@@ -93,7 +93,7 @@ describe("formatSidebarElapsedTime", () => {
     ["zh-hk", "3週"],
     ["zh-tw", "3週"],
     ["ja", "3週間"],
-    // ["ko", "3주"], // Catalog-dependent; enabled in kd/i18n-ko-locales.
+    ["ko", "3주"],
     ["pseudo", "3ŵ"],
   ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
     await activateLocale(locale);
