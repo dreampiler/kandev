@@ -17,6 +17,7 @@ const ZH_TW_LOCALE = "zh-tw";
 const ZH_HK_LOCALE = "zh-hk";
 const PT_PT_LOCALE = "pt-pt";
 const JA_LOCALE = "ja";
+const KO_LOCALE = "ko";
 const DISPLAY_LANGUAGE_KEY = "settings:displayLanguage";
 
 afterEach(async () => {
@@ -41,6 +42,9 @@ describe("locale predicates", () => {
     expect(isSupportedLocale(JA_LOCALE)).toBe(true);
     expect(isSupportedLocale("ja-JP")).toBe(true);
     expect(isSupportedLocale("  JA  ")).toBe(true);
+    expect(isSupportedLocale(KO_LOCALE)).toBe(true);
+    expect(isSupportedLocale("ko-KR")).toBe(true);
+    expect(isSupportedLocale("  KO  ")).toBe(true);
     expect(isSupportedLocale("pseudo")).toBe(true);
     expect(isSupportedLocale("fr")).toBe(false);
     expect(isSupportedLocale(42)).toBe(false);
@@ -55,6 +59,8 @@ describe("locale predicates", () => {
     expect(normalizeLocale("pt-PT")).toBe(PT_PT_LOCALE);
     expect(normalizeLocale("ja")).toBe(JA_LOCALE);
     expect(normalizeLocale("ja-JP")).toBe(JA_LOCALE);
+    expect(normalizeLocale("ko")).toBe(KO_LOCALE);
+    expect(normalizeLocale("ko-KR")).toBe(KO_LOCALE);
     expect(normalizeLocale("pseudo")).toBe("pseudo");
     expect(normalizeLocale("nope")).toBe(DEFAULT_LOCALE);
     expect(normalizeLocale(undefined)).toBe(DEFAULT_LOCALE);
@@ -69,6 +75,7 @@ describe("locale predicates", () => {
       "zh-tw",
       "zh-hk",
       "ja",
+      "ko",
       "pseudo",
     ]);
   });
@@ -85,9 +92,10 @@ describe("locale predicates", () => {
       "zh-tw",
       "zh-hk",
       "ja",
+      "ko",
       "pseudo",
     ]);
-    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "ja"]);
+    expect(selectableLocales(true)).toEqual(["en", "pt-pt", "zh-cn", "zh-tw", "zh-hk", "ja", "ko"]);
   });
 
   /**
@@ -211,6 +219,18 @@ describe("activateLocale", () => {
     expect(i18n.getResource(JA_LOCALE, "settings", "displayLanguage")).toBe("表示言語");
     expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("表示言語");
   });
+
+  // Catalog-dependent test; enabled in kd/i18n-ko-locales.
+  // it("activates Korean and resolves its real catalog", async () => {
+  //   const result = await activateLocale("ko");
+  //   expect(result).toBe(KO_LOCALE);
+  //   expect(i18n.language).toBe(KO_LOCALE);
+  //   expect(document.documentElement.lang).toBe(KO_LOCALE);
+  //   expect(readLocaleCookie()).toBe(KO_LOCALE);
+  //   expect(i18n.hasResourceBundle(KO_LOCALE, "settings")).toBe(true);
+  //   expect(i18n.getResource(KO_LOCALE, "settings", "displayLanguage")).toBe("표시 언어");
+  //   expect(i18n.t(DISPLAY_LANGUAGE_KEY)).toBe("표시 언어");
+  // });
 
   it("resolves reviewed product vocabulary for each Traditional Chinese region", async () => {
     await activateLocale(ZH_TW_LOCALE);

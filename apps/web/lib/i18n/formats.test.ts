@@ -55,6 +55,8 @@ describe("formatRelative (ja)", () => {
   });
 });
 
+
+
 describe("formatSidebarElapsedTime", () => {
   const now = new Date(FORMAT_NOW).getTime();
   const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString();
@@ -93,6 +95,7 @@ describe("formatSidebarElapsedTime", () => {
     ["zh-hk", "3週"],
     ["zh-tw", "3週"],
     ["ja", "3週間"],
+    // ["ko", "3주"], // Catalog-dependent; enabled in kd/i18n-ko-locales.
     ["pseudo", "3ŵ"],
   ] as const)("uses the %s compact unit catalog", async (locale, expected) => {
     await activateLocale(locale);
@@ -189,6 +192,30 @@ describe("locale-aware Intl wrappers", () => {
     );
     expect(formatDate(date, dateOptions)).toBe(
       new Intl.DateTimeFormat("ja", dateOptions).format(new Date(date)),
+    );
+    await activateLocale("en");
+  });
+
+  it("passes ko to number and date formatters", async () => {
+    await activateLocale("ko");
+    const numberOptions: Intl.NumberFormatOptions = {
+      style: "currency",
+      currency: "KRW",
+      currencyDisplay: "code",
+    };
+    const dateOptions: Intl.DateTimeFormatOptions = {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      timeZone: "UTC",
+    };
+    const date = FORMAT_DATE;
+
+    expect(formatNumber(1234.5, numberOptions)).toBe(
+      new Intl.NumberFormat("ko", numberOptions).format(1234.5),
+    );
+    expect(formatDate(date, dateOptions)).toBe(
+      new Intl.DateTimeFormat("ko", dateOptions).format(new Date(date)),
     );
     await activateLocale("en");
   });
@@ -329,10 +356,17 @@ describe("formatRelativeTime (locale awareness)", () => {
     expect(portuguese).toMatch(/horas/i);
   });
 
-  it("renders Japanese relative time once ja is active", async () => {
+it("renders Japanese relative time once ja is active", async () => {
     await activateLocale("ja");
     const japanese = formatRelativeTime(threeHoursAgo, now);
     expect(japanese).toContain("3");
     expect(japanese).toMatch(/時間/);
+  });
+
+  it("renders Korean relative time once ko is active", async () => {
+    await activateLocale("ko");
+    const korean = formatRelativeTime(threeHoursAgo, now);
+    expect(korean).toContain("3");
+    expect(korean).toMatch(/시간/);
   });
 });
