@@ -539,6 +539,7 @@
   "noTasksInThisProjectYet": "이 프로젝트에 아직 작업이 없습니다.",
   "noTasksTouchedYet": "아직 손댄 작업이 없습니다.",
   "noTasksWereModifiedDuringThis": "이 실행 중 수정된 작업이 없습니다.",
+  "noWorkspaces": "아직 워크스페이스가 없습니다.",
   "notConfigured": "구성되지 않음",
   "notifyOnly": "알림만",
   "noUtilizationDataAvailable": "사용 가능한 사용률 데이터가 없습니다.",
