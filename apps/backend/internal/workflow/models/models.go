@@ -331,6 +331,16 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 	return false
 }
 
+// AdvancesOnTurnComplete reports whether the step moves to another step when
+// its on_turn_complete actions run. Only the move actions transition the task;
+// disable_plan_mode changes session settings without moving, so a step whose
+// on_turn_complete carries only that action never advances.
+func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
+	return s.HasOnTurnCompleteAction(OnTurnCompleteMoveToNext) ||
+		s.HasOnTurnCompleteAction(OnTurnCompleteMoveToPrevious) ||
+		s.HasOnTurnCompleteAction(OnTurnCompleteMoveToStep)
+}
+
 // RemapStepID returns the mapped workflow-step ID when id references a template
 // step alias; otherwise it returns id unchanged.
 func RemapStepID(id string, idMap map[string]string) string {

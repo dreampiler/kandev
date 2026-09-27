@@ -2383,6 +2383,10 @@ func classifyAddBranchError(err error) string {
 //     AutoAdvanceRequiresSignal=true. Steps that don't opt in ignore the
 //     signal entirely; the bag entry is cleared on the next turn start
 //     (no separate audit trail is persisted).
+//   - Rejects the signal up front when the step requires a signal but has no
+//     on_turn_complete move action: such a signal would be recorded and
+//     consumed without advancing the task, so the agent gets a clear error
+//     instead of a silent no-op.
 //
 // Idempotency is intentionally lossy — a second call within the same step
 // silently keeps the first signal's payload (summary/handoff/blockers). The
@@ -2426,6 +2430,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 				"After satisfying that step, signal completion from the new turn. "+
 				"Do not move the task solely to bypass this error.",
 			launchStepID, task.WorkflowStepID), nil)
+	}
+
+	step, stepKnown := h.lookupStepForStepComplete(ctx, task.WorkflowStepID)
+	if errMsg, err := rejectSignalWithoutTransition(msg, step, stepKnown); errMsg != nil {
+		return errMsg, err
 	}
 
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
@@ -2472,7 +2481,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		"step_id":     task.WorkflowStepID,
 		"signaled_at": signal.SignaledAt,
 	}
-	if advances, note, ok := h.resolveStepCompletionAdvances(ctx, task.WorkflowStepID); ok {
+	if advances, note, ok := resolveStepCompletionAdvances(step); ok {
 		response["advances"] = advances
 		if note != "" {
 			response["note"] = note
@@ -2492,22 +2501,52 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
-// resolveStepCompletionAdvances reports whether the just-recorded signal will
-// actually move the task, alongside the accepted:true response
-// handleStepComplete always returns. accepted only means the signal was
-// durably recorded — a step whose AutoAdvanceRequiresSignal is false never
-// reads it, so the caller can accept a signal that changes nothing. ok is
-// false (both other return values ignored) when the current step cannot be
-// resolved: the caller must never guess this field into existence.
-func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
+// lookupStepForStepComplete loads the current workflow step definition. The
+// second return is false when the step cannot be resolved (no controller,
+// empty ID, or a lookup error); callers fail open so a missing definition
+// never rejects a valid completion signal. No workflowCtrl is wired in several
+// handler tests and some degraded deployments, so that case is expected.
+func (h *Handlers) lookupStepForStepComplete(ctx context.Context, workflowStepID string) (*workflowmodels.WorkflowStep, bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
-		return false, "", false
+		return nil, false
 	}
 	resp, err := h.workflowCtrl.GetStep(ctx, workflowStepID)
 	if err != nil || resp == nil || resp.Step == nil {
+		return nil, false
+	}
+	return resp.Step, true
+}
+
+// rejectSignalWithoutTransition returns a validation error when the step is
+// signal-gated but has no on_turn_complete move action: the signal would be
+// durably recorded and consumed without advancing the task, leaving the agent
+// with a silent no-op. stepKnown=false (lookup failure) fails open so a missing
+// definition never rejects a valid signal. Returns (nil, nil) when the signal
+// may proceed.
+func rejectSignalWithoutTransition(msg *ws.Message, step *workflowmodels.WorkflowStep, stepKnown bool) (*ws.Message, error) {
+	if !stepKnown || !step.AutoAdvanceRequiresSignal || step.AdvancesOnTurnComplete() {
+		return nil, nil
+	}
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
+		"workflow step %q has no completion transition, so a completion signal cannot advance the task. "+
+			"No signal was recorded. Do not retry step_complete_kandev from this step. "+
+			"If this step should advance on completion, add an on_turn_complete move action; otherwise "+
+			"wait for the task to be moved manually, or ask the user or coordinator to move it.",
+		step.Name), nil)
+}
+
+// resolveStepCompletionAdvances reports whether the just-recorded signal will
+// actually move the task, alongside the accepted:true response
+// handleStepComplete always returns. accepted only means the signal was
+// durably recorded — a step whose on_turn_complete has no move action never
+// reads it, so the caller can accept a signal that changes nothing. step is
+// nil (both other return values ignored) when the current step cannot be
+// resolved: the caller must never guess this field into existence.
+func resolveStepCompletionAdvances(step *workflowmodels.WorkflowStep) (advances bool, note string, ok bool) {
+	if step == nil {
 		return false, "", false
 	}
-	if resp.Step.AutoAdvanceRequiresSignal {
+	if step.AutoAdvanceRequiresSignal && step.AdvancesOnTurnComplete() {
 		return true, "", true
 	}
 	return false, "this step does not advance on a completion signal", true
