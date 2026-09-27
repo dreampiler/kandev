@@ -268,17 +268,26 @@ func (s *Service) probeAgentRunning(ctx context.Context, sessionID string) (bool
 type idleReclaimDisposition string
 
 const (
-	idleReclaimDispositionReclaimed    idleReclaimDisposition = "reclaimed"
-	idleReclaimDispositionSkippedState idleReclaimDisposition = "skipped_state"
-	idleReclaimDispositionSkippedLive  idleReclaimDisposition = "skipped_live_runtime"
-	idleReclaimDispositionSkippedTurn  idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionReclaimed       idleReclaimDisposition = "reclaimed"
+	idleReclaimDispositionSkippedState    idleReclaimDisposition = "skipped_state"
+	idleReclaimDispositionSkippedLive     idleReclaimDisposition = "skipped_live_runtime"
+	idleReclaimDispositionSkippedTurn     idleReclaimDisposition = "skipped_active_turn"
+	idleReclaimDispositionSkippedNoResume idleReclaimDisposition = "skipped_no_resume_token"
 )
 
 // classifyIdleReclaim is the single decision matrix for the idle-session
 // reclaim primitive. Reclaim is fail-closed: only sessions in an idle-yet-
 // resumable OR terminal shape AND without a live runtime AND without an
-// active turn proceed. Any uncertain signal falls into a skipped
-// disposition and the caller leaves the row untouched.
+// active turn AND carrying a resume token proceed. Any uncertain signal
+// falls into a skipped disposition and the caller leaves the row untouched.
+//
+// Why a resume token is required: releasing the provider runtime deletes a
+// tokenless executor row (lifecycle's stale-execution cleanup preserves only
+// rows with a resume token), and a session without a token cannot be
+// resumed without one. A freshly prepared session has no token until its
+// first turn runs, so reclaiming it would strand a later message with no
+// runtime to resume. Tokenless sessions keep their runtime reservation
+// until the first message produces a turn and a token.
 //
 // Why include Completed in the allowed set: the subtask terminal collapse
 // in setSessionWaitingForInputIfRequested writes session.state=Completed
@@ -287,13 +296,16 @@ const (
 // Cancelled are deliberately excluded — those have separate cancellation
 // cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
 // that already reconcile executor rows.
-func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool, hasActiveTurn bool) idleReclaimDisposition {
+func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool, hasActiveTurn bool, hasResumeToken bool) idleReclaimDisposition {
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
 		models.TaskSessionStateCompleted:
 	default:
 		return idleReclaimDispositionSkippedState
+	}
+	if !hasResumeToken {
+		return idleReclaimDispositionSkippedNoResume
 	}
 	if agentRunning {
 		return idleReclaimDispositionSkippedLive
@@ -306,9 +318,11 @@ func classifyIdleReclaim(sessionState models.TaskSessionState, agentRunning bool
 
 // reclaimIdleSession releases the provider-runtime reservation backing an
 // idle-yet-resumable or terminal session (state in {WaitingForInput, Idle,
-// Completed}) when no live agent process and no active turn can be
-// observed. Resume token and worktree path are preserved so a later resume
-// can re-attach the session without losing context. Never touches a
+// Completed}) when no live agent process, no active turn, and a resume
+// token can be observed. Resume token and worktree path are preserved so a
+// later resume can re-attach the session without losing context. A session
+// without a resume token is skipped: its executor row would be deleted by
+// the runtime cleanup and it could never be resumed. Never touches a
 // running executor. Synchronous settle points and the periodic reaper use
 // the same fail-closed primitive.
 //
@@ -355,7 +369,7 @@ func (s *Service) reclaimIdleSession(ctx context.Context, sessionID string) erro
 		return nil
 	}
 	hasActiveTurn := s.sessionHasActiveTurn(ctx, sessionID)
-	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn)
+	decision := classifyIdleReclaim(session.State, agentRunning, hasActiveTurn, running.ResumeToken != "")
 	if decision != idleReclaimDispositionReclaimed {
 		s.logger.Debug("idle reclaim skipped",
 			zap.String("session_id", sessionID),

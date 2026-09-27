@@ -44,6 +44,7 @@ func seedIdleReaperRow(
 		SessionID:        sessionID,
 		TaskID:           taskID,
 		AgentExecutionID: "exec-" + sessionID,
+		ResumeToken:      "rt-" + sessionID,
 		Runtime:          agentruntime.RuntimeStandalone,
 		Status:           status,
 	}); err != nil {
