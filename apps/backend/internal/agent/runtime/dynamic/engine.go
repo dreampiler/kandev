@@ -938,6 +938,16 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
 }
 
+// OpenCircuitForFailure opens the failed candidate's shared resource circuit
+// when its classified code is a provider-health signal. It is the seam for
+// startup failures that never reach a classified ApplyFailure: the process
+// start callback and the never-started stall open the failed candidate's
+// circuit directly so the next selection skips it for one backoff window
+// instead of repeating the same candidate.
+func (e *Engine) OpenCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
+	e.openCircuitForFailure(profile, candidateID, failure)
+}
+
 func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
 	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
 		return
@@ -964,7 +974,12 @@ func qualifiesForCircuit(code routingerr.Code) bool {
 		routingerr.CodeRateLimited, routingerr.CodeQuotaLimited,
 		routingerr.CodeNetworkUnavailable, routingerr.CodeModelCapacity,
 		routingerr.CodeProviderUnavailable, routingerr.CodeProviderOverloaded,
-		routingerr.CodeModelUnavailable:
+		routingerr.CodeModelUnavailable,
+		// A launch that never produced output ("The agent could not start." /
+		// "agent produced no output since start") classifies as one of these
+		// low-confidence codes. Opening the circuit for a bounded backoff lets
+		// the next selection skip the failed candidate instead of repeating it.
+		routingerr.CodeUnknownProvider, routingerr.CodeAgentRuntime:
 		return true
 	default:
 		return false

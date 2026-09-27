@@ -125,6 +125,7 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	}
 	if payload.NeverStarted {
 		if s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session) {
+			s.openDynamicCandidateCircuitForStartupFailure(ctx, session)
 			s.stopNeverStartedExecution(ctx, payload)
 		} else {
 			s.logger.Warn("skipping never-started teardown: session was not durably recorded FAILED",
