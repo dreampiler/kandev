@@ -80,6 +80,7 @@ func (r *Repository) initSchema() error {
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
 		cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 		complete_task_on_enter INTEGER NOT NULL DEFAULT 0,
+		allow_repeated_failure_fallback INTEGER,
 		order_revision INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
@@ -133,6 +134,11 @@ func (r *Repository) initSchema() error {
 	// existing workflows.
 	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
 	_ = r.migrate.Apply("workflow_steps.complete_task_on_enter", `ALTER TABLE workflow_steps ADD COLUMN complete_task_on_enter INTEGER NOT NULL DEFAULT 0`)
+	// Optional per-step override of the dynamic-profile repeated-failure
+	// fallback. NULL defers to the profile policy, 0 forbids the fallback, and
+	// 1 defers to the profile as well. The step can only tighten, never loosen,
+	// the profile's configured threshold.
+	_ = r.migrate.Apply("workflow_steps.allow_repeated_failure_fallback", `ALTER TABLE workflow_steps ADD COLUMN allow_repeated_failure_fallback INTEGER`)
 	r.migrate.Apply("workflow_steps.wip_limit", `ALTER TABLE workflow_steps ADD COLUMN wip_limit INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflow_steps.pull_from_step_id", `ALTER TABLE workflow_steps ADD COLUMN pull_from_step_id TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
@@ -265,15 +271,15 @@ func (r *Repository) seedDefaultWorkflowSteps() error {
 					prompt, events, allow_manual_move, is_start_step, show_in_command_panel,
 					agent_profile_id, profile_session_start_policy, profile_session_end_policy,
 					wip_limit, pull_from_step_id, session_target, auto_advance_requires_signal,
-					cancel_triggers_turn_complete, complete_task_on_enter, created_at, updated_at
+					cancel_triggers_turn_complete, complete_task_on_enter, allow_repeated_failure_fallback, created_at, updated_at
 				) VALUES (
 					?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-					?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+					?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
 				)
 			`),
 				idMap[stepDef.ID], workflowID, stepDef.Name, stepDef.Position, stepDef.Color,
 				stepDef.Prompt, string(eventsJSON), dialect.BoolToInt(stepDef.AllowManualMove),
-				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), sessionTargetJSON, dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), dialect.BoolToInt(stepDef.CompleteTaskOnEnter), now, now,
+				dialect.BoolToInt(stepDef.IsStartStep), dialect.BoolToInt(stepDef.ShowInCommandPanel), stepDef.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(stepDef.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(stepDef.ProfileSessionEndPolicy)), stepDef.WIPLimit, models.RemapStepID(stepDef.PullFromStepID, idMap), sessionTargetJSON, dialect.BoolToInt(stepDef.AutoAdvanceRequiresSignal), dialect.BoolToInt(stepDef.CancelTriggersTurnComplete), dialect.BoolToInt(stepDef.CompleteTaskOnEnter), optionalBoolToDB(stepDef.AllowRepeatedFailureFallback), now, now,
 			); err != nil {
 				return err
 			}
@@ -664,11 +670,11 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color,
-			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter, wip_limit, pull_from_step_id, session_target, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter, allow_repeated_failure_fallback, wip_limit, pull_from_step_id, session_target, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), step.ID, step.WorkflowID, step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON), dialect.BoolToInt(step.AllowManualMove),
-		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.CreatedAt, step.UpdatedAt)
+		dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), optionalBoolToDB(step.AllowRepeatedFailureFallback), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.CreatedAt, step.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -677,6 +683,18 @@ func (r *Repository) CreateStepWithDemotedStartSteps(ctx context.Context, step *
 		return nil, err
 	}
 	return demoted, nil
+}
+
+// optionalBoolToDB maps an optional boolean to a nullable INTEGER so the
+// tri-state workflow-step override survives a round trip: nil stays NULL.
+func optionalBoolToDB(value *bool) interface{} {
+	if value == nil {
+		return nil
+	}
+	if *value {
+		return 1
+	}
+	return 0
 }
 
 // normalizeStageType returns a string fit for the workflow_steps.stage_type
@@ -708,10 +726,11 @@ func (r *Repository) scanStep(row interface {
 	step := &models.WorkflowStep{}
 	var allowManualMove, isStartStep, showInCommandPanel, autoAdvanceRequiresSignal, cancelTriggersTurnComplete, completeTaskOnEnter int
 	var autoArchiveAfterHours sql.NullInt64
+	var allowRepeatedFailureFallback sql.NullInt64
 	var color, prompt, eventsJSON, agentProfileID, profileSessionStartPolicy, profileSessionEndPolicy, stageType, pullFromStepID, sessionTargetJSON sql.NullString
 
 	err := row.Scan(&step.ID, &step.WorkflowID, &step.Name, &step.Position, &color,
-		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &profileSessionStartPolicy, &profileSessionEndPolicy, &stageType, &autoAdvanceRequiresSignal, &cancelTriggersTurnComplete, &completeTaskOnEnter, &step.WIPLimit, &pullFromStepID, &sessionTargetJSON, &step.OrderRevision, &step.CreatedAt, &step.UpdatedAt)
+		&prompt, &eventsJSON, &allowManualMove, &isStartStep, &showInCommandPanel, &autoArchiveAfterHours, &agentProfileID, &profileSessionStartPolicy, &profileSessionEndPolicy, &stageType, &autoAdvanceRequiresSignal, &cancelTriggersTurnComplete, &completeTaskOnEnter, &allowRepeatedFailureFallback, &step.WIPLimit, &pullFromStepID, &sessionTargetJSON, &step.OrderRevision, &step.CreatedAt, &step.UpdatedAt)
 
 	if err != nil {
 		return nil, err
@@ -723,6 +742,10 @@ func (r *Repository) scanStep(row interface {
 	step.AutoAdvanceRequiresSignal = autoAdvanceRequiresSignal == 1
 	step.CancelTriggersTurnComplete = cancelTriggersTurnComplete == 1
 	step.CompleteTaskOnEnter = completeTaskOnEnter == 1
+	if allowRepeatedFailureFallback.Valid {
+		value := allowRepeatedFailureFallback.Int64 == 1
+		step.AllowRepeatedFailureFallback = &value
+	}
 	if autoArchiveAfterHours.Valid {
 		step.AutoArchiveAfterHours = int(autoArchiveAfterHours.Int64)
 	}
@@ -759,7 +782,7 @@ func (r *Repository) scanStep(row interface {
 	return step, nil
 }
 
-const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter, wip_limit, pull_from_step_id, session_target, order_revision, created_at, updated_at`
+const stepSelectColumns = `id, workflow_id, name, position, color, prompt, events, allow_manual_move, is_start_step, show_in_command_panel, auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, auto_advance_requires_signal, cancel_triggers_turn_complete, complete_task_on_enter, allow_repeated_failure_fallback, wip_limit, pull_from_step_id, session_target, order_revision, created_at, updated_at`
 
 // GetStep retrieves a workflow step by ID.
 func (r *Repository) GetStep(ctx context.Context, id string) (*models.WorkflowStep, error) {
@@ -818,11 +841,11 @@ func (r *Repository) UpdateStepWithDemotedStartSteps(ctx context.Context, step *
 		UPDATE workflow_steps SET
 			name = ?, position = ?, color = ?,
 			prompt = ?, events = ?,
-			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, complete_task_on_enter = ?, wip_limit = ?, pull_from_step_id = ?, session_target = ?, updated_at = ?
+			allow_manual_move = ?, is_start_step = ?, show_in_command_panel = ?, auto_archive_after_hours = ?, agent_profile_id = ?, profile_session_start_policy = ?, profile_session_end_policy = ?, stage_type = ?, auto_advance_requires_signal = ?, cancel_triggers_turn_complete = ?, complete_task_on_enter = ?, allow_repeated_failure_fallback = ?, wip_limit = ?, pull_from_step_id = ?, session_target = ?, updated_at = ?
 		WHERE id = ?
 	`), step.Name, step.Position, step.Color,
 		step.Prompt, string(eventsJSON),
-		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.UpdatedAt, step.ID)
+		dialect.BoolToInt(step.AllowManualMove), dialect.BoolToInt(step.IsStartStep), dialect.BoolToInt(step.ShowInCommandPanel), step.AutoArchiveAfterHours, step.AgentProfileID, taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)), taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)), normalizeStageType(step.StageType), dialect.BoolToInt(step.AutoAdvanceRequiresSignal), dialect.BoolToInt(step.CancelTriggersTurnComplete), dialect.BoolToInt(step.CompleteTaskOnEnter), optionalBoolToDB(step.AllowRepeatedFailureFallback), step.WIPLimit, step.PullFromStepID, sessionTargetJSON, step.UpdatedAt, step.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1032,7 +1055,7 @@ func (r *Repository) ListStepsByWorkflow(ctx context.Context, workflowID string)
 func (r *Repository) ListStepsByWorkspaceID(ctx context.Context, workspaceID string) ([]*models.WorkflowStep, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT ws.id, ws.workflow_id, ws.name, ws.position, ws.color, ws.prompt, ws.events,
-			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.profile_session_start_policy, ws.profile_session_end_policy, ws.stage_type, ws.auto_advance_requires_signal, ws.cancel_triggers_turn_complete, ws.complete_task_on_enter, ws.wip_limit, ws.pull_from_step_id, ws.session_target, ws.order_revision, ws.created_at, ws.updated_at
+			ws.allow_manual_move, ws.is_start_step, ws.show_in_command_panel, ws.auto_archive_after_hours, ws.agent_profile_id, ws.profile_session_start_policy, ws.profile_session_end_policy, ws.stage_type, ws.auto_advance_requires_signal, ws.cancel_triggers_turn_complete, ws.complete_task_on_enter, ws.allow_repeated_failure_fallback, ws.wip_limit, ws.pull_from_step_id, ws.session_target, ws.order_revision, ws.created_at, ws.updated_at
 		FROM workflow_steps ws
 		JOIN workflows w ON ws.workflow_id = w.id
 		WHERE w.workspace_id = ?

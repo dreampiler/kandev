@@ -75,6 +75,7 @@ type StepPortable struct {
 	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete   bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
 	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
+	AllowRepeatedFailureFallback *bool                                        `json:"allow_repeated_failure_fallback,omitempty" yaml:"allow_repeated_failure_fallback,omitempty"`
 	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
@@ -218,6 +219,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 			WIPLimit:                   s.WIPLimit,
 		}
+		sp.AllowRepeatedFailureFallback = CloneOptionalBool(s.AllowRepeatedFailureFallback)
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos
 		}
@@ -237,6 +239,16 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 		wp.AgentProfile = resolveProfile(wf.AgentProfileID)
 	}
 	return wp, nil
+}
+
+// CloneOptionalBool copies an optional boolean so a portable export never
+// aliases the domain model's pointer.
+func CloneOptionalBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func buildPortableSessionTarget(target *WorkflowSessionTarget, idToPos map[string]int) (*WorkflowSessionTargetPortable, error) {

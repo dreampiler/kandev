@@ -196,6 +196,23 @@ func (c *Conductor) RouteAfterFailure(
 	expectedGeneration int64,
 	failure *routingerr.Error,
 ) (RouteDecision, error) {
+	effectSafe := failure != nil && failure.FallbackAllowed
+	return c.RouteAfterFailureWithEffect(
+		ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, effectSafe,
+	)
+}
+
+// RouteAfterFailureWithEffect is the caller-owned effect-safety variant. A
+// caller that proved the failed turn was pre-result passes effectSafe=true so
+// the repeated-failure policy can override the classifier's no-fallback
+// invariant once the same concrete profile has failed enough times.
+func (c *Conductor) RouteAfterFailureWithEffect(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	effectSafe bool,
+) (RouteDecision, error) {
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
@@ -203,8 +220,8 @@ func (c *Conductor) RouteAfterFailure(
 	if err != nil {
 		return RouteDecision{}, err
 	}
-	return c.engine.ApplyFailureContext(
-		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure,
+	return c.engine.ApplyFailureContextWithEffect(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, effectSafe,
 	)
 }
 
@@ -303,18 +320,47 @@ func (c *Conductor) nextAfterLaunchFailure(
 		return RouteDecision{}, false, nil
 	}
 	if !classified.FallbackAllowed {
+		// The classifier forbids falling back. The only exception is the
+		// repeated-failure policy: the same concrete profile has already
+		// failed this way often enough that trying the next candidate is
+		// preferable to stopping. The engine owns the streak count and
+		// returns a stop decision until the threshold is reached.
+		if !repeatedFailureEligible(profile, decision.ExecutionProfileID, classified) {
+			return RouteDecision{}, false, nil
+		}
+	} else if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
-	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
-		return RouteDecision{}, false, nil
-	}
-	next, err := c.engine.ApplyFailureContext(
-		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified,
+	// A launch failure never produced a turn result, so the failed attempt is
+	// effect-safe by construction.
+	next, err := c.engine.ApplyFailureContextWithEffect(
+		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified, true,
 	)
 	if err != nil {
 		return RouteDecision{}, true, err
 	}
 	return next, true, nil
+}
+
+// repeatedFailureEligible reports whether the candidate opted into the
+// repeated-failure override for the unclassified class. It only gates whether
+// the engine is asked; the engine still owns the streak and the threshold.
+func repeatedFailureEligible(profile Profile, candidateID string, failure *routingerr.Error) bool {
+	if failure == nil || failureClassOf(failure) != routingerr.ClassUnclassified {
+		return false
+	}
+	candidate, ok := candidateByID(profile, candidateID)
+	if !ok {
+		return false
+	}
+	return candidate.Policies.RepeatedFailureEnabled(routingerr.ClassUnclassified)
+}
+
+func failureClassOf(failure *routingerr.Error) routingerr.Class {
+	if failure.Class != "" {
+		return failure.Class
+	}
+	return routingerr.ClassForCode(failure.Code)
 }
 
 func classifiedLaunchFailure(err error) *routingerr.Error {

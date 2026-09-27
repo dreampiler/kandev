@@ -745,14 +745,28 @@ func (s *Service) routeDynamicAgentFailure(
 			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
 		}
 	}()
-	if classified == nil || !classified.FallbackAllowed {
+	if classified == nil {
 		return false
 	}
-	if !dynamicPreResultSafe(data) {
-		// A dynamic route is never allowed to guess that a failed turn was
-		// pre-result. Missing evidence is as unsafe as observed output or a
-		// tool effect because the replacement could repeat a side effect.
+	// A dynamic route is never allowed to guess that a failed turn was
+	// pre-result. Missing evidence is as unsafe as observed output or a
+	// tool effect because the replacement could repeat a side effect. The
+	// same evidence is the effect-safety input the policy engine needs.
+	effectSafe := dynamicPreResultSafe(data)
+	if !effectSafe {
 		return false
+	}
+	if !classified.FallbackAllowed {
+		// The classifier forbids fallback. Only a repeated unclassified
+		// failure may override that, and only through the candidate's
+		// repeated-failure policy: the engine owns the streak and threshold,
+		// so an unconfigured or below-threshold route still stops here.
+		if classifiedClass(classified) != routingerr.ClassUnclassified {
+			return false
+		}
+		if !s.repeatedFailureFallbackAllowedForTask(ctx, data.TaskID) {
+			return false
+		}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
@@ -765,9 +779,9 @@ func (s *Service) routeDynamicAgentFailure(
 	if err != nil {
 		return false
 	}
-	decision, err := conductor.RouteAfterFailure(
+	decision, err := conductor.RouteAfterFailureWithEffect(
 		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
-		session.RouteGeneration, classified,
+		session.RouteGeneration, classified, effectSafe,
 	)
 	if err != nil {
 		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
@@ -776,6 +790,33 @@ func (s *Service) routeDynamicAgentFailure(
 	generation = decision.Generation
 	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
 	return handled
+}
+
+// classifiedClass resolves the normalized class for a classified failure,
+// preferring the classifier-provided class and falling back to the catalogue.
+func classifiedClass(failure *routingerr.Error) routingerr.Class {
+	if failure.Class != "" {
+		return failure.Class
+	}
+	return routingerr.ClassForCode(failure.Code)
+}
+
+// repeatedFailureFallbackAllowedForTask honors the workflow step's optional
+// kill switch. Only an explicit false disables the override; a missing step,
+// an unset field, or a lookup failure defers to the profile's policy.
+func (s *Service) repeatedFailureFallbackAllowedForTask(ctx context.Context, taskID string) bool {
+	if s.workflowStepGetter == nil || taskID == "" {
+		return true
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkflowStepID == "" {
+		return true
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil || step.AllowRepeatedFailureFallback == nil {
+		return true
+	}
+	return *step.AllowRepeatedFailureFallback
 }
 
 func (s *Service) persistPendingDynamicRecovery(
