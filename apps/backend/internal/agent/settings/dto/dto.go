@@ -78,6 +78,25 @@ type DynamicAgentPolicyDTO struct {
 	Version   int64                 `json:"version"`
 	Transient DynamicErrorPolicyDTO `json:"transient"`
 	Hard      DynamicErrorPolicyDTO `json:"hard"`
+	// Unclassified is the opt-in override for the unclassified failure class.
+	// Absent or disabled it keeps the historical fail-closed behavior.
+	Unclassified DynamicUnclassifiedPolicyDTO `json:"unclassified"`
+}
+
+// DynamicUnclassifiedPolicyDTO is the unclassified class policy. Only the
+// repeated-failure opt-in is meaningful here; retry and wait-for-reset are not
+// exposed because an unclassified failure has no provider-native recovery.
+type DynamicUnclassifiedPolicyDTO struct {
+	OnExhausted     string                          `json:"on_exhausted"`
+	RepeatedFailure DynamicRepeatedFailurePolicyDTO `json:"repeated_failure"`
+}
+
+// DynamicRepeatedFailurePolicyDTO enables a try-next fallback once the same
+// concrete execution profile has produced the same unclassified failure
+// Threshold times in a row. The failed turn must still be pre-result.
+type DynamicRepeatedFailurePolicyDTO struct {
+	Enabled   bool  `json:"enabled"`
+	Threshold int64 `json:"threshold"`
 }
 
 type DynamicErrorPolicyDTO struct {
