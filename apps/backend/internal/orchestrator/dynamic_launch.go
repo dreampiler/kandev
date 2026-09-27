@@ -81,8 +81,13 @@ func (d *dynamicTaskDownstream) Launch(
 			Stderr:     err.Error(),
 		})
 		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them.
+		// not provider failures. Let the ordinary launch recovery own them, but
+		// still open the failed candidate's circuit so the next selection does
+		// not repeat it. The raw error is returned unchanged.
 		if classified.Confidence == routingerr.ConfLow {
+			if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
+				d.service.openDynamicCandidateCircuitForStartupFailure(ctx, session)
+			}
 			return dynamicruntime.DownstreamExecution{}, err
 		}
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
@@ -253,6 +258,40 @@ func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID 
 	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
 }
 
+// openDynamicCandidateCircuitForStartupFailure records a startup failure
+// against the current dynamic candidate so the next selection skips it for one
+// circuit backoff window. A process-start failure or a never-started stall
+// does not pass through a classified ApplyFailure, so the circuit is opened
+// here directly; the route itself still stops for manual recovery. The
+// classification only feeds the circuit gate, which is why it carries the
+// startup phase and low confidence. Best-effort: a failure to record the
+// circuit never changes the caller's terminal outcome.
+func (s *Service) openDynamicCandidateCircuitForStartupFailure(
+	ctx context.Context,
+	session *models.TaskSession,
+) {
+	if s.profileExecutionResolver == nil || session == nil {
+		return
+	}
+	if session.RouteGeneration <= 0 || session.ExecutionProfileID == "" || session.AgentProfileID == "" {
+		return
+	}
+	failure := &routingerr.Error{
+		Code:       routingerr.CodeAgentRuntime,
+		Class:      routingerr.ClassUnclassified,
+		Phase:      routingerr.PhaseProcessStart,
+		Confidence: routingerr.ConfLow,
+	}
+	if err := s.profileExecutionResolver.OpenCircuitForFailure(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID, failure,
+	); err != nil {
+		s.logger.Debug("failed to open dynamic candidate circuit after startup failure",
+			zap.String("task_id", session.TaskID),
+			zap.String("session_id", session.ID),
+			zap.Error(err))
+	}
+}
+
 type dynamicRouteSessionProjector interface {
 	UpdateTaskSessionDynamicRouteIfCurrent(
 		context.Context,
@@ -380,6 +419,7 @@ func (s *Service) handleAgentProcessStartFailed(
 		return
 	}
 	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
+	s.openDynamicCandidateCircuitForStartupFailure(ctx, session)
 }
 
 func applyDynamicRouteDecisionProjection(
