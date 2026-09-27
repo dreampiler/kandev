@@ -150,8 +150,18 @@ func (h *Handler) createRoutine(c *gin.Context) {
 		CatchUpMax:             req.CatchUpMax,
 		Variables:              req.Variables,
 	}
-	if err := h.svc.CreateRoutine(c.Request.Context(), routine); err != nil {
-		respondInternalError(c, err)
+	var createErr error
+	if req.Trigger != nil {
+		createErr = h.svc.CreateRoutineWithTrigger(c.Request.Context(), routine, triggerFromRequest(req.Trigger))
+	} else {
+		createErr = h.svc.CreateRoutine(c.Request.Context(), routine)
+	}
+	if createErr != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(createErr, ErrInvalidTrigger) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": createErr.Error()})
 		return
 	}
 	withSchedule, err := h.withScheduleState(c, routine)
@@ -254,16 +264,8 @@ func (h *Handler) createTrigger(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	trigger := &RoutineTrigger{
-		RoutineID:      c.Param("id"),
-		Kind:           req.Kind,
-		CronExpression: req.CronExpression,
-		Timezone:       req.Timezone,
-		PublicID:       req.PublicID,
-		SigningMode:    req.SigningMode,
-		Secret:         req.Secret,
-		Enabled:        true,
-	}
+	trigger := triggerFromRequest(&req)
+	trigger.RoutineID = c.Param("id")
 	if err := h.svc.CreateRoutineTrigger(c.Request.Context(), trigger); err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrInvalidTrigger) {
@@ -274,6 +276,21 @@ func (h *Handler) createTrigger(c *gin.Context) {
 	}
 	trigger.Secret = "" // redact before sending response
 	c.JSON(http.StatusCreated, TriggerResponse{Trigger: trigger})
+}
+
+// triggerFromRequest builds a trigger from a create-trigger request body.
+// RoutineID is not set here: the standalone route supplies the path id and
+// the atomic create lets the repository copy the routine's id.
+func triggerFromRequest(req *CreateTriggerRequest) *RoutineTrigger {
+	return &RoutineTrigger{
+		Kind:           req.Kind,
+		CronExpression: req.CronExpression,
+		Timezone:       req.Timezone,
+		PublicID:       req.PublicID,
+		SigningMode:    req.SigningMode,
+		Secret:         req.Secret,
+		Enabled:        true,
+	}
 }
 
 func (h *Handler) deleteTrigger(c *gin.Context) {
