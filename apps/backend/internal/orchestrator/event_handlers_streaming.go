@@ -1830,7 +1830,7 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		}
 	}
 	if candidate != "" {
-		if err := s.SetPrimarySession(ctx, candidate); err != nil {
+		if err := s.SetPrimarySessionTransferringQueue(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",
 				zap.String("task_id", taskID),
 				zap.String("candidate", candidate),

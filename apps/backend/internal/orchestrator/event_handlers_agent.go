@@ -1947,6 +1947,9 @@ func (s *Service) handleQueuedMessageExecutionError(
 		len(queuedMsg.Attachments) > 0 &&
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
+	if s.recoverStrandedQueuedMessage(ctx, queuedMsg, err, userMessageRecorded) {
+		return
+	}
 	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
@@ -1993,6 +1996,94 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Int("content_length", len(queuedMsg.Content)))
+}
+
+// recoverStrandedQueuedMessage attempts to move an undeliverable ordinary
+// message, and any queue left behind on its bound session, onto the task's live
+// primary when the bound session's runtime is unavailable. It returns true when
+// the message found a new home; otherwise the caller keeps the existing
+// in-place requeue behavior.
+func (s *Service) recoverStrandedQueuedMessage(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	err error,
+	userMessageRecorded bool,
+) bool {
+	if queuedMsg.IsDurableDelivery() || !errors.Is(err, ErrSessionRuntimeUnavailable) {
+		return false
+	}
+	if !s.recoverStrandedQueueToPrimary(ctx, queuedMsg) {
+		return false
+	}
+	if userMessageRecorded {
+		markQueuedUserMessageRecorded(queuedMsg)
+	}
+	return true
+}
+
+// recoverStrandedQueueToPrimary moves a message that cannot be delivered to its
+// bound session, together with any queue left behind on that session, onto the
+// task's live primary session. It returns false when there is no eligible live
+// primary, or when the move did not complete, so the caller falls back to the
+// existing in-place requeue.
+func (s *Service) recoverStrandedQueueToPrimary(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) bool {
+	if s.messageQueue == nil || queuedMsg == nil || queuedMsg.TaskID == "" {
+		return false
+	}
+	target, ok := s.livePrimarySessionForTask(ctx, queuedMsg.TaskID, queuedMsg.SessionID)
+	if !ok {
+		return false
+	}
+	// Re-enqueue the taken message on its bound session first so the transfer
+	// below carries it (and its attachment claims) with the rest of the queue.
+	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
+		s.logger.Warn("failed to requeue stranded message before recovery",
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+		return false
+	}
+	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+	if err := s.transferQueuedSessionState(ctx, queuedMsg.TaskID, queuedMsg.SessionID, target); err != nil {
+		s.logger.Warn("failed to recover stranded queue onto primary session",
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("stranded_session_id", queuedMsg.SessionID),
+			zap.String("primary_session_id", target),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+		return false
+	}
+	s.logger.Info("recovered stranded queue onto live primary session",
+		zap.String("task_id", queuedMsg.TaskID),
+		zap.String("stranded_session_id", queuedMsg.SessionID),
+		zap.String("primary_session_id", target),
+		zap.String("queue_id", queuedMsg.ID))
+	return true
+}
+
+// livePrimarySessionForTask returns the id of the task's primary session when it
+// differs from excludeSessionID and can still be prompted: a non-terminal state
+// backed by an executor record.
+func (s *Service) livePrimarySessionForTask(ctx context.Context, taskID, excludeSessionID string) (string, bool) {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return "", false
+	}
+	for _, sess := range sessions {
+		if sess == nil || !sess.IsPrimary || sess.ID == excludeSessionID {
+			continue
+		}
+		if isTerminalSessionState(sess.State) {
+			continue
+		}
+		hasRunning, err := s.repo.HasExecutorRunningRow(ctx, sess.ID)
+		if err != nil || !hasRunning {
+			continue
+		}
+		return sess.ID, true
+	}
+	return "", false
 }
 
 // claimQueuedMessageHandoff resolves direct/test reservations and claims the
