@@ -2,6 +2,36 @@ package models
 
 import "testing"
 
+func TestWorkflowStepAdvancesOnTurnComplete(t *testing.T) {
+	cases := []struct {
+		name    string
+		actions []OnTurnCompleteAction
+		want    bool
+	}{
+		{name: "no actions", want: false},
+		{name: "disable_plan_mode only", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteDisablePlanMode}}, want: false},
+		{name: "move_to_next", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteMoveToNext}}, want: true},
+		{name: "move_to_previous", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteMoveToPrevious}}, want: true},
+		{name: "move_to_step", actions: []OnTurnCompleteAction{{Type: OnTurnCompleteMoveToStep}}, want: true},
+		{
+			name: "disable_plan_mode plus move_to_step",
+			actions: []OnTurnCompleteAction{
+				{Type: OnTurnCompleteDisablePlanMode},
+				{Type: OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "review"}},
+			},
+			want: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			step := &WorkflowStep{Events: StepEvents{OnTurnComplete: tc.actions}}
+			if got := step.AdvancesOnTurnComplete(); got != tc.want {
+				t.Fatalf("AdvancesOnTurnComplete() = %t, want %t", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRemapStepEvents_RemapGenericMoveToStep(t *testing.T) {
 	events := StepEvents{
 		OnChildrenCompleted: []GenericAction{
