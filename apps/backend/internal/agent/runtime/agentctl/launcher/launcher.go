@@ -245,15 +245,12 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	// CommandContext sends SIGKILL on cancellation, preventing graceful shutdown.
 	l.cmd = exec.Command(l.binaryPath, fmt.Sprintf("-port=%d", l.port))
 
-	// Inject bootstrap nonce and the resolved child contract. Remove inherited
-	// copies first so a managed child cannot observe a conflicting host value.
-	overrides := []string{"AGENTCTL_BOOTSTRAP_NONCE=" + nonce}
-	if l.startupConfig.Configured {
-		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
-		if err != nil {
-			return err
-		}
-		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	// Inject bootstrap nonce, the listen host contract, and the resolved child
+	// contract. Remove inherited copies first so a managed child cannot observe
+	// a conflicting host value.
+	overrides, err := l.spawnEnvOverrides(nonce)
+	if err != nil {
+		return err
 	}
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
@@ -307,6 +304,29 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	go l.monitorExit()
 
 	return nil
+}
+
+// spawnEnvOverrides builds the environment overrides for the agentctl child.
+//
+// AGENTCTL_LISTEN_HOST pins the standalone control server and every per-instance
+// listener to the same address the backend dials (cfg.Agent.StandaloneHost,
+// default 127.0.0.1). Without it the child binds every interface, which trips
+// the host firewall prompt even though the backend never reaches it off
+// loopback. An operator who deliberately sets a non-loopback
+// agent.standaloneHost still gets that value here for remote exposure.
+func (l *Launcher) spawnEnvOverrides(nonce string) ([]string, error) {
+	overrides := []string{
+		"AGENTCTL_BOOTSTRAP_NONCE=" + nonce,
+		"AGENTCTL_LISTEN_HOST=" + l.host,
+	}
+	if l.startupConfig.Configured {
+		encoded, err := commonconfig.EncodeAgentctlStartupConfig(l.startupConfig)
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
+	}
+	return overrides, nil
 }
 
 func environmentWithOverrides(base []string, overrides ...string) []string {
