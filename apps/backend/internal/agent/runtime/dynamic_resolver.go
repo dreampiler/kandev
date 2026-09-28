@@ -348,36 +348,6 @@ func (r *ProfileExecutionResolver) MarkRouteActionRequired(
 	return r.engine.MarkActionRequired(ctx, sessionID, expectedGeneration, reason)
 }
 
-// OpenCircuitForFailure records a launch-phase failure against the current
-// route candidate's shared binding without advancing the route generation.
-// Startup failures (process start failure, never-started stall) do not pass
-// through a classified ApplyFailure on every path, so the dynamic-route
-// callbacks open the circuit directly: the next selection then skips the
-// failed candidate for one circuit backoff window instead of selecting it
-// again. Best-effort: an error means the circuit was not recorded, never that
-// the caller's terminal outcome should change.
-func (r *ProfileExecutionResolver) OpenCircuitForFailure(
-	ctx context.Context,
-	sessionID, logicalProfileID, executionProfileID string,
-	failure *routingerr.Error,
-) error {
-	if r.engine == nil || r.dynamic == nil {
-		return errors.New("dynamic profile execution is not configured")
-	}
-	if !r.enabled.Load() {
-		return ErrDynamicRoutingDisabled
-	}
-	if sessionID == "" || logicalProfileID == "" || executionProfileID == "" || failure == nil {
-		return nil
-	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
-	if err != nil {
-		return err
-	}
-	r.engine.OpenCircuitForFailure(profile, executionProfileID, failure)
-	return nil
-}
-
 func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,

@@ -80,15 +80,13 @@ func (d *dynamicTaskDownstream) Launch(
 			ProviderID: launch.ExecutionProfileID,
 			Stderr:     err.Error(),
 		})
-		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them, but
-		// still open the failed candidate's circuit so the next selection does
-		// not repeat it. The raw error is returned unchanged.
+		// A pre-start launch failure produced no output, so it is effect-safe
+		// and the conductor may advance. A low-confidence classification has no
+		// provider policy class of its own; present it as a transient
+		// provider-availability failure so the candidate's configured policy
+		// decides between retrying and advancing instead of stopping the route.
 		if classified.Confidence == routingerr.ConfLow {
-			if session, sessionErr := d.service.repo.GetTaskSession(ctx, d.sessionID); sessionErr == nil && session != nil {
-				d.service.openDynamicCandidateCircuitForStartupFailure(ctx, session)
-			}
-			return dynamicruntime.DownstreamExecution{}, err
+			classified = transientStartupLaunchFailure()
 		}
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
@@ -258,38 +256,56 @@ func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID 
 	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
 }
 
-// openDynamicCandidateCircuitForStartupFailure records a startup failure
-// against the current dynamic candidate so the next selection skips it for one
-// circuit backoff window. A process-start failure or a never-started stall
-// does not pass through a classified ApplyFailure, so the circuit is opened
-// here directly; the route itself still stops for manual recovery. The
-// classification only feeds the circuit gate, which is why it carries the
-// startup phase and low confidence. Best-effort: a failure to record the
-// circuit never changes the caller's terminal outcome.
-func (s *Service) openDynamicCandidateCircuitForStartupFailure(
-	ctx context.Context,
-	session *models.TaskSession,
-) {
-	if s.profileExecutionResolver == nil || session == nil {
-		return
+// transientStartupLaunchFailure presents a process that never started as a
+// transient provider-availability failure. The process produced no output, so
+// the attempt is effect-safe, and the transient class lets the candidate's
+// configured provider policy drive the retry or immediate next-candidate
+// decision instead of stopping the route for manual recovery.
+func transientStartupLaunchFailure() *routingerr.Error {
+	return &routingerr.Error{
+		Code:            routingerr.CodeProviderUnavailable,
+		Class:           routingerr.ClassTransient,
+		Phase:           routingerr.PhaseProcessStart,
+		Confidence:      routingerr.ConfLow,
+		FallbackAllowed: true,
+		AutoRetryable:   true,
+		ClassifierRule:  "phase.prestart.launch_failure",
 	}
-	if session.RouteGeneration <= 0 || session.ExecutionProfileID == "" || session.AgentProfileID == "" {
-		return
+}
+
+// startupFailureEvent builds the failure evidence for a process that never
+// started. The prompt generation is read from the process-local attempt record
+// so the route failure gate can fence the failure to the launch that failed.
+func (s *Service) startupFailureEvent(taskID, sessionID, executionID string) watcher.AgentEventData {
+	data := watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
 	}
-	failure := &routingerr.Error{
-		Code:       routingerr.CodeAgentRuntime,
-		Class:      routingerr.ClassUnclassified,
-		Phase:      routingerr.PhaseProcessStart,
-		Confidence: routingerr.ConfLow,
+	if evidence, ok := s.promptAttemptForSession(sessionID); ok {
+		evidence.mu.Lock()
+		if evidence.executionID == "" || evidence.executionID == executionID {
+			data.PromptGeneration = evidence.promptGeneration
+		}
+		evidence.mu.Unlock()
 	}
-	if err := s.profileExecutionResolver.OpenCircuitForFailure(
-		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID, failure,
-	); err != nil {
-		s.logger.Debug("failed to open dynamic candidate circuit after startup failure",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", session.ID),
-			zap.Error(err))
+	return data
+}
+
+// routeDynamicStartupFailure routes a never-started process failure through the
+// immediate next-candidate policy. It reports whether the route accepted the
+// failure; a false result leaves the caller's terminal FAILED path in charge.
+// A caller must not already have recorded the session FAILED, because the
+// successor relaunch resets the session and refuses a terminal state.
+func (s *Service) routeDynamicStartupFailure(
+	ctx context.Context, taskID, sessionID, executionID string,
+) bool {
+	if s.profileExecutionResolver == nil {
+		return false
 	}
+	return s.routeDynamicAgentFailure(
+		ctx,
+		s.startupFailureEvent(taskID, sessionID, executionID),
+		transientStartupLaunchFailure(),
+	)
 }
 
 type dynamicRouteSessionProjector interface {
@@ -390,7 +406,7 @@ func (s *Service) handleAgentProcessStarted(
 // startup fails after LaunchPreparedSession already returned successfully.
 func (s *Service) handleAgentProcessStartFailed(
 	ctx context.Context,
-	_, sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	_ error,
 ) {
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
@@ -418,8 +434,18 @@ func (s *Service) handleAgentProcessStartFailed(
 	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
 		return
 	}
-	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
-	s.openDynamicCandidateCircuitForStartupFailure(ctx, session)
+	// A process that never started produced no output, so the route can
+	// advance to the next candidate immediately instead of waiting for a
+	// manual selection. routeDynamicAgentFailure marks the route
+	// action_required on decline; the explicit fallback covers a decline that
+	// never reached its own guard.
+	if !s.routeDynamicAgentFailure(
+		ctx,
+		s.startupFailureEvent(taskID, sessionID, agentExecutionID),
+		transientStartupLaunchFailure(),
+	) {
+		s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
+	}
 }
 
 func applyDynamicRouteDecisionProjection(
