@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "이 워크스페이스에 표시되거나 가져오는 GitHub 풀 리퀘스트 및 이슈를 제한합니다.",
   "loadingAccounts": "계정 불러오는 중...",
   "loadingOrganizations": "조직 불러오는 중...",
+  "loadingPullRequests": "풀 리퀘스트 불러오는 중...",
   "loadingRegisteredApps": "등록된 App 불러오는 중...",
   "loadingTaskAccess": "작업 접근 불러오는 중...",
   "localAndWorktreeTasksUseHost": "로컬 및 워크트리 작업은 호스트에서 볼 수 있는 Git 또는 SSH 자격 증명을 사용합니다. Docker, SSH, 클라우드 작업은 해당 실행기에 구성된 자격 증명을 사용합니다.",

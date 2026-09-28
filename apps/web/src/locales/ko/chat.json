@@ -18,6 +18,7 @@
   "attachmentPreviewAlt": "미리 보기",
   "attachmentPreviewFullAlt": "전체 크기 미리 보기",
   "attachmentUploadFailed": "첨부 파일 업로드에 실패했습니다",
+  "attachmentWorkspaceUnavailable": "이 작업의 워크스페이스를 찾을 수 없습니다. 파일은 임시 저장에 보관됩니다.",
   "attachmentUploadPending": "첨부 파일 업로드 중...",
   "attachmentUploadPendingSubmit": "보내기 전에 첨부 파일 업로드를 완료하세요.",
   "chatTabName": "채팅 {{index}}",
