@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
 import { selectWorkspaceAggregate } from "@/lib/state/slices/office/selectors";
-import { getWorkspaceAggregate } from "@/lib/api/domains/office-extended-api";
-import { normalizeActivityEntry } from "@/lib/api/domains/office-activity-normalize";
 import type { WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
 import { ActivityRow } from "@/app/office/workspace/activity/activity-row";
+import { useWorkspaceAggregate } from "@/hooks/domains/office/use-workspace-aggregate";
 import { useTranslation } from "react-i18next";
 
 /**
@@ -19,25 +17,7 @@ import { useTranslation } from "react-i18next";
 export function WorkspaceAggregatePageClient() {
   const { t } = useTranslation();
   const aggregate = useAppStore(selectWorkspaceAggregate);
-  const setWorkspaceAggregate = useAppStore((s) => s.setWorkspaceAggregate);
-  const loadedRef = useRef(false);
-  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
-
-  useEffect(() => {
-    if (loadedRef.current) return;
-    loadedRef.current = true;
-    void getWorkspaceAggregate()
-      .then((data) => {
-        setWorkspaceAggregate({
-          workspaces: data.workspaces ?? [],
-          recentActivity: (data.recent_activity ?? []).map(normalizeActivityEntry),
-        });
-        setLoadState("loaded");
-      })
-      .catch(() => {
-        setLoadState("error");
-      });
-  }, [setWorkspaceAggregate]);
+  const { loadState } = useWorkspaceAggregate();
 
   const workspaces = aggregate?.workspaces ?? [];
   const activity = aggregate?.recentActivity ?? [];

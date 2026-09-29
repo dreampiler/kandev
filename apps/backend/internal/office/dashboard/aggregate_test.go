@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
@@ -72,10 +73,12 @@ func TestGetWorkspacesAggregateUnavailable(t *testing.T) {
 // and merged activity feed.
 func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 	deps := newTestDeps(t)
-	deps.agents.instances = []*models.AgentInstance{{ID: "agent-1", WorkspaceID: "ws-1", Name: "Alpha Agent"}}
+	deps.agents.instances = []*models.AgentInstance{{
+		ID: "agent-1", WorkspaceID: "ws-1", Name: "Alpha Agent", Status: models.AgentStatusWorking,
+	}}
 	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{
-		{ID: "ws-1", Name: "Alpha"},
-		{ID: "ws-2", Name: "Beta"},
+		{ID: "ws-1", Name: "Alpha", OfficeWorkflowID: "office-workflow"},
+		{ID: "ws-2", Name: "Beta", OfficeWorkflowID: "office-workflow"},
 	}})
 
 	// ws-1: 2 open (todo + backlog-ish default), 1 in_progress, 1 blocked,
@@ -122,8 +125,14 @@ func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 	if alpha.PendingApprovals != 2 {
 		t.Fatalf("ws-1 pending approvals = %d, want 2", alpha.PendingApprovals)
 	}
+	if alpha.AgentCount != 1 || alpha.RunningAgents != 1 {
+		t.Fatalf("ws-1 agent counts = %d total, %d running; want 1 and 1", alpha.AgentCount, alpha.RunningAgents)
+	}
 	if beta.TaskCount != 1 || beta.OpenTasks != 1 || beta.PendingApprovals != 1 {
 		t.Fatalf("ws-2 = %+v, want total 1 open and 1 pending approval", beta)
+	}
+	if beta.AgentCount != 0 || beta.RunningAgents != 0 {
+		t.Fatalf("ws-2 agent counts = %d total, %d running; want 0 and 0", beta.AgentCount, beta.RunningAgents)
 	}
 
 	if len(resp.RecentActivity) != 2 {
@@ -151,6 +160,83 @@ func TestGetWorkspacesAggregateEmptyList(t *testing.T) {
 	}
 	if resp.RecentActivity == nil || len(resp.RecentActivity) != 0 {
 		t.Fatalf("recent activity = %#v, want non-nil empty slice", resp.RecentActivity)
+	}
+}
+
+func TestGetWorkspacesAggregateIncludesOnlyOfficeWorkspaces(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{
+		{ID: "office", Name: "Office workspace", OfficeWorkflowID: "office-workflow"},
+		{ID: "kanban", Name: "Kanban workspace"},
+	}})
+
+	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
+	if err != nil {
+		t.Fatalf("GetWorkspacesAggregate: %v", err)
+	}
+	if len(resp.Workspaces) != 1 || resp.Workspaces[0].WorkspaceID != "office" {
+		t.Fatalf("workspaces = %+v, want only the Office workspace", resp.Workspaces)
+	}
+}
+
+func TestGetWorkspacesAggregateReturnsAgentReadFailures(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{
+		{ID: "office", Name: "Office workspace", OfficeWorkflowID: "office-workflow"},
+	}})
+	wantErr := errors.New("agent store unavailable")
+	deps.agents.listErr = wantErr
+
+	if _, err := deps.svc.GetWorkspacesAggregate(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("GetWorkspacesAggregate error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestGetWorkspacesAggregateBatchesLargeWorkspaceLists(t *testing.T) {
+	deps := newTestDeps(t)
+	const workspaceCount = 33000
+	workspaces := make([]*taskmodels.Workspace, workspaceCount)
+	for i := range workspaces {
+		workspaces[i] = &taskmodels.Workspace{
+			ID:               fmt.Sprintf("ws-%05d", i),
+			Name:             fmt.Sprintf("Workspace %05d", i),
+			OfficeWorkflowID: "office-workflow",
+		}
+	}
+	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: workspaces})
+
+	firstID := workspaces[0].ID
+	lastID := workspaces[len(workspaces)-1].ID
+	insertAggregateTask(t, deps, "last-task", lastID, "BLOCKED")
+	insertAggregateApproval(t, deps, "last-approval", lastID, "pending")
+	insertAggregateActivity(t, deps, "old-activity", firstID, "task.created")
+	insertAggregateActivity(t, deps, "new-activity", lastID, "task.blocked")
+	if _, err := deps.db.Exec(`UPDATE office_activity_log SET created_at = datetime('now', '-1 minute') WHERE id = 'old-activity'`); err != nil {
+		t.Fatalf("set old activity time: %v", err)
+	}
+	if _, err := deps.db.Exec(`UPDATE office_activity_log SET created_at = datetime('now', '+1 minute') WHERE id = 'new-activity'`); err != nil {
+		t.Fatalf("set new activity time: %v", err)
+	}
+
+	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
+	if err != nil {
+		t.Fatalf("GetWorkspacesAggregate with %d workspaces: %v", workspaceCount, err)
+	}
+	if len(resp.Workspaces) != workspaceCount {
+		t.Fatalf("workspace count = %d, want %d", len(resp.Workspaces), workspaceCount)
+	}
+	var last dashboard.WorkspaceAggregateEntry
+	for _, entry := range resp.Workspaces {
+		if entry.WorkspaceID == lastID {
+			last = entry
+			break
+		}
+	}
+	if last.BlockedTasks != 1 || last.PendingApprovals != 1 {
+		t.Fatalf("last workspace counts = %+v, want one blocked task and approval", last)
+	}
+	if len(resp.RecentActivity) != 2 || resp.RecentActivity[0].ID != "new-activity" {
+		t.Fatalf("recent activity = %+v, want newest activity first across batches", resp.RecentActivity)
 	}
 }
 
