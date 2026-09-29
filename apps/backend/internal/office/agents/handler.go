@@ -236,6 +236,16 @@ func (h *Handler) updateAgent(c *gin.Context) {
 		})
 		return
 	}
+	if req.ExecutionAgentProfileID != nil {
+		if err := h.svc.ValidateExecutionProfileBinding(ctx, agent, *req.ExecutionAgentProfileID); err != nil {
+			if code := agentValidationErrorCode(err); code != "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "code": code})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
 	applyAgentUpdates(agent, req)
 	if err := h.svc.UpdateAgentInstance(ctx, agent); err != nil {
 		if code := agentValidationErrorCode(err); code != "" {
@@ -357,6 +367,10 @@ func agentValidationErrorCode(err error) string {
 		return "agent_reports_to_self"
 	case errors.Is(err, ErrAgentReportsToCycle):
 		return "agent_reports_to_cycle"
+	case errors.Is(err, ErrAgentExecutionProfileSelf):
+		return "agent_execution_profile_self"
+	case errors.Is(err, ErrAgentExecutionProfileNotDynamic):
+		return "agent_execution_profile_not_dynamic"
 	default:
 		return ""
 	}
@@ -678,6 +692,9 @@ func applyAgentUpdates(agent *models.AgentInstance, req *UpdateAgentRequest) {
 	}
 	if req.ExecutorPreference != nil {
 		agent.ExecutorPreference = *req.ExecutorPreference
+	}
+	if req.ExecutionAgentProfileID != nil {
+		agent.ExecutionAgentProfileID = *req.ExecutionAgentProfileID
 	}
 	if req.PauseReason != nil {
 		agent.PauseReason = *req.PauseReason

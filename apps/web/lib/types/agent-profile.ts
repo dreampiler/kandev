@@ -194,6 +194,11 @@ export type AgentProfile = {
   billingType?: BillingType;
   utilization?: ProviderUsage | null;
   skillIds?: string[];
+  /**
+   * Dynamic execution profile that owns this Office agent's launches. Empty
+   * means the agent resolves through workspace/default routing.
+   */
+  executionAgentProfileId?: AgentProfileId;
 
   // --- Timestamps ---
   createdAt: string;
