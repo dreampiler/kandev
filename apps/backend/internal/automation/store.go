@@ -1407,6 +1407,28 @@ func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason
 	return nil
 }
 
+// MarkRunTaskCreated advances an admitted run from triggered to task_created
+// when its launch was deferred by the session ceiling. The task already owns
+// the row (BindRunTask set task_id before dispatch); no session/turn exists
+// yet because the launch never happened. task_created is the state the
+// ceiling sweep's eventual turn settlement (MarkRun{Succeeded,Failed}ByTaskID)
+// matches, so the row is neither stuck open nor falsely failed while the
+// launch waits for capacity.
+func (s *Store) MarkRunTaskCreated(ctx context.Context, runID, taskID string) error {
+	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs
+		SET task_id = CASE WHEN ? <> '' THEN ? ELSE task_id END, status = ?
+		WHERE id = ? AND status = ?`),
+		taskID, taskID, string(RunStatusTaskCreated), runID, string(RunStatusTriggered))
+	if err != nil {
+		return err
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		return fmt.Errorf("automation run %s is not an admitted triggered run", runID)
+	}
+	return nil
+}
+
 func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),

@@ -70,6 +70,18 @@ var (
 // launch work for this run.
 var ErrAutomationRunNotDispatchable = errors.New("automation: run is not dispatchable")
 
+// ErrRunDeferred signals that the orchestrator refused the launch at the
+// session ceiling and recorded a ceiling_deferred replay. It is not a
+// failure: the task exists and owns the run, the sweep will retry the launch
+// once capacity frees up, and the eventual turn settles the run. DispatchRun
+// must therefore leave the row open (task_created) instead of marking it
+// failed, and its orchestrator caller must not delete the task.
+//
+// The orchestrator cannot be imported here (import cycle), so the
+// orchestrator's dispatch closures translate its own ceiling sentinel into
+// this one before returning to DispatchRun.
+var ErrRunDeferred = errors.New("automation: run launch deferred")
+
 // RunStopper cancels one exact task/session/turn binding. The bool is false
 // when the binding is already terminal or stale; that is not an internal
 // failure and must not cancel a successor turn.
@@ -1409,6 +1421,17 @@ func (s *Service) DispatchRun(
 
 	dispatchResult, err := dispatch()
 	if err != nil {
+		if errors.Is(err, ErrRunDeferred) {
+			// The ceiling refused the launch, not the run: the task already
+			// owns this row and the sweep will retry. Advance the row from
+			// triggered to task_created (this is what MarkRun{Succeeded,Failed}
+			// ByTaskID settles on) without marking it failed, and hand the
+			// caller a distinguishable non-failure so it skips cleanup.
+			if markErr := s.store.MarkRunTaskCreated(ctx, runID, run.TaskID); markErr != nil {
+				return fmt.Errorf("%w (mark run task_created: %v)", err, markErr)
+			}
+			return err
+		}
 		return s.markDispatchFailed(ctx, runID, err)
 	}
 	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {
