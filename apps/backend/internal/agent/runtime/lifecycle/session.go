@@ -1091,6 +1091,7 @@ func (sm *SessionManager) waitForPromptDone(
 	stallTicker := time.NewTicker(time.Minute)
 	defer stallTicker.Stop()
 	stallReported := false
+	terminalReported := false
 	startupGeneration := execution.startupAttemptSnapshot()
 
 	for {
@@ -1175,19 +1176,43 @@ func (sm *SessionManager) waitForPromptDone(
 						elapsed,
 						activityEpoch,
 						neverStarted,
+						false,
 					)
 				}
 				stallReported = true
 			}
 
 			// Past the escalation threshold the agent has produced no events for
-			// long enough that the prompt is treated as unrecoverable. Inject a
+			// long enough that the prompt is treated as unrecoverable. Publish
+			// the terminal classification once per generation and then inject a
 			// synthetic cancel-release completion so the blocked wait returns,
-			// mirroring escalateStuckCancel's technique. The channel is buffered
-			// size 1 and the injection is generation-checked, so a real
-			// completion that arrived first wins; the receive case above then
-			// wraps the signal's cancel-release error as ErrCancelEscalated.
+			// mirroring escalateStuckCancel's technique. Publish first so the
+			// synchronous stall handler records the terminal outcome and
+			// schedules teardown before SendPrompt's error path runs. The
+			// channel is buffered size 1 and the injection is generation-checked,
+			// so a real completion that arrived first wins; the receive case
+			// above then wraps the signal's cancel-release error as
+			// ErrCancelEscalated.
 			if elapsed >= stallEscalationThreshold {
+				// The terminal classification applies only to a prompt that
+				// produced turn events: a never-started prompt is already
+				// terminal from the five-minute never-started branch and must
+				// not be reclassified as a prolonged stall.
+				if !terminalReported && !neverStarted {
+					if sm.eventPublisher != nil {
+						sm.eventPublisher.PublishAgentStalled(
+							ctx,
+							execution,
+							promptGeneration,
+							lastActivity,
+							elapsed,
+							activityEpoch,
+							false,
+							true,
+						)
+					}
+					terminalReported = true
+				}
 				sm.logger.Error("agent stall escalation: no events within stall escalation threshold; injecting synthetic completion",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),

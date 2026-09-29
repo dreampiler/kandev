@@ -77,6 +77,12 @@ type AgentStalledPayload struct {
 	// NeverStarted is true when the agent has not emitted a single event since
 	// this prompt was dispatched — a terminal failure, not a mid-work pause.
 	NeverStarted bool `json:"never_started"`
+	// ProlongedStall is true when a prompt that did emit turn events has stayed
+	// silent past the terminal inactivity threshold. It is the terminal
+	// counterpart to the advisory stall: the consumer records the terminal
+	// outcome and tears the execution down instead of posting a recoverable
+	// notice. NeverStarted and ProlongedStall are mutually exclusive.
+	ProlongedStall bool `json:"prolonged_stall,omitempty"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
