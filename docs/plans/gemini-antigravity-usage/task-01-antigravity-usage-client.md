@@ -8,10 +8,10 @@ plan: "plan.md"
 requirements:
   - REQ-COSTS-SUBSCRIPTION-USAGE-001
 acceptance_criteria:
-  - AC-COSTS-SUBSCRIPTION-USAGE-001.2
-  - AC-COSTS-SUBSCRIPTION-USAGE-001.5
+  - AC-COSTS-SUBSCRIPTION-USAGE-001.9
+  - AC-COSTS-SUBSCRIPTION-USAGE-001.10
 system_design:
-  - ../../specs/costs/requirements/subscription-usage.md
+  - ../../specs/costs/system-design/antigravity-usage.md
 ---
 
 # Task 01: Add Antigravity Usage Client
@@ -26,13 +26,15 @@ Implement Antigravity usage provider that reads `agy -p "/usage" --output-format
 - Parser handles `command.data.groups[]` → "Gemini Models" → `buckets[]` with `window`, `remaining_fraction`, `reset_time`
 - Utilization computed as `1 - remaining_fraction` (percentage 0-100)
 - Disabled buckets (missing `reset_time`) are skipped
-- Returns `ProviderUsage` with provider="antigravity", windows with `Label`, `UtilizationPct`, `ResetAt`
+- Returns `ProviderUsage` with provider="google", windows with `Label`, `UtilizationPct`, `ResetAt`
 - No model calls or token consumption (verified: `num_turns: 0`, `usage.total_tokens: 0`)
 
 ## Verification
 
 ```bash
-cd apps/backend && go test -tags fts5 ./internal/agent/usage ./internal/backendapp
+cd apps/backend && go test ./internal/agent/usage -count=1
+cd apps/backend && go test ./internal/agent/agents -run '^TestAntigravityACP_' -count=1
+cd apps/backend && go test ./internal/backendapp -run '^TestTeamClaudeStatusURL$' -count=1
 ```
 
 Manual verification:
@@ -44,9 +46,10 @@ agy -p "/usage" --output-format json
 
 ## Files likely touched
 
-- `apps/backend/internal/backendapp/usage_adapter.go` — `ensureRegistered` registration, Antigravity client implementation
-- `apps/backend/internal/agent/usage/antigravity_usage.go` — new file for parser (or inline in usage_adapter)
-- Unit tests for parsing logic
+- `apps/backend/internal/backendapp/usage_adapter.go` — `ensureRegistered` registration
+- `apps/backend/internal/agent/usage/client_antigravity.go` — CLI client and parser
+- `apps/backend/internal/agent/agents/antigravity_acp.go` — subscription billing classification
+- `apps/backend/internal/agent/agents/antigravity_acp_test.go` — updated billing expectation
 
 ## Results
 

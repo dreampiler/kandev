@@ -81,7 +81,7 @@ type ProviderUsageClient interface {
 }
 ```
 
-Two implementations:
+Provider clients include:
 
 **`ClaudeUsageClient`**
 - Reads `access_token` from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`).
