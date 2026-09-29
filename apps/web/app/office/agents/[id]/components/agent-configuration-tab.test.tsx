@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api/client";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { AgentConfigurationTab } from "./agent-configuration-tab";
 
 // Mock toast so the act-like hooks don't error and we don't need the toast
@@ -21,6 +22,7 @@ vi.mock("@/lib/api/domains/office-api", async () => {
     updateAgentProfile: vi.fn().mockResolvedValue({}),
   };
 });
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({ useSettingsData: vi.fn() }));
 
 afterEach(() => {
   cleanup();
@@ -58,7 +60,23 @@ const PROFILE_OPTION = {
   cli_passthrough: false,
 };
 
-function renderConfigTab(agents: AgentProfile[], agent: AgentProfile) {
+const DYNAMIC_PROFILE_OPTION = {
+  id: "profile-dynamic-1",
+  label: "Cascade",
+  kind: "dynamic",
+  workspace_id: WORKSPACE_ID,
+  agent_id: "dynamic",
+  agent_name: "dynamic",
+  cli_passthrough: false,
+};
+
+const EXECUTION_PROFILE_COMBOBOX = "Execution profile";
+
+function renderConfigTab(
+  agents: AgentProfile[],
+  agent: AgentProfile,
+  profiles: AgentProfileOption[] = [PROFILE_OPTION],
+) {
   return render(
     <StateProvider
       initialState={{
@@ -67,7 +85,7 @@ function renderConfigTab(agents: AgentProfile[], agent: AgentProfile) {
           ...defaultOfficeState.office,
           agentProfilesByWorkspaceId: { [WORKSPACE_ID]: agents },
         },
-        agentProfiles: { items: [PROFILE_OPTION], version: 0 },
+        agentProfiles: { items: profiles, version: 0 },
       }}
     >
       <AgentConfigurationTab agent={agent} />
@@ -328,5 +346,43 @@ describe("AgentConfigurationTab CEO hierarchy", () => {
 
     const reportsTo = screen.getByRole("combobox", { name: REPORTS_TO_COMBOBOX });
     expect((reportsTo as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("AgentConfigurationTab execution profile", () => {
+  it("offers dynamic profiles and saves the selected binding", async () => {
+    renderConfigTab([baseAgent], baseAgent, [PROFILE_OPTION, DYNAMIC_PROFILE_OPTION]);
+
+    fireEvent.click(screen.getByRole("combobox", { name: EXECUTION_PROFILE_COMBOBOX }));
+    const listbox = await screen.findByRole("listbox");
+    fireEvent.click(within(listbox).getByRole("option", { name: "Cascade" }));
+    fireEvent.click(screen.getByRole("button", { name: SAVE_BUTTON }));
+
+    await waitFor(() => {
+      expect(updateAgentProfile).toHaveBeenCalledWith(
+        baseAgent.id,
+        expect.objectContaining({ executionAgentProfileId: "profile-dynamic-1" }),
+      );
+    });
+  });
+
+  it("preselects the stored execution binding", () => {
+    const bound = {
+      ...baseAgent,
+      executionAgentProfileId: toAgentProfileId("profile-dynamic-1"),
+    } as AgentProfile;
+    renderConfigTab([bound], bound, [PROFILE_OPTION, DYNAMIC_PROFILE_OPTION]);
+
+    expect(
+      screen.getByRole("combobox", { name: EXECUTION_PROFILE_COMBOBOX }).textContent,
+    ).toContain("Cascade");
+  });
+
+  it("omits non-dynamic profiles from the execution selector", async () => {
+    renderConfigTab([baseAgent], baseAgent, [PROFILE_OPTION, DYNAMIC_PROFILE_OPTION]);
+
+    fireEvent.click(screen.getByRole("combobox", { name: EXECUTION_PROFILE_COMBOBOX }));
+    const listbox = await screen.findByRole("listbox");
+    expect(within(listbox).queryByText("Claude • Default")).toBeNull();
   });
 });

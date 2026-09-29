@@ -13,10 +13,12 @@ import { selectOfficeAgentProfiles } from "@/lib/state/slices/office/selectors";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import { ApiError } from "@/lib/api/client";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
+import type { AgentProfileId } from "@/lib/types/ids";
 import { AgentRoutingCard } from "./agent-routing-card";
 import { reportsToOptions } from "./reports-to-options";
 import { useTranslation } from "react-i18next";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 
 type AgentConfigurationTabProps = {
   agent: AgentProfile;
@@ -80,6 +82,7 @@ type FormState = {
   budgetMonthlyCents: number;
   maxConcurrentSessions: number;
   executorType: string;
+  executionProfileId: string;
 };
 
 type FormField = keyof FormState;
@@ -91,6 +94,7 @@ const FORM_FIELDS: FormField[] = [
   "budgetMonthlyCents",
   "maxConcurrentSessions",
   "executorType",
+  "executionProfileId",
 ];
 
 function initialForm(agent: AgentProfile): FormState {
@@ -101,6 +105,7 @@ function initialForm(agent: AgentProfile): FormState {
     budgetMonthlyCents: agent.budgetMonthlyCents,
     maxConcurrentSessions: agent.maxConcurrentSessions,
     executorType: agent.executorPreference?.type ?? "",
+    executionProfileId: agent.executionAgentProfileId ?? "",
   };
 }
 
@@ -108,6 +113,18 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
   const { t } = useTranslation();
   const meta = useAppStore((s) => s.office.meta);
   const allOfficeAgents = useAppStore(selectOfficeAgentProfiles);
+  const allExecutionProfiles = useAppStore((s) => s.agentProfiles.items);
+  useSettingsData(true);
+
+  const executionProfiles = useMemo(
+    () =>
+      allExecutionProfiles
+        .filter(
+          (p) => p.kind === "dynamic" && (!p.workspace_id || p.workspace_id === agent.workspaceId),
+        )
+        .map((p) => ({ id: p.id, label: p.label })),
+    [allExecutionProfiles, agent.workspaceId],
+  );
 
   const roles =
     meta?.roles.map((r) => ({ id: r.id, label: r.label })) ??
@@ -141,9 +158,12 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         maxConcurrent={form.maxConcurrentSessions}
         executorType={form.executorType}
         executorTypes={executorTypes}
+        executionProfileId={form.executionProfileId}
+        executionProfiles={executionProfiles}
         onBudgetChange={(v) => patch({ budgetMonthlyCents: v })}
         onMaxConcurrentChange={(v) => patch({ maxConcurrentSessions: v })}
         onExecutorChange={(v) => patch({ executorType: v })}
+        onExecutionProfileChange={(v) => patch({ executionProfileId: v })}
       />
       <AgentRoutingCard agentId={agent.id} />
       {dirty && (
@@ -188,6 +208,9 @@ function buildAgentUpdate(
     budgetMonthlyCents: valueFor("budgetMonthlyCents"),
     maxConcurrentSessions: valueFor("maxConcurrentSessions"),
     executorPreference: executorType ? { type: executorType } : undefined,
+    ...(dirtyFields.has("executionProfileId")
+      ? { executionAgentProfileId: valueFor("executionProfileId") as AgentProfileId }
+      : {}),
   };
 }
 
@@ -432,17 +455,23 @@ function OrchestrationCard({
   maxConcurrent,
   executorType,
   executorTypes,
+  executionProfileId,
+  executionProfiles,
   onBudgetChange,
   onMaxConcurrentChange,
   onExecutorChange,
+  onExecutionProfileChange,
 }: {
   budgetCents: number;
   maxConcurrent: number;
   executorType: string;
   executorTypes: Array<{ id: string; label: string }>;
+  executionProfileId: string;
+  executionProfiles: Array<{ id: string; label: string }>;
   onBudgetChange: (v: number) => void;
   onMaxConcurrentChange: (v: number) => void;
   onExecutorChange: (v: string) => void;
+  onExecutionProfileChange: (v: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -498,7 +527,54 @@ function OrchestrationCard({
             </SelectContent>
           </Select>
         </div>
+        <ExecutionProfileField
+          value={executionProfileId}
+          profiles={executionProfiles}
+          onChange={onExecutionProfileChange}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+const NO_EXECUTION_PROFILE = "__unbound__";
+
+function ExecutionProfileField({
+  value,
+  profiles,
+  onChange,
+}: {
+  value: string;
+  profiles: Array<{ id: string; label: string }>;
+  onChange: (v: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div>
+      <Label htmlFor="cfg-execution-profile">{t("office:executionProfile")}</Label>
+      <Select
+        value={value || NO_EXECUTION_PROFILE}
+        onValueChange={(v) => onChange(v === NO_EXECUTION_PROFILE ? "" : v)}
+      >
+        <SelectTrigger
+          id="cfg-execution-profile"
+          data-testid="agent-execution-profile-selector"
+          className={controlSizingClassName("standard", "mt-1 w-full cursor-pointer")}
+        >
+          <SelectValue placeholder={t("office:selectExecutionProfile")} />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={NO_EXECUTION_PROFILE} className="cursor-pointer">
+            {t("office:noExecutionProfile")}
+          </SelectItem>
+          {profiles.map((p) => (
+            <SelectItem key={p.id} value={p.id} className="cursor-pointer">
+              {p.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground mt-1">{t("office:executionProfileHelp")}</p>
+    </div>
   );
 }
