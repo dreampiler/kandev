@@ -47,8 +47,11 @@ func (s *Service) stepPreparation(ctx context.Context) error {
 
 func (s *Service) finishPreparation(ctx context.Context, prepared record, receipt string, backupErr error) error {
 	code := ""
+	detail := ""
 	if backupErr != nil {
 		code = "backup_failed"
+		detail = limitPreparationDetail(backupErr.Error())
+		s.logFailure(ctx, "tool payload retention preparation failed", backupErr)
 	}
 	_, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
 		if r.Policy.Revision != prepared.Policy.Revision || r.Preparation.State != stateRunning || r.Operation == nil || r.Operation.ID != prepared.Operation.ID {
@@ -57,11 +60,13 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 		if backupErr != nil {
 			r.Preparation.State = stateFailed
 			r.Preparation.Error = code
+			r.PreparationDetail = detail
 			finishOperation(r, stateFailed, code, s.opts.Now())
 			return nil
 		}
 		r.Preparation.State = stateReady
 		r.Preparation.Error = ""
+		r.PreparationDetail = ""
 		r.Receipt = receipt
 		r.ApprovedRevision = r.Policy.Revision
 		r.Policy.Enabled = true
@@ -74,6 +79,17 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 		return errors.New(code)
 	}
 	return nil
+}
+
+// preparationDetailLimit bounds the stored failure cause so a runaway error
+// message cannot bloat the settings row.
+const preparationDetailLimit = 1024
+
+func limitPreparationDetail(message string) string {
+	if len(message) <= preparationDetailLimit {
+		return message
+	}
+	return message[:preparationDetailLimit]
 }
 
 func (s *Service) recoverPreparation(ctx context.Context, observed record) error {
@@ -103,5 +119,6 @@ func (s *Service) failPreparation(r *record) {
 	r.NextDueAt = nil
 	r.Preparation.State = stateFailed
 	r.Preparation.Error = "backup_interrupted"
+	r.PreparationDetail = ""
 	finishOperation(r, stateFailed, "backup_interrupted", s.opts.Now())
 }

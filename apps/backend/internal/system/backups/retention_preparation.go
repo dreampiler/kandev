@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -122,8 +121,10 @@ func (s *Service) VerifyRetentionBackupUnderLease(ctx context.Context, receipt R
 }
 
 func verifySnapshot(ctx context.Context, path string) (string, error) {
-	uri := &url.URL{Scheme: "file", Path: path, RawQuery: "mode=ro"}
-	reader, err := sqlx.Open("sqlite3", uri.String())
+	// Build the DSN the same way as db.OpenSQLiteReader. url.URL would
+	// percent-encode Windows separators (C:%5C...) and mattn/go-sqlite3
+	// rejects that as an invalid URI authority, so pass the path verbatim.
+	reader, err := sqlx.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", path))
 	if err != nil {
 		return "", err
 	}
