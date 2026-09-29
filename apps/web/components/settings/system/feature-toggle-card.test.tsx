@@ -128,6 +128,52 @@ describe("FeatureToggleCard", () => {
   });
 });
 
+describe("FeatureToggleCard - localized flag metadata", () => {
+  it("resolves label, description, and risk text from the catalog by flag key", () => {
+    render(
+      <FeatureToggleCard
+        flag={flagState({
+          key: "features.office",
+          label: "backend label that the catalog overrides",
+          description: "backend description that the catalog overrides",
+          risk_description: "backend risk that the catalog overrides",
+        })}
+        saving={false}
+        onChange={() => undefined}
+        onReset={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Office mode")).not.toBeNull();
+    expect(
+      screen.getByText("Enables autonomous agent office workflows and related settings."),
+    ).not.toBeNull();
+    expect(screen.getByText(/Office mode is still evolving\. Workflows/)).not.toBeNull();
+    expect(screen.queryByText("backend label that the catalog overrides")).toBeNull();
+  });
+
+  it("falls back to the backend text when the flag key has no catalog entry", () => {
+    render(
+      <FeatureToggleCard
+        flag={flagState({
+          key: "features.notARealFlag",
+          label: "Future flag",
+          description: "A flag added after this catalog entry.",
+          risk_description: "Backend risk text for an unknown flag.",
+        })}
+        saving={false}
+        onChange={() => undefined}
+        onReset={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Future flag")).not.toBeNull();
+    expect(screen.getByText("A flag added after this catalog entry.")).not.toBeNull();
+    expect(screen.getByText("Backend risk text for an unknown flag.")).not.toBeNull();
+    expect(screen.getByLabelText("Toggle Future flag")).not.toBeNull();
+  });
+});
+
 describe("FeatureToggleCard - unavailable state", () => {
   it("disables the switch and shows the reason when the flag is unavailable on this host", () => {
     const onChange = vi.fn();
