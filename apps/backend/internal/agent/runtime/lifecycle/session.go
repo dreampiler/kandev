@@ -31,6 +31,17 @@ const (
 	attachmentDeliveryPath             = "path"
 	attachmentDeliveryPrompt           = "prompt"
 	pendingDispatchedPromptWaitTimeout = 10 * time.Second
+
+	// stallEscalationThreshold is how long a prompt may receive no agent
+	// activity before waitForPromptDone treats the execution as unrecoverable.
+	// The judge is activity-based (lastActivityAt), never wall time, so a long
+	// turn that keeps emitting events is not escalated. Chosen above the
+	// 5-minute advisory stall report and the 10-minute stuck-signal watchdog
+	// threshold so this escalation only fires after both have had their chance.
+	// On firing it injects a synthetic completion so the blocked SendPrompt
+	// returns ErrCancelEscalated and the session leaves the STARTING/RUNNING
+	// ceiling population.
+	stallEscalationThreshold = 15 * time.Minute
 )
 
 // ErrSteerNotDispatched reports that a steer found no active prompt generation
@@ -1167,6 +1178,29 @@ func (sm *SessionManager) waitForPromptDone(
 					)
 				}
 				stallReported = true
+			}
+
+			// Past the escalation threshold the agent has produced no events for
+			// long enough that the prompt is treated as unrecoverable. Inject a
+			// synthetic cancel-release completion so the blocked wait returns,
+			// mirroring escalateStuckCancel's technique. The channel is buffered
+			// size 1 and the injection is generation-checked, so a real
+			// completion that arrived first wins; the receive case above then
+			// wraps the signal's cancel-release error as ErrCancelEscalated.
+			if elapsed >= stallEscalationThreshold {
+				sm.logger.Error("agent stall escalation: no events within stall escalation threshold; injecting synthetic completion",
+					zap.String("execution_id", execution.ID),
+					zap.Duration("elapsed_since_last_event", elapsed),
+					zap.Bool("never_started", neverStarted))
+				execution.signalPromptCompletionForStartupGeneration(
+					startupGeneration,
+					PromptCompletionSignal{
+						IsError:          true,
+						Error:            "cancel escalated: agent produced no events within stall escalation threshold",
+						PromptGeneration: promptGeneration,
+					},
+				)
+				continue
 			}
 		}
 	}
