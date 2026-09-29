@@ -10,11 +10,24 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsACPCommandProcAttrSuppressesConsoleWindow(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+
+	setACPCommandProcAttr(cmd)
+
+	require.NotNil(t, cmd.SysProcAttr)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
+	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW)
+}
 
 const acpCommandTestFixtureEnv = "KANDEV_ACP_COMMAND_TEST_FIXTURE"
 

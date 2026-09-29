@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	"golang.org/x/sys/windows"
 )
 
 func ignoreBrokenPipeSignal() {
@@ -15,7 +16,7 @@ func ignoreBrokenPipeSignal() {
 
 func configureManagedProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
 	}
 }
 

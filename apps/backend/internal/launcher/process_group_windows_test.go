@@ -5,8 +5,28 @@ package launcher
 import (
 	"os"
 	"os/exec"
+	"syscall"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsConfigureManagedProcessSuppressesConsoleWindow(t *testing.T) {
+	cmd := exec.Command("cmd.exe")
+
+	configureManagedProcess(cmd)
+
+	if cmd.SysProcAttr == nil {
+		t.Fatal("configureManagedProcess did not set process attributes")
+	}
+	flags := cmd.SysProcAttr.CreationFlags
+	if flags&syscall.CREATE_NEW_PROCESS_GROUP == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
+	}
+	if flags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", flags)
+	}
+}
 
 const launcherWindowsHelperEnv = "KANDEV_LAUNCHER_WINDOWS_HELPER"
 

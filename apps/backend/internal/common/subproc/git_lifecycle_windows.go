@@ -26,7 +26,7 @@ func prepareGitLifecycleCommand(cmd *exec.Cmd) error {
 	if attr.CreationFlags&windows.CREATE_NEW_CONSOLE != 0 {
 		return errors.New("Git command requests a new controlling console")
 	}
-	attr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED
+	attr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | windows.CREATE_NO_WINDOW
 	cmd.SysProcAttr = &attr
 	setGitWaitDelay(cmd)
 	return nil
