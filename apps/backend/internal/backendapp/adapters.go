@@ -315,6 +315,7 @@ var _ interface {
 	CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
+	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -636,6 +637,12 @@ func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceI
 	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
 }
 
+// RegisterInitialPromptDispatchCallbacks forwards initial prompt acceptance
+// to orchestrator owners that must keep a launch attempt active until dispatch.
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
 func (a *lifecycleAdapter) IsAgentCommandConfigured(agentInstanceID string) bool {
 	return a.mgr.IsAgentCommandConfigured(agentInstanceID)
 }
@@ -793,6 +800,39 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 
 func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
+// RegisterInitialPromptAdmissionCallbacks forwards the restart prompt's final
+// ownership check and acceptance callbacks to the lifecycle execution.
+func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
+		executionID, beforeAdmission, onDispatched, onFailure,
+	)
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	agentInstanceID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallback(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil {
 		return nil, err
 	}

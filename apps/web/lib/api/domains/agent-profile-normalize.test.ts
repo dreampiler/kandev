@@ -6,6 +6,7 @@ const sampleEnvVar = { key: "ANTHROPIC_BASE_URL", value: "https://api.example" }
 const SAMPLE_ID = "p1";
 const SAMPLE_PREFIX = "greywall --";
 const WORKSPACE_ID = "workspace-1";
+const dynamicProfileId = "dynamic-profile";
 
 const snakeCaseWirePayload = {
   id: SAMPLE_ID,
@@ -181,7 +182,7 @@ describe("normalizeAgentProfile", () => {
 
   it("normalizes a dynamic profile document and preserves candidate order", () => {
     const result = normalizeAgentProfile({
-      id: "dynamic-profile",
+      id: dynamicProfileId,
       kind: "dynamic",
       dynamic: {
         version: 4,
@@ -202,6 +203,7 @@ describe("normalizeAgentProfile", () => {
                 wait_for_reset: { enabled: false, max_wait_seconds: 0 },
                 on_exhausted: "stop",
               },
+              unclassified: { enabled: false, consecutive_failure_threshold: 0 },
             },
           },
         ],
@@ -227,15 +229,98 @@ describe("normalizeAgentProfile", () => {
               waitForReset: { enabled: false, maxWaitSeconds: 0 },
               onExhausted: "stop",
             },
+            unclassified: {
+              enabled: false,
+              consecutiveFailureThreshold: 0,
+              onExhausted: "stop",
+              repeatedFailure: { enabled: false, threshold: 0 },
+            },
           },
         },
       ],
     });
   });
 
+  it("preserves the API-configured unclassified policy through read and save", () => {
+    const profile = normalizeAgentProfile({
+      id: dynamicProfileId,
+      kind: "dynamic",
+      dynamic: {
+        version: 1,
+        candidates: [
+          {
+            position: 0,
+            execution_profile_id: "primary",
+            enabled: true,
+            policies: {
+              version: 1,
+              transient: { on_exhausted: "skip" },
+              hard: { on_exhausted: "skip" },
+              unclassified: { enabled: true, consecutive_failure_threshold: 4 },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(profile.dynamic?.candidates[0]?.policies).toMatchObject({
+      unclassified: { enabled: true, consecutiveFailureThreshold: 4 },
+    });
+    expect(toAgentProfilePayload(profile).dynamic).toMatchObject({
+      candidates: [
+        {
+          policies: {
+            unclassified: { enabled: true, consecutive_failure_threshold: 4 },
+          },
+        },
+      ],
+    });
+  });
+
+  it("preserves legacy unclassified fields through read and save", () => {
+    const profile = normalizeAgentProfile({
+      id: dynamicProfileId,
+      kind: "dynamic",
+      dynamic: {
+        version: 1,
+        candidates: [
+          {
+            position: 0,
+            execution_profile_id: "primary",
+            enabled: true,
+            policies: {
+              version: 1,
+              transient: { on_exhausted: "skip" },
+              hard: { on_exhausted: "skip" },
+              unclassified: {
+                on_exhausted: "stop",
+                repeated_failure: { enabled: true, threshold: 3 },
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    expect(profile.dynamic?.candidates[0]?.policies.unclassified).toMatchObject({
+      enabled: true,
+      consecutiveFailureThreshold: 3,
+      onExhausted: "stop",
+      repeatedFailure: { enabled: true, threshold: 3 },
+    });
+    expect(
+      toAgentProfilePayload(profile).dynamic?.candidates[0]?.policies?.unclassified,
+    ).toMatchObject({
+      enabled: true,
+      consecutive_failure_threshold: 3,
+      on_exhausted: "stop",
+      repeated_failure: { enabled: true, threshold: 3 },
+    });
+  });
+
   it("normalizes legacy dynamic rules into both error classes", () => {
     const result = normalizeAgentProfile({
-      id: "dynamic-profile",
+      id: dynamicProfileId,
       kind: "dynamic",
       dynamic: {
         version: 1,
@@ -318,7 +403,7 @@ describe("toAgentProfilePayload", () => {
 describe("toAgentProfilePayload dynamic candidates", () => {
   it("serializes dynamic candidates with opaque profile IDs", () => {
     const payload = toAgentProfilePayload({
-      id: toAgentProfileId("dynamic-profile"),
+      id: toAgentProfileId(dynamicProfileId),
       kind: "dynamic",
       dynamic: {
         version: 2,
@@ -338,6 +423,12 @@ describe("toAgentProfilePayload dynamic candidates", () => {
                 retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
                 waitForReset: { enabled: false, maxWaitSeconds: 0 },
                 onExhausted: "skip",
+              },
+              unclassified: {
+                enabled: false,
+                consecutiveFailureThreshold: 0,
+                onExhausted: "stop",
+                repeatedFailure: { enabled: false, threshold: 0 },
               },
             },
           },
@@ -362,6 +453,12 @@ describe("toAgentProfilePayload dynamic candidates", () => {
               retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
               wait_for_reset: { enabled: false, max_wait_seconds: 0 },
               on_exhausted: "skip",
+            },
+            unclassified: {
+              enabled: false,
+              consecutive_failure_threshold: 0,
+              on_exhausted: "stop",
+              repeated_failure: { enabled: false, threshold: 0 },
             },
           },
         },

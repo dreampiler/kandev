@@ -16,6 +16,7 @@ import type {
   DynamicErrorPolicy,
   DynamicPolicyOutcome,
   DynamicAgentProfile,
+  DynamicUnclassifiedPolicy,
 } from "@/lib/types/agent-profile";
 import { agentProfileId, workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
@@ -99,6 +100,12 @@ function legacyRulesToPolicy(rules: Record<string, string>): DynamicAgentPolicy 
     version: 1,
     transient: policyForLegacyAction(generic ?? "try_next"),
     hard: policyForLegacyAction(generic ?? "try_next"),
+    unclassified: {
+      enabled: false,
+      consecutiveFailureThreshold: 0,
+      onExhausted: "stop",
+      repeatedFailure: { enabled: false, threshold: 0 },
+    },
   };
   for (const [code, action] of Object.entries(rules)) {
     if (code === "on_provider_error") continue;
@@ -157,6 +164,26 @@ function normalizeDynamicErrorPolicy(raw: unknown): DynamicErrorPolicy {
   };
 }
 
+function normalizeDynamicUnclassifiedPolicy(raw: unknown): DynamicUnclassifiedPolicy {
+  const source = objectValue(raw) ?? {};
+  const legacySource = objectValue(source.repeatedFailure ?? source.repeated_failure);
+  const legacyEnabled = legacySource?.enabled === true;
+  const legacyThreshold = numberValue(legacySource?.threshold, 0);
+  const newEnabled = source.enabled;
+  const newThreshold = source.consecutiveFailureThreshold ?? source.consecutive_failure_threshold;
+  const enabled = typeof newEnabled === "boolean" ? newEnabled : legacyEnabled;
+  const threshold = newThreshold !== undefined ? numberValue(newThreshold, 0) : legacyThreshold;
+  const outcome = source.onExhausted ?? source.on_exhausted;
+  return {
+    enabled,
+    consecutiveFailureThreshold: threshold,
+    onExhausted: outcome === "skip" ? "skip" : "stop",
+    repeatedFailure: legacySource
+      ? { enabled: legacyEnabled, threshold: legacyThreshold }
+      : { enabled, threshold },
+  };
+}
+
 function normalizeDynamicPolicy(
   raw: unknown,
   legacyRules: Record<string, string>,
@@ -167,6 +194,7 @@ function normalizeDynamicPolicy(
     version: numberValue(source.version, 1),
     transient: normalizeDynamicErrorPolicy(source.transient),
     hard: normalizeDynamicErrorPolicy(source.hard),
+    unclassified: normalizeDynamicUnclassifiedPolicy(source.unclassified),
   };
 }
 
@@ -348,6 +376,15 @@ export function toAgentProfilePayload(
                 max_wait_seconds: policy.hard.waitForReset.maxWaitSeconds,
               },
               on_exhausted: policy.hard.onExhausted as DynamicPolicyOutcome,
+            },
+            unclassified: {
+              enabled: policy.unclassified.enabled,
+              consecutive_failure_threshold: policy.unclassified.consecutiveFailureThreshold,
+              on_exhausted: policy.unclassified.onExhausted ?? "stop",
+              repeated_failure: policy.unclassified.repeatedFailure ?? {
+                enabled: policy.unclassified.enabled,
+                threshold: policy.unclassified.consecutiveFailureThreshold,
+              },
             },
           },
         };

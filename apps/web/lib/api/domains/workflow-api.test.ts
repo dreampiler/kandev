@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
 import { createWorkflowStep, normalizeWorkflowTemplate } from "./workflow-api";
 
+const WORKFLOW_ID = "workflow-1";
+
 const fetchSpy = vi.fn<typeof fetch>();
 
 beforeEach(() => {
@@ -13,6 +15,19 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("normalizeWorkflowTemplate", () => {
   it("preserves template step identities used by transition references", () => {
+    const step = {
+      id: "in-progress",
+      name: "In Progress",
+      position: 0,
+      agent_profile_id: "profile-a",
+      profile_session_start_policy: "new" as const,
+      profile_session_end_policy: "park" as const,
+      disable_unclassified_fallback: true,
+      complete_task_on_enter: false,
+      events: {
+        on_turn_complete: [{ type: "move_to_step" as const, config: { step_id: "review" } }],
+      },
+    };
     const template = normalizeWorkflowTemplate({
       id: "template-1",
       name: "Review flow",
@@ -20,18 +35,7 @@ describe("normalizeWorkflowTemplate", () => {
       created_at: "",
       updated_at: "",
       default_steps: [
-        {
-          id: "in-progress",
-          name: "In Progress",
-          position: 0,
-          agent_profile_id: "profile-a",
-          profile_session_start_policy: "new",
-          profile_session_end_policy: "park",
-          complete_task_on_enter: false,
-          events: {
-            on_turn_complete: [{ type: "move_to_step", config: { step_id: "review" } }],
-          },
-        },
+        step,
         { id: "review", name: "Review", position: 1, complete_task_on_enter: true },
       ],
     });
@@ -41,6 +45,7 @@ describe("normalizeWorkflowTemplate", () => {
       agent_profile_id: "profile-a",
       profile_session_start_policy: "new",
       profile_session_end_policy: "park",
+      disable_unclassified_fallback: true,
     });
   });
 });
@@ -55,7 +60,7 @@ describe("createWorkflowStep", () => {
     );
 
     const payload: Parameters<typeof createWorkflowStep>[0] = {
-      workflow_id: "workflow-1",
+      workflow_id: WORKFLOW_ID,
       name: "Working",
       position: 1,
       agent_profile_id: "profile-a",
@@ -78,7 +83,7 @@ describe("createWorkflowStep", () => {
       new Response(
         JSON.stringify({
           id: "step-1",
-          workflow_id: "workflow-1",
+          workflow_id: WORKFLOW_ID,
           name: "Working",
           position: 1,
           color: "",
@@ -95,7 +100,7 @@ describe("createWorkflowStep", () => {
 
     const step = await createWorkflowStep(
       {
-        workflow_id: "workflow-1",
+        workflow_id: WORKFLOW_ID,
         name: "Working",
         position: 1,
         color: "",
@@ -106,5 +111,29 @@ describe("createWorkflowStep", () => {
     expect(step.profile_session_start_policy).toBe("reuse");
     expect(step.profile_session_end_policy).toBe("park");
     expect(step.complete_task_on_enter).toBe(false);
+  });
+
+  it("reads a legacy allow=false field as the new workflow veto", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          id: "step-1",
+          workflow_id: WORKFLOW_ID,
+          name: "Review",
+          position: 1,
+          color: "",
+          allow_repeated_failure_fallback: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const step = await createWorkflowStep(
+      { workflow_id: WORKFLOW_ID, name: "Review", position: 1 },
+      { baseUrl: "http://api.test" },
+    );
+
+    expect(step.disable_unclassified_fallback).toBe(true);
+    expect(step.allow_repeated_failure_fallback).toBe(false);
   });
 });

@@ -130,6 +130,8 @@ export type StepDefinition = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
+  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
@@ -159,6 +161,8 @@ export type WorkflowStep = {
   agent_profile_id?: string;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
+  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   complete_task_on_enter?: boolean;
   wip_limit?: number;
@@ -558,6 +562,8 @@ export type WorkflowStepDTO = {
   agent_profile_id?: AgentProfileId;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
+  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
@@ -1118,6 +1124,8 @@ export type StepPortable = {
   agent_profile?: AgentProfilePortable;
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
+  disable_unclassified_fallback?: boolean;
+  allow_repeated_failure_fallback?: boolean | null;
   session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;

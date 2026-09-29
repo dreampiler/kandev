@@ -13,6 +13,21 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/store"
 )
 
+func TestDecodeDynamicRoutePolicyAcceptsLegacyUnclassifiedShape(t *testing.T) {
+	legacy := `{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"},"unclassified":{"on_exhausted":"stop","repeated_failure":{"enabled":true,"threshold":3}}}`
+	document, _, err := decodeDynamicRoutePolicy(legacy)
+	if err != nil {
+		t.Fatalf("decode legacy route policy: %v", err)
+	}
+	if document.Unclassified == nil || !document.Unclassified.Enabled || document.Unclassified.ConsecutiveFailureThreshold != 3 {
+		t.Fatalf("legacy policy normalized to %#v, want enabled threshold 3", document.Unclassified)
+	}
+	conflicting := `{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"},"unclassified":{"enabled":true,"consecutive_failure_threshold":4,"repeated_failure":{"enabled":true,"threshold":3}}}`
+	if _, _, err := decodeDynamicRoutePolicy(conflicting); err == nil {
+		t.Fatal("conflicting legacy and current fields were accepted")
+	}
+}
+
 func TestResolveRouteActionRejectsManualRetryAfterRecoveryClaim(t *testing.T) {
 	ctx := context.Background()
 	resolver, engine, generation := newRetryingRouteActionResolver(t)

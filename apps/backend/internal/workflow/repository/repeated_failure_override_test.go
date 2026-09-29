@@ -27,6 +27,7 @@ func TestStepAllowRepeatedFailureFallback_TriStateRoundTrip(t *testing.T) {
 				Name:                         "Step",
 				Position:                     0,
 				Color:                        "#000000",
+				DisableUnclassifiedFallback:  tt.value != nil && !*tt.value,
 				AllowRepeatedFailureFallback: tt.value,
 			}
 			if err := repo.CreateStep(ctx, step); err != nil {
@@ -46,6 +47,7 @@ func TestStepAllowRepeatedFailureFallback_TriStateRoundTrip(t *testing.T) {
 				updated = boolPtr(false)
 			}
 			retrieved.AllowRepeatedFailureFallback = updated
+			retrieved.DisableUnclassifiedFallback = !*updated
 			if err := repo.UpdateStep(ctx, retrieved); err != nil {
 				t.Fatalf("UpdateStep: %v", err)
 			}

@@ -2106,6 +2106,41 @@ func TestSendPromptWithDispatchCallback_NotifiesBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestSendPromptWithAdmissionCallbackRejectsBeforePromptGeneration(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	store := NewExecutionStore()
+	sm.SetDependencies(nil, nil, store, nil)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("stream updates: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID: "admission-exec", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusReady, agentctl: client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	rejected := errors.New("prompt reservation is stale")
+	_, err := sm.SendPromptWithAdmissionCallback(
+		ctx, execution, "must not be sent", true, nil, true,
+		func() error { return rejected }, nil,
+	)
+	if !errors.Is(err, rejected) {
+		t.Fatalf("SendPrompt error = %v, want admission rejection", err)
+	}
+	if generation := store.ActivePromptGeneration(execution.ID); generation != 0 {
+		t.Fatalf("prompt generation = %d, want no admitted generation", generation)
+	}
+}
+
 func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)

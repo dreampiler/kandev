@@ -903,7 +903,7 @@ func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
 // the agent doesn't support in-place switching, it falls back to stopping and
 // restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
-	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, nil, nil)
+	return e.SwitchModelWithAdmissionCallbacks(ctx, taskID, sessionID, newModel, prompt, nil, nil, nil, nil)
 }
 
 // SwitchModelWithDispatchCallbacks is the model-switch variant used by a
@@ -916,27 +916,56 @@ func (e *Executor) SwitchModelWithDispatchCallbacks(
 	onDispatched func(executionID string),
 	onFailure func(),
 ) (*PromptResult, error) {
-	return e.switchModel(ctx, taskID, sessionID, newModel, prompt, onDispatched, onFailure)
+	return e.SwitchModelWithAdmissionCallbacks(ctx, taskID, sessionID, newModel, prompt, nil, onDispatched, onFailure, nil)
+}
+
+func (e *Executor) SwitchModelWithAdmissionCallbacks(
+	ctx context.Context,
+	taskID, sessionID, newModel, prompt string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+	onInPlaceSwitchFallback func(),
+) (*PromptResult, error) {
+	return e.switchModel(
+		ctx, taskID, sessionID, newModel, prompt,
+		beforeAdmission, onDispatched, onFailure, onInPlaceSwitchFallback,
+	)
 }
 
 func (e *Executor) switchModel(
 	ctx context.Context,
 	taskID, sessionID, newModel, prompt string,
+	beforeAdmission func(executionID string) error,
 	onDispatched func(executionID string),
 	onFailure func(),
+	onInPlaceSwitchFallback func(),
 ) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	// Try in-place model switch first.
+	// Try in-place model switch first. A queued prompt's admission gate fences
+	// the mutable ACP setting and its persisted snapshot before either path.
+	if beforeAdmission != nil {
+		executionID, err := e.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if err != nil || executionID == "" {
+			return nil, ErrExecutionNotFound
+		}
+		if err := beforeAdmission(executionID); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
 		e.logger.Info("model switched in-place via ACP model selection",
 			zap.String("session_id", sessionID),
 			zap.String("new_model", newModel))
 		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)
 		return &PromptResult{StopReason: "model_switched_in_place"}, nil
+	}
+	if onInPlaceSwitchFallback != nil {
+		onInPlaceSwitchFallback()
 	}
 
 	e.logger.Debug("in-place model switch not available, falling back to agent restart",
@@ -990,7 +1019,7 @@ func (e *Executor) switchModel(
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning, onDispatched, onFailure); err != nil {
+	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning, beforeAdmission, onDispatched, onFailure); err != nil {
 		return nil, err
 	}
 
@@ -1165,6 +1194,7 @@ func (e *Executor) launchModelSwitchAgent(
 	session *models.TaskSession,
 	req *LaunchAgentRequest,
 	existingRunning *models.ExecutorRunning,
+	beforeAdmission func(executionID string) error,
 	onDispatched func(executionID string),
 	onFailure func(),
 ) error {
@@ -1176,26 +1206,12 @@ func (e *Executor) launchModelSwitchAgent(
 			zap.Error(err))
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
-	if onDispatched != nil || onFailure != nil {
-		registrar, ok := e.agentManager.(interface {
-			RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
-		})
-		if !ok {
-			registrationErr := errors.New("agent manager cannot register initial prompt dispatch callbacks")
-			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, registrationErr)
-			return registrationErr
-		}
-		if err := registrar.RegisterInitialPromptDispatchCallbacks(
-			resp.AgentExecutionID,
-			func() {
-				if onDispatched != nil {
-					onDispatched(resp.AgentExecutionID)
-				}
-			},
-			onFailure,
+	if beforeAdmission != nil || onDispatched != nil || onFailure != nil {
+		if err := e.registerModelSwitchInitialPromptCallbacks(
+			resp.AgentExecutionID, beforeAdmission, onDispatched, onFailure,
 		); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
-			return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
+			return err
 		}
 	}
 
@@ -1226,6 +1242,76 @@ func (e *Executor) launchModelSwitchAgent(
 		zap.String("new_model", newModel),
 		zap.String("agent_execution_id", resp.AgentExecutionID))
 
+	return nil
+}
+
+func (e *Executor) registerModelSwitchInitialPromptCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if beforeAdmission != nil {
+		return e.registerInitialPromptAdmissionCallbacks(executionID, beforeAdmission, onDispatched, onFailure)
+	}
+	if onDispatched == nil && onFailure == nil {
+		return nil
+	}
+	return e.registerInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
+func (e *Executor) registerInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func(executionID string) error,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt admission callbacks")
+	}
+	if err := registrar.RegisterInitialPromptAdmissionCallbacks(
+		executionID,
+		func() error { return beforeAdmission(executionID) },
+		func() {
+			if onDispatched != nil {
+				onDispatched(executionID)
+			}
+		},
+		onFailure,
+	); err != nil {
+		return fmt.Errorf("failed to register initial prompt admission callbacks: %w", err)
+	}
+	return nil
+}
+
+func (e *Executor) registerInitialPromptDispatchCallbacks(
+	executionID string,
+	onDispatched func(executionID string),
+	onFailure func(),
+) error {
+	if onDispatched == nil && onFailure == nil {
+		return nil
+	}
+	registrar, ok := e.agentManager.(interface {
+		RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
+	})
+	if !ok {
+		return errors.New("agent manager cannot register initial prompt dispatch callbacks")
+	}
+	if err := registrar.RegisterInitialPromptDispatchCallbacks(
+		executionID,
+		func() {
+			if onDispatched != nil {
+				onDispatched(executionID)
+			}
+		},
+		onFailure,
+	); err != nil {
+		return fmt.Errorf("failed to register initial prompt dispatch callbacks: %w", err)
+	}
 	return nil
 }
 

@@ -541,6 +541,51 @@ func TestMarkDynamicRouteActionRequiredPublishesRouteProjection(t *testing.T) {
 	}
 }
 
+func TestMarkDynamicTerminalFailureActionRequiredProjectsManualRecovery(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-terminal-failure"
+		sessionID   = "session-dynamic-terminal-failure"
+		executionID = "execution-dynamic-terminal-failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
+	engine := dynamicruntime.NewEngine(
+		dynamicruntime.WithPersistence(repo),
+		dynamicruntime.WithStateLoader(repo),
+	)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	if err := engine.MarkActive(ctx, sessionID, decision.Generation); err != nil {
+		t.Fatalf("MarkActive: %v", err)
+	}
+
+	svc.markDynamicTerminalFailureActionRequired(ctx, sessionID, decision.Generation, "unclassified_fallback_disabled")
+
+	loaded, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if loaded == nil || loaded.Status != dynamicRouteStatusActionRequired {
+		t.Fatalf("durable route state = %#v, want action_required", loaded)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if updated.RouteState != dynamicRouteStatusActionRequired || updated.RouteReason != "unclassified_fallback_disabled" {
+		t.Fatalf("session route projection = (%q, %q), want action_required/unclassified_fallback_disabled", updated.RouteState, updated.RouteReason)
+	}
+	if len(eventBus.events) != 1 || eventBus.events[0].subject != events.TaskSessionStateChanged {
+		t.Fatalf("published events = %#v, want one session state event", eventBus.events)
+	}
+}
+
 func TestMarkDynamicRouteActiveDoesNotOverwriteActionRequiredRoute(t *testing.T) {
 	ctx := context.Background()
 	const (

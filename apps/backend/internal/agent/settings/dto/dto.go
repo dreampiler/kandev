@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -75,28 +76,55 @@ type DynamicAgentProfileDTO struct {
 // for one dynamic candidate. The two classes are deliberately explicit so a
 // missing class can never silently inherit another class's behavior.
 type DynamicAgentPolicyDTO struct {
-	Version   int64                 `json:"version"`
-	Transient DynamicErrorPolicyDTO `json:"transient"`
-	Hard      DynamicErrorPolicyDTO `json:"hard"`
-	// Unclassified is the opt-in override for the unclassified failure class.
-	// Absent or disabled it keeps the historical fail-closed behavior.
-	Unclassified DynamicUnclassifiedPolicyDTO `json:"unclassified"`
+	Version      int64                         `json:"version"`
+	Transient    DynamicErrorPolicyDTO         `json:"transient"`
+	Hard         DynamicErrorPolicyDTO         `json:"hard"`
+	Unclassified *DynamicUnclassifiedPolicyDTO `json:"unclassified,omitempty"`
 }
 
-// DynamicUnclassifiedPolicyDTO is the unclassified class policy. Only the
-// repeated-failure opt-in is meaningful here; retry and wait-for-reset are not
-// exposed because an unclassified failure has no provider-native recovery.
 type DynamicUnclassifiedPolicyDTO struct {
-	OnExhausted     string                          `json:"on_exhausted"`
-	RepeatedFailure DynamicRepeatedFailurePolicyDTO `json:"repeated_failure"`
+	Enabled                     bool                             `json:"enabled"`
+	ConsecutiveFailureThreshold int64                            `json:"consecutive_failure_threshold"`
+	OnExhausted                 string                           `json:"on_exhausted,omitempty"`
+	RepeatedFailure             *DynamicRepeatedFailurePolicyDTO `json:"repeated_failure,omitempty"`
+	hasEnabled                  bool                             `json:"-"`
+	hasThreshold                bool                             `json:"-"`
 }
 
-// DynamicRepeatedFailurePolicyDTO enables a try-next fallback once the same
-// concrete execution profile has produced the same unclassified failure
-// Threshold times in a row. The failed turn must still be pre-result.
 type DynamicRepeatedFailurePolicyDTO struct {
 	Enabled   bool  `json:"enabled"`
 	Threshold int64 `json:"threshold"`
+}
+
+func (p *DynamicUnclassifiedPolicyDTO) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Enabled                     *bool                            `json:"enabled"`
+		ConsecutiveFailureThreshold *int64                           `json:"consecutive_failure_threshold"`
+		OnExhausted                 string                           `json:"on_exhausted"`
+		RepeatedFailure             *DynamicRepeatedFailurePolicyDTO `json:"repeated_failure"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*p = DynamicUnclassifiedPolicyDTO{
+		OnExhausted:     wire.OnExhausted,
+		RepeatedFailure: wire.RepeatedFailure,
+		hasEnabled:      wire.Enabled != nil,
+		hasThreshold:    wire.ConsecutiveFailureThreshold != nil,
+	}
+	if wire.Enabled != nil {
+		p.Enabled = *wire.Enabled
+	}
+	if wire.ConsecutiveFailureThreshold != nil {
+		p.ConsecutiveFailureThreshold = *wire.ConsecutiveFailureThreshold
+	}
+	return nil
+}
+
+func (p *DynamicUnclassifiedPolicyDTO) HasCanonicalEnabled() bool { return p != nil && p.hasEnabled }
+
+func (p *DynamicUnclassifiedPolicyDTO) HasCanonicalThreshold() bool {
+	return p != nil && p.hasThreshold
 }
 
 type DynamicErrorPolicyDTO struct {

@@ -104,17 +104,41 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 // that prompt asynchronously, so callers that own startup cancellation must
 // wait for either provider acceptance or a pre-acceptance delivery failure.
 func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks(executionID, nil, onDispatched, onFailure)
+}
+
+// RegisterInitialPromptAdmissionCallbacks installs a final admission check and
+// one-shot acceptance/failure callbacks for the initial prompt sent during
+// StartAgentProcess.
+func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure, beforeAdmission)
 	return nil
 }
 
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
+	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil, onDispatched)
+}
+
+// PromptAgentWithAdmissionCallback revalidates ownership after stream
+// preparation and immediately before a new prompt generation is allocated.
+func (m *Manager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -133,7 +157,7 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 		return nil, err
 	}
 	defer operationRelease()
-	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {

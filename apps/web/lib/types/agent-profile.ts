@@ -50,10 +50,18 @@ export type DynamicErrorPolicy = {
   onExhausted: DynamicPolicyOutcome;
 };
 
+export type DynamicUnclassifiedPolicy = {
+  enabled: boolean;
+  consecutiveFailureThreshold: number;
+  onExhausted?: DynamicPolicyOutcome;
+  repeatedFailure?: { enabled: boolean; threshold: number };
+};
+
 export type DynamicAgentPolicy = {
   version: number;
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
+  unclassified: DynamicUnclassifiedPolicy;
 };
 
 export type DynamicAgentCandidate = {
@@ -285,6 +293,12 @@ export type AgentProfilePayload = {
             max_wait_seconds: number;
           };
           on_exhausted: DynamicPolicyOutcome;
+        };
+        unclassified: {
+          enabled: boolean;
+          consecutive_failure_threshold: number;
+          on_exhausted?: DynamicPolicyOutcome;
+          repeated_failure?: { enabled: boolean; threshold: number };
         };
       };
       rules?: Record<string, string>;

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
@@ -16,6 +17,7 @@ import (
 // sent to a different candidate.
 type DownstreamLaunch struct {
 	ExecutionProfileID string
+	AttemptID          string
 	Decision           RouteDecision
 	Prompt             string
 	PriorACPSession    string
@@ -225,6 +227,34 @@ func (c *Conductor) RouteAfterFailureWithEffect(
 	)
 }
 
+// RouteAfterUnclassifiedFailure applies the narrow opt-in policy using
+// caller-supplied evidence from a trusted task/runtime boundary.
+func (c *Conductor) RouteAfterUnclassifiedFailure(
+	ctx context.Context,
+	sessionID, logicalProfileID, currentExecutionProfileID string,
+	expectedGeneration int64,
+	failure *routingerr.Error,
+	evidence UnclassifiedFailureEvidence,
+) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	if resolver, ok := c.profiles.(interface {
+		RouteAfterUnclassifiedFailure(context.Context, string, string, string, int64, *routingerr.Error, UnclassifiedFailureEvidence) (RouteDecision, error)
+	}); ok {
+		return resolver.RouteAfterUnclassifiedFailure(
+			ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, evidence,
+		)
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyUnclassifiedFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, evidence,
+	)
+}
+
 // BuildContinuation creates the bounded provider-neutral handoff package used
 // by a successor launch. Callers that already classified a failed turn build
 // it before advancing the route, then persist it against the successor
@@ -256,6 +286,7 @@ func (c *Conductor) launchWithFallback(
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		execution, err := c.downstream.Launch(ctx, DownstreamLaunch{
 			ExecutionProfileID: current.ExecutionProfileID,
+			AttemptID:          uuid.NewString(),
 			Decision:           current,
 			Prompt:             ContinuationPrompt(request.Prompt, currentContinuation),
 			PriorACPSession:    priorACPSession(request.PriorACPSession, decision, current),
@@ -320,14 +351,7 @@ func (c *Conductor) nextAfterLaunchFailure(
 		return RouteDecision{}, false, nil
 	}
 	if !classified.FallbackAllowed {
-		// The classifier forbids falling back. The only exception is the
-		// repeated-failure policy: the same concrete profile has already
-		// failed this way often enough that trying the next candidate is
-		// preferable to stopping. The engine owns the streak count and
-		// returns a stop decision until the threshold is reached.
-		if !repeatedFailureEligible(profile, decision.ExecutionProfileID, classified) {
-			return RouteDecision{}, false, nil
-		}
+		return RouteDecision{}, false, nil
 	} else if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
@@ -340,27 +364,6 @@ func (c *Conductor) nextAfterLaunchFailure(
 		return RouteDecision{}, true, err
 	}
 	return next, true, nil
-}
-
-// repeatedFailureEligible reports whether the candidate opted into the
-// repeated-failure override for the unclassified class. It only gates whether
-// the engine is asked; the engine still owns the streak and the threshold.
-func repeatedFailureEligible(profile Profile, candidateID string, failure *routingerr.Error) bool {
-	if failure == nil || failureClassOf(failure) != routingerr.ClassUnclassified {
-		return false
-	}
-	candidate, ok := candidateByID(profile, candidateID)
-	if !ok {
-		return false
-	}
-	return candidate.Policies.RepeatedFailureEnabled(routingerr.ClassUnclassified)
-}
-
-func failureClassOf(failure *routingerr.Error) routingerr.Class {
-	if failure.Class != "" {
-		return failure.Class
-	}
-	return routingerr.ClassForCode(failure.Code)
 }
 
 func classifiedLaunchFailure(err error) *routingerr.Error {
