@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { Card } from "@kandev/ui/card";
 import { useAppStore } from "@/components/state-provider";
@@ -21,6 +21,7 @@ export function WorkspaceAggregatePageClient() {
   const aggregate = useAppStore(selectWorkspaceAggregate);
   const setWorkspaceAggregate = useAppStore((s) => s.setWorkspaceAggregate);
   const loadedRef = useRef(false);
+  const [loadState, setLoadState] = useState<"loading" | "loaded" | "error">("loading");
 
   useEffect(() => {
     if (loadedRef.current) return;
@@ -31,9 +32,10 @@ export function WorkspaceAggregatePageClient() {
           workspaces: data.workspaces ?? [],
           recentActivity: (data.recent_activity ?? []).map(normalizeActivityEntry),
         });
+        setLoadState("loaded");
       })
       .catch(() => {
-        setWorkspaceAggregate({ workspaces: [], recentActivity: [] });
+        setLoadState("error");
       });
   }, [setWorkspaceAggregate]);
 
@@ -42,9 +44,20 @@ export function WorkspaceAggregatePageClient() {
 
   return (
     <div className="space-y-4 p-6">
-      {workspaces.length === 0 ? (
+      {loadState === "loading" && (
+        <div className="text-sm text-muted-foreground" role="status">
+          {t("common:loading")}
+        </div>
+      )}
+      {loadState === "error" && (
+        <div className="text-sm text-destructive" role="alert">
+          {t("office:failedToLoad")}
+        </div>
+      )}
+      {loadState === "loaded" && workspaces.length === 0 && (
         <div className="text-sm text-muted-foreground">{t("office:noWorkspaces")}</div>
-      ) : (
+      )}
+      {loadState === "loaded" && workspaces.length > 0 && (
         <div className="grid gap-3">
           {workspaces.map((workspace) => (
             <WorkspaceAggregateCard key={workspace.workspace_id} workspace={workspace} />
@@ -52,20 +65,22 @@ export function WorkspaceAggregatePageClient() {
         </div>
       )}
 
-      <Card>
-        <div className="p-4 border-b border-border">
-          <h2 className="text-sm font-semibold">{t("office:recentActivity")}</h2>
-        </div>
-        <div className="divide-y divide-border">
-          {activity.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              {t("office:noRecentActivityActionsByAgents")}
-            </div>
-          ) : (
-            activity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
-          )}
-        </div>
-      </Card>
+      {loadState === "loaded" && (
+        <Card>
+          <div className="p-4 border-b border-border">
+            <h2 className="text-sm font-semibold">{t("office:recentActivity")}</h2>
+          </div>
+          <div className="divide-y divide-border">
+            {activity.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {t("office:noRecentActivityActionsByAgents")}
+              </div>
+            ) : (
+              activity.map((entry) => <ActivityRow key={entry.id} entry={entry} />)
+            )}
+          </div>
+        </Card>
+      )}
     </div>
   );
 }
@@ -86,6 +101,11 @@ function WorkspaceAggregateCard({ workspace }: { workspace: WorkspaceAggregateEn
             </span>
             <span>
               {t("office:inProgress")}: {workspace.in_progress_tasks}
+            </span>
+            <span>{t("office:countDone", { count: workspace.done_tasks })}</span>
+            <span>{t("office:agentCount", { count: workspace.agent_count })}</span>
+            <span>
+              {t("automations:running")}: {workspace.running_agents}
             </span>
             <span>
               {t("office:openBlocked", {

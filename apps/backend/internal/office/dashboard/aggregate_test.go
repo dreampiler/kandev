@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/dashboard"
+	"github.com/kandev/kandev/internal/office/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -71,6 +72,7 @@ func TestGetWorkspacesAggregateUnavailable(t *testing.T) {
 // and merged activity feed.
 func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 	deps := newTestDeps(t)
+	deps.agents.instances = []*models.AgentInstance{{ID: "agent-1", WorkspaceID: "ws-1", Name: "Alpha Agent"}}
 	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{
 		{ID: "ws-1", Name: "Alpha"},
 		{ID: "ws-2", Name: "Beta"},
@@ -92,6 +94,9 @@ func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 
 	insertAggregateActivity(t, deps, "act-1", "ws-1", "task.completed")
 	insertAggregateActivity(t, deps, "act-2", "ws-2", "task.created")
+	if _, err := deps.db.Exec(`UPDATE office_activity_log SET target_type = 'task', target_id = 't4' WHERE id = 'act-1'`); err != nil {
+		t.Fatalf("set activity target: %v", err)
+	}
 
 	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
 	if err != nil {
@@ -123,6 +128,11 @@ func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 
 	if len(resp.RecentActivity) != 2 {
 		t.Fatalf("recent activity count = %d, want 2", len(resp.RecentActivity))
+	}
+	for _, entry := range resp.RecentActivity {
+		if entry.WorkspaceID == "ws-1" && (entry.ActorName != "Alpha Agent" || entry.TargetName != "t4") {
+			t.Fatalf("ws-1 activity labels = actor %q target %q, want Alpha Agent and t4", entry.ActorName, entry.TargetName)
+		}
 	}
 }
 
