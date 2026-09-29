@@ -44,6 +44,14 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type automationDispatchReader interface {
+	GetAutomationForDispatch(ctx context.Context, id string) (*automation.Automation, error)
+}
+
+type managedAutomationRunDispatcher interface {
+	DispatchManagedAutomationRun(ctx context.Context, runID string) error
+}
+
 type automationRunDispatcher interface {
 	DispatchRun(
 		ctx context.Context,
@@ -243,6 +251,8 @@ func (s *Service) subscribeAutomationEvents() {
 }
 
 // handleAutomationTriggered creates a task when an automation trigger fires.
+//
+//nolint:nestif // The event path preserves run admission and managed-delivery reconciliation order.
 func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Event) error {
 	evt, ok := event.Data.(*automation.AutomationTriggeredEvent)
 	if !ok {
@@ -253,8 +263,35 @@ func (s *Service) handleAutomationTriggered(ctx context.Context, event *bus.Even
 		zap.String("automation_id", evt.AutomationID),
 		zap.String("trigger_type", string(evt.TriggerType)))
 
-	if s.automationService == nil || s.reviewTaskCreator == nil {
-		s.logger.Warn("automation service or task creator not configured")
+	if s.automationService == nil {
+		s.logger.Warn("automation service not configured")
+		return nil
+	}
+	if reader, ok := s.automationService.(automationDispatchReader); ok {
+		a, loadErr := reader.GetAutomationForDispatch(ctx, evt.AutomationID)
+		if loadErr != nil {
+			s.logger.Warn("failed to inspect automation destination", zap.String("automation_id", evt.AutomationID), zap.Error(loadErr))
+			return loadErr
+		}
+		if a == nil {
+			return nil
+		}
+		if a.TaskMode == automation.TaskModeManagedConversation {
+			dispatcher, available := s.automationService.(managedAutomationRunDispatcher)
+			if !available {
+				return fmt.Errorf("managed conversation automation delivery unavailable")
+			}
+			go func() {
+				if err := dispatcher.DispatchManagedAutomationRun(context.Background(), evt.RunID); err != nil {
+					s.logger.Error("managed conversation automation delivery failed",
+						zap.String("run_id", evt.RunID), zap.Error(err))
+				}
+			}()
+			return nil
+		}
+	}
+	if s.reviewTaskCreator == nil {
+		s.logger.Warn("automation task creator not configured")
 		return nil
 	}
 
@@ -741,6 +778,15 @@ func (s *Service) dispatchAutomationRun(
 	}
 	if err := dispatcher.DispatchRun(ctx, runID, action, reason, dispatch); err == nil {
 		return true
+	} else if errors.Is(err, automation.ErrRunDeferred) {
+		// The session ceiling refused the launch, not the run. DispatchRun has
+		// already left the row open (task_created) and the ceiling sweep owns
+		// retrying the launch, so neither onFailure (which would strand a claim
+		// the replay needs) nor cleanupFailedAutomationTask (which would delete
+		// the task the deferred record lives on) may run here.
+		s.logger.Info("automation run launch deferred by session ceiling; will replay once capacity frees up",
+			zap.String("operation", operation), zap.String("automation_id", automationID),
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
 	} else {
 		if onFailure != nil {
 			onFailure()
@@ -748,9 +794,21 @@ func (s *Service) dispatchAutomationRun(
 		s.logger.Error("failed to dispatch automation run",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	}
-	s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	return true
+}
+
+// mapAutomationDispatchError translates the orchestrator's ceiling-deferral
+// sentinel into the automation package's own ErrRunDeferred. The automation
+// package cannot import the orchestrator (import cycle), so DispatchRun needs
+// this distinguishable non-failure to know it must keep the run row open
+// (task_created) instead of marking it failed.
+func mapAutomationDispatchError(err error) error {
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		return automation.ErrRunDeferred
+	}
+	return err
 }
 
 func (s *Service) cleanupFailedAutomationTask(ctx context.Context, automationID, taskID string, action automation.ThreadAction) {
@@ -810,6 +868,12 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		}
 		result, err := s.promptAutomationContinuation(ctx, task, session, prompt)
 		if err != nil {
+			if errors.Is(err, ErrCeilingLaunchDeferred) {
+				// Keep the refreshed continuation metadata in place: the
+				// deferred replay captured this prompt, and restoring the
+				// snapshot would strand it.
+				return automation.RunDispatch{}, automation.ErrRunDeferred
+			}
 			restore()
 			return automation.RunDispatch{}, err
 		}
@@ -887,7 +951,8 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
-		return s.startAutomationTask(ctx, a, task, workflowStepID)
+		result, err := s.startAutomationTask(ctx, a, task, workflowStepID)
+		return result, mapAutomationDispatchError(err)
 	}, nil) {
 		return
 	}

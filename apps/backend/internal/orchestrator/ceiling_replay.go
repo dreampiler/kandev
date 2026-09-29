@@ -269,7 +269,12 @@ func (s *Service) evaluateCeilingDropReasons(
 		}
 	}
 	if deferral.Kind == models.CeilingLaunchStart {
-		if !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
+		// An automation trigger IS the start signal (see the auto-start comment
+		// in createAutomationTask): the workflow step's on_enter auto_start_agent
+		// setting does not govern it, and a deferred automation launch whose
+		// step lacks that action must not be dropped for it. Office launches
+		// are exempt for the same reason.
+		if !task.IsFromOffice && !isAutomationTaskOrigin(task.Origin) && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
 			return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
 		}
 		if s.shouldSkipTerminalPRAutoStart(ctx, task) {
