@@ -19,12 +19,17 @@ const (
 	metaKeyActionVisibility     = "action_visibility"
 	actionVisibilityRunning     = "running"
 	neverStartedNoticeContent   = "Agent produced no output since start."
+	prolongedStallNoticeContent = "Agent stopped responding; the turn was terminated."
 	// neverStartedStopTimeout bounds the detached runtime teardown started by
-	// stopNeverStartedExecution. A forced stop skips the graceful agentctl
+	// stopStalledExecution. A forced stop skips the graceful agentctl
 	// call, so nothing downstream (e.g. the Docker backend's cleanup context)
 	// applies its own bound in that path - an unresponsive daemon would
 	// otherwise hang the teardown goroutine indefinitely.
 	neverStartedStopTimeout = 30 * time.Second
+	// The forced-stop reasons name which terminal classification owns the
+	// teardown so the stop path is greppable.
+	neverStartedStopReason   = "agent never started before stall"
+	prolongedStallStopReason = "agent stalled with no activity before teardown"
 )
 
 // errAgentNeverStarted is the launch-failure error recorded when a stalled
@@ -33,14 +38,24 @@ const (
 // it is not a missing-branch error, so no legacy branch guidance is created.
 var errAgentNeverStarted = errors.New("agent produced no output since start")
 
+// errAgentProlongedStall is the launch-failure error recorded when a prompt
+// that had produced turn events stayed silent past the terminal inactivity
+// threshold. Like errAgentNeverStarted its Error() string becomes the
+// session's error_message; it does not advance the workflow step.
+var errAgentProlongedStall = errors.New("agent stopped responding during the turn")
+
 // handleAgentStalled persists an advisory recovery affordance for a turn that
 // stalled after producing at least one agent event, leaving the prompt,
-// session, and task lifecycle unchanged. When the agent has produced no
-// output at all since the prompt was dispatched (payload.NeverStarted), the
-// condition is terminal and unrecoverable: the notice is posted as an error
-// and the session/task transition to FAILED via the same idempotent CAS path
-// used for launch failures. The activity epoch prevents a late event from
-// turning an old watchdog snapshot into a terminal failure.
+// session, and task lifecycle unchanged. Two snapshots are terminal and
+// unrecoverable: the agent produced no output at all since the prompt was
+// dispatched (payload.NeverStarted), or a prompt that did produce turn events
+// then stayed silent past the terminal inactivity threshold
+// (payload.ProlongedStall). For either, the notice is posted as an error and
+// the session/task transition to FAILED via the same idempotent CAS path used
+// for launch failures, followed by a forced teardown. The prolonged case only
+// reclaims the prompt and its ceiling slot; it does not advance the workflow
+// step. The activity epoch prevents a late event from turning an old watchdog
+// snapshot into a terminal failure.
 func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.AgentStalledPayload) {
 	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
@@ -93,8 +108,9 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		metaKeySessionID: payload.SessionID,
 		metaKeyTaskID:    payload.TaskID,
 	}
+	terminal := payload.NeverStarted || payload.ProlongedStall
 	messageType := string(v1.MessageTypeStatus)
-	if payload.NeverStarted {
+	if terminal {
 		messageType = string(v1.MessageTypeError)
 	} else {
 		metadata[metaKeyActionVisibility] = actionVisibilityRunning
@@ -123,7 +139,8 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			zap.String("session_id", payload.SessionID),
 			zap.Error(err))
 	}
-	if payload.NeverStarted {
+	switch {
+	case payload.NeverStarted:
 		// A process that never started produced no output, so a dynamic route
 		// can advance to the next candidate immediately instead of stopping for
 		// manual recovery. Non-dynamic sessions and declined routes keep the
@@ -132,20 +149,42 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		if s.routeDynamicStartupFailure(ctx, payload.TaskID, payload.SessionID, payload.AgentExecutionID) {
 			return
 		}
-		if s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session) {
-			s.stopNeverStartedExecution(ctx, payload)
-		} else {
-			s.logger.Warn("skipping never-started teardown: session was not durably recorded FAILED",
-				zap.String("task_id", payload.TaskID),
-				zap.String("session_id", payload.SessionID))
-		}
+		s.recordAndStopStalledExecution(ctx, payload, errAgentNeverStarted, neverStartedStopReason, session)
+	case payload.ProlongedStall:
+		// A prompt that produced turn events then went silent past the terminal
+		// threshold cannot be routed to a successor: the process may still be
+		// alive, so this handler owns its forced teardown. It records the
+		// terminal outcome and does not advance the workflow step.
+		s.recordAndStopStalledExecution(ctx, payload, errAgentProlongedStall, prolongedStallStopReason, session)
 	}
 }
 
-// stopNeverStartedExecution tears down the process behind a never-started
-// stall. It runs after the session and task have already been recorded
-// FAILED, so a teardown failure never changes that recorded state: FAILED and
-// its launch-failure message stay authoritative either way.
+// recordAndStopStalledExecution records the terminal launch-failure outcome and,
+// only when that FAILED transition durably persisted, schedules the forced
+// teardown. Killing the process without a durable FAILED record would leave the
+// session claiming RUNNING with no process and no way for handleAgentStopped to
+// reconcile it, because stopStalledExecution claims teardown ownership first and
+// the resulting agent.stopped event is then ignored as already-owned.
+func (s *Service) recordAndStopStalledExecution(
+	ctx context.Context,
+	payload lifecycle.AgentStalledPayload,
+	launchErr error,
+	reason string,
+	session *models.TaskSession,
+) {
+	if s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, launchErr, session) {
+		s.stopStalledExecution(ctx, payload, reason)
+		return
+	}
+	s.logger.Warn("skipping stalled teardown: session was not durably recorded FAILED",
+		zap.String("task_id", payload.TaskID),
+		zap.String("session_id", payload.SessionID))
+}
+
+// stopStalledExecution tears down the process behind a terminal stall
+// (never-started or prolonged). It runs after the session and task have already
+// been recorded FAILED, so a teardown failure never changes that recorded
+// state: FAILED and its launch-failure message stay authoritative either way.
 //
 // Teardown ownership is claimed synchronously, while handleAgentStalled still
 // holds the per-session cancelInFlight guard, via claimExecutionTeardown
@@ -164,7 +203,7 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 // daemon. lifecycle.ErrExecutionNotFound means nothing is running and is
 // treated as success; any other failure is logged and left for a later stop
 // to retry against the still-registered execution.
-func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecycle.AgentStalledPayload) {
+func (s *Service) stopStalledExecution(ctx context.Context, payload lifecycle.AgentStalledPayload, reason string) {
 	if payload.AgentExecutionID == "" || s.agentManager == nil {
 		return
 	}
@@ -172,11 +211,11 @@ func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecyc
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), neverStartedStopTimeout)
 	go func() {
 		defer cancel()
-		err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, "agent never started before stall", true)
+		err := s.agentManager.StopAgentWithReason(stopCtx, payload.AgentExecutionID, reason, true)
 		if err == nil || errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return
 		}
-		s.logger.Warn("failed to tear down never-started execution after stall",
+		s.logger.Warn("failed to tear down stalled execution after stall",
 			zap.String("task_id", payload.TaskID),
 			zap.String("session_id", payload.SessionID),
 			zap.String("execution_id", payload.AgentExecutionID),
@@ -187,6 +226,9 @@ func (s *Service) stopNeverStartedExecution(ctx context.Context, payload lifecyc
 func stallNoticeContent(payload lifecycle.AgentStalledPayload) string {
 	if payload.NeverStarted {
 		return neverStartedNoticeContent
+	}
+	if payload.ProlongedStall {
+		return prolongedStallNoticeContent
 	}
 	tool := strings.TrimSpace(payload.ToolTitle)
 	if tool == "" {

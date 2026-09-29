@@ -64,8 +64,11 @@ func (p *EventPublisher) publishAgentEventWithTurnIDAndEvidence(
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
 // neverStarted reports whether the agent has emitted zero events since this
-// prompt was dispatched, and activityEpoch lets the consumer revalidate that
-// classification before applying a terminal transition.
+// prompt was dispatched, prolongedStall reports whether a prompt that did emit
+// turn events has stayed silent past the terminal inactivity threshold, and
+// activityEpoch lets the consumer revalidate that classification before
+// applying a terminal transition. The two discriminators are mutually
+// exclusive; the five-minute advisory publish passes both false.
 func (p *EventPublisher) PublishAgentStalled(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -74,6 +77,7 @@ func (p *EventPublisher) PublishAgentStalled(
 	stalledFor time.Duration,
 	activityEpoch uint64,
 	neverStarted bool,
+	prolongedStall bool,
 ) {
 	if p.eventBus == nil {
 		return
@@ -87,6 +91,7 @@ func (p *EventPublisher) PublishAgentStalled(
 		LastActivityAt:   lastActivityAt,
 		StalledFor:       stalledFor,
 		NeverStarted:     neverStarted,
+		ProlongedStall:   prolongedStall,
 	}
 	if tool := execution.activeToolSnapshot(); tool != nil {
 		payload.ToolCallID = tool.ToolCallID
