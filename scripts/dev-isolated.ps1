@@ -29,21 +29,15 @@
 .PARAMETER WebPort
   Force the web port (default: auto from base 47429).
 
-.PARAMETER WebHost
-  Host interface the Vite dev server binds to (default: 127.0.0.1). Pass a
-  different host, such as 0.0.0.0, only when remote access is required. The
-  backend proxy uses this host, and the browser still opens the backend URL.
-
 .PARAMETER AgentctlPort
-  Force an available agentctl base in the 200-port slot sequence starting at
-  49429 (default: first available slot).
+  Force the agentctl base port (default: auto from base 49429).
 
 .PARAMETER NoBuild
   Do not (re)build; require kandev + agentctl + mock-agent to already exist.
 
 .PARAMETER Install
   Run `make install` (backend deps + pnpm install + playwright browsers) before
-  building/launching, for clean checkouts. Requires Git Bash on Windows.
+  building/launching, for clean checkouts.
 
 .PARAMETER CopyDb
   Seed the isolated DB from an existing kandev.db (copied, never the original)
@@ -53,11 +47,7 @@
   Health-wait timeout in seconds (default: 60).
 
 .PARAMETER HomeDir
-  Isolated KANDEV_HOME_DIR (default: a unique
-  %USERPROFILE%\.kandev-test-<port>-<id> directory). The script
-  refuses a value that resolves inside a live Kandev home, through a symbolic
-  link or junction, or inside a git workspace. Existing git configuration and
-  -CopyDb destination files are never replaced.
+  Isolated KANDEV_HOME_DIR (default: %USERPROFILE%\.kandev-test).
 
 .EXAMPLE
   scripts\dev-isolated.ps1
@@ -78,7 +68,6 @@ param(
   [int]$Timeout = 60,
   [int]$BackendPort,
   [int]$WebPort,
-  [string]$WebHost = '127.0.0.1',
   [int]$AgentctlPort,
   [string]$HomeDir
 )
@@ -88,20 +77,17 @@ $ErrorActionPreference = 'Stop'
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
-Import-Module (Join-Path $ScriptDir 'isolated-instance.psm1') -Force
-$ConfiguredProductionHome = $env:KANDEV_HOME_DIR
 $BackendDir = Join-Path $RepoRoot 'apps\backend'
 $BinDir = Join-Path $BackendDir 'bin'
 $BackendBin = Join-Path $BinDir 'kandev.exe'
 $AgentctlBin = Join-Path $BinDir 'agentctl.exe'
 $MockAgentBin = Join-Path $BinDir 'mock-agent.exe'
-$WebDir = Join-Path $RepoRoot 'apps\web'
-$ViteCli = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
 $NodeModules = Join-Path $RepoRoot 'apps\node_modules'
 $RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin)
 
-# Ports we must never reuse (the well-known production ports).
-$GuardedPorts = @(38429, 37429, 39429)
+# Ports we must never reuse (the user's live instance). 38430 is the observed
+# production backend port on this host in addition to the documented default.
+$GuardedPorts = @(38429, 37429, 39429, 38430)
 
 # Isolated defaults — deliberately far from production.
 $BackendBase = 48429
@@ -144,46 +130,15 @@ function Assert-NotGuarded {
 
 if ($BackendPort) { Assert-NotGuarded -Port $BackendPort -What 'backend' }
 if ($WebPort) { Assert-NotGuarded -Port $WebPort -What 'web' }
+if ($AgentctlPort) { Assert-NotGuarded -Port $AgentctlPort -What 'agentctl' }
 
 $EffectiveBackendPort = if ($BackendPort) { $BackendPort } else { Select-FreePort -Base $BackendBase }
 $EffectiveWebPort = if ($WebPort) { $WebPort } else { Select-FreePort -Base $WebBase }
-$occupiedPorts = @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | ForEach-Object { [int]$_.LocalPort })
-function Test-AgentctlPortBlock {
-  param([int]$Base)
-  if ($Base + 199 -gt 65535) { return $false }
-  foreach ($port in (@($Base) + @(($Base + 100)..($Base + 199)))) {
-    if ($GuardedPorts -contains $port -or $occupiedPorts -contains $port -or
-      $port -eq $EffectiveBackendPort -or $port -eq $EffectiveWebPort) { return $false }
-  }
-  return $true
-}
+$EffectiveAgentctlPort = if ($AgentctlPort) { $AgentctlPort } else { Select-FreePort -Base $AgentctlBase }
 
-# Each agentctl base owns a disjoint 100-port instance range above it.
-if ($AgentctlPort) {
-  if (($AgentctlPort - $AgentctlBase) % 200 -ne 0 -or -not (Test-AgentctlPortBlock -Base $AgentctlPort)) {
-    throw "dev-isolated: agentctl port must be an available 200-port slot starting at $AgentctlBase."
-  }
-  $EffectiveAgentctlPort = $AgentctlPort
-} else {
-  $EffectiveAgentctlPort = $AgentctlBase
-  while (-not (Test-AgentctlPortBlock -Base $EffectiveAgentctlPort)) {
-    $EffectiveAgentctlPort += 200
-    if ($EffectiveAgentctlPort -gt ($AgentctlBase + 2000)) {
-      throw "dev-isolated: no free agentctl port block near $AgentctlBase"
-    }
-  }
-}
+# Reserve an agentctl instance range above the base for spawned agent processes.
 $AgentctlRangeBase = $EffectiveAgentctlPort + 100
 $AgentctlRangeMax = $AgentctlRangeBase + 99
-
-# --- Fail closed: the isolated home must not be a live-state boundary ---
-$RequestedHome = if ($HomeDir) { $HomeDir } else {
-  Join-Path $env:USERPROFILE ('.kandev-test-' + $EffectiveBackendPort + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
-}
-$LiveHomeRoots = @()
-if ($ConfiguredProductionHome) { $LiveHomeRoots += $ConfiguredProductionHome }
-$IsolatedHome = Resolve-SafeIsolatedHome -Path $RequestedHome -ProfileRoot $env:USERPROFILE `
-  -LiveHomeRoots $LiveHomeRoots
 
 # --- Preflight: prerequisites with actionable errors ---
 if (-not $NoBuild) {
@@ -197,30 +152,11 @@ if (-not $NoBuild) {
   }
 }
 
-$pnpmCmd = $null
-if ($Install) {
-  $pnpmCmd = Get-Command pnpm.exe -ErrorAction SilentlyContinue
-  if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue }
-  if (-not $pnpmCmd) { throw 'dev-isolated: pnpm is required for -Install.' }
-}
-$nodeCmd = if ($Web) { Get-Command node.exe -ErrorAction SilentlyContinue } else { $null }
-if ($Web -and -not $nodeCmd) { throw 'dev-isolated: node.exe is required for -Web.' }
-
 # --- Optional clean-checkout setup ---
 if ($Install) {
-  $gitCmd = Get-Command git.exe -ErrorAction SilentlyContinue
-  if (-not $gitCmd) { throw 'dev-isolated: -Install requires Git for Windows and Git Bash.' }
-  $gitRoot = Split-Path -Parent (Split-Path -Parent $gitCmd.Source)
-  $gitBash = Join-Path $gitRoot 'bin\bash.exe'
-  if (-not (Test-Path -LiteralPath $gitBash)) { throw 'dev-isolated: -Install requires Git Bash.' }
-  Write-Host "dev-isolated: running 'make install' through Git Bash..."
-  Push-Location -LiteralPath $RepoRoot
-  try {
-    & $gitBash -c 'make install'
-    if ($LASTEXITCODE -ne 0) { throw "dev-isolated: 'make install' failed (exit $LASTEXITCODE)." }
-  } finally {
-    Pop-Location
-  }
+  Write-Host "dev-isolated: running 'make install' (backend deps + pnpm install + playwright browsers)..."
+  & make -C $RepoRoot install
+  if ($LASTEXITCODE -ne 0) { throw "dev-isolated: 'make install' failed (exit $LASTEXITCODE)." }
   Write-Host "dev-isolated: install complete."
 }
 
@@ -243,41 +179,11 @@ if ($NoBuild) {
   if (-not (Test-RequiredBinsPresent)) {
     $needBuild = $true
   } else {
-    # Go source and embedded runtime inputs must match the binary we launch.
+    # Rebuild if any Go source is newer than the OLDEST required binary.
     $oldest = ($RequiredBins | ForEach-Object { Get-Item -LiteralPath $_ } | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime
     $newer = Get-ChildItem -LiteralPath $BackendDir -Recurse -Filter '*.go' -File -ErrorAction SilentlyContinue |
       Where-Object { $_.LastWriteTime -gt $oldest } |
       Select-Object -First 1
-    if (-not $newer) {
-      $embeddedInputs = @(
-        (Join-Path $RepoRoot 'profiles.yaml'),
-        (Join-Path $BackendDir 'go.mod'),
-        (Join-Path $BackendDir 'go.sum'),
-        (Join-Path $BackendDir 'config\workflows'),
-        (Join-Path $BackendDir 'config\utilityagents'),
-        (Join-Path $BackendDir 'config\prompts'),
-        (Join-Path $BackendDir 'internal\agent\agents\logos'),
-        (Join-Path $BackendDir 'internal\agent\agents\managed_npm_runtime_versions.json'),
-        (Join-Path $BackendDir 'internal\agent\docker\seccomp'),
-        (Join-Path $BackendDir 'internal\agentctl\server\api\scripts'),
-        (Join-Path $BackendDir 'internal\agentctl\types\replayfixtures\fixtures'),
-        (Join-Path $BackendDir 'internal\editors\discovery\editors.json'),
-        (Join-Path $BackendDir 'internal\i18n\locales'),
-        (Join-Path $BackendDir 'internal\mcp\canvasskill\files'),
-        (Join-Path $BackendDir 'internal\notifications\providers\assets'),
-        (Join-Path $BackendDir 'internal\office\configloader\instructions'),
-        (Join-Path $BackendDir 'internal\office\configloader\skills'),
-        (Join-Path $BackendDir 'internal\profiles\profiles.yaml'),
-        (Join-Path $BackendDir 'internal\webapp\embedded')
-      )
-      foreach ($inputPath in $embeddedInputs) {
-        if (-not (Test-Path -LiteralPath $inputPath)) { continue }
-        $newer = Get-ChildItem -LiteralPath $inputPath -Recurse -File -ErrorAction SilentlyContinue |
-          Where-Object { $_.LastWriteTime -gt $oldest } |
-          Select-Object -First 1
-        if ($newer) { break }
-      }
-    }
     if ($newer) { $needBuild = $true }
   }
   if ($needBuild) {
@@ -295,21 +201,14 @@ if ($NoBuild) {
 if ($Web -and -not (Test-Path -LiteralPath $NodeModules)) {
   throw "dev-isolated: node_modules not found - run 'make install' first, or pass -Install."
 }
-if ($Web -and -not (Test-Path -LiteralPath $ViteCli)) {
-  throw 'dev-isolated: Vite is missing - run pnpm install in apps/ first, or pass -Install.'
-}
 
-# --- Refuse to overwrite existing configuration or database files ---
-if ($CopyDb -and -not (Test-Path -LiteralPath $CopyDb)) {
-  throw "dev-isolated: -CopyDb source not found: $CopyDb"
-}
+# --- Create the isolated home / data dir ---
+$IsolatedHome = if ($HomeDir) { $HomeDir } else { Join-Path $env:USERPROFILE '.kandev-test' }
 $DataDir = Join-Path $IsolatedHome 'data'
-$RoamingAppData = Join-Path $IsolatedHome 'AppData\Roaming'
-$LocalAppData = Join-Path $IsolatedHome 'AppData\Local'
-$DbPath = Join-Path $DataDir 'kandev.db'
+New-Item -ItemType Directory -Path $DataDir -Force | Out-Null
+
+# Minimal gitconfig so the isolated HOME does not prompt for identity.
 $GitConfigPath = Join-Path $IsolatedHome '.gitconfig'
-Assert-SafeIsolatedHomePaths -HomeDir $IsolatedHome `
-  -Paths @($DataDir, $RoamingAppData, $LocalAppData, $DbPath, $GitConfigPath)
 $GitConfig = @'
 [user]
   name = Kandev Debug
@@ -319,25 +218,11 @@ $GitConfig = @'
 [tag]
   gpgsign = false
 '@
-if (Test-Path -LiteralPath $GitConfigPath) {
-  $existingGitConfig = (Get-Content -LiteralPath $GitConfigPath -Raw).TrimEnd()
-  if ($existingGitConfig -ne $GitConfig.TrimEnd()) {
-    throw "dev-isolated: refusing to overwrite existing git configuration in $IsolatedHome"
-  }
-}
-if ($CopyDb) {
-  foreach ($target in @($DbPath, "$DbPath-wal", "$DbPath-shm")) {
-    if (Test-Path -LiteralPath $target) {
-      throw "dev-isolated: refusing to overwrite existing database file: $target"
-    }
-  }
-}
-New-Item -ItemType Directory -Path $DataDir, $RoamingAppData, $LocalAppData -Force | Out-Null
-if (-not (Test-Path -LiteralPath $GitConfigPath)) {
-  Set-Content -LiteralPath $GitConfigPath -Value $GitConfig -Encoding ASCII
-}
+Set-Content -LiteralPath $GitConfigPath -Value $GitConfig -Encoding ASCII
 
+$DbPath = Join-Path $DataDir 'kandev.db'
 if ($CopyDb) {
+  if (-not (Test-Path -LiteralPath $CopyDb)) { throw "dev-isolated: -CopyDb source not found: $CopyDb" }
   Copy-Item -LiteralPath $CopyDb -Destination $DbPath -Force
   foreach ($suffix in @('-wal', '-shm')) {
     $sidecar = "$CopyDb$suffix"
@@ -348,10 +233,8 @@ if ($CopyDb) {
   Write-Host "dev-isolated: seeded isolated DB from $CopyDb"
 }
 
-$RunDir = Join-Path $env:TEMP ("kandev-isolated-" + $EffectiveBackendPort + '-' + [guid]::NewGuid().ToString('N'))
+$RunDir = Join-Path $env:TEMP ("kandev-isolated-" + $EffectiveBackendPort)
 New-Item -ItemType Directory -Path $RunDir -Force | Out-Null
-$IsolatedConfigPath = Join-Path $RunDir 'config.yaml'
-Set-Content -LiteralPath $IsolatedConfigPath -Value '# Isolated instance: no operator config.' -Encoding ASCII
 $BackendOutLog = Join-Path $RunDir 'backend.out.log'
 $BackendErrLog = Join-Path $RunDir 'backend.err.log'
 $WebOutLog = Join-Path $RunDir 'web.out.log'
@@ -362,10 +245,7 @@ $WebErrLog = Join-Path $RunDir 'web.err.log'
 $StdinFile = Join-Path $RunDir 'stdin.empty'
 New-Item -ItemType File -Path $StdinFile -Force | Out-Null
 $Pidfile = Join-Path $env:TEMP ("kandev-dev-isolated-" + $EffectiveBackendPort + '.pid')
-$BackendStartedFile = $Pidfile -replace '\.pid$', '.backend.started'
-$HomeFile = $Pidfile -replace '\.pid$', '.home'
 $WebPidfile = $Pidfile -replace '\.pid$', '.web.pid'
-$WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 
 # --- Launch the backend (detached, logs to file) ---
 # KANDEV_DEBUG_DEV_MODE=true selects the `dev` profile (mock agent, pprof,
@@ -373,25 +253,18 @@ $WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 # isolated instance needs no real GitHub/agents, and bind to loopback to avoid
 # Windows Firewall prompts.
 $BackendUrl = "http://127.0.0.1:$EffectiveBackendPort"
-$WebInternalHost = if ($WebHost -in @('0.0.0.0', '::', '[::]')) { '127.0.0.1' } else { $WebHost }
-if ($WebInternalHost.Contains(':') -and -not $WebInternalHost.StartsWith('[')) { $WebInternalHost = "[$WebInternalHost]" }
-$WebInternalUrl = if ($Web) { "http://${WebInternalHost}:$EffectiveWebPort" } else { '' }
 Write-Host "dev-isolated: starting backend on :$EffectiveBackendPort ..."
 
-$backendOverrides = [ordered]@{
+$savedEnv = @{}
+$overrides = [ordered]@{
   'HOME'                          = $IsolatedHome
   'USERPROFILE'                   = $IsolatedHome
-  'TEMP'                          = $RunDir
-  'TMP'                           = $RunDir
   'KANDEV_HOME_DIR'               = $IsolatedHome
   'KANDEV_DATABASE_PATH'          = $DbPath
-  'KANDEV_INTERNAL_CONFIG_FILE'   = $IsolatedConfigPath
   'KANDEV_SERVER_HOST'            = '127.0.0.1'
   'KANDEV_SERVER_PORT'            = "$EffectiveBackendPort"
-  'KANDEV_WEB_INTERNAL_URL'       = $WebInternalUrl
+  'KANDEV_WEB_INTERNAL_URL'       = "http://127.0.0.1:$EffectiveWebPort"
   'KANDEV_AGENT_STANDALONE_PORT'  = "$EffectiveAgentctlPort"
-  'KANDEV_AGENT_STANDALONE_HOST'  = '127.0.0.1'
-  'AGENTCTL_LISTEN_HOST'          = '127.0.0.1'
   'AGENTCTL_INSTANCE_PORT_BASE'   = "$AgentctlRangeBase"
   'AGENTCTL_INSTANCE_PORT_MAX'    = "$AgentctlRangeMax"
   'KANDEV_DEBUG_DEV_MODE'         = 'true'
@@ -400,22 +273,25 @@ $backendOverrides = [ordered]@{
   'KANDEV_MOCK_JIRA'              = 'true'
   'KANDEV_MOCK_LINEAR'            = 'true'
   'KANDEV_LOG_LEVEL'              = $(if ($env:KANDEV_LOG_LEVEL) { $env:KANDEV_LOG_LEVEL } else { 'info' })
+  'PATH'                          = "$BinDir;$env:PATH"
 }
-$BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
-  -IsolatedHome $IsolatedHome -Overrides $backendOverrides
+foreach ($key in $overrides.Keys) {
+  $savedEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+  [Environment]::SetEnvironmentVariable($key, $overrides[$key], 'Process')
+}
 
-$backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -Action {
-  Start-Process -FilePath $BackendBin -ArgumentList '__backend' `
+try {
+  $backendProc = Start-Process -FilePath $BackendBin -ArgumentList '__backend' `
     -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
     -RedirectStandardInput $StdinFile `
     -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
+} finally {
+  foreach ($key in $savedEnv.Keys) {
+    [Environment]::SetEnvironmentVariable($key, $savedEnv[$key], 'Process')
+  }
 }
 $BackendPid = $backendProc.Id
-$backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $BackendPid"
-if (-not $backendInfo) { throw "dev-isolated: cannot identify backend PID $BackendPid" }
 Set-Content -LiteralPath $Pidfile -Value $BackendPid -Encoding ASCII
-Set-Content -LiteralPath $BackendStartedFile -Value $backendInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
-Set-Content -LiteralPath $HomeFile -Value $IsolatedHome -Encoding UTF8
 
 # --- Wait for backend health ---
 $HealthUrl = "$BackendUrl/api/v1/system/health"
@@ -427,7 +303,6 @@ while ((Get-Date) -lt $deadline) {
     if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
     if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
     Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $BackendStartedFile, $HomeFile -Force -ErrorAction SilentlyContinue
     throw "dev-isolated: backend exited before becoming healthy."
   }
   try {
@@ -445,7 +320,6 @@ if (-not $healthy) {
   if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
   Stop-Process -Id $BackendPid -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
-  Remove-Item -LiteralPath $BackendStartedFile, $HomeFile -Force -ErrorAction SilentlyContinue
   throw "dev-isolated: backend did not become healthy within ${Timeout}s."
 }
 
@@ -453,35 +327,37 @@ if (-not $healthy) {
 $webStarted = $false
 if ($Web) {
   Write-Host "dev-isolated: starting web (vite dev) on :$EffectiveWebPort ..."
-  $webUrl = $WebInternalUrl
+  $pnpmCmd = Get-Command pnpm.exe -ErrorAction SilentlyContinue
+  if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue }
+  if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue }
+  if (-not $pnpmCmd) { throw "dev-isolated: 'pnpm' not found on PATH - install it (corepack/mise) before using -Web." }
+  $savedWebEnv = @{}
   $webOverrides = [ordered]@{
-    'TEMP'                 = $RunDir
-    'TMP'                  = $RunDir
+    'VITE_KANDEV_API_PORT' = "$EffectiveBackendPort"
     'KANDEV_API_BASE_URL'  = $BackendUrl
     'PORT'                 = "$EffectiveWebPort"
+    'HOSTNAME'             = '127.0.0.1'
     'VITE_KANDEV_DEBUG'    = 'true'
   }
-  $WebEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory (Split-Path -Parent $nodeCmd.Source) `
-    -IsolatedHome $IsolatedHome -Overrides $webOverrides
-  $webProc = $null
-  try {
-    # Launch Vite directly so the recorded PID is the listener, not a pnpm/cmd wrapper.
-    $webProc = Invoke-WithIsolatedEnvironment -Environment $WebEnvironment -Action {
-      Start-Process -FilePath $nodeCmd.Source `
-        -ArgumentList 'node_modules/vite/bin/vite.js', '--host', $WebHost, '--port', "$EffectiveWebPort", '--strictPort' `
-        -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardInput $StdinFile `
-        -RedirectStandardOutput $WebOutLog -RedirectStandardError $WebErrLog
-    }
-    $webInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($webProc.Id)"
-    if (-not $webInfo) { throw "dev-isolated: cannot identify web PID $($webProc.Id)" }
-    Set-Content -LiteralPath $WebPidfile -Value $webProc.Id -Encoding ASCII
-    Set-Content -LiteralPath $WebStartedFile -Value $webInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
-  } catch {
-    if ($webProc) { Stop-Process -Id $webProc.Id -Force -ErrorAction SilentlyContinue }
-    & (Join-Path $ScriptDir 'kandev-kill.ps1') -Pidfile $Pidfile -Yes
-    throw
+  foreach ($key in $webOverrides.Keys) {
+    $savedWebEnv[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+    [Environment]::SetEnvironmentVariable($key, $webOverrides[$key], 'Process')
   }
+  try {
+    $appsDir = Join-Path $RepoRoot 'apps'
+    $webProc = Start-Process -FilePath $pnpmCmd.Source `
+      -ArgumentList '-C', $appsDir, '--filter', '@kandev/web', 'dev' `
+      -WorkingDirectory $appsDir -WindowStyle Hidden -PassThru `
+      -RedirectStandardInput $StdinFile `
+      -RedirectStandardOutput $WebOutLog -RedirectStandardError $WebErrLog
+  } finally {
+    foreach ($key in $savedWebEnv.Keys) {
+      [Environment]::SetEnvironmentVariable($key, $savedWebEnv[$key], 'Process')
+    }
+  }
+  Set-Content -LiteralPath $WebPidfile -Value $webProc.Id -Encoding ASCII
+
+  $webUrl = "http://127.0.0.1:$EffectiveWebPort"
   $webDeadline = (Get-Date).AddSeconds($Timeout)
   while ((Get-Date) -lt $webDeadline) {
     if ($webProc.HasExited) { break }
@@ -503,12 +379,11 @@ Write-Host ''
 Write-Host '================ kandev dev-isolated: READY ================'
 Write-Host "  backend URL : $BackendUrl   (PID $BackendPid)"
 if ($webStarted) {
-  Write-Host "  browser URL : $BackendUrl"
-  Write-Host "  Vite target : $webUrl"
+  Write-Host "  web URL     : http://127.0.0.1:$EffectiveWebPort"
 } elseif ($Web) {
-  Write-Host "  browser URL : $BackendUrl   (Vite NOT ready - check log)"
+  Write-Host "  web URL     : http://127.0.0.1:$EffectiveWebPort   (NOT ready - check log)"
 } else {
-  Write-Host '  browser URL : (not started; pass -Web to launch the frontend)'
+  Write-Host '  web URL     : (not started; pass -Web to launch the frontend)'
 }
 Write-Host "  agentctl    : http://127.0.0.1:$EffectiveAgentctlPort  (range $AgentctlRangeBase-$AgentctlRangeMax)"
 Write-Host "  KANDEV_HOME : $IsolatedHome"

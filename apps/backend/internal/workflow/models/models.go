@@ -214,6 +214,12 @@ type StepDefinition struct {
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete,omitempty" yaml:"cancel_triggers_turn_complete,omitempty"`
 	// CompleteTaskOnEnter marks the final step as completing its task on entry.
 	CompleteTaskOnEnter bool `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
+	// AllowRepeatedFailureFallback overrides the dynamic-profile repeated-
+	// failure policy for this step. nil defers to the profile policy, false
+	// forbids the try-next fallback for repeated unclassified failures even
+	// when the profile allows it, and true defers to the profile as well. The
+	// step can only tighten, never loosen, the profile's configured threshold.
+	AllowRepeatedFailureFallback *bool `json:"allow_repeated_failure_fallback,omitempty" yaml:"allow_repeated_failure_fallback,omitempty"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -251,6 +257,11 @@ type WorkflowStep struct {
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete"`
 	// CompleteTaskOnEnter marks the final step as completing its task on entry.
 	CompleteTaskOnEnter bool `json:"complete_task_on_enter"`
+	// AllowRepeatedFailureFallback overrides the dynamic-profile repeated-
+	// failure policy for this step. nil defers to the profile policy, false
+	// forbids the try-next fallback for repeated unclassified failures even
+	// when the profile allows it, and true defers to the profile as well.
+	AllowRepeatedFailureFallback *bool `json:"allow_repeated_failure_fallback,omitempty"`
 	// OrderRevision is bumped by ReorderStepTasks (AC-TASKS-KANBAN-TASK-
 	// REORDERING-001.25/.37) each time this step's task order changes. A
 	// consumer that records the value it last saw can reject a WS event
@@ -318,6 +329,16 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 		}
 	}
 	return false
+}
+
+// AdvancesOnTurnComplete reports whether the step moves to another step when
+// its on_turn_complete actions run. Only the move actions transition the task;
+// disable_plan_mode changes session settings without moving, so a step whose
+// on_turn_complete carries only that action never advances.
+func (s *WorkflowStep) AdvancesOnTurnComplete() bool {
+	return s.HasOnTurnCompleteAction(OnTurnCompleteMoveToNext) ||
+		s.HasOnTurnCompleteAction(OnTurnCompleteMoveToPrevious) ||
+		s.HasOnTurnCompleteAction(OnTurnCompleteMoveToStep)
 }
 
 // RemapStepID returns the mapped workflow-step ID when id references a template

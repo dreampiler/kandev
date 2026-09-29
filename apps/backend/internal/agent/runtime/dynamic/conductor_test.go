@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
 
 type conductorTestProfileLoader struct {
@@ -367,6 +368,74 @@ func TestConductorDoesNotFallbackAfterPostStartLaunchFailure(t *testing.T) {
 		t.Fatalf("Launch error = %v, want %v", err, failure)
 	}
 }
+
+func TestConductorRepeatedUnclassifiedFailureFallsBackAtThreshold(t *testing.T) {
+	document := routingpolicy.DefaultDocument()
+	document.Unclassified = routingpolicy.Policy{
+		OnExhausted:     routingpolicy.OutcomeStop,
+		RepeatedFailure: routingpolicy.RepeatedFailurePolicy{Enabled: true, Threshold: 1},
+	}
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{ID: "candidate-first", Enabled: true, BindingKey: "first", Policies: document},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	failure := &routingerr.Error{
+		Code: routingerr.CodeAgentRuntime, Class: routingerr.ClassUnclassified, FallbackAllowed: false,
+	}
+	downstream := &conductorTestDownstream{}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile},
+		&unclassifiedThenSuccessDownstream{failure: failure, inner: downstream})
+
+	result, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID: "session-repeated", LogicalProfileID: profile.ID,
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if result.Decision.ExecutionProfileID != "candidate-second" || result.Decision.Generation != 2 {
+		t.Fatalf("final decision = %#v, want candidate-second at generation 2", result.Decision)
+	}
+}
+
+func TestConductorRepeatedUnclassifiedDisabledPolicyDoesNotFallback(t *testing.T) {
+	profile := Profile{
+		ID: "dynamic-profile",
+		Candidates: []Candidate{
+			{ID: "candidate-first", Enabled: true, BindingKey: "first", Policies: routingpolicy.DefaultDocument()},
+			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
+		},
+	}
+	failure := &routingerr.Error{
+		Code: routingerr.CodeAgentRuntime, Class: routingerr.ClassUnclassified, FallbackAllowed: false,
+	}
+	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile},
+		failingConductorTestDownstream{err: failure})
+
+	if _, err := conductor.Launch(context.Background(), ConductorLaunch{
+		SessionID: "session-disabled", LogicalProfileID: profile.ID,
+	}); err == nil {
+		t.Fatal("unclassified failure without the repeated-failure policy must not fall back")
+	}
+}
+
+type unclassifiedThenSuccessDownstream struct {
+	failure *routingerr.Error
+	inner   *conductorTestDownstream
+}
+
+func (d *unclassifiedThenSuccessDownstream) Launch(_ context.Context, launch DownstreamLaunch) (DownstreamExecution, error) {
+	if len(d.inner.launches) == 0 {
+		d.inner.launches = append(d.inner.launches, launch)
+		return DownstreamExecution{}, d.failure
+	}
+	return d.inner.Launch(context.Background(), launch)
+}
+
+func (*unclassifiedThenSuccessDownstream) Resume(context.Context, string, string) error { return nil }
+func (*unclassifiedThenSuccessDownstream) Stop(context.Context, string, string) error   { return nil }
 
 type multiFailureConductorTestDownstream struct {
 	launches []DownstreamLaunch

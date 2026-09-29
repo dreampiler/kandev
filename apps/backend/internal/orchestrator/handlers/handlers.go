@@ -648,7 +648,7 @@ func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*w
 	if errResp != nil {
 		return errResp, nil
 	}
-	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
+	if err := h.service.SetPrimarySessionTransferringQueue(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
 	}

@@ -12,7 +12,7 @@
   This is the tool a debugger uses to tell "my isolated instance" apart from
   "the user's live instance" before touching anything. A `PRODUCTION` marker is
   shown when a backend listens on one of the guarded production ports
-  (38429/37429/39429).
+  (38429/37429/39429/38430).
 
   HOME_DIR is resolved from a sibling pidfile written by dev-isolated.ps1 when
   present; it is shown as `?` otherwise, because Windows does not expose another
@@ -35,7 +35,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$GuardedPorts = @(38429, 37429, 39429)
+$GuardedPorts = @(38429, 37429, 39429, 38430)
 
 function Test-GuardedPort {
   param([int]$Port)
@@ -83,22 +83,13 @@ function Get-AgentctlPort {
 
 function Get-IsolatedHome {
   param([int]$BackendPid)
-  $candidates = Get-ChildItem -LiteralPath $env:TEMP -Filter 'kandev-dev-isolated-*.pid' -File -ErrorAction SilentlyContinue
+  $pattern = Join-Path $env:TEMP ('kandev-dev-isolated-*-*.pid')
+  $candidates = Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue
   foreach ($candidate in $candidates) {
-    if ($candidate.Name -notmatch '^kandev-dev-isolated-[0-9]+\.pid$') { continue }
     $raw = (Get-Content -LiteralPath $candidate.FullName -Raw).Trim()
     if ($raw -eq "$BackendPid") {
-      $startedFile = $candidate.FullName -replace '\.pid$', '.backend.started'
-      if (-not (Test-Path -LiteralPath $startedFile)) { continue }
-      $recordedStart = (Get-Content -LiteralPath $startedFile -Raw).Trim()
-      $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $BackendPid" -ErrorAction SilentlyContinue
-      if (-not $backendInfo -or $recordedStart -notmatch '^[0-9]+$' -or
-        $backendInfo.CreationDate.ToUniversalTime().Ticks -ne [long]$recordedStart) { continue }
-      $homeFile = $candidate.FullName -replace '\.pid$', '.home'
-      if (-not (Test-Path -LiteralPath $homeFile)) { continue }
-      $recordedHome = (Get-Content -LiteralPath $homeFile -Raw).Trim()
-      if ($recordedHome) { return $recordedHome }
-      continue
+      # The isolated home is fixed at %USERPROFILE%\.kandev-test by default.
+      return (Join-Path $env:USERPROFILE '.kandev-test')
     }
   }
   return '?'
@@ -125,8 +116,4 @@ $rows = foreach ($pidValue in ($pairs.Keys | Sort-Object)) {
     '{0,-7}  {1,-13}  {2,-13}  {3,-24}  {4}  {5}' -f $pidValue, $backendPort, $agentctlPort, $homeDir, $repoPath, $marker
   }
 }
-if ($Raw) {
-  $rows
-} else {
-  $rows | ForEach-Object { Write-Host $_ }
-}
+$rows | ForEach-Object { Write-Host $_ }

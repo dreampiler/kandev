@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +32,11 @@ func TestManualBackupCanceledDoesNotPublish(t *testing.T) {
 }
 
 func TestManualBackupIsPrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows synthesizes file modes (a writable file reports 0666), so the
+		// POSIX 0600 assertion is only meaningful on Unix.
+		t.Skip("POSIX file modes are not represented on Windows; covered on Linux CI")
+	}
 	s, dir := newTestService(t)
 	result, err := s.runCreate(context.Background())
 	if err != nil {
@@ -150,6 +156,30 @@ func TestVerifySnapshotRejectsCorruption(t *testing.T) {
 	}
 	if _, err := verifySnapshot(context.Background(), path); err == nil {
 		t.Fatal("accepted invalid database")
+	}
+}
+
+// TestVerifySnapshotAcceptsValidDatabase guards the read-only DSN against the
+// Windows regression where url.URL percent-encoded backslashes and mattn opened
+// nothing. The temp path is absolute and backslash-separated on Windows.
+func TestVerifySnapshotAcceptsValidDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "valid.db")
+	writer, err := sqlx.Open("sqlite3", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Exec(`CREATE TABLE things (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := verifySnapshot(context.Background(), path)
+	if err != nil {
+		t.Fatalf("verify snapshot: %v", err)
+	}
+	if len(digest) != 64 {
+		t.Fatalf("digest = %q", digest)
 	}
 }
 

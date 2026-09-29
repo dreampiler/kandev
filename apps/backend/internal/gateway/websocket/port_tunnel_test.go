@@ -38,6 +38,9 @@ func TestResolveAndBindReportsOccupiedPort(t *testing.T) {
 		t.Fatalf("add execution: %v", err)
 	}
 
+	// resolveAndBind binds the wildcard address (the tunnel must stay reachable
+	// from the host the browser used). On Windows a loopback-only occupant does
+	// not block that bind, so the occupant must hold the wildcard port.
 	occupied, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatalf("listen for occupied tunnel port: %v", err)

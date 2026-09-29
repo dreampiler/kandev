@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/stretchr/testify/require"
+	"strings"
 	"testing"
 )
 
@@ -72,4 +73,42 @@ func TestLateBackupCompletionCannotOverrideDisable(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, status.Policy.Enabled)
 	require.Equal(t, "none", status.Preparation.State)
+}
+
+// TestPreparationFailureRecordsCauseForDiagnosis keeps the raw backup error out
+// of the status payload while logging it and persisting it in the settings row,
+// so a future "backup_failed" can be diagnosed from the database alone.
+func TestPreparationFailureRecordsCauseForDiagnosis(t *testing.T) {
+	s := testService(t)
+	seedAnalysis(t, s)
+	ctx := context.Background()
+	backupErr := errors.New("vacuum into /data/backups/snapshot.db: disk full secret path")
+	var loggedMessage string
+	var loggedErr error
+	s.opts.Log = func(_ context.Context, message string, err error) {
+		loggedMessage, loggedErr = message, err
+	}
+	s.opts.CreateBackup = func(context.Context) (string, error) { return "", backupErr }
+	_, err := s.Save(ctx, Update{Enabled: true, Age: Age{3, "months"}, BackupChoice: "backup"})
+	require.NoError(t, err)
+	require.Error(t, s.stepPreparation(ctx))
+	status, err := s.Get(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "failed", status.Preparation.State)
+	require.Equal(t, "backup_failed", status.Preparation.Error)
+	require.NotContains(t, status.Preparation.Error, "secret")
+	require.ErrorIs(t, loggedErr, backupErr)
+	require.NotEmpty(t, loggedMessage)
+	stored, err := readRecord(ctx, s.pool.Reader())
+	require.NoError(t, err)
+	require.Contains(t, stored.PreparationDetail, "disk full secret path")
+	require.LessOrEqual(t, len(stored.PreparationDetail), preparationDetailLimit)
+}
+
+func TestLimitPreparationDetailTruncates(t *testing.T) {
+	long := strings.Repeat("x", preparationDetailLimit+50)
+	got := limitPreparationDetail(long)
+	require.Len(t, got, preparationDetailLimit)
+	require.Equal(t, long[:preparationDetailLimit], got)
+	require.Equal(t, "short", limitPreparationDetail("short"))
 }

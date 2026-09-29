@@ -80,10 +80,13 @@ func (d *dynamicTaskDownstream) Launch(
 			ProviderID: launch.ExecutionProfileID,
 			Stderr:     err.Error(),
 		})
-		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them.
+		// A pre-start launch failure produced no output, so it is effect-safe
+		// and the conductor may advance. A low-confidence classification has no
+		// provider policy class of its own; present it as a transient
+		// provider-availability failure so the candidate's configured policy
+		// decides between retrying and advancing instead of stopping the route.
 		if classified.Confidence == routingerr.ConfLow {
-			return dynamicruntime.DownstreamExecution{}, err
+			classified = transientStartupLaunchFailure()
 		}
 		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
 	}
@@ -253,6 +256,58 @@ func (s *Service) markDynamicRouteActionRequired(ctx context.Context, sessionID 
 	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
 }
 
+// transientStartupLaunchFailure presents a process that never started as a
+// transient provider-availability failure. The process produced no output, so
+// the attempt is effect-safe, and the transient class lets the candidate's
+// configured provider policy drive the retry or immediate next-candidate
+// decision instead of stopping the route for manual recovery.
+func transientStartupLaunchFailure() *routingerr.Error {
+	return &routingerr.Error{
+		Code:            routingerr.CodeProviderUnavailable,
+		Class:           routingerr.ClassTransient,
+		Phase:           routingerr.PhaseProcessStart,
+		Confidence:      routingerr.ConfLow,
+		FallbackAllowed: true,
+		AutoRetryable:   true,
+		ClassifierRule:  "phase.prestart.launch_failure",
+	}
+}
+
+// startupFailureEvent builds the failure evidence for a process that never
+// started. The prompt generation is read from the process-local attempt record
+// so the route failure gate can fence the failure to the launch that failed.
+func (s *Service) startupFailureEvent(taskID, sessionID, executionID string) watcher.AgentEventData {
+	data := watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
+	}
+	if evidence, ok := s.promptAttemptForSession(sessionID); ok {
+		evidence.mu.Lock()
+		if evidence.executionID == "" || evidence.executionID == executionID {
+			data.PromptGeneration = evidence.promptGeneration
+		}
+		evidence.mu.Unlock()
+	}
+	return data
+}
+
+// routeDynamicStartupFailure routes a never-started process failure through the
+// immediate next-candidate policy. It reports whether the route accepted the
+// failure; a false result leaves the caller's terminal FAILED path in charge.
+// A caller must not already have recorded the session FAILED, because the
+// successor relaunch resets the session and refuses a terminal state.
+func (s *Service) routeDynamicStartupFailure(
+	ctx context.Context, taskID, sessionID, executionID string,
+) bool {
+	if s.profileExecutionResolver == nil {
+		return false
+	}
+	return s.routeDynamicAgentFailure(
+		ctx,
+		s.startupFailureEvent(taskID, sessionID, executionID),
+		transientStartupLaunchFailure(),
+	)
+}
+
 type dynamicRouteSessionProjector interface {
 	UpdateTaskSessionDynamicRouteIfCurrent(
 		context.Context,
@@ -351,7 +406,7 @@ func (s *Service) handleAgentProcessStarted(
 // startup fails after LaunchPreparedSession already returned successfully.
 func (s *Service) handleAgentProcessStartFailed(
 	ctx context.Context,
-	_, sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	_ error,
 ) {
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
@@ -379,7 +434,18 @@ func (s *Service) handleAgentProcessStartFailed(
 	if session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
 		return
 	}
-	s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
+	// A process that never started produced no output, so the route can
+	// advance to the next candidate immediately instead of waiting for a
+	// manual selection. routeDynamicAgentFailure marks the route
+	// action_required on decline; the explicit fallback covers a decline that
+	// never reached its own guard.
+	if !s.routeDynamicAgentFailure(
+		ctx,
+		s.startupFailureEvent(taskID, sessionID, agentExecutionID),
+		transientStartupLaunchFailure(),
+	) {
+		s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "agent_process_start_failed")
+	}
 }
 
 func applyDynamicRouteDecisionProjection(
@@ -745,14 +811,28 @@ func (s *Service) routeDynamicAgentFailure(
 			s.markDynamicRouteActionRequired(ctx, session.ID, generation, reason)
 		}
 	}()
-	if classified == nil || !classified.FallbackAllowed {
+	if classified == nil {
 		return false
 	}
-	if !dynamicPreResultSafe(data) {
-		// A dynamic route is never allowed to guess that a failed turn was
-		// pre-result. Missing evidence is as unsafe as observed output or a
-		// tool effect because the replacement could repeat a side effect.
+	// A dynamic route is never allowed to guess that a failed turn was
+	// pre-result. Missing evidence is as unsafe as observed output or a
+	// tool effect because the replacement could repeat a side effect. The
+	// same evidence is the effect-safety input the policy engine needs.
+	effectSafe := dynamicPreResultSafe(data)
+	if !effectSafe {
 		return false
+	}
+	if !classified.FallbackAllowed {
+		// The classifier forbids fallback. Only a repeated unclassified
+		// failure may override that, and only through the candidate's
+		// repeated-failure policy: the engine owns the streak and threshold,
+		// so an unconfigured or below-threshold route still stops here.
+		if classifiedClass(classified) != routingerr.ClassUnclassified {
+			return false
+		}
+		if !s.repeatedFailureFallbackAllowedForTask(ctx, data.TaskID) {
+			return false
+		}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
@@ -765,9 +845,9 @@ func (s *Service) routeDynamicAgentFailure(
 	if err != nil {
 		return false
 	}
-	decision, err := conductor.RouteAfterFailure(
+	decision, err := conductor.RouteAfterFailureWithEffect(
 		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
-		session.RouteGeneration, classified,
+		session.RouteGeneration, classified, effectSafe,
 	)
 	if err != nil {
 		handled = s.persistPendingDynamicRecovery(ctx, session, decision, err)
@@ -776,6 +856,33 @@ func (s *Service) routeDynamicAgentFailure(
 	generation = decision.Generation
 	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput)
 	return handled
+}
+
+// classifiedClass resolves the normalized class for a classified failure,
+// preferring the classifier-provided class and falling back to the catalogue.
+func classifiedClass(failure *routingerr.Error) routingerr.Class {
+	if failure.Class != "" {
+		return failure.Class
+	}
+	return routingerr.ClassForCode(failure.Code)
+}
+
+// repeatedFailureFallbackAllowedForTask honors the workflow step's optional
+// kill switch. Only an explicit false disables the override; a missing step,
+// an unset field, or a lookup failure defers to the profile's policy.
+func (s *Service) repeatedFailureFallbackAllowedForTask(ctx context.Context, taskID string) bool {
+	if s.workflowStepGetter == nil || taskID == "" {
+		return true
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkflowStepID == "" {
+		return true
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil || step.AllowRepeatedFailureFallback == nil {
+		return true
+	}
+	return *step.AllowRepeatedFailureFallback
 }
 
 func (s *Service) persistPendingDynamicRecovery(

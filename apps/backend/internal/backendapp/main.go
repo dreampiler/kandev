@@ -1696,7 +1696,7 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, log))
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
 	return svc
 }
 
@@ -2659,6 +2659,7 @@ func buildOfficeFeatureServices(
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
+	dashboardSvc.SetWorkspaceLister(services.Task)
 	documentSvc := taskservice.NewDocumentService(taskRepo, log)
 	onboardingSvc := officeonboarding.NewOnboardingService(
 		repo, cfgLoader, cfgWriter, log,

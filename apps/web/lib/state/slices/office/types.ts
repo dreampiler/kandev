@@ -251,6 +251,11 @@ export type CreateRoutineInput = {
   catchUpPolicy?: string;
   catchUpMax?: number;
   variables?: Record<string, unknown> | string;
+  /**
+   * Optional trigger created in the same request as the routine, so a
+   * rejected trigger creates no routine at all.
+   */
+  trigger?: CreateTriggerInput;
 };
 
 /**
@@ -418,6 +423,32 @@ export type DashboardData = {
    * type at the consumer.
    */
   agent_summaries: AgentSummary[];
+};
+
+/**
+ * One workspace in the read-only multi-workspace overview
+ * (GET /api/v1/office/workspaces/aggregate). Mirrors the snake_case wire shape.
+ */
+export type WorkspaceAggregateEntry = {
+  workspace_id: string;
+  name: string;
+  task_count: number;
+  open_tasks: number;
+  in_progress_tasks: number;
+  blocked_tasks: number;
+  done_tasks: number;
+  pending_approvals: number;
+  agent_count: number;
+  running_agents: number;
+};
+
+/**
+ * Normalized store shape for the multi-workspace overview: the workspace list
+ * plus a merged recent-activity feed (activity entries normalized to camelCase).
+ */
+export type WorkspaceAggregate = {
+  workspaces: WorkspaceAggregateEntry[];
+  recentActivity: ActivityEntry[];
 };
 
 /**
@@ -634,6 +665,7 @@ export type OfficeSliceState = {
     inboxCountByWorkspaceId: Record<string, number>;
     runs: Run[];
     dashboardByWorkspaceId: Record<string, DashboardData | null>;
+    workspaceAggregate: WorkspaceAggregate | null;
     tasks: TasksState;
     meta: OfficeMeta | null;
     isLoading: boolean;
@@ -674,6 +706,7 @@ export type OfficeSliceActions = {
   setInboxCount: (workspaceId: string, count: number) => void;
   setRuns: (runs: Run[]) => void;
   setDashboard: (workspaceId: string, data: DashboardData | null) => void;
+  setWorkspaceAggregate: (data: WorkspaceAggregate | null) => void;
   setTasks: (tasks: OfficeTask[]) => void;
   appendTasks: (tasks: OfficeTask[]) => void;
   patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;

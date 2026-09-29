@@ -124,6 +124,14 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 			zap.Error(err))
 	}
 	if payload.NeverStarted {
+		// A process that never started produced no output, so a dynamic route
+		// can advance to the next candidate immediately instead of stopping for
+		// manual recovery. Non-dynamic sessions and declined routes keep the
+		// terminal FAILED path below; the successor relaunch, not this handler,
+		// owns teardown when the route advances.
+		if s.routeDynamicStartupFailure(ctx, payload.TaskID, payload.SessionID, payload.AgentExecutionID) {
+			return
+		}
 		if s.recordSessionLaunchFailure(ctx, payload.TaskID, payload.SessionID, errAgentNeverStarted, session) {
 			s.stopNeverStartedExecution(ctx, payload)
 		} else {
