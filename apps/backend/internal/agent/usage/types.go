@@ -1,5 +1,5 @@
 // Package usage provides subscription utilization tracking for agent providers.
-// It fetches utilization data from provider APIs (Anthropic, OpenAI) for agents
+// It fetches utilization data from provider APIs and local usage commands for agents
 // authenticated via OAuth/subscription credentials rather than API keys.
 package usage
 
@@ -27,7 +27,7 @@ type UtilizationWindow struct {
 
 // ProviderUsage is the full utilization response for one provider credential.
 type ProviderUsage struct {
-	Provider  string              `json:"provider"`       // "anthropic", "openai"
+	Provider  string              `json:"provider"`       // "anthropic", "openai", "google"
 	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
 	Windows   []UtilizationWindow `json:"windows"`
 	FetchedAt time.Time           `json:"fetched_at"`

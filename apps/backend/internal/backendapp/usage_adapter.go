@@ -74,6 +74,10 @@ func (a *usageProviderAdapter) ensureRegistered(profileID, agentName string) {
 		client := agentusage.NewCodexUsageClientWithPath(authPath)
 		key := agentusage.CacheKey("openai", authPath)
 		a.svc.Register(profileID, client, key)
+	case "antigravity-acp":
+		client := agentusage.NewAntigravityUsageClient()
+		key := agentusage.CacheKey("google-antigravity", filepath.Join(home, ".gemini", "antigravity-cli"))
+		a.svc.Register(profileID, client, key)
 	}
 }
 

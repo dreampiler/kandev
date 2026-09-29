@@ -246,13 +246,13 @@ func TestAntigravityACP_DisplayOrderUnique(t *testing.T) {
 	}
 }
 
-func TestAntigravityACP_PermissionAndBillingDefaults(t *testing.T) {
+func TestAntigravityACP_PermissionAndBilling(t *testing.T) {
 	a := NewAntigravityACP()
 	if len(a.PermissionSettings()) != 0 {
 		t.Errorf("PermissionSettings() = %#v, want empty", a.PermissionSettings())
 	}
-	if got := a.BillingType(); got != usage.BillingTypeAPIKey {
-		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeAPIKey)
+	if got := a.BillingType(); got != usage.BillingTypeSubscription {
+		t.Errorf("BillingType() = %q, want %q", got, usage.BillingTypeSubscription)
 	}
 	catalog := CatalogPermissionSettings(a)
 	auto, ok := catalog[PermissionKeyAutoApprove]

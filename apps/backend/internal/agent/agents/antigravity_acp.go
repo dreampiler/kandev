@@ -212,4 +212,4 @@ func (a *AntigravityACP) InferenceConfig() *InferenceConfig {
 	}
 }
 
-func (a *AntigravityACP) BillingType() usage.BillingType { return defaultBillingType() }
+func (a *AntigravityACP) BillingType() usage.BillingType { return usage.BillingTypeSubscription }
