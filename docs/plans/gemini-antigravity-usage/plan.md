@@ -1,6 +1,6 @@
 ---
 created: 2026-09-29
-status: in_progress
+status: done
 requirements:
   - REQ-COSTS-SUBSCRIPTION-USAGE-001
 system_design:
@@ -24,7 +24,7 @@ Reference: ai-chatroom `lib/usage.mjs` (MIT).
 - Parse `command.data.groups[]` → find "Gemini Models" group → extract `buckets[]` with `window`, `remaining_fraction`, `reset_time`
 - Convert to `ProviderUsage` with utilization = 1 - remaining_fraction (percentage)
 - Skip disabled buckets (e.g., 5h bucket with no reset_time)
-- Live measurement verified: SUCCESS, 0 turns, 0 tokens, 7-day 100%, reset 2026-10-02T18:47:39Z
+- Live measurement verified by running `agy -p "/usage" --output-format json`: `status` `SUCCESS`, `num_turns` 0, `usage.total_tokens` 0, Gemini Models weekly bucket at 100% used with reset `2026-10-02T18:47:39Z`
 - Update the existing Antigravity billing expectation and verify the usage parser through a disposable local call
 
 ### Out of scope
@@ -35,14 +35,14 @@ Reference: ai-chatroom `lib/usage.mjs` (MIT).
 
 ## Work orders
 
-- [ ] [Task 01: Add Antigravity usage client and register in usage_adapter](task-01-antigravity-usage-client.md) (code committed in the fork PR; live Office readback pending)
+- [x] [Task 01: Add Antigravity usage client and register in usage_adapter](task-01-antigravity-usage-client.md) (code committed in the fork PR; live Office readback pending)
 
 ## Verification results
 
 - `cd apps/backend && go test ./internal/agent/usage -count=1` passed.
 - `cd apps/backend && go test ./internal/agent/agents -run '^TestAntigravityACP_' -count=1` passed.
 - `cd apps/backend && go test ./internal/backendapp -run '^TestTeamClaudeStatusURL$' -count=1` passed.
-- Manual `agy -p "/usage" --output-format json` verified: SUCCESS, 0 turns, 0 tokens.
+- Live `agy -p "/usage" --output-format json` verified: `SUCCESS`, 0 turns, 0 tokens.
 
 ## Bundled delivery
 

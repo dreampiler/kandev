@@ -1,7 +1,7 @@
 ---
 id: "01-antigravity-usage-client"
 title: "Add Antigravity (Gemini) usage client and register in usage_adapter"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -55,7 +55,14 @@ agy -p "/usage" --output-format json
 
 - Antigravity provider registered in `usage_adapter.go` `ensureRegistered`
 - Parser extracts "Gemini Models" group buckets, computes utilization = 1 - remaining_fraction
-- Live measurement: 7-day window 100%, reset 2026-10-02T18:47:39Z (5h bucket disabled)
+- Live measurement of `agy -p "/usage" --output-format json`: `status` `SUCCESS`,
+  `num_turns` 0, `usage.total_tokens` 0. The Gemini Models weekly bucket reported
+  `remaining_fraction` 0 (100% used) with reset time `2026-10-02T18:47:39Z`; the
+  disabled 5-hour bucket (no `reset_time`) was omitted, and the separate
+  "Claude and GPT models" group was not attributed to Gemini.
+- A disposable in-package test parsed the captured CLI output into provider `google`
+  with a single `7-day` window at 100%; the file was removed after the run and is
+  not committed.
 - Tests pass, commit hooks (Go lint) pass
 - Fork commit: `31304b2a2` (branch `kd/antigravity-usage`)
-- PR: https://github.com/dreampiler/kandev/pull/23 (draft)
+- PR: https://github.com/dreampiler/kandev/pull/23
