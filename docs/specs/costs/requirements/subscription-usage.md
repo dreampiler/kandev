@@ -23,10 +23,12 @@ The Office cost dashboard shows `$0` for every agent running on a subscription p
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.2:** `subscription` — the agent authenticates via an OAuth flow or subscription credential (Claude OAuth token in `~/.claude/.credentials.json`, Codex subscription token in `~/.config/codex/auth.json`). For these agents, utilization percentage is the primary metric.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.3:** Claude profiles: if `CLAUDE_CODE_OAUTH_TOKEN` is in the credential set, or `~/.claude/.credentials.json` exists and contains `claudeAiOauth`, billing type is `subscription`. Otherwise `api_key`.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.4:** Codex profiles: if `~/.config/codex/auth.json` exists with a subscription token, billing type is `subscription`. Otherwise `api_key`.
-- **AC-COSTS-SUBSCRIPTION-USAGE-001.5:** All other agents: `api_key`.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.5:** Agents other than Claude, Codex, and Antigravity: `api_key`.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.6:** Reads `access_token` from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`).
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.7:** Calls `GET https://api.anthropic.com/api/oauth/usage` with `Authorization: Bearer <token>`.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.8:** Parses `five_hour.utilization` and `seven_day.utilization` from the response body.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.9:** Antigravity ACP profiles have `subscription` billing type. Kandev reads quota without a model turn through `agy -p "/usage" --output-format json` and selects only the `Gemini Models` group.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.10:** Each active Gemini bucket becomes a utilization window with `100 * (1 - remaining_fraction)` percent used and its `reset_time`. Buckets without a valid reset time are omitted.
 
 ## Migrated source detail
 
@@ -79,7 +81,7 @@ type ProviderUsageClient interface {
 }
 ```
 
-Two implementations:
+Provider clients include:
 
 **`ClaudeUsageClient`**
 - Reads `access_token` from `~/.claude/.credentials.json` (`claudeAiOauth.accessToken`).
@@ -93,6 +95,11 @@ Two implementations:
 - Calls `GET https://chatgpt.com/backend-api/wham/usage` with `Authorization: Bearer <token>`.
 - Reads `x-codex-primary-used-percent` and `x-codex-secondary-used-percent` response headers.
 - Returns two `UtilizationWindow` entries: `primary` and `secondary`.
+
+**`AntigravityUsageClient`**
+- Runs the local `agy -p "/usage" --output-format json` usage command without starting a model turn.
+- Reads the `Gemini Models` group under `command.data.groups[]` and converts active `buckets[]` into the same `ProviderUsage` window shape as Claude and Codex.
+- Uses `window` for the label, `remaining_fraction` for utilization, and `reset_time` for the reset instant. A bucket without a valid reset instant is not an active window.
 
 ### Utilization cache
 
@@ -193,7 +200,7 @@ The `AgentInstance` response (from `/api/v1/office/workspaces/:id/agents`) gains
 ## Out of scope
 
 - Real-time (sub-second) utilization polling — provider APIs are not real-time and polling aggressively would itself consume quota.
-- Utilization tracking for providers without a public usage API (Gemini, Copilot, Amp, etc.) — those agents remain API key billing type with dollar costs only.
+- Utilization tracking for other providers without a usage source (Copilot, Amp, etc.) — those agents remain API key billing type with dollar costs only.
 - Billing integration or actual charge reconciliation — all costs remain estimates.
 - Per-model quota breakdown for Codex — the Codex usage API only returns two aggregate percentages.
 - Automatic token refresh for Codex — the Codex auth.json token refresh flow is not publicly documented; if the token is expired the fetch returns an error and the check is skipped (fail-open).
