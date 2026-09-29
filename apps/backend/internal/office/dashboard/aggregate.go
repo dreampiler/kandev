@@ -96,6 +96,15 @@ func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*Workspa
 	if err != nil {
 		return nil, err
 	}
+	activityByWorkspace := make(map[string][]*models.ActivityEntry)
+	for _, entry := range activity {
+		if entry != nil {
+			activityByWorkspace[entry.WorkspaceID] = append(activityByWorkspace[entry.WorkspaceID], entry)
+		}
+	}
+	for workspaceID, entries := range activityByWorkspace {
+		s.enrichActivityLabels(ctx, workspaceID, entries, nil)
+	}
 	agentCounts := s.aggregateAgentCounts(ctx)
 
 	entries := make([]WorkspaceAggregateEntry, 0, len(ordered))
