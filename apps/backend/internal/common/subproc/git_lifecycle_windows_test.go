@@ -7,9 +7,32 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
+
+func TestWindowsPrepareGitLifecycleCommandSuppressesConsoleWindow(t *testing.T) {
+	cmd := exec.Command("git")
+	if err := prepareGitLifecycleCommand(cmd); err != nil {
+		t.Fatalf("prepareGitLifecycleCommand: %v", err)
+	}
+	if cmd.SysProcAttr == nil {
+		t.Fatal("prepareGitLifecycleCommand did not set process attributes")
+	}
+	flags := cmd.SysProcAttr.CreationFlags
+	if flags&syscall.CREATE_NEW_PROCESS_GROUP == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
+	}
+	if flags&windows.CREATE_SUSPENDED == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_SUSPENDED", flags)
+	}
+	if flags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", flags)
+	}
+}
 
 func TestWindowsManagedGitJobCleanup(t *testing.T) {
 	dir := t.TempDir()
