@@ -28,6 +28,16 @@ On a clean checkout, pass `--install` or run `make install` once so frontend dep
 
 `dev-isolated` prints a `READY` block with ports, log paths, pidfile, and teardown command. Save the backend/web port and pidfile.
 
+On native Windows, use `scripts\dev-isolated.ps1` (optionally `-Web`) and
+`scripts\kandev-kill.ps1 -Pidfile <printed-pidfile> -Yes`. It sets a separate
+home/database and loopback hosts for the backend and agentctl. Do not launch
+`apps\backend\bin\kandev.exe` or `agentctl.exe` directly from a fresh worktree
+for validation: their default host settings can bind all interfaces and trigger
+a new Windows Firewall authorization prompt for that executable path. Before
+the first launch from a new path, tell the owner that one prompt may still occur
+while this procedure is being verified. Never create or delete firewall rules
+as part of a test.
+
 ## Diagnostic bundles
 
 Inside a Kandev task session, request only the evidence needed:

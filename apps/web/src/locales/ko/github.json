@@ -650,5 +650,6 @@
   "mergeQueueRecoveryStatusRepairRequested": "이 제거에 대한 복구를 요청했습니다.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "복구를 요청했습니다. 재대기 전에 새 커밋을 기다리는 중입니다.",
   "mergeQueueRecoveryStatusWaitingForCommit": "재대기 전에 새 커밋을 기다리는 중입니다.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "새 헤드를 감지했습니다. 필수 검사를 기다리는 중입니다."
+  "mergeQueueRecoveryStatusWaitingForChecks": "새 헤드를 감지했습니다. 필수 검사를 기다리는 중입니다.",
+  "loadingPullRequests": "풀 리퀘스트를 불러오는 중..."
 }
