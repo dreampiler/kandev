@@ -28,29 +28,12 @@ type BackendTemplateStep = {
   profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
   profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
 };
-
-function normalizeWorkflowStepFallback<
-  T extends {
-    disable_unclassified_fallback?: boolean;
-    allow_repeated_failure_fallback?: boolean | null;
-  },
->(step: T): T & { disable_unclassified_fallback: boolean } {
-  const disabled =
-    step.disable_unclassified_fallback ?? step.allow_repeated_failure_fallback === false;
-  return {
-    ...step,
-    disable_unclassified_fallback: disabled,
-    allow_repeated_failure_fallback:
-      step.allow_repeated_failure_fallback ?? (disabled ? false : undefined),
-  };
-}
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
   steps?: BackendTemplateStep[];
@@ -59,34 +42,30 @@ type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
 
 export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowTemplate => {
   const steps = template.default_steps ?? template.steps ?? [];
-  const default_steps: StepDefinition[] = steps.map((step) => {
-    const fallback = normalizeWorkflowStepFallback(step);
-    return {
-      id: step.id,
-      name: step.name,
-      position: step.position,
-      color: step.color,
-      prompt: step.prompt,
-      events: step.events,
-      is_start_step: step.is_start_step,
-      show_in_command_panel: step.show_in_command_panel,
-      agent_profile_id: step.agent_profile_id ? agentProfileId(step.agent_profile_id) : undefined,
-      session_target: step.session_target ?? null,
-      profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
-        step.profile_session_start_policy,
-      ),
-      profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
-        step.profile_session_end_policy,
-      ),
-      disable_unclassified_fallback: fallback.disable_unclassified_fallback,
-      allow_repeated_failure_fallback: fallback.allow_repeated_failure_fallback,
-      complete_task_on_enter: step.complete_task_on_enter,
-      auto_advance_requires_signal: step.auto_advance_requires_signal,
-      cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
-      wip_limit: step.wip_limit,
-      pull_from_step_id: step.pull_from_step_id ?? null,
-    };
-  });
+  const default_steps: StepDefinition[] = steps.map((step) => ({
+    id: step.id,
+    name: step.name,
+    position: step.position,
+    color: step.color,
+    prompt: step.prompt,
+    events: step.events,
+    is_start_step: step.is_start_step,
+    show_in_command_panel: step.show_in_command_panel,
+    agent_profile_id: step.agent_profile_id ? agentProfileId(step.agent_profile_id) : undefined,
+    session_target: step.session_target ?? null,
+    profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
+      step.profile_session_start_policy,
+    ),
+    profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
+      step.profile_session_end_policy,
+    ),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
+    complete_task_on_enter: step.complete_task_on_enter,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
+    wip_limit: step.wip_limit,
+    pull_from_step_id: step.pull_from_step_id ?? null,
+  }));
   return {
     ...template,
     default_steps,
@@ -124,7 +103,8 @@ export async function listWorkflowSteps(workflowId: string, options?: ApiRequest
   return {
     ...response,
     steps: response.steps.map((step) => ({
-      ...normalizeWorkflowStepFallback(step),
+      ...step,
+      disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
       profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
         step.profile_session_start_policy,
       ),
@@ -138,7 +118,8 @@ export async function listWorkflowSteps(workflowId: string, options?: ApiRequest
 export async function getWorkflowStep(stepId: string, options?: ApiRequestOptions) {
   const step = await fetchJson<WorkflowStep>(`/api/v1/workflow/steps/${stepId}`, options);
   return {
-    ...normalizeWorkflowStepFallback(step),
+    ...step,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),
@@ -164,7 +145,6 @@ export async function createWorkflowStep(
     profile_session_start_policy?: StepDefinition["profile_session_start_policy"];
     profile_session_end_policy?: StepDefinition["profile_session_end_policy"];
     disable_unclassified_fallback?: boolean;
-    allow_repeated_failure_fallback?: boolean | null;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   },
@@ -175,7 +155,8 @@ export async function createWorkflowStep(
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
   return {
-    ...normalizeWorkflowStepFallback(step),
+    ...step,
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     profile_session_start_policy: normalizeWorkflowProfileSessionStartPolicy(
       step.profile_session_start_policy,
     ),

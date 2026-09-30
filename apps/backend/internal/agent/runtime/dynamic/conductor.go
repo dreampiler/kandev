@@ -198,23 +198,6 @@ func (c *Conductor) RouteAfterFailure(
 	expectedGeneration int64,
 	failure *routingerr.Error,
 ) (RouteDecision, error) {
-	effectSafe := failure != nil && failure.FallbackAllowed
-	return c.RouteAfterFailureWithEffect(
-		ctx, sessionID, logicalProfileID, currentExecutionProfileID, expectedGeneration, failure, effectSafe,
-	)
-}
-
-// RouteAfterFailureWithEffect is the caller-owned effect-safety variant. A
-// caller that proved the failed turn was pre-result passes effectSafe=true so
-// the repeated-failure policy can override the classifier's no-fallback
-// invariant once the same concrete profile has failed enough times.
-func (c *Conductor) RouteAfterFailureWithEffect(
-	ctx context.Context,
-	sessionID, logicalProfileID, currentExecutionProfileID string,
-	expectedGeneration int64,
-	failure *routingerr.Error,
-	effectSafe bool,
-) (RouteDecision, error) {
 	if c.engine == nil || c.profiles == nil {
 		return RouteDecision{}, errors.New("dynamic conductor is not configured")
 	}
@@ -222,8 +205,8 @@ func (c *Conductor) RouteAfterFailureWithEffect(
 	if err != nil {
 		return RouteDecision{}, err
 	}
-	return c.engine.ApplyFailureContextWithEffect(
-		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure, effectSafe,
+	return c.engine.ApplyFailureContext(
+		ctx, sessionID, profile, expectedGeneration, currentExecutionProfileID, failure,
 	)
 }
 
@@ -352,13 +335,12 @@ func (c *Conductor) nextAfterLaunchFailure(
 	}
 	if !classified.FallbackAllowed {
 		return RouteDecision{}, false, nil
-	} else if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
+	}
+	if c.engine.ActionFor(profile, decision.ExecutionProfileID, classified.Code) != ActionTryNext {
 		return RouteDecision{}, false, nil
 	}
-	// A launch failure never produced a turn result, so the failed attempt is
-	// effect-safe by construction.
-	next, err := c.engine.ApplyFailureContextWithEffect(
-		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified, true,
+	next, err := c.engine.ApplyFailureContext(
+		ctx, sessionID, profile, decision.Generation, decision.ExecutionProfileID, classified,
 	)
 	if err != nil {
 		return RouteDecision{}, true, err

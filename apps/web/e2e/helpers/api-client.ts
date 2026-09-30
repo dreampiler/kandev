@@ -458,6 +458,8 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   return fields;
 }
 
+const MAX_TASK_DELETE_PREVIEW_ATTEMPTS = 3;
+
 /**
  * HTTP API client for seeding test data via the backend REST API.
  */
@@ -469,13 +471,14 @@ export class ApiClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: Pick<RequestInit, "redirect">,
+    options?: Pick<RequestInit, "redirect"> & { extraHeaders?: Record<string, string> },
   ): Promise<Response> {
+    const { extraHeaders, ...requestOptions } = options ?? {};
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: await this.requestHeaders(method, body),
+      headers: { ...(await this.requestHeaders(method, body)), ...extraHeaders },
       body: body ? JSON.stringify(body) : undefined,
-      ...options,
+      ...requestOptions,
     });
   }
 
@@ -501,7 +504,12 @@ export class ApiClient {
     method: string,
     body?: unknown,
   ): Promise<Record<string, string> | undefined> {
-    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    // This client is worker-scoped, but its backend can restart during a test.
+    // Do not let fetch reuse an idle keep-alive socket from the previous process.
+    const headers: Record<string, string> = {
+      Connection: "close",
+      ...(body ? { "Content-Type": "application/json" } : {}),
+    };
     if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
       headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
         this.baseUrl,
@@ -702,7 +710,7 @@ export class ApiClient {
   /**
    * Delete kanban-only agent profiles except the ones in keepIds.
    *
-   * Office-scoped profiles (those with a non-empty `workspace_id`) are
+   * Office-scoped profiles (those with a non-empty `workspaceId`) are
    * always preserved — they belong to onboarded office workspaces and
    * are managed via the office agent endpoints, not by this helper.
    * Without this guard the per-test cleanup deletes the seeded CEO and
@@ -712,8 +720,7 @@ export class ApiClient {
     const { agents } = await this.listAgents();
     for (const agent of agents) {
       for (const profile of agent.profiles ?? []) {
-        const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
-        if (wsId) continue;
+        if (profile.workspaceId) continue;
         if (!keepIds.includes(profile.id)) {
           await this.deleteTestProfile(profile.id);
         }
@@ -1350,6 +1357,7 @@ export class ApiClient {
     auto_focus_new_tasks?: boolean;
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
+    agent_tab_close_behavior?: "delete_session" | "hide_panel";
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
@@ -1519,18 +1527,39 @@ export class ApiClient {
   ): Promise<void> {
     const cascade = options?.cascade ?? false;
     const discardWorktreeChanges = options?.discardWorktreeChanges ?? false;
-    const preview = await this.request<{ confirmation_id: string }>(
-      "POST",
-      "/api/v1/tasks/delete-preflight",
-      { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
-    );
     const query = new URLSearchParams();
     if (cascade) query.set("cascade", "true");
     if (discardWorktreeChanges) query.set("discard_worktree_changes", "true");
     const queryString = query.toString() ? `?${query.toString()}` : "";
-    await this.request("DELETE", `/api/v1/tasks/${taskId}${queryString}`, undefined, {
-      "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id,
-    });
+    const deletePath = `/api/v1/tasks/${taskId}${queryString}`;
+    for (let attempt = 0; attempt < MAX_TASK_DELETE_PREVIEW_ATTEMPTS; attempt += 1) {
+      const preview = await this.request<{ confirmation_id: string }>(
+        "POST",
+        "/api/v1/tasks/delete-preflight",
+        { task_ids: [taskId], cascade, discard_worktree_changes: discardWorktreeChanges },
+      );
+      const response = await this.rawRequest("DELETE", deletePath, undefined, {
+        extraHeaders: { "X-Kandev-Task-Delete-Confirmation": preview.confirmation_id },
+      });
+      if (response.ok) {
+        await response.json();
+        return;
+      }
+
+      const text = await response.text();
+      let isStalePreview = false;
+      if (response.status === 409) {
+        try {
+          const payload = JSON.parse(text) as { error?: unknown };
+          isStalePreview = payload.error === "task deletion preview is no longer current";
+        } catch {
+          isStalePreview = false;
+        }
+      }
+      if (!isStalePreview || attempt === MAX_TASK_DELETE_PREVIEW_ATTEMPTS - 1) {
+        throw new Error(`API DELETE ${deletePath} failed (${response.status}): ${text}`);
+      }
+    }
   }
 
   async archiveTask(taskId: string): Promise<void> {
@@ -2666,6 +2695,7 @@ export class ApiClient {
       content: string;
       author_type: string;
       type?: string;
+      turn_id?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
       created_at?: string;

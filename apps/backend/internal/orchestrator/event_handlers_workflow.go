@@ -7038,7 +7038,7 @@ func (s *Service) quiesceActiveResetTurn(
 		turnID = ""
 	}
 	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
-		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
+		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relockWithContext,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
 	)
 	if err != nil {

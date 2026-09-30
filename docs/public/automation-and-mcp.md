@@ -335,6 +335,10 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 `create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
 
+In task mode, a session-bound Kanban child can pass `parent_id: "self"` to create a sibling under its direct parent when the one-level Kanban depth limit is reached. The result reports the requested and effective parent and explains that the common parent owns coordination while the calling session remains the creation source. An explicit child ID retains the depth error. External MCP callers cannot use the `self` shorthand, and Office task creation keeps its existing runtime and skill boundary.
+
+The additive `parent_resolution` result contains `requested_parent_id`, `resolved_parent_id`, `reason: "kanban_depth_limit"`, and an explanatory `message`. A deduplicated result describes existing work without creation or reparenting; its top-level `parent_id` remains the returned task's actual parent. The `deduplicated` and `creation_complete` indicators retain their existing meaning. See [Coordination](coordination.md#create-a-subtask-from-an-agent) for inheritance and parent controls.
+
 ### Protect task plan writes
 
 Task plans are shared documents. Agent writes use an opaque `version` to detect
@@ -923,7 +927,7 @@ External MCP exposes tools in these groups:
 - workspace/workflow configuration: list workspaces, workflows, repositories, and workflow steps; create, update, delete, import, or export workflows; create, update, delete, or reorder steps;
 - agents and profiles: list/update agents; create/delete profiles; list/update profiles; get/update profile MCP configuration;
 - executors: list executors and profiles; create, update, or delete executor profiles;
-- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; saved prompt tools are read-only;
+- saved prompts: list prompt summaries without content or read one prompt by its exact, case-sensitive name; create new prompts or update custom prompts that allow agent edits;
 - agent-accessible settings: search setting definitions, describe a field, list authorized resource targets, read saved values, and update declared values through one compact contract;
 - tasks: list, create, move, delete, archive, or update task state; list a task's sessions; read task conversation; discover or answer pending clarification questions; and discover or resolve live agent permission requests.
 
@@ -972,7 +976,7 @@ contains summaries only, so it does not include prompt content:
 ```json
 {
   "shared_prompts": [
-    { "name": "code-review", "builtin": true, "content_bytes": 1234 }
+    { "name": "code-review", "builtin": true, "allow_agent_edits": false, "content_bytes": 1234 }
   ],
   "total": 1
 }
@@ -985,9 +989,36 @@ Use `get_shared_prompt_kandev` with one saved prompt name to read its full conte
 ```
 
 Names are case-sensitive. Kandev trims surrounding whitespace before lookup. The result contains
-`name`, `content`, `builtin`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
+`name`, `content`, `builtin`, `allow_agent_edits`, `content_bytes`, `created_at`, and `updated_at`; it does not expose the
 internal prompt ID. An empty or unknown name returns an error without prompt content. These tools
-only read saved prompts. They do not create, update, delete, or expand `@name` references.
+only read saved prompts and do not expand `@name` references.
+
+### Create or update a saved prompt
+
+Configuration and external MCP clients expose `create_shared_prompt_kandev` and
+`update_shared_prompt_kandev`. Both require `org.config.manage` and accept:
+
+```json
+{ "name": "review-policy", "content": "Check correctness and test coverage." }
+```
+
+Creation fails if the exact name already exists. Update replaces the full content
+of an existing, case-sensitive name and cannot rename it. Names allow up to 512
+UTF-8 bytes, content up to 1 MiB; surrounding whitespace is trimmed. Success
+returns the same saved-prompt fields as `get_shared_prompt_kandev`.
+
+**Built-in prompts cannot be changed by agents.** Existing custom prompts and
+prompts created in Settings default to human-only editing. An operator can edit a
+custom prompt in **Settings > Prompts**, enable **Allow agent edits**, and save.
+MCP-created prompts allow later agent edits by default; an operator can turn that
+off. MCP cannot change this permission, and generic `update_settings_kandev`
+prompt writes enforce the same protection.
+
+Apply shared prompt changes before changing workflow steps that inject them, then
+read back both the prompts and steps. Successful writes refresh open prompt
+settings pages and affect future `@name` expansions. They preserve unsaved editor
+drafts and do not rewrite instructions already captured by a running turn.
+There is no shared-prompt deletion tool.
 
 ### Answer a pending clarification question
 

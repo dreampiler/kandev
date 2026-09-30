@@ -39,7 +39,6 @@ A matching failure has the same trusted origin, phase, semantic code, and comple
 
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.1:** An absent, null, or disabled policy shall retain manual recovery for unclassified failures. Known transient and hard policies shall retain their behavior.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.2:** An enabled candidate policy shall accept a consecutive-failure threshold from 2 through 10. Invalid settings shall fail validation without changing saved configuration.
-- **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.2a:** A legacy `unclassified.repeated_failure.threshold` of 1 shall read as effective threshold 2 and canonicalize to 2 only on an explicit save. Reading an old row shall not write it. The canonical `consecutive_failure_threshold` field shall still reject 1, and conflicting dual input shall fail without mutation.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.3:** Each qualifying failure below the threshold shall require manual recovery. The policy shall not schedule retries or reset waits.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.4:** At the threshold, Kandev shall select the next eligible configured candidate in order. The session, conversation, and logical profile shall remain unchanged. Exhaustion shall require manual recovery without wrapping to an earlier candidate.
 - **AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.5:** Every counted failure shall have current, trusted evidence of no output and no effects. Stale, conflicting, duplicate, incomplete, or ambiguous evidence shall never advance the candidate.

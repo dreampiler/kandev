@@ -21,24 +21,4 @@ describe("workflow step update payload", () => {
     expect(stepUpdatePayload(enabled)).toMatchObject({ disable_unclassified_fallback: true });
     expect(stepUpdatePayload(disabled)).toMatchObject({ disable_unclassified_fallback: false });
   });
-
-  it("preserves the legacy allow alias in step updates", () => {
-    const step = Object.assign(
-      {
-        id: "step-1",
-        workflow_id: toWorkflowId("wf-1"),
-        name: "Review",
-        position: 1,
-        color: "blue",
-        created_at: "",
-        updated_at: "",
-      },
-      { disable_unclassified_fallback: true, allow_repeated_failure_fallback: false },
-    );
-
-    expect(stepUpdatePayload(step)).toMatchObject({
-      disable_unclassified_fallback: true,
-      allow_repeated_failure_fallback: false,
-    });
-  });
 });

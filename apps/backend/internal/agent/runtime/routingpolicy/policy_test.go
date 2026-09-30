@@ -166,46 +166,6 @@ func withReset(failure *routingerr.Error, resetAt time.Time) *routingerr.Error {
 	return failure
 }
 
-func unclassifiedFailure() *routingerr.Error {
-	return &routingerr.Error{
-		Code:             routingerr.CodeAgentRuntime,
-		Class:            routingerr.ClassUnclassified,
-		CatalogueVersion: routingerr.CatalogueVersion,
-		FallbackAllowed:  false,
-	}
-}
-
-func TestEvaluateUnclassifiedStaysStoppedWhenPolicyDisabled(t *testing.T) {
-	document := DefaultDocument()
-	got := Evaluate(document, EvaluationInput{
-		Failure: unclassifiedFailure(), EffectSafe: true,
-		Now: time.Unix(1, 0).UTC(),
-	})
-	if got.Kind != DecisionStop {
-		t.Fatalf("kind = %s, want stop", got.Kind)
-	}
-}
-
-func TestDocumentWithoutUnclassifiedSectionStaysFailClosed(t *testing.T) {
-	// A document persisted before the unclassified section existed must keep
-	// loading and must keep stopping unclassified failures.
-	raw := []byte(`{"version":1,"transient":{"retry":{"enabled":false,"max_retries":0,"initial_interval_seconds":0},"wait_for_reset":{"enabled":false,"max_wait_seconds":0},"on_exhausted":"skip"},"hard":{"retry":{"enabled":false,"max_retries":0,"initial_interval_seconds":0},"wait_for_reset":{"enabled":false,"max_wait_seconds":0},"on_exhausted":"skip"}}`)
-	var document Document
-	if err := json.Unmarshal(raw, &document); err != nil {
-		t.Fatalf("decode legacy document: %v", err)
-	}
-	if err := ValidateDocument(document); err != nil {
-		t.Fatalf("legacy document should stay valid: %v", err)
-	}
-	got := Evaluate(document, EvaluationInput{
-		Failure: unclassifiedFailure(), EffectSafe: true,
-		Now: time.Unix(1, 0).UTC(),
-	})
-	if got.Kind != DecisionStop {
-		t.Fatalf("legacy document kind = %s, want stop", got.Kind)
-	}
-}
-
 func itoa(value int64) string {
 	if value == 0 {
 		return "0"

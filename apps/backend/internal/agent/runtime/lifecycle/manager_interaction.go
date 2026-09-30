@@ -119,21 +119,48 @@ func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure, beforeAdmission)
+	execution.setInitialPromptDispatchCallbacks(beforeAdmission, onDispatched, onFailure)
 	return nil
 }
 
 // PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
 // must keep admission serialized until the queued prompt is actually dispatched.
 func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
-	return m.PromptAgentWithAdmissionCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil, onDispatched)
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
+	if err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
+	defer operationRelease()
+	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
+	}
+	return result, err
 }
 
-// PromptAgentWithAdmissionCallback revalidates ownership after stream
-// preparation and immediately before a new prompt generation is allocated.
+// PromptAgentWithAdmissionCallback lets the orchestrator revalidate its
+// dispatch reservation after lifecycle stream preparation and before a new
+// prompt generation is allocated.
 func (m *Manager) PromptAgentWithAdmissionCallback(
 	ctx context.Context,
-	executionID, prompt string,
+	executionID string,
+	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 	beforeAdmission func() error,
@@ -157,7 +184,9 @@ func (m *Manager) PromptAgentWithAdmissionCallback(
 		return nil, err
 	}
 	defer operationRelease()
-	result, err := m.sessionManager.SendPromptWithAdmissionCallback(ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched)
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(
+		ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -1470,6 +1499,7 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain

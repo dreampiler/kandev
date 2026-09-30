@@ -96,11 +96,6 @@ export function dynamicProfilePayload(
             enabled: candidate.policies.unclassified.enabled,
             consecutive_failure_threshold:
               candidate.policies.unclassified.consecutiveFailureThreshold,
-            on_exhausted: candidate.policies.unclassified.onExhausted ?? "stop",
-            repeated_failure: candidate.policies.unclassified.repeatedFailure ?? {
-              enabled: candidate.policies.unclassified.enabled,
-              threshold: candidate.policies.unclassified.consecutiveFailureThreshold,
-            },
           },
         },
       })),

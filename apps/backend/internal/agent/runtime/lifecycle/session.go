@@ -164,7 +164,31 @@ func (sm *SessionManager) InitializeSession(
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
 ) (*InitializeResult, error) {
+	return sm.InitializeSessionWithSettingsPolicy(
+		ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers,
+		SessionSettingsPolicyStrict,
+	)
+}
+
+// InitializeSessionWithSettingsPolicy initializes an ACP session with an
+// explicit per-attempt settings policy.
+func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
+	ctx context.Context,
+	client *agentctl.Client,
+	agentConfig agents.Agent,
+	existingSessionID string,
+	workspacePath string,
+	mcpServers []agentctltypes.McpServer,
+	settingsPolicy SessionSettingsPolicy,
+) (*InitializeResult, error) {
+	if settingsPolicy != SessionSettingsPolicyStrict && settingsPolicy != SessionSettingsPolicyProviderRestored {
+		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
+	}
 	rt := agentConfig.Runtime()
+	if settingsPolicy == SessionSettingsPolicyProviderRestored &&
+		(!rt.SessionConfig.NativeSessionResume || existingSessionID == "") {
+		return nil, fmt.Errorf("provider-restored recovery requires a native resumable session identity")
+	}
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("workspace_path", workspacePath),
@@ -198,7 +222,7 @@ func (sm *SessionManager) InitializeSession(
 		zap.String("agent_version", result.AgentVersion))
 
 	// Step 2: Create or resume ACP session based on configuration
-	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers)
+	sessionID, err := sm.createOrLoadSession(ctx, client, agentConfig, existingSessionID, workspacePath, mcpServers, settingsPolicy)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +239,7 @@ func (sm *SessionManager) createOrLoadSession(
 	existingSessionID string,
 	workspacePath string,
 	mcpServers []agentctltypes.McpServer,
+	settingsPolicy SessionSettingsPolicy,
 ) (string, error) {
 	rt := agentConfig.Runtime()
 	sm.logger.Debug("createOrLoadSession decision",
@@ -223,9 +248,16 @@ func (sm *SessionManager) createOrLoadSession(
 		zap.String("existing_session_id", existingSessionID),
 		zap.Bool("will_attempt_load", rt.SessionConfig.NativeSessionResume && existingSessionID != ""))
 	if rt.SessionConfig.NativeSessionResume && existingSessionID != "" {
-		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
+		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers, settingsPolicy)
 		if err == nil {
 			return sessionID, nil
+		}
+		if settingsPolicy == SessionSettingsPolicyProviderRestored {
+			sm.logger.Warn("session/load failed during provider-restored recovery, preserving session identity",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.Error(err))
+			return "", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
 		}
 		// If the underlying ACP connection is dead (peer disconnected, context
 		// cancelled), session/new on the same client will return the same
@@ -315,12 +347,17 @@ func (sm *SessionManager) loadSession(
 	agentConfig agents.Agent,
 	sessionID string,
 	mcpServers []agentctltypes.McpServer,
+	settingsPolicy SessionSettingsPolicy,
 ) (string, error) {
 	sm.logger.Info("restoring existing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
 		zap.String("session_id", sessionID))
 
-	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
+	loadSettingsPolicy := streams.SessionSettingsPolicyStrict
+	if settingsPolicy == SessionSettingsPolicyProviderRestored {
+		loadSettingsPolicy = streams.SessionSettingsPolicyProviderRestored
+	}
+	if err := client.LoadSessionWithPolicy(ctx, sessionID, mcpServers, loadSettingsPolicy); err != nil {
 		// context.Canceled is caller teardown (WS disconnect, session already
 		// gone) rather than an agent or transport fault, so it does not warrant
 		// an ERROR + stacktrace. DeadlineExceeded is a real startup/handshake
@@ -433,12 +470,26 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	if err != nil {
 		return err
 	}
+	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
 	providerDefaultConfig := execution.GetModelState()
+	if execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
+		// The provider has already restored this conversation with its own
+		// effective settings. Retrying saved launch selections here would turn
+		// recovery into another failed start, so omit those values for this
+		// attempt while retaining compatible, unrelated config options.
+		profileModel = ""
+		profileMode = ""
+		profileConfigOptions = sanitizeProviderRestoredConfigOptions(profileConfigOptions, providerDefaultConfig)
+		runtimeModel = ""
+		runtimeMode = ""
+		runtimeConfigOptions = sanitizeProviderRestoredConfigOptions(runtimeConfigOptions, providerDefaultConfig)
+		startModelPolicy = StartModelPolicy{}
+	}
 
 	// Decide the effective model up front under the executor-authoritative
 	// policy, then hand the decided model to the layers so it is applied once.
@@ -496,6 +547,21 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 
 	return nil
+}
+
+func strictAuggieTaskStartModelPolicy(
+	policy StartModelPolicy,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+) StartModelPolicy {
+	if execution == nil || execution.TaskScope != TaskLaunchScopeTask || execution.IsPassthrough ||
+		agentConfig == nil || agentConfig.ID() != "auggie" {
+		return policy
+	}
+	policy.FallbackModel = ""
+	policy.AutoFallback = false
+	policy.RequireExactModel = true
+	return policy
 }
 
 // applyStartModelPolicyToEffectiveModel resolves the effective model (profile
@@ -592,7 +658,10 @@ func (sm *SessionManager) initializeACPConnection(
 	if client == nil {
 		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	result, err := sm.InitializeSession(ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
+	result, err := sm.InitializeSessionWithSettingsPolicy(
+		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
+		execution.sessionSettingsStartupPolicy(),
+	)
 	releaseClient()
 	if err != nil {
 		// loadSession already logged the root cause. context.Canceled is
@@ -659,7 +728,7 @@ func (sm *SessionManager) applyProfileSessionLayers(
 	sanitizedOptions := sanitizeProfileConfigOptions(profileConfigOptions, execution.GetModelState())
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
-		if err := client.SetConfigOption(ctx, configID, value); err != nil {
+		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
 			sm.logger.Warn("failed to set profile config option via ACP",
 				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
 				zap.String("value", value), zap.Error(err))
@@ -717,7 +786,7 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 	}
 	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
 		value := sanitizedOptions[configID]
-		if err := client.SetConfigOption(ctx, configID, value); err != nil {
+		if err := setStartupSessionConfigOption(ctx, execution, client, configID, value); err != nil {
 			failed = append(failed, configID)
 			sm.logger.Warn("failed to set runtime config option via ACP",
 				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
@@ -727,6 +796,18 @@ func (sm *SessionManager) applyRuntimeSessionLayers(
 		finalConfigID = configID
 	}
 	return finalConfigID, failed
+}
+
+func setStartupSessionConfigOption(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	configID, value string,
+) error {
+	if execution != nil && execution.sessionSettingsStartupPolicy() == SessionSettingsPolicyProviderRestored {
+		return client.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyProviderRestored)
+	}
+	return client.SetConfigOption(ctx, configID, value)
 }
 
 func sanitizeProfileConfigOptions(options map[string]string, state *CachedModelState) map[string]string {
@@ -741,6 +822,49 @@ func sanitizeProfileConfigOptions(options map[string]string, state *CachedModelS
 		}
 	}
 	return cleaned
+}
+
+func sanitizeProviderRestoredConfigOptions(options map[string]string, state *CachedModelState) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	_, catalogKnown := capturedRuntimeConfigOptionCatalog(state)
+	if !catalogKnown {
+		return nil
+	}
+	type optionIdentity struct {
+		option streams.ConfigOption
+		count  int
+	}
+	identities := make(map[string]optionIdentity, len(state.ConfigOptions))
+	for _, option := range state.ConfigOptions {
+		id := strings.TrimSpace(option.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		identity := identities[key]
+		identity.count++
+		identity.option = option
+		identities[key] = identity
+	}
+	sanitized := make(map[string]string, len(options))
+	for id, value := range options {
+		if strings.TrimSpace(id) != id {
+			continue
+		}
+		identity, advertised := identities[strings.ToLower(id)]
+		if !advertised || identity.count != 1 || identity.option.ID != id ||
+			strings.TrimSpace(identity.option.Category) == "" ||
+			!isRestorableRuntimeConfigOption(id, identity.option.Category, value) {
+			continue
+		}
+		sanitized[id] = value
+	}
+	if len(sanitized) == 0 {
+		return nil
+	}
+	return sanitized
 }
 
 func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, execution *AgentExecution, sessionID, mode string) error {
@@ -793,6 +917,7 @@ func (sm *SessionManager) publishSettledConfigOptions(
 	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
 		Type:                    streams.EventTypeSessionModels,
 		SessionID:               acpSessionID,
+		SessionSettingsPolicy:   providerRestoredSettingsPolicy(execution),
 		CurrentModelID:          live.CurrentModelID,
 		SessionModels:           live.Models,
 		ConfigOptions:           live.ConfigOptions,
@@ -920,12 +1045,20 @@ func (sm *SessionManager) publishOriginalConfigOptionsWithProfile(
 	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
 		Type:                    streams.EventTypeSessionModels,
 		SessionID:               acpSessionID,
+		SessionSettingsPolicy:   providerRestoredSettingsPolicy(execution),
 		CurrentModelID:          currentModel,
 		SessionModels:           state.Models,
 		ConfigOptions:           options,
 		OriginalConfigCandidate: options,
 		Data:                    map[string]any{"original_config_settled": true},
 	})
+}
+
+func providerRestoredSettingsPolicy(execution *AgentExecution) streams.SessionSettingsPolicy {
+	if execution == nil {
+		return ""
+	}
+	return sessionSettingsProjectionPolicy(execution.sessionSettingsProjectionPolicy())
 }
 
 func setConfigOptionValue(options []streams.ConfigOption, configID, value string) bool {
@@ -993,7 +1126,9 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 		var admissionRejectedHandler func(InitialPromptFailure)
 		if onInitialPromptFailure != nil {
 			initialPromptFailure := sm.initialPromptFailure
-			admissionRejectedHandler = func(InitialPromptFailure) { onInitialPromptFailure() }
+			admissionRejectedHandler = func(InitialPromptFailure) {
+				onInitialPromptFailure()
+			}
 			failureHandler = func(failure InitialPromptFailure) {
 				onInitialPromptFailure()
 				if initialPromptFailure != nil {
@@ -1014,8 +1149,10 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				acpAttachments,
 				false,
 				sendPromptCallbacks{
-					beforeAdmission: beforeAdmission, onAdmissionRejected: admissionRejectedHandler,
-					onDispatched: onDispatched, onFailure: failureHandler,
+					beforeAdmission:     beforeAdmission,
+					onAdmissionRejected: admissionRejectedHandler,
+					onDispatched:        onDispatched,
+					onFailure:           failureHandler,
 				},
 				false,
 			)
@@ -1307,11 +1444,21 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
-	return sm.SendPromptWithAdmissionCallback(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil, onDispatched)
+	return sm.sendPrompt(
+		ctx,
+		execution,
+		prompt,
+		validateStatus,
+		attachments,
+		dispatchOnly,
+		sendPromptCallbacks{onDispatched: onDispatched},
+		false,
+	)
 }
 
-// SendPromptWithAdmissionCallback lets the owner revalidate dispatch ownership
-// after prompt/attachment preparation and before a generation is allocated.
+// SendPromptWithAdmissionCallback reports the final point before a new prompt
+// generation is allocated. Callers can revalidate dispatch ownership after
+// stream preparation and reject work that was cancelled or superseded.
 func (sm *SessionManager) SendPromptWithAdmissionCallback(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -1741,6 +1888,12 @@ func (sm *SessionManager) preparePrompt(
 	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
 		ctx = trace.ContextWithSpan(ctx, sessionSpan)
 	}
+	// For follow-up prompts, validate status before claiming a new generation.
+	if validateStatus {
+		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
+			return ctx, "", fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+		}
+	}
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	sm.logger.Info("sending prompt to agent",
 		zap.String("execution_id", execution.ID),
@@ -1753,8 +1906,6 @@ func (sm *SessionManager) admitPrompt(execution *AgentExecution, validateStatus 
 	if validateStatus && execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 		return 0, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 	}
-	// Allocate the generation only after the owner confirms that this prompt is
-	// still current. Rejected admissions therefore cannot own a turn identity.
 	var promptGeneration uint64
 	switch {
 	case sm.promptStarter != nil:

@@ -27,11 +27,4 @@ func TestWorkflowStepProjectionRetainsUnclassifiedVeto(t *testing.T) {
 	if !veto {
 		t.Fatal("projected disable_unclassified_fallback = false, want true")
 	}
-	var legacyAllow bool
-	if err := json.Unmarshal(fields["allow_repeated_failure_fallback"], &legacyAllow); err != nil {
-		t.Fatalf("unmarshal projected legacy allow alias: %v", err)
-	}
-	if legacyAllow {
-		t.Fatal("projected legacy allow alias = true, want false")
-	}
 }

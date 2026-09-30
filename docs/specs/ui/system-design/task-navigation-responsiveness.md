@@ -28,6 +28,7 @@ Do not replace the virtualizer or increase mounted-row counts to conceal delays.
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.4` | Progressive restoration |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.5` | Scope and stale-response protection |
 | `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.6` | Responsive presentation |
+| `AC-UI-TASK-NAVIGATION-RESPONSIVENESS-001.7` | Task route presentation and essential hydration |
 
 ## Components and responsibilities
 
@@ -244,3 +245,78 @@ the bounded local cache choice and its alternatives are preserved here.
 Per-hook ownership cannot coordinate multiple consumers, while a global cache
 would weaken scope isolation. A framework migration would expand the repair
 without resolving the resource-specific readiness and invalidation contracts.
+
+## Task route presentation and essential hydration
+
+The SPA task route uses the current workspace's existing task projection and
+validated session records to render available content during navigation. Do
+not retain or replay complete hydration bundles: messages, runtime state,
+settings, and session epochs remain owned by their existing store slices.
+Unknown or cross-workspace projections and unknown requested sessions follow
+normal authoritative loading. Task removal/recovery boundaries remain in place.
+
+Client route resolution fetches only the task and its owned session list, then
+hydrates those essential slices. The full boot/SSR enrichment entry points
+remain unchanged. Existing mounted domain hooks own message/turn backfill,
+profile reconciliation, repositories, workflow snapshots, settings, and shells;
+one slow optional resource must not delay other content. The existing full-session
+reconciler also initializes missing persisted model/configuration state through
+the shared boot hydration mapper; a model event already in the store wins over
+that background response. Omitted messages/turns
+must remain unloaded, never become fabricated empty histories.
+
+Read-cursor capture remains gated until the fresh session list is hydrated.
+Readiness belongs to the exact hydration snapshot, not just the task/session
+route key: returning to the same route requires its fresh snapshot to hydrate.
+Automatic session creation also waits for authoritative task/session hydration;
+a lightweight projection is presentation data, not permission to launch.
+Task details supplied by route resolution must not trigger a duplicate details
+request. Reconnects received before route readiness retain one pending details
+refresh and drain it once hydration completes. Foreground refresh and route-error
+recovery remain available.
+
+Task/session ownership is checked before cached presentation. The task projection
+preserves workspace, repository, status, and recovery metadata. Projection and
+session selection use one store snapshot. Without an explicit session in the
+URL, authoritative resolution preserves the currently selected owned session;
+it falls back to the primary session only if that selection is no longer valid.
+Route request
+cancellation and session hydration epochs reject obsolete navigation and live
+session overwrites. There is no new persistent cache or backend API.
+
+This section implements `.7` and applies the `.5`/`.6` isolation and responsive
+contracts to whole-task presentation.
+
+## Browser work before task paint
+
+Cached route data must also avoid unnecessary synchronous browser work:
+
+- Responsive consumers share one event-updated snapshot and one set of media
+  listeners. Ordinary renders reuse that snapshot; the last unsubscribe clears
+  it so a later mount reads the current viewport.
+- File-tree rows initially use positive cached or estimated heights. Browser
+  ResizeObserver entries provide actual row and viewport sizes, including later
+  resizes and visibility changes. When ResizeObserver is unavailable, measure
+  mounted rows synchronously and keep the library's viewport fallback. Preserve
+  positive cached row geometry while hidden and retain the existing row window,
+  selection and scroll rules.
+- Pinned-pane enforcement reads container width once before changing constraints;
+  each subsequent layout event still measures the current container.
+- Spinner CSS provides initial motion; animation promotion runs after the first
+  frame and cancels on unmount. Existing visibility and reduced-motion ownership
+  remains unchanged.
+- Default static Markdown reuses context-free parsed element trees in an LRU
+  bounded by 128 entries and 512,000 source characters. Oversized messages bypass
+  retention. Custom renderers and active text motion bypass this cache; task and
+  file-link providers stay outside it so callbacks and diagram identity always
+  belong to the current consumer. This caches pure rendering, not authorized
+  task state, mounted views or component effects.
+- Unopened task-create forms do not mount. After first use they retain the
+  existing close, draft and focus lifecycle. Sidebar selection reaches unrelated
+  rows as an unchanged local boolean instead of a changing global task ID.
+
+Use deterministic regressions for those mechanisms and matched production-build
+Firefox/Chromium measurements for the aggregate effect. Animation-frame DOM
+readiness is a navigation proxy, not proof of compositor paint. Retaining complete
+chat views was considered but rejected: its modest measured benefit did not
+justify changing message refresh, composer and hidden-view lifecycles.

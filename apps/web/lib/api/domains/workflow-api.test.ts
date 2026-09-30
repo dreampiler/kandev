@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import { afterEach, beforeEach, vi } from "vitest";
 import { createWorkflowStep, normalizeWorkflowTemplate } from "./workflow-api";
 
-const WORKFLOW_ID = "workflow-1";
-
 const fetchSpy = vi.fn<typeof fetch>();
 
 beforeEach(() => {
@@ -60,7 +58,7 @@ describe("createWorkflowStep", () => {
     );
 
     const payload: Parameters<typeof createWorkflowStep>[0] = {
-      workflow_id: WORKFLOW_ID,
+      workflow_id: "workflow-1",
       name: "Working",
       position: 1,
       agent_profile_id: "profile-a",
@@ -83,7 +81,7 @@ describe("createWorkflowStep", () => {
       new Response(
         JSON.stringify({
           id: "step-1",
-          workflow_id: WORKFLOW_ID,
+          workflow_id: "workflow-1",
           name: "Working",
           position: 1,
           color: "",
@@ -100,7 +98,7 @@ describe("createWorkflowStep", () => {
 
     const step = await createWorkflowStep(
       {
-        workflow_id: WORKFLOW_ID,
+        workflow_id: "workflow-1",
         name: "Working",
         position: 1,
         color: "",
@@ -111,29 +109,5 @@ describe("createWorkflowStep", () => {
     expect(step.profile_session_start_policy).toBe("reuse");
     expect(step.profile_session_end_policy).toBe("park");
     expect(step.complete_task_on_enter).toBe(false);
-  });
-
-  it("reads a legacy allow=false field as the new workflow veto", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          id: "step-1",
-          workflow_id: WORKFLOW_ID,
-          name: "Review",
-          position: 1,
-          color: "",
-          allow_repeated_failure_fallback: false,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    );
-
-    const step = await createWorkflowStep(
-      { workflow_id: WORKFLOW_ID, name: "Review", position: 1 },
-      { baseUrl: "http://api.test" },
-    );
-
-    expect(step.disable_unclassified_fallback).toBe(true);
-    expect(step.allow_repeated_failure_fallback).toBe(false);
   });
 });

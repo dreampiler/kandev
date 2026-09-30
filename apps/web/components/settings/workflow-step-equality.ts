@@ -34,7 +34,6 @@ function profileStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
 function recoveryStepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
   return {
     disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
-    allow_repeated_failure_fallback: step.allow_repeated_failure_fallback,
   };
 }
 

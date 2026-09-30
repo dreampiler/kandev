@@ -3,7 +3,6 @@
 package routingpolicy
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -44,11 +43,6 @@ type ResetWaitPolicy struct {
 	MaxWaitSeconds int64 `json:"max_wait_seconds"`
 }
 
-type RepeatedFailurePolicy struct {
-	Enabled   bool  `json:"enabled"`
-	Threshold int64 `json:"threshold"`
-}
-
 type Policy struct {
 	Retry        RetryPolicy     `json:"retry"`
 	WaitForReset ResetWaitPolicy `json:"wait_for_reset"`
@@ -56,58 +50,8 @@ type Policy struct {
 }
 
 type UnclassifiedPolicy struct {
-	Enabled                     bool                   `json:"enabled"`
-	ConsecutiveFailureThreshold int64                  `json:"consecutive_failure_threshold"`
-	OnExhausted                 Outcome                `json:"on_exhausted,omitempty"`
-	RepeatedFailure             *RepeatedFailurePolicy `json:"repeated_failure,omitempty"`
-}
-
-func (policy *UnclassifiedPolicy) UnmarshalJSON(data []byte) error {
-	var wire struct {
-		Enabled                     *bool                  `json:"enabled"`
-		ConsecutiveFailureThreshold *int64                 `json:"consecutive_failure_threshold"`
-		OnExhausted                 Outcome                `json:"on_exhausted"`
-		RepeatedFailure             *RepeatedFailurePolicy `json:"repeated_failure"`
-	}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-	*policy = UnclassifiedPolicy{OnExhausted: wire.OnExhausted, RepeatedFailure: wire.RepeatedFailure}
-	if wire.Enabled != nil {
-		policy.Enabled = *wire.Enabled
-	}
-	if wire.ConsecutiveFailureThreshold != nil {
-		policy.ConsecutiveFailureThreshold = *wire.ConsecutiveFailureThreshold
-	}
-	if wire.RepeatedFailure == nil {
-		return nil
-	}
-	legacy := *wire.RepeatedFailure
-	if err := validateUnclassifiedAliasAgreement(wire.Enabled, wire.ConsecutiveFailureThreshold, &legacy); err != nil {
-		return err
-	}
-	if wire.Enabled == nil {
-		policy.Enabled = legacy.Enabled
-	}
-	if wire.ConsecutiveFailureThreshold == nil {
-		policy.ConsecutiveFailureThreshold = legacy.Threshold
-		if legacy.Enabled && legacy.Threshold == 1 {
-			policy.ConsecutiveFailureThreshold = MinUnclassifiedThreshold
-			legacy.Threshold = MinUnclassifiedThreshold
-		}
-	}
-	policy.RepeatedFailure = &legacy
-	return nil
-}
-
-func validateUnclassifiedAliasAgreement(enabled *bool, threshold *int64, legacy *RepeatedFailurePolicy) error {
-	if enabled != nil && *enabled != legacy.Enabled {
-		return errors.New("legacy repeated_failure.enabled conflicts with canonical enabled")
-	}
-	if threshold != nil && *threshold != legacy.Threshold {
-		return errors.New("legacy repeated_failure.threshold conflicts with canonical threshold")
-	}
-	return nil
+	Enabled                     bool  `json:"enabled"`
+	ConsecutiveFailureThreshold int64 `json:"consecutive_failure_threshold"`
 }
 
 type Document struct {
@@ -126,7 +70,7 @@ func DefaultDocument() Document {
 		Version:      Version,
 		Transient:    DefaultPolicy(),
 		Hard:         DefaultPolicy(),
-		Unclassified: &UnclassifiedPolicy{OnExhausted: OutcomeStop},
+		Unclassified: &UnclassifiedPolicy{},
 	}
 }
 
@@ -151,35 +95,15 @@ func ValidateDocument(document Document) error {
 	if err := ValidatePolicy(document.Hard); err != nil {
 		return fmt.Errorf("hard policy: %w", err)
 	}
-	return validateUnclassifiedPolicy(document.Unclassified)
-}
-
-func validateUnclassifiedPolicy(policy *UnclassifiedPolicy) error {
-	if policy == nil {
-		return nil
-	}
-	if policy.Enabled && (policy.ConsecutiveFailureThreshold < MinUnclassifiedThreshold || policy.ConsecutiveFailureThreshold > MaxUnclassifiedThreshold) {
-		return fmt.Errorf("unclassified.consecutive_failure_threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
-	}
-	if !policy.Enabled && policy.ConsecutiveFailureThreshold != 0 {
-		return errors.New("disabled unclassified threshold must be zero")
-	}
-	return validateRepeatedFailureCompatibility(policy)
-}
-
-func validateRepeatedFailureCompatibility(policy *UnclassifiedPolicy) error {
-	legacy := policy.RepeatedFailure
-	if legacy == nil {
-		return nil
-	}
-	if legacy.Enabled && (legacy.Threshold < MinUnclassifiedThreshold || legacy.Threshold > MaxUnclassifiedThreshold) {
-		return fmt.Errorf("legacy unclassified.repeated_failure.threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
-	}
-	if !legacy.Enabled && legacy.Threshold != 0 {
-		return errors.New("disabled legacy repeated_failure threshold must be zero")
-	}
-	if legacy.Enabled != policy.Enabled || (legacy.Enabled && legacy.Threshold != policy.ConsecutiveFailureThreshold) {
-		return errors.New("legacy repeated_failure fields conflict with the canonical unclassified policy")
+	if document.Unclassified != nil {
+		policy := document.Unclassified
+		if policy.Enabled {
+			if policy.ConsecutiveFailureThreshold < MinUnclassifiedThreshold || policy.ConsecutiveFailureThreshold > MaxUnclassifiedThreshold {
+				return fmt.Errorf("unclassified.consecutive_failure_threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
+			}
+		} else if policy.ConsecutiveFailureThreshold != 0 {
+			return errors.New("disabled unclassified threshold must be zero")
+		}
 	}
 	return nil
 }

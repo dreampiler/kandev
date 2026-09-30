@@ -111,21 +111,13 @@ func (a *mockAgent) handleDynamicUnclassifiedFallback(
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil, true
 }
 
-// dynamicUnclassifiedFallbackPathSanitizer maps any character that is illegal
-// in a Windows file name to "_" so a raw session id (which may capture a
-// trailing "<...>" tag) still yields a usable temp file on every platform.
-var dynamicUnclassifiedFallbackPathSanitizer = strings.NewReplacer(
-	"/", "_", "\\", "_", "<", "_", ">", "_", ":", "_",
-	"\"", "_", "|", "_", "?", "_", "*", "_", "..", "_",
-)
-
 func dynamicUnclassifiedFallbackBindingPath(sid acp.SessionId) string {
-	safe := dynamicUnclassifiedFallbackPathSanitizer.Replace(string(sid))
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
 	return filepath.Join(os.TempDir(), "kandev-mock-dynamic-unclassified-"+safe+".session")
 }
 
 func dynamicUnclassifiedFallbackCounterPath(sid acp.SessionId) string {
-	safe := dynamicUnclassifiedFallbackPathSanitizer.Replace(string(sid))
+	safe := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(string(sid))
 	return filepath.Join(os.TempDir(), "kandev-mock-dynamic-unclassified-"+safe+".count")
 }
 

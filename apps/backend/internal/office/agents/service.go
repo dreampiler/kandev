@@ -46,11 +46,6 @@ var (
 	ErrAgentReportsToCycle   = errors.New("agent reporting structure cannot contain a cycle")
 	ErrAgentStatusTransition = errors.New("invalid status transition")
 	ErrAgentStatusStale      = errors.New("agent status changed before recovery")
-	// ErrAgentExecutionProfileSelf rejects binding an agent to its own profile id.
-	ErrAgentExecutionProfileSelf = errors.New("execution profile cannot be the agent itself")
-	// ErrAgentExecutionProfileNotDynamic rejects a binding whose target is a
-	// concrete profile rather than a dynamic routing profile.
-	ErrAgentExecutionProfileNotDynamic = errors.New("execution profile must be a dynamic profile")
 )
 
 // GovernanceSettingsReader reads workspace governance settings.
@@ -555,50 +550,26 @@ func (s *AgentService) ApplyProfileConfiguration(
 	if s.profileStore == nil {
 		return errors.New("agent profile store is not configured")
 	}
+	if target == nil {
+		return errors.New("target agent is required")
+	}
 	source, err := s.profileStore.GetAgentProfile(ctx, sourceProfileID)
 	if err != nil {
 		return fmt.Errorf("get source agent profile: %w", err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return errors.New("source agent profile is unavailable")
 	}
 	if source.WorkspaceID != "" && source.WorkspaceID != target.WorkspaceID {
 		return errors.New("source agent profile belongs to a different workspace")
 	}
 	target.AgentID = source.AgentID
+	target.ExecutionAgentProfileID = ""
 	if source.AgentID == agents.DynamicAgentID {
 		// A dynamic execution profile is a routing owner, not a concrete CLI
 		// family. Bind the Office identity to it so the shared resolver can
 		// select a concrete candidate without replacing the Office ID.
 		target.ExecutionAgentProfileID = source.ID
-	}
-	return nil
-}
-
-// ValidateExecutionProfileBinding checks that sourceProfileID may be bound as
-// target's dynamic execution profile. An empty id clears the binding. The
-// referenced profile must exist, belong to target's workspace, be a dynamic
-// routing profile, and differ from target's own id.
-func (s *AgentService) ValidateExecutionProfileBinding(
-	ctx context.Context,
-	target *models.AgentInstance,
-	sourceProfileID string,
-) error {
-	if sourceProfileID == "" {
-		return nil
-	}
-	if sourceProfileID == target.ID {
-		return ErrAgentExecutionProfileSelf
-	}
-	if s.profileStore == nil {
-		return errors.New("agent profile store is not configured")
-	}
-	source, err := s.profileStore.GetAgentProfile(ctx, sourceProfileID)
-	if err != nil {
-		return fmt.Errorf("get execution agent profile: %w", err)
-	}
-	if source.WorkspaceID != "" && source.WorkspaceID != target.WorkspaceID {
-		return errors.New("execution agent profile belongs to a different workspace")
-	}
-	if source.AgentID != agents.DynamicAgentID {
-		return ErrAgentExecutionProfileNotDynamic
 	}
 	return nil
 }

@@ -11,7 +11,7 @@ import type {
   LiveRun,
 } from "@/lib/state/slices/office/types";
 import type { CLIFlag, AgentRole, AgentStatus } from "@/lib/types/agent-profile";
-import { agentProfileId, workspaceId, type AgentProfileId } from "@/lib/types/ids";
+import { agentProfileId, workspaceId } from "@/lib/types/ids";
 import { normalizeProject } from "./office-project-normalize";
 
 // Re-export extended API so existing imports continue to work.
@@ -158,6 +158,11 @@ function normalizeAgent(raw: unknown): AgentProfile {
     icon: agent.icon as string | undefined,
     status: agent.status as AgentStatus,
     reportsTo: stringField(agent, "reportsTo", "reports_to"),
+    executionAgentProfileId: stringField(
+      agent,
+      "executionAgentProfileId",
+      "execution_agent_profile_id",
+    ),
     permissions: parseJSONField(agent.permissions, {}),
     budgetMonthlyCents: numberField(agent, "budgetMonthlyCents", "budget_monthly_cents", 0),
     maxConcurrentSessions: numberField(
@@ -175,10 +180,6 @@ function normalizeAgent(raw: unknown): AgentProfile {
     billingType: rawField(agent, "billingType", "billing_type") as AgentProfile["billingType"],
     utilization: (agent.utilization ?? null) as AgentProfile["utilization"],
     skillIds: parseJSONField<string[]>(rawField(agent, "skillIds", "skill_ids"), []),
-    executionAgentProfileId:
-      (stringField(agent, "executionAgentProfileId", "execution_agent_profile_id") as
-        | AgentProfileId
-        | "") || undefined,
     // CLI subprocess fields. Office-served rows may omit these when the
     // office agent is not yet wired to a CLI client; default to safe
     // empty values so the canonical type stays satisfied.
@@ -205,7 +206,7 @@ function stringifyJSONField(value: unknown): string | undefined {
 function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     name: data.name,
-    agent_profile_id: data.agentProfileId,
+    agent_profile_id: data.executionAgentProfileId ?? data.agentProfileId,
     role: data.role,
     icon: data.icon,
     reports_to: data.reportsTo,
@@ -215,7 +216,6 @@ function agentPayload(data: Partial<AgentProfile>): Record<string, unknown> {
     desired_skills: stringifyJSONField(data.desiredSkills),
     executor_preference: stringifyJSONField(data.executorPreference),
     skill_ids: stringifyJSONField(data.skillIds),
-    execution_agent_profile_id: data.executionAgentProfileId,
   };
   if (data.autoApprove !== undefined) {
     payload.auto_approve = data.autoApprove;

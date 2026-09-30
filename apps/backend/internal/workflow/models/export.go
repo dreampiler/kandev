@@ -76,7 +76,6 @@ type StepPortable struct {
 	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
 	CancelTriggersTurnComplete   bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
 	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
-	AllowRepeatedFailureFallback *bool                                        `json:"allow_repeated_failure_fallback,omitempty" yaml:"allow_repeated_failure_fallback,omitempty"`
 	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
@@ -96,29 +95,14 @@ func (s *StepPortable) UnmarshalJSON(data []byte) error {
 	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
 		return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
 	}
-	if raw, ok := fields[disableUnclassifiedFallbackField]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return fmt.Errorf("%s must be a boolean, not null", disableUnclassifiedFallbackField)
+	if raw, ok := fields["disable_unclassified_fallback"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("disable_unclassified_fallback must be a boolean, not null")
 	}
 	var decoded plainStepPortable
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		return err
 	}
 	*s = StepPortable(decoded)
-	_, allowPresent := fields["allow_repeated_failure_fallback"]
-	_, disablePresent := fields[disableUnclassifiedFallbackField]
-	var disable *bool
-	if disablePresent {
-		value := s.DisableUnclassifiedFallback
-		disable = &value
-	}
-	allow, resolvedDisable, err := ResolveWorkflowStepFallbackAliases(
-		s.AllowRepeatedFailureFallback, allowPresent, disable, disablePresent,
-	)
-	if err != nil {
-		return err
-	}
-	s.AllowRepeatedFailureFallback = allow
-	s.DisableUnclassifiedFallback = resolvedDisable
 	_, s.completionTaskOnEnterPresent = fields["complete_task_on_enter"]
 	s.completionTaskOnEnterDecoded = true
 	return nil
@@ -128,18 +112,10 @@ func (s *StepPortable) UnmarshalJSON(data []byte) error {
 // version-2 completion field.
 func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
 	type plainStepPortable StepPortable
-	allowPresent := false
-	disablePresent := false
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			field := node.Content[i].Value
-			if field == "allow_repeated_failure_fallback" {
-				allowPresent = true
-			}
-			if field == disableUnclassifiedFallbackField {
-				disablePresent = true
-			}
-			if field != "complete_task_on_enter" && field != disableUnclassifiedFallbackField {
+			if field != "complete_task_on_enter" && field != "disable_unclassified_fallback" {
 				continue
 			}
 			valueNode := node.Content[i+1]
@@ -153,19 +129,6 @@ func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*s = StepPortable(decoded)
-	var disable *bool
-	if disablePresent {
-		value := s.DisableUnclassifiedFallback
-		disable = &value
-	}
-	allow, resolvedDisable, err := ResolveWorkflowStepFallbackAliases(
-		s.AllowRepeatedFailureFallback, allowPresent, disable, disablePresent,
-	)
-	if err != nil {
-		return err
-	}
-	s.AllowRepeatedFailureFallback = allow
-	s.DisableUnclassifiedFallback = resolvedDisable
 	present := false
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
@@ -261,7 +224,6 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			CompleteTaskOnEnter:         s.CompleteTaskOnEnter,
 			WIPLimit:                    s.WIPLimit,
 		}
-		sp.AllowRepeatedFailureFallback = LegacyRepeatedFailureFallbackAlias(s)
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
 			sp.PullFromStepPosition = &pos
 		}
@@ -281,16 +243,6 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 		wp.AgentProfile = resolveProfile(wf.AgentProfileID)
 	}
 	return wp, nil
-}
-
-// CloneOptionalBool copies an optional boolean so a portable export never
-// aliases the domain model's pointer.
-func CloneOptionalBool(value *bool) *bool {
-	if value == nil {
-		return nil
-	}
-	cloned := *value
-	return &cloned
 }
 
 func buildPortableSessionTarget(target *WorkflowSessionTarget, idToPos map[string]int) (*WorkflowSessionTargetPortable, error) {

@@ -226,6 +226,7 @@ func flushStreamingStateWithHistory(
 	execution.messageMu.Lock()
 	content := execution.detachAssistantHistoryLocked()
 	execution.messageMu.Unlock()
+
 	persistAssistantHistory(content, execution, historyManager, log)
 }
 
