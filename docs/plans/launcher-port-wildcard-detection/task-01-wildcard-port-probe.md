@@ -69,3 +69,13 @@ golangci-lint run ./internal/launcher/... --new-from-rev=origin/main --timeout=5
 
 Default ports, fallback ranges, health-token ownership, the Windows address-in-use
 classifier, and backend runtime-state locking.
+
+## Follow-up (2026-10-01)
+
+The Windows Firewall follow-up to PR #30 renames this task's regression test
+`TestCanBindDetectsWildcardListener` to `TestCanBindDetectsOccupiedListener`. Unix keeps the
+wildcard-occupant assertion, so the original contract and its failure mode are unchanged. Windows
+holds the port with a loopback listener (`127.0.0.1:0`) instead, because a wildcard test listener
+binds a non-loopback interface and Windows Firewall prompts for every ephemeral
+`%TEMP%/go-build...` test binary. `canBind` production behavior is unchanged. See
+`docs/specs/executors/requirements/port-collision-safety.md` for the probe contract.

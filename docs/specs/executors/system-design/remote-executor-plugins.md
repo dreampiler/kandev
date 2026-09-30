@@ -139,6 +139,10 @@ Reuse the configured runtime API address and scoped task credentials; reject loo
 addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
+On Windows the fixture's own unit tests advertise a loopback address
+(`KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK=1`) so the ephemeral test binary binds loopback instead of
+a non-loopback interface and does not request Firewall access. The fixture's default advertised
+address and listener are unchanged outside tests.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases

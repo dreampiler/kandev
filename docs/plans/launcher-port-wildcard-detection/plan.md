@@ -63,11 +63,14 @@ automatic selection together. No signature change, so no downstream caller updat
 
 ## Regression test
 
-`TestCanBindDetectsWildcardListener` (new, in `ports_test.go`): stand up a wildcard TCP
-listener (`net.Listen("tcp", ":0")` on the IPv6/dual wildcard, or `0.0.0.0:0`), take its
-port, and assert `canBind(port)` returns `false`. This fails before the fix (bind-only
-`canBind` returns `true` against the wildcard listener) and passes after. A companion
-assertion confirms `pickAvailablePortExcept(port, nil)` does not return the occupied port.
+`TestCanBindDetectsOccupiedListener` (new, in `ports_test.go`): stand up an occupied TCP
+listener, take its port, and assert `canBind(port)` returns `false`. This fails before the fix
+(bind-only `canBind` returns `true` against the wildcard listener) and passes after. A companion
+assertion confirms `pickAvailablePortExcept(port, nil)` does not return the occupied port. Unix
+stands up a wildcard listener (`net.Listen("tcp", ":0")`) so the specific-address bind can still
+succeed against it. Windows stands up a loopback listener (`127.0.0.1:0`) because a wildcard test
+listener would bind a non-loopback interface and prompt for Firewall access from every ephemeral
+`%TEMP%/go-build...` test binary.
 
 ## Tasks
 
