@@ -9,6 +9,7 @@ requirements:
   - REQ-EXECUTORS-PLUGIN-005
   - REQ-EXECUTORS-PLUGIN-006
   - REQ-EXECUTORS-PLUGIN-007
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
 ---
 
 # Remote executor plugins system design
@@ -36,6 +37,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 | REQ-EXECUTORS-PLUGIN-005 | Plugin lifecycle |
 | REQ-EXECUTORS-PLUGIN-006 | Effective capabilities and expiry |
 | REQ-EXECUTORS-PLUGIN-007 | User interfaces |
+| REQ-EXECUTORS-PORT-COLLISION-SAFETY-001 | Bootstrap and reverse connectivity (Windows test listeners only) |
 
 ## Registration and profiles
 
@@ -139,6 +141,14 @@ Reuse the configured runtime API address and scoped task credentials; reject loo
 addresses before provisioning. Structural validation is not a reachability guarantee.
 Bootstrap performs a bounded authenticated callback probe; failure rolls back provisioning.
 Use a fake non-loopback address and controlled transport in unit tests, not a production bypass.
+On Windows the fixture's own unit tests advertise a loopback address
+(`KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK=1`) so the ephemeral test binary binds loopback instead of
+a non-loopback interface and does not request Firewall access. The fixture's default advertised
+address and listener are unchanged outside tests. This mapping is scoped to test listeners: the
+loopback-only regression policy also covers the launcher's Windows port-occupied regression test,
+which holds the probed port with a loopback listener, while production port probing and backend
+port ownership remain owned by the
+[port collision and backend ownership safety](../requirements/port-collision-safety.md) requirement.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases
