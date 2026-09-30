@@ -152,3 +152,22 @@ Follow-up remediation:
   allowlisting, explicit settings, and environment restoration. Windows CI runs
   these tests and parses the three launcher scripts. The current Linux workspace
   has no PowerShell runtime, so they could not be executed locally.
+
+2026-09-30 Windows firewall follow-up for AC-LAUNCHER-ISOLATED-SCRIPTS-001.4:
+
+- The isolated script now explicitly pins both the standalone agentctl host and
+  its listener to `127.0.0.1`. Common port allocation and the agentctl fallback
+  probe use `127.0.0.1:0` instead of a temporary wildcard listener.
+- Windows worktree validation guidance was added to `apps/backend/AGENTS.md`
+  and `.agents/skills/debug/references/instance.md` so fresh binaries are
+  launched through the isolated script.
+- A fresh-path launch used backend port 48429, agentctl port 49429, and a
+  dedicated temporary home/database. Both listeners were loopback-only;
+  Firewall event 2097 had no entry for the new executable path, and the
+  production listener on 38430 retained its PID. Focused Go tests, the backend
+  build, PowerShell parsing, and exact teardown passed.
+- `scripts/tests/isolated-instance.Tests.ps1` failed in this local environment
+  because `%TEMP%` itself contains a `.git` entry, which the fake-profile home
+  guard correctly treats as a workspace. This did not affect the fresh-path
+  launch. The prior Firewall events establish executable paths but do not
+  identify the precise listener that triggered each prompt.
