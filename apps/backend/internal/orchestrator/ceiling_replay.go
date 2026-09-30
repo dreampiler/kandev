@@ -43,6 +43,10 @@ const (
 	// ceilingReplaySuperseded is a terminal disposition for a claimed launch
 	// whose workflow entry or destination changed before dispatch.
 	ceilingReplaySuperseded
+	// ceilingReplayAbandoned is a terminal disposition for a launch that
+	// failed for a non-ceiling reason after its owner settled that failure:
+	// the record is cleared rather than retained for a later pass.
+	ceilingReplayAbandoned
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
@@ -211,6 +215,11 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	case ceilingReplayFailed:
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
+	case ceilingReplayAbandoned:
+		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason and was settled by its owner; clearing the record",
+			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
+		claim.settle(ctx)
+		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplayStillDeferred:
 		// Remove the in-flight claim after the replay gate has restored the
 		// durable deferral. The next sweep must be able to own it again.
@@ -323,6 +332,8 @@ func (s *Service) dropCeilingDeferral(
 	}
 
 	s.clearCeilingDeferredRecord(ctx, task.ID, deferral)
+	s.failDeferredAutomationRun(ctx, task.ID, automationRunFromCeilingPayload(deferral.Payload),
+		fmt.Sprintf("the queued launch was dropped: %s", detail))
 	s.publishTaskUpdatedByID(ctx, task.ID)
 }
 
@@ -571,6 +582,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		// auto_start alone would replay it as a manual override that bypasses
 		// the ceiling.
 		Origin:              launchOrigin(stringField(payload, "origin")),
+		AutomationRun:       automationRunFromCeilingPayload(payload),
 		ceilingEntryBinding: entryBinding,
 	}
 	if spawnRaw, ok := payload["spawn_origin"].(map[string]interface{}); ok {
@@ -602,7 +614,8 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return ceilingReplayStillDeferred
 	}
-	return ceilingReplayOutcomeFromExecution(execution, err)
+	return s.settleReplayedAutomationStart(ctx, task.ID, opts.AutomationRun, execution, err,
+		ceilingReplayOutcomeFromExecution(execution, err))
 }
 
 // replayCeilingLaunchStartCreated replays an AC-42d "start_created" record.

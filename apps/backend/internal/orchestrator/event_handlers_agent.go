@@ -2111,7 +2111,12 @@ func (s *Service) handleQueuedMessageExecutionError(
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
-		errors.Is(err, ErrSessionRuntimeUnavailable) {
+		errors.Is(err, ErrSessionRuntimeUnavailable) ||
+		// A bounded readiness/resume wait that ran out (surfacing as
+		// "failed to ensure session is running: context deadline exceeded")
+		// says nothing about the message itself; keep it for the next
+		// delivery trigger instead of dropping it.
+		errors.Is(err, context.DeadlineExceeded) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}

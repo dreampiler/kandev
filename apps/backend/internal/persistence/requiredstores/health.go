@@ -19,7 +19,14 @@ import (
 
 const (
 	defaultProbeInterval = 15 * time.Second
-	probeTimeout         = 2 * time.Second
+	// defaultProbeTimeout bounds one periodic probe. Two seconds was shorter
+	// than the wait for a read connection while many agent sessions ran, so a
+	// busy pool was reported as an unavailable database.
+	defaultProbeTimeout = 5 * time.Second
+	// runtimeFailureThreshold is how many consecutive periodic probes must
+	// fail before the stores are recorded unavailable. A single slow probe
+	// under load previously turned every stateful route into a 503.
+	runtimeFailureThreshold = 3
 )
 
 // Health probes the shared database and every table declared by the catalog.
@@ -29,10 +36,13 @@ type Health struct {
 	pool    *db.Pool
 	log     *logger.Logger
 
-	mu       sync.Mutex
-	interval time.Duration
-	cancel   context.CancelFunc
-	done     chan struct{}
+	mu           sync.Mutex
+	interval     time.Duration
+	probeTimeout time.Duration
+	cancel       context.CancelFunc
+	done         chan struct{}
+	// runtimeFailures counts consecutive failed periodic probes.
+	runtimeFailures int
 }
 
 type probeFailureDiagnostic struct {
@@ -42,11 +52,19 @@ type probeFailureDiagnostic struct {
 	storeID     string
 	writerStats sql.DBStats
 	readerStats sql.DBStats
+	// consecutiveFailures is set for periodic probes only.
+	consecutiveFailures int
 }
 
 // NewHealth creates a runtime health probe for a completed store tracker.
 func NewHealth(tracker *Tracker, pool *db.Pool, log *logger.Logger) *Health {
-	return &Health{tracker: tracker, pool: pool, log: log, interval: defaultProbeInterval}
+	return &Health{
+		tracker:      tracker,
+		pool:         pool,
+		log:          log,
+		interval:     defaultProbeInterval,
+		probeTimeout: defaultProbeTimeout,
+	}
 }
 
 // SetInterval changes the periodic interval. It is intended for tests and
@@ -68,6 +86,13 @@ func (h *Health) Check(ctx context.Context) error {
 }
 
 func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
+	return h.probe(ctx, false)
+}
+
+// probe runs one probe. A buffered probe is the periodic runtime path: its
+// ping and table failures are recorded only once runtimeFailureThreshold of
+// them happen in a row. A missing pool is never buffered.
+func (h *Health) probe(ctx context.Context, buffered bool) (*probeFailureDiagnostic, error) {
 	if h == nil || h.tracker == nil {
 		return nil, errors.New("required-store health tracker is unavailable")
 	}
@@ -88,6 +113,9 @@ func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
 			}
 		}
 	}
+	if pending, tolerated := h.bufferRuntimeFailure(buffered, results, diagnostic); tolerated {
+		return diagnostic, pending
+	}
 	var failures []error
 	for index, result := range results {
 		if err := h.tracker.RecordProbe(h.tracker.catalog[index].ID, result); err != nil {
@@ -106,6 +134,37 @@ func (h *Health) check(ctx context.Context) (*probeFailureDiagnostic, error) {
 	return diagnostic, errors.Join(failures...)
 }
 
+// bufferRuntimeFailure tracks consecutive periodic probe failures. It reports
+// whether the failed results are still below runtimeFailureThreshold and must
+// be left unrecorded, returning their joined error; a success resets the
+// count. Strict probes are never buffered and do not touch the count.
+func (h *Health) bufferRuntimeFailure(
+	buffered bool,
+	results []error,
+	diagnostic *probeFailureDiagnostic,
+) (pending error, tolerated bool) {
+	if !buffered {
+		return nil, false
+	}
+	var failures []error
+	for index, result := range results {
+		if result != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", h.tracker.catalog[index].ID, result))
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if len(failures) == 0 {
+		h.runtimeFailures = 0
+		return nil, false
+	}
+	h.runtimeFailures++
+	if diagnostic != nil {
+		diagnostic.consecutiveFailures = h.runtimeFailures
+	}
+	return errors.Join(failures...), h.runtimeFailures < runtimeFailureThreshold
+}
+
 // MarkUnavailable records a destructive database transition before the
 // maintenance owner releases its admission lease. This keeps stateful
 // requests fail-closed while the process waits for the required restart.
@@ -119,7 +178,9 @@ func (h *Health) MarkUnavailable() {
 // checkRuntime runs a periodic probe when the database can be admitted. SQLite
 // maintenance owns the same writer pool, so a busy maintenance lease defers
 // the probe instead of turning bounded writer contention into an unhealthy
-// state. Startup callers continue to use Check, which remains strict.
+// state. A failed periodic probe is only logged until runtimeFailureThreshold
+// consecutive probes fail. Startup callers continue to use Check, which
+// remains strict, and MarkUnavailable stays immediate.
 func (h *Health) checkRuntime(ctx context.Context) (deferred bool, err error) {
 	deferred, _, err = h.checkRuntimeDetailed(ctx)
 	return deferred, err
@@ -138,7 +199,7 @@ func (h *Health) checkRuntimeDetailed(
 		}
 		defer release()
 	}
-	diagnostic, err = h.check(ctx)
+	diagnostic, err = h.probe(ctx, true)
 	return false, diagnostic, err
 }
 
@@ -239,6 +300,11 @@ func (d *probeFailureDiagnostic) logFields() []zap.Field {
 	if d.storeID != "" {
 		fields = append(fields, zap.String("store_id", d.storeID))
 	}
+	if d.consecutiveFailures > 0 {
+		fields = append(fields,
+			zap.Int("consecutive_failures", d.consecutiveFailures),
+			zap.Int("failure_threshold", runtimeFailureThreshold))
+	}
 	return fields
 }
 
@@ -291,7 +357,7 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 			if ctx.Err() != nil {
 				return
 			}
-			checkCtx, cancel := context.WithTimeout(ctx, probeTimeout)
+			checkCtx, cancel := context.WithTimeout(ctx, h.probeTimeout)
 			_, diagnostic, err := h.checkRuntimeDetailed(checkCtx)
 			if err != nil {
 				h.logProbeFailure(diagnostic)

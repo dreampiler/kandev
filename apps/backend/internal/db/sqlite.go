@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -14,10 +16,35 @@ const (
 	defaultBusyTimeout = 5 * time.Second
 
 	// defaultSQLiteReaderConns is the number of concurrent read connections.
-	// SQLite WAL mode allows many readers alongside a single writer; 4 is a
-	// reasonable default for a desktop/server workload.
-	defaultSQLiteReaderConns = 4
+	// SQLite WAL mode allows many readers alongside a single writer. The
+	// previous default of 4 saturated once 13-20 agent sessions ran at the
+	// same time: readers queued on the pool, the required-store health probe
+	// timed out, and stateful routes answered 503 until the queue drained.
+	defaultSQLiteReaderConns = 12
+
+	// maxSQLiteReaderConns caps the sqliteReaderConnsEnv override.
+	maxSQLiteReaderConns = 64
+
+	// sqliteReaderConnsEnv overrides defaultSQLiteReaderConns at startup.
+	sqliteReaderConnsEnv = "KANDEV_SQLITE_READER_CONNS"
 )
+
+// sqliteReaderConns resolves the read pool size. A missing, non-numeric, or
+// non-positive override keeps the default; larger values are capped.
+func sqliteReaderConns() int {
+	raw := strings.TrimSpace(os.Getenv(sqliteReaderConnsEnv))
+	if raw == "" {
+		return defaultSQLiteReaderConns
+	}
+	conns, err := strconv.Atoi(raw)
+	if err != nil || conns < 1 {
+		return defaultSQLiteReaderConns
+	}
+	if conns > maxSQLiteReaderConns {
+		return maxSQLiteReaderConns
+	}
+	return conns
+}
 
 // OpenSQLite opens a SQLite database configured for writes (single connection).
 func OpenSQLite(dbPath string) (*sql.DB, error) {
@@ -72,8 +99,9 @@ func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("failed to open read-only database: %w", err)
 	}
 
-	db.SetMaxOpenConns(defaultSQLiteReaderConns)
-	db.SetMaxIdleConns(defaultSQLiteReaderConns)
+	readerConns := sqliteReaderConns()
+	db.SetMaxOpenConns(readerConns)
+	db.SetMaxIdleConns(readerConns)
 
 	return db, nil
 }

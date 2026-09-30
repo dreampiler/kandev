@@ -3322,6 +3322,11 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	if blocked {
 		return false, nil
 	}
+	if fromStepID == destinationStepID {
+		if err := r.pinSameStepPromotionEntry(ctx, tx, task); err != nil {
+			return false, err
+		}
+	}
 
 	// This is always an arrival — a promotion enters destinationStepID from a
 	// queued band, never a reorder — so the caller-supplied task.Position is
@@ -3430,6 +3435,36 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 	}
 	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, 0)
 	return true, nil
+}
+
+// pinSameStepPromotionEntry records, on the promotion marker the caller set,
+// the ledger row of the entry a same-step promotion admits. The task entered
+// the step when it was queued, so the promotion itself records no transition.
+// Reading the latest row inside the promotion transaction, after the task row
+// is locked, pins that queued entry before any later move can add a newer row.
+func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	marker, ok := task.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	var entryID int64
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), task.ID).Scan(&entryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if entryID > 0 {
+		marker[models.QueuePromotionEntryTransitionIDKey] = entryID
+	}
+	return nil
 }
 
 func (r *Repository) lockTaskAndLoadPromotionMetadata(ctx context.Context, tx *sql.Tx, task *models.Task) error {

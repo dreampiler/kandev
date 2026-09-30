@@ -950,14 +950,18 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 }
 
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
+	var run *automationRunLaunch
+	if runID != "" {
+		run = &automationRunLaunch{RunID: runID, ThreadAction: action, ThreadReason: reason}
+	}
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
-		result, err := s.startAutomationTask(ctx, a, task, workflowStepID)
+		result, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 		return result, mapAutomationDispatchError(err)
 	}, nil) {
 		return
 	}
 
-	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID)
+	dispatch, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
 	if err != nil {
 		s.logger.Error("failed to auto-start automation task",
 			zap.String("task_id", task.ID), zap.Error(err))
@@ -983,8 +987,9 @@ func (s *Service) startAutomationTask(
 	a *automation.Automation,
 	task *models.Task,
 	workflowStepID string,
+	run *automationRunLaunch,
 ) (automation.RunDispatch, error) {
-	execution, err := s.StartTask(
+	execution, err := s.startTask(
 		ctx,
 		task.ID,
 		a.AgentProfileID,
@@ -996,14 +1001,84 @@ func (s *Service) startAutomationTask(
 		false,
 		true,
 		nil,
+		startTaskOptions{AutomationRun: run},
 	)
 	if err != nil {
 		return automation.RunDispatch{}, err
 	}
 	if execution == nil || execution.SessionID == "" || execution.TurnID == "" {
-		return automation.RunDispatch{}, errors.New("automation task start returned no session or turn identity")
+		return automation.RunDispatch{}, errors.New(errAutomationStartNoIdentity)
 	}
 	return automation.RunDispatch{TaskID: task.ID, SessionID: execution.SessionID, TurnID: execution.TurnID}, nil
+}
+
+const errAutomationStartNoIdentity = "automation task start returned no session or turn identity"
+
+// ceilingPayloadAutomationRunKey is the "start" replay payload key holding the
+// automationRunLaunch a deferred launch serves.
+const ceilingPayloadAutomationRunKey = "automation_run"
+
+// automationRunLaunch names the admitted automation run a task start serves,
+// with the thread disposition its binding records.
+type automationRunLaunch struct {
+	RunID        string                  `json:"run_id"`
+	ThreadAction automation.ThreadAction `json:"thread_action"`
+	ThreadReason string                  `json:"thread_reason"`
+}
+
+// automationRunFromCeilingPayload returns the run a deferred start serves, or
+// nil for a launch that serves none.
+func automationRunFromCeilingPayload(payload map[string]interface{}) *automationRunLaunch {
+	var run *automationRunLaunch
+	decodeCeilingPayloadField(payload[ceilingPayloadAutomationRunKey], &run)
+	if run == nil || run.RunID == "" {
+		return nil
+	}
+	return run
+}
+
+// settleReplayedAutomationStart gives a replayed automation start the run
+// bookkeeping of the direct launch: a dispatched launch is bound to its exact
+// run, and a launch that failed for a non-ceiling reason fails the run and
+// abandons the record, because a retained record could later dispatch a turn
+// for a run that is already terminal.
+func (s *Service) settleReplayedAutomationStart(
+	ctx context.Context,
+	taskID string,
+	run *automationRunLaunch,
+	execution *executor.TaskExecution,
+	launchErr error,
+	outcome ceilingReplayOutcome,
+) ceilingReplayOutcome {
+	if run == nil {
+		return outcome
+	}
+	switch outcome {
+	case ceilingReplaySucceeded:
+		if execution.SessionID == "" || execution.TurnID == "" {
+			s.failDeferredAutomationRun(ctx, taskID, run, errAutomationStartNoIdentity)
+			return outcome
+		}
+		s.bindAutomationRun(ctx, run.RunID, taskID, execution.SessionID, execution.TurnID,
+			run.ThreadAction, run.ThreadReason, "ceiling-replay")
+	case ceilingReplayFailed:
+		s.failDeferredAutomationRun(ctx, taskID, run, launchErr.Error())
+		return ceilingReplayAbandoned
+	}
+	return outcome
+}
+
+// failDeferredAutomationRun settles the run of a deferred start that will not
+// launch. The run row was written before the launch, so it would otherwise sit
+// at task_created forever and hold a max_concurrent_runs slot with no
+// completion event coming to free it.
+func (s *Service) failDeferredAutomationRun(ctx context.Context, taskID string, run *automationRunLaunch, errMsg string) {
+	if run == nil {
+		return
+	}
+	if !s.markExactAutomationRunTerminal(ctx, run.RunID, "", "", false, errMsg) {
+		s.markAutomationRunTerminal(ctx, taskID, false, errMsg)
+	}
 }
 
 // Repository-selector disposition tokens (A5's wire format). A bare token is
