@@ -387,6 +387,92 @@ func TestHandleTaskQueuePromotedSameStepEntryReplacesPreviousStepRoute(t *testin
 	}
 }
 
+// A same-step promotion pins the entry it admits on its one-shot marker inside
+// the promotion write. If the task leaves and re-enters the step before the
+// promotion delivery is handled, the delivery must still act for the queued
+// entry it admitted, not for the newer entry, so the entry guard drops it
+// instead of running the newer entry's on_enter a second time.
+func TestHandleTaskQueuePromotedSameStepIgnoresReentryAfterPromotion(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.stepGetter.steps["step-a"] = &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", Position: 0,
+		AgentProfileID:          "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+	fixture.stepGetter.steps["step-b"] = &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", Position: 1,
+		AgentProfileID:            "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute,
+		models.WorkflowSessionRoute{
+			OperationID:       "route-step-a",
+			DestinationStepID: "step-a",
+			EntryIdentity:     fixture.svc.workflowEntryIdentity(ctx, "t1"),
+			TargetKind:        workflowSessionRouteTargetProfile,
+			AgentProfileID:    "profile-a",
+			DestinationID:     fixture.current.ID,
+			Phase:             workflowSessionRouteCommitted,
+		}))
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-b"
+	task.WIPAdmitted = false
+	task.QueuedForStepID = "step-b"
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task), "queue task on the full destination step")
+	queuedEntryID, err := fixture.repo.GetLatestTaskStepTransitionID(ctx, "t1")
+	require.NoError(t, err)
+	require.Positive(t, queuedEntryID)
+
+	task, err = fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	task.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": "step-b",
+	}
+	claimed, err := fixture.repo.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, task, "step-b", "step-b", 0)
+	require.NoError(t, err)
+	require.True(t, claimed, "same-step promotion must claim the queued row")
+	require.Zero(t, task.WorkflowStepTransitionID, "a same-step promotion writes no ledger row")
+	promotedTask, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, queuedEntryID, queuePromotionStampedEntryID(promotedTask.Metadata[models.MetaKeyQueuePromotionPending]),
+		"the promotion must pin the queued entry on its marker")
+
+	// The task leaves the step and comes back before the promotion delivery
+	// is handled; the re-entry writes a newer ledger row for the same step.
+	for _, stepID := range []string{"step-a", "step-b"} {
+		moved, getErr := fixture.repo.GetTask(ctx, "t1")
+		require.NoError(t, getErr)
+		moved.WorkflowStepID = stepID
+		require.NoError(t, fixture.repo.UpdateTask(ctx, moved))
+	}
+	reentryID, err := fixture.repo.GetLatestTaskStepTransitionID(ctx, "t1")
+	require.NoError(t, err)
+	require.Greater(t, reentryID, queuedEntryID, "re-entry must write a newer ledger row")
+
+	entryComplete := make(chan struct{})
+	fixture.svc.onTaskQueuePromotionEntryComplete = func() { close(entryComplete) }
+
+	fixture.svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "t1"})
+	select {
+	case <-entryComplete:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queue-promotion entry did not complete")
+	}
+
+	after, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	route, ok := models.LoadWorkflowSessionRoute(after.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-a", route.DestinationStepID,
+		"a promotion delivery for the earlier entry must not dispatch the re-entry's on_enter")
+}
+
 func TestProcessManualMoveLifecycle_UnknownSourceKeepsLifecyclePending(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)

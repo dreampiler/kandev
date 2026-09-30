@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // subscribeWorkflowQueueEvents keeps queue admission in sync with workflow
@@ -43,12 +44,17 @@ func (s *Service) handleWorkflowStepQueueUpdate(ctx context.Context, event *bus.
 // queuePromotionEntryID returns the ledger identity of the step entry that a
 // queue promotion delivers. A task queued on a full step entered that step when
 // it was queued, so the same-step write that later admits it records no
-// transition and its delivery carries no id. The entry being dispatched is then
-// the task's latest ledger row, which lets the entry guard tell this current
-// entry apart from a late callback for an earlier step.
-func (s *Service) queuePromotionEntryID(ctx context.Context, taskID string, deliveredID int64) int64 {
+// transition and its delivery carries no id. That write pins the queued entry
+// on the promotion marker; using the pinned row keeps a delivery handled after
+// the task left and re-entered the step from acting for the newer entry. A
+// marker without a pinned row (written before promotions pinned their entry)
+// falls back to the task's latest ledger row.
+func (s *Service) queuePromotionEntryID(ctx context.Context, taskID string, deliveredID int64, promotionToken interface{}) int64 {
 	if deliveredID > 0 {
 		return deliveredID
+	}
+	if pinnedID := queuePromotionStampedEntryID(promotionToken); pinnedID > 0 {
+		return pinnedID
 	}
 	reader, ok := s.repo.(workflowStepTransitionReader)
 	if !ok {
@@ -61,4 +67,24 @@ func (s *Service) queuePromotionEntryID(ctx context.Context, taskID string, deli
 		return deliveredID
 	}
 	return latestID
+}
+
+// queuePromotionStampedEntryID reads the entry row a same-step promotion
+// pinned on its marker. The marker is decoded from task metadata JSON, so the
+// number normally arrives as float64.
+func queuePromotionStampedEntryID(promotionToken interface{}) int64 {
+	marker, ok := promotionToken.(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	switch value := marker[models.QueuePromotionEntryTransitionIDKey].(type) {
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	case float64:
+		return int64(value)
+	default:
+		return 0
+	}
 }
