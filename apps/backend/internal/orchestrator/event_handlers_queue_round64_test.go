@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -155,6 +156,37 @@ func TestQueuedMessageExecutionError_RequeuesSeam3Refusal(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].ID != queued.ID || entries[0].IsReservedInFlight() {
 		t.Fatalf("seam-3 refusal queue state = %#v, want one unreserved original message", entries)
+	}
+}
+
+func TestQueuedMessageExecutionError_RequeuesEnsureSessionDeadline(t *testing.T) {
+	ctx := context.Background()
+	repo := messagequeue.NewMemoryRepository()
+	queue := messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger())
+	svc := &Service{messageQueue: queue, logger: testLogger()}
+
+	queued, err := queue.QueueMessage(
+		ctx, "session-ensure-deadline", "task-ensure-deadline", "keep me", "", messagequeue.QueuedByAgent, false, nil,
+	)
+	if err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+	reserved, dispatched, autoRun := queue.ReserveQueuedWithAutoRun(ctx, queued.SessionID)
+	if !autoRun || !dispatched || reserved == nil {
+		t.Fatalf("reserve message: auto_run=%t dispatched=%t message=%v", autoRun, dispatched, reserved)
+	}
+
+	svc.handleQueuedMessageExecutionError(
+		ctx, queued.SessionID, reserved, nil, false, false,
+		fmt.Errorf("failed to ensure session is running: %w", context.DeadlineExceeded),
+	)
+
+	entries, err := repo.ListBySession(ctx, queued.SessionID)
+	if err != nil {
+		t.Fatalf("list requeued messages: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != queued.ID || entries[0].IsReservedInFlight() {
+		t.Fatalf("ensure-session deadline queue state = %#v, want one unreserved original message", entries)
 	}
 }
 
