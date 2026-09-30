@@ -8,8 +8,63 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// blockingStallBus records agent.stalled publishes and then holds them until
+// release is closed, standing in for a synchronous stall handler that is stuck
+// behind the session's cancel guard.
+type blockingStallBus struct {
+	MockEventBusWithTracking
+	release <-chan struct{}
+}
+
+func (b *blockingStallBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	_ = b.MockEventBusWithTracking.Publish(ctx, subject, event)
+	if subject == "agent.stalled" {
+		<-b.release
+	}
+	return nil
+}
+
+// TestWaitForPromptDone_BlockedStallPublishStillEscalates: when the stall
+// handler never returns, neither the five-minute advisory publish nor the
+// terminal publish may keep the wait loop from releasing the prompt at the
+// terminal threshold.
+func TestWaitForPromptDone_BlockedStallPublishStillEscalates(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		eventBus := &blockingStallBus{release: release}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := newTerminalStallExecution()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(stallEscalationThreshold + time.Minute)
+		synctest.Wait()
+
+		select {
+		case err := <-waitResult:
+			if !errors.Is(err, ErrCancelEscalated) {
+				t.Fatalf("waitForPromptDone error = %v, want ErrCancelEscalated", err)
+			}
+		default:
+			t.Fatal("waitForPromptDone stayed blocked behind a stall publish that never returned")
+		}
+		if got := countProlongedStallEvents(&eventBus.MockEventBusWithTracking); got != 1 {
+			t.Fatalf("terminal classifications published = %d, want exactly 1", got)
+		}
+	})
+}
 
 // countProlongedStallEvents counts published agent.stalled events that carry
 // the terminal discriminator, isolating them from the five-minute advisory

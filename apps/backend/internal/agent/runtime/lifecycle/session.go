@@ -1311,18 +1311,16 @@ func (sm *SessionManager) waitForPromptDone(
 					zap.Duration("elapsed_since_last_event", elapsed),
 					zap.Time("last_activity", lastActivity),
 					zap.Bool("never_started", neverStarted))
-				if sm.eventPublisher != nil {
-					sm.eventPublisher.PublishAgentStalled(
-						ctx,
-						execution,
-						promptGeneration,
-						lastActivity,
-						elapsed,
-						activityEpoch,
-						neverStarted,
-						false,
-					)
-				}
+				sm.publishAgentStalledBounded(
+					ctx,
+					execution,
+					promptGeneration,
+					lastActivity,
+					elapsed,
+					activityEpoch,
+					neverStarted,
+					false,
+				)
 				stallReported = true
 			}
 
@@ -1332,7 +1330,10 @@ func (sm *SessionManager) waitForPromptDone(
 			// synthetic cancel-release completion so the blocked wait returns,
 			// mirroring escalateStuckCancel's technique. Publish first so the
 			// synchronous stall handler records the terminal outcome and
-			// schedules teardown before SendPrompt's error path runs. The
+			// schedules teardown before SendPrompt's error path runs; the wait
+			// for that handler is bounded by stallPublishWaitLimit so a handler
+			// stuck behind the session's cancel guard cannot keep the prompt
+			// (and its ceiling slot) alive. The
 			// channel is buffered size 1 and the injection is generation-checked,
 			// so a real completion that arrived first wins; the receive case
 			// above then wraps the signal's cancel-release error as
@@ -1343,18 +1344,16 @@ func (sm *SessionManager) waitForPromptDone(
 				// terminal from the five-minute never-started branch and must
 				// not be reclassified as a prolonged stall.
 				if !terminalReported && !neverStarted {
-					if sm.eventPublisher != nil {
-						sm.eventPublisher.PublishAgentStalled(
-							ctx,
-							execution,
-							promptGeneration,
-							lastActivity,
-							elapsed,
-							activityEpoch,
-							false,
-							true,
-						)
-					}
+					sm.publishAgentStalledBounded(
+						ctx,
+						execution,
+						promptGeneration,
+						lastActivity,
+						elapsed,
+						activityEpoch,
+						false,
+						true,
+					)
 					terminalReported = true
 				}
 				sm.logger.Error("agent stall escalation: no events within stall escalation threshold; injecting synthetic completion",
