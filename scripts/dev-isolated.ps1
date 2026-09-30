@@ -329,10 +329,17 @@ if (-not $healthy) {
 $webStarted = $false
 if ($Web) {
   Write-Host "dev-isolated: starting web (vite dev) on :$EffectiveWebPort ..."
-  $pnpmCmd = Get-Command pnpm.exe -ErrorAction SilentlyContinue
-  if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm.cmd -ErrorAction SilentlyContinue }
-  if (-not $pnpmCmd) { $pnpmCmd = Get-Command pnpm -ErrorAction SilentlyContinue }
-  if (-not $pnpmCmd) { throw "dev-isolated: 'pnpm' not found on PATH - install it (corepack/mise) before using -Web." }
+  $nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
+  if (-not $nodeCmd) { throw "dev-isolated: 'node.exe' not found on PATH - install Node before using -Web." }
+  $webDir = Join-Path $RepoRoot 'apps\web'
+  $viteScript = Join-Path $webDir 'node_modules\vite\bin\vite.js'
+  if (-not (Test-Path -LiteralPath $viteScript)) {
+    throw "dev-isolated: Vite is missing - run 'pnpm install --frozen-lockfile' from apps before using -Web."
+  }
+  foreach ($generator in @('generate-release-notes.mjs', 'generate-changelog.mjs')) {
+    & $nodeCmd.Source (Join-Path $webDir "scripts\$generator")
+    if ($LASTEXITCODE -ne 0) { throw "dev-isolated: $generator failed (exit $LASTEXITCODE)." }
+  }
   $savedWebEnv = @{}
   $webOverrides = [ordered]@{
     'VITE_KANDEV_API_PORT' = "$EffectiveBackendPort"
@@ -346,10 +353,9 @@ if ($Web) {
     [Environment]::SetEnvironmentVariable($key, $webOverrides[$key], 'Process')
   }
   try {
-    $appsDir = Join-Path $RepoRoot 'apps'
-    $webProc = Start-Process -FilePath $pnpmCmd.Source `
-      -ArgumentList '-C', $appsDir, '--filter', '@kandev/web', 'dev' `
-      -WorkingDirectory $appsDir -WindowStyle Hidden -PassThru `
+    $webProc = Start-Process -FilePath $nodeCmd.Source `
+      -ArgumentList "`"$viteScript`" --host 127.0.0.1 --port $EffectiveWebPort" `
+      -WorkingDirectory $webDir -WindowStyle Hidden -PassThru `
       -RedirectStandardInput $StdinFile `
       -RedirectStandardOutput $WebOutLog -RedirectStandardError $WebErrLog
   } finally {

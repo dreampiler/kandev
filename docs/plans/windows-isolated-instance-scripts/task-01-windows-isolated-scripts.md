@@ -157,7 +157,10 @@ Follow-up remediation:
 
 - The isolated script now explicitly pins both the standalone agentctl host and
   its listener to `127.0.0.1`. Common port allocation and the agentctl fallback
-  probe use `127.0.0.1:0` instead of a temporary wildcard listener.
+  probe use `127.0.0.1:0` instead of a temporary wildcard listener. The optional
+  Vite launch runs Node directly with explicit loopback host and selected port
+  arguments. Its pidfile now records the actual listener instead of a `pnpm.cmd`
+  wrapper that can exit while Vite remains live.
 - Windows worktree validation guidance was added to `apps/backend/AGENTS.md`
   and `.agents/skills/debug/references/instance.md` so fresh binaries are
   launched through the isolated script.
