@@ -1,10 +1,20 @@
 ---
+id: "01-wildcard-port-probe"
+title: "Detect wildcard listeners in the launcher port probe"
 status: done
-plan: "./plan.md"
-spec: "../../specs/executors/requirements/port-collision-safety.md"
 wave: 1
-parallel-safe: no
-parallelism: sequential
+depends_on: []
+plan: "./plan.md"
+requirements:
+  - REQ-EXECUTORS-CONTROL-OWNERSHIP-001
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
+acceptance_criteria:
+  - AC-EXECUTORS-CONTROL-OWNERSHIP-001.7
+  - AC-EXECUTORS-PORT-COLLISION-SAFETY-001.6
+  - AC-EXECUTORS-PORT-COLLISION-SAFETY-001.7
+system_design:
+  - ../../specs/executors/system-design/agent-survival-across-restart-01.md
+  - ../../specs/executors/system-design/remote-executor-plugins.md
 ---
 
 # Task 01: Detect wildcard listeners in the launcher port probe

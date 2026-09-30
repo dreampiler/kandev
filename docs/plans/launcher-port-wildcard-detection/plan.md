@@ -1,7 +1,12 @@
 ---
 status: implemented
 created: 2026-08-11
-spec: "../../specs/executors/requirements/port-collision-safety.md"
+requirements:
+  - REQ-EXECUTORS-CONTROL-OWNERSHIP-001
+  - REQ-EXECUTORS-PORT-COLLISION-SAFETY-001
+system_design:
+  - ../../specs/executors/system-design/agent-survival-across-restart-01.md
+  - ../../specs/executors/system-design/remote-executor-plugins.md
 ---
 
 # Plan: Launcher port-availability probe detects wildcard listeners
@@ -76,7 +81,7 @@ listener would bind a non-loopback interface and prompt for Firewall access from
 
 | Task | Wave | Parallel-safe | Summary |
 | --- | --- | --- | --- |
-| task-01-wildcard-port-probe | 1 | no | Add failing regression test, implement connect+bind dual-stack `canBind`. |
+| [task-01-wildcard-port-probe](task-01-wildcard-port-probe.md) | 1 | no | Add failing regression test, implement connect+bind dual-stack `canBind`. |
 
 ## Validation
 
