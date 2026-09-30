@@ -125,35 +125,56 @@ func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStep
 
 // CreateStepRequest is the request for creating a single workflow step.
 type CreateStepRequest struct {
-	WorkflowID                 string             `json:"workflow_id"`
-	Name                       string             `json:"name"`
-	Position                   int                `json:"position"`
-	Color                      string             `json:"color"`
-	StageType                  *models.StageType  `json:"stage_type,omitempty"`
-	Prompt                     string             `json:"prompt,omitempty"`
-	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
-	Events                     *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove            bool               `json:"allow_manual_move"`
-	IsStartStep                *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
-	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
-	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
-	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
-	WIPLimit                   *int               `json:"wip_limit,omitempty"`
-	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	WorkflowID                   string             `json:"workflow_id"`
+	Name                         string             `json:"name"`
+	Position                     int                `json:"position"`
+	Color                        string             `json:"color"`
+	StageType                    *models.StageType  `json:"stage_type,omitempty"`
+	Prompt                       string             `json:"prompt,omitempty"`
+	AgentProfileID               *string            `json:"agent_profile_id,omitempty"`
+	Events                       *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove              bool               `json:"allow_manual_move"`
+	IsStartStep                  *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel           *bool              `json:"show_in_command_panel,omitempty"`
+	AutoAdvanceRequiresSignal    *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete   *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter          *bool              `json:"complete_task_on_enter,omitempty"`
+	ProfileSessionStartPolicy    *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy      *string            `json:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback  *bool              `json:"disable_unclassified_fallback,omitempty"`
+	AllowRepeatedFailureFallback *bool              `json:"allow_repeated_failure_fallback,omitempty"`
+	SessionTarget                SessionTargetPatch `json:"session_target,omitempty"`
+	WIPLimit                     *int               `json:"wip_limit,omitempty"`
+	PullFromStepID               *string            `json:"pull_from_step_id,omitempty"`
 }
 
-func rejectNullCompleteTaskOnEnter(data []byte) error {
+func rejectNullStepBooleanFields(data []byte) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return err
 	}
-	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
-		return fmt.Errorf("complete_task_on_enter must be a boolean")
+	for _, field := range []string{"complete_task_on_enter", "disable_unclassified_fallback"} {
+		if raw, ok := fields[field]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+			return fmt.Errorf("%s must be a boolean", field)
+		}
 	}
+	return nil
+}
+
+func applyStepFallbackRequest(
+	step *models.WorkflowStep,
+	allow *bool,
+	allowPresent bool,
+	disable *bool,
+) error {
+	allow, resolvedDisable, err := models.ResolveWorkflowStepFallbackAliases(
+		allow, allowPresent, disable, disable != nil,
+	)
+	if err != nil {
+		return err
+	}
+	step.AllowRepeatedFailureFallback = allow
+	step.DisableUnclassifiedFallback = resolvedDisable
 	return nil
 }
 
@@ -161,7 +182,7 @@ func rejectNullCompleteTaskOnEnter(data []byte) error {
 // boundary uses nil to mean the documented default for create and no-op for
 // update, so null must be rejected instead of silently taking either path.
 func (r *CreateStepRequest) UnmarshalJSON(data []byte) error {
-	if err := rejectNullCompleteTaskOnEnter(data); err != nil {
+	if err := rejectNullStepBooleanFields(data); err != nil {
 		return err
 	}
 	type requestAlias CreateStepRequest
@@ -226,6 +247,11 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.CompleteTaskOnEnter != nil {
 		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
 	}
+	if req.DisableUnclassifiedFallback != nil || req.AllowRepeatedFailureFallback != nil {
+		if err := applyStepFallbackRequest(step, req.AllowRepeatedFailureFallback, req.AllowRepeatedFailureFallback != nil, req.DisableUnclassifiedFallback); err != nil {
+			return nil, err
+		}
+	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {
 			return nil, fmt.Errorf("wip_limit must be non-negative")
@@ -247,31 +273,34 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 
 // UpdateStepRequest is the request for updating a workflow step.
 type UpdateStepRequest struct {
-	ID                         string             `json:"id"`
-	Name                       *string            `json:"name,omitempty"`
-	Position                   *int               `json:"position,omitempty"`
-	Color                      *string            `json:"color,omitempty"`
-	StageType                  *models.StageType  `json:"stage_type,omitempty"`
-	Prompt                     *string            `json:"prompt,omitempty"`
-	Events                     *models.StepEvents `json:"events,omitempty"`
-	AllowManualMove            *bool              `json:"allow_manual_move,omitempty"`
-	IsStartStep                *bool              `json:"is_start_step,omitempty"`
-	ShowInCommandPanel         *bool              `json:"show_in_command_panel,omitempty"`
-	AutoArchiveAfterHours      *int               `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID             *string            `json:"agent_profile_id,omitempty"`
-	AutoAdvanceRequiresSignal  *bool              `json:"auto_advance_requires_signal,omitempty"`
-	CancelTriggersTurnComplete *bool              `json:"cancel_triggers_turn_complete,omitempty"`
-	CompleteTaskOnEnter        *bool              `json:"complete_task_on_enter,omitempty"`
-	ProfileSessionStartPolicy  *string            `json:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    *string            `json:"profile_session_end_policy,omitempty"`
-	SessionTarget              SessionTargetPatch `json:"session_target,omitempty"`
-	WIPLimit                   *int               `json:"wip_limit,omitempty"`
-	PullFromStepID             *string            `json:"pull_from_step_id,omitempty"`
+	ID                                  string             `json:"id"`
+	Name                                *string            `json:"name,omitempty"`
+	Position                            *int               `json:"position,omitempty"`
+	Color                               *string            `json:"color,omitempty"`
+	StageType                           *models.StageType  `json:"stage_type,omitempty"`
+	Prompt                              *string            `json:"prompt,omitempty"`
+	Events                              *models.StepEvents `json:"events,omitempty"`
+	AllowManualMove                     *bool              `json:"allow_manual_move,omitempty"`
+	IsStartStep                         *bool              `json:"is_start_step,omitempty"`
+	ShowInCommandPanel                  *bool              `json:"show_in_command_panel,omitempty"`
+	AutoArchiveAfterHours               *int               `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID                      *string            `json:"agent_profile_id,omitempty"`
+	AutoAdvanceRequiresSignal           *bool              `json:"auto_advance_requires_signal,omitempty"`
+	CancelTriggersTurnComplete          *bool              `json:"cancel_triggers_turn_complete,omitempty"`
+	CompleteTaskOnEnter                 *bool              `json:"complete_task_on_enter,omitempty"`
+	ProfileSessionStartPolicy           *string            `json:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy             *string            `json:"profile_session_end_policy,omitempty"`
+	DisableUnclassifiedFallback         *bool              `json:"disable_unclassified_fallback,omitempty"`
+	AllowRepeatedFailureFallback        *bool              `json:"allow_repeated_failure_fallback,omitempty"`
+	allowRepeatedFailureFallbackPresent bool               `json:"-"`
+	SessionTarget                       SessionTargetPatch `json:"session_target,omitempty"`
+	WIPLimit                            *int               `json:"wip_limit,omitempty"`
+	PullFromStepID                      *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // UnmarshalJSON rejects null while preserving omission semantics for updates.
 func (r *UpdateStepRequest) UnmarshalJSON(data []byte) error {
-	if err := rejectNullCompleteTaskOnEnter(data); err != nil {
+	if err := rejectNullStepBooleanFields(data); err != nil {
 		return err
 	}
 	type requestAlias UpdateStepRequest
@@ -280,6 +309,11 @@ func (r *UpdateStepRequest) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*r = UpdateStepRequest(decoded)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	_, r.allowRepeatedFailureFallbackPresent = fields["allow_repeated_failure_fallback"]
 	return nil
 }
 
@@ -345,6 +379,11 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	}
 	if req.CompleteTaskOnEnter != nil {
 		step.CompleteTaskOnEnter = *req.CompleteTaskOnEnter
+	}
+	if req.allowRepeatedFailureFallbackPresent || req.DisableUnclassifiedFallback != nil {
+		if err := applyStepFallbackRequest(step, req.AllowRepeatedFailureFallback, req.allowRepeatedFailureFallbackPresent, req.DisableUnclassifiedFallback); err != nil {
+			return nil, err
+		}
 	}
 	if req.WIPLimit != nil {
 		if *req.WIPLimit < 0 {

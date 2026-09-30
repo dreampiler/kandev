@@ -131,6 +131,36 @@ func TestEvaluateHonorsStopAfterExhaustion(t *testing.T) {
 	}
 }
 
+func TestUnclassifiedPolicyValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		section string
+		wantErr bool
+	}{
+		{name: "absent remains disabled"},
+		{name: "null remains disabled", section: `,"unclassified":null`},
+		{name: "disabled canonical policy", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":0}`},
+		{name: "minimum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":2}`},
+		{name: "maximum enabled threshold", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":10}`},
+		{name: "threshold below minimum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":1}`, wantErr: true},
+		{name: "threshold above maximum", section: `,"unclassified":{"enabled":true,"consecutive_failure_threshold":11}`, wantErr: true},
+		{name: "disabled threshold must be zero", section: `,"unclassified":{"enabled":false,"consecutive_failure_threshold":3}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := `{"version":1,"transient":{"on_exhausted":"skip"},"hard":{"on_exhausted":"skip"}` + tt.section + `}`
+			var document Document
+			if err := json.Unmarshal([]byte(raw), &document); err != nil {
+				t.Fatalf("unmarshal policy: %v", err)
+			}
+			err := ValidateDocument(document)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateDocument() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func withReset(failure *routingerr.Error, resetAt time.Time) *routingerr.Error {
 	failure.ResetHint = &resetAt
 	return failure
@@ -145,78 +175,14 @@ func unclassifiedFailure() *routingerr.Error {
 	}
 }
 
-func documentWithRepeatedFailure(threshold int64) Document {
-	document := DefaultDocument()
-	document.Unclassified = Policy{
-		OnExhausted:     OutcomeStop,
-		RepeatedFailure: RepeatedFailurePolicy{Enabled: true, Threshold: threshold},
-	}
-	return document
-}
-
-func TestEvaluateRepeatedUnclassifiedFailureFallsBackAtThreshold(t *testing.T) {
-	now := time.Unix(1000, 0).UTC()
-	document := documentWithRepeatedFailure(2)
-
-	tests := []struct {
-		name        string
-		consecutive int64
-		effectSafe  bool
-		wantKind    DecisionKind
-		wantOutcome Outcome
-	}{
-		{name: "below threshold stops", consecutive: 1, effectSafe: true, wantKind: DecisionStop, wantOutcome: OutcomeStop},
-		{name: "at threshold skips", consecutive: 2, effectSafe: true, wantKind: DecisionSkip, wantOutcome: OutcomeSkip},
-		{name: "above threshold skips", consecutive: 5, effectSafe: true, wantKind: DecisionSkip, wantOutcome: OutcomeSkip},
-		{name: "unsafe effect stops even at threshold", consecutive: 5, effectSafe: false, wantKind: DecisionStop, wantOutcome: OutcomeStop},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := Evaluate(document, EvaluationInput{
-				Failure: unclassifiedFailure(), Now: now,
-				EffectSafe: tt.effectSafe, ConsecutiveFailures: tt.consecutive,
-			})
-			if got.Kind != tt.wantKind {
-				t.Fatalf("kind = %s, want %s (%#v)", got.Kind, tt.wantKind, got)
-			}
-			if got.PendingOutcome != tt.wantOutcome {
-				t.Fatalf("pending outcome = %s, want %s", got.PendingOutcome, tt.wantOutcome)
-			}
-			if tt.effectSafe && got.Class != routingerr.ClassUnclassified {
-				t.Fatalf("class = %s, want unclassified", got.Class)
-			}
-		})
-	}
-}
-
 func TestEvaluateUnclassifiedStaysStoppedWhenPolicyDisabled(t *testing.T) {
 	document := DefaultDocument()
 	got := Evaluate(document, EvaluationInput{
-		Failure: unclassifiedFailure(), EffectSafe: true, ConsecutiveFailures: 100,
+		Failure: unclassifiedFailure(), EffectSafe: true,
 		Now: time.Unix(1, 0).UTC(),
 	})
 	if got.Kind != DecisionStop {
 		t.Fatalf("kind = %s, want stop", got.Kind)
-	}
-}
-
-func TestValidatePolicyRepeatedFailureThreshold(t *testing.T) {
-	base := DefaultPolicy()
-	base.RepeatedFailure = RepeatedFailurePolicy{Enabled: true, Threshold: 0}
-	if err := ValidatePolicy(base); err == nil {
-		t.Fatal("enabled threshold 0 should be rejected")
-	}
-	base.RepeatedFailure.Threshold = MaxRepeatedFailureThreshold + 1
-	if err := ValidatePolicy(base); err == nil {
-		t.Fatal("enabled threshold above max should be rejected")
-	}
-	base.RepeatedFailure = RepeatedFailurePolicy{Threshold: 3}
-	if err := ValidatePolicy(base); err == nil {
-		t.Fatal("disabled repeated failure with nonzero threshold should be rejected")
-	}
-	base.RepeatedFailure = RepeatedFailurePolicy{Enabled: true, Threshold: 2}
-	if err := ValidatePolicy(base); err != nil {
-		t.Fatalf("valid repeated failure policy rejected: %v", err)
 	}
 }
 
@@ -232,7 +198,7 @@ func TestDocumentWithoutUnclassifiedSectionStaysFailClosed(t *testing.T) {
 		t.Fatalf("legacy document should stay valid: %v", err)
 	}
 	got := Evaluate(document, EvaluationInput{
-		Failure: unclassifiedFailure(), EffectSafe: true, ConsecutiveFailures: 3,
+		Failure: unclassifiedFailure(), EffectSafe: true,
 		Now: time.Unix(1, 0).UTC(),
 	})
 	if got.Kind != DecisionStop {

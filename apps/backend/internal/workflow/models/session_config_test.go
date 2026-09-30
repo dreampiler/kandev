@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -91,6 +92,35 @@ func TestValidateWorkflowStepConfigureSession(t *testing.T) {
 			}
 			require.ErrorContains(t, err, tt.wantErr)
 		})
+	}
+}
+
+func TestValidateWorkflowStepFallbackAliasesMustAgree(t *testing.T) {
+	allow := false
+	require.ErrorContains(t, ValidateWorkflowStep(&WorkflowStep{
+		AllowRepeatedFailureFallback: &allow,
+		DisableUnclassifiedFallback:  false,
+	}), "conflicts with")
+
+	require.NoError(t, ValidateWorkflowStep(&WorkflowStep{
+		AllowRepeatedFailureFallback: &allow,
+		DisableUnclassifiedFallback:  true,
+	}))
+}
+
+func TestStepDefinitionFallbackAliases(t *testing.T) {
+	var legacy StepDefinition
+	if err := json.Unmarshal([]byte(`{"id":"step-1","allow_repeated_failure_fallback":false}`), &legacy); err != nil {
+		t.Fatalf("decode legacy template step: %v", err)
+	}
+	if !legacy.DisableUnclassifiedFallback || legacy.AllowRepeatedFailureFallback == nil || *legacy.AllowRepeatedFailureFallback {
+		t.Fatalf("legacy template step = %#v, want disabled fallback and legacy false", legacy)
+	}
+
+	var conflicting StepDefinition
+	err := json.Unmarshal([]byte(`{"id":"step-1","allow_repeated_failure_fallback":false,"disable_unclassified_fallback":false}`), &conflicting)
+	if err == nil {
+		t.Fatal("conflicting template fallback fields were accepted")
 	}
 }
 

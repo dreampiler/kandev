@@ -3,6 +3,7 @@
 package routingpolicy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -21,23 +22,9 @@ const (
 	MaxRetryDelay                   = 24 * time.Hour
 	MinResetWaitSeconds       int64 = 1
 	MaxResetWaitSeconds       int64 = 7 * 24 * 60 * 60
-
-	// MinRepeatedFailureThreshold is the smallest number of consecutive
-	// same-profile failures that may trigger a try-next fallback. A threshold
-	// of 1 is valid and means "fall back on the first classified failure".
-	MinRepeatedFailureThreshold int64 = 1
-	MaxRepeatedFailureThreshold int64 = 10
+	MinUnclassifiedThreshold  int64 = 2
+	MaxUnclassifiedThreshold  int64 = 10
 )
-
-// RepeatedFailurePolicy allows an otherwise non-fallbackable failure to try
-// the next candidate once the same concrete execution profile has produced
-// the same class of failure repeatedly. It exists so an environment-specific
-// defect that always classifies as unclassified cannot pin a dynamic profile
-// to one candidate forever; it never overrides the effect-safety invariant.
-type RepeatedFailurePolicy struct {
-	Enabled   bool  `json:"enabled"`
-	Threshold int64 `json:"threshold"`
-}
 
 type Outcome string
 
@@ -57,24 +44,77 @@ type ResetWaitPolicy struct {
 	MaxWaitSeconds int64 `json:"max_wait_seconds"`
 }
 
+type RepeatedFailurePolicy struct {
+	Enabled   bool  `json:"enabled"`
+	Threshold int64 `json:"threshold"`
+}
+
 type Policy struct {
 	Retry        RetryPolicy     `json:"retry"`
 	WaitForReset ResetWaitPolicy `json:"wait_for_reset"`
 	OnExhausted  Outcome         `json:"on_exhausted"`
-	// RepeatedFailure is only consulted for the unclassified class. It is a
-	// deliberate, opt-in override of the classifier's FallbackAllowed=false
-	// invariant for a concrete profile that keeps failing the same way.
-	RepeatedFailure RepeatedFailurePolicy `json:"repeated_failure"`
+}
+
+type UnclassifiedPolicy struct {
+	Enabled                     bool                   `json:"enabled"`
+	ConsecutiveFailureThreshold int64                  `json:"consecutive_failure_threshold"`
+	OnExhausted                 Outcome                `json:"on_exhausted,omitempty"`
+	RepeatedFailure             *RepeatedFailurePolicy `json:"repeated_failure,omitempty"`
+}
+
+func (policy *UnclassifiedPolicy) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		Enabled                     *bool                  `json:"enabled"`
+		ConsecutiveFailureThreshold *int64                 `json:"consecutive_failure_threshold"`
+		OnExhausted                 Outcome                `json:"on_exhausted"`
+		RepeatedFailure             *RepeatedFailurePolicy `json:"repeated_failure"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*policy = UnclassifiedPolicy{OnExhausted: wire.OnExhausted, RepeatedFailure: wire.RepeatedFailure}
+	if wire.Enabled != nil {
+		policy.Enabled = *wire.Enabled
+	}
+	if wire.ConsecutiveFailureThreshold != nil {
+		policy.ConsecutiveFailureThreshold = *wire.ConsecutiveFailureThreshold
+	}
+	if wire.RepeatedFailure == nil {
+		return nil
+	}
+	legacy := *wire.RepeatedFailure
+	if err := validateUnclassifiedAliasAgreement(wire.Enabled, wire.ConsecutiveFailureThreshold, &legacy); err != nil {
+		return err
+	}
+	if wire.Enabled == nil {
+		policy.Enabled = legacy.Enabled
+	}
+	if wire.ConsecutiveFailureThreshold == nil {
+		policy.ConsecutiveFailureThreshold = legacy.Threshold
+		if legacy.Enabled && legacy.Threshold == 1 {
+			policy.ConsecutiveFailureThreshold = MinUnclassifiedThreshold
+			legacy.Threshold = MinUnclassifiedThreshold
+		}
+	}
+	policy.RepeatedFailure = &legacy
+	return nil
+}
+
+func validateUnclassifiedAliasAgreement(enabled *bool, threshold *int64, legacy *RepeatedFailurePolicy) error {
+	if enabled != nil && *enabled != legacy.Enabled {
+		return errors.New("legacy repeated_failure.enabled conflicts with canonical enabled")
+	}
+	if threshold != nil && *threshold != legacy.Threshold {
+		return errors.New("legacy repeated_failure.threshold conflicts with canonical threshold")
+	}
+	return nil
 }
 
 type Document struct {
-	Version   int64  `json:"version"`
-	Transient Policy `json:"transient"`
-	Hard      Policy `json:"hard"`
-	// Unclassified is intentionally separate from the two provider-recovery
-	// classes. A missing or disabled value keeps the historical fail-closed
-	// behavior: an unclassified failure stops the route.
-	Unclassified Policy `json:"unclassified"`
+	Version      int64               `json:"version"`
+	Transient    Policy              `json:"transient"`
+	Hard         Policy              `json:"hard"`
+	Unclassified *UnclassifiedPolicy `json:"unclassified,omitempty"`
 }
 
 func DefaultPolicy() Policy {
@@ -83,8 +123,10 @@ func DefaultPolicy() Policy {
 
 func DefaultDocument() Document {
 	return Document{
-		Version: Version, Transient: DefaultPolicy(), Hard: DefaultPolicy(),
-		Unclassified: Policy{OnExhausted: OutcomeStop},
+		Version:      Version,
+		Transient:    DefaultPolicy(),
+		Hard:         DefaultPolicy(),
+		Unclassified: &UnclassifiedPolicy{OnExhausted: OutcomeStop},
 	}
 }
 
@@ -94,22 +136,9 @@ func (document Document) PolicyFor(class routingerr.Class) (Policy, bool) {
 		return document.Transient, true
 	case routingerr.ClassHard:
 		return document.Hard, true
-	case routingerr.ClassUnclassified:
-		if !document.Unclassified.RepeatedFailure.Enabled {
-			return Policy{}, false
-		}
-		return document.Unclassified, true
 	default:
 		return Policy{}, false
 	}
-}
-
-// RepeatedFailureEnabled reports whether the document opts into the
-// repeated-failure override for the class. It is false for every class whose
-// policy is absent, so fail-closed callers can gate on it directly.
-func (document Document) RepeatedFailureEnabled(class routingerr.Class) bool {
-	policy, ok := document.PolicyFor(class)
-	return ok && policy.RepeatedFailure.Enabled
 }
 
 func ValidateDocument(document Document) error {
@@ -122,13 +151,35 @@ func ValidateDocument(document Document) error {
 	if err := ValidatePolicy(document.Hard); err != nil {
 		return fmt.Errorf("hard policy: %w", err)
 	}
-	// The unclassified section is optional and fail-closed. Validate it only
-	// when it opts in, so a persisted document written before the section
-	// existed keeps loading unchanged.
-	if document.Unclassified.RepeatedFailure.Enabled {
-		if err := ValidatePolicy(document.Unclassified); err != nil {
-			return fmt.Errorf("unclassified policy: %w", err)
-		}
+	return validateUnclassifiedPolicy(document.Unclassified)
+}
+
+func validateUnclassifiedPolicy(policy *UnclassifiedPolicy) error {
+	if policy == nil {
+		return nil
+	}
+	if policy.Enabled && (policy.ConsecutiveFailureThreshold < MinUnclassifiedThreshold || policy.ConsecutiveFailureThreshold > MaxUnclassifiedThreshold) {
+		return fmt.Errorf("unclassified.consecutive_failure_threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
+	}
+	if !policy.Enabled && policy.ConsecutiveFailureThreshold != 0 {
+		return errors.New("disabled unclassified threshold must be zero")
+	}
+	return validateRepeatedFailureCompatibility(policy)
+}
+
+func validateRepeatedFailureCompatibility(policy *UnclassifiedPolicy) error {
+	legacy := policy.RepeatedFailure
+	if legacy == nil {
+		return nil
+	}
+	if legacy.Enabled && (legacy.Threshold < MinUnclassifiedThreshold || legacy.Threshold > MaxUnclassifiedThreshold) {
+		return fmt.Errorf("legacy unclassified.repeated_failure.threshold must be between %d and %d", MinUnclassifiedThreshold, MaxUnclassifiedThreshold)
+	}
+	if !legacy.Enabled && legacy.Threshold != 0 {
+		return errors.New("disabled legacy repeated_failure threshold must be zero")
+	}
+	if legacy.Enabled != policy.Enabled || (legacy.Enabled && legacy.Threshold != policy.ConsecutiveFailureThreshold) {
+		return errors.New("legacy repeated_failure fields conflict with the canonical unclassified policy")
 	}
 	return nil
 }
@@ -136,13 +187,6 @@ func ValidateDocument(document Document) error {
 func ValidatePolicy(policy Policy) error {
 	if policy.OnExhausted != OutcomeSkip && policy.OnExhausted != OutcomeStop {
 		return fmt.Errorf("on_exhausted must be %q or %q", OutcomeSkip, OutcomeStop)
-	}
-	if policy.RepeatedFailure.Enabled {
-		if policy.RepeatedFailure.Threshold < MinRepeatedFailureThreshold || policy.RepeatedFailure.Threshold > MaxRepeatedFailureThreshold {
-			return fmt.Errorf("repeated_failure.threshold must be between %d and %d", MinRepeatedFailureThreshold, MaxRepeatedFailureThreshold)
-		}
-	} else if policy.RepeatedFailure.Threshold != 0 {
-		return errors.New("disabled repeated_failure threshold must be zero")
 	}
 	if policy.Retry.Enabled {
 		if policy.Retry.MaxRetries < MinRetries || policy.Retry.MaxRetries > MaxRetries {
@@ -179,10 +223,6 @@ type EvaluationInput struct {
 	RetryOrdinal  int64
 	ResetWaitUsed bool
 	EffectSafe    bool
-	// ConsecutiveFailures is the number of consecutive failures the same
-	// concrete execution profile has produced for this route. It is only
-	// consulted for the unclassified class.
-	ConsecutiveFailures int64
 }
 
 type Evaluation struct {
@@ -197,7 +237,7 @@ type Evaluation struct {
 
 func Evaluate(document Document, input EvaluationInput) Evaluation {
 	result := Evaluation{Kind: DecisionStop, PendingOutcome: OutcomeStop}
-	if input.Failure == nil || !input.EffectSafe {
+	if input.Failure == nil || !input.EffectSafe || !input.Failure.FallbackAllowed {
 		return result
 	}
 	class := failureClass(input.Failure)
@@ -212,20 +252,6 @@ func Evaluate(document Document, input EvaluationInput) Evaluation {
 		result.CatalogueVersion = routingerr.CatalogueVersion
 	}
 	result.PendingOutcome = policy.OnExhausted
-
-	if !input.Failure.FallbackAllowed {
-		// The classifier forbids falling back for this failure. The only
-		// override is the repeated-failure policy: the same concrete profile
-		// has failed the same way often enough that trying a different
-		// candidate is worth more than stopping, and the failed turn was
-		// proven not to have produced a side effect.
-		if !repeatedFailureOverride(class, policy, input.ConsecutiveFailures) {
-			return result
-		}
-		result.Kind = DecisionSkip
-		result.PendingOutcome = OutcomeSkip
-		return result
-	}
 
 	if resetAt, ok := resetWaitDeadline(policy, input); ok {
 		result.Kind = DecisionWaitForReset
@@ -242,18 +268,6 @@ func Evaluate(document Document, input EvaluationInput) Evaluation {
 		result.Kind = DecisionSkip
 	}
 	return result
-}
-
-// repeatedFailureOverride reports whether an otherwise non-fallbackable
-// failure may try the next candidate because the same concrete profile has
-// repeatedly produced the same unclassified failure. It is deliberately
-// narrow: only the unclassified class, only when the profile opted in, and
-// only once the threshold is reached.
-func repeatedFailureOverride(class routingerr.Class, policy Policy, consecutive int64) bool {
-	if class != routingerr.ClassUnclassified || !policy.RepeatedFailure.Enabled {
-		return false
-	}
-	return consecutive >= policy.RepeatedFailure.Threshold
 }
 
 func failureClass(failure *routingerr.Error) routingerr.Class {
