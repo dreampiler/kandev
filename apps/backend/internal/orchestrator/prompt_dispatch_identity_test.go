@@ -206,6 +206,10 @@ func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
 	if reservation == nil {
 		t.Fatal("mark queued dispatch in flight returned nil")
 	}
+	claimed, err := svc.claimQueuedDispatchForExecution(sessionID, queued.ID, reservation)
+	if err != nil || !claimed {
+		t.Fatalf("claim queued dispatch for execution: claimed=%v err=%v", claimed, err)
+	}
 
 	promptDone := make(chan error, 1)
 	go func() {

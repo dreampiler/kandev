@@ -106,7 +106,7 @@ func TestPublishCarriesEveryStepField(t *testing.T) {
 		"profile_session_start_policy":    string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":      string(step.ProfileSessionEndPolicy),
 		"disable_unclassified_fallback":   step.DisableUnclassifiedFallback,
-		"allow_repeated_failure_fallback": step.AllowRepeatedFailureFallback,
+		"allow_repeated_failure_fallback": models.LegacyRepeatedFailureFallbackAlias(step),
 		"stage_type":                      string(step.StageType),
 		"auto_advance_requires_signal":    step.AutoAdvanceRequiresSignal,
 		"cancel_triggers_turn_complete":   step.CancelTriggersTurnComplete,

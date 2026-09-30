@@ -112,6 +112,7 @@ func normalizeDynamicUnclassified(policy *dto.DynamicAgentPolicyDTO) error {
 		Enabled:   unclassified.Enabled,
 		Threshold: unclassified.ConsecutiveFailureThreshold,
 	}
+	unclassified.MarkCanonicalPresent()
 	return nil
 }
 

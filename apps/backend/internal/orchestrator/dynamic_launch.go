@@ -319,14 +319,14 @@ func (s *Service) markDynamicTerminalFailureActionRequired(
 	sessionID string,
 	generation int64,
 	reason string,
-) {
+) bool {
 	if s.profileExecutionResolver == nil || s.repo == nil || sessionID == "" || generation <= 0 {
-		return
+		return false
 	}
 	// Failure callbacks precede the session-state projection; the route generation fences this terminal transition.
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.RouteGeneration != generation {
-		return
+		return false
 	}
 	decision, err := s.profileExecutionResolver.MarkRouteTerminalFailureActionRequired(
 		ctx, sessionID, generation, reason,
@@ -336,16 +336,17 @@ func (s *Service) markDynamicTerminalFailureActionRequired(
 			s.logger.Warn("failed to mark terminal dynamic route failure as action_required",
 				zap.String("session_id", sessionID), zap.Error(err))
 		}
-		return
+		return false
 	}
 	if decision.Status != dynamicRouteStatusActionRequired {
-		return
+		return false
 	}
 	session, err = s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil || session.RouteGeneration != generation {
-		return
+		return false
 	}
 	s.mirrorDynamicRouteProjection(ctx, session, generation, decision.Status, reason)
+	return true
 }
 
 // transientStartupLaunchFailure presents a process that never started as a
@@ -993,8 +994,11 @@ func (s *Service) markDeclinedDynamicFailure(
 	reason string,
 	unclassified bool,
 ) {
-	if unclassified {
-		s.markDynamicTerminalFailureActionRequired(ctx, sessionID, generation, reason)
+	// An unclassified failure on an already-active route needs the terminal
+	// marker. A route still starting or retrying, such as a successor
+	// generation claimed just before its continuation build failed, is settled
+	// by the generation-fenced launch marker instead.
+	if unclassified && s.markDynamicTerminalFailureActionRequired(ctx, sessionID, generation, reason) {
 		return
 	}
 	s.markDynamicRouteActionRequired(ctx, sessionID, generation, reason)

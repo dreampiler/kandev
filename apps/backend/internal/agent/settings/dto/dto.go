@@ -127,6 +127,17 @@ func (p *DynamicUnclassifiedPolicyDTO) HasCanonicalThreshold() bool {
 	return p != nil && p.hasThreshold
 }
 
+// MarkCanonicalPresent records that normalization has materialized the canonical
+// enabled and threshold fields, so a normalized policy compares and re-normalizes
+// identically to one decoded from its serialized canonical form.
+func (p *DynamicUnclassifiedPolicyDTO) MarkCanonicalPresent() {
+	if p == nil {
+		return
+	}
+	p.hasEnabled = true
+	p.hasThreshold = true
+}
+
 type DynamicErrorPolicyDTO struct {
 	Retry        DynamicRetryPolicyDTO     `json:"retry"`
 	WaitForReset DynamicResetWaitPolicyDTO `json:"wait_for_reset"`
