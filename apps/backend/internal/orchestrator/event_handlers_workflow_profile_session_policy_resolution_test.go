@@ -313,6 +313,80 @@ func TestHandleTaskQueuePromotedUsesSourceParkPolicy(t *testing.T) {
 	}
 }
 
+// A task that reaches a full step is queued on that step, and the later
+// same-step promotion admits it without writing a ledger row. The promotion
+// delivery therefore carries no transition id while the task still holds the
+// route committed by the step it left.
+func TestHandleTaskQueuePromotedSameStepEntryReplacesPreviousStepRoute(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.stepGetter.steps["step-a"] = &wfmodels.WorkflowStep{
+		ID: "step-a", WorkflowID: "wf1", Position: 0,
+		AgentProfileID:          "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyPark,
+	}
+	fixture.stepGetter.steps["step-b"] = &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", Position: 1,
+		AgentProfileID:            "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyNew,
+	}
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute,
+		models.WorkflowSessionRoute{
+			OperationID:       "route-step-a",
+			DestinationStepID: "step-a",
+			EntryIdentity:     fixture.svc.workflowEntryIdentity(ctx, "t1"),
+			TargetKind:        workflowSessionRouteTargetProfile,
+			AgentProfileID:    "profile-a",
+			DestinationID:     fixture.current.ID,
+			Phase:             workflowSessionRouteCommitted,
+		}))
+
+	task, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WorkflowStepID = "step-b"
+	task.WIPAdmitted = false
+	task.QueuedForStepID = "step-b"
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task), "queue task on the full destination step")
+	queuedEntryID, err := fixture.repo.GetLatestTaskStepTransitionID(ctx, "t1")
+	require.NoError(t, err)
+	require.Positive(t, queuedEntryID, "entering the destination step must write its ledger row")
+
+	task, err = fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.Metadata[models.MetaKeyQueuePromotionPending] = map[string]interface{}{
+		"from_step_id": "step-b",
+	}
+	require.NoError(t, fixture.repo.UpdateTask(ctx, task), "admit queued task on the same step")
+	require.Zero(t, task.WorkflowStepTransitionID, "a same-step promotion writes no ledger row")
+
+	entryComplete := make(chan struct{})
+	fixture.svc.onTaskQueuePromotionEntryComplete = func() { close(entryComplete) }
+
+	fixture.svc.handleTaskQueuePromoted(ctx, watcher.TaskEventData{TaskID: "t1"})
+	select {
+	case <-entryComplete:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queue-promotion entry did not complete")
+	}
+
+	promoted, err := fixture.repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	route, ok := models.LoadWorkflowSessionRoute(promoted.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "step-b", route.DestinationStepID,
+		"the promoted entry must replace the route committed by the previous step")
+	require.Equal(t, workflowEntryIdentityForID(queuedEntryID), route.EntryIdentity)
+	require.NotEqual(t, fixture.current.ID, route.DestinationID)
+
+	source, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
+	require.NoError(t, err)
+	if source.State != models.TaskSessionStateWaitingForInput || source.IsPrimary {
+		t.Fatalf("source after promotion = state %s primary %t, want parked nonprimary", source.State, source.IsPrimary)
+	}
+}
+
 func TestProcessManualMoveLifecycle_UnknownSourceKeepsLifecyclePending(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
