@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: agents
 created: 2026-09-30
 owners:
@@ -10,49 +10,50 @@ owners:
 
 ## Overview
 
-OpenCode running against a credit-metered provider plan reports a depleted
-account as a plain stderr diagnostic whose wording names the credit plan rather
-than a usage period. The agent system owns provider error classification, so it
-must recognize that diagnostic: otherwise dynamic routing never learns the
-account is exhausted, cannot advance to the next candidate provider, and the
-agent stops on an account that cannot serve requests.
+OpenCode can report a depleted credit allowance as plain diagnostic text. The
+agent system owns provider-error classification. It must recognize exhausted
+credit allowances so dynamic routing can try another configured provider.
+
+Payment errors also arrive as text without an HTTP status. These errors require
+user action when the text does not show credit exhaustion.
 
 ## Terminology
 
-- **Credit-exhaustion diagnostic:** The provider-authored message stating that
-  a credit plan or credit balance is exhausted, with bounded wording such as
-  "credit limit reached", "out of credits", "insufficient credits",
-  "insufficient balance", or "payment required".
-- **Period usage-limit diagnostic:** The already-classified message naming a
-  daily, weekly, monthly, or N-hour usage limit. It is out of scope here.
+- **Credit-exhaustion diagnostic:** OpenCode text that states a credit limit
+  has been reached, credits are exhausted, or the balance is insufficient.
+- **Payment diagnostic:** OpenCode text that states payment is required but
+  does not state that a credit allowance is exhausted.
 
 ## Requirements
 
-### REQ-AGENTS-OPENCODE-CREDIT-001: Recognize opencode credit-exhaustion diagnostics
+### REQ-AGENTS-OPENCODE-CREDIT-001: Classify OpenCode billing diagnostics
 
-**Intent:** A depleted credit-plan account must yield a fallback-eligible
-high-confidence quota classification so dynamic routing advances to the next
-candidate provider instead of stalling on the exhausted account.
+**Intent:** Provider routing must distinguish an exhausted credit allowance
+from a billing condition that requires user action.
 
-**User story:** As an operator, I want OpenCode credit exhaustion classified as
-a provider quota error, so that dynamic profiles continue on a healthy provider
-without manual intervention.
+**User story:** As an operator, I want an exhausted credit route skipped and a
+billing problem surfaced, so that other configured routes can handle safe work
+and users can repair inactive billing.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-OPENCODE-CREDIT-001.1:** An `opencode-acp` stderr diagnostic
-  containing one of the bounded credit-exhaustion phrases shall classify as
-  `quota_limited` with high confidence and shall allow fallback.
-- **AC-AGENTS-OPENCODE-CREDIT-001.2:** The rule shall not match the bare word
-  "credit", so provider text that merely mentions credits in an unrelated
-  sentence (for example a prompt to purchase more credits) keeps its existing
-  classification.
-- **AC-AGENTS-OPENCODE-CREDIT-001.3:** Classification shall be independent of
-  the redacted renewal URL and date in the observed message, so sanitization
-  changes to that text do not affect routing.
+- **AC-AGENTS-OPENCODE-CREDIT-001.1:** When `opencode-acp` reports one of the
+  bounded credit-exhaustion phrases, the system shall classify it as
+  high-confidence `quota_limited` and allow fallback.
+- **AC-AGENTS-OPENCODE-CREDIT-001.2:** When `opencode-acp` reports only
+  `payment required`, the system shall classify it as high-confidence
+  `subscription_required`, set user action, and disable automatic retry.
+- **AC-AGENTS-OPENCODE-CREDIT-001.3:** When the text reports credit exhaustion
+  and payment requirement, the system shall give credit-exhaustion text priority.
+- **AC-AGENTS-OPENCODE-CREDIT-001.4:** When structured HTTP status and text
+  disagree, the system shall give the structured status priority.
+- **AC-AGENTS-OPENCODE-CREDIT-001.5:** Text that only mentions credits without
+  an exhaustion phrase shall keep its existing classification.
+- **AC-AGENTS-OPENCODE-CREDIT-001.6:** Credit classification shall not depend
+  on a renewal URL or date that sanitization removes.
 
 ## Out of scope
 
-- Changing classification rules for providers other than `opencode-acp`.
-- Changing candidate ordering, circuit behavior, or provider selection.
-- Reset-time parsing for credit-exhaustion text.
+- Changing rules for providers other than `opencode-acp`.
+- Changing candidate ordering, credential circuits, or provider selection.
+- Parsing reset times from these billing diagnostics.
