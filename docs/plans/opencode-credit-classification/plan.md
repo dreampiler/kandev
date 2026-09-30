@@ -28,7 +28,8 @@ and date before classification, so the rule never depends on that text.
 
 ## Delivery order
 
-1. Add the rule and the focused classification test in one work order.
+1. [task-01-classify-opencode-credit-exhaustion.md](task-01-classify-opencode-credit-exhaustion.md):
+   add the rule and the focused classification test in one work order.
 
 ## Verification strategy
 
