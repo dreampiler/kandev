@@ -122,5 +122,14 @@
   "newViewNumbered": "새 뷰 {{suffix}}",
   "untitledView": "제목 없는 뷰",
   "workspaceContextRefreshFailed": "작업을 새로 고치지 못했습니다.",
-  "workspaceContextAccessDenied": "이 워크스페이스에 더 이상 접근할 수 없습니다."
+  "workspaceContextAccessDenied": "이 워크스페이스에 더 이상 접근할 수 없습니다.",
+  "continuedFrom": "{{title}}에서 이어짐",
+  "continuationLabel": "이어짐",
+  "selectedTaskCount_one": "작업 {{count}}개 선택됨",
+  "selectedTaskCount_other": "작업 {{count}}개 선택됨",
+  "clearSelection": "선택 해제",
+  "nextPage": "다음",
+  "pageLoadFailed": "이 페이지를 불러오지 못했습니다.",
+  "pageStatus": "{{total}}페이지 중 {{page}}페이지",
+  "previousPage": "이전"
 }
