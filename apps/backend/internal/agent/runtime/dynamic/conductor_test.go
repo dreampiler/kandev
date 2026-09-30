@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
 
 type conductorTestProfileLoader struct {
@@ -366,27 +365,6 @@ func TestConductorDoesNotFallbackAfterPostStartLaunchFailure(t *testing.T) {
 	_, err := conductor.Launch(context.Background(), ConductorLaunch{SessionID: "session-post-start", LogicalProfileID: profile.ID})
 	if !errors.Is(err, failure) {
 		t.Fatalf("Launch error = %v, want %v", err, failure)
-	}
-}
-
-func TestConductorRepeatedUnclassifiedDisabledPolicyDoesNotFallback(t *testing.T) {
-	profile := Profile{
-		ID: "dynamic-profile",
-		Candidates: []Candidate{
-			{ID: "candidate-first", Enabled: true, BindingKey: "first", Policies: routingpolicy.DefaultDocument()},
-			{ID: "candidate-second", Enabled: true, BindingKey: "second"},
-		},
-	}
-	failure := &routingerr.Error{
-		Code: routingerr.CodeAgentRuntime, Class: routingerr.ClassUnclassified, FallbackAllowed: false,
-	}
-	conductor := NewConductor(NewEngine(), conductorTestProfileLoader{profile: profile},
-		failingConductorTestDownstream{err: failure})
-
-	if _, err := conductor.Launch(context.Background(), ConductorLaunch{
-		SessionID: "session-disabled", LogicalProfileID: profile.ID,
-	}); err == nil {
-		t.Fatal("unclassified failure without the repeated-failure policy must not fall back")
 	}
 }
 

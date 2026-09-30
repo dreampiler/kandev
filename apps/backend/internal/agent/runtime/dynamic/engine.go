@@ -387,32 +387,13 @@ func (e *Engine) ApplyFailureContext(
 	currentCandidateID string,
 	failure *routingerr.Error,
 ) (RouteDecision, error) {
-	effectSafe := failure != nil && failure.FallbackAllowed
-	return e.ApplyFailureContextWithEffect(
-		ctx, sessionID, profile, expectedGeneration, currentCandidateID, failure, effectSafe,
-	)
-}
-
-// ApplyFailureContextWithEffect is the caller-owned effect-safety variant. A
-// caller that has independent evidence the failed turn produced no side effect
-// (for example a pre-result agent failure) passes effectSafe=true even when
-// the classifier forbids fallback, so the repeated-failure policy can decide.
-func (e *Engine) ApplyFailureContextWithEffect(
-	ctx context.Context,
-	sessionID string,
-	profile Profile,
-	expectedGeneration int64,
-	currentCandidateID string,
-	failure *routingerr.Error,
-	effectSafe bool,
-) (RouteDecision, error) {
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
 	e.openCircuitForFailure(profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
-		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure, effectSafe)
+		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
 	}
 	action := e.ActionFor(profile, currentCandidateID, failure.Code)
 	switch action {
@@ -450,11 +431,6 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return RouteDecision{}, err
 	}
 	policyState := decodePolicyState(state.PolicyStateJSON)
-	// Legacy candidate-only counters are retained in the decoder solely for
-	// cleanup. They never contribute to the fingerprint-based streak.
-	policyState.ConsecutiveFailures = 0
-	policyState.LastExecutionProfileID = ""
-	policyState.LastFailureCode = ""
 	if previous := policyState.Unclassified; previous.valid() && previous.LastAttemptID == evidence.AttemptID {
 		return unclassifiedStreakDecision(state, previous), ErrRecoveryPending
 	}
@@ -808,10 +784,9 @@ func (e *Engine) applyPolicyFailure(
 	currentCandidateID string,
 	candidate Candidate,
 	failure *routingerr.Error,
-	effectSafe bool,
 ) (RouteDecision, error) {
 	state, exists, policyState, evaluation, now, err := e.preparePolicyFailure(
-		ctx, sessionID, expectedGeneration, currentCandidateID, candidate, failure, effectSafe,
+		ctx, sessionID, expectedGeneration, candidate, failure,
 	)
 	if err != nil {
 		return RouteDecision{}, err
@@ -866,10 +841,8 @@ func (e *Engine) preparePolicyFailure(
 	ctx context.Context,
 	sessionID string,
 	expectedGeneration int64,
-	currentCandidateID string,
 	candidate Candidate,
 	failure *routingerr.Error,
-	effectSafe bool,
 ) (RouteState, bool, PolicyState, routingpolicy.Evaluation, time.Time, error) {
 	state, exists, err := e.stateForFailure(ctx, sessionID)
 	if err != nil {
@@ -896,7 +869,7 @@ func (e *Engine) preparePolicyFailure(
 	}
 	evaluation := routingpolicy.Evaluate(candidate.Policies, routingpolicy.EvaluationInput{
 		Failure: failure, Now: now, RetryOrdinal: policyState.RetryOrdinal,
-		ResetWaitUsed: resetWaitUsed, EffectSafe: effectSafe,
+		ResetWaitUsed: resetWaitUsed, EffectSafe: failure.FallbackAllowed,
 	})
 	policyJSON, err := json.Marshal(candidate.Policies)
 	if err != nil {
@@ -907,9 +880,6 @@ func (e *Engine) preparePolicyFailure(
 	policyState.CatalogueVersion = evaluation.CatalogueVersion
 	policyState.PolicyJSON = string(policyJSON)
 	policyState.RetryOrdinal = evaluation.RetryOrdinal
-	policyState.ConsecutiveFailures = 0
-	policyState.LastExecutionProfileID = ""
-	policyState.LastFailureCode = ""
 	if policyState.ResetWaitClasses == nil {
 		policyState.ResetWaitClasses = make(map[routingerr.Class]bool)
 	}
@@ -1021,23 +991,6 @@ func mustJSON(value PolicyState) []byte {
 	return payload
 }
 
-// clearRepeatedFailureStreak removes the obsolete candidate-only counter from
-// persisted route state. It never grants fallback; new fallback authority is
-// represented only by the versioned UnclassifiedStreak.
-func clearRepeatedFailureStreak(raw string) string {
-	if raw == "" {
-		return raw
-	}
-	var state PolicyState
-	if err := json.Unmarshal([]byte(raw), &state); err != nil {
-		return raw
-	}
-	state.ConsecutiveFailures = 0
-	state.LastExecutionProfileID = ""
-	state.LastFailureCode = ""
-	return string(mustJSON(state))
-}
-
 // ResumePending advances a due retry/wait state to retrying. The caller still
 // owns the concrete launch and must pass the returned generation through its
 // normal launch fence.
@@ -1123,7 +1076,6 @@ func (e *Engine) MarkActive(ctx context.Context, sessionID string, expectedGener
 	}
 	expectedStatus := state.Status
 	state.Status = routeStatusActive
-	state.PolicyStateJSON = clearRepeatedFailureStreak(state.PolicyStateJSON)
 	state.UpdatedAt = e.now()
 	if err := e.persistSameGeneration(ctx, expectedGeneration, expectedStatus, state); err != nil {
 		return err
@@ -1226,42 +1178,6 @@ func (e *Engine) MarkActionRequired(
 		}
 		e.states[sessionID] = state
 		delete(e.retryClaims, sessionID)
-	}
-	return RouteDecision{
-		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,
-		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation,
-		ProfileVersion: state.ProfileVersion, Reason: reason, Status: state.Status,
-	}, nil
-}
-
-// MarkTerminalFailureActionRequired moves a confirmed failed attempt from
-// active to manual recovery. Unlike MarkActionRequired, its caller must have
-// observed terminal failure for the active candidate.
-func (e *Engine) MarkTerminalFailureActionRequired(
-	ctx context.Context,
-	sessionID string,
-	expectedGeneration int64,
-	reason string,
-) (RouteDecision, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	state, exists, err := e.loadStateLocked(ctx, sessionID)
-	if err != nil {
-		return RouteDecision{}, err
-	}
-	if !exists {
-		return RouteDecision{}, ErrRouteStateNotFound
-	}
-	if state.Generation != expectedGeneration {
-		return RouteDecision{}, ErrStaleGeneration
-	}
-	if state.Status == routeStatusActive {
-		state.Status = routeStatusActionRequired
-		state.UpdatedAt = e.now()
-		if err := e.persistSameGeneration(ctx, expectedGeneration, routeStatusActive, state); err != nil {
-			return RouteDecision{}, err
-		}
-		e.states[sessionID] = state
 	}
 	return RouteDecision{
 		SessionID: sessionID, LogicalProfileID: state.LogicalProfileID,

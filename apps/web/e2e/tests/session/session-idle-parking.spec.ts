@@ -105,7 +105,7 @@ test.describe("workspace ACP idle suspension", () => {
 
       await testPage.goto("/");
       const focusedSession = await openTaskSession(testPage, task.id);
-      await expect.poll(() => focusLaunchResponses.length, { timeout: 30_000 }).toBe(1);
+      await expect.poll(() => focusLaunchResponses.length, { timeout: 10_000 }).toBe(1);
       await expect
         .poll(
           () => ({

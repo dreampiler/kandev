@@ -553,9 +553,10 @@ type ListTaskSessionsResponse struct {
 }
 
 type WorkflowSnapshotDTO struct {
-	Workflow WorkflowDTO       `json:"workflow"`
-	Steps    []WorkflowStepDTO `json:"steps"`
-	Tasks    []TaskDTO         `json:"tasks"`
+	Workflow     WorkflowDTO          `json:"workflow"`
+	Steps        []WorkflowStepDTO    `json:"steps"`
+	Tasks        []TaskDTO            `json:"tasks"`
+	TaskCoverage *models.TaskCoverage `json:"task_coverage,omitempty"`
 }
 
 type ListMessagesResponse struct {
@@ -598,8 +599,9 @@ type ListTurnsResponse struct {
 }
 
 type ListWorkflowsResponse struct {
-	Workflows []WorkflowDTO `json:"workflows"`
-	Total     int           `json:"total"`
+	Workflows            []WorkflowDTO                `json:"workflows"`
+	Total                int                          `json:"total"`
+	TaskWorkflowCoverage *models.TaskWorkflowCoverage `json:"task_workflow_coverage,omitempty"`
 }
 
 type ListWorkspacesResponse struct {
@@ -1225,25 +1227,24 @@ func steerEligible(sessionID string, state models.TaskSessionState, provider For
 
 // WorkflowStepDTO represents a workflow step for API responses
 type WorkflowStepDTO struct {
-	ID                           string                                   `json:"id"`
-	WorkflowID                   string                                   `json:"workflow_id"`
-	Name                         string                                   `json:"name"`
-	Position                     int                                      `json:"position"`
-	Color                        string                                   `json:"color"`
-	Prompt                       string                                   `json:"prompt,omitempty"`
-	Events                       *StepEventsDTO                           `json:"events,omitempty"`
-	AllowManualMove              bool                                     `json:"allow_manual_move"`
-	IsStartStep                  bool                                     `json:"is_start_step"`
-	ShowInCommandPanel           bool                                     `json:"show_in_command_panel"`
-	AutoArchiveAfterHours        int                                      `json:"auto_archive_after_hours,omitempty"`
-	AgentProfileID               string                                   `json:"agent_profile_id,omitempty"`
-	ProfileSessionStartPolicy    models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
-	ProfileSessionEndPolicy      models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
-	DisableUnclassifiedFallback  bool                                     `json:"disable_unclassified_fallback"`
-	AllowRepeatedFailureFallback *bool                                    `json:"allow_repeated_failure_fallback,omitempty"`
-	SessionTarget                *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
-	WIPLimit                     int                                      `json:"wip_limit"`
-	PullFromStepID               string                                   `json:"pull_from_step_id,omitempty"`
+	ID                          string                                   `json:"id"`
+	WorkflowID                  string                                   `json:"workflow_id"`
+	Name                        string                                   `json:"name"`
+	Position                    int                                      `json:"position"`
+	Color                       string                                   `json:"color"`
+	Prompt                      string                                   `json:"prompt,omitempty"`
+	Events                      *StepEventsDTO                           `json:"events,omitempty"`
+	AllowManualMove             bool                                     `json:"allow_manual_move"`
+	IsStartStep                 bool                                     `json:"is_start_step"`
+	ShowInCommandPanel          bool                                     `json:"show_in_command_panel"`
+	AutoArchiveAfterHours       int                                      `json:"auto_archive_after_hours,omitempty"`
+	AgentProfileID              string                                   `json:"agent_profile_id,omitempty"`
+	ProfileSessionStartPolicy   models.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy"`
+	ProfileSessionEndPolicy     models.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy"`
+	DisableUnclassifiedFallback bool                                     `json:"disable_unclassified_fallback"`
+	SessionTarget               *wfmodels.WorkflowSessionTarget          `json:"session_target,omitempty"`
+	WIPLimit                    int                                      `json:"wip_limit"`
+	PullFromStepID              string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
 	StageType                  string `json:"stage_type,omitempty"`

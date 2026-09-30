@@ -425,20 +425,6 @@ func (r *ProfileExecutionResolver) MarkRouteActionRequired(
 	return r.engine.MarkActionRequired(ctx, sessionID, expectedGeneration, reason)
 }
 
-// MarkRouteTerminalFailureActionRequired exposes recovery for a confirmed
-// failed attempt whose route had already reached active.
-func (r *ProfileExecutionResolver) MarkRouteTerminalFailureActionRequired(
-	ctx context.Context,
-	sessionID string,
-	expectedGeneration int64,
-	reason string,
-) (dynamic.RouteDecision, error) {
-	if r.engine == nil {
-		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
-	}
-	return r.engine.MarkTerminalFailureActionRequired(ctx, sessionID, expectedGeneration, reason)
-}
-
 func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 	ctx context.Context,
 	sessionID, profileID, currentExecutionProfileID string,
@@ -701,10 +687,38 @@ func (r *ProfileExecutionResolver) dynamicSourceProfileID(ctx context.Context, l
 	if err != nil {
 		return "", fmt.Errorf("resolve profile %s: %w", logicalProfileID, err)
 	}
+	sourceProfileID := logicalProfileID
 	if profile != nil && profile.ExecutionAgentProfileID != "" {
-		return profile.ExecutionAgentProfileID, nil
+		sourceProfileID = profile.ExecutionAgentProfileID
 	}
-	return logicalProfileID, nil
+	if err := r.validateDynamicSourceProfile(ctx, logicalProfileID, sourceProfileID, profile); err != nil {
+		return "", err
+	}
+	return sourceProfileID, nil
+}
+
+func (r *ProfileExecutionResolver) validateDynamicSourceProfile(
+	ctx context.Context, logicalProfileID, sourceProfileID string, logicalProfile *agentsettingsmodels.AgentProfile,
+) error {
+	source, err := r.profiles.GetAgentProfile(ctx, sourceProfileID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile %s: %w", sourceProfileID, err)
+	}
+	if source == nil || source.DeletedAt != nil || !source.Enabled {
+		return fmt.Errorf("dynamic source profile %s is unavailable", sourceProfileID)
+	}
+	if logicalProfile != nil && sourceProfileID != logicalProfileID &&
+		source.WorkspaceID != "" && source.WorkspaceID != logicalProfile.WorkspaceID {
+		return fmt.Errorf("dynamic source profile %s belongs to a different workspace", sourceProfileID)
+	}
+	agent, err := r.profiles.GetAgent(ctx, source.AgentID)
+	if err != nil {
+		return fmt.Errorf("resolve dynamic source profile family %s: %w", sourceProfileID, err)
+	}
+	if agent == nil || agent.Name != agents.DynamicAgentID {
+		return fmt.Errorf("execution profile %s is not a dynamic profile", sourceProfileID)
+	}
+	return nil
 }
 
 func (r *ProfileExecutionResolver) agentNameForProfile(

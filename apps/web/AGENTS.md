@@ -79,7 +79,7 @@ lib/api/domains/                    # API clients
 
 `chatMotion` owns per-device chat animation preview and persistence; `useChatMotion` applies OS reduced motion. Keep it separate from `richOutputMotion` and transcript auto-scroll. Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in `quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts` owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
 
-**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
+**Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions. Client task navigation uses `fetchTaskNavigationData` for essential task/session hydration. Render current-workspace task projections during refresh; leave optional enrichment to domain hooks instead of repeating the full boot bundle. Read-cursor capture and automatic session creation wait for authoritative route hydration. Do not replay cached hydration snapshots over live state.
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
 
@@ -113,7 +113,7 @@ surface.
   browser-native behavior for the Vite SPA while legacy Next entrypoints are
   phased out.
 - Task links: `lib/links.ts::linkToTask` is the only `/t/:taskId` builder; pass raw IDs, use `TaskLink` or `AppLink`, and use `linkToTask` for router pushes. Keep compatibility `/tasks/:id`, Office/API paths, and route-recognition prefixes separate.
-- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection.
+- Components stay under 200 lines; extract domain components. Hooks belong in `hooks/domains/` and encapsulate subscription plus selection. `ChangesPanelBody` owns the sole scroller; route working-tree, PR, commit, inline-file, and status row descriptors through `ChangesTimelineViewport`, keeping full collections for counts/actions and keying state by task/session/environment.
 - **Code-host dashboards:** GitHub, GitLab, and plugin code-host pages must use
   the provider-neutral primitives in `components/integrations/` for
   change-request lists, rows, toolbars, scope controls, task preset menus, and
@@ -291,7 +291,7 @@ and `lib/plugins/types.ts` are its detailed host implementation — all three mu
 
 ## Sidebar task views
 
-`sidebarViewsByWorkspace` stores personal view state by workspace ID. Use `selectSidebarViews`, preserve workspace identity through async saves and rollback, and keep `sidebarViews` only for legacy wire/hydration compatibility. The backend owns migration/defaults; writes use scoped `sidebar_view_state`, never legacy global fields.
+`taskOverview.byId` owns lightweight task records. Board/workflow `taskIds` and sidebar page memberships reference them; compatible `tasks` arrays expose the exact canonical objects. `withTaskOverviewNormalization` merges legacy board, optimistic, and Office writes before publication. Owners cover boards, active detail, displayed pages, and reusable pages; final release evicts the record. Read journals protect live changes/deletions within 1,000 IDs / 1 MiB. Task timestamps and summary revisions are independent. See [shared task state](../../docs/specs/ui/system-design/sidebar-shared-task-state.md) for coverage and reconciliation. Complete `sqlite_nocase_v1` scopes page locally, including sets above 100; other views fetch bounded pages. Covered views have no query or updating announcement. Do not mount sidebar-only all-workflow fetches. `sidebarViewsByWorkspace` stores personal views: use `selectSidebarViews`, retain workspace identity through saves/rollback, and reserve `sidebarViews` for legacy hydration. The backend owns migration/defaults; writes use scoped `sidebar_view_state`. `SidebarTaskPageCache` shares reads per store and retains at most five first pages, 2 MiB including entities, for five minutes from fetch. Later pages remain display-only. Context generations fence reuse. Soft invalidation clears reusable pages but can publish reconciled provisional rows while one trailing refresh recovers membership; provisional pages are never reusable. Summary changes invalidate affected pages. Access denial clears rows and outstanding reads for every consumer. Keep query status in `SidebarTaskQueryStatus`, without duplicate archive errors or layout-shifting banners.
 
 ## Testing notes
 

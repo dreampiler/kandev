@@ -131,7 +131,6 @@ export type StepDefinition = {
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   execution_profile_id?: AgentProfileId;
   route_generation?: number;
@@ -162,7 +161,6 @@ export type WorkflowStep = {
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   complete_task_on_enter?: boolean;
   wip_limit?: number;
@@ -563,7 +561,6 @@ export type WorkflowStepDTO = {
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   session_target?: WorkflowSessionTarget | null;
   stage_type?: "work" | "review" | "approval" | "custom";
   wip_limit?: number;
@@ -786,6 +783,7 @@ export type EditorsResponse = {
 };
 
 export type CustomPrompt = {
+  allow_agent_edits?: boolean;
   id: string;
   name: string;
   content: string;
@@ -807,11 +805,28 @@ export type WorkflowSnapshot = {
   workflow: Workflow;
   steps: WorkflowStepDTO[];
   tasks: Task[];
+  task_coverage?: TaskCoverage;
+};
+
+export type TaskCoverage = {
+  workspace_id: string;
+  workflow_id: string;
+  membership: "active";
+  total: number;
+  complete: boolean;
+  ordering_profile: "sqlite_nocase_v1" | "server_only" | (string & {});
+};
+
+export type TaskWorkflowCoverage = {
+  workspace_id: string;
+  workflow_ids: string[];
+  complete: boolean;
 };
 
 export type ListWorkflowsResponse = {
   workflows: Workflow[];
   total: number;
+  task_workflow_coverage?: TaskWorkflowCoverage;
 };
 
 export type ListTasksResponse = {
@@ -841,6 +856,8 @@ export type SidebarTaskPageEntry = {
   group_key?: string;
   group_label?: string;
   workflow_name?: string;
+  workflow_id?: string;
+  workflow_step_id?: string;
   workflow_step_name?: string;
   workflow_step_color?: string;
   depth?: number;
@@ -854,6 +871,8 @@ export type SidebarTaskPageEntry = {
 };
 
 export type SidebarTaskPageResponse = {
+  /** Client reconciliation kept safe rows while membership awaits a trailing refresh. */
+  provisional?: boolean;
   query_key: string;
   page: number;
   page_size: number;
@@ -1125,7 +1144,6 @@ export type StepPortable = {
   profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   session_target?: { kind: "initial" } | { kind: "step"; step_position: number } | null;
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;

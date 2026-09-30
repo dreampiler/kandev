@@ -85,61 +85,10 @@ func ValidateWorkflowStep(step *WorkflowStep) error {
 	if step == nil {
 		return fmt.Errorf("workflow step is required")
 	}
-	if step.AllowRepeatedFailureFallback != nil &&
-		step.DisableUnclassifiedFallback == *step.AllowRepeatedFailureFallback {
-		return fmt.Errorf("allow_repeated_failure_fallback conflicts with disable_unclassified_fallback")
-	}
 	if err := ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
 		return err
 	}
 	return ValidateStepEventsWithRouting(step.Events, step.AgentProfileID != "", step.SessionTarget != nil)
-}
-
-// LegacyRepeatedFailureFallbackAlias projects the nullable legacy field for
-// older clients while keeping the new disable field authoritative.
-func LegacyRepeatedFailureFallbackAlias(step *WorkflowStep) *bool {
-	if step == nil {
-		return nil
-	}
-	if step.AllowRepeatedFailureFallback != nil {
-		value := *step.AllowRepeatedFailureFallback
-		return &value
-	}
-	if step.DisableUnclassifiedFallback {
-		value := false
-		return &value
-	}
-	return nil
-}
-
-// ResolveWorkflowStepFallbackAliases reconciles the legacy nullable allow
-// field with the new non-null disable field at API and import boundaries.
-func ResolveWorkflowStepFallbackAliases(
-	allow *bool,
-	allowPresent bool,
-	disable *bool,
-	disablePresent bool,
-) (*bool, bool, error) {
-	if disablePresent {
-		resolvedDisable := disable != nil && *disable
-		if allowPresent && allow != nil && resolvedDisable == *allow {
-			return nil, false, fmt.Errorf("allow_repeated_failure_fallback and disable_unclassified_fallback fallback fields conflict")
-		}
-		if allowPresent && allow != nil {
-			value := *allow
-			return &value, resolvedDisable, nil
-		}
-		allowValue := !resolvedDisable
-		return &allowValue, resolvedDisable, nil
-	}
-	if allowPresent {
-		if allow == nil {
-			return nil, false, nil
-		}
-		value := *allow
-		return &value, !value, nil
-	}
-	return nil, false, nil
 }
 
 // ValidateStepEvents validates on-enter action invariants for a step shape

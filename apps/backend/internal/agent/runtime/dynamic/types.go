@@ -75,18 +75,7 @@ type PolicyState struct {
 	ResetWaitClasses map[routingerr.Class]bool `json:"reset_wait_classes,omitempty"`
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
-	// ConsecutiveFailures counts how many times in a row the same concrete
-	// execution profile has produced the same unclassified failure. It gates
-	// the repeated-failure try-next override and resets on success or when the
-	// candidate changes.
-	ConsecutiveFailures int64 `json:"consecutive_failures,omitempty"`
-	// LastExecutionProfileID identifies the concrete profile the counter is
-	// tied to. A different candidate resets the count.
-	LastExecutionProfileID string `json:"last_execution_profile_id,omitempty"`
-	// LastFailureCode is the most recent classified code for the route. It is
-	// informational and used to scope the consecutive counter.
-	LastFailureCode routingerr.Code     `json:"last_failure_code,omitempty"`
-	Unclassified    *UnclassifiedStreak `json:"unclassified_streak,omitempty"`
+	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of

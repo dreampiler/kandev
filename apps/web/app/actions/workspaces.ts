@@ -373,7 +373,6 @@ type BackendTemplateStep = {
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -396,11 +395,7 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
       step.profile_session_end_policy,
     ),
-    disable_unclassified_fallback:
-      step.disable_unclassified_fallback ?? step.allow_repeated_failure_fallback === false,
-    allow_repeated_failure_fallback:
-      step.allow_repeated_failure_fallback ??
-      (step.disable_unclassified_fallback ? false : undefined),
+    disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
     pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
@@ -439,7 +434,6 @@ type BackendWorkflowStep = {
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
   complete_task_on_enter?: boolean;
   auto_advance_requires_signal?: boolean;
   cancel_triggers_turn_complete?: boolean;
@@ -470,11 +464,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   profile_session_end_policy: normalizeWorkflowProfileSessionEndPolicy(
     step.profile_session_end_policy,
   ),
-  disable_unclassified_fallback:
-    step.disable_unclassified_fallback ?? step.allow_repeated_failure_fallback === false,
-  allow_repeated_failure_fallback:
-    step.allow_repeated_failure_fallback ??
-    (step.disable_unclassified_fallback ? false : undefined),
+  disable_unclassified_fallback: step.disable_unclassified_fallback ?? false,
   complete_task_on_enter: step.complete_task_on_enter,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
   cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
@@ -532,7 +522,6 @@ export async function createWorkflowStepAction(payload: {
   profile_session_start_policy?: WorkflowStep["profile_session_start_policy"];
   profile_session_end_policy?: WorkflowStep["profile_session_end_policy"];
   disable_unclassified_fallback?: boolean;
-  allow_repeated_failure_fallback?: boolean | null;
 }): Promise<WorkflowStep> {
   const body = {
     workflow_id: payload.workflow_id,
@@ -554,7 +543,6 @@ export async function createWorkflowStepAction(payload: {
     profile_session_start_policy: payload.profile_session_start_policy,
     profile_session_end_policy: payload.profile_session_end_policy,
     disable_unclassified_fallback: payload.disable_unclassified_fallback ?? false,
-    allow_repeated_failure_fallback: payload.allow_repeated_failure_fallback,
     auto_advance_requires_signal: payload.auto_advance_requires_signal ?? false,
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
@@ -588,7 +576,6 @@ export async function updateWorkflowStepAction(
       | "profile_session_start_policy"
       | "profile_session_end_policy"
       | "disable_unclassified_fallback"
-      | "allow_repeated_failure_fallback"
       | "complete_task_on_enter"
     >
   >,

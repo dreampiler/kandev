@@ -315,7 +315,12 @@ func (s *Service) markAcceptedDispatchLiveLocked(sessionID string, reservation *
 	}
 }
 
-func (s *Service) retainQueuedDispatchForInitialAdmissionLocked(sessionID, entryID string) *queuedDispatchReservation {
+// retainQueuedDispatchForInitialAdmissionLocked keeps the accepted marker
+// alive when a model-switch worker returns before its asynchronous initial
+// prompt reaches provider admission.
+func (s *Service) retainQueuedDispatchForInitialAdmissionLocked(
+	sessionID, entryID string,
+) *queuedDispatchReservation {
 	reservation := s.queuedDispatchReservationForEntry(sessionID, entryID)
 	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
 		reservation.currentPhase() != queuedDispatchAccepted {
@@ -325,15 +330,22 @@ func (s *Service) retainQueuedDispatchForInitialAdmissionLocked(sessionID, entry
 	return reservation
 }
 
-func (s *Service) acceptRetainedQueuedDispatchLocked(sessionID string, reservation *queuedDispatchReservation) {
+func (s *Service) acceptRetainedQueuedDispatchLocked(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
 	accepted := s.acceptedQueuedDispatchForSession(sessionID)
-	if accepted == nil || accepted != reservation || accepted.currentPhase() != queuedDispatchAwaitingAdmission {
+	if accepted == nil || accepted != reservation ||
+		accepted.currentPhase() != queuedDispatchAwaitingAdmission {
 		return
 	}
 	accepted.phase.Store(uint32(queuedDispatchLive))
 }
 
-func (s *Service) discardQueuedDispatchAwaitingAdmission(sessionID string, reservation *queuedDispatchReservation) {
+func (s *Service) discardQueuedDispatchAwaitingAdmission(
+	sessionID string,
+	reservation *queuedDispatchReservation,
+) {
 	if reservation == nil || s.acceptedQueuedDispatchForSession(sessionID) != reservation ||
 		reservation.currentPhase() != queuedDispatchAwaitingAdmission {
 		return

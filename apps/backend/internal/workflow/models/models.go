@@ -215,13 +215,6 @@ type StepDefinition struct {
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete,omitempty" yaml:"cancel_triggers_turn_complete,omitempty"`
 	// CompleteTaskOnEnter marks the final step as completing its task on entry.
 	CompleteTaskOnEnter bool `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
-	// AllowRepeatedFailureFallback overrides the dynamic-profile repeated-
-	// failure policy for this step. nil defers to the profile policy, false
-	// forbids the try-next fallback for repeated unclassified failures even
-	// when the profile allows it, and true defers to the profile as well. The
-	// step can only tighten, never loosen, the profile's configured threshold.
-	AllowRepeatedFailureFallback       *bool `json:"allow_repeated_failure_fallback,omitempty" yaml:"allow_repeated_failure_fallback,omitempty"`
-	disableUnclassifiedFallbackPresent bool  `json:"-" yaml:"-"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -260,11 +253,6 @@ type WorkflowStep struct {
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete"`
 	// CompleteTaskOnEnter marks the final step as completing its task on entry.
 	CompleteTaskOnEnter bool `json:"complete_task_on_enter"`
-	// AllowRepeatedFailureFallback overrides the dynamic-profile repeated-
-	// failure policy for this step. nil defers to the profile policy, false
-	// forbids the try-next fallback for repeated unclassified failures even
-	// when the profile allows it, and true defers to the profile as well.
-	AllowRepeatedFailureFallback *bool `json:"allow_repeated_failure_fallback,omitempty"`
 	// OrderRevision is bumped by ReorderStepTasks (AC-TASKS-KANBAN-TASK-
 	// REORDERING-001.25/.37) each time this step's task order changes. A
 	// consumer that records the value it last saw can reject a WS event

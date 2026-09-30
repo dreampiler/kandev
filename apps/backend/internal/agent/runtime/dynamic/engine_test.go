@@ -453,38 +453,6 @@ func TestEngineMarkActionRequiredIsNoOpOnceRouteIsActive(t *testing.T) {
 	}
 }
 
-func TestEngineMarkTerminalFailureActionRequiredFromActive(t *testing.T) {
-	engine := NewEngine()
-	profile := Profile{ID: "dynamic-terminal-failure", Candidates: []Candidate{{ID: "first", Enabled: true}}}
-	initial, err := engine.Select("terminal-failure-session", profile, 0, "")
-	if err != nil {
-		t.Fatalf("initial Select: %v", err)
-	}
-	if err := engine.MarkActive(context.Background(), "terminal-failure-session", initial.Generation); err != nil {
-		t.Fatalf("MarkActive: %v", err)
-	}
-
-	marker, ok := interface{}(engine).(interface {
-		MarkTerminalFailureActionRequired(context.Context, string, int64, string) (RouteDecision, error)
-	})
-	if !ok {
-		t.Fatal("engine does not expose terminal failure recovery for an active route")
-	}
-	decision, err := marker.MarkTerminalFailureActionRequired(
-		context.Background(), "terminal-failure-session", initial.Generation, "unclassified_fallback_disabled",
-	)
-	if err != nil {
-		t.Fatalf("MarkTerminalFailureActionRequired: %v", err)
-	}
-	if decision.Status != routeStatusActionRequired {
-		t.Fatalf("decision.Status = %q, want %q", decision.Status, routeStatusActionRequired)
-	}
-	state, ok := engine.State("terminal-failure-session")
-	if !ok || state.Status != routeStatusActionRequired || state.Generation != initial.Generation {
-		t.Fatalf("state after terminal failure = %#v, ok=%v", state, ok)
-	}
-}
-
 // TestEngineMarkActionRequiredFromRetryingTransitionsAtSameGeneration is the
 // regression test restoring the deferred recovery guard in
 // LaunchDynamicRouteAction for the timer-recovery path: persistDynamicPolicyRecovery

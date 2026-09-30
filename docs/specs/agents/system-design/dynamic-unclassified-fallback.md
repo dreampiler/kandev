@@ -35,7 +35,6 @@ Retain document version 1 for this additive field. Old readers fail closed by ig
 Absent or null means disabled. Canonical disabled form uses `enabled: false` and threshold zero.
 Enabled thresholds are integers from 2 through 10. Reject disabled nonzero thresholds and malformed sections.
 The sample threshold is illustrative, not an enabled default.
-For the legacy `unclassified.repeated_failure` alias only, threshold 1 is read as effective threshold 2. A read must not rewrite the persisted row; the next explicit save stores canonical threshold 2. Canonical `consecutive_failure_threshold: 1` remains invalid, and conflicting dual input fails before mutation.
 Backend DTO normalization and `routingpolicy.ValidateDocument` must use matching validation rules.
 Legacy rule conversion never enables this extension.
 
