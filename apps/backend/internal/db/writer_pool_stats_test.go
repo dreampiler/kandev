@@ -57,3 +57,60 @@ func TestRegisterWriterPoolStatsExposesDBStatsAtDebugVars(t *testing.T) {
 	// guard actually works.
 	RegisterWriterPoolStats(pool)
 }
+
+// TestSQLiteReaderConnsResolvesEnvironmentOverride pins the read pool sizing:
+// the default applies unless the override is a positive integer, and the
+// override is capped.
+func TestSQLiteReaderConnsResolvesEnvironmentOverride(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		raw  string
+		want int
+	}{
+		{name: "unset", raw: "", want: defaultSQLiteReaderConns},
+		{name: "override", raw: "20", want: 20},
+		{name: "padded override", raw: " 8 ", want: 8},
+		{name: "minimum", raw: "1", want: 1},
+		{name: "not a number", raw: "many", want: defaultSQLiteReaderConns},
+		{name: "zero", raw: "0", want: defaultSQLiteReaderConns},
+		{name: "negative", raw: "-3", want: defaultSQLiteReaderConns},
+		{name: "above cap", raw: "500", want: maxSQLiteReaderConns},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(sqliteReaderConnsEnv, test.raw)
+			if got := sqliteReaderConns(); got != test.want {
+				t.Fatalf("sqliteReaderConns() with %q = %d, want %d", test.raw, got, test.want)
+			}
+		})
+	}
+}
+
+// TestOpenSQLiteReaderAppliesResolvedPoolSize covers the wiring: the reader
+// pool opens with the resolved size instead of a fixed constant.
+func TestOpenSQLiteReaderAppliesResolvedPoolSize(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "reader-pool-size.db")
+	writer, err := OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = writer.Close() })
+
+	for _, test := range []struct {
+		raw  string
+		want int
+	}{
+		{raw: "", want: defaultSQLiteReaderConns},
+		{raw: "7", want: 7},
+	} {
+		t.Setenv(sqliteReaderConnsEnv, test.raw)
+		reader, err := OpenSQLiteReader(dbPath)
+		if err != nil {
+			t.Fatalf("OpenSQLiteReader with %q: %v", test.raw, err)
+		}
+		got := reader.Stats().MaxOpenConnections
+		_ = reader.Close()
+		if got != test.want {
+			t.Fatalf("reader MaxOpenConnections with %q = %d, want %d", test.raw, got, test.want)
+		}
+	}
+}
