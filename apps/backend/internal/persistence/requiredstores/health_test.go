@@ -191,12 +191,17 @@ func TestRuntimeHealthResumesAfterMaintenance(t *testing.T) {
 	if _, err := conn.Exec("DROP TABLE first"); err != nil {
 		t.Fatalf("drop first table: %v", err)
 	}
-	deferred, err = health.checkRuntime(context.Background())
-	if deferred {
-		t.Fatal("checkRuntime deferred after maintenance released")
-	}
-	if err == nil {
-		t.Fatal("checkRuntime returned nil with a missing table")
+	for attempt := 1; attempt <= runtimeFailureThreshold; attempt++ {
+		deferred, err = health.checkRuntime(context.Background())
+		if deferred {
+			t.Fatal("checkRuntime deferred after maintenance released")
+		}
+		if err == nil {
+			t.Fatal("checkRuntime returned nil with a missing table")
+		}
+		if attempt < runtimeFailureThreshold && !health.Healthy() {
+			t.Fatalf("health became unhealthy after %d of %d consecutive failures", attempt, runtimeFailureThreshold)
+		}
 	}
 	if health.Healthy() {
 		t.Fatal("health remained healthy after a real post-maintenance failure")
@@ -285,6 +290,7 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 				t.Fatalf("NewFromZap: %v", err)
 			}
 			health := NewHealth(tracker, pool, log)
+			health.probeTimeout = 250 * time.Millisecond
 			if err := health.Check(context.Background()); err != nil {
 				t.Fatalf("initial Check: %v", err)
 			}
@@ -347,8 +353,11 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 			if _, ok := fields["error"]; ok {
 				t.Fatalf("failure warning exposed raw error: %#v", fields["error"])
 			}
-			if health.Healthy() {
-				t.Fatal("health remained healthy after a timed-out probe")
+			if got := fields["consecutive_failures"]; got != int64(1) {
+				t.Fatalf("consecutive_failures = %v, want 1", got)
+			}
+			if !health.Healthy() {
+				t.Fatal("one timed-out periodic probe marked the stores unavailable")
 			}
 
 			if err := tx.Rollback(); err != nil {
@@ -361,6 +370,67 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 				t.Fatal("health did not recover after the blocked pool became available")
 			}
 		})
+	}
+}
+
+func TestRuntimeHealthBuffersConsecutiveProbeFailures(t *testing.T) {
+	conn, _, tracker, health := newSQLiteHealthFixture(t, []Descriptor{{
+		ID: "first", OwnerPackage: "owner/first", RequiredTables: []string{"first"}, Sweep: startup.StepStoresRepositories,
+	}})
+	if _, err := conn.Exec("CREATE TABLE first (id TEXT PRIMARY KEY)"); err != nil {
+		t.Fatalf("create first table: %v", err)
+	}
+	if err := tracker.RecordSuccess("first"); err != nil {
+		t.Fatalf("RecordSuccess: %v", err)
+	}
+	if err := health.Check(context.Background()); err != nil {
+		t.Fatalf("initial Check: %v", err)
+	}
+	failProbe := func() {
+		t.Helper()
+		tx := holdWriter(t, conn)
+		ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+		defer cancel()
+		deferred, err := health.checkRuntime(ctx)
+		if deferred || err == nil {
+			t.Fatalf("blocked checkRuntime = deferred %v, err %v; want false and an error", deferred, err)
+		}
+		if err := tx.Rollback(); err != nil {
+			t.Fatalf("release writer: %v", err)
+		}
+	}
+
+	for attempt := 1; attempt < runtimeFailureThreshold; attempt++ {
+		failProbe()
+		if !health.Healthy() {
+			t.Fatalf("health became unhealthy after %d of %d consecutive failures", attempt, runtimeFailureThreshold)
+		}
+	}
+	if deferred, err := health.checkRuntime(context.Background()); deferred || err != nil {
+		t.Fatalf("successful checkRuntime = deferred %v, err %v; want false, nil", deferred, err)
+	}
+	// The success reset the count, so the threshold starts over.
+	for attempt := 1; attempt < runtimeFailureThreshold; attempt++ {
+		failProbe()
+		if !health.Healthy() {
+			t.Fatalf("health became unhealthy %d failures after a successful probe", attempt)
+		}
+	}
+	failProbe()
+	if health.Healthy() {
+		t.Fatalf("health stayed healthy after %d consecutive failures", runtimeFailureThreshold)
+	}
+	if deferred, err := health.checkRuntime(context.Background()); deferred || err != nil {
+		t.Fatalf("recovery checkRuntime = deferred %v, err %v; want false, nil", deferred, err)
+	}
+	if !health.Healthy() {
+		t.Fatal("health did not recover on the first successful probe")
+	}
+
+	// A destructive maintenance transition is never buffered.
+	health.MarkUnavailable()
+	if health.Healthy() {
+		t.Fatal("MarkUnavailable did not take effect immediately")
 	}
 }
 
