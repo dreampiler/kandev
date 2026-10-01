@@ -758,6 +758,14 @@ func (m *Manager) handleStreamDisconnectWithStartupGeneration(
 	promptGeneration uint64,
 	startupGeneration uint64,
 ) {
+	if execution.stopRequested.Load() || m.IsShuttingDown() {
+		return
+	}
+	if promptGeneration != 0 && m.tryActiveStreamReattach(execution, promptGeneration, startupGeneration, func() error {
+		return m.streamManager.openUpdatesStream(execution, startupGeneration)
+	}) {
+		return
+	}
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
 		if !execution.signalPromptCompletionForStartupGenerationLeased(
 			startupGeneration,

@@ -349,6 +349,7 @@ func beginExecutionPrompt(execution *AgentExecution) uint64 {
 }
 
 func beginExecutionPromptLocked(execution *AgentExecution) uint64 {
+	execution.cancelRequested.Store(false)
 	// A prompt is about to be dispatched through this object, so a
 	// recovered-but-not-yet-adopted generation must not later clobber it with
 	// a stale pre-restart completion (see recoveredPromptGenerationPending).

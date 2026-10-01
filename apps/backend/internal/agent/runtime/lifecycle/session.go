@@ -1306,6 +1306,8 @@ func (sm *SessionManager) waitForPromptDone(
 			neverStarted := !agentEventSeen
 
 			if elapsed >= 5*time.Minute && !stallReported {
+				sm.logUpdateStreamStage(execution, promptGeneration)
+				captureStopWaitSnapshot(sm.logger, execution.ID, stopWaitPromptStall)
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),

@@ -277,6 +277,7 @@ func (m *Manager) CancelAgentForPrompt(
 
 func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExecution) error {
 	executionID := execution.ID
+	execution.cancelRequested.Store(true)
 
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -1238,6 +1239,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.stopRequested.Store(true)
+	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
+		captureStopWaitSnapshot(m.logger, executionID, phase)
+	})
+	defer stopWatch.finish()
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
@@ -1251,6 +1257,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
 		defer cancelStop()
 	}
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -1291,11 +1298,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Try to gracefully stop via agentctl first, then always close connections.
 	// A retained Kubernetes resume gets a bounded non-cancelled opportunity to
 	// stop the failed process before its Pod is preserved for another retry.
+	stopWatch.advance(stopWaitAgentctl)
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
 	// an unobservable orphan process.
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
@@ -1347,6 +1356,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("task_id", execution.TaskID))
 
 	// Publish stopped event
+	stopWatch.advance(stopWaitPublish)
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil

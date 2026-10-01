@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -69,6 +70,13 @@ type Client struct {
 	// session/load responses and by asynchronous session_models events. Lifecycle
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
+	updateStage           atomic.Pointer[updateStreamStage]
+}
+
+func (c *Client) IsClosed() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.closed
 }
 
 func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {

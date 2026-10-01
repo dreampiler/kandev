@@ -1866,6 +1866,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 		// Retry through the public guarded drain after releasing that marker so a
 		// later FIFO entry is not stranded when the ready handler backed off.
 		s.drainQueuedMessageForPromptableSession(promptCtx, reservedSessionID)
+	} else {
+		var acceptedDispatch *acceptedPromptDispatchError
+		if errors.As(err, &acceptedDispatch) {
+			s.evaluateAcceptedQueuedSuccessor(promptCtx, queuedMsg.TaskID, reservedSessionID, queuedMsg.ID, reservation)
+		}
 	}
 
 }

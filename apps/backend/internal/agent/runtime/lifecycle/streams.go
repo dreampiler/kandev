@@ -295,41 +295,46 @@ func (sm *StreamManager) streamContext(execution *AgentExecution) context.Contex
 
 // connectUpdatesStream handles the updates WebSocket stream with ready signaling
 func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready chan<- struct{}) {
-	ctx := sm.streamContext(execution)
 	startupGeneration := execution.startupAttemptSnapshot()
+	err := sm.openUpdatesStream(execution, startupGeneration)
+	if ready != nil {
+		close(ready)
+	}
+	if err != nil {
+		sm.logger.Error("failed to connect to updates stream",
+			zap.String("instance_id", execution.ID), zap.Error(err))
+	}
+}
+
+func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGeneration uint64) error {
+	execution.updateStreamAttachMu.Lock()
+	defer execution.updateStreamAttachMu.Unlock()
+	ctx := sm.streamContext(execution)
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
-		if ready != nil {
-			close(ready)
-		}
-		return
+		return errActiveStreamReattachIneligible
 	}
+	defer releaseClient()
+	if client.HasAgentStream() {
+		return nil
+	}
+	streamGeneration := execution.updateStreamGeneration.Add(1)
 
 	err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
+		if !execution.ownsUpdateStream(streamGeneration) {
+			return
+		}
 		if sm.callbacks.OnAgentEventWithGeneration != nil {
 			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
 		} else if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
-		if disconnectErr != nil {
+		if disconnectErr != nil && execution.ownsUpdateStream(streamGeneration) && execution.ownsAgentCtlClient(client) {
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
 	})
-	releaseClient()
-
-	// Signal that the stream connection attempt is complete (success or failure)
-	// StreamUpdates returns immediately after establishing the WebSocket connection
-	// and starting the read goroutine, so this signals that we're ready to receive updates
-	if ready != nil {
-		close(ready)
-	}
-
-	if err != nil {
-		sm.logger.Error("failed to connect to updates stream",
-			zap.String("instance_id", execution.ID),
-			zap.Error(err))
-	}
+	return err
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {

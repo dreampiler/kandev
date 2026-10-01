@@ -97,9 +97,15 @@ type AgentExecution struct {
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and
 	// PATH as the agent subprocess without persisting secrets in metadata.
-	runtimeEnv       map[string]string
-	runtimeEnvMu     sync.RWMutex
-	promptGeneration uint64
+	runtimeEnv                      map[string]string
+	runtimeEnvMu                    sync.RWMutex
+	promptGeneration                uint64
+	updateStreamGeneration          atomic.Uint64
+	updateStreamAttachMu            sync.Mutex
+	stopRequested                   atomic.Bool
+	cancelRequested                 atomic.Bool
+	reattachMu                      sync.Mutex
+	reattachClaimedPromptGeneration uint64
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
