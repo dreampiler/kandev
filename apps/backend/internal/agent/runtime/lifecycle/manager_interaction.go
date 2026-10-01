@@ -1239,12 +1239,13 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	// The marker arms before teardown so concurrent disconnect handlers stop
-	// treating the stream loss as unexpected. Every error return before the
-	// runtime settles must release it again: a failed stop leaves the execution
+	// The marker arms under the stop lock so overlapping stops serialize
+	// arm/disarm: a stop queued behind a failing stop must re-arm after that
+	// failure disarms, and a teardown-in-progress execution must not reopen for
+	// a queued waiter's pre-wait state. Every error return before the runtime
+	// settles must release the marker again: a failed stop leaves the execution
 	// live, and its later disconnects must not be suppressed as intentional
 	// stops.
-	execution.stopRequested.Store(true)
 	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
 		captureStopWaitSnapshot(m.logger, executionID, phase)
 	})
@@ -1254,6 +1255,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.stopRequested.Store(true)
 	backendForce := force
 	stopCtx := ctx
 	if shouldPreserveKubernetesRuntime(execution, reason) {
@@ -1320,7 +1322,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		cancelCleanup()
 		if err != nil {
-			m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 			return fmt.Errorf("delete runtime secrets for execution %s: %w", executionID, err)
 		}
 	}
@@ -1347,7 +1348,6 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// resume the same conversation after a graceful backend restart.
 	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
-			m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 			return err
 		}
 	}
