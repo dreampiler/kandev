@@ -23,8 +23,8 @@ Desktop:
 
 ```text
 Office navigation | Overview
-                  | Workspace A  Tasks 12  In progress 2  Done 8  Agents 3  Approvals 1
-                  | Workspace B  Tasks  4  In progress 1  Done 2  Agents 1  Approvals 0
+                  | Workspace A  Tasks 12  Tasks (In progress) 2  Done 8  Agents 3  Agents (Running) 0  Approvals 1
+                  | Workspace B  Tasks  4  Tasks (In progress) 1  Done 2  Agents 1  Agents (Running) 1  Approvals 0
                   | Recent activity
                   | Task KAN-21 updated in Workspace A        [Run]
                   | Agent completed KAN-18 in Workspace B      [Run]
@@ -36,17 +36,17 @@ Phone:
 Office menu
 Overview
 Workspace A
-Tasks 12 · In progress 2 · Done 8
-Agents 3 · Approvals 1
+Tasks 12 · Tasks (In progress) 2 · Done 8
+Agents 3 · Agents (Running) 0 · Approvals 1
 Workspace B
-Tasks 4 · In progress 1 · Done 2
-Agents 1 · Approvals 0
+Tasks 4 · Tasks (In progress) 1 · Done 2
+Agents 1 · Agents (Running) 1 · Approvals 0
 Recent activity
 Task KAN-21 updated in Workspace A       [Run]
 Agent completed KAN-18 in Workspace B    [Run]
 ```
 
-The phone layout stacks the same workspace cards and activity rows. Each row remains a separate touch target. The counts and navigation are required; spacing is illustrative.
+The phone layout stacks the same workspace cards and activity rows. Each row remains a separate touch target. The counts and navigation are required; spacing is illustrative. The labels distinguish task workflow state from Office agents that are currently working; a task can remain in progress with no executing session.
 
 ## Work order
 

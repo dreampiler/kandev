@@ -80,12 +80,12 @@ function WorkspaceAggregateCard({ workspace }: { workspace: WorkspaceAggregateEn
               {t("office:tasks")}: {workspace.task_count}
             </span>
             <span>
-              {t("office:inProgress")}: {workspace.in_progress_tasks}
+              {t("office:tasks")} ({t("office:inProgress")}): {workspace.in_progress_tasks}
             </span>
             <span>{t("office:countDone", { count: workspace.done_tasks })}</span>
             <span>{t("office:agentCount", { count: workspace.agent_count })}</span>
             <span>
-              {t("automations:running")}: {workspace.running_agents}
+              {t("office:agents")} ({t("automations:running")}): {workspace.running_agents}
             </span>
             <span>
               {t("office:openBlocked", {
