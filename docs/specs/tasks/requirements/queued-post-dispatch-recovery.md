@@ -43,6 +43,18 @@ strand unrelated follow-up messages.
   row twice or reorder it ahead of an older pending row. Auto-run OFF shall
   leave the queue pending.
 
+- **AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.5:** A rejected MCP prompt
+  shall remove only its own newly created, unreferenced, unsent turn. It shall
+  preserve an existing native turn, another owner's turn, and an adopted turn.
+- **AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.6:** If an unaccepted prompt's
+  own turn disappears, Kandev shall restore its still-owned RUNNING claim only
+  under the existing session identity, incarnation, execution, state, revision,
+  and cancellation guards. A successor owner or accepted long-running provider
+  shall remain untouched; retry shall preserve FIFO and Auto-run policy.
+- **AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.7:** An accepted MCP prompt
+  followed by a dispatch error shall retain its transcript and turn and report
+  acceptance, so callers do not replay accepted work as an unaccepted retry.
+
 ## Compatibility and exclusions
 
 This requirement does not change the prolonged-stall terminal classification,
