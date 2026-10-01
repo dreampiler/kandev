@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -114,9 +116,38 @@ func (b *overlappingStopBackend) StopInstance(
 	return b.secondErr
 }
 
+// stopWaiterQueued reports whether a goroutine is parked inside
+// StopAgentWithReason waiting for the per-execution stop lock. Handing the
+// lock over only after this is true removes goroutine scheduling from the
+// overlapping-stop interleaving.
+func stopWaiterQueued() bool {
+	buf := make([]byte, 4<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, len(buf)*2)
+	}
+	for _, block := range strings.Split(string(buf), "\n\n") {
+		if !strings.Contains(block, "StopAgentWithReason(") {
+			continue
+		}
+		if strings.Contains(block, "sync.(*Mutex).Lock(") || strings.Contains(block, "sync.(*Mutex).lockSlow(") {
+			return true
+		}
+	}
+	return false
+}
+
 // A stop waiting on the stop lock must arm the marker after it acquires the
 // lock: an earlier failing stop disarms the marker while the waiter is still
-// queued, and the waiter must not tear the stream down unprotected.
+// queued, and the waiter must not tear the stream down unprotected. The
+// barrier makes the interleaving deterministic: once the waiter is parked at
+// the stop lock, a pre-lock arming (the removed shape) has already executed by
+// program order, and arming under the lock has not executed yet, so closing
+// the release channel orders the first stop's disarm after either state.
 func TestStopAgentWithReasonOverlappingStopsRearmUnderStopLock(t *testing.T) {
 	log := newTestRegistryLogger()
 	execRegistry := NewExecutorRegistry(log)
@@ -142,12 +173,10 @@ func TestStopAgentWithReasonOverlappingStopsRearmUnderStopLock(t *testing.T) {
 	go func() {
 		secondDone <- mgr.StopAgentWithReason(context.Background(), execution.ID, "second stop", false)
 	}()
-	// Wait until the queued stop has passed its own arming point so the first
-	// stop's disarm cannot precede it; with arming serialized under the stop
-	// lock the waiter stays unarmed until it owns the lock, so this wait is
-	// bounded and only used as a scheduling barrier for the buggy shape.
-	require.Eventually(t, func() bool { return execution.stopRequested.Load() },
-		500*time.Millisecond, 5*time.Millisecond, "the queued stop never reached its arming point")
+	// Deterministic barrier: wait until the queued stop is parked at the stop
+	// lock before letting the first stop fail and disarm.
+	require.Eventually(t, stopWaiterQueued, 2*time.Second, 5*time.Millisecond,
+		"the queued stop never reached the stop lock")
 	close(backend.release)
 	require.ErrorIs(t, <-firstDone, backend.firstErr)
 	require.ErrorIs(t, <-secondDone, backend.secondErr)
