@@ -2619,6 +2619,7 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	sessionID string,
 	reserve bool,
 	recovery *models.PromptDispatchRecovery,
+	ownedSessionRevision ...*time.Time,
 ) (string, bool, *models.Turn, error) {
 	if s.turnService == nil {
 		return "", false, nil, nil
@@ -2658,6 +2659,12 @@ func (s *Service) startTurnForSessionWithOwnershipChecked(
 	}
 	if err != nil {
 		return "", false, nil, fmt.Errorf("persist turn: %w", err)
+	}
+
+	// Turn insertion writes this exact activity revision to the session row.
+	// Never replace it with a later read that may belong to another owner.
+	if len(ownedSessionRevision) > 0 && ownedSessionRevision[0] != nil {
+		*ownedSessionRevision[0] = turn.UpdatedAt
 	}
 
 	if reserve {

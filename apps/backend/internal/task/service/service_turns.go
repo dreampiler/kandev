@@ -292,6 +292,29 @@ func (s *Service) RollbackReservedTurn(
 	return true, nil
 }
 
+// RollbackUnsentMessageTurn removes an unreferenced turn created by a rejected
+// message while preserving any turn adopted by an admitted provider dispatch.
+func (s *Service) RollbackUnsentMessageTurn(ctx context.Context, sessionID, turnID string) (bool, error) {
+	writer, ok := s.turns.(interface {
+		DeleteUnsentMessageTurnIfUnreferenced(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	turn, err := s.turns.GetTurn(ctx, turnID)
+	if err != nil {
+		return false, err
+	}
+	if turn.TaskSessionID != sessionID {
+		return false, nil
+	}
+	removed, err := writer.DeleteUnsentMessageTurnIfUnreferenced(ctx, sessionID, turnID)
+	if err != nil || !removed {
+		return removed, err
+	}
+	return true, s.publishTurnEvent(events.TurnRemoved, turn, nil)
+}
+
 // createCompletedTurn persists a synthetic turn that is never observable as
 // active. It is used for lifecycle messages that must belong to a turn without
 // making an idle task appear to have an active agent turn.
