@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/maintenance"
 )
@@ -121,10 +122,7 @@ func (s *Service) VerifyRetentionBackupUnderLease(ctx context.Context, receipt R
 }
 
 func verifySnapshot(ctx context.Context, path string) (string, error) {
-	// Build the DSN the same way as db.OpenSQLiteReader. url.URL would
-	// percent-encode Windows separators (C:%5C...) and mattn/go-sqlite3
-	// rejects that as an invalid URI authority, so pass the path verbatim.
-	reader, err := sqlx.Open("sqlite3", fmt.Sprintf("file:%s?mode=ro", path))
+	reader, err := openSnapshotReader(path)
 	if err != nil {
 		return "", err
 	}
@@ -149,6 +147,12 @@ func verifySnapshot(ctx context.Context, path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+// openSnapshotReader opens the snapshot file itself read-only and never
+// creates a file.
+func openSnapshotReader(path string) (*sqlx.DB, error) {
+	return sqlx.Open("sqlite3", "file:"+db.EscapeSQLiteURIPath(path)+"?mode=ro")
 }
 
 type contextReader struct {

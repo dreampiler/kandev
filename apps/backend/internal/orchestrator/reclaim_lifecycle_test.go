@@ -92,9 +92,9 @@ func (lease *activeLSPLeaseForTest) StopLSPLeasesForExecution(executionID string
 
 // TestClassifyIdleReclaimDisposition is the single decision-matrix test for
 // the idle-reclaim predicate. Each case names the (state, runtime-live,
-// active-turn, resume-token) tuple the primitive sees and the disposition it
-// must return; fail-closed means every uncertain input is a Skipped*
-// disposition.
+// active-turn, resume-token, row-status) tuple the primitive sees and the
+// disposition it must return; fail-closed means every uncertain input is a
+// Skipped* disposition.
 func TestClassifyIdleReclaimDisposition(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -102,6 +102,7 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 		agentRunning   bool
 		hasActiveTurn  bool
 		hasResumeToken bool
+		rowStatus      string
 		want           idleReclaimDisposition
 	}{
 		{
@@ -174,7 +175,7 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			agentRunning:   false,
 			hasActiveTurn:  false,
 			hasResumeToken: false,
-			want:           idleReclaimDispositionSkippedNoResume,
+			want:           idleReclaimDispositionSkippedNoToken,
 		},
 		{
 			name:           "tokenless idle office state is never reclaimed",
@@ -182,15 +183,15 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			agentRunning:   false,
 			hasActiveTurn:  false,
 			hasResumeToken: false,
-			want:           idleReclaimDispositionSkippedNoResume,
+			want:           idleReclaimDispositionSkippedNoToken,
 		},
 		{
-			name:           "tokenless completed session is never reclaimed",
+			name:           "tokenless completed session can be reclaimed",
 			state:          models.TaskSessionStateCompleted,
 			agentRunning:   false,
 			hasActiveTurn:  false,
 			hasResumeToken: false,
-			want:           idleReclaimDispositionSkippedNoResume,
+			want:           idleReclaimDispositionReclaimed,
 		},
 		{
 			name:           "state guard precedes the token guard",
@@ -200,10 +201,53 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			hasResumeToken: false,
 			want:           idleReclaimDispositionSkippedState,
 		},
+		{
+			name:           "prepared waiting_for_input row without resume token is never reclaimed",
+			state:          models.TaskSessionStateWaitingForInput,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusPrepared,
+			want:           idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:           "ready idle office row without resume token is never reclaimed",
+			state:          models.TaskSessionStateIdle,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusReady,
+			want:           idleReclaimDispositionSkippedNoToken,
+		},
+		{
+			name:           "running waiting_for_input row without resume token reclaims",
+			state:          models.TaskSessionStateWaitingForInput,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusRunning,
+			want:           idleReclaimDispositionReclaimed,
+		},
+		{
+			name:           "completed session without resume token reclaims",
+			state:          models.TaskSessionStateCompleted,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusReady,
+			want:           idleReclaimDispositionReclaimed,
+		},
+		{
+			name:           "live runtime is reported before a missing resume token",
+			state:          models.TaskSessionStateWaitingForInput,
+			agentRunning:   true,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusPrepared,
+			want:           idleReclaimDispositionSkippedLive,
+		},
+		{
+			name:           "running session without resume token is skipped by state",
+			state:          models.TaskSessionStateRunning,
+			hasResumeToken: false,
+			rowStatus:      models.ExecutorRunningStatusRunning,
+			want:           idleReclaimDispositionSkippedState,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn, tt.hasResumeToken)
+			got := classifyIdleReclaim(tt.state, tt.agentRunning, tt.hasActiveTurn, tt.hasResumeToken, tt.rowStatus)
 			if got != tt.want {
 				t.Fatalf("disposition = %q, want %q", got, tt.want)
 			}
@@ -284,7 +328,7 @@ func TestReclaimIdleSessionSkipsTokenlessSession(t *testing.T) {
 		TaskID:           "taskPrepared",
 		AgentExecutionID: "exec-prepared",
 		Runtime:          agentruntime.RuntimeStandalone,
-		Status:           models.ExecutorRunningStatusRunning,
+		Status:           models.ExecutorRunningStatusPrepared,
 		LocalPID:         5150,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -311,7 +355,7 @@ func TestReclaimIdleSessionSkipsTokenlessSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("row missing after tokenless reclaim: %v", err)
 	}
-	if row.Status != models.ExecutorRunningStatusRunning || row.LocalPID != 5150 {
+	if row.Status != models.ExecutorRunningStatusPrepared || row.LocalPID != 5150 {
 		t.Fatalf("tokenless session must keep its runtime reservation: status=%q pid=%d", row.Status, row.LocalPID)
 	}
 }
