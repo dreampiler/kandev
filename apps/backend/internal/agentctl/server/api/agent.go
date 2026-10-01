@@ -267,6 +267,10 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 // runAgentStreamWriter sends agent events and MCP requests to the backend connection.
 func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, streamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	defer wg.Done()
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	var sent uint64
+	var lastSent time.Time
 	defer func() {
 		if err := conn.Close(); err != nil {
 			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
@@ -276,6 +280,11 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			if err := s.writeUpdateStreamStageHeartbeat(writeMessage, sent, lastSent); err != nil {
+				s.logger.Debug("failed to write update stream stage heartbeat", zap.Error(err))
+				return
+			}
 		case notification, ok := <-updatesCh:
 			if !ok {
 				return
@@ -289,6 +298,8 @@ func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn,
 				s.logger.Debug("failed to write notification", zap.Error(err))
 				return
 			}
+			sent++
+			lastSent = time.Now()
 		case mcpReq, ok := <-mcpRequestCh:
 			if !ok {
 				mcpRequestCh = nil

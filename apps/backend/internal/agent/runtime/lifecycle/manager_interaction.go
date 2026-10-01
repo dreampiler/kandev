@@ -277,6 +277,7 @@ func (m *Manager) CancelAgentForPrompt(
 
 func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExecution) error {
 	executionID := execution.ID
+	execution.cancelRequested.Store(true)
 
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
@@ -1238,11 +1239,23 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	// The marker arms under the stop lock so overlapping stops serialize
+	// arm/disarm: a stop queued behind a failing stop must re-arm after that
+	// failure disarms, and a teardown-in-progress execution must not reopen for
+	// a queued waiter's pre-wait state. Every error return before the runtime
+	// settles must release the marker again: a failed stop leaves the execution
+	// live, and its later disconnects must not be suppressed as intentional
+	// stops.
+	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
+		captureStopWaitSnapshot(m.logger, executionID, phase)
+	})
+	defer stopWatch.finish()
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.stopRequested.Store(true)
 	backendForce := force
 	stopCtx := ctx
 	if shouldPreserveKubernetesRuntime(execution, reason) {
@@ -1251,8 +1264,10 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		stopCtx, cancelStop = kubernetesDurableContext(ctx)
 		defer cancelStop()
 	}
+	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
+		m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 		return err
 	}
 	defer activityLease.Release()
@@ -1291,12 +1306,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Try to gracefully stop via agentctl first, then always close connections.
 	// A retained Kubernetes resume gets a bounded non-cancelled opportunity to
 	// stop the failed process before its Pod is preserved for another retry.
+	stopWatch.advance(stopWaitAgentctl)
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
 	// an unobservable orphan process.
+	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
+		m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
@@ -1347,9 +1365,27 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("task_id", execution.TaskID))
 
 	// Publish stopped event
+	stopWatch.advance(stopWaitPublish)
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
+}
+
+// releaseStopMarkerAfterFailedStop reopens an execution whose stop returned an
+// error without settling the runtime: a still-registered execution may remain
+// live, so its later stream disconnects must not be suppressed as intentional
+// stops. A replaced execution object or a completed stop is left untouched.
+func (m *Manager) releaseStopMarkerAfterFailedStop(
+	execution *AgentExecution,
+	executionID string,
+	stopErr error,
+) {
+	if stopErr == nil {
+		return
+	}
+	if current, currentExists := m.executionStore.Get(executionID); currentExists && current == execution {
+		execution.stopRequested.Store(false)
+	}
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach
