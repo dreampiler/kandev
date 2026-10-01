@@ -123,12 +123,18 @@ agentctl; and `TestAcceptedQueuedPromptRecovery` in orchestrator. No
 listener-opening test, full Go suite, or E2E was run. The operator owns the
 post-build installation replacement.
 
-Changed-package `golangci-lint run --new-from-rev=cbeb01485e --timeout=5m`
+Changed-package `golangci-lint run --new-from-rev=798cb120be50 --timeout=5m`
 reported zero issues after the queue helper was split by responsibility.
-`python3 scripts/list-docs.py validate` validated 338 decisions and 1282
+`python3 scripts/list-docs.py validate` validated 337 decisions and 1281
 specifications; `python3 scripts/lint-spec-files.py --all` passed.
 `make -C apps/backend build-kandev` and `build-agentctl` produced the worktree's
 Windows binaries. No operating installation was changed.
+
+The fork integration branch was based on `origin/main` at `798cb120be50` so
+this PR carries only these 35 files. Office overview PR #36 has no overlapping
+files. The two lifecycle files changed on the older fork/upstream divergence
+merged without conflict; the focused tests, lint, documentation checks, and
+local builds passed again on the fork base.
 
 ## Risks
 
