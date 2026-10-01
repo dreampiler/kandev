@@ -200,10 +200,6 @@ func officeWorkspaceScopeMiddleware(
 ) gin.HandlerFunc {
 	resolvers := officeParamScopeResolvers(officeRepo)
 	return func(c *gin.Context) {
-		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
-			c.Next()
-			return
-		}
 		// The comment endpoint has its own task-relation guard for agent
 		// callers. Let that guard decide every target so missing, foreign, and
 		// unrelated tasks all produce the same forbidden response.
@@ -216,6 +212,10 @@ func officeWorkspaceScopeMiddleware(
 				c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 				return
 			}
+			c.Next()
+			return
+		}
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
 			c.Next()
 			return
 		}

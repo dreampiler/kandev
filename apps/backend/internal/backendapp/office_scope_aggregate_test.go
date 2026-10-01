@@ -103,6 +103,23 @@ func TestOfficeScopeAggregateDeniesAgentCaller(t *testing.T) {
 	}
 }
 
+// TestOfficeScopeAggregateDeniesAgentCallerWhenAuthDisabled pins that the
+// multi-workspace route still rejects agent tokens when browser auth is off.
+func TestOfficeScopeAggregateDeniesAgentCallerWhenAuthDisabled(t *testing.T) {
+	h := newOfficeScopeHarness(t)
+	agentSvc := officeagents.NewAgentService(h.officeRepo, testLogger(t), nil)
+	agentSvc.SetAuth(officeagents.NewAgentAuth("test-signing-key"))
+	token, err := agentSvc.MintRuntimeJWT("agent-user-a", "task-user-a", h.workspaces[officeScopeUserA], "run-user-a", "", "")
+	if err != nil {
+		t.Fatalf("mint runtime jwt: %v", err)
+	}
+
+	code, reached := driveOfficeAggregate(t, h, nil, nil, agentSvc, token)
+	if code != http.StatusNotFound || reached {
+		t.Fatalf("status = %d, reached = %v; want 404 and false", code, reached)
+	}
+}
+
 // TestOfficeScopeAggregateAuthDisabledPassthrough pins that the aggregate is
 // reachable when auth is off, matching every other Office route's disabled
 // behavior.
