@@ -158,6 +158,16 @@ func (r *Repository) DeleteTurnIfUnreferenced(
 	ctx context.Context,
 	sessionID, turnID string,
 ) (bool, error) {
+	return r.deleteTurnIfUnreferenced(ctx, sessionID, turnID, false)
+}
+
+// DeleteUnsentMessageTurnIfUnreferenced removes only a still-idle turn created
+// for a rejected message. The writer transaction serializes adoption and cleanup.
+func (r *Repository) DeleteUnsentMessageTurnIfUnreferenced(ctx context.Context, sessionID, turnID string) (bool, error) {
+	return r.deleteTurnIfUnreferenced(ctx, sessionID, turnID, true)
+}
+
+func (r *Repository) deleteTurnIfUnreferenced(ctx context.Context, sessionID, turnID string, unsentMessage bool) (bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin turn rollback: %w", err)
@@ -166,16 +176,16 @@ func (r *Repository) DeleteTurnIfUnreferenced(
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
 		return false, err
 	}
-	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM task_session_turns
-		WHERE id = ?
-		  AND task_session_id = ?
-		  AND NOT EXISTS (
-			SELECT 1
-			FROM task_session_messages
-			WHERE turn_id = task_session_turns.id
-		  )
-	`), turnID, sessionID)
+	query := `
+  DELETE FROM task_session_turns
+  WHERE id = ? AND task_session_id = ?
+   AND NOT EXISTS (SELECT 1 FROM task_session_messages WHERE turn_id = task_session_turns.id)`
+	if unsentMessage {
+		query += ` AND completed_at IS NULL
+   AND EXISTS (SELECT 1 FROM task_sessions WHERE id = task_session_turns.task_session_id
+    AND state IN ('CREATED', 'WAITING_FOR_INPUT', 'IDLE'))`
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), turnID, sessionID)
 	if err != nil {
 		return false, fmt.Errorf("delete unreferenced turn: %w", err)
 	}

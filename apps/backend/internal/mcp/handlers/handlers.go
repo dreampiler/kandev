@@ -3984,10 +3984,14 @@ func (h *Handlers) promptPreparedTaskMessage(
 	releasePeerMessageStartAdmission(admission)
 	// Record before prompting so the message is tied to the turn PromptTask
 	// dispatches. If dispatch fails, remove the row before REVIEW rollback.
-	recorded := h.recordUserMessage(ctx, taskID, session.ID, prompt, metadata)
+	recorded, ownedTurnID := h.recordUserMessageForPrompt(ctx, taskID, session.ID, prompt, metadata)
 	status, err := h.promptWithAutoResume(ctx, taskID, session.ID, prompt)
 	if err != nil {
-		h.deleteRecordedUserMessage(ctx, recorded)
+		var accepted interface{ DetachedResumeAccepted() bool }
+		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
+			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID}, nil
+		}
+		h.deleteRecordedUserMessage(ctx, recorded, ownedTurnID)
 		return taskMessageDispatchResult{}, err
 	}
 	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
@@ -4704,15 +4708,49 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 	return message
 }
 
-func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *models.Message) {
-	h.deleteRecordedUserMessageWithTurnRollback(ctx, message, true)
+// recordUserMessageForPrompt retains creation ownership separately from the
+// message's turn ID: attaching to an existing turn never grants cleanup rights.
+func (h *Handlers) recordUserMessageForPrompt(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*models.Message, string) {
+	if h.taskSvc == nil {
+		return nil, ""
+	}
+	turn, err := h.taskSvc.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return h.recordUserMessage(ctx, taskID, sessionID, prompt, metadata), ""
+	}
+	ownedTurnID := ""
+	if turn == nil {
+		turn, err = h.taskSvc.StartTurn(ctx, sessionID)
+		if err != nil {
+			return h.recordUserMessage(ctx, taskID, sessionID, prompt, metadata), ""
+		}
+		ownedTurnID = turn.ID
+	}
+	message, err := h.taskSvc.CreateMessage(ctx, &service.CreateMessageRequest{
+		TaskSessionID: sessionID, TaskID: taskID, TurnID: turn.ID,
+		Content: prompt, AuthorType: "user", Metadata: metadata,
+	})
+	if err != nil {
+		h.logger.Warn("failed to record user message for message_task", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		if ownedTurnID != "" {
+			_, _ = h.taskSvc.RollbackUnsentMessageTurn(ctx, sessionID, ownedTurnID)
+		}
+		return nil, ""
+	}
+	return message, ownedTurnID
+}
+
+func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *models.Message, ownedTurnID string) {
+	h.deleteRecordedUserMessageWithoutTurnRollback(ctx, message)
+	if h.taskSvc == nil || message == nil || ownedTurnID == "" {
+		return
+	}
+	if _, err := h.taskSvc.RollbackUnsentMessageTurn(ctx, message.TaskSessionID, ownedTurnID); err != nil {
+		h.logger.Warn("failed to roll back rejected user message turn", zap.String("session_id", message.TaskSessionID), zap.String("turn_id", ownedTurnID), zap.Error(err))
+	}
 }
 
 func (h *Handlers) deleteRecordedUserMessageWithoutTurnRollback(ctx context.Context, message *models.Message) {
-	h.deleteRecordedUserMessageWithTurnRollback(ctx, message, false)
-}
-
-func (h *Handlers) deleteRecordedUserMessageWithTurnRollback(ctx context.Context, message *models.Message, abandonOpenTurns bool) {
 	if h.taskSvc == nil || message == nil {
 		return
 	}
@@ -4723,15 +4761,7 @@ func (h *Handlers) deleteRecordedUserMessageWithTurnRollback(ctx context.Context
 			zap.String("session_id", message.TaskSessionID),
 			zap.Error(err))
 	}
-	if abandonOpenTurns {
-		if err := h.taskSvc.AbandonOpenTurns(ctx, message.TaskSessionID); err != nil {
-			h.logger.Warn("failed to abandon rejected user message turn for message_task",
-				zap.String("message_id", message.ID),
-				zap.String("task_id", message.TaskID),
-				zap.String("session_id", message.TaskSessionID),
-				zap.Error(err))
-		}
-	}
+
 }
 
 // promptWithAutoResume sends a prompt to a session and resumes the agent

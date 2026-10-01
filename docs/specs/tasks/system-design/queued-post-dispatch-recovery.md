@@ -27,6 +27,7 @@ system's terminal-stall classification remains unchanged here.
 | --- | --- |
 | `AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.1` | Accepted-row settlement |
 | `AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.2` through `.4` | Successor eligibility and recovery |
+| `AC-TASKS-QUEUED-POST-DISPATCH-RECOVERY-001.5` through `.7` | Prompt rollback ownership |
 
 ## Accepted-row settlement
 
@@ -54,6 +55,27 @@ or session recovery re-evaluates the same pending head. Never silently turn a
 terminal failed session into an automatically restarted agent, and never
 advance a workflow step from a synthetic completion.
 
+## Prompt rollback ownership
+
+MCP prompt preparation records whether it created a new turn. Rejection deletes
+its rejected message, then atomically removes only that exact unreferenced open
+turn while the session remains CREATED, WAITING_FOR_INPUT, or IDLE. Existing,
+referenced, completed, or RUNNING-adopted turns survive. Successful removal
+uses the existing TurnRemoved event. An accepted-dispatch error retains the
+transcript and turn and reports sent.
+
+Native missing-turn compensation retains the claim's original identity and
+execution and the exact revision written by its own claim/turn insertion. It
+does not adopt a later owner's row after a callback. Restoration requires an
+unaccepted claim, matching task/session/incarnation/execution, RUNNING state,
+no error or completion, unchanged revision, no replacement cached turn, and
+the existing cancellation guard. The existing snapshot CAS must still succeed;
+otherwise compensation preserves the winner. Normal queue reservation and
+retry retain FIFO, Auto-run OFF, and accepted long-running provider protection.
+
+This repair does not change schema or global CAS policy. Arbitrary same-timestamp,
+same-identity metadata changes remain limited by existing revision precision.
+
 ## Failure and observability
 
 Log the accepted queue ID and successor disposition (`dispatched`,
@@ -69,3 +91,10 @@ agent manager and no listener. Exercise accepted post-dispatch failure with
 one later row, terminal session/no eligible primary, eligible primary,
 Auto-run OFF, concurrent ready signal, and restart reconciliation. The owner
 forbids listener-opening tests, the full Go suite, and E2E.
+
+Prompt ownership verification uses actual MCP and native claim/rollback
+functions with temporary SQLite and the existing fake runtime boundary. Cover
+own-turn cleanup and adoption, successor revision/execution, accepted prompts,
+CAS zero rows, FIFO retry, Auto-run OFF, long-running provider preservation,
+and TurnRemoved event with database readback. Use focused race tests without
+listeners or operating processes.

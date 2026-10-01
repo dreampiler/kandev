@@ -1846,6 +1846,10 @@ func TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress(t *testing.T
 	winner.AgentProfileID = "winning-profile"
 	require.NoError(t, repo.UpdateTaskSession(ctx, winner))
 	require.NoError(t, repo.UpdateSessionMetadata(ctx, stale.ID, map[string]interface{}{"owner": "winning-launch"}))
+	// Adjacent writes can share a Windows clock tick. Pin the competing writer's
+	// distinct revision so this assertion tests the revision guard deterministically.
+	_, err = repo.DB().ExecContext(ctx, "UPDATE task_sessions SET updated_at = ? WHERE id = ?", expectedUpdatedAt.Add(time.Second), stale.ID)
+	require.NoError(t, err)
 
 	stale.AgentProfileID = "original-profile"
 	changed, err := repo.UpdateTaskSessionIfCurrentSnapshot(

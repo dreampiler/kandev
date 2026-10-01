@@ -7891,16 +7891,19 @@ func (s *Service) validatePromptCancellationFence(
 }
 
 type promptClaimRollback struct {
-	previousSessionState models.TaskSessionState
-	previousTaskState    v1.TaskState
-	taskStateClaimed     bool
-	sessionIdentity      messagequeue.QueueSessionIdentity
-	turnID               string
-	createdTurn          bool
-	reservedTurn         *models.Turn
-	reservedTurnAccepted bool
-	dispatchGuardRelease func()
-	dispatchGuard        *lockedCancelInFlightGuard
+	previousSessionState    models.TaskSessionState
+	previousTaskState       v1.TaskState
+	taskStateClaimed        bool
+	sessionIdentity         messagequeue.QueueSessionIdentity
+	turnID                  string
+	createdTurn             bool
+	reservedTurn            *models.Turn
+	reservedTurnAccepted    bool
+	dispatchAccepted        bool
+	claimedSessionUpdatedAt time.Time
+	claimedExecutionID      string
+	dispatchGuardRelease    func()
+	dispatchGuard           *lockedCancelInFlightGuard
 }
 
 func (s *Service) claimPromptDispatch(
@@ -7976,10 +7979,13 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 		return nil, promptClaimRollback{}, err
 	}
 	rollback := promptClaimRollback{
-		previousSessionState: previousState,
-		turnID:               turnID,
-		createdTurn:          createdTurn,
-		reservedTurn:         reservedTurn,
+		previousSessionState:    previousState,
+		turnID:                  turnID,
+		createdTurn:             createdTurn,
+		reservedTurn:            reservedTurn,
+		claimedSessionUpdatedAt: claimed.UpdatedAt,
+		claimedExecutionID:      claimed.AgentExecutionID,
+		sessionIdentity:         messagequeue.QueueSessionIdentity{TaskID: claimed.TaskID, SessionID: claimed.ID, SessionIncarnationID: claimed.QueueIncarnationID},
 	}
 	if reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID); reservation != nil {
 		rollback.sessionIdentity = reservation.identity
@@ -8020,8 +8026,10 @@ func (s *Service) claimLifecyclePromptDispatchWithResumeAttempt(
 	}
 	rollback := promptClaimRollback{
 		previousSessionState: previousSessionState,
-		turnID:               turnID,
-		createdTurn:          createdTurn,
+		turnID:               turnID, createdTurn: createdTurn,
+		claimedSessionUpdatedAt: session.UpdatedAt,
+		claimedExecutionID:      session.AgentExecutionID,
+		sessionIdentity:         messagequeue.QueueSessionIdentity{TaskID: session.TaskID, SessionID: session.ID, SessionIncarnationID: session.QueueIncarnationID},
 	}
 	if reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID); reservation != nil {
 		rollback.sessionIdentity = reservation.identity
@@ -8059,6 +8067,7 @@ func (s *Service) claimLifecyclePromptDispatchWithResumeAttempt(
 	if reservation := s.queuedDispatchReservationForEntry(sessionID, claimEntryID); reservation != nil {
 		s.markAcceptedDispatchLiveLocked(sessionID, reservation)
 	}
+
 	keepDispatchGuard = true
 	return session, rollback, nil
 }
@@ -8113,7 +8122,11 @@ func (s *Service) rollbackPromptClaim(
 	}
 	if rollback.turnID != "" && s.turnService != nil {
 		activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
-		if err != nil || activeTurn == nil || activeTurn.ID != rollback.turnID {
+		if err == nil && activeTurn == nil {
+			s.restoreUnsentMissingTurnClaim(ctx, taskID, sessionID, rollback)
+			return
+		}
+		if err != nil || activeTurn.ID != rollback.turnID {
 			s.logger.Debug("skipping stale prompt claim rollback",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -8139,6 +8152,54 @@ func (s *Service) rollbackPromptClaim(
 			s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
 		}
 	}
+}
+
+// A vanished turn is not permission to overwrite a replacement execution.
+// Only an unsent claim whose durable identity and revision remain unchanged
+// may recover its own RUNNING projection.
+func (s *Service) restoreUnsentMissingTurnClaim(ctx context.Context, taskID, sessionID string, rollback promptClaimRollback) {
+	if rollback.dispatchAccepted || rollback.reservedTurnAccepted || rollback.claimedSessionUpdatedAt.IsZero() || rollback.previousSessionState == models.TaskSessionStateRunning {
+		return
+	}
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || !ownsUnsentMissingTurnSnapshot(current, taskID, sessionID, rollback) {
+		return
+	}
+	if cached, ok := s.activeTurns.Load(sessionID); ok && cached != rollback.turnID {
+		return
+	}
+	writer, ok := s.repo.(interface {
+		UpdateTaskSessionIfCurrentSnapshot(context.Context, *models.TaskSession, models.TaskSessionState, time.Time, map[string]interface{}) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	current.State = rollback.previousSessionState
+	current.ErrorMessage = ""
+	current.CompletedAt = nil
+	restored, err := writer.UpdateTaskSessionIfCurrentSnapshot(ctx, current, models.TaskSessionStateRunning, rollback.claimedSessionUpdatedAt, current.Metadata)
+	if err != nil {
+		s.logger.Warn("failed to restore unsent prompt claim after owned turn disappeared", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("turn_id", rollback.turnID), zap.Error(err))
+		return
+	}
+	if !restored {
+		return
+	}
+	s.activeTurns.CompareAndDelete(sessionID, rollback.turnID)
+	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, models.TaskSessionStateRunning, rollback.previousSessionState, "", &current.UpdatedAt, current)
+	s.republishTaskActivityOnSettle(ctx, taskID, models.TaskSessionStateRunning, rollback.previousSessionState)
+	if rollback.taskStateClaimed {
+		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
+	}
+}
+
+// ownsUnsentMissingTurnSnapshot checks the immutable claim against the current session.
+func ownsUnsentMissingTurnSnapshot(current *models.TaskSession, taskID, sessionID string, rollback promptClaimRollback) bool {
+	identity := rollback.sessionIdentity
+	return current != nil && current.TaskID == taskID && identity.TaskID == taskID &&
+		identity.SessionID == sessionID && identity.SessionIncarnationID != "" && current.QueueIncarnationID == identity.SessionIncarnationID &&
+		current.State == models.TaskSessionStateRunning && current.AgentExecutionID == rollback.claimedExecutionID &&
+		current.ErrorMessage == "" && current.CompletedAt == nil && current.UpdatedAt.Equal(rollback.claimedSessionUpdatedAt)
 }
 
 func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, turnID string) {
@@ -8288,6 +8349,7 @@ func (s *Service) handlePromptDispatchFailure(
 	fallbackRetryPrompt string,
 	promptReferenceContext string,
 ) (*PromptResult, error) {
+	rollback.dispatchAccepted = dispatchAccepted
 	if errors.Is(promptErr, errPromptAdmissionRejected) {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
 		return nil, promptErr
@@ -8530,7 +8592,7 @@ func (s *Service) claimSessionRunningForPrompt(
 		}
 	}
 	turnID, createdTurn, reservedTurn, err := s.startTurnForSessionWithOwnershipChecked(
-		ctx, sessionID, reserveTurnUntilDispatch, promptDispatchRecovery,
+		ctx, sessionID, reserveTurnUntilDispatch, promptDispatchRecovery, &freshSession.UpdatedAt,
 	)
 	if err != nil {
 		rollback := promptClaimRollback{previousSessionState: previousState}
@@ -8546,10 +8608,13 @@ func (s *Service) claimSessionRunningForPrompt(
 	if reservedTurn != nil && s.turnService != nil {
 		if err := s.turnService.MarkReservedTurnDispatchAttempted(ctx, reservedTurn); err != nil {
 			rollback := promptClaimRollback{
-				previousSessionState: previousState,
-				turnID:               turnID,
-				createdTurn:          createdTurn,
-				reservedTurn:         reservedTurn,
+				previousSessionState:    previousState,
+				turnID:                  turnID,
+				createdTurn:             createdTurn,
+				reservedTurn:            reservedTurn,
+				claimedSessionUpdatedAt: freshSession.UpdatedAt,
+				claimedExecutionID:      freshSession.AgentExecutionID,
+				sessionIdentity:         messagequeue.QueueSessionIdentity{TaskID: freshSession.TaskID, SessionID: freshSession.ID, SessionIncarnationID: freshSession.QueueIncarnationID},
 			}
 			if reservation != nil {
 				rollback.sessionIdentity = reservation.identity
@@ -8563,10 +8628,13 @@ func (s *Service) claimSessionRunningForPrompt(
 	}
 	reservation = s.queuedDispatchReservationForEntry(sessionID, claimEntryID)
 	rollback := promptClaimRollback{
-		previousSessionState: previousState,
-		turnID:               turnID,
-		createdTurn:          createdTurn,
-		reservedTurn:         reservedTurn,
+		previousSessionState:    previousState,
+		turnID:                  turnID,
+		createdTurn:             createdTurn,
+		reservedTurn:            reservedTurn,
+		claimedSessionUpdatedAt: freshSession.UpdatedAt,
+		claimedExecutionID:      freshSession.AgentExecutionID,
+		sessionIdentity:         messagequeue.QueueSessionIdentity{TaskID: freshSession.TaskID, SessionID: freshSession.ID, SessionIncarnationID: freshSession.QueueIncarnationID},
 	}
 	if reservation != nil {
 		rollback.sessionIdentity = reservation.identity
@@ -8750,7 +8818,7 @@ func (s *Service) claimLifecycleSessionRunningWithResumeAttempt(
 	// Keep the lifecycle admission guard through durable turn creation. A reset
 	// that follows this claim must observe this turn and quiesce it before it
 	// replaces the provider context.
-	turnID, createdTurn, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil)
+	turnID, createdTurn, _, err := s.startTurnForSessionWithOwnershipChecked(ctx, sessionID, false, nil, &freshSession.UpdatedAt)
 	if err != nil {
 		failureCtx, cancel := (promptTaskOptions{}).failureContext(ctx)
 		defer cancel()

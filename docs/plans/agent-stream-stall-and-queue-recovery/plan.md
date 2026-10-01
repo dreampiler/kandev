@@ -70,6 +70,9 @@ settlement. This package takes priority over peer-report batch delivery.
 - Successor queue evaluation after an accepted prompt's post-dispatch error,
   respecting session recovery and all existing delivery gates.
 
+- Ownership-scoped rejection cleanup and missing-turn rollback, retaining
+  accepted transcripts and existing queue/provider guards.
+
 ### Out of scope
 
 - Reimplementing the existing fifteen-minute prolonged-stall teardown or
@@ -104,12 +107,15 @@ the remaining queue stays durable with visible recovery state.
 | Agent `.1`-.3 | Fake-client tests for unexpected/intentional close, exact-generation reattach, retained terminal outcome, and exhausted retry. |
 | Agent `.4`-.5 | Pure channel tests for stage snapshots, a blocked handler with continuing frame receipt, metadata heartbeat exclusion, and one log per prompt generation. |
 | Task `.1`-.4 | Existing orchestrator queue recovery tests for accepted-error acknowledgement, successor eligibility, terminal session, Auto-run OFF, concurrent wake, and restart. |
+| Task `.5`-.7 | Actual MCP/native functions with temporary SQLite: owned rejection cleanup, successor ownership and CAS guards, accepted transcript preservation, FIFO retry, and long provider protection. |
 
 ## Work orders
 
 - [x] [Task 01: Record the first missing update-stream stage](task-01-record-stream-stages.md)
 - [x] [Task 02: Reattach an active prompt after an unexpected stream close](task-02-reattach-active-stream.md)
 - [x] [Task 03: Recover the queue after accepted post-dispatch error](task-03-recover-accepted-queue.md)
+
+- [x] [Task 04: Preserve prompt rollback ownership](task-04-prompt-rollback-ownership.md)
 
 Task 02 uses Task 01's stage snapshot. Task 03 is independent in code but
 remains sequential in the primary conversation. No subagents are authorized.
@@ -144,3 +150,14 @@ local builds passed again on the fork base.
   fenced to the original execution and applied once.
 - A terminal FAILED session may not be promptable. Queue recovery must keep
   accepted work durable and visible without silently bypassing recovery policy.
+
+### Prompt rollback ownership verification
+
+Task 04 reproduced rejected native-turn deletion and missing-turn stale RUNNING
+claims through actual functions and temporary SQLite. A second deterministic
+callback interleaving exposed adoption of a successor revision/execution;
+immutable own-claim capture fixed that case. Focused four-package `-race`
+regressions passed on the integrated fork base, including FIFO retry, Auto-run
+OFF, accepted prompt preservation, long provider protection, and TurnRemoved
+readback. Existing changed-package lint reported zero issues after a pure
+predicate extraction. No operating installation was changed.
