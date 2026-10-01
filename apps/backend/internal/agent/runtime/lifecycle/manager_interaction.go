@@ -1239,6 +1239,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	// The marker arms before teardown so concurrent disconnect handlers stop
+	// treating the stream loss as unexpected. Every error return before the
+	// runtime settles must release it again: a failed stop leaves the execution
+	// live, and its later disconnects must not be suppressed as intentional
+	// stops.
 	execution.stopRequested.Store(true)
 	stopWatch := newStopWaitWatch(30*time.Second, func(phase stopWaitPhase) {
 		captureStopWaitSnapshot(m.logger, executionID, phase)
@@ -1260,6 +1265,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	stopWatch.advance(stopWaitActivity)
 	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
+		m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 		return err
 	}
 	defer activityLease.Release()
@@ -1306,6 +1312,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// an unobservable orphan process.
 	stopWatch.advance(stopWaitRuntime)
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
+		m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
@@ -1313,6 +1320,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		cancelCleanup()
 		if err != nil {
+			m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 			return fmt.Errorf("delete runtime secrets for execution %s: %w", executionID, err)
 		}
 	}
@@ -1339,6 +1347,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// resume the same conversation after a graceful backend restart.
 	if execution.Owner.Kind == ExecutionOwnerRun || preservePassthroughConversation {
 		if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+			m.releaseStopMarkerAfterFailedStop(execution, executionID, err)
 			return err
 		}
 	}
@@ -1360,6 +1369,23 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
+}
+
+// releaseStopMarkerAfterFailedStop reopens an execution whose stop returned an
+// error without settling the runtime: a still-registered execution may remain
+// live, so its later stream disconnects must not be suppressed as intentional
+// stops. A replaced execution object or a completed stop is left untouched.
+func (m *Manager) releaseStopMarkerAfterFailedStop(
+	execution *AgentExecution,
+	executionID string,
+	stopErr error,
+) {
+	if stopErr == nil {
+		return
+	}
+	if current, currentExists := m.executionStore.Get(executionID); currentExists && current == execution {
+		execution.stopRequested.Store(false)
+	}
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach
