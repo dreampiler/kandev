@@ -448,7 +448,9 @@ type MCPHandler interface {
 // If onDisconnect is provided, it is called when the WebSocket read goroutine exits (e.g., on error or close).
 func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error)) error {
 	const wsRoute = "/api/v1/agent/stream"
-	conn, _, err := c.dialWebSocket(ctx, wsRoute, c.wsAuthHeaders())
+	dialCtx, cancelDial := context.WithTimeout(ctx, 15*time.Second)
+	conn, _, err := c.dialWebSocket(dialCtx, wsRoute, c.wsAuthHeaders())
+	cancelDial()
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
@@ -456,6 +458,9 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	c.mu.Lock()
 	c.agentStreamConn = conn
 	c.mu.Unlock()
+	stage := newUpdateStreamStage()
+	stage.connected.Store(true)
+	c.updateStage.Store(stage)
 
 	c.logger.Info("connected to updates stream", zap.String("path", wsRoute))
 
@@ -466,7 +471,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 		return conn.WriteMessage(websocket.TextMessage, data)
 	}
 
-	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+	go c.readUpdatesStream(ctx, conn, handler, mcpHandler, onDisconnect, writeMessage, stage)
 
 	return nil
 }
@@ -510,15 +515,17 @@ func (c *Client) readUpdatesStream(
 	mcpHandler MCPHandler,
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
+	stage *updateStreamStage,
 ) {
 	// Ordered, single-worker dispatch preserves per-stream event ordering while
 	// decoupling handler execution from response-frame delivery.
 	events := newAgentEventQueue()
 	workerDone := make(chan struct{})
-	go c.dispatchAgentEvents(handler, events, workerDone)
+	go c.dispatchAgentEvents(handler, events, workerDone, stage)
 
 	var lastErr error
 	defer func() {
+		stage.connected.Store(false)
 		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
@@ -571,6 +578,9 @@ func (c *Client) readUpdatesStream(
 		// Try to parse as ws.Message to check message type
 		var wsMsg ws.Message
 		if err := json.Unmarshal(message, &wsMsg); err == nil {
+			if c.consumeUpdateStreamMetadata(stage, wsMsg) {
+				continue
+			}
 			// Check if this is a response/error to a pending request
 			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
 				continue
@@ -609,6 +619,7 @@ func (c *Client) readUpdatesStream(
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		stage.recordRead()
 		// Hand off to the ordered worker rather than running handler inline.
 		// enqueue never blocks the read loop, so a burst of events behind a
 		// blocked handler can't backpressure delivery of response frames.
@@ -620,7 +631,7 @@ func (c *Client) readUpdatesStream(
 // pushed onto the queue, preserving arrival order. It is the single consumer of
 // the queue; readUpdatesStream closes the queue on teardown and waits on
 // workerDone so an in-flight handler finishes before disconnect is signaled.
-func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}) {
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stage *updateStreamStage) {
 	defer close(done)
 	for {
 		event, ok := events.dequeue()
@@ -628,6 +639,7 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 			return
 		}
 		handler(event)
+		stage.recordHandled()
 	}
 }
 
