@@ -221,7 +221,7 @@ func initCoreTaskServices(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
-	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log)
+	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log, agentRegistry)
 	if err != nil {
 		return nil, err
 	}
@@ -336,6 +336,7 @@ func initDynamicRuntimeResolver(
 	repos *Repositories,
 	cfg *config.Config,
 	log *logger.Logger,
+	agentRegistry *registry.Registry,
 ) (*agentruntime.ProfileExecutionResolver, *dynamicruntime.CredentialBindingResolver, error) {
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
@@ -348,6 +349,9 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+		dynamicruntime.WithUsageSnapshotProvider(
+			newDynamicUsageSnapshot(newUsageProviderAdapter(repos.AgentSettings, agentRegistry), repos.Task, time.Now),
+		),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {

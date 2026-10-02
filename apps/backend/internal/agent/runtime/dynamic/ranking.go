@@ -32,6 +32,15 @@ type PaceScore struct {
 	Controlling     string
 	UsageFraction   float64
 	ElapsedFraction float64
+	// HasRecord distinguishes a genuinely unobserved candidate from one whose
+	// recorded usage fraction is zero. Without it a missing read and a real zero
+	// would be indistinguishable, which is exactly the confusion the unknown
+	// state exists to prevent.
+	HasRecord bool
+	// Complete is false when the recorded evidence is partial, for example
+	// unpriced or incompletely measured events. The recorded fraction is then a
+	// visible lower bound rather than a usable pace.
+	Complete bool
 	// FloorApplied records that the elapsed floor, not the real elapsed share,
 	// divided the usage fraction, so a preview can explain the number.
 	FloorApplied bool
@@ -68,7 +77,8 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 	// to have no consumption, which is different from unknown usage.
 	if window.ExplicitNoWindow {
 		return PaceScore{
-			Known: true, Pace: 0, Controlling: window.Label, ObservedAt: window.ObservedAt,
+			Known: true, Complete: true, Pace: 0,
+			Controlling: window.Label, ObservedAt: window.ObservedAt,
 		}, true
 	}
 	if window.UsageFraction == nil {
@@ -82,10 +92,12 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 	denominator := math.Max(elapsed, minPaceElapsed)
 	return PaceScore{
 		Known:           true,
+		Complete:        true,
 		Pace:            *window.UsageFraction / denominator,
 		Controlling:     window.Label,
 		UsageFraction:   *window.UsageFraction,
 		ElapsedFraction: elapsed,
+		HasRecord:       true,
 		FloorApplied:    elapsed < minPaceElapsed,
 		ObservedAt:      window.ObservedAt,
 	}, true
