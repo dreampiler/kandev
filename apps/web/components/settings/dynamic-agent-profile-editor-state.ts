@@ -15,7 +15,12 @@ import type {
   DynamicAgentCandidate,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicModelPolicy,
+  DynamicTierPolicy,
+  DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
+import type { DynamicCandidateTier } from "@/components/settings/dynamic-agent-tiers";
+import { deriveTiers } from "@/components/settings/dynamic-agent-tiers";
 import {
   dynamicDraftRevision,
   useDynamicAgentProfileEditorDraft,
@@ -41,6 +46,12 @@ export type DynamicAgentProfileEditorState = {
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
+  toggleJoin: (index: number) => void;
+  updateTierPolicy: (tierIndex: number, patch: Partial<DynamicTierPolicy>) => void;
+  updateCandidateModel: (index: number, patch: Partial<DynamicModelPolicy>) => void;
+  updateManualWindow: (index: number, windows: DynamicUsageWindow[]) => void;
+  updateKeepModelWhileRunning: (enabled: boolean) => void;
+  keepModelWhileRunning: boolean;
   updateCandidate: (index: number, patch: Partial<DynamicAgentCandidate>) => void;
   updateCandidatePolicy: (
     index: number,
@@ -48,6 +59,7 @@ export type DynamicAgentProfileEditorState = {
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
   candidates: DynamicAgentCandidate[];
+  tiers: DynamicCandidateTier[];
   discardDraft: () => void;
 };
 
@@ -56,12 +68,14 @@ export function dynamicProfilePayload(
   enabled: boolean,
   version: number,
   candidates: DynamicAgentCandidate[],
+  keepModelWhileRunning = true,
 ) {
   return {
     name: name.trim(),
     enabled,
     dynamic: {
       version,
+      keep_model_while_running: keepModelWhileRunning,
       candidates: candidates.map((candidate, position) => ({
         position,
         execution_profile_id: candidate.executionProfileId,
@@ -97,6 +111,43 @@ export function dynamicProfilePayload(
             consecutive_failure_threshold:
               candidate.policies.unclassified.consecutiveFailureThreshold,
           },
+          // A row with no draft selection is omitted rather than defaulted, so
+          // the server preserves what it already has for a legacy row.
+          ...(candidate.policies.selection
+            ? {
+                selection: {
+                  join_previous: candidate.policies.selection.joinPrevious,
+                  ...(candidate.policies.selection.tier
+                    ? {
+                        tier: {
+                          mode: candidate.policies.selection.tier.mode,
+                          on_failure: candidate.policies.selection.tier.onFailure,
+                        },
+                      }
+                    : {}),
+                  model: {
+                    cost: candidate.policies.selection.model.cost,
+                    usage_source: candidate.policies.selection.model.usageSource,
+                    reserved_user_share_pct:
+                      candidate.policies.selection.model.reservedUserSharePct,
+                    ...(candidate.policies.selection.model.windows &&
+                    candidate.policies.selection.model.windows.length > 0
+                      ? {
+                          windows: candidate.policies.selection.model.windows.map((window) => ({
+                            period: window.period,
+                            unit: window.unit,
+                            limit: window.limit,
+                            reset: {
+                              anchor: window.reset.anchor,
+                              timezone: window.reset.timezone,
+                            },
+                          })),
+                        }
+                      : {}),
+                  },
+                },
+              }
+            : {}),
         },
       })),
     },
@@ -169,6 +220,7 @@ export function useDynamicAgentProfileEditorState({
         dynamic: {
           version: draft.dynamicVersion,
           candidates: draft.candidates,
+          keepModelWhileRunning: draft.keepModelWhileRunning,
         },
       };
       const payload = dynamicProfilePayload(
@@ -176,6 +228,7 @@ export function useDynamicAgentProfileEditorState({
         draft.profileEnabled,
         draft.dynamicVersion,
         draft.candidates,
+        draft.keepModelWhileRunning,
       );
       if (onDraftChange) {
         onDraftChange(draftPayload);
@@ -262,9 +315,16 @@ export function useDynamicAgentProfileEditorState({
     addCandidate: draft.addCandidate,
     moveCandidate: draft.moveCandidate,
     removeCandidate: draft.removeCandidate,
+    toggleJoin: draft.toggleJoin,
+    updateTierPolicy: draft.updateTierPolicy,
+    updateCandidateModel: draft.updateCandidateModel,
+    updateManualWindow: draft.updateManualWindow,
+    updateKeepModelWhileRunning: draft.updateKeepModelWhileRunning,
+    keepModelWhileRunning: draft.keepModelWhileRunning,
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
+    tiers: deriveTiers(draft.candidates),
     discardDraft: draft.reset,
   };
 }
