@@ -227,8 +227,13 @@ counterpart and run the following from `apps/backend/` with
 `KANDEV_TEST_POSTGRES_DSN` supplied by an isolated test database, never production:
 
 ```powershell
-go test ./internal/task/repository/sqlite -run 'TestPostgres.*DynamicManualWindow' -count=1 -timeout=10m -v
+go test ./internal/task/repository/sqlite -run '^TestPostgresGetManualWindowUsage_' -count=1 -timeout=10m -v
 ```
+
+The pattern matches the two real function names. Confirm both `=== RUN` lines
+appear and no `--- SKIP` is printed: a `-run` pattern that matches nothing still
+exits 0 with `no tests to run`, which would read as a green parity check while
+running no test at all.
 
 The fixture currently skips without that variable; a skip is not passing database
 parity evidence. No new ledger column is planned: resolve concrete identity from

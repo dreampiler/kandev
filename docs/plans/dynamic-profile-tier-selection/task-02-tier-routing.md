@@ -81,7 +81,7 @@ Use the plan's focused backend lint command after changes settle. Run the
 PostgreSQL query counterpart with an isolated `KANDEV_TEST_POSTGRES_DSN`:
 
 ```powershell
-go test ./internal/task/repository/sqlite -run 'TestPostgres.*DynamicManualWindow' -count=1 -timeout=10m -v
+go test ./internal/task/repository/sqlite -run '^TestPostgresGetManualWindowUsage_' -count=1 -timeout=10m -v
 ```
 
 Its environment-gated skip does not satisfy parity evidence.
@@ -219,10 +219,11 @@ Six cases: two logical sessions on one concrete model, sibling candidate
 exclusion, reset-instant boundary exclusion, partial and unpriced accounting,
 deleted-turn attribution, empty query, and degenerate input.
 
-The PostgreSQL counterpart named in the plan (`TestPostgres.*DynamicManualWindow`)
-is **not** written yet, so this increment has no dialect-parity evidence. The
-query itself is dialect-neutral (no `rowid`, no SQLite-only JSON or date syntax)
-but that is unproven until the env-gated test exists.
+The PostgreSQL counterpart named in the plan
+(`^TestPostgresGetManualWindowUsage_`) is **not** written yet, so this increment
+has no dialect-parity evidence. The query itself is dialect-neutral (no `rowid`,
+no SQLite-only JSON or date syntax) but that is unproven until the env-gated test
+exists.
 
 The wider `sqlite` package run shows six failures. Each was reproduced at the
 untouched base by stashing and repeating: `TestUpdateDocumentWritesEveryMutableFieldAndReportsMissing`,
@@ -390,11 +391,19 @@ but that remains unproven and must not be reported as parity.
 
 ### Resume condition
 
-Run `go test ./internal/task/repository/sqlite -run 'TestPostgres.*DynamicManualWindow' -count=1 -timeout=10m -v`
+Run `go test ./internal/task/repository/sqlite -run '^TestPostgresGetManualWindowUsage_' -count=1 -timeout=10m -v`
 against an isolated test database with `KANDEV_TEST_POSTGRES_DSN` set, and
 confirm both cases execute rather than skip. If they pass, change this work
-order's status from `blocked` to `complete`. If they fail, the failure belongs
-to the query's dialect handling in `dynamic_manual_usage.go`.
+order's status from `blocked` to `done`. If they fail, the failure belongs to
+the query's dialect handling in `dynamic_manual_usage.go`.
+
+The pattern is anchored on the real function names,
+`TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary` and
+`TestPostgresGetManualWindowUsage_CountsUnpricedAndIncomplete`. An earlier
+revision of this file recorded `TestPostgres.*DynamicManualWindow`, which matches
+neither name: it exits 0 printing `no tests to run` and `PASS`, so it reads as a
+green parity check while running nothing. Before accepting a result, confirm the
+output contains both `=== RUN` lines and no `--- SKIP`.
 
 ### Still outstanding overall
 
