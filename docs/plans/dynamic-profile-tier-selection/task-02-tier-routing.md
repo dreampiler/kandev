@@ -1,7 +1,7 @@
 ---
 id: "02-tier-routing"
 title: "Select tier candidates from usage with durable transition chains"
-status: blocked
+status: done
 wave: 2
 depends_on:
   - "01-selection-contract"
@@ -412,6 +412,27 @@ again.
 This work order remains **blocked**: one case has passed in isolation, never both
 in a single run. Re-run the corrected command on CI and confirm both pass together
 before flipping the status.
+
+### Parity proven on CI: both cases pass
+
+`Backend Postgres` on PR #44 (job 111063238487) ran the corrected command against
+a real PostgreSQL and both cases executed and passed in one run:
+
+```
+=== RUN   TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary
+--- PASS: TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary (0.67s)
+=== RUN   TestPostgresGetManualWindowUsage_CountsUnpricedAndIncomplete
+--- PASS: TestPostgresGetManualWindowUsage_CountsUnpricedAndIncomplete (0.67s)
+```
+
+No `--- SKIP` and no `no tests to run`, so this is real dialect-parity evidence
+rather than the environment-gated skip the design refuses to accept. The
+work order's status moves from `blocked` to `done`.
+
+Note for anyone re-reading the CI list: the sibling job `Backend Postgres 18`
+also passes, but it only runs `TestPreviousStableUpgrade` and
+`TestPostgresBootInitializesRepositories`, so it is not parity evidence. Only the
+`Backend Postgres` job executes this suite.
 
 ### Resume condition
 

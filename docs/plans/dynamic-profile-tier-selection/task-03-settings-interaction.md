@@ -220,6 +220,22 @@ treatment already proven in `app-status-bar-settings-card.tsx`.
 touch size, so a regression is caught by a unit test rather than only by an E2E
 run on a phone project.
 
+### E2E executed on CI: touch target fixed, one collision found
+
+CI ran both specs. The 44px keep-model failure is **gone** after the shared
+`settingsTouchSwitchClassName()` treatment, which confirms the production fix.
+
+Both specs then failed on one remaining cause, which the earlier round
+introduced: the action group's new `data-testid="dynamic-candidate-actions-<n>"`
+shared the `dynamic-candidate-` prefix, so the row selector
+`[data-testid^="dynamic-candidate-"]` matched both the row and its control group
+and tripped strict mode. Renamed to `dynamic-row-controls-<n>`, which cannot
+collide with the row prefix.
+
+That is the second time a position- or prefix-based selector broke when the DOM
+gained an element. The control group is now named explicitly for that reason, and
+a future reader should add a `data-testid` rather than reach for a position.
+
 ### Verification actually run (all exit 0)
 
 - `pnpm run typecheck`

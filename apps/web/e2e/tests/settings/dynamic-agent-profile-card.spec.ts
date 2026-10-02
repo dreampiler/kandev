@@ -82,7 +82,8 @@ test.describe("Dynamic Agents settings card", () => {
       await dropdown.locator(`[data-value="${candidate.id}"]`).click();
 
       // The list wraps rows in a per-tier container, so a bare `li` would match
-      // both the tier and its row and break strict mode.
+      // both the tier and its row and break strict mode. The prefix deliberately
+      // excludes the row's own control group, which is named differently.
       const candidateRow = testPage
         .getByTestId("dynamic-profile-candidates")
         .locator('[data-testid^="dynamic-candidate-"]');
@@ -220,7 +221,7 @@ test.describe("Dynamic agent tier selection", () => {
 
     try {
       await openDynamicProfileEditor(testPage, dynamicProfile.id);
-      const actions = testPage.getByTestId("dynamic-candidate-actions-1");
+      const actions = testPage.getByTestId("dynamic-row-controls-1");
       const order = await actions
         .getByRole("button")
         .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label") ?? ""));

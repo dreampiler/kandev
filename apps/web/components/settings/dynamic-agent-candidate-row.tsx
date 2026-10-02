@@ -147,7 +147,7 @@ function CandidateRowHeader({
       </div>
       <div
         className="flex shrink-0 items-center gap-1"
-        data-testid={`dynamic-candidate-actions-${index}`}
+        data-testid={`dynamic-row-controls-${index}`}
       >
         <Button
           variant="ghost"
