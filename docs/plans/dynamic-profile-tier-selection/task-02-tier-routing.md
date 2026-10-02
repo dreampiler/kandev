@@ -1,7 +1,7 @@
 ---
 id: "02-tier-routing"
 title: "Select tier candidates from usage with durable transition chains"
-status: in_progress
+status: blocked
 wave: 2
 depends_on:
   - "01-selection-contract"
@@ -284,7 +284,7 @@ intermediate value it then overwrote.
   selection and the preview. Automatic source reads each candidate's own account
   binding and never borrows another profile's usage. Manual source resolves the
   calendar window, queries the ledger over the half-open interval, and converts
-  the recorded total with exact decimal arithmetic — money scales the limit by
+  the recorded total with exact decimal arithmetic ??money scales the limit by
   100 for the ledger's subcent precision.
 - `PaceScore` gained `HasRecord` and `Complete` so an unobserved candidate is
   distinguishable from a recorded zero, and a partial total is unknown for
@@ -350,10 +350,53 @@ Two defects the parity test caught, both real and both fixed:
 | `go test ./internal/backendapp ./internal/orchestrator -run 'Test.*Dynamic' -count=1` | 0 | pass |
 | `go build ./...` | 0 | pass |
 
-### Not delivered
+### Seventh increment: preview endpoints and PostgreSQL parity (`34d85f9c20`, `495f2ef435`)
 
-This increment is the shared computation. The two HTTP preview endpoints are
-still not registered, so no client can call the preview yet, and the
-PostgreSQL parity test for the manual-window query is still absent. WO-03 must
-not ship before the endpoints exist, because the editor would offer a
-current-choice preview with nothing behind it.
+- `POST /api/v1/agent-profiles/dynamic-preview` and
+  `POST /api/v1/agent-profiles/:id/dynamic-preview` are registered **without**
+  the mutation interlock, so the existing settings lock permits a read-only
+  preview while continuing to block every mutation.
+- The controller validates the draft through the same `validateDynamicAgentProfile`
+  the save path uses, so preview and save accept exactly the same documents and
+  an invalid draft can never produce a confident-looking prediction.
+- A missing preview seam reports an explicit `unavailable` state instead of
+  looking like an empty profile.
+- The provider is wired at the composition boundary and reuses the same usage
+  snapshot and the same pure preview, so an identical profile, clock, health and
+  usage state answers identically on the editor and runtime paths.
+- `TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary` and
+  `TestPostgresGetManualWindowUsage_CountsUnpricedAndIncomplete` cover the LEFT
+  JOIN, half-open interval comparison and CASE aggregates against PostgreSQL.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/settings/controller -run 'TestPreviewDynamicProfile' -count=1` | 0 | pass |
+| `go test ./internal/agent/settings/controller -count=1 -timeout=10m -skip 'TestHostRuntimeUpdater'` | 0 | pass |
+| `go test ./internal/agent/settings/handlers -count=1 -timeout=10m` | 0 | pass |
+| `golangci-lint run ./internal/agent/settings/... ./internal/backendapp/... ./internal/agent/runtime/dynamic/...` | 0 | 0 issues |
+| `go build ./...` | 0 | pass |
+| `go test ./internal/task/repository/sqlite -run 'TestDynamicManualWindowUsage\|TestPostgresGetManualWindowUsage' -count=1 -v` | 0 | 6 SQLite cases pass, **2 PostgreSQL cases SKIP** |
+
+### Why this work order is blocked rather than complete
+
+The plan and design are explicit that an environment-gated skip is **not**
+database parity evidence. On this host there is no `KANDEV_TEST_POSTGRES_DSN`,
+no local PostgreSQL service and no reachable Docker daemon, so the two
+PostgreSQL cases could not actually execute. The manual-window query is
+dialect-neutral by inspection (no `rowid`, no SQLite-only JSON or date syntax),
+but that remains unproven and must not be reported as parity.
+
+### Resume condition
+
+Run `go test ./internal/task/repository/sqlite -run 'TestPostgres.*DynamicManualWindow' -count=1 -timeout=10m -v`
+against an isolated test database with `KANDEV_TEST_POSTGRES_DSN` set, and
+confirm both cases execute rather than skip. If they pass, change this work
+order's status from `blocked` to `complete`. If they fail, the failure belongs
+to the query's dialect handling in `dynamic_manual_usage.go`.
+
+### Still outstanding overall
+
+WO-03 (desktop and phone editors, six-language copy, E2E) and WO-04 (evidence,
+docs, three-model RV, fork PR) are untouched.
