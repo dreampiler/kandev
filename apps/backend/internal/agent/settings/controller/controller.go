@@ -70,6 +70,7 @@ type Controller struct {
 	repo                        store.Repository
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
+	dynamicPreview              DynamicPreviewProvider
 	sessionChecker              SessionChecker
 	watcherDeps                 WatcherDependencyChecker
 	routingTierDeps             RoutingTierDependencyChecker

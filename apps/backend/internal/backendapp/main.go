@@ -1397,6 +1397,13 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
+	// The settings current-choice preview shares the tier runtime's usage
+	// snapshot and its pure preview, so the editor and a live selection answer
+	// from the same evidence.
+	agentSettingsController.SetDynamicPreviewProvider(
+		newDynamicUsageSnapshot(newUsageProviderAdapter(repos.AgentSettings, agentRegistry), repos.Task, time.Now),
+	)
+
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
 	services.Task.StartSessionReconciliationLoop(ctx)

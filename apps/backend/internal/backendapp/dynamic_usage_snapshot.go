@@ -217,3 +217,17 @@ func recordedFraction(
 	value, _ := fraction.Float64()
 	return value, true
 }
+
+// PreviewDynamicSelection implements the settings controller's read-only preview
+// seam. It reuses the same usage snapshot and the same pure preview the engine
+// uses, so an identical profile, clock, health and usage state answers
+// identically on both paths.
+func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
+	ctx context.Context,
+	profile dynamicruntime.Profile,
+	ineligible map[string]string,
+	now time.Time,
+) dynamicruntime.SelectionPreview {
+	scores, _ := s.UsageSnapshot(ctx, profile)
+	return dynamicruntime.PreviewSelection(profile, scores, ineligible, "", dynamicruntime.SelectionChain{}, now)
+}
