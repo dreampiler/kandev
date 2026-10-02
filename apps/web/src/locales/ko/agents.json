@@ -408,7 +408,7 @@
   "dynamicModelReservedShareDescription": "기록된 사용량이 예약 비율만큼 남은 지점에 도달하면 Kandev는 이 후보를 더 이상 선택하지 않습니다.",
   "dynamicModelReservedShareUnavailable": "예약 비율을 정하려면 먼저 사용량 출처를 고르세요.",
   "dynamicKeepModelWhileRunning": "작업 중에는 선택한 모델 유지",
-  "dynamicKeepModelWhileRunningDescription": "사용량 변화나 사용 가능해진 여유가 생겨도 진행 중인 작업을 다른 모델로 바꾸지 않습니다. 새 세션이나 적격한 실패 시점에 다시 비교합니다.",
+  "dynamicKeepModelWhileRunningDescription": "사용량 변화나 사용 가능해진 여유가 생겨도 진행 중인 작업을 다른 모델로 바꾸지 않습니다. 새 세션이나 적격한 실패 시점에 다시 비교합니다. 이 기본 설정은 프로필별로 저장됩니다.",
   "dynamicPreviewChooseNow": "지금 선택할 후보: {{candidate}}",
   "dynamicPreviewUnavailable": "현재 선택을 확인할 수 없습니다",
   "dynamicPreviewLoading": "현재 선택을 확인하는 중",

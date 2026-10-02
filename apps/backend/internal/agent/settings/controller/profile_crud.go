@@ -534,7 +534,7 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		dynamic = &models.DynamicAgentProfile{
 			ProfileID:             profile.ID,
-			KeepModelWhileRunning: true,
+			KeepModelWhileRunning: keepModelWhileRunning(req.Dynamic),
 		}
 	}
 	if req.Name != nil {

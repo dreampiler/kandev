@@ -367,6 +367,93 @@ func TestDynamicProfileCreateAndUpdatePersistsCandidates(t *testing.T) {
 	}
 }
 
+// TestDynamicProfileUpdateStoresTheRequestedKeepModelPreference pins that the
+// continuity preference survives an update in the value the caller sent, and
+// that omitting it keeps whatever is already stored. Both directions were
+// previously collapsed to the default.
+func TestDynamicProfileUpdateStoresTheRequestedKeepModelPreference(t *testing.T) {
+	ctrl, repo := newSQLiteBackedController(t)
+	if err := ctrl.agentRegistry.Register(agents.NewDynamicAgent()); err != nil {
+		t.Fatalf("register dynamic agent: %v", err)
+	}
+	if err := ctrl.agentRegistry.Register(agents.NewClaudeACP()); err != nil {
+		t.Fatalf("register concrete agent: %v", err)
+	}
+	ctrl.SetDynamicAgentRoutingEnabled(true)
+	ctx := context.Background()
+	if err := repo.CreateAgent(ctx, &models.Agent{ID: agents.DynamicAgentID, Name: agents.DynamicAgentID}); err != nil {
+		t.Fatalf("create dynamic family: %v", err)
+	}
+	if err := repo.CreateAgent(ctx, &models.Agent{ID: "claude-family", Name: "claude-acp"}); err != nil {
+		t.Fatalf("create concrete family: %v", err)
+	}
+	candidate := &models.AgentProfile{AgentID: "claude-family", Name: "Claude", AgentDisplayName: "Claude"}
+	if err := repo.CreateAgentProfile(ctx, candidate); err != nil {
+		t.Fatalf("create candidate: %v", err)
+	}
+	policy := &dto.DynamicAgentPolicyDTO{
+		Version:      1,
+		Transient:    dto.DynamicErrorPolicyDTO{OnExhausted: "skip"},
+		Hard:         dto.DynamicErrorPolicyDTO{OnExhausted: "skip"},
+		Unclassified: &dto.DynamicUnclassifiedPolicyDTO{Enabled: true, ConsecutiveFailureThreshold: 3},
+	}
+	document := func(version int64, keep *bool) *dto.DynamicAgentProfileDTO {
+		return &dto.DynamicAgentProfileDTO{
+			Version:               version,
+			KeepModelWhileRunning: keep,
+			Candidates: []dto.DynamicAgentCandidateDTO{{
+				Position:           0,
+				ExecutionProfileID: candidate.ID,
+				Enabled:            true,
+				Policies:           policy,
+			}},
+		}
+	}
+	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: agents.DynamicAgentID,
+		Name:    "Continuity",
+		Dynamic: document(1, nil),
+	})
+	if err != nil {
+		t.Fatalf("create dynamic profile: %v", err)
+	}
+	readKeep := func() bool {
+		t.Helper()
+		dynamicRepo, ok := repo.(store.DynamicProfileRepository)
+		if !ok {
+			t.Fatal("repository does not implement dynamic profile storage")
+		}
+		stored, _, err := dynamicRepo.GetDynamicAgentProfile(ctx, created.ID)
+		if err != nil {
+			t.Fatalf("read dynamic profile: %v", err)
+		}
+		return stored.KeepModelWhileRunning
+	}
+	if !readKeep() {
+		t.Fatal("a create that omits the preference must store the documented default of on")
+	}
+
+	off := false
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
+		ID: created.ID, Dynamic: document(1, &off),
+	}); err != nil {
+		t.Fatalf("disable keep model: %v", err)
+	}
+	if readKeep() {
+		t.Fatal("an explicit keep_model_while_running=false was stored as true")
+	}
+
+	// An update that omits the field must preserve the stored false.
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{
+		ID: created.ID, Dynamic: document(2, nil),
+	}); err != nil {
+		t.Fatalf("update omitting the preference: %v", err)
+	}
+	if readKeep() {
+		t.Fatal("an omitted keep_model_while_running must preserve the stored false")
+	}
+}
+
 func TestDynamicProfileCreateValidatesBeforeCreatingParent(t *testing.T) {
 	ctrl, repo := newSQLiteBackedController(t)
 	if err := ctrl.agentRegistry.Register(agents.NewDynamicAgent()); err != nil {

@@ -408,7 +408,7 @@
   "dynamicModelReservedShareDescription": "記録済み使用量が予約割合の残量に達すると、Kandev はこの候補を再び選びません。",
   "dynamicModelReservedShareUnavailable": "予約割合を設定する前に使用量の入手元を選んでください。",
   "dynamicKeepModelWhileRunning": "実行中は選択したモデルを維持",
-  "dynamicKeepModelWhileRunningDescription": "使用量の変化や新たな空き容量があっても、実行中の作業を別モデルへ移しません。新しいセッションまたは対象、失敗の時点で再比較します。",
+  "dynamicKeepModelWhileRunningDescription": "使用量の変化や新たな空き容量があっても、実行中の作業を別モデルへ移しません。新しいセッションまたは対象、失敗の時点で再比較します。 この設定はプロファイルごとに保存されます。",
   "dynamicPreviewChooseNow": "現在選ぶ候補: {{candidate}}",
   "dynamicPreviewUnavailable": "現在の選択を確認できません",
   "dynamicPreviewLoading": "現在の選択を確認しています",

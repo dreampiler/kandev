@@ -10,6 +10,10 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
+// subcentsPerDollar is the ledger's money unit for task_usage_events and
+// office_cost_events: hundredths of a cent, so one dollar is 10,000 of them.
+const subcentsPerDollar = 10_000
+
 // manualWindowTotalsReader is the narrow ledger seam tier ranking needs, so the
 // composition boundary depends on a read contract rather than on the whole
 // task repository.
@@ -188,8 +192,9 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 }
 
 // recordedFraction converts a recorded total into a fraction of the allowance.
-// Money uses the ledger's USD subcent precision, so the limit is scaled by 100
-// with exact decimal arithmetic rather than by binary floating point.
+// Money uses the ledger's USD subcent precision, so the limit is scaled into that
+// unit with exact decimal arithmetic rather than by binary floating point. The
+// ledger stores hundredths of a cent, so one dollar is 10,000 of them.
 func recordedFraction(
 	totals sqliterepo.ManualWindowUsage,
 	unit string,
@@ -204,7 +209,7 @@ func recordedFraction(
 			return 0, false
 		}
 		recorded = new(big.Rat).SetInt64(totals.CostSubcents)
-		limit = new(big.Rat).Mul(limit, big.NewRat(100, 1))
+		limit = new(big.Rat).Mul(limit, big.NewRat(subcentsPerDollar, 1))
 	case agentusage.WindowUnitTokens:
 		recorded = new(big.Rat).SetInt64(totals.TokensTotal)
 	default:

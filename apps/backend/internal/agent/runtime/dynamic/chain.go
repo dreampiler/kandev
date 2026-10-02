@@ -293,6 +293,18 @@ type selectionWinner struct {
 	ok        bool
 }
 
+// tierSelection pairs a winner with the search space that produced it, so a
+// caller persisting a route reason resolves the direction that governed the
+// decision rather than re-deriving it from the successor's own policy.
+type tierSelection struct {
+	winner selectionWinner
+	plan   selectionPlan
+}
+
+func (w selectionWinner) withPlan(plan selectionPlan) tierSelection {
+	return tierSelection{winner: w, plan: plan}
+}
+
 // firstSelectable returns the winning candidate, walking tiers in order and
 // ranking only the first tier that still has one.
 //

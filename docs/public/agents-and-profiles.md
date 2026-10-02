@@ -479,7 +479,8 @@ source to be observable, so it is unavailable until you select one.
 The profile-level **Keep the chosen model while work runs** switch is on by
 default. With it on, usage changes and newly available capacity do not move
 running work to a different model; Kandev compares candidates again at a new
-session or at an eligible failure. Turn it off to allow a mid-session change.
+session or at an eligible failure. The preference is stored per profile and
+travels with save, reload, and duplication.
 
 **Would choose now** shows which candidate a new selection would pick right now,
 with its tier, reason, and the usage, elapsed, and pace figures behind the

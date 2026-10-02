@@ -65,8 +65,11 @@ func TestSnapshotNoneSourceIsUnknownUnlessFree(t *testing.T) {
 
 func TestSnapshotManualComputesMoneyFractionAgainstTheLedger(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
+	// The ledger stores hundredths of a cent, so half of a $100 month is
+	// 500,000 of them, not 5,000. Getting this constant wrong scales every
+	// reported money fraction by 100.
 	manual := &fakeManualTotals{totals: sqliterepo.ManualWindowUsage{
-		CostSubcents: 5000, TokensTotal: 900, EventCount: 2,
+		CostSubcents: 500_000, TokensTotal: 900, EventCount: 2,
 	}}
 	candidate := automaticCandidate("manual", dynamicruntime.UsageManual, dynamicruntime.CostSubscription)
 	candidate.Selection.Model.Windows = []dynamicruntime.UsageWindow{{
@@ -80,8 +83,8 @@ func TestSnapshotManualComputesMoneyFractionAgainstTheLedger(t *testing.T) {
 		t.Fatalf("UsageSnapshot: %v", err)
 	}
 	score := scores["manual"]
-	// 5000 subcents against a 100.00 USD allowance is half of the month, and the
-	// window has barely elapsed, so the pace must be well above the fraction.
+	// Half of the 100.00 USD allowance, with the window barely elapsed, so the
+	// pace must be well above the fraction.
 	if !score.Known {
 		t.Fatalf("score = %#v, want a known pace", score)
 	}
@@ -114,7 +117,7 @@ func TestSnapshotManualTokensFraction(t *testing.T) {
 func TestSnapshotManualIncompleteTotalsStayUnknown(t *testing.T) {
 	now := time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC)
 	manual := &fakeManualTotals{totals: sqliterepo.ManualWindowUsage{
-		CostSubcents: 5000, EventCount: 2, UnpricedCount: 1,
+		CostSubcents: 500_000, EventCount: 2, UnpricedCount: 1,
 	}}
 	candidate := automaticCandidate("partial", dynamicruntime.UsageManual, dynamicruntime.CostSubscription)
 	candidate.Selection.Model.Windows = []dynamicruntime.UsageWindow{{
@@ -199,7 +202,9 @@ func TestSnapshotWithoutManualReaderIsUnknown(t *testing.T) {
 // TestRecordedFractionRejectsUnknownUnit pins that an unrecognised unit is
 // never treated as a confirmed zero charge.
 func TestRecordedFractionRejectsUnknownUnit(t *testing.T) {
-	totals := sqliterepo.ManualWindowUsage{CostSubcents: 100, TokensTotal: 100, EventCount: 1}
+	// 100,000 subcents is $10.00, so against a $100 allowance the money fraction
+	// is 0.1 while the 100 tokens against the same number is 1.
+	totals := sqliterepo.ManualWindowUsage{CostSubcents: 100_000, TokensTotal: 100, EventCount: 1}
 	limit := mustRat(t, "100")
 	if _, ok := recordedFraction(totals, "credits", limit); ok {
 		t.Fatal("unknown unit accepted, want rejection")
@@ -208,12 +213,32 @@ func TestRecordedFractionRejectsUnknownUnit(t *testing.T) {
 		t.Fatal("nonpositive limit accepted, want rejection")
 	}
 	money, ok := recordedFraction(totals, agentusage.WindowUnitMoney, limit)
-	if !ok || money != 0.01 {
-		t.Fatalf("money fraction = %v (ok=%v), want 0.01", money, ok)
+	if !ok || money != 0.1 {
+		t.Fatalf("money fraction = %v (ok=%v), want 0.1", money, ok)
 	}
 	tokens, ok := recordedFraction(totals, agentusage.WindowUnitTokens, limit)
 	if !ok || tokens != 1 {
 		t.Fatalf("token fraction = %v (ok=%v), want 1", tokens, ok)
+	}
+}
+
+// TestRecordedFractionUsesTheLedgerSubcentUnit pins the money unit against the
+// ledger's own contract. task_usage_events.cost_subcents is hundredths of a cent,
+// so one dollar is 10,000 of them; scaling the allowance by anything else reports
+// every money fraction at the wrong magnitude while still looking plausible.
+func TestRecordedFractionUsesTheLedgerSubcentUnit(t *testing.T) {
+	oneDollar := sqliterepo.ManualWindowUsage{CostSubcents: subcentsPerDollar, EventCount: 1}
+	fraction, ok := recordedFraction(oneDollar, agentusage.WindowUnitMoney, mustRat(t, "1"))
+	if !ok || fraction != 1 {
+		t.Fatalf("one dollar against a one dollar allowance = %v (ok=%v), want 1", fraction, ok)
+	}
+	oneCent, ok := recordedFraction(
+		sqliterepo.ManualWindowUsage{CostSubcents: subcentsPerDollar / 100, EventCount: 1},
+		agentusage.WindowUnitMoney,
+		mustRat(t, "0.01"),
+	)
+	if !ok || oneCent != 1 {
+		t.Fatalf("one cent against a one cent allowance = %v (ok=%v), want 1", oneCent, ok)
 	}
 }
 

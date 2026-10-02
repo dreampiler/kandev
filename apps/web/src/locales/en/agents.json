@@ -408,7 +408,7 @@
   "dynamicModelReservedShareDescription": "Kandev stops choosing this candidate once recorded usage reaches 1 minus the reserved share, so this share stays available for you.",
   "dynamicModelReservedShareUnavailable": "Choose a usage source before reserving a share of this candidate's capacity.",
   "dynamicKeepModelWhileRunning": "Keep the chosen model while work runs",
-  "dynamicKeepModelWhileRunningDescription": "Usage changes and newly available capacity do not move running work to a different model. Kandev compares again at a new session or an eligible failure.",
+  "dynamicKeepModelWhileRunningDescription": "Usage changes and newly available capacity do not move running work to a different model. Kandev compares again at a new session or an eligible failure. This preference is stored per profile.",
   "dynamicPreviewChooseNow": "Would choose now: {{candidate}}",
   "dynamicPreviewUnavailable": "Current choice unavailable",
   "dynamicPreviewLoading": "Checking the current choice",

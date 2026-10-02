@@ -408,7 +408,7 @@
   "dynamicModelReservedShareDescription": "当已记录用量达到预留比例的余量时，Kandev 不再选择该候选，把这部分容量留给你自己使用。",
   "dynamicModelReservedShareUnavailable": "请先选择用量来源，再预留该候选的一部分容量。",
   "dynamicKeepModelWhileRunning": "工作期间保持所选模型",
-  "dynamicKeepModelWhileRunningDescription": "用量变化或出现新的可用容量时，不会把进行中的工作换到其他模型。Kandev 会在新会话或符合条件的失败时重新比较。",
+  "dynamicKeepModelWhileRunningDescription": "用量变化或出现新的可用容量时，不会把进行中的工作换到其他模型。Kandev 会在新会话或符合条件的失败时重新比较。 此偏好设置按配置文件保存。",
   "dynamicPreviewChooseNow": "现在会选择：{{candidate}}",
   "dynamicPreviewUnavailable": "无法确认当前选择",
   "dynamicPreviewLoading": "正在确认当前选择",

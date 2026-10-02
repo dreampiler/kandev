@@ -408,7 +408,7 @@
   "dynamicModelReservedShareDescription": "O Kandev deixa de escolher este candidato quando o uso registado atinge 1 menos a percentagem reservada, mantendo essa parte disponível para si.",
   "dynamicModelReservedShareUnavailable": "Escolha uma origem de uso antes de reservar parte da capacidade deste candidato.",
   "dynamicKeepModelWhileRunning": "Manter o modelo escolhido durante a execução",
-  "dynamicKeepModelWhileRunningDescription": "Variações de uso e nova capacidade disponível não mudam o trabalho em curso para outro modelo. O Kandev compara novamente numa nova sessão ou numa falha elegível.",
+  "dynamicKeepModelWhileRunningDescription": "Variações de uso e nova capacidade disponível não mudam o trabalho em curso para outro modelo. O Kandev compara novamente numa nova sessão ou numa falha elegível. Esta preferencia e guardada por perfil.",
   "dynamicPreviewChooseNow": "Escolheria agora: {{candidate}}",
   "dynamicPreviewUnavailable": "Escolha atual indisponível",
   "dynamicPreviewLoading": "A verificar a escolha atual",

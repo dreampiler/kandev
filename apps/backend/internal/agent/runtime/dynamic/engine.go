@@ -559,6 +559,11 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 
+	// The usage observation is taken before the engine lock so a slow provider
+	// read cannot block other sessions, and so every candidate the successor
+	// search ranks is compared against one clock and one set of evidence.
+	scores := e.usageSnapshot(ctx, profile)
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, err := e.currentUnclassifiedRouteState(ctx, sessionID, profile, expectedGeneration, currentCandidateID)
@@ -588,7 +593,7 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_manual_recovery")
 	}
 	return e.routeToUnclassifiedSuccessor(
-		ctx, state, profile, currentCandidateID, expectedGeneration, failure, evidence, policyState,
+		ctx, state, profile, currentCandidateID, expectedGeneration, failure, evidence, policyState, scores,
 	)
 }
 
@@ -705,15 +710,41 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	failure *routingerr.Error,
 	evidence UnclassifiedFailureEvidence,
 	policyState PolicyState,
+	scores map[string]PaceScore,
 ) (RouteDecision, error) {
-	successor, found := e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
-	if !found {
-		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
+	observedAt := e.now()
+
+	successor, ok := e.unclassifiedSuccessor(
+		state, profile, currentCandidateID, expectedGeneration, scores, observedAt,
+	)
+	if !ok {
+		return e.persistUnclassifiedManual(
+			ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted",
+		)
 	}
-	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
-	if persistedDecision, err := e.recordUnclassifiedSuccessor(
+	// The transition continues the durable chain, so a candidate already tried in
+	// this chain and an earlier tier both stay excluded.
+	chain, chainErr := decodeSelectionChain(state.PolicyStateJSON)
+	if chainErr != nil {
+		delete(e.states, state.SessionID)
+		return RouteDecision{}, chainErr
+	}
+	generation := expectedGeneration + 1
+	chain = chain.forProfile(profile.ID, generation).withTried(successor.winner.candidate.ID)
+	chain.LastTierHeadID = successor.winner.tier.HeadID
+	chainJSON, chainErr := carrySelectionChain(state.PolicyStateJSON, chain)
+	if chainErr != nil {
+		delete(e.states, state.SessionID)
+		return RouteDecision{}, chainErr
+	}
+	decision, nextState := unclassifiedSuccessorRoute(
+		state, profile, successor.winner.candidate, successor.winner.tier, successor.plan,
+		generation, failure, chainJSON, observedAt,
+	)
+	persistedDecision, err := e.recordUnclassifiedSuccessor(
 		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
-	); err != nil {
+	)
+	if err != nil {
 		return persistedDecision, err
 	}
 	e.states[state.SessionID] = nextState
@@ -721,39 +752,56 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	return decision, nil
 }
 
-func (e *Engine) firstSelectableUnclassifiedSuccessor(
+// unclassifiedSuccessor runs the ordinary tier search space against the
+// unclassified path's narrower admission scope. The selector is shared so this
+// path honors the tier's selection rule and failure direction and cannot return
+// to an earlier tier or an already-tried candidate, while eligibility stays
+// exactly as narrow as it was before tiers existed.
+func (e *Engine) unclassifiedSuccessor(
+	state RouteState,
 	profile Profile,
-	currentCandidateID, sessionID string,
-	generation int64,
-) (Candidate, bool) {
-	for index, item := range profile.Candidates {
-		if item.ID != currentCandidateID {
+	currentCandidateID string,
+	expectedGeneration int64,
+	scores map[string]PaceScore,
+	now time.Time,
+) (tierSelection, bool) {
+	generation := expectedGeneration + 1
+	ineligible := make(map[string]string, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		if candidate.ID == currentCandidateID {
 			continue
 		}
-		for _, candidate := range profile.Candidates[index+1:] {
-			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
-				return candidate, true
-			}
+		if e.candidateSelectable(candidate, state.SessionID, generation, "", "", now) {
+			continue
 		}
-		break
+		ineligible[candidate.ID] = IneligibleCircuit
 	}
-	return Candidate{}, false
+	chain, err := decodeSelectionChain(state.PolicyStateJSON)
+	if err != nil {
+		return tierSelection{}, false
+	}
+	resolved := ResolveFallbackSelection(profile, currentCandidateID, "", chain, ineligible)
+	winner := resolved.firstSelectable(scores, now, nil)
+	return winner.withPlan(resolved), winner.ok
 }
 
 func unclassifiedSuccessorRoute(
 	state RouteState,
 	profile Profile,
 	successor Candidate,
-	expectedGeneration int64,
+	tier Tier,
+	plan selectionPlan,
+	generation int64,
 	failure *routingerr.Error,
+	policyStateJSON string,
 	updatedAt time.Time,
 ) (RouteDecision, RouteState) {
-	generation := expectedGeneration + 1
 	decision := RouteDecision{
 		SessionID: state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
-		ProfileVersion: profile.Version, Reason: "policy_skip",
-		Status: routeStatusStarting, ErrorCode: failure.Code,
+		ProfileVersion: profile.Version,
+		Reason:         selectionReason(successor, tier, plan, "policy_skip"),
+		Status:         routeStatusStarting, ErrorCode: failure.Code,
 		ErrorClass:       routingerr.ClassUnclassified,
 		CatalogueVersion: routingerr.CatalogueVersion,
 		PendingOutcome:   routingpolicy.OutcomeSkip,
@@ -762,7 +810,8 @@ func unclassifiedSuccessorRoute(
 		SessionID: state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Status: routeStatusStarting,
-		UpdatedAt: updatedAt,
+		PolicyStateJSON: policyStateJSON,
+		UpdatedAt:       updatedAt,
 	}
 	return decision, nextState
 }
