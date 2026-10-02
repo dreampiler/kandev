@@ -55,7 +55,7 @@ Production bounds are 5s then 8s, summing to 13s inside the 15s sweep budget.
 
 | Work order | Scope | Status |
 | --- | --- | --- |
-| [task-01](../../../plans/agent-install-detection-bounds/task-01-hermes-acp-check-retry.md) | Bounded-check discrimination and the Hermes staged measurement | done |
+| [task-01](task-01-hermes-acp-check-retry.md) | Bounded-check discrimination and the Hermes staged measurement | done |
 
 ## Validation
 
