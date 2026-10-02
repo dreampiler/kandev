@@ -140,15 +140,62 @@ work orders are not started, so this work order is not complete.
 Two table expectations in the new ranking tests were wrong and were corrected;
 the implementation matched the reviewed semantics in both cases.
 
+### Second increment: engine wiring and durable chains (commit `17080b099`)
+
+- `dynamic/chain.go` holds the durable `SelectionChain` carried inside
+  `PolicyStateJSON`: concrete candidate identities, never badge numbers, bounded
+  by the candidate list. It continues across retry, skip and restart and is only
+  closed by a new attempt.
+- `ResolveSelection` handles a fresh selection and `ResolveFallbackSelection`
+  handles a permitted failure transition. Keeping them apart is load-bearing: a
+  new user turn starts a new chain, while only a failure transition applies the
+  tier's configured direction. Deriving the direction in both paths broke
+  `TestEngineQuotaFailureSkipsSiblingsOnSharedBinding`, which re-selects a
+  healthy candidate on a new turn.
+- `same_tier_next` keeps the failed tier and advances only once it is exhausted;
+  `next_tier` skips its remaining peers. `TierSearchOrder` never wraps.
+- `selectWithPlan` fetches the usage snapshot outside `Engine.mu`, takes one
+  observation for the whole decision, and rechecks admission during the existing
+  atomic claim. A lost probe race re-ranks instead of ending the decision, and a
+  losing probe never marks a candidate tried.
+- The unclassified fallback path still uses its own narrower
+  `candidateSelectable`, so its admission scope did not widen.
+
+### Three defects the existing suite caught
+
+- A failed probe claim gave up instead of reconsidering, so an exhausted circuit
+  ended the selection rather than advancing.
+- The chain blocked an explicit same-candidate retry; a permitted retry is not a
+  cross-candidate selection and must not be excluded.
+- `selectWithPlan` exceeded the 80-line limit until the exhausted-selection
+  branch was extracted.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/runtime/dynamic ./internal/agent/runtime -count=1 -timeout=10m` | 0 | pass, existing engine and conductor suites included |
+| `golangci-lint run ./internal/agent/runtime/dynamic/... ./internal/agent/runtime` | 0 | 0 issues |
+| `go test ./internal/backendapp -run 'Test.*Dynamic\|Test.*Route' -count=1` | 0 | pass |
+| `go test ./internal/task/dto -run 'Test.*Dynamic\|Test.*Route' -count=1` | 0 | pass |
+
+New tier cases: same-tier-next A-B-C walk then forward advance, next-tier peer
+skip, no wrap to an earlier tier, chain survival across a restart, pace ranking
+picking the least-used candidate, ranking only the first tier that has a
+candidate, stop vetoing any automatic change, unknown usage never winning pace,
+and chain exclusions surviving policy-counter changes.
+
+`orchestrator` `TestCeilingDispatchAdmissionSerializesRouteMutation` is a
+pre-existing flaky timing test; it fails on roughly half of repeated runs at the
+untouched base and asserts only a claim renewal timestamp.
+
 ### Not delivered
 
-The ranking helper is not yet wired into `Engine.selectContext` or
-`applyPolicyFailure`, so routing is still flat ordered selection and the
-`pace` and `cost` modes have no runtime effect yet. Still outstanding: the
-usage snapshot seam at the composition boundary, the Claude/Codex window
-duration plumbing, the manual ledger aggregate joined through
-`task_session_turns.execution_profile_id` with its PostgreSQL counterpart, the
-durable `selection_chain` in `PolicyStateJSON`, the route reason codes, and the
-read-only preview endpoints. `TierModePace` and `TierModeCost` are therefore
-settings the runtime does not yet honour, which is why WO-03 must not ship
-before this work order finishes.
+The ranking helper is now wired into the engine, so a saved `pace` or `cost`
+mode is honoured for tier selection. Still outstanding: the real usage snapshot
+provider wired at the composition boundary, Claude/Codex numeric window
+plumbing, the manual ledger aggregate joined through
+`task_session_turns.execution_profile_id` with its PostgreSQL counterpart, route
+reason codes, and the two read-only preview endpoints. WO-03 must not ship
+before those exist, because the editor would promise behaviour that is not yet
+implemented.
