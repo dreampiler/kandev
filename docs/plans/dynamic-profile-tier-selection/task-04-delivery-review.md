@@ -94,6 +94,20 @@ publication needs explicit authority after replacement, not an automatic tool ca
 
 ## Results
 
+### Delivery
+
+Fork PR **#44** (`dreampiler/kandev`, base `main`, head `kd/dyn-tier-selection`),
+https://github.com/dreampiler/kandev/pull/44. Head at push: `937f1b9a4a`.
+
+`origin/main` had advanced to `42f572f0fc` (the Hermes install-detection PR
+already recorded as orthogonal: different packages, no shared file). It was
+merged in rather than rebased, which produces the same squash-merge result on
+this fork. The merge was clean, and `go build ./...` plus the dynamic and
+settings-controller suites were re-run against the merged tree before pushing.
+
+Nothing was pushed before this PR, and the installed runtime, the shared
+checkout and the upstream repository were not touched.
+
 ### Three-model review, run 1 of 3 (GPT-6 Sol, `openrouter/openai/gpt-6-sol`)
 
 Snapshot `2c83becce7`, fork base `c8d4c923c`, 83 files changed. Receipts: route
