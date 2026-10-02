@@ -202,16 +202,18 @@ func recordedFraction(
 ) (float64, bool) {
 	var recorded *big.Rat
 	switch unit {
-	case agentusage.WindowUnitMoney:
-		// A money total with an unpriced or incompletely measured event stays a
-		// recorded lower bound rather than a complete figure.
+	case agentusage.WindowUnitMoney, agentusage.WindowUnitTokens:
+		// A total with an unpriced or incompletely measured event stays a
+		// recorded lower bound rather than a complete figure, in either unit.
 		if totals.UnpricedCount > 0 || totals.IncompleteCount > 0 {
 			return 0, false
 		}
-		recorded = new(big.Rat).SetInt64(totals.CostSubcents)
-		limit = new(big.Rat).Mul(limit, big.NewRat(subcentsPerDollar, 1))
-	case agentusage.WindowUnitTokens:
-		recorded = new(big.Rat).SetInt64(totals.TokensTotal)
+		if unit == agentusage.WindowUnitMoney {
+			recorded = new(big.Rat).SetInt64(totals.CostSubcents)
+			limit = new(big.Rat).Mul(limit, big.NewRat(subcentsPerDollar, 1))
+		} else {
+			recorded = new(big.Rat).SetInt64(totals.TokensTotal)
+		}
 	default:
 		return 0, false
 	}

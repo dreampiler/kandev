@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
 
 // The selection document is additive: a candidate without it keeps ordered
@@ -63,7 +64,10 @@ func normalizeDynamicSelection(candidate *dto.DynamicAgentCandidateDTO, head boo
 		if selection.Tier != nil {
 			return fmt.Errorf("%w: candidates[%d].policies.selection.tier is only allowed on a tier's first row", ErrDynamicProfileRule, candidate.Position)
 		}
-		return nil
+		// A joined row owns its model options even though it does not own a
+		// tier, so those are validated here too. Skipping them would persist an
+		// out-of-set cost class, an unbounded reserve, or a malformed window.
+		return normalizeDynamicModelPolicy(candidate.Position, &selection.Model)
 	}
 	selection.JoinPrevious = false
 	if selection.Tier == nil {
@@ -175,6 +179,12 @@ func validateDynamicResetAnchor(reset *dto.DynamicAgentResetAnchorDTO) error {
 	}
 	if _, err := time.LoadLocation(timezone); err != nil {
 		return fmt.Errorf("timezone %q is not a known IANA zone", timezone)
+	}
+	// The grammar is checked here rather than left to the runtime resolver, so a
+	// typo is a save error instead of a window that silently reports unknown
+	// usage forever.
+	if _, err := agentusage.ParseResetAnchor(anchor); err != nil {
+		return fmt.Errorf("anchor %q is not a valid reset anchor: %w", anchor, err)
 	}
 	return nil
 }

@@ -175,9 +175,12 @@ describe("dynamic tier selection save payload", () => {
       };
     };
     expect(payload.dynamic.keep_model_while_running).toBe(false);
+    // The server's tag is `on_failure`. A verbatim camelCase spread of the tier
+    // object does not decode, so the stored direction silently fell back to the
+    // default while this assertion still passed.
     expect(payload.dynamic.candidates[0]?.policies.selection).toEqual({
       join_previous: false,
-      tier: { mode: "cost", onFailure: "next_tier" },
+      tier: { mode: "cost", on_failure: "next_tier" },
       model: { cost: "metered", usage_source: "automatic", reserved_user_share_pct: 10 },
     });
   });

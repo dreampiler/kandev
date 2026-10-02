@@ -519,7 +519,12 @@ export function toAgentProfilePayload(
 function dynamicSelectionPayload(selection: DynamicAgentSelection) {
   return {
     join_previous: selection.joinPrevious,
-    ...(selection.tier ? { tier: selection.tier } : {}),
+    // The tier object is spelled out rather than spread: the Go tag is
+    // `on_failure`, and a verbatim camelCase spread would be dropped by the
+    // decoder and silently stored as the default direction.
+    ...(selection.tier
+      ? { tier: { mode: selection.tier.mode, on_failure: selection.tier.onFailure } }
+      : {}),
     model: {
       cost: selection.model.cost,
       usage_source: selection.model.usageSource,

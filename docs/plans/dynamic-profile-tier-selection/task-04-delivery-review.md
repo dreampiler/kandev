@@ -184,10 +184,105 @@ verification.
    - **Resume condition:** the idle user-turn boundary compares capacity when the
      preference is off, with a case proving an admitted turn is never interrupted.
 
-### Outstanding
+### Three-model review, run 2 of 3 (DeepSeek 4.1 Flash, `openrouter/deepseek/deepseek-v4.1-flash`)
 
-Reviews 2 and 3 (Opus 5.5 and DeepSeek 4.1 Flash) have not run, so this is not a
-completed three-model review. Two of the three reviewed models remain, and a
-finding they raise may change the material above.
+Snapshot `1d9b5b4727`, same fork base `c8d4c923c`. Receipts: route `openrouter`,
+model `deepseek/deepseek-v4.1-flash`, one `opencode run` process, exit 0, no
+provider fallback. It reported no blockers and ten findings, four of them real
+defects this branch introduced.
+
+#### Fixed
+
+1. **Major — the tier failure direction was dropped on one write path.**
+   `dynamicSelectionPayload` spread `selection.tier` verbatim into the wire body,
+   so the request carried `onFailure` while the Go tag is `on_failure`. The
+   decoder does not match the two, `normalizeDynamicTierPolicy` then applied the
+   default, and a "next tier" choice was silently stored as "same tier next".
+   The editor's own save path already emitted the correct name, so the two paths
+   disagreed. The tier object is now spelled out field by field, and the
+   round-trip test asserts `on_failure` instead of the shape that hid the bug.
+
+2. **Major — a joined row's model options were never validated.**
+   `normalizeDynamicSelection` returned early for a joined row, so its cost
+   class, usage source, reserved share and manual windows were stored unchecked.
+   A row owns its model options even when it does not own a tier, so they now go
+   through `normalizeDynamicModelPolicy` on that branch too.
+
+3. **Major — a malformed reset anchor was accepted at save time.**
+   Validation checked only that the anchor was non-empty, short, and paired with
+   a known timezone, so `"ninety"` or `"25:99"` saved successfully and then
+   resolved to unknown usage at runtime. Save now parses the anchor with the
+   same `agentusage.ParseResetAnchor` the runtime uses, turning a silent
+   "usage unavailable" into a save error.
+
+4. **Major — a partial token measurement was reported as a confident pace.**
+   The money branch rejected a total with unpriced or incomplete events while the
+   token branch ignored them. Both units now reject an incomplete total, so
+   AC-003.4's partial-accounting rule holds for either unit.
+
+#### Accepted as recorded residual risk
+
+5. **Automatic usage is attributed to the host account for remote candidates**
+   (`backendapp/usage_adapter.go`). The pre-existing adapter registers usage
+   clients against the backend host's credential files, so a subscription-bound
+   Claude or Codex candidate running on a container or SSH executor is scored
+   from the host's account rather than its own binding. This is the pre-existing
+   adapter's behaviour, not something the tier work introduced, but tier ranking
+   is its first consumer that acts on it.
+   - **Cause:** no executor-aware credential resolution behind the usage client.
+   - **Impact:** a remote candidate's pace can reflect the host account, so it
+     may be ranked as idle when it is busy. Two candidates on different
+     executors can receive identical observations.
+   - **Next owner:** this task, as a scoped follow-up work order, because closing
+     it means resolving credentials per candidate executor.
+   - **Resume condition:** a binding-isolation fixture proving two candidates on
+     different executors receive different observations, and that an
+     unsupported binding reports unknown rather than the host's usage.
+
+6. **Preview cannot see route health.** `previewEligibility` marks only disabled
+   rows ineligible, so a preview can name a candidate whose binding currently has
+   an open circuit. AC-005.2 conditions preview/selection agreement on matching
+   health inputs, and the preview provider has no health seam at all.
+   - **Cause:** no circuit-health input on `DynamicPreviewProvider`.
+   - **Impact:** a preview can disagree with the selection it predicts, during a
+     circuit window only.
+   - **Next owner:** this task, as a scoped follow-up work order.
+   - **Resume condition:** the provider receives circuit state and the existing
+     preview/selection parity test covers an open circuit.
+
+7. **The recorded lower bound is not retained.** An incomplete money or token
+   total returns unknown and drops the window, so `PaceScore.HasRecord` never
+   becomes true for manual windows and the branch meant to keep a partial figure
+   visible is unreachable. An existing test pins that behaviour, so fixing it
+   changes an assertion this branch wrote.
+   - **Cause:** `recordedFraction` returns only a fraction, not the recorded
+     total, so the caller cannot distinguish "nothing recorded" from "partially
+     recorded".
+   - **Impact:** partial accounting is shown as plain unknown rather than as a
+     labelled lower bound.
+   - **Next owner:** this task, as a scoped follow-up work order.
+   - **Resume condition:** the window result carries the recorded total and
+     completeness separately from the fraction.
+
+Findings 5 and 6 of the first review (no model-scoped window filter; keep-model
+off having no runtime effect) are also confirmed by this run and remain recorded
+above.
+
+### Three-model review, run 3 of 3 (Opus 5.5)
+
+Not run. The `openrouter/anthropic/claude-opus-5.5` route refused the request
+with "This request would exceed your available credits given your current
+in-flight requests", and `llmgateway` and `opencode/*` routes for the same model
+are unavailable on this host (`Dev Pass credit limit reached`, `Model access is
+disabled`).
+- **Cause:** provider credit exhaustion, not a property of the review.
+- **Impact:** two of three reviews completed. The third model has not seen the
+  snapshot.
+- **Next owner:** this task, once the route has credit.
+- **Resume condition:** `opencode run -m openrouter/anthropic/claude-opus-5.5`
+  against `.rv-brief.md` completes and its findings are verified the same way.
+  The package's completion criterion for a three-model review is not met until
+  then.
+
  Formal RV, PR, runtime replacement and upstream publication were not
 performed during planning.
