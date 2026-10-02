@@ -1,7 +1,7 @@
 ---
 id: "02-tier-routing"
 title: "Select tier candidates from usage with durable transition chains"
-status: pending
+status: in_progress
 wave: 2
 depends_on:
   - "01-selection-contract"
@@ -112,4 +112,43 @@ generation after fetch. Do not clear the chain when clearing retry counters.
 
 ## Results
 
-Pending. No runtime behavior or formal review executed in the design turn.
+Partial. Commit `d7caec982` delivers the pure ranking core only. The remaining
+work orders are not started, so this work order is not complete.
+
+### Delivered so far
+
+- `usage.UtilizationWindow` gained additive `DurationSeconds`, `StartAt` and
+  `ModelID` plus a `UsableFor` predicate. A window needs a numeric duration, a
+  known reset and a non-positive span to score; it is never parsed out of the
+  display `Label`, and an unusable window is unknown rather than zero.
+- `dynamic/ranking.go` holds the pure, side-effect-free ranking a preview and a
+  live selection can share: `PaceFromWindows` with the clamped elapsed fraction
+  and the 0.05 floor, the largest-pace-across-windows rule, invalid-window
+  rejection, known-before-unknown ordering with saved row order on ties,
+  `CostRank` class ordering with the legacy unknown class last, and
+  `ReservationExclusion` as an admission gate that leaves raw pace untouched.
+
+### Verified
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/runtime/dynamic -count=1` | 0 | pass, includes the new pace, cost, order and reservation cases |
+| `go test ./internal/agent/usage -count=1 -timeout=10m` | 0 | pass |
+| `golangci-lint run ./internal/agent/runtime/dynamic/... ./internal/agent/usage/...` | 0 | 0 issues |
+| `go build ./...` | 0 | pass |
+
+Two table expectations in the new ranking tests were wrong and were corrected;
+the implementation matched the reviewed semantics in both cases.
+
+### Not delivered
+
+The ranking helper is not yet wired into `Engine.selectContext` or
+`applyPolicyFailure`, so routing is still flat ordered selection and the
+`pace` and `cost` modes have no runtime effect yet. Still outstanding: the
+usage snapshot seam at the composition boundary, the Claude/Codex window
+duration plumbing, the manual ledger aggregate joined through
+`task_session_turns.execution_profile_id` with its PostgreSQL counterpart, the
+durable `selection_chain` in `PolicyStateJSON`, the route reason codes, and the
+read-only preview endpoints. `TierModePace` and `TierModeCost` are therefore
+settings the runtime does not yet honour, which is why WO-03 must not ship
+before this work order finishes.
