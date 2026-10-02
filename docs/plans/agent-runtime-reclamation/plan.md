@@ -45,6 +45,9 @@ None of these is a pending decision. They were declined.
 
 ## Work packages
 
+- [x] [WO-01: Terminal-session reclaim and recovery exclusion](task-01-terminal-reclaim.md) (done)
+- [ ] [WO-02: Per-session footprint projection](task-02-runtime-footprint-projection.md) (pending)
+
 ### WO-01 — Terminal-session reclaim and recovery exclusion
 
 Delivered in this branch.
