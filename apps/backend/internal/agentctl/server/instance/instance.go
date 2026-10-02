@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
@@ -26,6 +27,38 @@ type processManager interface {
 	// identity" reconstruction row). Empty before the agent's session/new or
 	// session/load completes.
 	GetSessionID() string
+}
+
+// footprintReader is the optional capability a process manager implements when
+// it can measure the live process tree it owns. It is deliberately not part of
+// processManager: measurement is a diagnostic read, so a process manager that
+// cannot report one simply has no row to publish rather than forcing every
+// implementation and test double to grow a stubbed method.
+type footprintReader interface {
+	OwnedFootprint() process.ProcessFootprint
+}
+
+// RuntimeFootprint is an instance's authoritative per-session footprint
+// projection: counts and bytes only, attributed to the instance identity the
+// control server already owns rather than to a process name or a bare process
+// identifier. It carries no transcript content, credential, resume token, or
+// command line.
+type RuntimeFootprint struct {
+	// InstanceID is the owning instance's identity.
+	InstanceID string `json:"instance_id"`
+	// SessionID is the Kandev session this runtime serves.
+	SessionID string `json:"session_id,omitempty"`
+	// TaskID is the Kandev task this runtime serves.
+	TaskID string `json:"task_id,omitempty"`
+	// Status is the instance's current status string.
+	Status string `json:"status"`
+	// CreatedAt is when the instance was created. It is the last-activity lower
+	// bound for an instance that has served no request yet.
+	CreatedAt time.Time `json:"created_at"`
+	// LastActivity is the most recent observed request on this instance, or the
+	// zero time when none has been observed.
+	LastActivity time.Time `json:"last_activity"`
+	process.ProcessFootprint
 }
 
 // Instance represents a single agent instance running as a subprocess.
@@ -335,4 +368,27 @@ func (i *Instance) setStatus(status string) {
 	i.statusMu.Lock()
 	i.Status = status
 	i.statusMu.Unlock()
+}
+
+// Footprint measures the live process tree this instance owns. The identity
+// carried by the result is the instance's own, so the caller attributes the
+// bytes to a session without inferring ownership from a process name.
+func (i *Instance) Footprint() RuntimeFootprint {
+	i.statusMu.RLock()
+	status := i.Status
+	createdAt := i.CreatedAt
+	i.statusMu.RUnlock()
+
+	footprint := RuntimeFootprint{
+		InstanceID:   i.ID,
+		SessionID:    i.SessionID,
+		TaskID:       i.TaskID,
+		Status:       status,
+		CreatedAt:    createdAt,
+		LastActivity: i.LastActivity(),
+	}
+	if reader, ok := i.manager.(footprintReader); ok {
+		footprint.ProcessFootprint = reader.OwnedFootprint()
+	}
+	return footprint
 }

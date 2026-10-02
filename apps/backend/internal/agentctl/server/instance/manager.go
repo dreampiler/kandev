@@ -62,7 +62,7 @@ type Manager struct {
 	// observe the counter at zero and a CreateInstance already past its own
 	// checks could then Add(1) behind it. Setting the flag under the same mutex
 	// CreateInstance holds means every creation either completes before the
-	// flag is set — so its Add is visible to the Wait below — or sees the flag
+	// flag is set ??so its Add is visible to the Wait below ??or sees the flag
 	// and refuses.
 	abandonWG    sync.WaitGroup
 	shuttingDown bool
@@ -154,7 +154,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	}
 
 	// The caller may already be gone. Creation is serialised on m.mu, the
-	// control client gives up after 30s, and callers that give up retry — so
+	// control client gives up after 30s, and callers that give up retry ??so
 	// under load this lock grows a queue of requests nobody is waiting for any
 	// more. Building an instance for one of those leaks it: no caller holds its
 	// ID, so nothing ever stops it, and it keeps a port, an HTTP server and a
@@ -329,8 +329,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 // abandonPartialInstanceTimeout bounds the admission wait inside
 // StopForTeardown for an instance whose caller vanished mid-creation. It does
-// not bound the tracker stops themselves — WorkspaceTracker.Stop honours no
-// context and falls back to its own stopTimeout — which is exactly why this
+// not bound the tracker stops themselves ??WorkspaceTracker.Stop honours no
+// context and falls back to its own stopTimeout ??which is exactly why this
 // teardown runs off the creation mutex rather than under it.
 const abandonPartialInstanceTimeout = 5 * time.Second
 
@@ -432,7 +432,7 @@ func (m *Manager) resolveAgentCommand(req *CreateRequest) string {
 // config.McpServerConfig. Stdio entries whose Command can't be resolved
 // (binary missing from PATH, no longer installed, etc.) are dropped with
 // a warning so the agent doesn't spawn a permanently-broken child for an
-// MCP it can never invoke. See GH issue #1247 — the `/snap/bin/brave`
+// MCP it can never invoke. See GH issue #1247 ??the `/snap/bin/brave`
 // stale-MCP repro.
 func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.McpServerConfig {
 	result := make([]config.McpServerConfig, 0, len(mcpServers))
@@ -467,12 +467,12 @@ func (m *Manager) buildMcpServerConfigs(mcpServers []McpServerConfig) []config.M
 // container/remote host but not on the agentctl host will be dropped
 // here even though it would have worked at agent runtime. For Standalone
 // and Sprites this is unambiguously correct; for Docker/SSH it's an
-// acceptable false positive — surfacing the warn log is better than
+// acceptable false positive ??surfacing the warn log is better than
 // spawning a permanently broken child every session (the `/snap/bin/brave`
 // repro in GH issue #1247).
 func mcpStdioValidationError(mcp McpServerConfig) string {
 	// Non-stdio transports (sse, http, streamable_http) carry their endpoint
-	// in URL — nothing to validate locally.
+	// in URL ??nothing to validate locally.
 	if mcp.URL != "" {
 		return ""
 	}
@@ -544,6 +544,24 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 		result = append(result, inst.Info())
 	}
 	return result
+}
+
+// ListInstanceFootprints returns the per-session footprint of every live
+// instance. Instances are copied out under the manager lock before measurement,
+// so a process walk never holds it.
+func (m *Manager) ListInstanceFootprints() []RuntimeFootprint {
+	m.mu.RLock()
+	instances := make([]*Instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		instances = append(instances, inst)
+	}
+	m.mu.RUnlock()
+
+	footprints := make([]RuntimeFootprint, 0, len(instances))
+	for _, inst := range instances {
+		footprints = append(footprints, inst.Footprint())
+	}
+	return footprints
 }
 
 // StopInstance stops and removes an instance by ID.
@@ -715,7 +733,7 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 // so a Shutdown(ctx) caller with a tight deadline can find that the
 // reaper drain consumed it before the main shutdown loop starts. The
 // reaper polls reaperStop between instances, so the worst-case drain is
-// one StopInstance round (15s), not N×timeout.
+// one StopInstance round (15s), not N횞timeout.
 func (m *Manager) stopReaperOnce() {
 	m.reaperStopOnce.Do(func() {
 		close(m.reaperStop)
