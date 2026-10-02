@@ -88,6 +88,10 @@ type Tier struct {
 	HeadID     string
 	Policy     TierPolicy
 	Candidates []Candidate
+	// Configured reports that the head actually stored a tier policy. A legacy
+	// or default head carries the derived defaults but is not configured, so a
+	// persisted route reason keeps its established code for it.
+	Configured bool
 }
 
 // DeriveTiers groups an ordered candidate list into contiguous tiers. A row
@@ -106,6 +110,7 @@ func DeriveTiers(candidates []Candidate) []Tier {
 			Index:      len(tiers) + 1,
 			HeadID:     candidate.ID,
 			Policy:     tierPolicyFor(candidate),
+			Configured: candidate.Selection.Tier != nil,
 			Candidates: []Candidate{candidate},
 		})
 	}

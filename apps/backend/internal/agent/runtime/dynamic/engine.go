@@ -206,10 +206,11 @@ func (e *Engine) selectWithPlan(
 	claim := func(candidate Candidate) bool {
 		return e.claimProbe(candidate, sessionID, generation, observedAt)
 	}
-	candidate, tier, found := resolved.firstSelectable(scores, observedAt, claim)
-	if !found {
+	winner := resolved.firstSelectable(scores, observedAt, claim)
+	if !winner.ok {
 		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain)
 	}
+	candidate, tier := winner.candidate, winner.tier
 	chain := resolved.chain.forProfile(profile.ID, generation).withTried(candidate.ID)
 	chain.LastTierHeadID = tier.HeadID
 	chainJSON, chainErr := carrySelectionChain(state.PolicyStateJSON, chain)

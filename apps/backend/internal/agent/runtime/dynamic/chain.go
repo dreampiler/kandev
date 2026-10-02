@@ -205,7 +205,7 @@ type selectionPlan struct {
 // The rule part names how the successor was chosen; the suffix names the
 // fallback direction that produced the transition.
 func selectionReason(candidate Candidate, tier Tier, plan selectionPlan, fallbackReason string) string {
-	if candidate.Selection.Tier == nil {
+	if !tier.Configured {
 		return fallbackReason
 	}
 	code, ok := RouteReason(TierPolicy{Mode: tier.Policy.Mode, OnFailure: plan.direction}, plan.fallback)
@@ -284,6 +284,15 @@ func tierContaining(tiers []Tier, candidateID string) *Tier {
 	return &tiers[index]
 }
 
+// selectionWinner is the outcome of ranking a search space: the chosen
+// candidate, the tier that chose it, and the evidence behind that choice.
+type selectionWinner struct {
+	candidate Candidate
+	tier      Tier
+	score     PaceScore
+	ok        bool
+}
+
 // firstSelectable returns the winning candidate, walking tiers in order and
 // ranking only the first tier that still has one.
 //
@@ -295,7 +304,7 @@ func (p selectionPlan) firstSelectable(
 	scores map[string]PaceScore,
 	now time.Time,
 	claim func(Candidate) bool,
-) (Candidate, Tier, bool) {
+) selectionWinner {
 	ineligible := make(map[string]string, len(p.ineligible))
 	for id, reason := range p.ineligible {
 		ineligible[id] = reason
@@ -314,10 +323,10 @@ func (p selectionPlan) firstSelectable(
 				break
 			}
 			if claim == nil || claim(winner.Candidate) {
-				return winner.Candidate, tier, true
+				return selectionWinner{candidate: winner.Candidate, tier: tier, score: winner.Score, ok: true}
 			}
 			ineligible[winner.Candidate.ID] = IneligibleCircuit
 		}
 	}
-	return Candidate{}, Tier{}, false
+	return selectionWinner{}
 }
