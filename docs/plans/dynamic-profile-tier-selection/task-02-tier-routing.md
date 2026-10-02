@@ -189,13 +189,56 @@ and chain exclusions surviving policy-counter changes.
 pre-existing flaky timing test; it fails on roughly half of repeated runs at the
 untouched base and asserts only a claim renewal timestamp.
 
+### Third increment: manual ledger aggregate (commit `873bcb98f`)
+
+- `sqlite.GetManualWindowUsage` aggregates one concrete execution profile's
+  recorded usage over the half-open interval `[start, end)`.
+- Concrete identity comes from `task_session_turns.execution_profile_id` joined
+  through the event's `turn_id`, never from the session's mutable current route
+  and never from the event's logical `agent_profile_id`. The only fallback is an
+  event whose own profile is already proven concrete, which is what
+  `TestDynamicManualWindowUsageLeavesDeletedTurnsUnattributed` pins: a deleted
+  turn stays unattributed, and the logical dynamic profile is never treated as
+  a concrete candidate.
+- The total is recorded-only and stays visible as a lower bound: unpriced and
+  incomplete events are counted and returned alongside the sum, so
+  `Complete()` reports the gap instead of the query collapsing to a wrong
+  number. An empty query is a zero *recorded* total, not proof a subscription was
+  never used.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/task/repository/sqlite -run 'TestDynamicManualWindowUsage' -count=1` | 0 | pass |
+| `golangci-lint run ./internal/task/repository/sqlite/...` | 0 | 0 issues |
+| `go build ./...` | 0 | pass |
+| `go vet ./internal/task/repository/sqlite` | 0 | pass |
+
+Six cases: two logical sessions on one concrete model, sibling candidate
+exclusion, reset-instant boundary exclusion, partial and unpriced accounting,
+deleted-turn attribution, empty query, and degenerate input.
+
+The PostgreSQL counterpart named in the plan (`TestPostgres.*DynamicManualWindow`)
+is **not** written yet, so this increment has no dialect-parity evidence. The
+query itself is dialect-neutral (no `rowid`, no SQLite-only JSON or date syntax)
+but that is unproven until the env-gated test exists.
+
+The wider `sqlite` package run shows six failures. Each was reproduced at the
+untouched base by stashing and repeating: `TestUpdateDocumentWritesEveryMutableFieldAndReportsMissing`,
+`TestUpdateExecutorProfileWritesMutableFieldsAndReportsMissing`,
+`TestUpdateExecutorProfileIfUnmodifiedRejectsStaleProfile`,
+`TestResetExecutorReachabilityClearsTheRecordButAdvancesUpdatedAt`,
+`TestUpdateTurnRejectsSnapshotStaleBehindMetadataPatch` and
+`TestQuerySidebarTaskPageBreaksMalformedParentCycleAtSmallestID` are pre-existing
+timestamp-ordering flakes on this host, not regressions.
+
 ### Not delivered
 
-The ranking helper is now wired into the engine, so a saved `pace` or `cost`
-mode is honoured for tier selection. Still outstanding: the real usage snapshot
-provider wired at the composition boundary, Claude/Codex numeric window
-plumbing, the manual ledger aggregate joined through
-`task_session_turns.execution_profile_id` with its PostgreSQL counterpart, route
-reason codes, and the two read-only preview endpoints. WO-03 must not ship
-before those exist, because the editor would promise behaviour that is not yet
-implemented.
+The ranking helper is wired into the engine, so a saved `pace` or `cost` mode is
+honoured for tier selection. Still outstanding: window-boundary resolution for
+the four manual periods in a named timezone, a real usage snapshot provider wired
+at the composition boundary for Claude/Codex, numeric window duration plumbing
+from those clients, route reason codes, and the two read-only preview endpoints.
+WO-03 must not ship before those exist, because the editor would promise
+behaviour that is not yet implemented.
