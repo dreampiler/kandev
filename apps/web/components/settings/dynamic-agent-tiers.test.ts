@@ -4,10 +4,12 @@ import {
   deriveTiers,
   moveCandidate,
   newCandidateRow,
+  normalizeReservedShare,
   removeCandidate,
   tierAt,
   toggleJoin,
   updateCandidateModel,
+  updateManualWindow,
   updateTierPolicy,
 } from "@/components/settings/dynamic-agent-tiers";
 
@@ -188,5 +190,49 @@ describe("tier policy", () => {
     const next = updateTierPolicy(candidates, 2, { mode: "pace" });
     expect(next[0].policies.selection?.tier?.mode).toBe("order");
     expect(next[1].policies.selection?.tier?.mode).toBe("pace");
+  });
+});
+
+describe("reserved share", () => {
+  it("clears a reserve that has no usage source to observe", () => {
+    expect(
+      normalizeReservedShare({ cost: "free", usageSource: "none", reservedUserSharePct: 30 }),
+    ).toEqual({ cost: "free", usageSource: "none", reservedUserSharePct: 0 });
+  });
+
+  it("keeps a reserve while a usage source is selected", () => {
+    expect(
+      normalizeReservedShare({ cost: "free", usageSource: "automatic", reservedUserSharePct: 30 }),
+    ).toEqual({ cost: "free", usageSource: "automatic", reservedUserSharePct: 30 });
+  });
+
+  it("keeps a zero reserve untouched", () => {
+    expect(
+      normalizeReservedShare({ cost: "free", usageSource: "none", reservedUserSharePct: 0 }),
+    ).toEqual({ cost: "free", usageSource: "none", reservedUserSharePct: 0 });
+  });
+});
+
+describe("manual windows", () => {
+  it("replaces the window list for one row only", () => {
+    const candidates = build(["A", "B"]);
+    const windows = [
+      {
+        period: "month" as const,
+        unit: "money" as const,
+        limit: "20",
+        reset: { anchor: "00:00", timezone: "UTC" },
+      },
+    ];
+    const next = updateManualWindow(candidates, 1, windows);
+    expect(next[0].policies.selection?.model?.windows).toBeUndefined();
+    expect(next[1].policies.selection?.model?.windows).toEqual(windows);
+  });
+
+  it("leaves a joined row's model options addressable by position", () => {
+    const candidates = toggleJoin(build(["A", "B"]), 1);
+    const next = updateCandidateModel(candidates, 1, { cost: "metered" });
+    expect(deriveTiers(next)).toHaveLength(1);
+    expect(next[1].policies.selection?.model.cost).toBe("metered");
   });
 });

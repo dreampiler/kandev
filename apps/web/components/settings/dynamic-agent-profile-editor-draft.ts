@@ -67,8 +67,9 @@ export function dynamicDraftRevision(
   name: string,
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
+  keepModelWhileRunning = true,
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({ name, candidates, enabled, keepModelWhileRunning });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.

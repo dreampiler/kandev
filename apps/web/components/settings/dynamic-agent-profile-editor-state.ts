@@ -25,6 +25,10 @@ import {
   dynamicDraftRevision,
   useDynamicAgentProfileEditorDraft,
 } from "@/components/settings/dynamic-agent-profile-editor-draft";
+import {
+  useDynamicSelectionPreview,
+  type DynamicPreviewController,
+} from "@/hooks/domains/settings/use-dynamic-selection-preview";
 
 type DynamicAgentProfileEditorStateProps = {
   agent: Agent;
@@ -60,6 +64,8 @@ export type DynamicAgentProfileEditorState = {
   ) => void;
   candidates: DynamicAgentCandidate[];
   tiers: DynamicCandidateTier[];
+  preview: DynamicPreviewController;
+  labelForCandidate: (executionProfileId: string) => string;
   discardDraft: () => void;
 };
 
@@ -266,11 +272,19 @@ export function useDynamicAgentProfileEditorState({
     }
   };
 
-  const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  // Keep-model belongs to the revision: it is a saved profile preference, so a
+  // draft that changes only that preference is still a dirty draft.
+  const draftRevision = dynamicDraftRevision(
+    draft.name,
+    draft.candidates,
+    draft.profileEnabled,
+    draft.keepModelWhileRunning,
+  );
   const savedRevision = dynamicDraftRevision(
     draft.savedProfile.name,
     draft.savedProfile.dynamic?.candidates ?? [],
     draft.savedProfile.enabled !== false,
+    draft.savedProfile.dynamic?.keepModelWhileRunning !== false,
   );
   const policiesValid = draft.candidates.every(
     (candidate) =>
@@ -301,6 +315,21 @@ export function useDynamicAgentProfileEditorState({
     },
   });
 
+  const preview = useDynamicSelectionPreview({
+    payload: dynamicProfilePayload(
+      draft.name,
+      draft.profileEnabled,
+      draft.dynamicVersion,
+      draft.candidates,
+      draft.keepModelWhileRunning,
+    ).dynamic,
+    revision: draftRevision,
+    profileId: profile.id,
+    enabled: routingEnabled && draft.candidates.length > 0,
+  });
+  const labelForCandidate = (executionProfileId: string) =>
+    concreteProfiles.find((item) => item.id === executionProfileId)?.name ?? executionProfileId;
+
   return {
     name: draft.name,
     profileEnabled: draft.profileEnabled,
@@ -325,6 +354,8 @@ export function useDynamicAgentProfileEditorState({
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
     tiers: deriveTiers(draft.candidates),
+    preview,
+    labelForCandidate,
     discardDraft: draft.reset,
   };
 }
