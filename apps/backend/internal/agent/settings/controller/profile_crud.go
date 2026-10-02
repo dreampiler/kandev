@@ -221,7 +221,11 @@ func (c *Controller) createDynamicProfile(
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 		return nil, err
 	}
-	dynamic := &models.DynamicAgentProfile{ProfileID: profile.ID, Version: 1}
+	dynamic := &models.DynamicAgentProfile{
+		ProfileID:             profile.ID,
+		Version:               1,
+		KeepModelWhileRunning: keepModelWhileRunning(req.Dynamic),
+	}
 	if err := dynamicRepo.CreateDynamicAgentProfile(ctx, dynamic, routes); err != nil {
 		if cleanupErr := c.repo.DeleteAgentProfile(ctx, profile.ID); cleanupErr != nil {
 			return nil, fmt.Errorf("%w; cleanup dynamic profile parent: %v", err, cleanupErr)
@@ -341,18 +345,62 @@ func validateDynamicAgentProfile(profile *dto.DynamicAgentProfileDTO) error {
 	if profile == nil || len(profile.Candidates) == 0 {
 		return ErrDynamicProfileCandidatesRequired
 	}
-	for position, candidate := range profile.Candidates {
+	for position := range profile.Candidates {
+		candidate := &profile.Candidates[position]
 		if candidate.Position != position {
 			return fmt.Errorf("%w: candidate %d has position %d", ErrDynamicProfilePositions, position, candidate.Position)
 		}
 		if strings.TrimSpace(candidate.ExecutionProfileID) == "" {
 			return fmt.Errorf("%w: candidate %d has no execution profile", ErrDynamicProfileCandidate, position)
 		}
-		if err := normalizeDynamicCandidatePolicy(&profile.Candidates[position]); err != nil {
+		if err := normalizeDynamicCandidatePolicy(candidate); err != nil {
+			return err
+		}
+		if err := normalizeDynamicSelection(candidate, dynamicSelectionHead(candidate, position)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// keepModelWhileRunning resolves the profile-wide continuity preference. It is
+// not a selection mode: an omitted value keeps the documented default of on, so
+// a create request never has to opt in.
+func keepModelWhileRunning(profile *dto.DynamicAgentProfileDTO) bool {
+	if profile == nil || profile.KeepModelWhileRunning == nil {
+		return true
+	}
+	return *profile.KeepModelWhileRunning
+}
+
+// dynamicSelectionHead reports whether a row owns its tier. The first row is
+// always a head; any other row is a head exactly when it does not join the row
+// above it.
+func dynamicSelectionHead(candidate *dto.DynamicAgentCandidateDTO, position int) bool {
+	if position == 0 || candidate.Policies == nil || candidate.Policies.Selection == nil {
+		return true
+	}
+	return !candidate.Policies.Selection.JoinPrevious
+}
+
+// preserveDynamicSelection keeps the saved row configuration and the saved
+// keep-model preference alive across an update that omits them, so an unrelated
+// edit and a legacy client never silently erase a tier layout.
+func (c *Controller) preserveDynamicSelection(
+	ctx context.Context,
+	dynamicRepo store.DynamicProfileRepository,
+	profileID string,
+	request *dto.DynamicAgentProfileDTO,
+) error {
+	existing, existingRoutes, err := dynamicRepo.GetDynamicAgentProfile(ctx, profileID)
+	if err != nil {
+		return fmt.Errorf("load dynamic profile %s: %w", profileID, err)
+	}
+	if request.KeepModelWhileRunning == nil {
+		keep := existing.KeepModelWhileRunning
+		request.KeepModelWhileRunning = &keep
+	}
+	return mergeDynamicSelection(existingRoutes, request.Candidates)
 }
 
 func dynamicRoutesFromDTO(profileID string, profile *dto.DynamicAgentProfileDTO) ([]models.DynamicAgentRoute, error) {
@@ -383,9 +431,11 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 	if profile == nil {
 		return nil, nil
 	}
+	keepModel := profile.KeepModelWhileRunning
 	result := &dto.DynamicAgentProfileDTO{
-		Version:    profile.Version,
-		Candidates: make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		Version:               profile.Version,
+		Candidates:            make([]dto.DynamicAgentCandidateDTO, 0, len(routes)),
+		KeepModelWhileRunning: &keepModel,
 	}
 	for _, route := range routes {
 		policy, err := decodeDynamicPolicyDocument(route.RulesJSON, route.Position)
@@ -471,15 +521,21 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		if req.Dynamic.Version <= 0 {
 			return nil, fmt.Errorf("dynamic profile version is required")
 		}
-		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
-		if err != nil {
-			return nil, err
-		}
 		dynamicRepo, err = c.dynamicProfileRepository()
 		if err != nil {
 			return nil, err
 		}
-		dynamic = &models.DynamicAgentProfile{ProfileID: profile.ID}
+		if err := c.preserveDynamicSelection(ctx, dynamicRepo, profile.ID, req.Dynamic); err != nil {
+			return nil, err
+		}
+		dynamicRoutes, err = c.validateDynamicCandidates(ctx, profile.ID, req.Dynamic)
+		if err != nil {
+			return nil, err
+		}
+		dynamic = &models.DynamicAgentProfile{
+			ProfileID:             profile.ID,
+			KeepModelWhileRunning: true,
+		}
 	}
 	if req.Name != nil {
 		profile.Name = *req.Name

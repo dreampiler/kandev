@@ -755,7 +755,8 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	}
 	profile := dynamic.Profile{
 		ID: profileID, Version: config.Version,
-		Candidates: make([]dynamic.Candidate, 0, len(routes)),
+		KeepModelWhileRunning: config.KeepModelWhileRunning,
+		Candidates:            make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
 		candidate := dynamic.Candidate{
@@ -763,12 +764,13 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
 		if route.RulesJSON != "" {
-			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
+			policy, legacyRules, selection, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
 			if policyErr != nil {
 				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
 			}
 			candidate.Policies = policy
 			candidate.Rules = legacyRules
+			candidate.Selection = selection
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
 		switch {
@@ -792,24 +794,28 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	return profile, nil
 }
 
-func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {
+// decodeDynamicRoutePolicy splits the stored document into the failure-policy
+// half consumed by routingpolicy and the additive selection half consumed by
+// tier routing. Failure-policy evaluation never sees selection, and an absent
+// selection yields the legacy ordered defaults.
+func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, dynamic.Selection, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
 	if _, hasVersion := fields["version"]; hasVersion {
 		var document routingpolicy.Document
 		if err := json.Unmarshal([]byte(raw), &document); err != nil {
-			return routingpolicy.Document{}, nil, err
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 		}
 		if err := routingpolicy.ValidateDocument(document); err != nil {
-			return routingpolicy.Document{}, nil, err
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 		}
-		return document, nil, nil
+		return document, nil, decodeDynamicRouteSelection(fields), nil
 	}
 	var legacy map[string]dynamic.Action
 	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
 	document := routingpolicy.DefaultDocument()
 	classActions := make(map[routingerr.Class]dynamic.Action)
@@ -821,10 +827,10 @@ func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dy
 		}
 		class := routingerr.ClassForCode(routingerr.Code(key))
 		if class != routingerr.ClassTransient && class != routingerr.ClassHard {
-			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rule %q is not a provider error code", key)
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, fmt.Errorf("legacy rule %q is not a provider error code", key)
 		}
 		if previous, ok := classActions[class]; ok && previous != action {
-			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rules conflict for %s errors", class)
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, fmt.Errorf("legacy rules conflict for %s errors", class)
 		}
 		classActions[class] = action
 		if class == routingerr.ClassTransient {
@@ -834,9 +840,84 @@ func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dy
 		}
 	}
 	if err := routingpolicy.ValidateDocument(document); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
-	return document, legacy, nil
+	return document, legacy, dynamic.Selection{}, nil
+}
+
+// dynamicRouteSelectionDocument is the additive selection subobject. A missing
+// or empty document is the legacy ordered configuration, not an error.
+type dynamicRouteSelectionDocument struct {
+	JoinPrevious bool                       `json:"join_previous"`
+	Tier         *dynamicRouteTierDocument  `json:"tier"`
+	Model        *dynamicRouteModelDocument `json:"model"`
+}
+
+type dynamicRouteTierDocument struct {
+	Mode      string `json:"mode"`
+	OnFailure string `json:"on_failure"`
+}
+
+type dynamicRouteModelDocument struct {
+	Cost                 string                    `json:"cost"`
+	UsageSource          string                    `json:"usage_source"`
+	ReservedUserSharePct int                       `json:"reserved_user_share_pct"`
+	Windows              []dynamicRouteUsageWindow `json:"windows"`
+}
+
+type dynamicRouteUsageWindow struct {
+	Period string                `json:"period"`
+	Unit   string                `json:"unit"`
+	Limit  string                `json:"limit"`
+	Reset  *dynamicRouteResetDoc `json:"reset"`
+}
+
+type dynamicRouteResetDoc struct {
+	Anchor   string `json:"anchor"`
+	Timezone string `json:"timezone"`
+}
+
+func decodeDynamicRouteSelection(fields map[string]json.RawMessage) dynamic.Selection {
+	raw, ok := fields["selection"]
+	if !ok {
+		return dynamic.Selection{}
+	}
+	var document dynamicRouteSelectionDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return dynamic.Selection{}
+	}
+	return document.toSelection()
+}
+
+func (d dynamicRouteSelectionDocument) toSelection() dynamic.Selection {
+	selection := dynamic.Selection{JoinPrevious: d.JoinPrevious}
+	if d.Tier != nil {
+		selection.Tier = &dynamic.TierPolicy{
+			Mode:      dynamic.TierMode(d.Tier.Mode),
+			OnFailure: dynamic.FailureDirection(d.Tier.OnFailure),
+		}
+	}
+	if d.Model != nil {
+		selection.Model = d.Model.toModelOptions()
+	}
+	return selection
+}
+
+func (d dynamicRouteModelDocument) toModelOptions() dynamic.ModelOptions {
+	options := dynamic.ModelOptions{
+		Cost:                 dynamic.CostClass(d.Cost),
+		UsageSource:          dynamic.UsageSource(d.UsageSource),
+		ReservedUserSharePct: d.ReservedUserSharePct,
+	}
+	for _, window := range d.Windows {
+		converted := dynamic.UsageWindow{Period: window.Period, Unit: window.Unit, Limit: window.Limit}
+		if window.Reset != nil {
+			converted.ResetAnchor = window.Reset.Anchor
+			converted.Timezone = window.Reset.Timezone
+		}
+		options.Windows = append(options.Windows, converted)
+	}
+	return options
 }
 
 func legacyActionPolicy(action dynamic.Action) routingpolicy.Policy {
