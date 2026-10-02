@@ -37,7 +37,18 @@ type manualWindowTotalsReader interface {
 type dynamicUsageSnapshot struct {
 	usage  *usageProviderAdapter
 	manual manualWindowTotalsReader
+	health PreviewHealthReader
 	now    func() time.Time
+}
+
+// PreviewHealthReader reports the route-health verdict for one candidate's own
+// credential binding. It is the same circuit state the selection engine consults,
+// so a preview and an actual selection agree on health as well as on usage.
+type PreviewHealthReader interface {
+	// OpenCircuit reports whether the candidate's binding is currently paused
+	// after a provider failure. A binding that cannot be resolved is not open:
+	// the caller then reports unknown rather than inventing a verdict.
+	OpenCircuit(ctx context.Context, executionProfileID string, now time.Time) (open bool, known bool)
 }
 
 func newDynamicUsageSnapshot(
@@ -49,6 +60,14 @@ func newDynamicUsageSnapshot(
 		now = time.Now
 	}
 	return &dynamicUsageSnapshot{usage: usage, manual: manual, now: now}
+}
+
+// WithPreviewHealth injects the shared route-health reader. Without it a preview
+// can still name a choice, but it cannot account for a paused binding, so the
+// wiring is explicit rather than assumed.
+func (s *dynamicUsageSnapshot) WithPreviewHealth(reader PreviewHealthReader) *dynamicUsageSnapshot {
+	s.health = reader
+	return s
 }
 
 // UsageSnapshot implements dynamic.UsageSnapshotProvider.
@@ -102,9 +121,23 @@ func (s *dynamicUsageSnapshot) automaticScore(
 	if err != nil || observed == nil || len(observed.Windows) == 0 {
 		return dynamicruntime.PaceScore{ObservedAt: observedAt}
 	}
+	return dynamicruntime.PaceFromWindows(
+		observedAt, applicableAutomaticWindows(candidate.ModelID, observed),
+	)
+}
+
+// applicableAutomaticWindows keeps only the windows that are this candidate's own
+// usage. A window scoped to a different model is that model's consumption, and a
+// window with no usable length or reset is not a measurement at all, so both are
+// skipped rather than borrowed. An account-wide window applies to whichever model
+// the candidate launches.
+func applicableAutomaticWindows(
+	candidateModelID string,
+	observed *agentusage.ProviderUsage,
+) []dynamicruntime.WindowObservation {
 	windows := make([]dynamicruntime.WindowObservation, 0, len(observed.Windows))
 	for _, window := range observed.Windows {
-		if !window.UsableFor("") {
+		if !window.UsableFor(candidateModelID) {
 			continue
 		}
 		fraction := window.UtilizationPct / 100
@@ -116,7 +149,7 @@ func (s *dynamicUsageSnapshot) automaticScore(
 			ObservedAt:    observed.FetchedAt,
 		})
 	}
-	return dynamicruntime.PaceFromWindows(observedAt, windows)
+	return windows
 }
 
 // manualScore aggregates recorded ledger usage for the configured windows. The
@@ -145,7 +178,6 @@ func (s *dynamicUsageSnapshot) manualScore(
 	}
 	return score
 }
-
 func (s *dynamicUsageSnapshot) resolveManualWindow(
 	ctx context.Context,
 	executionProfileID string,
@@ -178,7 +210,7 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 	if err != nil {
 		return dynamicruntime.WindowObservation{}, false
 	}
-	used, ok := recordedFraction(totals, configured.Unit, limit)
+	used, complete, ok := recordedFraction(totals, configured.Unit, limit)
 	if !ok {
 		return dynamicruntime.WindowObservation{}, false
 	}
@@ -188,6 +220,7 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 		StartAt:       resolved.Start,
 		ResetAt:       resolved.Reset,
 		ObservedAt:    observedAt,
+		Partial:       !complete,
 	}, true
 }
 
@@ -195,19 +228,20 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 // Money uses the ledger's USD subcent precision, so the limit is scaled into that
 // unit with exact decimal arithmetic rather than by binary floating point. The
 // ledger stores hundredths of a cent, so one dollar is 10,000 of them.
+//
+// A total with an unpriced or incompletely measured event is still converted.
+// That figure undercounts, so it is returned as a lower bound with complete
+// false rather than discarded: the caller keeps it visible and refuses to rank
+// on it, which is what lets a preview say "at least this much" instead of
+// silently reporting nothing.
 func recordedFraction(
 	totals sqliterepo.ManualWindowUsage,
 	unit string,
 	limit *big.Rat,
-) (float64, bool) {
+) (value float64, complete bool, ok bool) {
 	var recorded *big.Rat
 	switch unit {
 	case agentusage.WindowUnitMoney, agentusage.WindowUnitTokens:
-		// A total with an unpriced or incompletely measured event stays a
-		// recorded lower bound rather than a complete figure, in either unit.
-		if totals.UnpricedCount > 0 || totals.IncompleteCount > 0 {
-			return 0, false
-		}
 		if unit == agentusage.WindowUnitMoney {
 			recorded = new(big.Rat).SetInt64(totals.CostSubcents)
 			limit = new(big.Rat).Mul(limit, big.NewRat(subcentsPerDollar, 1))
@@ -215,14 +249,14 @@ func recordedFraction(
 			recorded = new(big.Rat).SetInt64(totals.TokensTotal)
 		}
 	default:
-		return 0, false
+		return 0, false, false
 	}
 	if limit.Sign() <= 0 {
-		return 0, false
+		return 0, false, false
 	}
 	fraction := new(big.Rat).Quo(recorded, limit)
-	value, _ := fraction.Float64()
-	return value, true
+	value, _ = fraction.Float64()
+	return value, totals.UnpricedCount == 0 && totals.IncompleteCount == 0, true
 }
 
 // PreviewDynamicSelection implements the settings controller's read-only preview
@@ -236,5 +270,33 @@ func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
 	now time.Time,
 ) dynamicruntime.SelectionPreview {
 	scores, _ := s.UsageSnapshot(ctx, profile)
-	return dynamicruntime.PreviewSelection(profile, scores, ineligible, "", dynamicruntime.SelectionChain{}, now)
+	// Route health is part of what a selection consults, so a preview that
+	// ignored it could name a candidate an actual selection would refuse. The
+	// caller's codes win: this only adds rows nobody has spoken for.
+	merged := make(map[string]string, len(ineligible)+len(profile.Candidates))
+	for id, reason := range ineligible {
+		merged[id] = reason
+	}
+	for _, candidate := range profile.Candidates {
+		if _, decided := merged[candidate.ID]; decided {
+			continue
+		}
+		if open, known := s.circuitOpen(ctx, candidate.ID, now); known && open {
+			merged[candidate.ID] = dynamicruntime.IneligibleCircuit
+		}
+	}
+	return dynamicruntime.PreviewSelection(profile, scores, merged, "", dynamicruntime.SelectionChain{}, now)
+}
+
+// circuitOpen answers route health for one candidate. Without a health reader the
+// verdict is unknown, and an unknown verdict must not be reported as healthy.
+func (s *dynamicUsageSnapshot) circuitOpen(
+	ctx context.Context,
+	executionProfileID string,
+	now time.Time,
+) (open bool, known bool) {
+	if s.health == nil {
+		return false, false
+	}
+	return s.health.OpenCircuit(ctx, executionProfileID, now)
 }

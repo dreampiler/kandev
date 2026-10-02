@@ -23,7 +23,13 @@ type WindowObservation struct {
 	ResetAt          time.Time
 	ExplicitNoWindow bool
 	ObservedAt       time.Time
+	// Partial marks a measurement that is known to undercount, for example a
+	// ledger total with an unpriced or incompletely measured event. The figure
+	// stays visible as a lower bound but must not produce a pace.
+	Partial bool
 }
+
+func (w WindowObservation) partial() bool { return w.Partial && !w.ExplicitNoWindow }
 
 // PaceScore is the result of ranking one candidate's windows.
 type PaceScore struct {
@@ -56,10 +62,29 @@ type PaceScore struct {
 // the strongest signal a candidate is busy. A window whose start is in the
 // future, whose reset has passed, or whose span is not positive is invalid and
 // is skipped rather than clamped into a usable score.
+//
+// A partially measured window still contributes its recorded figure, so the
+// lower bound stays visible, but it never produces a pace: an incomplete total
+// understates usage, and ranking on it would overstate the candidate's
+// remaining capacity.
 func PaceFromWindows(now time.Time, windows []WindowObservation) PaceScore {
 	best := PaceScore{}
 	found := false
+	recorded := false
+	incomplete := false
 	for _, window := range windows {
+		if window.UsageFraction != nil && window.partial() {
+			// The window is a real measurement, so it is reported as a record,
+			// but its figure is a lower bound rather than a usable pace.
+			recorded = true
+			incomplete = true
+			if !best.HasRecord {
+				best.UsageFraction = *window.UsageFraction
+				best.Controlling = window.Label
+				best.ObservedAt = window.ObservedAt
+			}
+			continue
+		}
 		score, ok := paceForWindow(now, window)
 		if !ok {
 			continue
@@ -68,6 +93,10 @@ func PaceFromWindows(now time.Time, windows []WindowObservation) PaceScore {
 			best = score
 			found = true
 		}
+	}
+	if !found && (recorded || incomplete) {
+		best.HasRecord = recorded
+		best.Complete = false
 	}
 	return best
 }

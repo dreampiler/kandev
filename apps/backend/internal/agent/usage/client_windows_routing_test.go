@@ -144,4 +144,32 @@ func TestUtilizationWindowUsableForRejectsUnidentifiedScopeAndMismatch(t *testin
 	}
 }
 
+// TestUtilizationWindowModelScopeNeedsBothIdentities pins AC-003.3's
+// attribution rule. A model-scoped window is that model's consumption, so it is
+// only usable for that exact model, and it stays unusable when the candidate's
+// own model is unknown. Accepting it because "we cannot tell" is exactly the
+// substitution of another model's usage that the unknown state prevents.
+func TestUtilizationWindowModelScopeNeedsBothIdentities(t *testing.T) {
+	reset := time.Date(2026, 10, 2, 17, 0, 0, 0, time.UTC)
+	scoped := UtilizationWindow{
+		DurationSeconds: 18000, ResetAt: reset, StartAt: reset.Add(-5 * time.Hour),
+		ModelID: "claude-opus-5",
+	}
+	if scoped.UsableFor("") {
+		t.Fatal("a model-scoped window was accepted for a candidate with no known model")
+	}
+	if !scoped.UsableFor("claude-opus-5") {
+		t.Fatal("a model-scoped window was rejected for its own model")
+	}
+	if scoped.UsableFor("claude-sonnet-5") {
+		t.Fatal("a sibling model's window was accepted, want it excluded")
+	}
+	// An account-wide window still applies whatever model the candidate runs.
+	accountWide := scoped
+	accountWide.ModelID = ""
+	if !accountWide.UsableFor("") || !accountWide.UsableFor("claude-sonnet-5") {
+		t.Fatal("an account-wide window must remain usable for any model")
+	}
+}
+
 func itoa(value int64) string { return strconv.FormatInt(value, 10) }

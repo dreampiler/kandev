@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -74,6 +75,75 @@ func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
 // the concrete profile through the resolver's conservative fallback.
 func (r *ProfileExecutionResolver) SetCredentialBindingResolver(resolver *dynamic.CredentialBindingResolver) {
 	r.bindingResolver = resolver
+}
+
+// KeepModelWhileRunning reports the profile-wide continuity preference. A load
+// failure answers true, the documented default, because failing open toward
+// stickiness keeps an admitted turn on its current candidate rather than
+// silently moving work when the preference could not be read.
+func (r *ProfileExecutionResolver) KeepModelWhileRunning(
+	ctx context.Context,
+	logicalProfileID string,
+) bool {
+	if r == nil || !r.Enabled() {
+		return true
+	}
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return true
+	}
+	return profile.KeepModelWhileRunning
+}
+
+// ReevaluateForNewTurn runs one fresh capacity comparison for a session whose
+// profile does not keep its chosen model. The incumbent is not preferred, so the
+// tier ranking decides which candidate a new user turn should use. The caller
+// invokes it at the idle boundary before launching, so an admitted turn is never
+// interrupted.
+func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
+	ctx context.Context,
+	sessionID string,
+	logicalProfileID string,
+	expectedGeneration int64,
+) (dynamic.RouteDecision, error) {
+	if r == nil || r.engine == nil {
+		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
+	}
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.SelectContext(ctx, sessionID, profile, expectedGeneration, "")
+}
+
+// OpenCircuit reports whether a concrete candidate's own credential binding is
+// currently paused. The settings preview uses it so a prediction accounts for
+// route health exactly as a live selection does, rather than naming a candidate
+// an actual selection would refuse.
+//
+// A candidate whose profile or binding cannot be resolved reports an unknown
+// verdict instead of a healthy one: the caller must not present an unverified
+// candidate as selectable.
+func (r *ProfileExecutionResolver) OpenCircuit(
+	ctx context.Context,
+	executionProfileID string,
+	now time.Time,
+) (open bool, known bool) {
+	if r == nil || r.engine == nil || r.profiles == nil || executionProfileID == "" {
+		return false, false
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
+	if err != nil || profile == nil || profile.DeletedAt != nil {
+		return false, false
+	}
+	key := dynamic.ResourceKey(dynamic.ScopeProfile, executionProfileID)
+	if r.bindingResolver != nil {
+		key = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
+		)
+	}
+	return r.engine.Circuits().IsOpen(key, now), true
 }
 
 // NewConductor creates the lifecycle-facing conductor with the same engine,
@@ -782,7 +852,12 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			}
 		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
-		case r.bindingResolver != nil:
+		default:
+			// The launched model identifies which provider windows belong to this
+			// candidate, so a window scoped to another model cannot be its usage.
+			candidate.ModelID = strings.TrimSpace(concrete.Model)
+		}
+		if candidate.Enabled && r.bindingResolver != nil {
 			binding := profileCredentialBindingDescriptor(concrete)
 			candidate.BindingKey = dynamic.ResourceKey(
 				dynamic.ScopeCredential,

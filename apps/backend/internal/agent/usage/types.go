@@ -50,11 +50,16 @@ type UtilizationWindow struct {
 // A window needs a numeric duration and a known reset instant, and must not
 // carry an unidentified model scope. An unusable window is unknown usage, not
 // zero usage and not unlimited capacity.
+//
+// A window that names a specific model is only usable for that model. When the
+// candidate's own model is unknown the window cannot be matched to it, so it
+// stays unusable: attributing a sibling model's consumption to a candidate is
+// exactly the substitution the unknown state exists to prevent.
 func (w UtilizationWindow) UsableFor(modelID string) bool {
 	if w.DurationSeconds <= 0 || w.ResetAt.IsZero() || w.AmbiguousModelScope {
 		return false
 	}
-	if w.ModelID != "" && modelID != "" && w.ModelID != modelID {
+	if w.ModelID != "" && w.ModelID != modelID {
 		return false
 	}
 	return w.StartAt.Before(w.ResetAt)

@@ -40,9 +40,14 @@ type Candidate struct {
 	ID         string
 	Enabled    bool
 	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
-	Selection  Selection
+	// ModelID is the concrete model this candidate launches. A provider window
+	// scoped to a different model is another model's consumption, so it must not
+	// score this candidate. Empty means the candidate's model is not identified,
+	// which keeps every window that names a model out rather than guessing.
+	ModelID   string
+	Rules     map[string]Action
+	Policies  routingpolicy.Document
+	Selection Selection
 }
 
 type Profile struct {
