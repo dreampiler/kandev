@@ -316,9 +316,44 @@ ledger reader.
 host for unrelated reasons (PTY console process creation and a stderr wording
 assertion). Both were reproduced at the untouched base by stashing.
 
+### Sixth increment: shared read-only preview (`3b762fb154`)
+
+- `dynamic.PreviewSelection` answers for a new selection using the same
+  `ResolveSelection`/`ResolveFallbackSelection` plan and the same `RankTier`
+  the engine uses, so preview and actual selection agree when the profile, clock,
+  health and usage inputs match.
+- It claims nothing: no generation, no probe lease, no circuit, no launch and no
+  attempt row. `TestPreviewSelectionIsReadOnly` asserts that against a live
+  persistence fake and an open circuit.
+- `PreviewState` separates the states a UI must render differently:
+  `no_candidates`, `no_eligible_candidate`, `ready`, and `unavailable`.
+- Every ranked candidate is returned with its tier, eligibility, reason code,
+  cost class and pace evidence, so the preview can explain why the winner won.
+
+Two defects the parity test caught, both real and both fixed:
+
+- `selectionReason` keyed off the *selected candidate's* own `Selection.Tier`.
+  A joined row carries no tier by design, so every joined winner fell back to the
+  legacy `candidate_order` code while the preview emitted the tier code.
+  `Tier.Configured` now records whether the head actually stored a policy, so
+  both paths discriminate identically.
+- `PreviewSelection` always built the fallback plan, so a fresh preview reported
+  `tier_pace_same_tier` where the engine reported `tier_pace`. It now resolves the
+  same plan kind the engine would for the same inputs.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/runtime/dynamic ./internal/agent/runtime -count=1 -timeout=10m` | 0 | pass |
+| `golangci-lint run ./internal/agent/runtime/dynamic/...` | 0 | 0 issues |
+| `go test ./internal/backendapp ./internal/orchestrator -run 'Test.*Dynamic' -count=1` | 0 | pass |
+| `go build ./...` | 0 | pass |
+
 ### Not delivered
 
-Still outstanding for this work order: the two read-only preview endpoints, and
-the PostgreSQL parity test for the manual-window query, which therefore still has
-no dialect-parity evidence. WO-03 must not ship before the preview exists, because
-the editor would offer a current-choice preview with nothing behind it.
+This increment is the shared computation. The two HTTP preview endpoints are
+still not registered, so no client can call the preview yet, and the
+PostgreSQL parity test for the manual-window query is still absent. WO-03 must
+not ship before the endpoints exist, because the editor would offer a
+current-choice preview with nothing behind it.
