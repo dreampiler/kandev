@@ -270,11 +270,55 @@ persisted code plus direction, and legacy code preservation.
 One implementation fix came from `staticcheck`: `monthReset` assigned an
 intermediate value it then overwrote.
 
+### Fifth increment: window durations and the usage snapshot provider (`757c753ce`, `741b6de821`)
+
+- The Codex client now carries the provider's numeric `limit_window_seconds`
+  through `DurationSeconds` and `StartAt` instead of leaving routing to parse the
+  display label. The Claude client maps its known window kinds to numeric
+  lengths through one `claudeWindowDuration` helper, covering both the `limits`
+  array and the `five_hour`/`seven_day` fallback.
+- Claude's `weekly_scoped` limit reports only a display name, which is not an
+  identity. It is marked `AmbiguousModelScope` and `UsableFor` rejects it, so an
+  unidentifiable model scope stays unknown rather than being matched by label.
+- `backendapp.dynamicUsageSnapshot` is the input adapter shared by a live
+  selection and the preview. Automatic source reads each candidate's own account
+  binding and never borrows another profile's usage. Manual source resolves the
+  calendar window, queries the ledger over the half-open interval, and converts
+  the recorded total with exact decimal arithmetic — money scales the limit by
+  100 for the ledger's subcent precision.
+- `PaceScore` gained `HasRecord` and `Complete` so an unobserved candidate is
+  distinguishable from a recorded zero, and a partial total is unknown for
+  ranking while remaining visible as a lower bound.
+- The engine is wired with the provider at the composition boundary in
+  `initDynamicRuntimeResolver`, so a saved `pace` or `cost` mode is now backed by
+  real observations rather than falling back to unknown.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/usage -count=1` | 0 | pass |
+| `go test ./internal/backendapp -run 'TestSnapshot\|TestRecordedFraction' -count=1` | 0 | pass |
+| `go test ./internal/agent/usage ./internal/agent/runtime/dynamic ./internal/agent/runtime -count=1 -timeout=10m` | 0 | pass |
+| `go test ./internal/backendapp ./internal/orchestrator -run 'Test.*Dynamic' -count=1` | 0 | pass |
+| `golangci-lint run ./internal/backendapp/... ./internal/agent/usage/... ./internal/agent/runtime/dynamic/...` | 0 | 0 issues |
+| `go build ./...` | 0 | pass |
+
+New cases cover Codex numeric duration retention, a Codex window with no
+duration being unusable, the Claude scoped-limit identity gap, known Claude
+kinds and the fallback shape, model applicability, and the snapshot adapter:
+unknown-vs-free-zero, manual money and token fractions, incomplete totals,
+unknown timezone and anchor, unknown unit, ledger read failure, and a missing
+ledger reader.
+
+`backendapp` `TestBuildLoginPTYServicesRegistersStopAllCleanup` and
+`TestBackendStartupConflictStopsBeforeSharedStateInitialization` fail on this
+host for unrelated reasons (PTY console process creation and a stderr wording
+assertion). Both were reproduced at the untouched base by stashing.
+
 ### Not delivered
 
-Still outstanding for this work order: a real usage snapshot provider wired at
-the composition boundary for Claude/Codex, numeric window duration plumbing from
-those clients, and the two read-only preview endpoints. The PostgreSQL parity
-test named in the plan is still not written, so the manual-window query has no
-dialect-parity evidence. WO-03 must not ship before these exist, because the
-editor would promise behaviour that is not yet implemented.
+Still outstanding for this work order: the two read-only preview endpoints, and
+the PostgreSQL parity test for the manual-window query, which therefore still has
+no dialect-parity evidence. WO-03 must not ship before the preview exists, because
+the editor would offer a current-choice preview with nothing behind it.
