@@ -233,12 +233,48 @@ untouched base by stashing and repeating: `TestUpdateDocumentWritesEveryMutableF
 `TestQuerySidebarTaskPageBreaksMalformedParentCycleAtSmallestID` are pre-existing
 timestamp-ordering flakes on this host, not regressions.
 
+### Fourth increment: reset windows and route reason codes (`99a56d187`, `c96019654`)
+
+- `agent/usage.ResolveResetWindow` resolves the window containing an instant for
+  all four manual periods. A five-hour window steps whole blocks from the
+  anchor's fixed phase, so its length stays exactly five hours across a DST
+  transition. Day, week and month are calendar boundaries resolved with
+  `time.Date` in the target location, so a monthly plan resets on the calendar
+  month rather than on a fixed 30-day duration.
+- `ResetAnchor` carries the local reset time, weekday, day of month and phase in
+  one documented space-separated form. A day of month beyond the month length
+  clamps to that month's last valid day (31 January / 28 or 29 February).
+- Route reason codes are a bounded set: `tier_order`, `tier_pace`, `tier_cost`,
+  with `_same_tier` / `_next_tier` suffixes on a fallback. The rule part names how
+  the successor was chosen and the suffix names the direction that produced the
+  transition, taken from the failed candidate's tier rather than the successor's
+  own policy. A row with no stored tier metadata keeps its established reason
+  code, so existing consumers are unaffected.
+
+### Verified for this increment
+
+| Check | Exit | Result |
+| --- | --- | --- |
+| `go test ./internal/agent/usage -count=1` | 0 | pass |
+| `golangci-lint run ./internal/agent/usage/...` | 0 | 0 issues |
+| `go test ./internal/agent/runtime/dynamic ./internal/agent/runtime -count=1 -timeout=10m` | 0 | pass |
+| `golangci-lint run ./internal/agent/runtime/dynamic/... ./internal/agent/runtime ./internal/agent/usage/...` | 0 | 0 issues |
+| `go test ./internal/backendapp ./internal/orchestrator -run 'Test.*Dynamic' -count=1` | 0 | pass |
+
+Cases cover anchor parsing and its rejection set, five-hour length across a US
+spring-forward, phase shifting the block grid, calendar day/week boundaries,
+calendar-month resolution with clamping, leap-day clamping, a day-31 anchor in a
+31-day month, DST fall-back, degenerate input, the full reason-code table, the
+persisted code plus direction, and legacy code preservation.
+
+One implementation fix came from `staticcheck`: `monthReset` assigned an
+intermediate value it then overwrote.
+
 ### Not delivered
 
-The ranking helper is wired into the engine, so a saved `pace` or `cost` mode is
-honoured for tier selection. Still outstanding: window-boundary resolution for
-the four manual periods in a named timezone, a real usage snapshot provider wired
-at the composition boundary for Claude/Codex, numeric window duration plumbing
-from those clients, route reason codes, and the two read-only preview endpoints.
-WO-03 must not ship before those exist, because the editor would promise
-behaviour that is not yet implemented.
+Still outstanding for this work order: a real usage snapshot provider wired at
+the composition boundary for Claude/Codex, numeric window duration plumbing from
+those clients, and the two read-only preview endpoints. The PostgreSQL parity
+test named in the plan is still not written, so the manual-window query has no
+dialect-parity evidence. WO-03 must not ship before these exist, because the
+editor would promise behaviour that is not yet implemented.
