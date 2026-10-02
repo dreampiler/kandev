@@ -1,7 +1,7 @@
 ---
 id: "01-selection-contract"
 title: "Persist dynamic tier and model selection settings"
-status: completed
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
