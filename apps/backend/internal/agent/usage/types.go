@@ -38,14 +38,20 @@ type UtilizationWindow struct {
 	// scopes its limits per model. Empty means the window applies to every
 	// model on the account.
 	ModelID string `json:"model_id,omitempty"`
+
+	// AmbiguousModelScope marks a window the provider scoped to a model it did
+	// not identify. Claude reports only a display name for a scoped limit, and
+	// a display label is not an identity, so such a window cannot be matched to
+	// a candidate and is unavailable for a pace score.
+	AmbiguousModelScope bool `json:"ambiguous_model_scope,omitempty"`
 }
 
 // UsableFor reports whether this window can score a pace for the given model.
-// A window needs a numeric duration and a known reset instant; a window scoped
-// to a different model does not apply. An unusable window is unknown usage, not
+// A window needs a numeric duration and a known reset instant, and must not
+// carry an unidentified model scope. An unusable window is unknown usage, not
 // zero usage and not unlimited capacity.
 func (w UtilizationWindow) UsableFor(modelID string) bool {
-	if w.DurationSeconds <= 0 || w.ResetAt.IsZero() {
+	if w.DurationSeconds <= 0 || w.ResetAt.IsZero() || w.AmbiguousModelScope {
 		return false
 	}
 	if w.ModelID != "" && modelID != "" && w.ModelID != modelID {
