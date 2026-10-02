@@ -138,6 +138,46 @@ func tierIndexOf(tiers []Tier, candidateID string) int {
 	return -1
 }
 
+// Route reason codes are a bounded set. They name the selection rule and, for a
+// fallback, the direction that was taken. They never embed a credential, a
+// provider response body or a prompt.
+const (
+	ReasonTierOrder = "tier_order"
+	ReasonTierPace  = "tier_pace"
+	ReasonTierCost  = "tier_cost"
+
+	ReasonSuffixSameTier = "_same_tier"
+	ReasonSuffixNextTier = "_next_tier"
+)
+
+// RouteReason returns the persisted reason code for one selection.
+//
+// Only a configured tier produces a tier code. A row with no stored tier
+// metadata is a legacy or default row, and its established reason code is left
+// untouched so existing consumers keep working.
+func RouteReason(policy TierPolicy, fallback bool) (string, bool) {
+	if policy.Mode == "" {
+		return "", false
+	}
+	base := ReasonTierOrder
+	switch policy.Mode {
+	case TierModePace:
+		base = ReasonTierPace
+	case TierModeCost:
+		base = ReasonTierCost
+	case TierModeOrder:
+	default:
+		return "", false
+	}
+	if !fallback {
+		return base, true
+	}
+	if policy.OnFailure == FailureNextTier {
+		return base + ReasonSuffixNextTier, true
+	}
+	return base + ReasonSuffixSameTier, true
+}
+
 // selectionPlan is one decision's resolved search space: which tiers to try, and
 // which candidates are already spent in this transition chain.
 type selectionPlan struct {
@@ -148,6 +188,31 @@ type selectionPlan struct {
 	// carries an empty chain, because a new user turn is a new chain rather than
 	// a continuation of the previous one's exclusions.
 	chain SelectionChain
+	// fallback marks a permitted failure transition, so a tier reason carries its
+	// direction suffix.
+	fallback bool
+	// direction is the fallback direction that governed this decision, taken
+	// from the failed candidate's tier. The persisted reason records the
+	// direction that was actually applied rather than the successor's own
+	// configured policy.
+	direction FailureDirection
+}
+
+// selectionReason prefers the bounded tier code for a configured tier and
+// otherwise keeps the caller's established reason, so a legacy or default row
+// does not change the codes existing consumers already read.
+//
+// The rule part names how the successor was chosen; the suffix names the
+// fallback direction that produced the transition.
+func selectionReason(candidate Candidate, tier Tier, plan selectionPlan, fallbackReason string) string {
+	if candidate.Selection.Tier == nil {
+		return fallbackReason
+	}
+	code, ok := RouteReason(TierPolicy{Mode: tier.Policy.Mode, OnFailure: plan.direction}, plan.fallback)
+	if !ok {
+		return fallbackReason
+	}
+	return code
 }
 
 // ResolveSelection builds the search space for a fresh selection: every tier in
@@ -206,6 +271,8 @@ func ResolveFallbackSelection(
 		excluded:   excluded,
 		ineligible: eligibility,
 		chain:      chain,
+		fallback:   true,
+		direction:  direction,
 	}
 }
 

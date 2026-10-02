@@ -223,7 +223,7 @@ func (e *Engine) selectWithPlan(
 		ExecutionProfileID: candidate.ID,
 		Generation:         generation,
 		ProfileVersion:     profile.Version,
-		Reason:             reason,
+		Reason:             selectionReason(candidate, tier, resolved, reason),
 		Status:             routeStatusStarting,
 	}
 	nextState := RouteState{
