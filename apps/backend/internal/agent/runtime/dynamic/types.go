@@ -80,6 +80,10 @@ type PolicyState struct {
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+	// SelectionChain is the durable no-revisit record for the current
+	// transition chain. It is carried across retry, skip and restart and is
+	// only cleared by a closed chain, never by a policy counter reset.
+	SelectionChain *SelectionChain `json:"selection_chain,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of
