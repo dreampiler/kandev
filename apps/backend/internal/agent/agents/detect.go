@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"time"
 )
@@ -32,16 +33,32 @@ func WithCommandCheck(name string, args ...string) DetectOption {
 		if err != nil {
 			return false, "", nil
 		}
-		checkCtx, cancel := context.WithTimeout(ctx, commandCheckTimeout)
-		defer cancel()
-		if err := exec.CommandContext(checkCtx, path, args...).Run(); err != nil {
-			if ctx.Err() != nil {
-				return false, "", ctx.Err()
-			}
+		found, _, err := runCommandCheck(ctx, path, commandCheckTimeout, args...)
+		if err != nil {
+			return false, "", err
+		}
+		if !found {
 			return false, "", nil
 		}
 		return true, path, nil
 	}
+}
+
+// runCommandCheck runs a capability check bounded by timeout. It separates the
+// two ways a check can fail: the command answering with a nonzero exit, and
+// the bound elapsing before the command answered. Only a caller cancellation
+// is an error, so callers that treat a bound as inconclusive (and may measure
+// again) can tell the cases apart. Use errors.Is on err for cancellation.
+func runCommandCheck(ctx context.Context, path string, timeout time.Duration, args ...string) (found, timedOut bool, err error) {
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if runErr := exec.CommandContext(checkCtx, path, args...).Run(); runErr != nil {
+		if ctx.Err() != nil {
+			return false, false, ctx.Err()
+		}
+		return false, errors.Is(checkCtx.Err(), context.DeadlineExceeded), nil
+	}
+	return true, false, nil
 }
 
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
