@@ -185,6 +185,49 @@ by touch, and the phone list stays a focused tier list.
 - `tsc -p <scratch config>` over both E2E specs and the new helper ??no errors in
   those files. The repo's own `typecheck` excludes `e2e/`.
 
+### CI ran the Playwright suites: three failures found and fixed
+
+CI executed both specs, which this host cannot. Three real defects surfaced:
+
+1. **Strict-mode violation from the new tier wrapper.** The list now nests rows in
+   a per-tier `<li>`, so `getByTestId("dynamic-profile-candidates").locator("li")`
+   matched both the tier and its row. Both specs now select
+   `[data-testid^="dynamic-candidate-"]`.
+2. **Wrong save control.** The editor saves through the shared floating save
+   surface registered with `useSettingsSaveContributor`, whose idle label is
+   `settings:saveChanges` ("Save changes"). The spec looked for `agents:saveProfile`
+   ("Save profile"), which only the CLI profile editor uses, so it timed out
+   waiting for a button that does not exist here.
+3. **Position-dependent structural selector.** `.locator("> div").last()` broke
+   once the policy grid was appended after the action row. The action group now
+   carries `data-testid="dynamic-candidate-actions-<index>"`, so the assertion names
+   the element instead of its position.
+
+### Production defect: four switches below the touch minimum
+
+The mobile spec measured the keep-model switch at **16.6px** against a 44px
+minimum. `@kandev/ui/switch` renders `data-[size=default]:h-[16.6px]`, and a
+surrounding row's `min-h-11` does not enlarge the control itself.
+
+The same pattern existed in three more places that the spec did not assert:
+the candidate enabled switch, and the retry and reset-wait switches in the policy
+editor. All four now share one `settingsTouchSwitchClassName()` helper, which
+carries `h-11 w-11` on the control and redraws the track as a `before`
+pseudo-element so the visible pill keeps ordinary settings density. This is the
+treatment already proven in `app-status-bar-settings-card.tsx`.
+
+`dynamic-settings-touch-targets.test.tsx` asserts all three components carry the
+touch size, so a regression is caught by a unit test rather than only by an E2E
+run on a phone project.
+
+### Verification actually run (all exit 0)
+
+- `pnpm run typecheck`
+- `pnpm exec eslint <changed settings + E2E spec files> --max-warnings 0`
+- `pnpm run i18n:check`
+- `pnpm exec vitest run <11 suites>` — 85 tests, including the two new touch-target
+  cases
+
 ### E2E could not be executed on this host
 
 Both specs are written and extend the existing suites as the work order asks:

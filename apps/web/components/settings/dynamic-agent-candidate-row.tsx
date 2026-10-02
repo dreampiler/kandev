@@ -12,7 +12,7 @@ import type {
   DynamicModelPolicy,
   DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
-import { settingsActionClassName } from "./settings-control";
+import { settingsActionClassName, settingsTouchSwitchClassName } from "./settings-control";
 
 type DynamicAgentCandidateRowProps = {
   candidate: DynamicAgentCandidate;
@@ -142,9 +142,13 @@ function CandidateRowHeader({
           checked={candidate.enabled}
           onCheckedChange={(checked) => onToggleEnabled(index, { enabled: checked })}
           aria-label={`${enabledLabel}: ${label}`}
+          className={settingsTouchSwitchClassName()}
         />
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div
+        className="flex shrink-0 items-center gap-1"
+        data-testid={`dynamic-candidate-actions-${index}`}
+      >
         <Button
           variant="ghost"
           size="icon"

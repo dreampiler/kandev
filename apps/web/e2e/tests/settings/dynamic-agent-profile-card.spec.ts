@@ -81,7 +81,11 @@ test.describe("Dynamic Agents settings card", () => {
       await expect(dropdown.locator(`[data-value="${candidate.id}"]`)).toBeVisible();
       await dropdown.locator(`[data-value="${candidate.id}"]`).click();
 
-      const candidateRow = testPage.getByTestId("dynamic-profile-candidates").locator("li");
+      // The list wraps rows in a per-tier container, so a bare `li` would match
+      // both the tier and its row and break strict mode.
+      const candidateRow = testPage
+        .getByTestId("dynamic-profile-candidates")
+        .locator('[data-testid^="dynamic-candidate-"]');
       await expect(candidateRow).toContainText(candidate.name);
       await expect(testPage.getByTestId("dynamic-policy-transient")).toBeVisible();
       await expect(testPage.getByTestId("dynamic-policy-hard")).toBeVisible();
@@ -176,7 +180,9 @@ test.describe("Dynamic agent tier selection", () => {
         "false",
       );
 
-      await testPage.getByRole("button", { name: "Save profile" }).click();
+      // This editor saves through the shared floating save surface; its idle
+      // label is settings:saveChanges, not the per-editor agents:saveProfile.
+      await testPage.getByRole("button", { name: "Save changes" }).click();
       await expect(testPage.getByText("Dynamic profile saved.")).toBeVisible({ timeout: 20_000 });
 
       // Readback comes from the backend, not from the draft that was just saved.
@@ -214,7 +220,7 @@ test.describe("Dynamic agent tier selection", () => {
 
     try {
       await openDynamicProfileEditor(testPage, dynamicProfile.id);
-      const actions = testPage.getByTestId("dynamic-candidate-1").locator("> div").last();
+      const actions = testPage.getByTestId("dynamic-candidate-actions-1");
       const order = await actions
         .getByRole("button")
         .evaluateAll((buttons) => buttons.map((button) => button.getAttribute("aria-label") ?? ""));

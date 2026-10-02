@@ -14,7 +14,7 @@ import {
   SettingsErrorText,
 } from "@/components/settings/settings-typography";
 import type { DynamicErrorClass, DynamicErrorPolicy } from "@/lib/types/agent-profile";
-import { settingsControlClassName } from "./settings-control";
+import { settingsControlClassName, settingsTouchSwitchClassName } from "./settings-control";
 
 const MAX_RETRIES = 10;
 const MAX_INITIAL_INTERVAL_SECONDS = 3600;
@@ -169,6 +169,7 @@ export function DynamicPolicyEditor({
               )
             }
             aria-label={retryLabel}
+            className={settingsTouchSwitchClassName()}
           />
         </div>
         {policy.retry.enabled && (
@@ -227,6 +228,7 @@ export function DynamicPolicyEditor({
               )
             }
             aria-label={waitLabel}
+            className={settingsTouchSwitchClassName()}
           />
         </div>
         {policy.waitForReset.enabled && (

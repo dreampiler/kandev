@@ -13,6 +13,7 @@ import { DynamicAgentPreview } from "@/components/settings/dynamic-agent-preview
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { useDynamicAgentProfileEditorState } from "@/components/settings/dynamic-agent-profile-editor-state";
+import { settingsTouchSwitchClassName } from "@/components/settings/settings-control";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 type DynamicAgentProfileEditorProps = {
@@ -114,6 +115,7 @@ function DynamicKeepModelPreference({
         onCheckedChange={onChange}
         data-testid="dynamic-keep-model-toggle"
         aria-label={t("agents:dynamicKeepModelWhileRunning")}
+        className={settingsTouchSwitchClassName()}
       />
     </div>
   );

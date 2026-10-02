@@ -58,8 +58,13 @@ func TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary(t *tes
 	if err != nil {
 		t.Fatalf("GetManualWindowUsage: %v", err)
 	}
-	if usage.EventCount != 1 || usage.TokensTotal != 150 || usage.CostSubcents != 42 {
-		t.Fatalf("usage = %#v, want only the in-window concrete-a event", usage)
+	// The expected figures come from the seeded event rather than a literal, so
+	// a fixture change cannot leave this case asserting a stale number.
+	wantTokens := inside.TokensTotal
+	wantCost := inside.CostSubcents
+	if usage.EventCount != 1 || usage.TokensTotal != wantTokens || usage.CostSubcents != wantCost {
+		t.Fatalf("usage = %#v, want only the in-window concrete-a event (%d tokens, %d subcents)",
+			usage, wantTokens, wantCost)
 	}
 	if usage.TurnsAttributed != 1 || usage.ProfileAttributed != 0 {
 		t.Fatalf("attribution = (turns %d, profile %d), want both via the turn",

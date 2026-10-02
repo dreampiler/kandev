@@ -96,9 +96,11 @@ test.describe("Dynamic Agents settings card on mobile", () => {
       await expect(dropdown.getByTestId("agent-profile-picker-agent-icon").first()).toBeVisible();
       await dropdown.locator(`[data-value="${candidate.id}"]`).tap();
 
-      await expect(testPage.getByTestId("dynamic-profile-candidates").locator("li")).toContainText(
-        candidate.name,
-      );
+      await expect(
+        testPage
+          .getByTestId("dynamic-profile-candidates")
+          .locator('[data-testid^="dynamic-candidate-"]'),
+      ).toContainText(candidate.name);
       await expect(testPage.getByTestId("dynamic-policy-transient")).toBeVisible();
       await expect(testPage.getByTestId("dynamic-policy-hard")).toBeVisible();
       await testPage

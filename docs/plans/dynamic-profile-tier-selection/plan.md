@@ -235,8 +235,15 @@ appear and no `--- SKIP` is printed: a `-run` pattern that matches nothing still
 exits 0 with `no tests to run`, which would read as a green parity check while
 running no test at all.
 
-The fixture currently skips without that variable; a skip is not passing database
-parity evidence. No new ledger column is planned: resolve concrete identity from
+The fixture skips on a host without that variable; a skip is not passing database
+parity evidence. On CI the variable is set and both cases execute: the first
+executed and **failed** there, on a stale expectation rather than on the query.
+It asserted 150 tokens against a fixture that seeds 155, so it now derives the
+expected figures from the seeded event instead of a literal. The second case
+passed on first execution, which is the evidence that the dialect branching
+itself is sound. task-02 stays non-complete until both cases pass in one run.
+
+No new ledger column is planned: resolve concrete identity from
 `task_session_turns` through the event's `turn_id`. If a schema gap is proven,
 record and resolve it before widening implementation.
 

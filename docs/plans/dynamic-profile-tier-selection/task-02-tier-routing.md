@@ -389,6 +389,30 @@ PostgreSQL cases could not actually execute. The manual-window query is
 dialect-neutral by inspection (no `rowid`, no SQLite-only JSON or date syntax),
 but that remains unproven and must not be reported as parity.
 
+### CI executed the parity cases: red, then fixed
+
+CI sets `KANDEV_TEST_POSTGRES_DSN`, so the two cases really ran rather than
+skipping. `TestPostgresGetManualWindowUsage_JoinsTurnProfileAndExcludesBoundary`
+**failed**:
+
+```
+usage = {TokensTotal:155, CostSubcents:42, EventCount:1, UnpricedCount:0,
+         IncompleteCount:0, TurnsAttributed:1, ProfileAttributed:0}
+```
+
+The cause was the test expectation, not the query. `manualUsageEventPostgres`
+builds its event from `newTestUsageEvent`, whose fixture sets `TokensTotal: 155`,
+while the assertion hardcoded 150. The cost and both attribution counters were
+already correct, and the sibling case
+(`..._CountsUnpricedAndIncomplete`) passed on its first execution, so the dialect
+branching is sound. The case now derives its expected token and cost figures from
+the seeded event, so a fixture change cannot leave it asserting a stale number
+again.
+
+This work order remains **blocked**: one case has passed in isolation, never both
+in a single run. Re-run the corrected command on CI and confirm both pass together
+before flipping the status.
+
 ### Resume condition
 
 Run `go test ./internal/task/repository/sqlite -run '^TestPostgresGetManualWindowUsage_' -count=1 -timeout=10m -v`
