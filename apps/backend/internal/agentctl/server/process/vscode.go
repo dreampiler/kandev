@@ -47,6 +47,7 @@ type VscodeManager struct {
 	workDir         string
 	port            int
 	theme           string         // "dark" or "light"
+	bindHost        string         // empty binds all interfaces; Windows tests use loopback
 	installStrategy tools.Strategy // optional: auto-installs code-server if not found
 	logger          *logger.Logger
 
@@ -229,7 +230,11 @@ func allocatePort() (int, error) {
 // startProcess creates and starts the code-server subprocess.
 func (v *VscodeManager) startProcess(ctx context.Context, generationDone chan struct{}, binaryPath string) error {
 	workDir := resolveExistingWorkDir(v.workDir, v.logger)
-	bindAddr := fmt.Sprintf("0.0.0.0:%d", v.port)
+	bindHost := v.bindHost
+	if bindHost == "" {
+		bindHost = "0.0.0.0"
+	}
+	bindAddr := fmt.Sprintf("%s:%d", bindHost, v.port)
 	args := []string{
 		"--bind-addr", bindAddr,
 		"--auth", "none",

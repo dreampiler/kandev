@@ -53,6 +53,9 @@ func prepareVscodeTestServer(t *testing.T) *Server {
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir(), VscodeCommand: os.Args[0]}
 	procMgr := process.NewManager(cfg, log)
+	// The fixture child listens on the configured bind host; loopback keeps a
+	// temporary test binary from prompting for Windows Firewall access.
+	procMgr.SetVscodeBindHost("127.0.0.1")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
