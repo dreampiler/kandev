@@ -1384,7 +1384,10 @@ func (s *Service) UpdateToolCallMessageWithCreate(ctx context.Context, sessionID
 	// Publish message.updated event
 	_ = s.publishMessageEvent(ctx, events.MessageUpdated, message, receipt)
 
-	s.logger.Info("tool call message updated",
+	// Debug, not Info: this is the per-update hot path of every tool call, so at
+	// INFO a single agent turn produced hundreds of lines and buried the events
+	// that carry state changes. The publish above is what the UI observes.
+	s.logger.Debug("tool call message updated",
 		zap.String("message_id", message.ID),
 		zap.String("tool_call_id", toolCallID),
 		zap.String("status", status))

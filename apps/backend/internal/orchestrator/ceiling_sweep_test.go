@@ -13,7 +13,7 @@ func TestCeilingSweeper_TicksOnIntervalAndStops(t *testing.T) {
 	r := newCeilingSweeper()
 	r.interval = 5 * time.Millisecond
 	var ticks atomic.Int32
-	require.True(t, r.start(context.Background(), func(context.Context) { ticks.Add(1) }))
+	require.True(t, r.start(context.Background(), func(context.Context, ceilingSweepCause) { ticks.Add(1) }))
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for ticks.Load() < 2 && time.Now().Before(deadline) {
@@ -33,7 +33,7 @@ func TestCeilingSweeper_SignalNowTriggersAPromptTick(t *testing.T) {
 	r := newCeilingSweeper()
 	r.interval = time.Hour
 	var ticks atomic.Int32
-	require.True(t, r.start(context.Background(), func(context.Context) { ticks.Add(1) }))
+	require.True(t, r.start(context.Background(), func(context.Context, ceilingSweepCause) { ticks.Add(1) }))
 	defer r.stop()
 
 	r.signalNow()
@@ -52,7 +52,7 @@ func TestCeilingSweeper_SignalCoalescesWhilePassIsInFlight(t *testing.T) {
 	tickStarted := make(chan struct{}, 8)
 	release := make(chan struct{})
 	var ticks atomic.Int32
-	require.True(t, r.start(context.Background(), func(context.Context) {
+	require.True(t, r.start(context.Background(), func(context.Context, ceilingSweepCause) {
 		ticks.Add(1)
 		tickStarted <- struct{}{}
 		<-release
@@ -108,7 +108,7 @@ func TestCeilingSweepTick_ExpiresStaleReservationsAndDrains(t *testing.T) {
 	// Advance the controller's clock well past the launch budget, so the tick's
 	// AC-7 backstop finds this reservation stale.
 	svc.sessionCeiling.now = func() time.Time { return fixedStart.Add(24 * time.Hour) }
-	svc.ceilingSweepTick(context.Background())
+	svc.ceilingSweepTick(context.Background(), ceilingSweepPeriodic)
 
 	svc.sessionCeiling.mu.Lock()
 	_, held := svc.sessionCeiling.reservations[decision.reservationKey]
