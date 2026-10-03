@@ -44,11 +44,12 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles        store.Repository
-	dynamic         store.DynamicProfileRepository
-	engine          *dynamic.Engine
-	bindingResolver *dynamic.CredentialBindingResolver
-	enabled         atomic.Bool
+	profiles         store.Repository
+	dynamic          store.DynamicProfileRepository
+	engine           *dynamic.Engine
+	bindingResolver  *dynamic.CredentialBindingResolver
+	sessionExecutors SessionExecutorResolver
+	enabled          atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -127,6 +128,17 @@ func (r *ProfileExecutionResolver) LoadDynamicProfileForExecutor(
 	executorID string,
 ) (dynamic.Profile, error) {
 	return r.loadDynamicProfileForExecutor(ctx, profileID, executorID)
+}
+
+// LoadDynamicProfileForSession loads the profile with the execution environment
+// resolved from the session. It is the form every selection entry point uses, so
+// a session's executor reaches usage attribution without each caller threading it.
+func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(
+	ctx context.Context,
+	profileID string,
+	sessionID string,
+) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 }
 
 // executionEnvironment reports the candidate's execution environment for a
@@ -294,7 +306,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if sessionID == "" {
 		sessionID = "utility:" + uuid.NewString()
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -334,7 +346,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -580,7 +592,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -719,7 +731,7 @@ func (r *ProfileExecutionResolver) resolve(
 	if r.dynamic == nil || r.engine == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -835,8 +847,57 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	return agent.Name, nil
 }
 
+// SessionExecutorResolver reports the executor a session runs on. The executor
+// lives on the task session rather than the agent profile, so it is the only
+// authoritative source for whether a candidate's agent authenticates against the
+// backend host's provider account.
+//
+// A resolver that returns an empty executor keeps the host default, which is
+// what an unqualified session launches on.
+type SessionExecutorResolver func(ctx context.Context, sessionID string) (string, error)
+
+// SetSessionExecutorResolver injects the session-executor lookup. With it, every
+// selection entry point carries the execution environment into usage
+// attribution, instead of only the paths that thread an executor explicitly.
+func (r *ProfileExecutionResolver) SetSessionExecutorResolver(
+	resolve SessionExecutorResolver,
+) {
+	r.sessionExecutors = resolve
+}
+
+// sessionExecutor resolves a session's executor, degrading to empty when the
+// lookup is unavailable or fails. Degrading to the host default rather than
+// remote keeps the established behaviour for callers that cannot be classified,
+// while an executor that is positively known to be remote is never lost.
+func (r *ProfileExecutionResolver) sessionExecutor(ctx context.Context, sessionID string) string {
+	if r == nil || r.sessionExecutors == nil || sessionID == "" {
+		return ""
+	}
+	executorID, err := r.sessionExecutors(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(executorID)
+}
+
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
 	return r.loadDynamicProfileForExecutor(ctx, profileID, "")
+}
+
+// loadDynamicProfileForSession resolves the execution environment from an
+// explicit executor when the caller has one, and otherwise from the session. An
+// explicit value wins so a caller that already knows the executor is never
+// second-guessed by a lookup.
+func (r *ProfileExecutionResolver) loadDynamicProfileForSession(
+	ctx context.Context,
+	profileID string,
+	sessionID string,
+	executorID string,
+) (dynamic.Profile, error) {
+	if strings.TrimSpace(executorID) == "" {
+		executorID = r.sessionExecutor(ctx, sessionID)
+	}
+	return r.loadDynamicProfileForExecutor(ctx, profileID, executorID)
 }
 
 // loadDynamicProfileForExecutor loads the profile and marks every candidate's

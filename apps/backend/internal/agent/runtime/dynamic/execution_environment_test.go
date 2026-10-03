@@ -29,25 +29,3 @@ func TestIsRemoteExecutor(t *testing.T) {
 		})
 	}
 }
-
-// TestRemoteCandidatesAreMarkedByExecutorLoad pins that the execution
-// environment reaches the candidates. The two profiles below differ only in the
-// executor their session runs on, which is the whole point: the same candidate
-// set must not be scored identically in a container and on the host.
-func TestRemoteCandidatesAreMarkedByExecutorLoad(t *testing.T) {
-	base := Profile{
-		ID: "dynamic-1", Version: 1,
-		Candidates: []Candidate{{ID: "concrete-a", Enabled: true}, {ID: "concrete-b", Enabled: true}},
-	}
-	remote := base
-	remote.Candidates = append([]Candidate(nil), base.Candidates...)
-	for index := range remote.Candidates {
-		remote.Candidates[index].RemoteExecution = true
-	}
-	if base.Candidates[0].RemoteExecution {
-		t.Fatal("a host-loaded candidate must not be marked remote")
-	}
-	if !remote.Candidates[0].RemoteExecution || !remote.Candidates[1].RemoteExecution {
-		t.Fatalf("remote = %#v, want every candidate marked remote", remote.Candidates)
-	}
-}

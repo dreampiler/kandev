@@ -363,6 +363,22 @@ func initDynamicRuntimeResolver(
 		cfg.Features.DynamicAgentRouting,
 	)
 	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	// The executor lives on the task session, so this is what lets a selection
+	// tell a host execution from a container, SSH or Kubernetes one. Without it
+	// every candidate would read the backend host's provider account, which is a
+	// different account than a remote candidate's agent authenticates with.
+	dynamicResolver.SetSessionExecutorResolver(func(
+		ctx context.Context, sessionID string,
+	) (string, error) {
+		session, err := repos.Task.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		if session == nil {
+			return "", nil
+		}
+		return session.ExecutorID, nil
+	})
 	return dynamicResolver, dynamicBindingResolver, nil
 }
 
