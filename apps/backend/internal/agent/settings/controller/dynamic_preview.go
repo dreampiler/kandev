@@ -64,6 +64,9 @@ type DynamicPreviewDTO struct {
 // so it never enforces the optimistic version.
 type DynamicPreviewRequest struct {
 	Dynamic *dto.DynamicAgentProfileDTO `json:"dynamic"`
+	// ProfileID is the saved profile from the request path, empty for a draft.
+	// It lets a round-robin preview continue from the profile's history.
+	ProfileID string `json:"-"`
 }
 
 // SetDynamicPreviewProvider injects the runtime preview seam.
@@ -92,6 +95,9 @@ func (c *Controller) PreviewDynamicProfile(
 		return &DynamicPreviewDTO{State: string(dynamic.PreviewUnavailable)}, nil
 	}
 	profile := previewProfile(request.Dynamic)
+	if id := strings.TrimSpace(request.ProfileID); id != "" {
+		profile.ID = id
+	}
 	preview := c.dynamicPreview.PreviewDynamicSelection(
 		ctx, profile, previewEligibility(profile), time.Now(),
 	)

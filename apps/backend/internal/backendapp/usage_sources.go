@@ -55,15 +55,17 @@ func catalogModelClass(catalog agentusage.ModelClassifier, modelID string) model
 type usageBindingResolver struct {
 	home   string
 	getenv func(string) string
+	// openRouterDailyLimit is the configured free-model daily allowance.
+	openRouterDailyLimit int
 
 	catalogOnce       sync.Once
 	openRouterCatalog agentusage.ModelClassifier
 	llmGatewayCatalog agentusage.ModelClassifier
 }
 
-func newUsageBindingResolver() *usageBindingResolver {
+func newUsageBindingResolver(openRouterDailyLimit int) *usageBindingResolver {
 	home, _ := os.UserHomeDir()
-	return &usageBindingResolver{home: home, getenv: os.Getenv}
+	return &usageBindingResolver{home: home, getenv: os.Getenv, openRouterDailyLimit: openRouterDailyLimit}
 }
 
 func (r *usageBindingResolver) catalogs() (agentusage.ModelClassifier, agentusage.ModelClassifier) {
@@ -167,7 +169,7 @@ func (r *usageBindingResolver) openCodeBinding(model string) (usageBinding, bool
 		modelID := strings.TrimPrefix(model, openRouterPrefix)
 		catalog, _ := r.catalogs()
 		return usageBinding{
-			client:   agentusage.NewOpenRouterUsageClient(authPath),
+			client:   agentusage.NewOpenRouterUsageClient(authPath, r.openRouterDailyLimit),
 			cacheKey: agentusage.CacheKey("openrouter", authPath), source: usageSourceProviderAPI,
 			accountKey: "openrouter:" + authPath, modelID: model, class: catalogModelClass(catalog, modelID),
 		}, true

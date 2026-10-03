@@ -217,12 +217,13 @@ func (b usageBinding) accountKind() string {
 func newUsageProviderAdapter(
 	settingsStore settingsstore.Repository,
 	log *logger.Logger,
+	openRouterDailyLimit int,
 ) *usageProviderAdapter {
 	return &usageProviderAdapter{
 		svc:           agentusage.NewUsageService(),
 		settingsStore: settingsStore,
 		proxyResolver: defaultUsageProxyResolver(),
-		bindings:      newUsageBindingResolver(),
+		bindings:      newUsageBindingResolver(openRouterDailyLimit),
 		log:           log,
 	}
 }

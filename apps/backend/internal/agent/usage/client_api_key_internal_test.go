@@ -110,7 +110,7 @@ func TestAPIKeyClientsClassifyFailuresWithoutTheBody(t *testing.T) {
 func TestOpenRouterDailyFreeQuotaIsAnAccountWideUTCDay(t *testing.T) {
 	body := `{"data":{"is_free_tier":false,"free_model_daily_requests":{"used":16,"limit":1000,"remaining":984}}}`
 	srv := serveJSON(t, "or-key", body)
-	client := NewOpenRouterUsageClient(writeOpenCodeAuth(t, map[string]string{"openrouter": "or-key"}))
+	client := NewOpenRouterUsageClient(writeOpenCodeAuth(t, map[string]string{"openrouter": "or-key"}), 0)
 	client.keyURL = srv.URL
 	now := time.Date(2026, 10, 3, 14, 30, 0, 0, time.FixedZone("KST", 9*3600))
 	client.now = func() time.Time { return now }
@@ -133,7 +133,7 @@ func TestOpenRouterDailyFreeQuotaIsAnAccountWideUTCDay(t *testing.T) {
 }
 
 func TestOpenRouterWithoutTheCounterHasNoWindow(t *testing.T) {
-	usage := parseOpenRouterUsage(openRouterKeyResponse{}, time.Now())
+	usage := parseOpenRouterUsage(openRouterKeyResponse{}, time.Now(), OpenRouterFreeDailyRequests)
 	if len(usage.Windows) != 0 {
 		t.Fatalf("windows = %#v, want none rather than a guessed limit", usage.Windows)
 	}
@@ -203,5 +203,17 @@ func TestClaudeScopeRefusalIsUnauthorized(t *testing.T) {
 	_, err := client.FetchUsage(context.Background())
 	if reason, status := FailureOf(err); reason != FailureUnauthorized || status != http.StatusForbidden {
 		t.Fatalf("failure = %q/%d, want unauthorized/403", reason, status)
+	}
+}
+
+func TestOpenRouterConfiguredAllowanceWinsOverTheProviderLimit(t *testing.T) {
+	var raw openRouterKeyResponse
+	body := `{"data":{"is_free_tier":true,"free_model_daily_requests":{"used":40,"limit":50}}}`
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatal(err)
+	}
+	usage := parseOpenRouterUsage(raw, time.Now(), OpenRouterFreeDailyRequests)
+	if len(usage.Windows) != 1 || usage.Windows[0].UtilizationPct != 4 || usage.Windows[0].LimitReached {
+		t.Fatalf("windows = %#v, want 40 of the configured 1000 requests", usage.Windows)
 	}
 }

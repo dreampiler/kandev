@@ -17,6 +17,10 @@ const (
 	dynamicSelectionModeOrder = "order"
 	dynamicSelectionModePace  = "pace"
 	dynamicSelectionModeCost  = "cost"
+	// Random picks uniformly within the tier; round-robin continues after the
+	// candidate the tier chose last.
+	dynamicSelectionModeRandom     = "random"
+	dynamicSelectionModeRoundRobin = "round_robin"
 
 	dynamicSelectionFailureSameTierNext = "same_tier_next"
 	dynamicSelectionFailureNextTier     = "next_tier"
@@ -199,7 +203,8 @@ func validateDynamicResetAnchor(reset *dto.DynamicAgentResetAnchorDTO) error {
 
 func isDynamicSelectionMode(mode string) bool {
 	switch mode {
-	case dynamicSelectionModeOrder, dynamicSelectionModePace, dynamicSelectionModeCost:
+	case dynamicSelectionModeOrder, dynamicSelectionModePace, dynamicSelectionModeCost,
+		dynamicSelectionModeRandom, dynamicSelectionModeRoundRobin:
 		return true
 	default:
 		return false

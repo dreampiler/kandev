@@ -224,7 +224,7 @@ func initCoreTaskServices(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
-	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, log)
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, log, cfg.Limits.OpenRouterFreeDailyRequests)
 	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log, usageAdapter)
 	if err != nil {
 		return nil, err
@@ -349,13 +349,16 @@ func initDynamicRuntimeResolver(
 	if err := dynamicCircuits.Restore(ctx); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
 	}
+	accounts := newAccountUsageReader(usageAdapter, repos.Task)
 	dynamicEngine := dynamicruntime.NewEngine(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
 		dynamicruntime.WithUsageSnapshotProvider(
-			newDynamicUsageSnapshot(usageAdapter, repos.Task, time.Now),
+			newDynamicUsageSnapshot(usageAdapter, repos.Task, time.Now).WithInternalUsage(accounts),
 		),
+		dynamicruntime.WithSelectionHistory(routeSelectionHistory{repo: repos.Task}),
+		dynamicruntime.WithLimitObserver(newUsageLimitRecorder(accounts, repos.Task, log)),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {

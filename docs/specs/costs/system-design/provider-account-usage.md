@@ -7,6 +7,7 @@ requirements:
   - REQ-COSTS-PROVIDER-USAGE-003
   - REQ-COSTS-PROVIDER-USAGE-004
   - REQ-COSTS-PROVIDER-USAGE-005
+  - REQ-COSTS-PROVIDER-USAGE-006
 ---
 
 # Provider Account Usage System Design
@@ -27,6 +28,7 @@ design only reads usage and never opens or closes a circuit.
 | `REQ-COSTS-PROVIDER-USAGE-003` | [Window scope](#window-scope) |
 | `REQ-COSTS-PROVIDER-USAGE-004` | [Account-scoped counting](#account-scoped-counting) |
 | `REQ-COSTS-PROVIDER-USAGE-005` | [Settings list](#settings-list) |
+| `REQ-COSTS-PROVIDER-USAGE-006` | [Internal accumulation](#internal-accumulation) |
 
 ## Account binding
 
@@ -61,8 +63,10 @@ text never includes a body.
   ending in `-free` bind to the account without a client.
 - **OpenRouter:** `GET https://openrouter.ai/api/v1/key`. The
   `free_model_daily_requests` used/limit pair becomes a `free_models` window from
-  midnight UTC to the next midnight. The provider's limit already reflects
-  purchased credits.
+  midnight UTC to the next midnight, measured against
+  `limits.openRouterFreeDailyRequests` (default 1000). The per-model
+  20-requests-a-minute limit surfaces as rate-limit errors and is handled by
+  route health, not modeled as a window.
 - **LLM Gateway dev plan:** `GET https://api.llmgateway.io/v1/key`. Credits
   used/limit become an account-wide monthly window without start or reset,
   exhausted when remaining credits reach zero. The premium week becomes a
@@ -108,6 +112,19 @@ with `reason` and `status`, `unsupported` and `no_usage_api` with `recorded`
 turn and token totals for the account since midnight UTC. The route is
 read-only and is not behind the settings mutation interlock.
 
+## Internal accumulation
+
+`accountUsageReader` sums the task usage ledger over every profile bound to the
+candidate's account (`GetManualWindowUsageForProfiles`), with a 30-second cache.
+The dynamic snapshot attaches the trailing 24-hour turns and tokens to every
+candidate whose provider usage is unknown. The engine calls a `LimitObserver`
+when a candidate fails with `quota_limited` or `rate_limited`;
+`usageLimitRecorder` then stores the account's 5-hour, 24-hour and 7-day
+recorded usage in `usage_limit_observations` off the routing path. The settings
+list reports the trailing windows (`internal`) and a 30-day summary of hits with
+the lower median at a hit (`limit_hits`). Observations are analysis only and
+never suspend a candidate.
+
 ## Failure and recovery
 
 A failed read is cached for fifteen seconds and logged as `usage.fetch_failed`
@@ -116,8 +133,9 @@ fifteen minutes. Selection treats a failed reading as unknown.
 
 ## Persistence
 
-No schema change. Reads use the existing in-memory five-minute cache and the
-task usage ledger.
+`usage_limit_observations` is a new append-only table, plus an index on
+`dynamic_route_attempts(logical_profile_id, created_at)` for round-robin
+continuation. Provider reads use the in-memory five-minute cache.
 
 ## Security
 

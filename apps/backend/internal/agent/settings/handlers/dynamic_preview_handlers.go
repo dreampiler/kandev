@@ -23,6 +23,7 @@ func (h *Handlers) httpPreviewDynamicProfile(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid dynamic preview request"})
 		return
 	}
+	req.ProfileID = c.Param("id")
 	resp, err := h.controller.PreviewDynamicProfile(c.Request.Context(), req)
 	if err != nil {
 		if isInvalidDynamicProfileUpdateError(err) {

@@ -68,6 +68,20 @@ func PreviewSelection(
 	chain SelectionChain,
 	now time.Time,
 ) SelectionPreview {
+	return PreviewSelectionWith(profile, RankOptions{Scores: scores}, ineligible, currentCandidateID, chain, now)
+}
+
+// PreviewSelectionWith previews with the same random source and round-robin
+// history a live selection uses. A random choice is a prediction of one draw,
+// not a promise that the next session lands on the same candidate.
+func PreviewSelectionWith(
+	profile Profile,
+	inputs RankOptions,
+	ineligible map[string]string,
+	currentCandidateID string,
+	chain SelectionChain,
+	now time.Time,
+) SelectionPreview {
 	// The preview must resolve the same plan the engine would for the same
 	// inputs, so a fresh preview walks every tier and carries no fallback
 	// direction, while a preview of an in-progress transition carries both.
@@ -82,11 +96,12 @@ func PreviewSelection(
 		return preview
 	}
 	preview.Available = true
-	ranked := plan.firstSelectable(scores, now, nil)
+	inputs = inputs.at(now)
+	ranked := plan.firstSelectable(inputs, nil)
 	for _, tier := range plan.tiers {
-		entries := RankTier(tier, RankOptions{
-			Now: now, Scores: scores, Eligible: ineligible, Excluded: plan.excluded,
-		})
+		options := inputs
+		options.Eligible, options.Excluded = ineligible, plan.excluded
+		entries := RankTier(tier, options)
 		for _, entry := range entries {
 			preview.Considered = append(preview.Considered, PreviewEntry{
 				CandidateID:      entry.Candidate.ID,

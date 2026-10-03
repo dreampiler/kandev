@@ -7,6 +7,7 @@ requirements:
   - REQ-COSTS-PROVIDER-USAGE-003
   - REQ-COSTS-PROVIDER-USAGE-004
   - REQ-COSTS-PROVIDER-USAGE-005
+  - REQ-COSTS-PROVIDER-USAGE-006
 system_design:
   - ../../specs/costs/system-design/provider-account-usage.md
   - ../../specs/agents/system-design/dynamic-profile-tier-selection.md
@@ -35,6 +36,7 @@ usage endpoint answered 200 with a weekly window.
 
 - [x] [Task 01: Backend usage sources and list API](task-01-backend-usage-sources.md)
 - [x] [Task 02: Usage on the agents settings list](task-02-agents-list-usage.md) (depends on Task 01)
+- [x] [Task 03: Selection modes and internal usage](task-03-selection-modes-and-internal-usage.md) (depends on Task 01)
 
 ## ASCII UI preview
 

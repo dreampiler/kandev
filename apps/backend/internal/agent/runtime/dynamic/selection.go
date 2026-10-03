@@ -13,6 +13,11 @@ const (
 	TierModeOrder TierMode = "order"
 	TierModePace  TierMode = "pace"
 	TierModeCost  TierMode = "cost"
+	// TierModeRandom picks uniformly among the tier's eligible candidates.
+	TierModeRandom TierMode = "random"
+	// TierModeRoundRobin picks the eligible candidate after the one the tier
+	// chose last, in saved row order, wrapping around.
+	TierModeRoundRobin TierMode = "round_robin"
 )
 
 type FailureDirection string

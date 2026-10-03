@@ -86,6 +86,10 @@ type LimitsConfig struct {
 	GHMaxConcurrent   int `mapstructure:"ghMaxConcurrent"`
 	GitMaxConcurrent  int `mapstructure:"gitMaxConcurrent"`
 	LSPMaxConnections int `mapstructure:"lspMaxConnections"`
+	// OpenRouterFreeDailyRequests is the account-wide daily request allowance
+	// for OpenRouter free models that usage ranking measures against. It is
+	// 1000 once an account has bought at least $10 of credits, 50 otherwise.
+	OpenRouterFreeDailyRequests int `mapstructure:"openRouterFreeDailyRequests"`
 }
 
 // MessageQueueConfig contains prompt queue limits.

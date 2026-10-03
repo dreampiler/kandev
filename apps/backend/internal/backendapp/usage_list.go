@@ -14,11 +14,16 @@ import (
 type profileUsageLister struct {
 	usage  *usageProviderAdapter
 	ledger accountWindowTotalsReader
+	limits usageLimitHistory
 	now    func() time.Time
 }
 
 func newProfileUsageLister(usage *usageProviderAdapter, ledger accountWindowTotalsReader) *profileUsageLister {
-	return &profileUsageLister{usage: usage, ledger: ledger, now: time.Now}
+	lister := &profileUsageLister{usage: usage, ledger: ledger, now: time.Now}
+	if history, ok := ledger.(usageLimitHistory); ok {
+		lister.limits = history
+	}
+	return lister
 }
 
 // ListProfileUsage implements the settings controller's ProfileUsageProvider.
@@ -32,18 +37,26 @@ func (l *profileUsageLister) ListProfileUsage(ctx context.Context) ([]dto.AgentP
 	for _, bound := range profiles {
 		accounts[bound.binding.accountKey] = append(accounts[bound.binding.accountKey], bound.profile.ID)
 	}
+	now := l.now()
 	recorded := make(map[string]*dto.AgentProfileRecordedUsageDTO)
+	internal := make(map[string]*dto.AgentProfileInternalUsageDTO)
+	hits := l.limitHitsByAccount(ctx, now)
 	result := make([]dto.AgentProfileUsageDTO, 0, len(profiles))
 	for _, bound := range profiles {
 		usage := l.usage.usageForProfile(ctx, bound.profile, bound.agentType)
 		entry := profileUsageDTO(bound.profile.ID, usage)
+		key := bound.binding.accountKey
 		if usage.State == profileUsageNoUsageAPI {
-			key := bound.binding.accountKey
 			if _, done := recorded[key]; !done {
 				recorded[key] = l.recordedToday(ctx, accounts[key])
 			}
 			entry.Recorded = recorded[key]
 		}
+		if _, done := internal[key]; !done {
+			internal[key] = l.accountInternalUsage(ctx, accounts[key], now)
+		}
+		entry.Internal = internal[key]
+		entry.LimitHits = hits[key]
 		result = append(result, entry)
 	}
 	return result, nil

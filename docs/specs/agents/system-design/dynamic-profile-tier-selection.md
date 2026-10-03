@@ -85,7 +85,7 @@ Proposed shape (illustrative values, never a seeded operational configuration):
 }
 ```
 
-`tier.mode` is `order|pace|cost`; `on_failure` is
+`tier.mode` is `order|pace|cost|random|round_robin`; `on_failure` is
 `same_tier_next|next_tier`. `model.cost` is `free|subscription|metered` and
 is routing metadata, not an edit to authentication `billing_type`.
 `usage_source` is `automatic|manual|none`. Manual adds `windows[]`, each with

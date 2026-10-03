@@ -55,6 +55,12 @@ type Engine struct {
 	loader      StateLoader
 	probes      map[string]ProbeLease
 	usage       UsageSnapshotProvider
+	history     SelectionHistory
+	pick        func(n int) int
+	// recentPicks holds selections this process made, keyed by logical
+	// profile, until the durable history reflects them.
+	recentPicks map[string]map[string]time.Time
+	limits      LimitObserver
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -69,6 +75,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		states:      make(map[string]RouteState),
 		probes:      make(map[string]ProbeLease),
 		retryClaims: make(map[string]int64),
+		pick:        defaultRandomPick,
 	}
 	for _, option := range options {
 		option(engine)
@@ -183,7 +190,7 @@ func (e *Engine) selectWithPlan(
 	reason string,
 ) (RouteDecision, error) {
 	observedAt := e.now()
-	scores := e.usageSnapshot(ctx, profile)
+	inputs := e.rankInputs(ctx, profile)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -206,11 +213,12 @@ func (e *Engine) selectWithPlan(
 	claim := func(candidate Candidate) bool {
 		return e.claimProbe(candidate, sessionID, generation, observedAt)
 	}
-	winner := resolved.firstSelectable(scores, observedAt, claim)
+	winner := resolved.firstSelectable(inputs.at(observedAt), claim)
 	if !winner.ok {
 		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain)
 	}
 	candidate, tier := winner.candidate, winner.tier
+	e.notePickLocked(profile.ID, candidate.ID, observedAt)
 	chain := resolved.chain.forProfile(profile.ID, generation).withTried(candidate.ID)
 	chain.LastTierHeadID = tier.HeadID
 	chainJSON, chainErr := carrySelectionChain(state.PolicyStateJSON, chain)
@@ -526,6 +534,7 @@ func (e *Engine) ApplyFailureContext(
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
 	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	e.observeLimit(ctx, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -562,7 +571,7 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 	// The usage observation is taken before the engine lock so a slow provider
 	// read cannot block other sessions, and so every candidate the successor
 	// search ranks is compared against one clock and one set of evidence.
-	scores := e.usageSnapshot(ctx, profile)
+	scores := e.rankInputs(ctx, profile)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -710,7 +719,7 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	failure *routingerr.Error,
 	evidence UnclassifiedFailureEvidence,
 	policyState PolicyState,
-	scores map[string]PaceScore,
+	scores RankOptions,
 ) (RouteDecision, error) {
 	observedAt := e.now()
 
@@ -722,6 +731,7 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 			ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted",
 		)
 	}
+	e.notePickLocked(profile.ID, successor.winner.candidate.ID, observedAt)
 	// The transition continues the durable chain, so a candidate already tried in
 	// this chain and an earlier tier both stay excluded.
 	chain, chainErr := decodeSelectionChain(state.PolicyStateJSON)
@@ -762,7 +772,7 @@ func (e *Engine) unclassifiedSuccessor(
 	profile Profile,
 	currentCandidateID string,
 	expectedGeneration int64,
-	scores map[string]PaceScore,
+	scores RankOptions,
 	now time.Time,
 ) (tierSelection, bool) {
 	generation := expectedGeneration + 1
@@ -781,7 +791,7 @@ func (e *Engine) unclassifiedSuccessor(
 		return tierSelection{}, false
 	}
 	resolved := ResolveFallbackSelection(profile, currentCandidateID, "", chain, ineligible)
-	winner := resolved.firstSelectable(scores, now, nil)
+	winner := resolved.firstSelectable(scores.at(now), nil)
 	return winner.withPlan(resolved), winner.ok
 }
 

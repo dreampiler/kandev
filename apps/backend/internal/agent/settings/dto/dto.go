@@ -102,7 +102,7 @@ type DynamicAgentSelectionDTO struct {
 }
 
 type DynamicAgentTierPolicyDTO struct {
-	// Mode is "order", "pace" or "cost"; OnFailure is "same_tier_next" or
+	// Mode is "order", "pace", "cost", "random" or "round_robin"; OnFailure is "same_tier_next" or
 	// "next_tier". Both are a closed set.
 	Mode      string `json:"mode"`
 	OnFailure string `json:"on_failure"`

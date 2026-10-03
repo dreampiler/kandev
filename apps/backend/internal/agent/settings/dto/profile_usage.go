@@ -20,6 +20,10 @@ type AgentProfileUsageDTO struct {
 	// day. It is reported for accounts whose provider publishes no usage API,
 	// and is a lower bound rather than the provider's own count.
 	Recorded *AgentProfileRecordedUsageDTO `json:"recorded,omitempty"`
+	// Internal is Kandev's recorded account usage over trailing windows.
+	Internal *AgentProfileInternalUsageDTO `json:"internal,omitempty"`
+	// LimitHits summarizes recorded limit hits and the usage at those moments.
+	LimitHits *AgentProfileLimitHitsDTO `json:"limit_hits,omitempty"`
 }
 
 // AgentProfileUsageWindowDTO is one provider window that limits the profile's
@@ -46,4 +50,33 @@ type AgentProfileRecordedUsageDTO struct {
 // ListAgentProfileUsageResponse lists every concrete profile's usage.
 type ListAgentProfileUsageResponse struct {
 	Profiles []AgentProfileUsageDTO `json:"profiles"`
+}
+
+// AgentProfileInternalUsageDTO is Kandev's own recorded usage for the profile's
+// account over trailing windows ending now. It is a lower bound that exists for
+// every account, including ones whose provider publishes no usage.
+type AgentProfileInternalUsageDTO struct {
+	ProfileCount int                             `json:"profile_count"`
+	Windows      []AgentProfileInternalWindowDTO `json:"windows"`
+}
+
+// AgentProfileInternalWindowDTO is one trailing window. Label is 5h, day or week.
+type AgentProfileInternalWindowDTO struct {
+	Label        string `json:"label"`
+	Turns        int64  `json:"turns"`
+	TokensTotal  int64  `json:"tokens_total"`
+	CostSubcents int64  `json:"cost_subcents"`
+}
+
+// AgentProfileLimitHitsDTO summarizes the limit hits recorded for the account
+// in the last 30 days, with the median recorded usage at the moment of a hit:
+// an estimate of where an undisclosed limit bites.
+type AgentProfileLimitHitsDTO struct {
+	Count            int       `json:"count"`
+	LastAt           time.Time `json:"last_at"`
+	MedianTurns5h    int64     `json:"median_turns_5h"`
+	MedianTurnsDay   int64     `json:"median_turns_day"`
+	MedianTokensDay  int64     `json:"median_tokens_day"`
+	MedianTurnsWeek  int64     `json:"median_turns_week"`
+	MedianTokensWeek int64     `json:"median_tokens_week"`
 }

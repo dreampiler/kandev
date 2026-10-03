@@ -71,8 +71,9 @@ profiles to show their real quota use, so that I can see when one is exhausted.
   its reported reset.
 - **AC-COSTS-PROVIDER-USAGE-002.2:** When the model has the `openrouter/`
   prefix, the system shall report the account's free-model daily request count
-  and limit as a window over the current UTC day that applies only to free
-  models.
+  against the configured allowance (`limits.openRouterFreeDailyRequests`,
+  default 1000 for an account with $10 of purchased credits) as a window over
+  the current UTC day that applies only to free models.
 - **AC-COSTS-PROVIDER-USAGE-002.3:** When the model has the `llmgateway/`
   prefix, the system shall report the dev plan's monthly credit use and the
   weekly premium-model cap. A monthly window without a published reset shall
@@ -118,6 +119,23 @@ profiles to show their real quota use, so that I can see when one is exhausted.
   per account.
 - **AC-COSTS-PROVIDER-USAGE-005.2:** Settings > Agents shall show each profile's
   usage on its row, including unknown and unavailable states with their reason.
+
+### REQ-COSTS-PROVIDER-USAGE-006: Internal accumulation and limit evidence
+
+**Intent:** Kandev can rank and explain usage even when a provider discloses
+neither usage nor limits.
+
+#### Acceptance criteria
+
+- **AC-COSTS-PROVIDER-USAGE-006.1:** The system shall report each account's
+  recorded turns, tokens and cost over trailing 5-hour, 24-hour and 7-day
+  windows.
+- **AC-COSTS-PROVIDER-USAGE-006.2:** When a dynamic candidate fails with a
+  quota or rate limit, the system shall store the account's recorded usage in
+  those windows at that moment, and shall summarize the last 30 days of such
+  hits with their count, latest time and median usage at a hit.
+- **AC-COSTS-PROVIDER-USAGE-006.3:** A candidate whose provider usage is unknown
+  shall carry its account's recorded 24-hour usage for ranking.
 
 ## Out of scope
 

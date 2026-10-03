@@ -1401,7 +1401,9 @@ func startGatewayAndServe(
 	// editor and a real selection answer from the same evidence including a
 	// paused binding. The resolver is the same instance routing uses, so a
 	// candidate's binding key resolves identically on both paths.
-	previewSnapshot := newDynamicUsageSnapshot(services.UsageAdapter, repos.Task, time.Now)
+	previewSnapshot := newDynamicUsageSnapshot(services.UsageAdapter, repos.Task, time.Now).
+		WithInternalUsage(newAccountUsageReader(services.UsageAdapter, repos.Task)).
+		WithSelectionHistory(routeSelectionHistory{repo: repos.Task})
 	if services.DynamicProfileResolver != nil {
 		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
 	}

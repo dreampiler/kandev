@@ -57,3 +57,15 @@ func TestListProfileUsage(t *testing.T) {
 		t.Fatalf("ListProfileUsage = %#v, %v", resp, err)
 	}
 }
+
+func TestRandomAndRoundRobinTierModesAreAccepted(t *testing.T) {
+	for _, mode := range []string{dynamicSelectionModeRandom, dynamicSelectionModeRoundRobin} {
+		candidates := []dto.DynamicAgentCandidateDTO{{
+			Position: 0, ExecutionProfileID: "a",
+			Policies: selectionPolicy(mode, dynamicSelectionFailureSameTierNext, false, true),
+		}}
+		if err := validateDynamicAgentProfile(&dto.DynamicAgentProfileDTO{Version: 1, Candidates: candidates}); err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+	}
+}

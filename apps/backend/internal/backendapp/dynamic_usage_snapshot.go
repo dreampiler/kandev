@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"math/rand/v2"
 	"time"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
@@ -36,10 +37,26 @@ type manualWindowTotalsReader interface {
 // known pace, so an unavailable reading can never make a busy candidate look
 // idle.
 type dynamicUsageSnapshot struct {
-	usage  *usageProviderAdapter
-	manual manualWindowTotalsReader
-	health PreviewHealthReader
-	now    func() time.Time
+	usage    *usageProviderAdapter
+	manual   manualWindowTotalsReader
+	health   PreviewHealthReader
+	internal *accountUsageReader
+	history  dynamicruntime.SelectionHistory
+	now      func() time.Time
+}
+
+// WithInternalUsage orders candidates with unknown provider usage by Kandev's
+// own recorded account usage instead of leaving them indistinguishable.
+func (s *dynamicUsageSnapshot) WithInternalUsage(reader *accountUsageReader) *dynamicUsageSnapshot {
+	s.internal = reader
+	return s
+}
+
+// WithSelectionHistory lets a preview continue a round-robin tier from the
+// candidate the live engine chose last.
+func (s *dynamicUsageSnapshot) WithSelectionHistory(history dynamicruntime.SelectionHistory) *dynamicUsageSnapshot {
+	s.history = history
+	return s
 }
 
 // PreviewHealthReader reports the route-health verdict for one candidate's own
@@ -79,7 +96,11 @@ func (s *dynamicUsageSnapshot) UsageSnapshot(
 	observedAt := s.now()
 	scores := make(map[string]dynamicruntime.PaceScore, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
-		scores[candidate.ID] = s.scoreFor(ctx, candidate, observedAt)
+		score := s.scoreFor(ctx, candidate, observedAt)
+		if !score.Known && s.internal != nil {
+			score.Internal = s.internal.Internal(ctx, candidate.ID, observedAt)
+		}
+		scores[candidate.ID] = score
 	}
 	return scores, nil
 }
@@ -348,7 +369,21 @@ func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
 			merged[candidate.ID] = dynamicruntime.IneligibleCircuit
 		}
 	}
-	return dynamicruntime.PreviewSelection(profile, scores, merged, "", dynamicruntime.SelectionChain{}, now)
+	inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
+	return dynamicruntime.PreviewSelectionWith(profile, inputs, merged, "", dynamicruntime.SelectionChain{}, now)
+}
+
+// lastPicked reads the round-robin history for a saved profile. A draft that
+// has never been saved has no history and starts from its first row.
+func (s *dynamicUsageSnapshot) lastPicked(ctx context.Context, profile dynamicruntime.Profile) map[string]string {
+	if s.history == nil || profile.ID == "" {
+		return nil
+	}
+	last, err := s.history.LastSelections(ctx, profile.ID)
+	if err != nil {
+		return nil
+	}
+	return dynamicruntime.LastPickedByTier(profile, last)
 }
 
 // circuitOpen answers route health for one candidate. Without a health reader the
