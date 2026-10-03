@@ -1,6 +1,9 @@
 package dynamic
 
-import "math/big"
+import (
+	"math/big"
+	"strings"
+)
 
 // Tier selection is a closed set. The values are stored in the route document
 // and are never inferred from a profile name.
@@ -79,6 +82,24 @@ type Selection struct {
 	JoinPrevious bool
 	Tier         *TierPolicy
 	Model        ModelOptions
+}
+
+// HostExecutorID is the host-local standalone executor. Anything else is a
+// container, SSH host, Kubernetes pod or cloud executor, where the agent
+// authenticates against a different provider account than the backend host.
+const HostExecutorID = "exec-local"
+
+// IsRemoteExecutor reports whether an executor ID names an environment other than
+// the backend host. An empty ID keeps the host default, which is what an
+// unqualified profile launches on; remoteness is only ever asserted on positive
+// evidence, so a caller that does not know the executor is not treated as remote.
+func IsRemoteExecutor(executorID string) bool {
+	switch strings.TrimSpace(executorID) {
+	case "", HostExecutorID:
+		return false
+	default:
+		return true
+	}
 }
 
 // Tier is one maximal contiguous run of candidates connected by joins. Tiers

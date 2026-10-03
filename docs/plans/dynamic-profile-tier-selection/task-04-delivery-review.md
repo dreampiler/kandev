@@ -237,21 +237,7 @@ defects this branch introduced.
 #### Accepted as recorded residual risk
 
 5. **Automatic usage is attributed to the host account for remote candidates**
-   (`backendapp/usage_adapter.go`). The pre-existing adapter registers usage
-   clients against the backend host's credential files, so a subscription-bound
-   Claude or Codex candidate running on a container or SSH executor is scored
-   from the host's account rather than its own binding. This is the pre-existing
-   adapter's behaviour, not something the tier work introduced, but tier ranking
-   is its first consumer that acts on it.
-   - **Cause:** no executor-aware credential resolution behind the usage client.
-   - **Impact:** a remote candidate's pace can reflect the host account, so it
-     may be ranked as idle when it is busy. Two candidates on different
-     executors can receive identical observations.
-   - **Next owner:** this task, as a scoped follow-up work order, because closing
-     it means resolving credentials per candidate executor.
-   - **Resume condition:** a binding-isolation fixture proving two candidates on
-     different executors receive different observations, and that an
-     unsupported binding reports unknown rather than the host's usage.
+   (`backendapp/usage_adapter.go`). Now implemented; see the eleventh increment.
 
 6. **Preview cannot see route health.** `previewEligibility` marks only disabled
    rows ineligible, so a preview can name a candidate whose binding currently has

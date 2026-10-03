@@ -59,7 +59,7 @@ func TestKeepModelOffReevaluatesAtANewTurnBoundary(t *testing.T) {
 	if resolver.KeepModelWhileRunning(ctx, "dynamic-continuity") {
 		t.Fatal("fixture stored keep-model on, want it off")
 	}
-	decision, err := resolver.ReevaluateForNewTurn(ctx, "session-continuity", "dynamic-continuity", 0)
+	decision, err := resolver.ReevaluateForNewTurn(ctx, "session-continuity", "dynamic-continuity", 0, "exec-local")
 	if err != nil {
 		t.Fatalf("ReevaluateForNewTurn: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestKeepModelOnKeepsTheSelectedCandidate(t *testing.T) {
 	resolver := newWorkflowDynamicProfileResolverWithCandidatesAndKeepModel(
 		t, "dynamic-continuity", continuityCandidates(), true,
 	)
-	first, err := resolver.ReevaluateForNewTurn(ctx, "session-keep-on", "dynamic-continuity", 0)
+	first, err := resolver.ReevaluateForNewTurn(ctx, "session-keep-on", "dynamic-continuity", 0, "exec-local")
 	if err != nil {
 		t.Fatalf("initial selection: %v", err)
 	}
@@ -104,12 +104,14 @@ func TestReevaluateForNewTurnStartsANewChain(t *testing.T) {
 	resolver := newWorkflowDynamicProfileResolverWithCandidatesAndKeepModel(
 		t, "dynamic-continuity", continuityCandidates(), false,
 	)
-	first, err := resolver.ReevaluateForNewTurn(ctx, "session-chain", "dynamic-continuity", 0)
+	first, err := resolver.ReevaluateForNewTurn(
+		ctx, "session-chain", "dynamic-continuity", 0, "exec-local",
+	)
 	if err != nil {
 		t.Fatalf("first comparison: %v", err)
 	}
 	second, err := resolver.ReevaluateForNewTurn(
-		ctx, "session-chain", "dynamic-continuity", first.Generation,
+		ctx, "session-chain", "dynamic-continuity", first.Generation, "exec-local",
 	)
 	if err != nil {
 		t.Fatalf("second comparison: %v", err)
@@ -131,7 +133,7 @@ func TestReevaluateForNewTurnRejectsAStaleGeneration(t *testing.T) {
 	resolver := newWorkflowDynamicProfileResolverWithCandidatesAndKeepModel(
 		t, "dynamic-continuity", continuityCandidates(), false,
 	)
-	if _, err := resolver.ReevaluateForNewTurn(ctx, "session-stale", "dynamic-continuity", 7); err == nil {
+	if _, err := resolver.ReevaluateForNewTurn(ctx, "session-stale", "dynamic-continuity", 7, "exec-local"); err == nil {
 		t.Fatal("a comparison against a nonexistent generation must be refused")
 	} else if err != dynamicruntime.ErrStaleGeneration {
 		t.Fatalf("error = %v, want %v", err, dynamicruntime.ErrStaleGeneration)

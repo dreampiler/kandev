@@ -105,15 +105,42 @@ func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
 	sessionID string,
 	logicalProfileID string,
 	expectedGeneration int64,
+	executorID string,
 ) (dynamic.RouteDecision, error) {
 	if r == nil || r.engine == nil {
 		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
 	}
-	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	profile, err := r.loadDynamicProfileForExecutor(ctx, logicalProfileID, executorID)
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
 	return r.engine.SelectContext(ctx, sessionID, profile, expectedGeneration, "")
+}
+
+// LoadDynamicProfileForExecutor loads the profile with the execution environment
+// of the session that will run it. The executor lives on the task session, so
+// this is how a remote execution is distinguished from a host one and kept from
+// inheriting the host's provider account usage.
+func (r *ProfileExecutionResolver) LoadDynamicProfileForExecutor(
+	ctx context.Context,
+	profileID string,
+	executorID string,
+) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForExecutor(ctx, profileID, executorID)
+}
+
+// executionEnvironment reports the candidate's execution environment for a
+// session. The executor lives on the task session rather than the agent profile,
+// so this is the only place it can be known authoritatively; an unqualified
+// session is treated as the host default, which is what an unqualified profile
+// launches on.
+// executionEnvironment reports the candidate's execution environment for a
+// session, using the single classification the runtime owns.
+func executionEnvironment(executorID string) string {
+	if dynamic.IsRemoteExecutor(executorID) {
+		return strings.TrimSpace(executorID)
+	}
+	return "local"
 }
 
 // OpenCircuit reports whether a concrete candidate's own credential binding is
@@ -809,6 +836,18 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 }
 
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForExecutor(ctx, profileID, "")
+}
+
+// loadDynamicProfileForExecutor loads the profile and marks every candidate's
+// execution environment. Passing the session's executor ID is what lets usage
+// attribution tell a host execution from a remote one; omitting it keeps the
+// host default, which is what an unqualified profile launches on.
+func (r *ProfileExecutionResolver) loadDynamicProfileForExecutor(
+	ctx context.Context,
+	profileID string,
+	executorID string,
+) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
 	}
@@ -828,45 +867,64 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 		KeepModelWhileRunning: config.KeepModelWhileRunning,
 		Candidates:            make([]dynamic.Candidate, 0, len(routes)),
 	}
+	remoteExecution := executionEnvironment(executorID) != "local"
 	for _, route := range routes {
-		candidate := dynamic.Candidate{
-			ID: route.ExecutionProfileID, Enabled: route.Enabled,
-			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
-		}
-		if route.RulesJSON != "" {
-			policy, legacyRules, selection, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
-			if policyErr != nil {
-				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
-			}
-			candidate.Policies = policy
-			candidate.Rules = legacyRules
-			candidate.Selection = selection
-		}
-		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
-		switch {
-		case profileErr != nil:
-			if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
-				candidate.Enabled = false
-			} else {
-				return dynamic.Profile{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
-			}
-		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
-			candidate.Enabled = false
-		default:
-			// The launched model identifies which provider windows belong to this
-			// candidate, so a window scoped to another model cannot be its usage.
-			candidate.ModelID = strings.TrimSpace(concrete.Model)
-		}
-		if candidate.Enabled && r.bindingResolver != nil {
-			binding := profileCredentialBindingDescriptor(concrete)
-			candidate.BindingKey = dynamic.ResourceKey(
-				dynamic.ScopeCredential,
-				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
-			)
+		candidate, err := r.resolveDynamicCandidate(ctx, route, remoteExecution)
+		if err != nil {
+			return dynamic.Profile{}, err
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil
+}
+
+// resolveDynamicCandidate turns one saved route into a runtime candidate. A
+// deleted or disabled concrete profile leaves the row present but disabled, so
+// the tier layout and its numbering survive an operator removing a model.
+func (r *ProfileExecutionResolver) resolveDynamicCandidate(
+	ctx context.Context,
+	route agentsettingsmodels.DynamicAgentRoute,
+	remoteExecution bool,
+) (dynamic.Candidate, error) {
+	candidate := dynamic.Candidate{
+		ID: route.ExecutionProfileID, Enabled: route.Enabled,
+		BindingKey:      dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+		RemoteExecution: remoteExecution,
+	}
+	if route.RulesJSON != "" {
+		policy, legacyRules, selection, err := decodeDynamicRoutePolicy(route.RulesJSON)
+		if err != nil {
+			return dynamic.Candidate{}, fmt.Errorf(
+				"decode dynamic route %s: %w", route.ExecutionProfileID, err)
+		}
+		candidate.Policies = policy
+		candidate.Rules = legacyRules
+		candidate.Selection = selection
+	}
+	concrete, err := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
+	switch {
+	case err != nil:
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, store.ErrAgentProfileDeleted) {
+			return dynamic.Candidate{}, fmt.Errorf(
+				"load dynamic candidate %s: %w", route.ExecutionProfileID, err)
+		}
+		candidate.Enabled = false
+	case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
+		candidate.Enabled = false
+	default:
+		// The launched model identifies which provider windows belong to this
+		// candidate, so a window scoped to another model cannot be its usage.
+		candidate.ModelID = strings.TrimSpace(concrete.Model)
+	}
+	if candidate.Enabled && r.bindingResolver != nil {
+		candidate.BindingKey = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(
+				profileCredentialBindingDescriptor(concrete), route.ExecutionProfileID,
+			),
+		)
+	}
+	return candidate, nil
 }
 
 // decodeDynamicRoutePolicy splits the stored document into the failure-policy

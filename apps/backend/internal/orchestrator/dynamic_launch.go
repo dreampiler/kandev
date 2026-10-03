@@ -511,6 +511,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		SessionID: session.ID, LogicalProfileID: session.AgentProfileID,
 		Decision: decision, Prompt: options.Prompt,
 		PriorACPSession: session.DownstreamACPSessionID,
+		ExecutorID:      session.ExecutorID,
 	}
 	if prebuiltContinuation != nil {
 		selected.PrebuiltContinuation = prebuiltContinuation
@@ -813,7 +814,7 @@ func (s *Service) reevaluateDynamicModelForNewTurn(
 	state dynamicruntime.RouteState,
 ) (dynamicruntime.RouteDecision, error) {
 	decision, err := s.profileExecutionResolver.ReevaluateForNewTurn(
-		ctx, session.ID, session.AgentProfileID, state.Generation,
+		ctx, session.ID, session.AgentProfileID, state.Generation, session.ExecutorID,
 	)
 	if err != nil {
 		return dynamicruntime.RouteDecision{}, err

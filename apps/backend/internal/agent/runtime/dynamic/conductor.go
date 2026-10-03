@@ -45,6 +45,20 @@ type DownstreamExecutionLoader interface {
 
 type ProfileLoader interface {
 	LoadDynamicProfile(context.Context, string) (Profile, error)
+	// LoadDynamicProfileForExecutor loads the profile with the execution
+	// environment that will run it, so a remote session's candidates are not
+	// scored from the backend host's provider account.
+	LoadDynamicProfileForExecutor(context.Context, string, string) (Profile, error)
+}
+
+// loadProfile prefers the executor-aware load so the execution environment
+// reaches usage attribution, and falls back to the plain load for a loader that
+// does not implement it.
+func (c *Conductor) loadProfile(ctx context.Context, logicalProfileID, executorID string) (Profile, error) {
+	if executorID != "" {
+		return c.profiles.LoadDynamicProfileForExecutor(ctx, logicalProfileID, executorID)
+	}
+	return c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
 }
 
 type ConductorOption func(*Conductor)
@@ -88,6 +102,11 @@ type ConductorLaunch struct {
 	Prompt             string
 	PriorACPSession    string
 	Continuation       ContinuationInput
+	// ExecutorID is the session's executor. It decides whether the candidates run
+	// on this host, where the host's provider credentials are their own account,
+	// or somewhere remote, where reading host usage would borrow another
+	// account's consumption. Empty keeps the host default.
+	ExecutorID string
 }
 
 // ConductorSelectedLaunch hands the conductor a route that was already
@@ -102,6 +121,9 @@ type ConductorSelectedLaunch struct {
 	PriorACPSession      string
 	Continuation         ContinuationInput
 	PrebuiltContinuation *Continuation
+	// ExecutorID carries the same execution-environment meaning as
+	// ConductorLaunch.ExecutorID.
+	ExecutorID string
 }
 
 type ConductorResult struct {
@@ -114,7 +136,7 @@ func (c *Conductor) Launch(ctx context.Context, request ConductorLaunch) (Conduc
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.ExecutorID)
 	if err != nil {
 		return ConductorResult{}, err
 	}
@@ -147,7 +169,7 @@ func (c *Conductor) LaunchSelected(ctx context.Context, request ConductorSelecte
 	if c.engine == nil || c.profiles == nil || c.downstream == nil {
 		return ConductorResult{}, errors.New("dynamic conductor is not configured")
 	}
-	profile, err := c.profiles.LoadDynamicProfile(ctx, request.LogicalProfileID)
+	profile, err := c.loadProfile(ctx, request.LogicalProfileID, request.ExecutorID)
 	if err != nil {
 		return ConductorResult{}, err
 	}

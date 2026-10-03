@@ -114,7 +114,14 @@ func (s *dynamicUsageSnapshot) automaticScore(
 	candidate dynamicruntime.Candidate,
 	observedAt time.Time,
 ) dynamicruntime.PaceScore {
-	if s.usage == nil {
+	// AC-003.3: automatic usage may only answer for a candidate whose execution
+	// is the backend host, because that is the only place whose provider
+	// credentials are the candidate's own account. A container, SSH or
+	// Kubernetes execution authenticates somewhere else, so the host's reading
+	// is another account's consumption and the answer is unknown rather than a
+	// confident wrong number. Manual windows are unaffected: they are summed
+	// from the task ledger by concrete candidate, not read from host credentials.
+	if s.usage == nil || candidate.RemoteExecution {
 		return dynamicruntime.PaceScore{ObservedAt: observedAt}
 	}
 	observed, err := s.usage.GetUsage(ctx, candidate.ID)
