@@ -48,6 +48,7 @@ export type {
   ThreadViewDraftApi,
   LspStatusLocation,
   LastSeenDisplay,
+  OfficeOverviewScope,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,

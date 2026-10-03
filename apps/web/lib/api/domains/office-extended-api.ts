@@ -1,5 +1,6 @@
 import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type { DashboardData, WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
+import type { OverviewSections } from "@/lib/state/slices/office/overview-types";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
 import type { RawActivityEntry } from "./office-activity-normalize";
@@ -603,7 +604,7 @@ export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {
   return fetchJson<DashboardData>(`${BASE}/workspaces/${workspaceId}/dashboard`, options);
 }
 
-export type WorkspaceAggregateWire = {
+export type WorkspaceAggregateWire = OverviewSections & {
   workspaces: WorkspaceAggregateEntry[];
   recent_activity: RawActivityEntry[];
 };

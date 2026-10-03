@@ -14,6 +14,7 @@ import type {
   ToolStatus,
   LspStatusLocation,
   LastSeenDisplay,
+  OfficeOverviewScope,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -489,6 +490,7 @@ export type UserSettingsState = {
   terminalFontSize: number | null;
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
+  officeOverviewScope: OfficeOverviewScope;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   sidebarHoverEnabled: boolean;

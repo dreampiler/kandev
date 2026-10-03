@@ -1,4 +1,4 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getWorkspaceAggregate = vi.hoisted(() => vi.fn());
@@ -32,6 +32,22 @@ const response = {
   recent_activity: [],
 };
 
+// The sections an aggregate without overview data normalizes to.
+const emptySections = {
+  scope: "office",
+  generated_at: undefined,
+  compute_ms: undefined,
+  system: undefined,
+  models: [],
+  blocked_accounts: [],
+  last_24h: [],
+  needs_human: [],
+};
+
+function setVisibility(state: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+}
+
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
   const promise = new Promise<T>((res) => {
@@ -47,6 +63,8 @@ describe("useWorkspaceAggregate", () => {
   });
 
   afterEach(() => {
+    cleanup();
+    setVisibility("visible");
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -62,6 +80,7 @@ describe("useWorkspaceAggregate", () => {
     expect(setWorkspaceAggregate).toHaveBeenCalledWith({
       workspaces: response.workspaces,
       recentActivity: [],
+      sections: emptySections,
     });
     expect(getWorkspaceAggregate).toHaveBeenCalledTimes(1);
 
@@ -138,6 +157,59 @@ describe("useWorkspaceAggregate", () => {
     expect(setWorkspaceAggregate).toHaveBeenCalledWith({
       workspaces: [{ ...response.workspaces[0], name: "Current workspace" }],
       recentActivity: [],
+      sections: emptySections,
     });
+  });
+});
+
+describe("useWorkspaceAggregate visibility and sections", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    getWorkspaceAggregate.mockResolvedValue(response);
+  });
+
+  afterEach(() => {
+    cleanup();
+    setVisibility("visible");
+    vi.useRealTimers();
+    vi.clearAllMocks();
+  });
+
+  it("makes no requests while the page is hidden and refreshes once it is shown", async () => {
+    renderHook(() => useWorkspaceAggregate());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(getWorkspaceAggregate).toHaveBeenCalledTimes(1);
+
+    setVisibility("hidden");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_000);
+    });
+    expect(getWorkspaceAggregate).toHaveBeenCalledTimes(1);
+
+    setVisibility("visible");
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await Promise.resolve();
+    });
+    expect(getWorkspaceAggregate).toHaveBeenCalledTimes(2);
+  });
+
+  it("stores the overview sections served with the aggregate", async () => {
+    getWorkspaceAggregate.mockResolvedValueOnce({
+      ...response,
+      scope: "reachable",
+      system: { running_sessions: 2 },
+      needs_human: [{ kind: "question", id: "p1" }],
+    });
+    renderHook(() => useWorkspaceAggregate());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const stored = setWorkspaceAggregate.mock.calls[0][0];
+    expect(stored.sections.scope).toBe("reachable");
+    expect(stored.sections.system).toEqual({ running_sessions: 2 });
+    expect(stored.sections.needs_human).toHaveLength(1);
   });
 });
