@@ -31,7 +31,7 @@ Four owner-approved outcomes, recorded 2026-10-03:
 | --- | --- | --- | --- |
 | Tear down runtimes for terminal sessions | REQ-001 | WO-01 | delivered |
 | Stop recovery re-adopting terminal sessions | REQ-002 | WO-01 | delivered |
-| Show per-session process and memory footprint | REQ-003 | WO-02 | not started |
+| Show per-session process and memory footprint | REQ-003 | WO-02 | delivered |
 | Verify and repair descendant reclamation | REQ-004 | WO-01 | closed with evidence |
 
 Explicitly withdrawn from the earlier draft, on owner instruction:
@@ -46,7 +46,7 @@ None of these is a pending decision. They were declined.
 ## Work packages
 
 - [x] [WO-01: Terminal-session reclaim and recovery exclusion](task-01-terminal-reclaim.md) (done)
-- [ ] [WO-02: Per-session footprint projection](task-02-runtime-footprint-projection.md) (pending)
+- [x] [WO-02: Per-session footprint projection](task-02-runtime-footprint-projection.md) (done)
 
 ### WO-01 — Terminal-session reclaim and recovery exclusion
 
@@ -69,19 +69,19 @@ a live process" and no longer describe the behaviour.
 
 ### WO-02 — Per-session footprint projection
 
-Not started. Covers REQ-003.
+Delivered. Covers REQ-003.
 
-This is a separate package because it is a capability addition rather than a
-defect fix, and it carries web UI work with a mobile-parity obligation. It is not
-delivered by WO-01 and must not be folded into a fix branch.
+This shipped as its own commits on the same branch rather than inside WO-01, because it is
+a capability addition rather than a defect fix and it carries web UI work with a
+mobile-parity obligation. Folding it into a fix commit would have hidden a large
+surface behind a small bug fix.
 
 ## Dependency order
 
 WO-01 has no dependency and is delivered.
 
-WO-02 depends on nothing and may start independently. Its first step is to
-re-verify the attribution it will display, because WO-01 changes what is retained
-and therefore changes the numbers it should be read against.
+WO-02 landed after WO-01 and therefore reports the post-reclaim figures, which is the
+state an operator will actually read.
 
 ## Verification performed for WO-01
 

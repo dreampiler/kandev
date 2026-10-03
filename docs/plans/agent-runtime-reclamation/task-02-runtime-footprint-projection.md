@@ -1,7 +1,7 @@
 ---
 id: "02-runtime-footprint-projection"
 title: "Per-session runtime footprint projection"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-terminal-reclaim"]
 plan: "plan.md"
@@ -20,7 +20,7 @@ system_design:
 
 # WO-02 — Per-Session Footprint Projection
 
-**State:** not started
+**State:** delivered
 **Requirements:** REQ-EXECUTORS-RUNTIME-RECLAIM-003
 **Branch:** to be created
 
@@ -31,6 +31,10 @@ investigation that produced this initiative needed a read-only, session-attribut
 process and memory observation, and had to reconstruct attribution from the
 database and the host process table by hand. That reconstruction is the evidence
 this work order removes.
+
+## Delivered
+
+Delivered in \kd/agent-runtime-terminal-reclaim\: agentctl per-platform owned-process measurement, the control-server route, the backend control client, lifecycle session attribution, the single expvar registry, the workspace-scoped HTTP endpoint, and the web card with six-locale copy and focused mobile Playwright coverage.
 
 ## Scope
 
@@ -74,7 +78,12 @@ Re-verify the attribution the projection will display. WO-01 changes which
 runtimes are retained, so the expected numbers after this work lands differ from
 the numbers in the requirements document, which were measured before it.
 
+## Validation actually run
+
+See the PR body for the exact commands and results. Narrowly: \go build ./...\ clean; footprint and reclaim tests pass in every touched package; \pnpm run typecheck\ clean; \pnpm run lint\ clean; \pnpm run i18n:check\ unchanged from base at 448 unreferenced catalog entries, all thirteen new keys referenced; 13 focused web unit/component tests pass.
+
 ## Validation
+
 
 Backend:
 
