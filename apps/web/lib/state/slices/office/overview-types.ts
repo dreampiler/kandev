@@ -92,6 +92,7 @@ export type OverviewEvent = {
   kind: OverviewEventKind;
   at: string;
   workspace_id?: string;
+  automation_id?: string;
   task_id?: string;
   session_id?: string;
   title?: string;

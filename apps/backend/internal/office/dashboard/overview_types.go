@@ -147,13 +147,14 @@ type OverviewBlockedAccount struct {
 
 // OverviewEvent is one entry in the last-24-hours section.
 type OverviewEvent struct {
-	Kind        string    `json:"kind"`
-	At          time.Time `json:"at"`
-	WorkspaceID string    `json:"workspace_id,omitempty"`
-	TaskID      string    `json:"task_id,omitempty"`
-	SessionID   string    `json:"session_id,omitempty"`
-	Title       string    `json:"title,omitempty"`
-	Detail      string    `json:"detail,omitempty"`
+	Kind         string    `json:"kind"`
+	At           time.Time `json:"at"`
+	WorkspaceID  string    `json:"workspace_id,omitempty"`
+	AutomationID string    `json:"automation_id,omitempty"`
+	TaskID       string    `json:"task_id,omitempty"`
+	SessionID    string    `json:"session_id,omitempty"`
+	Title        string    `json:"title,omitempty"`
+	Detail       string    `json:"detail,omitempty"`
 }
 
 // OverviewHumanItem is one thing waiting on a person.

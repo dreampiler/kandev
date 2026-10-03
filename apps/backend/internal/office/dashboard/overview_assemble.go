@@ -331,6 +331,7 @@ func assembleEvents(
 	for _, row := range automation {
 		events = append(events, OverviewEvent{
 			Kind: overviewEventAutomationRun, At: row.CreatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
+			AutomationID: row.AutomationID,
 		})
 	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })

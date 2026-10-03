@@ -91,3 +91,5 @@ The dashboard service takes its workspace list from the task service. It does no
 ## Observability
 
 The endpoint uses the existing Office HTTP logging and error reporting. It adds no metric or log identity labels.
+
+Automation-created tasks carry `automation_id` in task metadata. The bounded automation-task query extracts only this identifier through the database dialect helper. Automation events open the originating workspace automation settings, while legacy rows without an identifier retain their task link.

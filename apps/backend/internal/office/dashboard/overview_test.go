@@ -126,6 +126,8 @@ func TestOverviewScopeSelectsWorkspaces(t *testing.T) {
 
 func TestOverviewMetricsAndSections(t *testing.T) {
 	deps := overviewFixture(t)
+	insertOverviewTask(t, deps, "t-auto", "ws-office", "COMPLETED", "", time.Now().UTC())
+	mustExec(t, deps, `UPDATE tasks SET origin = 'automation_run', metadata = '{"automation_id":"auto-1"}' WHERE id = 't-auto'`)
 	deps.svc.SetWorkspaceLister(overviewLister())
 	deps.svc.SetOverviewReader(deps.repo)
 	deps.svc.SetOverviewScopeSource(stubScopeSource{scope: dashboard.OverviewScopeReachable})
@@ -167,8 +169,11 @@ func TestOverviewMetricsAndSections(t *testing.T) {
 	kinds := map[string]bool{}
 	for _, ev := range resp.Last24h {
 		kinds[ev.Kind] = true
+		if ev.Kind == "automation_run" && (ev.AutomationID != "auto-1" || ev.WorkspaceID != "ws-office") {
+			t.Fatalf("automation event destination = %+v", ev)
+		}
 	}
-	if !kinds["task_completed"] || !kinds["session_failed"] {
+	if !kinds["task_completed"] || !kinds["session_failed"] || !kinds["automation_run"] {
 		t.Fatalf("last 24h = %+v; want a completion and a session failure", resp.Last24h)
 	}
 }
