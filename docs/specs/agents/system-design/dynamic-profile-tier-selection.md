@@ -85,7 +85,7 @@ Proposed shape (illustrative values, never a seeded operational configuration):
 }
 ```
 
-`tier.mode` is `order|pace|cost`; `on_failure` is
+`tier.mode` is `order|pace|cost|random|round_robin`; `on_failure` is
 `same_tier_next|next_tier`. `model.cost` is `free|subscription|metered` and
 is routing metadata, not an edit to authentication `billing_type`.
 `usage_source` is `automatic|manual|none`. Manual adds `windows[]`, each with
@@ -175,8 +175,13 @@ computing pace. Select the largest pace over applicable available windows.
 Expired windows require refreshed evidence; future starts and zero lengths are
 invalid. Unknown-only candidates sort after known; ties use saved row order.
 
-Free plus explicitly no window yields zero pace. Subscription/metered without
-usable windows stays unknown. Circuit eligibility is checked before ranking,
+A row whose source is automatic, none or absent ranks on the concrete
+profile's account reading when one exists (see the
+[provider account usage design](../../costs/system-design/provider-account-usage.md));
+manual windows override it, and a manual window may count the whole account.
+A provider-exhausted window without a usable span scores at the elapsed floor.
+Without a reading, free plus explicitly no window yields zero pace and
+subscription/metered without usable windows stays unknown. Circuit eligibility is checked before ranking,
 including free candidates. The existing Kandev one-minute or trusted-reset
 backoff remains; no external escalating-backoff policy is imported.
 

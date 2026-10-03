@@ -35,6 +35,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
+		r.initUsageLimitObservationsSchema,
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 )
 
 // SelectionChain is the durable record of one transition chain: the admitted
@@ -142,9 +141,11 @@ func tierIndexOf(tiers []Tier, candidateID string) int {
 // fallback, the direction that was taken. They never embed a credential, a
 // provider response body or a prompt.
 const (
-	ReasonTierOrder = "tier_order"
-	ReasonTierPace  = "tier_pace"
-	ReasonTierCost  = "tier_cost"
+	ReasonTierOrder      = "tier_order"
+	ReasonTierPace       = "tier_pace"
+	ReasonTierCost       = "tier_cost"
+	ReasonTierRandom     = "tier_random"
+	ReasonTierRoundRobin = "tier_round_robin"
 
 	ReasonSuffixSameTier = "_same_tier"
 	ReasonSuffixNextTier = "_next_tier"
@@ -165,6 +166,10 @@ func RouteReason(policy TierPolicy, fallback bool) (string, bool) {
 		base = ReasonTierPace
 	case TierModeCost:
 		base = ReasonTierCost
+	case TierModeRandom:
+		base = ReasonTierRandom
+	case TierModeRoundRobin:
+		base = ReasonTierRoundRobin
 	case TierModeOrder:
 	default:
 		return "", false
@@ -313,8 +318,7 @@ func (w selectionWinner) withPlan(plan selectionPlan) tierSelection {
 // candidate is not marked tried and the ranking simply continues, so a losing
 // probe never costs the chain a candidate.
 func (p selectionPlan) firstSelectable(
-	scores map[string]PaceScore,
-	now time.Time,
+	inputs RankOptions,
 	claim func(Candidate) bool,
 ) selectionWinner {
 	ineligible := make(map[string]string, len(p.ineligible))
@@ -327,9 +331,9 @@ func (p selectionPlan) firstSelectable(
 	}
 	for _, tier := range p.tiers {
 		for {
-			ranked := RankTier(tier, RankOptions{
-				Now: now, Scores: scores, Eligible: ineligible, Excluded: excluded,
-			})
+			options := inputs
+			options.Eligible, options.Excluded = ineligible, excluded
+			ranked := RankTier(tier, options)
 			winner, ok := FirstEligible(ranked)
 			if !ok {
 				break

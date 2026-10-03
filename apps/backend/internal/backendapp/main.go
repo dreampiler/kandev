@@ -1393,8 +1393,7 @@ func startGatewayAndServe(
 	// /agents/:id/utilization endpoint can fetch live utilization data.
 	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
 	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		services.OfficeSvcs.Agents.SetUsageProvider(services.UsageAdapter)
 	}
 
 	// The settings current-choice preview shares the tier runtime's usage
@@ -1402,13 +1401,14 @@ func startGatewayAndServe(
 	// editor and a real selection answer from the same evidence including a
 	// paused binding. The resolver is the same instance routing uses, so a
 	// candidate's binding key resolves identically on both paths.
-	previewSnapshot := newDynamicUsageSnapshot(
-		newUsageProviderAdapter(repos.AgentSettings, agentRegistry), repos.Task, time.Now,
-	)
+	previewSnapshot := newDynamicUsageSnapshot(services.UsageAdapter, repos.Task, time.Now).
+		WithInternalUsage(newAccountUsageReader(services.UsageAdapter, repos.Task)).
+		WithSelectionHistory(routeSelectionHistory{repo: repos.Task})
 	if services.DynamicProfileResolver != nil {
 		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
 	}
 	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
+	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)

@@ -42,8 +42,8 @@ the no-revisit rule applies to automatic transition chains in both layouts.
   bounded tier with consecutive numbering. Moving a row across a tier boundary
   shall clear affected joins instead of implicitly joining unrelated neighbors.
   Reordering within one tier shall retain that tier and its policy.
-- **AC-AGENTS-TIER-SELECTION-001.3:** Each tier shall offer ordered, lowest-pace
-  and lowest-cost selection, and same-tier-next or next-tier-on-failure
+- **AC-AGENTS-TIER-SELECTION-001.3:** Each tier shall offer ordered, lowest-pace,
+  lowest-cost, random and round-robin selection, and same-tier-next or next-tier-on-failure
   direction. Tiers shall always be traversed in list order. There shall be no
   profile-level selection mode. Joining all rows permits whole-list comparison.
 - **AC-AGENTS-TIER-SELECTION-001.4:** Removing, splitting or merging rows shall
@@ -72,16 +72,24 @@ the no-revisit rule applies to automatic transition chains in both layouts.
   usage fraction divided by elapsed window fraction, with elapsed clamped to a
   minimum of 0.05. Window start is reset time minus window length. Multiple
   windows shall use their largest pace; 25% usage at 40% elapsed yields 0.625.
-- **AC-AGENTS-TIER-SELECTION-003.2:** Known pace shall sort before unknown pace;
-  equal values shall retain row order. A free candidate explicitly configured
+- **AC-AGENTS-TIER-SELECTION-003.2:** Known pace with remaining capacity shall
+  sort first, then unknown pace ordered by the account's recorded 24-hour usage,
+  then known exhausted usage; equal known values shall retain row order and
+  candidates tied on unknown usage shall be chosen at random. Random selection
+  picks uniformly among eligible candidates; round-robin selection picks the
+  eligible candidate after the tier's last choice, skipping blocked candidates
+  and continuing after a restart from the route attempt log. A free candidate explicitly configured
   without a window shall have pace zero but shall remain subject to existing
   circuit/backoff restrictions. Missing, expired, invalid or unavailable usage
   shall not be represented as zero usage or unlimited capacity.
 - **AC-AGENTS-TIER-SELECTION-003.3:** Each model row shall offer free,
-  subscription or metered cost classification, automatic usage for Claude and
-  Codex, manual limits, or no usage source. Automatic usage shall match the
-  candidate's actual supported account binding; unavailable bindings shall be
-  reported rather than replaced by another account's usage.
+  subscription or metered cost classification, automatic usage, manual limits,
+  or no usage source. Automatic usage shall match the candidate's actual
+  supported account binding; unavailable bindings shall be reported rather than
+  replaced by another account's usage. Usage belongs to the concrete profile's
+  account ([provider account usage](../../costs/requirements/provider-account-usage.md)),
+  so a row without manual limits ranks on that account's reading whenever one
+  exists; no usage source only decides the free/unknown fallback without one.
 - **AC-AGENTS-TIER-SELECTION-003.4:** Manual limits shall support 5-hour, day,
   week and calendar-month windows, a reset basis, and a positive money or token
   allowance. Kandev-recorded session usage in that window shall determine the

@@ -72,6 +72,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"limits.ghMaxConcurrent":                   {},
 	"limits.gitMaxConcurrent":                  {},
 	"limits.lspMaxConnections":                 {},
+	"limits.openRouterFreeDailyRequests":       {},
 	"messageQueue.maxPerSession":               {},
 	"agentctl.idleTimeout":                     {},
 	"agentctl.idleReaperInterval":              {},
@@ -304,6 +305,7 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultInt("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8)
 	setDefaultInt("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12)
 	setDefaultInt("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8)
+	setDefaultInt("limits.openRouterFreeDailyRequests", &cfg.Limits.OpenRouterFreeDailyRequests, 1000)
 	setDefaultInt("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10)
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
@@ -343,6 +345,9 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyPositiveIntEnv("limits.ghMaxConcurrent", &cfg.Limits.GHMaxConcurrent, 8, envSnapshot, sources)
 	applyPositiveIntEnv("limits.gitMaxConcurrent", &cfg.Limits.GitMaxConcurrent, 12, envSnapshot, sources)
 	applyPositiveIntEnv("limits.lspMaxConnections", &cfg.Limits.LSPMaxConnections, 8, envSnapshot, sources)
+	applyPositiveIntEnv(
+		"limits.openRouterFreeDailyRequests", &cfg.Limits.OpenRouterFreeDailyRequests, 1000, envSnapshot, sources,
+	)
 	applyNonNegativeIntEnv("messageQueue.maxPerSession", &cfg.MessageQueue.MaxPerSession, 10, envSnapshot, sources)
 	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
 	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)

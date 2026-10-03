@@ -82,7 +82,10 @@ type Services struct {
 	ManagedRuntimeSelections managedruntime.SelectionStore
 	DynamicProfileResolver   *agentruntime.ProfileExecutionResolver
 	DynamicBindingResolver   *dynamicruntime.CredentialBindingResolver
-	Task                     *taskservice.Service
+	// UsageAdapter reads concrete profiles' provider usage through one shared
+	// cache for Office utilization, dynamic selection and the settings views.
+	UsageAdapter *usageProviderAdapter
+	Task         *taskservice.Service
 	// Org owns organizations. Always non-nil; Enabled() reports whether the
 	// multi-tenancy feature is on.
 	Org           *org.Service

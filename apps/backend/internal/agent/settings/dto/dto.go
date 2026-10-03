@@ -102,7 +102,7 @@ type DynamicAgentSelectionDTO struct {
 }
 
 type DynamicAgentTierPolicyDTO struct {
-	// Mode is "order", "pace" or "cost"; OnFailure is "same_tier_next" or
+	// Mode is "order", "pace", "cost", "random" or "round_robin"; OnFailure is "same_tier_next" or
 	// "next_tier". Both are a closed set.
 	Mode      string `json:"mode"`
 	OnFailure string `json:"on_failure"`
@@ -125,6 +125,10 @@ type DynamicAgentUsageWindowDTO struct {
 	Unit   string                      `json:"unit"`
 	Limit  string                      `json:"limit"`
 	Reset  *DynamicAgentResetAnchorDTO `json:"reset,omitempty"`
+	// Scope is "candidate" (the default when empty) or "account". An account
+	// window sums the recorded usage of every profile on the same provider
+	// account, for quotas a provider counts across all of the account's models.
+	Scope string `json:"scope,omitempty"`
 }
 
 type DynamicAgentResetAnchorDTO struct {

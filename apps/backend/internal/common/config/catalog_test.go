@@ -149,6 +149,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_GH_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_GIT_MAX_CONCURRENT", class: "catalog"},
 		{envVar: "KANDEV_LSP_MAX_CONNECTIONS", class: "catalog"},
+		{envVar: "KANDEV_OPENROUTER_FREE_DAILY_REQUESTS", class: "catalog"},
 		{envVar: "KANDEV_QUEUE_MAX_PER_SESSION", class: "catalog"},
 		{envVar: "KANDEV_ACP_IDLE_TIMEOUT", class: "catalog"},
 		{envVar: "KANDEV_ACP_IDLE_REAPER_INTERVAL", class: "catalog"},

@@ -20,9 +20,19 @@ const (
 	claudeLabel7Day  = "7-day"
 )
 
+// ClaudeOAuthTokenEnv is the environment variable Claude Code reads a
+// long-lived OAuth token from (`claude setup-token`). A host-run Claude agent
+// inherits it from the Kandev process, so it is that agent's account.
+const ClaudeOAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
+
+const claudeProvider = "anthropic"
+
 // ClaudeUsageClient fetches utilization from the Anthropic OAuth usage API.
+// It authenticates either with a static OAuth token, which it never refreshes
+// or persists, or with the CLI credentials file.
 type ClaudeUsageClient struct {
 	credentialsPath string
+	staticToken     string
 	usageURL        string
 	refreshURL      string
 	httpClient      *http.Client
@@ -38,6 +48,17 @@ func NewClaudeUsageClientWithPath(credentialsPath string) *ClaudeUsageClient {
 	}
 }
 
+// NewClaudeUsageClientWithOAuthToken creates a client for a long-lived OAuth
+// token supplied through the environment rather than the credentials file.
+func NewClaudeUsageClientWithOAuthToken(token string) *ClaudeUsageClient {
+	return &ClaudeUsageClient{
+		staticToken: token,
+		usageURL:    claudeUsageURL,
+		refreshURL:  claudeRefreshURL,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
 // CredentialsPath returns the path this client reads credentials from.
 func (c *ClaudeUsageClient) CredentialsPath() string {
 	return c.credentialsPath
@@ -46,6 +67,9 @@ func (c *ClaudeUsageClient) CredentialsPath() string {
 // HasSubscriptionCredentials reports whether the credentials file exists and
 // carries an OAuth (subscription) token.
 func (c *ClaudeUsageClient) HasSubscriptionCredentials() bool {
+	if c.staticToken != "" {
+		return true
+	}
 	creds, err := c.readCredentials()
 	return err == nil && creds.ClaudeAiOauth != nil && creds.ClaudeAiOauth.AccessToken != ""
 }
@@ -87,16 +111,9 @@ type claudeUsageResponse struct {
 
 // FetchUsage implements ProviderUsageClient.
 func (c *ClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
-	creds, err := c.readCredentials()
+	token, plan, err := c.accessToken(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("claude usage: read credentials: %w", err)
-	}
-	if creds.ClaudeAiOauth == nil {
-		return nil, fmt.Errorf("claude usage: no claudeAiOauth entry in %s", c.credentialsPath)
-	}
-	token, err := c.freshAccessToken(ctx, creds.ClaudeAiOauth)
-	if err != nil {
-		return nil, fmt.Errorf("claude usage: %w", err)
+		return nil, err
 	}
 
 	body, err := c.getUsage(ctx, token)
@@ -106,16 +123,36 @@ func (c *ClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, err
 
 	var raw claudeUsageResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("claude usage: decode: %w", err)
+		return nil, &FetchError{Provider: claudeProvider, Reason: FailureDecode, Err: err}
 	}
 
 	now := time.Now()
 	return &ProviderUsage{
-		Provider:  "anthropic",
-		Plan:      creds.ClaudeAiOauth.SubscriptionType,
+		Provider:  claudeProvider,
+		Plan:      plan,
 		Windows:   claudeWindows(raw, now),
 		FetchedAt: now,
 	}, nil
+}
+
+// accessToken resolves the bearer token and the plan it belongs to. A static
+// token is used as given; the credentials file is refreshed when it expires.
+func (c *ClaudeUsageClient) accessToken(ctx context.Context) (token string, plan string, err error) {
+	if c.staticToken != "" {
+		return c.staticToken, "", nil
+	}
+	creds, err := c.readCredentials()
+	if err != nil {
+		return "", "", &FetchError{Provider: claudeProvider, Reason: FailureCredentialMissing, Err: err}
+	}
+	if creds.ClaudeAiOauth == nil || creds.ClaudeAiOauth.AccessToken == "" {
+		return "", "", &FetchError{Provider: claudeProvider, Reason: FailureCredentialMissing}
+	}
+	token, err = c.freshAccessToken(ctx, creds.ClaudeAiOauth)
+	if err != nil {
+		return "", "", &FetchError{Provider: claudeProvider, Reason: FailureUnauthorized, Err: err}
+	}
+	return token, creds.ClaudeAiOauth.SubscriptionType, nil
 }
 
 func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte, error) {
@@ -128,16 +165,16 @@ func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte,
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("claude usage: http: %w", err)
+		return nil, &FetchError{Provider: claudeProvider, Reason: FailureNetwork, Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("claude usage: read body: %w", err)
+		return nil, &FetchError{Provider: claudeProvider, Reason: FailureNetwork, Err: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("claude usage: unexpected status %d: %s", resp.StatusCode, body)
+		return nil, statusFailure(claudeProvider, resp.StatusCode)
 	}
 	return body, nil
 }

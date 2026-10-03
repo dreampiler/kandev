@@ -2,7 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"math/big"
+	"math/rand/v2"
 	"time"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
@@ -35,10 +37,26 @@ type manualWindowTotalsReader interface {
 // known pace, so an unavailable reading can never make a busy candidate look
 // idle.
 type dynamicUsageSnapshot struct {
-	usage  *usageProviderAdapter
-	manual manualWindowTotalsReader
-	health PreviewHealthReader
-	now    func() time.Time
+	usage    *usageProviderAdapter
+	manual   manualWindowTotalsReader
+	health   PreviewHealthReader
+	internal *accountUsageReader
+	history  dynamicruntime.SelectionHistory
+	now      func() time.Time
+}
+
+// WithInternalUsage orders candidates with unknown provider usage by Kandev's
+// own recorded account usage instead of leaving them indistinguishable.
+func (s *dynamicUsageSnapshot) WithInternalUsage(reader *accountUsageReader) *dynamicUsageSnapshot {
+	s.internal = reader
+	return s
+}
+
+// WithSelectionHistory lets a preview continue a round-robin tier from the
+// candidate the live engine chose last.
+func (s *dynamicUsageSnapshot) WithSelectionHistory(history dynamicruntime.SelectionHistory) *dynamicUsageSnapshot {
+	s.history = history
+	return s
 }
 
 // PreviewHealthReader reports the route-health verdict for one candidate's own
@@ -78,7 +96,11 @@ func (s *dynamicUsageSnapshot) UsageSnapshot(
 	observedAt := s.now()
 	scores := make(map[string]dynamicruntime.PaceScore, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
-		scores[candidate.ID] = s.scoreFor(ctx, candidate, observedAt)
+		score := s.scoreFor(ctx, candidate, observedAt)
+		if !score.Known && s.internal != nil {
+			score.Internal = s.internal.Internal(ctx, candidate.ID, observedAt)
+		}
+		scores[candidate.ID] = score
 	}
 	return scores, nil
 }
@@ -88,32 +110,38 @@ func (s *dynamicUsageSnapshot) scoreFor(
 	candidate dynamicruntime.Candidate,
 	observedAt time.Time,
 ) dynamicruntime.PaceScore {
-	switch candidate.Selection.Model.UsageSource {
-	case dynamicruntime.UsageAutomatic:
-		return s.automaticScore(ctx, candidate, observedAt)
-	case dynamicruntime.UsageManual:
+	source := candidate.Selection.Model.UsageSource
+	if source == dynamicruntime.UsageManual {
 		return s.manualScore(ctx, candidate, observedAt)
-	default:
-		// No usage source configured: free candidates that are explicitly
-		// windowless are a known zero, everything else is unknown.
-		if candidate.Selection.Model.Cost == dynamicruntime.CostFree {
-			return dynamicruntime.PaceScore{
-				Known: true, Complete: true, Controlling: freeNoWindowLabel, ObservedAt: observedAt,
-			}
-		}
+	}
+	// Usage is a property of the concrete profile's account, so any row that
+	// does not override it with manual windows ranks on the profile's own
+	// reading when one exists.
+	if score, ok := s.profileScore(ctx, candidate, observedAt); ok {
+		return score
+	}
+	if source == dynamicruntime.UsageAutomatic {
 		return dynamicruntime.PaceScore{ObservedAt: observedAt}
 	}
+	// Without a reading, a free candidate that is explicitly windowless is a
+	// known zero, and everything else is unknown.
+	if candidate.Selection.Model.Cost == dynamicruntime.CostFree {
+		return dynamicruntime.PaceScore{
+			Known: true, Complete: true, Controlling: freeNoWindowLabel, ObservedAt: observedAt,
+		}
+	}
+	return dynamicruntime.PaceScore{ObservedAt: observedAt}
 }
 
 const freeNoWindowLabel = "no_usage_window"
 
-// automaticScore reads the candidate's own account binding. It never borrows
-// another profile's usage: an unavailable binding stays unknown.
-func (s *dynamicUsageSnapshot) automaticScore(
+// profileScore reads the candidate's own account binding. It never borrows
+// another profile's usage: an unavailable binding reports no reading.
+func (s *dynamicUsageSnapshot) profileScore(
 	ctx context.Context,
 	candidate dynamicruntime.Candidate,
 	observedAt time.Time,
-) dynamicruntime.PaceScore {
+) (dynamicruntime.PaceScore, bool) {
 	// AC-003.3: automatic usage may only answer for a candidate whose execution
 	// is the backend host, because that is the only place whose provider
 	// credentials are the candidate's own account. A container, SSH or
@@ -122,29 +150,38 @@ func (s *dynamicUsageSnapshot) automaticScore(
 	// confident wrong number. Manual windows are unaffected: they are summed
 	// from the task ledger by concrete candidate, not read from host credentials.
 	if s.usage == nil || candidate.RemoteExecution {
-		return dynamicruntime.PaceScore{ObservedAt: observedAt}
+		return dynamicruntime.PaceScore{}, false
 	}
-	observed, err := s.usage.GetUsage(ctx, candidate.ID)
-	if err != nil || observed == nil || len(observed.Windows) == 0 {
-		return dynamicruntime.PaceScore{ObservedAt: observedAt}
+	observed := s.usage.ProfileUsage(ctx, candidate.ID)
+	if observed.State != profileUsageOK || observed.Usage == nil {
+		return dynamicruntime.PaceScore{}, false
 	}
-	return dynamicruntime.PaceFromWindows(
-		observedAt, applicableAutomaticWindows(candidate.ModelID, observed),
-	)
+	windows := applicableAutomaticWindows(observed.ModelID, observed.Usage)
+	if len(windows) == 0 {
+		return dynamicruntime.PaceScore{}, false
+	}
+	score := dynamicruntime.PaceFromWindows(observedAt, windows)
+	if !score.Known {
+		return dynamicruntime.PaceScore{}, false
+	}
+	return score, true
 }
 
 // applicableAutomaticWindows keeps only the windows that are this candidate's own
 // usage. A window scoped to a different model is that model's consumption, and a
 // window with no usable length or reset is not a measurement at all, so both are
-// skipped rather than borrowed. An account-wide window applies to whichever model
-// the candidate launches.
+// skipped rather than borrowed, unless the provider reports it exhausted: an
+// exhausted account is known to be busy even when its reset is not published.
+// An account-wide window applies to whichever model the candidate launches.
 func applicableAutomaticWindows(
 	candidateModelID string,
 	observed *agentusage.ProviderUsage,
 ) []dynamicruntime.WindowObservation {
 	windows := make([]dynamicruntime.WindowObservation, 0, len(observed.Windows))
 	for _, window := range observed.Windows {
-		if !window.UsableFor(candidateModelID) {
+		usable := window.UsableFor(candidateModelID)
+		exhaustedAccountWindow := window.Exhausted() && window.ModelID == "" && !window.AmbiguousModelScope
+		if !usable && !exhaustedAccountWindow {
 			continue
 		}
 		fraction := window.UtilizationPct / 100
@@ -154,6 +191,7 @@ func applicableAutomaticWindows(
 			StartAt:       window.StartAt,
 			ResetAt:       window.ResetAt,
 			ObservedAt:    observed.FetchedAt,
+			Exhausted:     window.Exhausted(),
 		})
 	}
 	return windows
@@ -213,7 +251,7 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 	if resolved.Reset.Before(end) {
 		end = resolved.Reset
 	}
-	totals, err := s.manual.GetManualWindowUsage(ctx, executionProfileID, resolved.Start, end)
+	totals, err := s.recordedTotals(ctx, executionProfileID, configured, resolved.Start, end)
 	if err != nil {
 		return dynamicruntime.WindowObservation{}, false
 	}
@@ -230,6 +268,45 @@ func (s *dynamicUsageSnapshot) resolveManualWindow(
 		Partial:       !complete,
 	}, true
 }
+
+// accountWindowTotalsReader sums several profiles' recorded usage, which an
+// account-scoped window needs. It is optional so a narrower reader still serves
+// candidate-scoped windows.
+type accountWindowTotalsReader interface {
+	GetManualWindowUsageForProfiles(
+		ctx context.Context,
+		executionProfileIDs []string,
+		start time.Time,
+		end time.Time,
+	) (sqliterepo.ManualWindowUsage, error)
+}
+
+// recordedTotals sums the window's recorded usage. An account window counts
+// every profile bound to the candidate's provider account; when the account
+// cannot be resolved the window has no answer rather than silently shrinking
+// to the candidate's own share of the quota.
+func (s *dynamicUsageSnapshot) recordedTotals(
+	ctx context.Context,
+	executionProfileID string,
+	configured dynamicruntime.UsageWindow,
+	start time.Time,
+	end time.Time,
+) (sqliterepo.ManualWindowUsage, error) {
+	if !configured.AccountScoped() {
+		return s.manual.GetManualWindowUsage(ctx, executionProfileID, start, end)
+	}
+	reader, ok := s.manual.(accountWindowTotalsReader)
+	if !ok || s.usage == nil {
+		return sqliterepo.ManualWindowUsage{}, errAccountWindowUnavailable
+	}
+	profileIDs, err := s.usage.AccountProfileIDs(ctx, executionProfileID)
+	if err != nil {
+		return sqliterepo.ManualWindowUsage{}, err
+	}
+	return reader.GetManualWindowUsageForProfiles(ctx, profileIDs, start, end)
+}
+
+var errAccountWindowUnavailable = errors.New("account usage window cannot be resolved")
 
 // recordedFraction converts a recorded total into a fraction of the allowance.
 // Money uses the ledger's USD subcent precision, so the limit is scaled into that
@@ -292,7 +369,21 @@ func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
 			merged[candidate.ID] = dynamicruntime.IneligibleCircuit
 		}
 	}
-	return dynamicruntime.PreviewSelection(profile, scores, merged, "", dynamicruntime.SelectionChain{}, now)
+	inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
+	return dynamicruntime.PreviewSelectionWith(profile, inputs, merged, "", dynamicruntime.SelectionChain{}, now)
+}
+
+// lastPicked reads the round-robin history for a saved profile. A draft that
+// has never been saved has no history and starts from its first row.
+func (s *dynamicUsageSnapshot) lastPicked(ctx context.Context, profile dynamicruntime.Profile) map[string]string {
+	if s.history == nil || profile.ID == "" {
+		return nil
+	}
+	last, err := s.history.LastSelections(ctx, profile.ID)
+	if err != nil {
+		return nil
+	}
+	return dynamicruntime.LastPickedByTier(profile, last)
 }
 
 // circuitOpen answers route health for one candidate. Without a health reader the

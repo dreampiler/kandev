@@ -27,6 +27,10 @@ type WindowObservation struct {
 	// ledger total with an unpriced or incompletely measured event. The figure
 	// stays visible as a lower bound but must not produce a pace.
 	Partial bool
+	// Exhausted marks a window the provider reports as used up. When the window
+	// has no usable span, its usage is still a known fact: the candidate is
+	// scored as busy as possible rather than left unknown.
+	Exhausted bool
 }
 
 func (w WindowObservation) partial() bool { return w.Partial && !w.ExplicitNoWindow }
@@ -51,7 +55,22 @@ type PaceScore struct {
 	// divided the usage fraction, so a preview can explain the number.
 	FloorApplied bool
 	ObservedAt   time.Time
+	// Internal is Kandev's own recorded usage for the candidate's account. It
+	// is a lower bound rather than a provider figure, so it only orders
+	// candidates whose provider usage is unknown.
+	Internal InternalUsage
 }
+
+// InternalUsage is recorded usage over a trailing window. Known is false when
+// the ledger could not be read, which is different from recorded zero usage.
+type InternalUsage struct {
+	Known  bool
+	Turns  int64
+	Tokens int64
+}
+
+// exhausted reports a known reading at or past its allowance.
+func (s PaceScore) exhausted() bool { return s.Known && s.UsageFraction >= 1 }
 
 // PaceFromWindows selects the largest pace across the applicable windows.
 //
@@ -113,7 +132,10 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 	if window.UsageFraction == nil {
 		return PaceScore{}, false
 	}
-	if !window.ResetAt.After(window.StartAt) || !now.Before(window.ResetAt) || now.Before(window.StartAt) {
+	if !window.ResetAt.After(window.StartAt) {
+		return exhaustedWithoutSpan(window)
+	}
+	if !now.Before(window.ResetAt) || now.Before(window.StartAt) {
 		return PaceScore{}, false
 	}
 	elapsed := now.Sub(window.StartAt).Seconds() / window.ResetAt.Sub(window.StartAt).Seconds()
@@ -129,6 +151,26 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 		HasRecord:       true,
 		FloorApplied:    elapsed < minPaceElapsed,
 		ObservedAt:      window.ObservedAt,
+	}, true
+}
+
+// exhaustedWithoutSpan scores a used-up window whose elapsed share is unknown.
+// The elapsed floor is the most conservative divisor, so the candidate ranks
+// behind every candidate whose window still has capacity.
+func exhaustedWithoutSpan(window WindowObservation) (PaceScore, bool) {
+	if !window.Exhausted {
+		return PaceScore{}, false
+	}
+	usage := math.Max(*window.UsageFraction, 1)
+	return PaceScore{
+		Known:         true,
+		Complete:      true,
+		Pace:          usage / minPaceElapsed,
+		Controlling:   window.Label,
+		UsageFraction: usage,
+		HasRecord:     true,
+		FloorApplied:  true,
+		ObservedAt:    window.ObservedAt,
 	}, true
 }
 
@@ -183,6 +225,23 @@ type RankOptions struct {
 	Scores   map[string]PaceScore
 	Eligible map[string]string
 	Excluded map[string]bool
+	// Pick returns an index in [0, n). Random and tie-breaking choices use it;
+	// nil always picks the first, which keeps a ranking reproducible.
+	Pick func(n int) int
+	// LastPicked maps a tier head ID to the candidate that tier chose last, for
+	// round-robin selection.
+	LastPicked map[string]string
+}
+
+func (o RankOptions) pick(n int) int {
+	if o.Pick == nil || n <= 1 {
+		return 0
+	}
+	index := o.Pick(n)
+	if index < 0 || index >= n {
+		return 0
+	}
+	return index
 }
 
 // RankTier orders the eligible candidates of one tier using the tier's own
@@ -225,6 +284,7 @@ func RankTier(tier Tier, options RankOptions) []RankCandidate {
 		})
 	}
 	stableSortRanked(ranked, tier.Policy.Mode)
+	promoteChoice(ranked, tier, options)
 	return ranked
 }
 
@@ -254,15 +314,49 @@ func stableSortRanked(ranked []RankCandidate, mode TierMode) {
 	insertionSort(ranked, less)
 }
 
-func rankByPace(left, right RankCandidate) bool {
-	if left.Score.Known != right.Score.Known {
-		// Known pace is preferred; an unknown candidate is not a zero.
-		return left.Score.Known
+// Pace groups order candidates by what is known about them: a known reading
+// with capacity, then unknown provider usage, then a known exhausted reading.
+// An unknown candidate is never treated as idle, and an exhausted one is never
+// preferred over a candidate that might still have capacity.
+const (
+	paceGroupKnown = iota
+	paceGroupUnknown
+	paceGroupExhausted
+)
+
+func paceGroup(score PaceScore) int {
+	switch {
+	case score.exhausted():
+		return paceGroupExhausted
+	case score.Known:
+		return paceGroupKnown
+	default:
+		return paceGroupUnknown
 	}
-	if !left.Score.Known || !right.Score.Known {
-		return false
+}
+
+func rankByPace(left, right RankCandidate) bool {
+	leftGroup, rightGroup := paceGroup(left.Score), paceGroup(right.Score)
+	if leftGroup != rightGroup {
+		return leftGroup < rightGroup
+	}
+	if leftGroup == paceGroupUnknown {
+		return internalLess(left.Score.Internal, right.Score.Internal)
 	}
 	return left.Score.Pace < right.Score.Pace
+}
+
+// internalLess orders unknown candidates by Kandev's recorded usage: fewer
+// turns first, then fewer tokens. A candidate whose ledger could not be read
+// sorts after one with a reading.
+func internalLess(left, right InternalUsage) bool {
+	if left.Known != right.Known {
+		return left.Known
+	}
+	if left.Turns != right.Turns {
+		return left.Turns < right.Turns
+	}
+	return left.Tokens < right.Tokens
 }
 
 func rankByCost(left, right RankCandidate) bool {

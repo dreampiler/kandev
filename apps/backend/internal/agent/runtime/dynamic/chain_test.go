@@ -252,12 +252,14 @@ func TestDynamicTierTransitionChainStopsBeforeRanking(t *testing.T) {
 	}
 }
 
-func TestDynamicTierTransitionChainIgnoredUsageNeverWinsPace(t *testing.T) {
+func TestDynamicTierTransitionChainUnknownUsageChoosesAmongPeers(t *testing.T) {
 	engine := NewEngine(
 		WithClock(func() time.Time { return time.Unix(1000, 0) }),
-		// A failed refresh is unknown usage, not a zero: a must not win by
-		// looking idle.
+		// A failed refresh is unknown usage, not a zero, so neither candidate
+		// wins by looking idle: the tie is broken by the random source instead
+		// of always sending new sessions to the first row.
 		WithUsageSnapshotProvider(failingUsage{}),
+		WithRandomPick(func(n int) int { return n - 1 }),
 	)
 	profile := Profile{
 		ID: "unknown-usage", Version: 1,
@@ -270,8 +272,8 @@ func TestDynamicTierTransitionChainIgnoredUsageNeverWinsPace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
-	if decision.ExecutionProfileID != "a" {
-		t.Fatalf("decision = %q, want saved row order for unknown usage", decision.ExecutionProfileID)
+	if decision.ExecutionProfileID != "b" {
+		t.Fatalf("decision = %q, want the random draw among unknown peers", decision.ExecutionProfileID)
 	}
 }
 

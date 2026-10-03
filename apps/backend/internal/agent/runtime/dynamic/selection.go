@@ -13,6 +13,11 @@ const (
 	TierModeOrder TierMode = "order"
 	TierModePace  TierMode = "pace"
 	TierModeCost  TierMode = "cost"
+	// TierModeRandom picks uniformly among the tier's eligible candidates.
+	TierModeRandom TierMode = "random"
+	// TierModeRoundRobin picks the eligible candidate after the one the tier
+	// chose last, in saved row order, wrapping around.
+	TierModeRoundRobin TierMode = "round_robin"
 )
 
 type FailureDirection string
@@ -52,7 +57,20 @@ type UsageWindow struct {
 	Limit       string
 	ResetAnchor string
 	Timezone    string
+	// Scope is WindowScopeCandidate or WindowScopeAccount.
+	Scope string
 }
+
+// Manual window scopes. A candidate window counts only the candidate's own
+// recorded usage; an account window counts every profile on the same provider
+// account, because some providers enforce one quota across all of its models.
+const (
+	WindowScopeCandidate = "candidate"
+	WindowScopeAccount   = "account"
+)
+
+// AccountScoped reports whether the window counts the whole account.
+func (w UsageWindow) AccountScoped() bool { return w.Scope == WindowScopeAccount }
 
 // LimitValue parses the allowance exactly. Callers must not treat an unparsable
 // value as zero usage or unlimited capacity.

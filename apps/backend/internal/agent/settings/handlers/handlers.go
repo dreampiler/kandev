@@ -96,6 +96,8 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	// permits it while continuing to block every mutation.
 	api.POST("/agent-profiles/dynamic-preview", cfg, h.httpPreviewDynamicProfile)
 	api.POST("/agent-profiles/:id/dynamic-preview", cfg, h.httpPreviewDynamicProfile)
+	// Provider usage is read-only and served from the shared usage cache.
+	api.GET("/agent-profiles/usage", h.httpListProfileUsage)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

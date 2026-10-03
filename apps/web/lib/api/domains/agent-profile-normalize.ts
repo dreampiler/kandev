@@ -218,12 +218,13 @@ function normalizeDynamicPolicy(
   };
 }
 
-const dynamicTierModes = ["order", "pace", "cost"] as const;
+const dynamicTierModes = ["order", "pace", "cost", "random", "round_robin"] as const;
 const dynamicTierFailureDirections = ["same_tier_next", "next_tier"] as const;
 const dynamicModelCostClasses = ["free", "subscription", "metered"] as const;
 const dynamicModelUsageSources = ["automatic", "manual", "none"] as const;
 const dynamicUsageWindowPeriods = ["five_hour", "day", "week", "month"] as const;
 const dynamicUsageWindowUnits = ["money", "tokens"] as const;
+const dynamicUsageWindowScopes = ["candidate", "account"] as const;
 
 function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
   return typeof value === "string" && (allowed as readonly string[]).includes(value)
@@ -290,6 +291,9 @@ function normalizeDynamicUsageWindow(raw: unknown): DynamicUsageWindow[] {
       unit,
       limit: source.limit,
       reset: { anchor: reset.anchor, timezone: reset.timezone },
+      ...(oneOf(source.scope, dynamicUsageWindowScopes) === "account"
+        ? { scope: "account" as const }
+        : {}),
     },
   ];
 }
@@ -536,6 +540,7 @@ function dynamicSelectionPayload(selection: DynamicAgentSelection) {
               unit: window.unit,
               limit: window.limit,
               reset: { anchor: window.reset.anchor, timezone: window.reset.timezone },
+              ...(window.scope === "account" ? { scope: "account" } : {}),
             })),
           }
         : {}),

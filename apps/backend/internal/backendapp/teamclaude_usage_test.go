@@ -25,12 +25,12 @@ func TestTeamClaudeStatusURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := teamClaudeStatusURL(&settingsmodels.AgentProfile{
-				AgentID: "claude-acp",
+				AgentID: "agent-row-id",
 				EnvVars: []settingsmodels.ProfileEnvVar{
 					{Key: teamClaudeBaseURLEnv, Value: tc.base},
 					{Key: usageProxyVendorEnv, Value: tc.vendor},
 				},
-			})
+			}, claudeACPAgentID)
 			if got != tc.want || ok != tc.ok {
 				t.Fatalf("teamClaudeStatusURL = %q, %v; want %q, %v", got, ok, tc.want, tc.ok)
 			}

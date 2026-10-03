@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -59,8 +61,8 @@ const manualWindowUsageQuery = `
 	 WHERE e.occurred_at >= ?
 	   AND e.occurred_at < ?
 	   AND (
-	     t.execution_profile_id = ?
-	     OR (t.id IS NULL AND e.agent_profile_id = ?)
+	     t.execution_profile_id IN (?)
+	     OR (t.id IS NULL AND e.agent_profile_id IN (?))
 	   )
 `
 
@@ -77,19 +79,40 @@ func (r *Repository) GetManualWindowUsage(
 	start time.Time,
 	end time.Time,
 ) (ManualWindowUsage, error) {
-	if executionProfileID == "" {
+	return r.GetManualWindowUsageForProfiles(ctx, []string{executionProfileID}, start, end)
+}
+
+// GetManualWindowUsageForProfiles aggregates the recorded usage of several
+// concrete execution profiles over [start, end). It answers an account-scoped
+// window, where a provider enforces one quota across every profile that uses
+// the same account. Each event is attributed exactly as for a single profile,
+// so an event counts once even when several of the profiles are listed.
+func (r *Repository) GetManualWindowUsageForProfiles(
+	ctx context.Context,
+	executionProfileIDs []string,
+	start time.Time,
+	end time.Time,
+) (ManualWindowUsage, error) {
+	ids := make([]string, 0, len(executionProfileIDs))
+	for _, id := range executionProfileIDs {
+		if id != "" {
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
 		return ManualWindowUsage{}, fmt.Errorf("manual window usage requires a concrete execution profile")
 	}
 	if !end.After(start) {
 		return ManualWindowUsage{}, nil
 	}
-	query := r.ro.Rebind(manualWindowUsageQuery)
+	query, args, err := sqlx.In(manualWindowUsageQuery,
+		costSourceUnpriced, usageCompletenessComplete, start, end, ids, ids)
+	if err != nil {
+		return ManualWindowUsage{}, err
+	}
 	usage := ManualWindowUsage{}
 	var attributedByTurn int64
-	err := r.ro.QueryRowxContext(ctx, query,
-		costSourceUnpriced, usageCompletenessComplete, start, end,
-		executionProfileID, executionProfileID,
-	).Scan(
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(
 		&usage.EventCount,
 		&usage.TokensTotal,
 		&usage.CostSubcents,
