@@ -90,6 +90,8 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 
 	api.GET("/meta", h.getMeta)
 	api.GET("/workspaces/aggregate", h.getWorkspacesAggregate)
+	api.GET("/workspaces/aggregate/tasks", h.getOverviewWorkspaceTasks)
+	api.GET("/workspaces/aggregate/running", h.getOverviewRunning)
 	api.GET("/workspaces/:wsId/dashboard", h.getDashboard)
 	api.GET("/workspaces/:wsId/live-runs", h.getLiveRuns)
 	api.GET("/workspaces/:wsId/agent-summaries", h.getAgentSummaries)

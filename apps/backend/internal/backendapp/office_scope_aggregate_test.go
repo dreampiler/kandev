@@ -25,6 +25,20 @@ func driveOfficeAggregate(
 	token string,
 ) (int, bool) {
 	t.Helper()
+	return driveOfficeAggregatePath(t, h, authSvc, identity, agentSvc, token, "/workspaces/aggregate")
+}
+
+// driveOfficeAggregatePath is driveOfficeAggregate for any aggregate route.
+func driveOfficeAggregatePath(
+	t *testing.T,
+	h *officeScopeHarness,
+	authSvc *auth.Service,
+	identity *authn.Identity,
+	agentSvc *officeagents.AgentService,
+	token string,
+	route string,
+) (int, bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	if identity != nil {
@@ -39,9 +53,9 @@ func driveOfficeAggregate(
 	}
 	group.Use(officeWorkspaceScopeMiddleware(authSvc, h.taskSvc, h.officeRepo))
 	reached := false
-	group.GET("/workspaces/aggregate", func(c *gin.Context) { reached = true; c.Status(http.StatusOK) })
+	group.GET(route, func(c *gin.Context) { reached = true; c.Status(http.StatusOK) })
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/workspaces/aggregate", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office"+route, nil)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -128,5 +142,29 @@ func TestOfficeScopeAggregateAuthDisabledPassthrough(t *testing.T) {
 	code, reached := driveOfficeAggregate(t, h, nil, nil, nil, "")
 	if code != http.StatusOK || !reached {
 		t.Fatalf("status = %d, reached = %v; want 200 and true", code, reached)
+	}
+}
+
+// TestOfficeScopeAggregateListRoutes pins that the overview list routes are
+// guarded like the aggregate itself: a real identity reaches them and an
+// agent token never does.
+func TestOfficeScopeAggregateListRoutes(t *testing.T) {
+	for _, route := range []string{"/workspaces/aggregate/tasks", "/workspaces/aggregate/running"} {
+		h := newOfficeScopeHarness(t)
+		code, reached := driveOfficeAggregatePath(t, h, h.authSvc,
+			&authn.Identity{UserID: officeScopeUserA, Role: authn.RoleMember}, nil, "", route)
+		if code != http.StatusOK || !reached {
+			t.Fatalf("%s real identity: status = %d, reached = %v; want 200 and true", route, code, reached)
+		}
+		agentSvc := officeagents.NewAgentService(h.officeRepo, testLogger(t), nil)
+		agentSvc.SetAuth(officeagents.NewAgentAuth("test-signing-key"))
+		token, err := agentSvc.MintRuntimeJWT("agent-user-a", "task-user-a", h.workspaces[officeScopeUserA], "run-user-a", "", "")
+		if err != nil {
+			t.Fatalf("mint runtime jwt: %v", err)
+		}
+		code, reached = driveOfficeAggregatePath(t, h, nil, nil, agentSvc, token, route)
+		if code != http.StatusNotFound || reached {
+			t.Fatalf("%s agent token: status = %d, reached = %v; want 404 and false", route, code, reached)
+		}
 	}
 }

@@ -145,7 +145,7 @@ func clarificationSidecarPredicate(sidecar *models.ClarificationSidecarFilter) (
 // never be answered.
 func clarificationBundleQuery(drv, joinExtra, whereExtra string) string {
 	return "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
-		clarificationBundleTableExpr(drv, joinExtra, whereExtra) +
+		clarificationBundleTableExpr(drv, joinExtra, whereExtra, "") +
 		"\nORDER BY b.created_at ASC, b.pending_id ASC\nLIMIT ?"
 }
 
@@ -156,14 +156,16 @@ func clarificationBundleQuery(drv, joinExtra, whereExtra string) string {
 // inbox design, "Persistence" and "Data and contracts" hidden_count /
 // next_snooze_expiry).
 func clarificationBundleCountQuery(drv, joinExtra, whereExtra string) string {
-	return "SELECT COUNT(*), MIN(cs.snooze_until)\n" + clarificationBundleTableExpr(drv, joinExtra, whereExtra)
+	return "SELECT COUNT(*), MIN(cs.snooze_until)\n" + clarificationBundleTableExpr(drv, joinExtra, whereExtra, "")
 }
 
 // clarificationBundleTableExpr is the shared FROM/JOIN/WHERE expression both
 // queries above select from. See clarificationBundleQuery's doc comment for
 // what each conjunct means; kept in one place so the count query cannot drift
-// from the page query's notion of "answerable".
-func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
+// from the page query's notion of "answerable". innerExtra is AND-ed into the
+// grouped message scan itself (empty for the inbox queries), so a caller that
+// already knows its sessions can bound the scan rather than filter after it.
+func clarificationBundleTableExpr(drv, joinExtra, whereExtra, innerExtra string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
 	questionIDExpr := fmt.Sprintf(
@@ -197,6 +199,7 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
 			  AND %[4]s
 			  AND %[5]s
 			  AND %[6]s
+			  %[9]s
 			GROUP BY %[1]s, m.task_session_id
 		) b
 		JOIN tasks t ON t.id = b.task_id
@@ -204,7 +207,50 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra string) string {
 		WHERE b.has_pending = 1
 		  AND b.has_missing_question_id = 0
 		  %[3]s
-	`, pendingIDExpr, statusExpr, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr, joinExtra)
+	`, pendingIDExpr, statusExpr, whereExtra, notParentQuestion, nonTerminalSession, currentTurn, questionIDExpr, joinExtra, innerExtra)
+}
+
+// maxAnswerableSessionIDsPerQuery keeps the session IN list below SQLite's
+// conservative host-parameter limit.
+const maxAnswerableSessionIDsPerQuery = 400
+
+// ListAnswerableClarificationsForSessions returns the answerable clarification
+// bundles (pending, current turn, live session) of the supplied sessions only.
+// It reuses clarificationBundleTableExpr so it cannot disagree with the inbox
+// about what is answerable, but bounds the grouped message scan to the given
+// sessions through the (task_session_id, pending_id) index instead of every
+// clarification message. Callers pass sessions from workspaces the caller can
+// already reach, so no visibility predicate is added.
+func (r *Repository) ListAnswerableClarificationsForSessions(
+	ctx context.Context, sessionIDs []string,
+) ([]models.ClarificationBundleSummary, error) {
+	var out []models.ClarificationBundleSummary
+	drv := r.ro.DriverName()
+	for start := 0; start < len(sessionIDs); start += maxAnswerableSessionIDsPerQuery {
+		end := min(start+maxAnswerableSessionIDsPerQuery, len(sessionIDs))
+		batch := sessionIDs[start:end]
+		placeholders := make([]string, len(batch))
+		args := make([]interface{}, len(batch))
+		for i, id := range batch {
+			placeholders[i] = "?"
+			args[i] = id
+		}
+		inner := "AND m.task_session_id IN (" + strings.Join(placeholders, ", ") + ")"
+		query := "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
+			clarificationBundleTableExpr(drv, "", "", inner) +
+			"\nORDER BY b.created_at ASC, b.pending_id ASC"
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		bundles, scanErr := scanClarificationBundleRows(rows, dialect.IsPostgres(drv))
+		_ = rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		out = append(out, bundles...)
+	}
+	return out, nil
 }
 
 // scanClarificationBundleRows scans the bundle rows. The created_at column
