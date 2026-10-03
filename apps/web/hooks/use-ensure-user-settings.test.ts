@@ -114,6 +114,7 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    officeOverviewScope: "office",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
