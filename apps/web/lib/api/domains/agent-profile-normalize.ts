@@ -10,6 +10,10 @@ import type { Agent, ProfileEnvVar } from "@/lib/types/http";
 import type {
   AgentProfile,
   DynamicAgentPolicy,
+  DynamicAgentSelection,
+  DynamicModelPolicy,
+  DynamicTierPolicy,
+  DynamicUsageWindow,
   AgentProfileKind,
   AgentProfilePayload,
   CLIFlag,
@@ -204,12 +208,90 @@ function normalizeDynamicPolicy(
 ): DynamicAgentPolicy {
   const source = objectValue(raw);
   if (!source) return legacyRulesToPolicy(legacyRules);
+  const selection = normalizeDynamicSelection(source.selection);
   return {
     version: numberValue(source.version, 1),
     transient: normalizeDynamicErrorPolicy(source.transient),
     hard: normalizeDynamicErrorPolicy(source.hard),
     unclassified: normalizeDynamicUnclassifiedPolicy(source.unclassified),
+    ...(selection ? { selection } : {}),
   };
+}
+
+const dynamicTierModes = ["order", "pace", "cost"] as const;
+const dynamicTierFailureDirections = ["same_tier_next", "next_tier"] as const;
+const dynamicModelCostClasses = ["free", "subscription", "metered"] as const;
+const dynamicModelUsageSources = ["automatic", "manual", "none"] as const;
+const dynamicUsageWindowPeriods = ["five_hour", "day", "week", "month"] as const;
+const dynamicUsageWindowUnits = ["money", "tokens"] as const;
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined;
+}
+
+/**
+ * Absent selection is a legacy ordered row, not an invalid document, so the
+ * normalizer returns undefined rather than manufacturing defaults the server
+ * never stored.
+ */
+function normalizeDynamicSelection(raw: unknown): DynamicAgentSelection | undefined {
+  const source = objectValue(raw);
+  if (!source) return undefined;
+  const model = normalizeDynamicModel(source.model);
+  return {
+    joinPrevious: source.join_previous === true || source.joinPrevious === true,
+    ...(normalizeDynamicTier(source.tier) ? { tier: normalizeDynamicTier(source.tier) } : {}),
+    model,
+  };
+}
+
+function normalizeDynamicTier(raw: unknown): DynamicTierPolicy | undefined {
+  const source = objectValue(raw);
+  if (!source) return undefined;
+  const mode = oneOf(source.mode, dynamicTierModes);
+  const onFailure = oneOf(source.on_failure ?? source.onFailure, dynamicTierFailureDirections);
+  if (!mode || !onFailure) return undefined;
+  return { mode, onFailure };
+}
+
+function normalizeDynamicModel(raw: unknown): DynamicModelPolicy {
+  const source = objectValue(raw);
+  if (!source) {
+    return { cost: "", usageSource: "none", reservedUserSharePct: 0 };
+  }
+  const windows = Array.isArray(source.windows)
+    ? source.windows.flatMap((entry) => normalizeDynamicUsageWindow(entry))
+    : undefined;
+  return {
+    cost: oneOf(source.cost, dynamicModelCostClasses) ?? "",
+    usageSource:
+      oneOf(source.usage_source ?? source.usageSource, dynamicModelUsageSources) ?? "none",
+    reservedUserSharePct: numberValue(
+      source.reserved_user_share_pct ?? source.reservedUserSharePct,
+      0,
+    ),
+    ...(windows && windows.length > 0 ? { windows } : {}),
+  };
+}
+
+function normalizeDynamicUsageWindow(raw: unknown): DynamicUsageWindow[] {
+  const source = objectValue(raw);
+  if (!source) return [];
+  const period = oneOf(source.period, dynamicUsageWindowPeriods);
+  const unit = oneOf(source.unit, dynamicUsageWindowUnits);
+  const reset = objectValue(source.reset);
+  if (!period || !unit || !reset || typeof source.limit !== "string" || !reset) return [];
+  if (typeof reset.anchor !== "string" || typeof reset.timezone !== "string") return [];
+  return [
+    {
+      period,
+      unit,
+      limit: source.limit,
+      reset: { anchor: reset.anchor, timezone: reset.timezone },
+    },
+  ];
 }
 
 function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
@@ -245,7 +327,22 @@ function pickDynamic(raw: RawProfile): DynamicAgentProfile | undefined {
         },
       ];
     }),
+    ...normalizedKeepModel(document),
   };
+}
+
+/**
+ * A request that never set the preference must omit it so the server preserves
+ * the saved value, so an absent field yields no key at all.
+ */
+function normalizedKeepModel(document: Record<string, unknown>): {
+  keepModelWhileRunning?: boolean;
+} {
+  const snake = document.keep_model_while_running;
+  if (typeof snake === "boolean") return { keepModelWhileRunning: snake };
+  const camel = document.keepModelWhileRunning;
+  if (typeof camel === "boolean") return { keepModelWhileRunning: camel };
+  return {};
 }
 
 /**
@@ -369,6 +466,9 @@ export function toAgentProfilePayload(
   if (profile.dynamic) {
     payload.dynamic = {
       version: profile.dynamic.version,
+      ...(typeof profile.dynamic.keepModelWhileRunning === "boolean"
+        ? { keep_model_while_running: profile.dynamic.keepModelWhileRunning }
+        : {}),
       candidates: profile.dynamic.candidates.map((candidate) => {
         const policy = candidate.policies ?? legacyRulesToPolicy(candidate.rules ?? {});
         return {
@@ -405,10 +505,40 @@ export function toAgentProfilePayload(
               enabled: policy.unclassified.enabled,
               consecutive_failure_threshold: policy.unclassified.consecutiveFailureThreshold,
             },
+            // A row without a draft selection is omitted rather than sent as a
+            // defaulted object, so the server preserves what it already has.
+            ...(policy.selection ? { selection: dynamicSelectionPayload(policy.selection) } : {}),
           },
         };
       }),
     };
   }
   return payload;
+}
+
+function dynamicSelectionPayload(selection: DynamicAgentSelection) {
+  return {
+    join_previous: selection.joinPrevious,
+    // The tier object is spelled out rather than spread: the Go tag is
+    // `on_failure`, and a verbatim camelCase spread would be dropped by the
+    // decoder and silently stored as the default direction.
+    ...(selection.tier
+      ? { tier: { mode: selection.tier.mode, on_failure: selection.tier.onFailure } }
+      : {}),
+    model: {
+      cost: selection.model.cost,
+      usage_source: selection.model.usageSource,
+      reserved_user_share_pct: selection.model.reservedUserSharePct,
+      ...(selection.model.windows && selection.model.windows.length > 0
+        ? {
+            windows: selection.model.windows.map((window) => ({
+              period: window.period,
+              unit: window.unit,
+              limit: window.limit,
+              reset: { anchor: window.reset.anchor, timezone: window.reset.timezone },
+            })),
+          }
+        : {}),
+    },
+  };
 }

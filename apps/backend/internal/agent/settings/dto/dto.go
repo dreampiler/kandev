@@ -73,6 +73,10 @@ type AgentProfileDTO struct {
 type DynamicAgentProfileDTO struct {
 	Version    int64                      `json:"version"`
 	Candidates []DynamicAgentCandidateDTO `json:"candidates"`
+	// KeepModelWhileRunning is the profile-wide continuity preference, not a
+	// selection mode. It is a pointer so an update that omits the field
+	// preserves the saved value while an explicit false is honored.
+	KeepModelWhileRunning *bool `json:"keep_model_while_running,omitempty"`
 }
 
 // DynamicAgentPolicyDTO is the canonical, versioned policy document persisted
@@ -83,6 +87,51 @@ type DynamicAgentPolicyDTO struct {
 	Transient    DynamicErrorPolicyDTO         `json:"transient"`
 	Hard         DynamicErrorPolicyDTO         `json:"hard"`
 	Unclassified *DynamicUnclassifiedPolicyDTO `json:"unclassified,omitempty"`
+	// Selection is additive. Its absence means legacy defaults rather than an
+	// invalid record, so older documents keep reading as ordered candidates.
+	Selection *DynamicAgentSelectionDTO `json:"selection,omitempty"`
+}
+
+// DynamicAgentSelectionDTO is one candidate row's tier and model options.
+// Tier is stored only on a tier's first row; every row stores its own join flag
+// and model options.
+type DynamicAgentSelectionDTO struct {
+	JoinPrevious bool                       `json:"join_previous"`
+	Tier         *DynamicAgentTierPolicyDTO `json:"tier,omitempty"`
+	Model        DynamicAgentModelPolicyDTO `json:"model"`
+}
+
+type DynamicAgentTierPolicyDTO struct {
+	// Mode is "order", "pace" or "cost"; OnFailure is "same_tier_next" or
+	// "next_tier". Both are a closed set.
+	Mode      string `json:"mode"`
+	OnFailure string `json:"on_failure"`
+}
+
+type DynamicAgentModelPolicyDTO struct {
+	// Cost is free, subscription or metered routing metadata. It never edits
+	// the authentication billing type.
+	Cost        string `json:"cost"`
+	UsageSource string `json:"usage_source"`
+	// ReservedUserSharePct defaults to zero and is 0 through 100 inclusive.
+	ReservedUserSharePct int                          `json:"reserved_user_share_pct"`
+	Windows              []DynamicAgentUsageWindowDTO `json:"windows,omitempty"`
+}
+
+type DynamicAgentUsageWindowDTO struct {
+	// Period is five_hour, day, week or month; Unit is money or tokens. Limit
+	// is a positive decimal string so subcent money keeps its precision.
+	Period string                      `json:"period"`
+	Unit   string                      `json:"unit"`
+	Limit  string                      `json:"limit"`
+	Reset  *DynamicAgentResetAnchorDTO `json:"reset,omitempty"`
+}
+
+type DynamicAgentResetAnchorDTO struct {
+	// Anchor is the local reset time, weekday/day-of-month and fixed-window
+	// phase. Timezone is a validated IANA name.
+	Anchor   string `json:"anchor"`
+	Timezone string `json:"timezone"`
 }
 
 type DynamicUnclassifiedPolicyDTO struct {

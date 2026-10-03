@@ -139,10 +139,13 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 		if w == nil {
 			continue
 		}
+		resetAt := codexResetAt(w, now)
 		windows = append(windows, UtilizationWindow{
-			Label:          codexWindowLabel(w.LimitWindowSeconds),
-			UtilizationPct: w.UsedPercent,
-			ResetAt:        codexResetAt(w, now),
+			Label:           codexWindowLabel(w.LimitWindowSeconds),
+			UtilizationPct:  w.UsedPercent,
+			ResetAt:         resetAt,
+			DurationSeconds: w.LimitWindowSeconds,
+			StartAt:         codexWindowStart(resetAt, w.LimitWindowSeconds),
 		})
 	}
 	return &ProviderUsage{
@@ -172,6 +175,17 @@ func codexResetAt(w *codexWindow, now time.Time) time.Time {
 		return time.Unix(w.ResetAt, 0)
 	}
 	return now.Add(time.Duration(w.ResetAfterSeconds) * time.Second)
+}
+
+// codexWindowStart carries the provider's numeric window length into the routing
+// shape. The display label is not evidence: only the seconds Codex reported can
+// determine elapsed time. A nonpositive or missing length yields a zero start,
+// which makes the window unusable for a pace score rather than wrong.
+func codexWindowStart(resetAt time.Time, limitWindowSeconds int64) time.Time {
+	if limitWindowSeconds <= 0 || resetAt.IsZero() {
+		return time.Time{}
+	}
+	return resetAt.Add(-time.Duration(limitWindowSeconds) * time.Second)
 }
 
 func (c *CodexUsageClient) readAuth() (*codexAuthJSON, error) {

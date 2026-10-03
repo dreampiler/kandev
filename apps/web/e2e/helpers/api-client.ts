@@ -19,6 +19,7 @@ import type {
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type { SidebarTaskColorAutomation } from "../../lib/task-color-automation-settings";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
+import type { DynamicPreviewResponse } from "../../lib/api/domains/dynamic-preview-api";
 import type {
   PRCommitDetail,
   TaskCIAutomationOptions,
@@ -818,7 +819,10 @@ export class ApiClient {
       enabled: boolean;
       unclassifiedEnabled: boolean;
       consecutiveFailureThreshold: number;
+      /** Optional tier selection; omitted candidates keep the legacy default. */
+      selection?: Record<string, unknown>;
     }>,
+    options: { keepModelWhileRunning?: boolean } = {},
   ): Promise<AgentProfile> {
     const errorPolicy = {
       retry: { enabled: false, max_retries: 0, initial_interval_seconds: 0 },
@@ -830,6 +834,7 @@ export class ApiClient {
       model: "",
       dynamic: {
         version: 1,
+        keep_model_while_running: options.keepModelWhileRunning ?? true,
         candidates: candidates.map((candidate, position) => ({
           position,
           execution_profile_id: candidate.executionProfileId,
@@ -844,11 +849,22 @@ export class ApiClient {
                 ? candidate.consecutiveFailureThreshold
                 : 0,
             },
+            ...(candidate.selection ? { selection: candidate.selection } : {}),
           },
         })),
       },
     });
     return normalizeAgentProfile(response);
+  }
+
+  async previewDynamicProfile(
+    dynamic: unknown,
+    profileId?: string,
+  ): Promise<DynamicPreviewResponse> {
+    const path = profileId
+      ? `/api/v1/agent-profiles/${profileId}/dynamic-preview`
+      : "/api/v1/agent-profiles/dynamic-preview";
+    return this.request<DynamicPreviewResponse>("POST", path, { dynamic });
   }
 
   async getAgentProfile(profileId: string): Promise<AgentProfile> {

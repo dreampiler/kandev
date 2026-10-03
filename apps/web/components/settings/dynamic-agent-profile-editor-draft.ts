@@ -5,15 +5,27 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
-  DynamicAgentPolicy,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicModelPolicy,
+  DynamicTierPolicy,
+  DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
 import {
   isProfileRevisionNewer,
   reconcileAgentProfileSnapshot,
   sameEditableProfile,
 } from "@/components/settings/agent-profile-reconciliation";
+import {
+  moveCandidate as moveCandidateInTiers,
+  newCandidateRow,
+  normalizeReservedShare,
+  removeCandidate as removeCandidateInTiers,
+  toggleJoin as toggleJoinInTiers,
+  updateCandidateModel,
+  updateManualWindow,
+  updateTierPolicy,
+} from "@/components/settings/dynamic-agent-tiers";
 
 type DynamicAgentProfileEditorDraftProps = {
   profile: AgentProfile;
@@ -25,6 +37,7 @@ export type DynamicAgentProfileEditorDraft = {
   candidates: DynamicAgentCandidate[];
   profileEnabled: boolean;
   dynamicVersion: number;
+  keepModelWhileRunning: boolean;
   currentProfile: AgentProfile;
   savedProfile: AgentProfile;
   hasExternalConflict: boolean;
@@ -39,31 +52,24 @@ export type DynamicAgentProfileEditorDraft = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  toggleJoin: (index: number) => void;
+  updateTierPolicy: (tierIndex: number, patch: Partial<DynamicTierPolicy>) => void;
+  updateCandidateModel: (index: number, patch: Partial<DynamicModelPolicy>) => void;
+  updateManualWindow: (index: number, windows: DynamicUsageWindow[]) => void;
+  updateKeepModelWhileRunning: (enabled: boolean) => void;
   applyProfile: (profile: AgentProfile) => void;
   markProfileSubmitted: (profile: AgentProfile | null) => void;
   acceptProfileSaveResponse: (profile: AgentProfile, submitted: AgentProfile) => void;
   reset: () => void;
 };
 
-const defaultDynamicErrorPolicy = (): DynamicErrorPolicy => ({
-  retry: { enabled: false, maxRetries: 0, initialIntervalSeconds: 0 },
-  waitForReset: { enabled: false, maxWaitSeconds: 0 },
-  onExhausted: "skip",
-});
-
-const defaultDynamicPolicy = (): DynamicAgentPolicy => ({
-  version: 1,
-  transient: defaultDynamicErrorPolicy(),
-  hard: defaultDynamicErrorPolicy(),
-  unclassified: { enabled: false, consecutiveFailureThreshold: 0 },
-});
-
 export function dynamicDraftRevision(
   name: string,
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
+  keepModelWhileRunning = true,
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({ name, candidates, enabled, keepModelWhileRunning });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.
@@ -77,6 +83,9 @@ export function useDynamicAgentProfileEditorDraft({
   );
   const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
+  const [keepModelWhileRunning, setKeepModelWhileRunning] = useState(
+    profile.dynamic?.keepModelWhileRunning !== false,
+  );
   const [savedProfile, setSavedProfile] = useState(profile);
   const [hasExternalConflict, setHasExternalConflict] = useState(false);
   const previousProfileRef = useRef(profile);
@@ -88,7 +97,7 @@ export function useDynamicAgentProfileEditorDraft({
     ...profile,
     name,
     enabled: profileEnabled,
-    dynamic: { version: dynamicVersion, candidates },
+    dynamic: { version: dynamicVersion, candidates, keepModelWhileRunning },
   };
   savedProfileRef.current = savedProfile;
   currentProfileRef.current = currentProfile;
@@ -101,7 +110,22 @@ export function useDynamicAgentProfileEditorDraft({
     onDraftChange?.({
       name: nextName,
       enabled: nextEnabled,
-      dynamic: { version: dynamicVersion, candidates: nextCandidates },
+      dynamic: {
+        version: dynamicVersion,
+        candidates: nextCandidates,
+        keepModelWhileRunning,
+      },
+    });
+  };
+
+  /** Applies a candidate-list mutation and publishes the resulting draft. */
+  const applyCandidates = (
+    mutate: (current: DynamicAgentCandidate[]) => DynamicAgentCandidate[],
+  ) => {
+    setCandidates((current) => {
+      const next = mutate(current);
+      notifyDraft(name, next);
+      return next;
     });
   };
 
@@ -116,40 +140,65 @@ export function useDynamicAgentProfileEditorDraft({
   };
 
   const addCandidate = (executionProfileId: string) => {
-    setCandidates((current) => {
-      const next = [
-        ...current,
-        {
-          position: current.length,
-          executionProfileId: toAgentProfileId(executionProfileId),
-          enabled: true,
-          policies: defaultDynamicPolicy(),
-        },
-      ];
-      notifyDraft(name, next);
-      return next;
-    });
+    applyCandidates((current) => [
+      ...current,
+      {
+        ...newCandidateRow(toAgentProfileId(executionProfileId)),
+        position: current.length,
+      },
+    ]);
   };
 
   const moveCandidate = (index: number, direction: -1 | 1) => {
-    setCandidates((current) => {
-      const target = index + direction;
-      if (target < 0 || target >= current.length) return current;
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      const reordered = next.map((candidate, position) => ({ ...candidate, position }));
-      notifyDraft(name, reordered);
-      return reordered;
-    });
+    applyCandidates((current) => moveCandidateInTiers(current, index, direction));
   };
 
   const removeCandidate = (index: number) => {
-    setCandidates((current) => {
-      const next = current
-        .filter((_, candidateIndex) => candidateIndex !== index)
-        .map((candidate, position) => ({ ...candidate, position }));
-      notifyDraft(name, next);
-      return next;
+    applyCandidates((current) => removeCandidateInTiers(current, index));
+  };
+
+  const toggleJoin = (index: number) => {
+    applyCandidates((current) => toggleJoinInTiers(current, index));
+  };
+
+  const updateTier = (tierIndex: number, patch: Partial<DynamicTierPolicy>) => {
+    applyCandidates((current) => updateTierPolicy(current, tierIndex, patch));
+  };
+
+  const updateModel = (index: number, patch: Partial<DynamicModelPolicy>) => {
+    applyCandidates((current) => {
+      const next = updateCandidateModel(current, index, patch);
+      // A reserve is meaningless without an observable usage source, so the pair
+      // is kept consistent here instead of failing at save time.
+      return next.map((candidate, position) =>
+        position === index
+          ? {
+              ...candidate,
+              policies: {
+                ...candidate.policies,
+                selection: candidate.policies.selection
+                  ? {
+                      ...candidate.policies.selection,
+                      model: normalizeReservedShare(candidate.policies.selection.model),
+                    }
+                  : candidate.policies.selection,
+              },
+            }
+          : candidate,
+      );
+    });
+  };
+
+  const updateWindows = (index: number, windows: DynamicUsageWindow[]) => {
+    applyCandidates((current) => updateManualWindow(current, index, windows));
+  };
+
+  const updateKeepModel = (enabled: boolean) => {
+    setKeepModelWhileRunning(enabled);
+    onDraftChange?.({
+      name,
+      enabled: profileEnabled,
+      dynamic: { version: dynamicVersion, candidates, keepModelWhileRunning: enabled },
     });
   };
 
@@ -191,6 +240,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
     setHasExternalConflict(false);
     submittedProfileRef.current = null;
   };
@@ -200,6 +250,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
   }, []);
 
   const markProfileSubmitted = useCallback((submitted: AgentProfile | null) => {
@@ -251,6 +302,7 @@ export function useDynamicAgentProfileEditorDraft({
     candidates,
     profileEnabled,
     dynamicVersion,
+    keepModelWhileRunning,
     currentProfile,
     savedProfile,
     hasExternalConflict,
@@ -261,6 +313,11 @@ export function useDynamicAgentProfileEditorDraft({
     removeCandidate,
     updateCandidate,
     updateCandidatePolicy,
+    toggleJoin,
+    updateTierPolicy: updateTier,
+    updateCandidateModel: updateModel,
+    updateManualWindow: updateWindows,
+    updateKeepModelWhileRunning: updateKeepModel,
     applyProfile,
     markProfileSubmitted,
     acceptProfileSaveResponse,

@@ -17,6 +17,23 @@ func (l conductorTestProfileLoader) LoadDynamicProfile(context.Context, string) 
 	return l.profile, nil
 }
 
+// LoadDynamicProfileForExecutor marks the profile's candidates as remote when the
+// session runs somewhere other than this host, which is what keeps host provider
+// usage from being attributed to a remote candidate.
+func (l conductorTestProfileLoader) LoadDynamicProfileForExecutor(
+	_ context.Context, _ string, executorID string,
+) (Profile, error) {
+	profile := l.profile
+	if IsRemoteExecutor(executorID) {
+		return profile, nil
+	}
+	profile.Candidates = append([]Candidate(nil), profile.Candidates...)
+	for index := range profile.Candidates {
+		profile.Candidates[index].RemoteExecution = true
+	}
+	return profile, nil
+}
+
 type conductorTestDownstream struct {
 	launches []DownstreamLaunch
 }

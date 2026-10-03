@@ -222,7 +222,7 @@ func initCoreTaskServices(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
-	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log)
+	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log, agentRegistry)
 	if err != nil {
 		return nil, err
 	}
@@ -337,6 +337,7 @@ func initDynamicRuntimeResolver(
 	repos *Repositories,
 	cfg *config.Config,
 	log *logger.Logger,
+	agentRegistry *registry.Registry,
 ) (*agentruntime.ProfileExecutionResolver, *dynamicruntime.CredentialBindingResolver, error) {
 	dynamicCircuits := dynamicruntime.NewCircuitRegistry(
 		dynamicruntime.WithCircuitPersistence(repos.Task),
@@ -349,6 +350,9 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
 		dynamicruntime.WithCircuitRegistry(dynamicCircuits),
+		dynamicruntime.WithUsageSnapshotProvider(
+			newDynamicUsageSnapshot(newUsageProviderAdapter(repos.AgentSettings, agentRegistry), repos.Task, time.Now),
+		),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {
@@ -360,6 +364,22 @@ func initDynamicRuntimeResolver(
 		cfg.Features.DynamicAgentRouting,
 	)
 	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	// The executor lives on the task session, so this is what lets a selection
+	// tell a host execution from a container, SSH or Kubernetes one. Without it
+	// every candidate would read the backend host's provider account, which is a
+	// different account than a remote candidate's agent authenticates with.
+	dynamicResolver.SetSessionExecutorResolver(func(
+		ctx context.Context, sessionID string,
+	) (string, error) {
+		session, err := repos.Task.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return "", err
+		}
+		if session == nil {
+			return "", nil
+		}
+		return session.ExecutorID, nil
+	})
 	return dynamicResolver, dynamicBindingResolver, nil
 }
 

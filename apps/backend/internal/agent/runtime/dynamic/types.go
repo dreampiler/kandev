@@ -40,14 +40,35 @@ type Candidate struct {
 	ID         string
 	Enabled    bool
 	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
+	// ModelID is the concrete model this candidate launches. A provider window
+	// scoped to a different model is another model's consumption, so it must not
+	// score this candidate. Empty means the candidate's model is not identified,
+	// which keeps every window that names a model out rather than guessing.
+	ModelID string
+	// RemoteExecution records that this candidate's execution environment is a
+	// container, SSH host, Kubernetes pod or other remote executor, where the
+	// agent authenticates against a different account than the backend host.
+	//
+	// It is false by default because an unqualified profile launches on the host,
+	// and the credential binding descriptor has always assumed that. It is set
+	// only on positive evidence that the session's executor is not the host.
+	//
+	// Automatic usage is refused for a remote candidate: reading the host's
+	// credentials for it would attribute another account's consumption to it,
+	// which is the substitution AC-003.3 forbids.
+	RemoteExecution bool
+	Rules           map[string]Action
+	Policies        routingpolicy.Document
+	Selection       Selection
 }
 
 type Profile struct {
 	ID         string
 	Version    int64
 	Candidates []Candidate
+	// KeepModelWhileRunning is the profile-wide continuity preference. It binds
+	// a healthy selection across turns and is not a selection mode.
+	KeepModelWhileRunning bool
 }
 
 type RouteState struct {
@@ -76,6 +97,10 @@ type PolicyState struct {
 	Deadline         *time.Time                `json:"deadline,omitempty"`
 	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
 	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+	// SelectionChain is the durable no-revisit record for the current
+	// transition chain. It is carried across retry, skip and restart and is
+	// only cleared by a closed chain, never by a policy counter reset.
+	SelectionChain *SelectionChain `json:"selection_chain,omitempty"`
 }
 
 // UnclassifiedStreak is the bounded durable identity for one sequence of

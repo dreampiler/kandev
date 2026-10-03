@@ -1397,6 +1397,19 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
+	// The settings current-choice preview shares the tier runtime's usage
+	// snapshot, its pure preview and the live route-health registry, so the
+	// editor and a real selection answer from the same evidence including a
+	// paused binding. The resolver is the same instance routing uses, so a
+	// candidate's binding key resolves identically on both paths.
+	previewSnapshot := newDynamicUsageSnapshot(
+		newUsageProviderAdapter(repos.AgentSettings, agentRegistry), repos.Task, time.Now,
+	)
+	if services.DynamicProfileResolver != nil {
+		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
+	}
+	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
+
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
 	services.Task.StartSessionReconciliationLoop(ctx)
