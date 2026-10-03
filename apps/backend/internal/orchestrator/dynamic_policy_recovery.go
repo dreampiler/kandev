@@ -41,6 +41,7 @@ func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
 		s.dynamicRecoveryTimers = make(map[string]*time.Timer)
 	}
 	s.dynamicRecoveryMu.Unlock()
+	s.profileExecutionResolver.SetResourceWaitObserver(s.observeDynamicResourceWait)
 
 	states, err := lister.ListPendingRouteStates(ctx)
 	if err != nil {
@@ -131,7 +132,13 @@ func (s *Service) scheduleDynamicPolicyRecovery(sessionID string, generation int
 	if err := json.Unmarshal([]byte(rawPolicyState), &policyState); err != nil || policyState.Deadline == nil {
 		return
 	}
-	deadline := policyState.Deadline.UTC()
+	s.scheduleDynamicRecoveryAt(sessionID, generation, policyState.Deadline.UTC())
+}
+
+func (s *Service) scheduleDynamicRecoveryAt(sessionID string, generation int64, deadline time.Time) {
+	if sessionID == "" || generation <= 0 {
+		return
+	}
 	s.dynamicRecoveryMu.Lock()
 	ctx := s.dynamicRecoveryCtx
 	if ctx == nil {
@@ -179,6 +186,14 @@ func (s *Service) runDynamicPolicyRecovery(ctx context.Context, sessionID string
 	if s.rescheduleEarlyDynamicPolicyRecovery(sessionID, generation, state.PolicyStateJSON) {
 		return
 	}
+	if state.Status == dynamicRouteStatusWaiting {
+		// The route action takes the cancel guard itself.
+		lock.Unlock()
+		release()
+		locked = false
+		s.runDynamicResourceWaitRecovery(ctx, sessionID, generation)
+		return
+	}
 	resolved, err := s.profileExecutionResolver.ResumePendingRoute(ctx, sessionID, generation)
 	if s.handleDynamicPolicyResumeError(ctx, loader, sessionID, generation, err) {
 		return
@@ -215,10 +230,21 @@ func loadDueDynamicPolicyState(
 	if err != nil || state == nil || state.Generation != generation {
 		return nil, false
 	}
+	if state.Status == dynamicRouteStatusWaiting {
+		return state, isDynamicResourceWait(state.PolicyStateJSON)
+	}
 	if state.Status != string(routingpolicy.DecisionRetry) && state.Status != string(routingpolicy.DecisionWaitForReset) {
 		return nil, false
 	}
 	return state, true
+}
+
+func isDynamicResourceWait(rawPolicyState string) bool {
+	var policyState dynamicruntime.PolicyState
+	if err := json.Unmarshal([]byte(rawPolicyState), &policyState); err != nil {
+		return false
+	}
+	return policyState.ResourceWait && policyState.Deadline != nil
 }
 
 func (s *Service) rescheduleEarlyDynamicPolicyRecovery(sessionID string, generation int64, rawPolicyState string) bool {

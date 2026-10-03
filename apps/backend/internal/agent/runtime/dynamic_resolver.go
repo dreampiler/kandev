@@ -22,7 +22,10 @@ import (
 
 var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
 
-const dynamicRouteStatusRetrying = "retrying"
+const (
+	dynamicRouteStatusRetrying = "retrying"
+	dynamicRouteStatusWaiting  = "waiting"
+)
 
 // ProfileExecution is the caller-facing result of resolving a logical
 // profile. Concrete callers receive the same ID for both fields. Dynamic
@@ -49,6 +52,7 @@ type ProfileExecutionResolver struct {
 	engine           *dynamic.Engine
 	bindingResolver  *dynamic.CredentialBindingResolver
 	sessionExecutors SessionExecutorResolver
+	providerLimits   ProviderLimitReader
 	enabled          atomic.Bool
 }
 
@@ -168,21 +172,8 @@ func (r *ProfileExecutionResolver) OpenCircuit(
 	executionProfileID string,
 	now time.Time,
 ) (open bool, known bool) {
-	if r == nil || r.engine == nil || r.profiles == nil || executionProfileID == "" {
-		return false, false
-	}
-	profile, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
-	if err != nil || profile == nil || profile.DeletedAt != nil {
-		return false, false
-	}
-	key := dynamic.ResourceKey(dynamic.ScopeProfile, executionProfileID)
-	if r.bindingResolver != nil {
-		key = dynamic.ResourceKey(
-			dynamic.ScopeCredential,
-			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
-		)
-	}
-	return r.engine.Circuits().IsOpen(key, now), true
+	suspension, known := r.CandidateSuspension(ctx, executionProfileID, now)
+	return suspension.Blocked(), known
 }
 
 // NewConductor creates the lifecycle-facing conductor with the same engine,
@@ -562,6 +553,14 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 			}
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
+		if state.Status == dynamicRouteStatusWaiting {
+			// A route that exhausted every candidate has no pending candidate to
+			// resume, so retrying it is a fresh selection with no preference. A
+			// preference here would make the engine refuse every other candidate
+			// while the preferred one stays suspended, so a session that waited
+			// on one candidate could never reach a candidate that already freed up.
+			return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", "")
+		}
 		decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
 		if resumeErr == nil {
 			return r.executionFromDecisionWithRecovery(ctx, profileID, sessionID, decision)
@@ -936,6 +935,7 @@ func (r *ProfileExecutionResolver) loadDynamicProfileForExecutor(
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
+	r.applyResourceLimits(ctx, profile.Candidates)
 	return profile, nil
 }
 

@@ -7,6 +7,13 @@ GO := go
 GOFLAGS := -v
 LDFLAGS := -s -w
 
+# Cap how many test binaries `go test` builds and runs at once. The default
+# (GOMAXPROCS) can exhaust memory on high-core machines when several agents
+# run the suite concurrently. Override with `make test TEST_PARALLEL=N`, or
+# replace the flags entirely with `TEST_FLAGS=...`.
+TEST_PARALLEL ?= 2
+TEST_FLAGS ?= -p $(TEST_PARALLEL)
+
 # Debug launches get a distinct browser identity by default. An explicit
 # environment or command-line value still wins through Make's `?=` semantics.
 KANDEV_WEB_TITLE_PREFIX ?= Debug
@@ -372,7 +379,7 @@ start-debug: build
 ## Run tests
 test:
 	@echo "Running tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 ./...
 
 ## Run only the Windows-sensitive packages — mirrors the test-windows job in
 ## .github/workflows/backend-tests.yml. The broader suite uses Unix-only
@@ -382,20 +389,20 @@ test:
 ## guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 	@echo "Running Windows helper console-behavior tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/common/subproc ./internal/agent/mcpconfig ./internal/agentctl/server/utility ./internal/agent/acpdbg ./internal/agent/codexdbg -run "^(TestWindowsPrepareGitLifecycleCommandHidesConsoleWindow|TestWindowsDetachedParentKeepsConsoleHiddenForDescendants|TestPrepareNativeMCPProcessHidesConsoleWindow|TestWindowsACPCommandProcAttrHidesConsoleWindow|TestConfigureProcessTreeHidesConsoleWindow)$$"
 	@echo "Running Windows managed runtime cache tests..."
 	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
 	# which requires Developer Mode on Windows. Add new //go:build windows tests here.
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
 	@echo "Running Windows port-collision tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/common/netutil -run TestIsAddrInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/agentctl/server/instance -run TestAllocatePortAndListenerRetriesAddressInUse
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/gateway/websocket -run TestResolveAndBindReportsOccupiedPort
 	@echo "Running Windows SQLite database path tests..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/system/backups -run TestVerifySnapshotOpensNativeAbsolutePath
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v ./internal/task/inventoryrepair -run "^TestOpenDatabase(Reads|Writes)NativeAbsolutePath$$"
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
@@ -408,14 +415,14 @@ check-make-shells:
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
 test-e2e:
 	@echo "Running E2E adapter tests..."
-	$(GO) test -trimpath -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
+	$(GO) test $(TEST_FLAGS) -trimpath -tags e2e -v -timeout 10m ./internal/agentctl/server/adapter/e2e/
 
 ## Run sprites e2e test (requires SPRITES_API_TOKEN env var)
 ## Sprites VMs are always x86_64/amd64 regardless of host architecture.
 test-sprites-e2e: build-agentctl-linux
 	@echo "Running sprites e2e test..."
 	KANDEV_AGENTCTL_LINUX_BINARY=$(CURDIR)/$(BUILD_DIR)/agentctl-linux-amd64 \
-		$(GO) test -trimpath -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
+		$(GO) test $(TEST_FLAGS) -trimpath -v -count=1 -tags sprites_e2e -run TestSpritesE2E -timeout 10m ./internal/agent/runtime/lifecycle/
 
 ## Stress-run the lifecycle goleak suite — repro target for the CI-only flake
 ## where StreamManager/WorkspaceStream goroutines linger past TestMain on
@@ -427,12 +434,12 @@ test-sprites-e2e: build-agentctl-linux
 LIFECYCLE_GOLEAK_COUNT ?= 20
 test-lifecycle-goleak:
 	@echo "Stress-running lifecycle goleak suite ($(LIFECYCLE_GOLEAK_COUNT)x)..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -race -count=$(LIFECYCLE_GOLEAK_COUNT) -timeout 600s ./internal/agent/runtime/lifecycle/ ./internal/agent/runtime/agentctl/
 
 ## Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test $(TEST_FLAGS) -trimpath -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
 ## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of

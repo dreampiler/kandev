@@ -433,14 +433,17 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 // ListPendingRouteStates returns only states whose durable policy deadline can
 // be reconciled automatically. States marked retrying are intentionally not
 // returned after restart because dispatch may already have crossed the
-// process boundary and must remain a manual recovery decision.
+// process boundary and must remain a manual recovery decision. A waiting state
+// is returned only when it waits for suspended resources, because only that
+// wait has a deadline after which a fresh selection can succeed.
 func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT session_id, logical_profile_id, execution_profile_id,
 			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
 		FROM dynamic_route_states
-		WHERE state IN (?, ?) ORDER BY updated_at ASC
-	`), string("retry_wait"), string("waiting_for_reset"))
+		WHERE state IN (?, ?) OR (state = ? AND policy_state_json LIKE ?)
+		ORDER BY updated_at ASC
+	`), string("retry_wait"), string("waiting_for_reset"), "waiting", `%"resource_wait":true%`)
 	if err != nil {
 		return nil, err
 	}
@@ -530,24 +533,28 @@ func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicru
 func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.CircuitSnapshot) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_resource_circuits
-			(resource_key, state, until_at, code, probe_until, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+			(resource_key, state, until_at, code, probe_until, strikes, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(resource_key) DO UPDATE SET
 			state = excluded.state,
 			until_at = excluded.until_at,
 			code = excluded.code,
 			probe_until = excluded.probe_until,
+			strikes = excluded.strikes,
 			updated_at = excluded.updated_at
 	`), snapshot.Key, snapshot.State, nullableTime(snapshot.Until), snapshot.Code,
-		nullableTime(snapshot.ProbeUntil), time.Now().UTC())
+		nullableTime(snapshot.ProbeUntil), snapshot.Strikes, time.Now().UTC())
 	return err
 }
 
+// LoadCircuits returns every circuit that is not plainly healthy. A closed
+// circuit that still carries strikes is included, so a restart does not reset
+// the suspension ladder of a resource that never produced output again.
 func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.CircuitSnapshot, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT resource_key, state, until_at, code, probe_until
+		SELECT resource_key, state, until_at, code, probe_until, strikes
 		FROM dynamic_resource_circuits
-		WHERE state <> ? ORDER BY resource_key
+		WHERE state <> ? OR strikes > 0 ORDER BY resource_key
 	`), dynamicruntime.CircuitClosed)
 	if err != nil {
 		return nil, err
@@ -559,7 +566,7 @@ func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.Circuit
 		var until, probeUntil sql.NullTime
 		var state string
 		var code string
-		if err := rows.Scan(&snapshot.Key, &state, &until, &code, &probeUntil); err != nil {
+		if err := rows.Scan(&snapshot.Key, &state, &until, &code, &probeUntil, &snapshot.Strikes); err != nil {
 			return nil, err
 		}
 		snapshot.State = dynamicruntime.CircuitState(state)
