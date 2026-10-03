@@ -74,6 +74,7 @@ signals, and task-scoped scheduling contracts.
 - [Multi-branch tasks](requirements/multi-branch.md)
 - [Parent-Child Message Interrupt](requirements/parent-child-message-interrupt.md)
 - [Parent-Child Task Stop](requirements/parent-child-task-stop.md)
+- [Coordinator Child Task Ordering](requirements/coordinator-child-task-ordering.md)
 - [Passthrough Queued Prompt Dispatch](requirements/passthrough-queued-prompt-dispatch.md)
 - [Task plan content size limit](requirements/plan-content-size-limit.md)
 - [Task Plan Comments](requirements/plan-comments.md)

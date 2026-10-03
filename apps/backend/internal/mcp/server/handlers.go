@@ -696,6 +696,28 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) reorderChildTasksHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		orderedIDs, err := req.RequireStringSlice("ordered_task_ids")
+		if err != nil || len(orderedIDs) == 0 {
+			return mcp.NewToolResultError("ordered_task_ids is required"), nil
+		}
+		// Build a fresh payload so callers cannot override trusted sender
+		// attribution; the backend authorizes against sender_task_id.
+		payload := map[string]interface{}{
+			"ordered_task_ids": orderedIDs,
+			"sender_task_id":   s.taskID,
+		}
+		copyOptionalStringArg(payload, req, "placement")
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReorderChildTasks, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 // spawnSessionHandler spawns an additional agent session on an existing task.
 // task_id defaults to the server's own task; sender identity is injected so
 // the spawned session can identify and reply to its spawner.

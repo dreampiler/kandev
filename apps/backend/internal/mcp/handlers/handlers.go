@@ -298,6 +298,7 @@ type Handlers struct {
 	taskStopper            TaskStopper
 	titleBranchRenamer     TaskTitleBranchRenamer
 	stopTaskGetter         func(context.Context, string) (*models.Task, error)
+	childTaskReorderer     ChildTaskReorderService
 	messageQueue           MessageQueuer
 	promptResolver         PromptReferenceResolver
 	promptReader           PromptReader
@@ -405,6 +406,7 @@ func NewHandlers(
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
+		h.childTaskReorderer = taskSvc
 	}
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
 		h.taskStopper = stopper
@@ -563,6 +565,7 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPReorderChildTasks, h.handleReorderChildTasks)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 

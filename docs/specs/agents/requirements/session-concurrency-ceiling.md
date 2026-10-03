@@ -82,6 +82,14 @@ bounded instance capacity, so that one installation does not overload its host.
   while its start waits, the unbound run shall fail and release its concurrency
   slot.
 
+- **AC-AGENTS-SESSION-CEILING-001.11:** Each retry pass shall consider eligible,
+  due ceiling-deferred tasks by priority (critical, high, medium, low, other),
+  then position, then original ceiling queue time, then task ID, all ascending
+  except priority urgency. An unreadable or absent queue time sorts after valid
+  times at the same priority and position. Unrelated writes and repeated
+  refusals shall not change this order. Normal per-step WIP admission retains
+  its existing position-first ordering.
+
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 
 **Intent:** Let administrators enable and adjust the instance ceiling in Settings.

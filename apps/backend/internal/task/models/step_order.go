@@ -18,7 +18,7 @@ func StepOrderLess(left, right *Task) bool {
 	if left.Position != right.Position {
 		return left.Position < right.Position
 	}
-	if lp, rp := stepOrderPriorityRank(left.Priority), stepOrderPriorityRank(right.Priority); lp != rp {
+	if lp, rp := TaskPriorityRank(left.Priority), TaskPriorityRank(right.Priority); lp != rp {
 		return lp < rp
 	}
 	leftQueuedAt, rightQueuedAt := stepOrderEffectiveQueuedAt(left), stepOrderEffectiveQueuedAt(right)
@@ -31,7 +31,8 @@ func StepOrderLess(left, right *Task) bool {
 	return left.ID < right.ID
 }
 
-func stepOrderPriorityRank(priority string) int {
+// TaskPriorityRank orders known priorities by urgency, with unknown values last.
+func TaskPriorityRank(priority string) int {
 	switch priority {
 	case TaskPriorityCritical:
 		return 0
