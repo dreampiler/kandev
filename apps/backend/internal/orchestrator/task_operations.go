@@ -9522,6 +9522,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 	if s.isCancelInFlight(identity.SessionID) || s.isQueuedDispatchInFlight(identity.SessionID) || s.isSteerInFlight(identity.SessionID) {
 		return false, nil
 	}
+	s.pruneStaleChildStallAlerts(ctx, identity)
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 	if err != nil {
 		return false, err
@@ -10715,6 +10716,7 @@ func (s *Service) cancelAgentWhileUnlocked(
 }
 
 func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string, prepared cancelAgentPreparation) error {
+	s.markChildTurnCancelled(ctx, sessionID, prepared)
 	session := prepared.session
 	if session != nil {
 		reconciled, err := s.reconcileCancelledTurnOwned(

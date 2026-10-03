@@ -273,6 +273,10 @@ export type SessionBackendMessageMap = {
     "session.pending_action_changed",
     SessionPendingActionChangedPayload
   >;
+  "session.child_stall_undeliverable": BackendMessage<
+    "session.child_stall_undeliverable",
+    TaskSessionNotificationPayload
+  >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",
     TaskSessionNotificationPayload
