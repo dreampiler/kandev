@@ -112,6 +112,9 @@ export function OverviewNeedsHuman({ items }: { items: OverviewHumanItem[] }) {
 }
 
 function eventHref(event: OverviewEvent): string | undefined {
+  if (event.kind === "automation_run" && event.workspace_id && event.automation_id) {
+    return `/settings/workspaces/${encodeURIComponent(event.workspace_id)}/automations/${encodeURIComponent(event.automation_id)}`;
+  }
   if (event.task_id) {
     return linkToTask(
       event.task_id,

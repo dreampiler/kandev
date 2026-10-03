@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -121,6 +122,7 @@ type OverviewApprovalRow struct {
 type OverviewAutomationTaskRow struct {
 	ID           string `db:"id"`
 	WorkspaceID  string `db:"workspace_id"`
+	AutomationID string `db:"automation_id"`
 	Title        string `db:"title"`
 	CreatedAtRaw string `db:"created_at"`
 	CreatedAt    time.Time
@@ -461,7 +463,8 @@ func (r *Repository) ListOverviewAutomationTasks(
 		placeholders, args := placeholdersFor(batch)
 		args = append(args, since, limit)
 		var rows []*OverviewAutomationTaskRow
-		query := `SELECT id, workspace_id, COALESCE(title, '') AS title, CAST(created_at AS TEXT) AS created_at
+		query := `SELECT id, workspace_id, COALESCE(title, '') AS title, CAST(created_at AS TEXT) AS created_at,
+			COALESCE(` + dialect.JSONExtract(r.ro.DriverName(), "metadata", "automation_id") + `, '') AS automation_id
 			FROM tasks
 			WHERE workspace_id IN (` + strings.Join(placeholders, ",") + `)
 			  AND COALESCE(origin, '') = '` + taskmodels.TaskOriginAutomationRun + `' AND created_at >= ?

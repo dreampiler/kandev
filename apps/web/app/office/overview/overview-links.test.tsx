@@ -283,3 +283,28 @@ describe("overview list and section destinations", () => {
     expect(hrefOf(screen.getByText("Fast"))).toBe("/settings/agents/claude-code/profiles/prof-1");
   });
 });
+
+describe("overview automation destination", () => {
+  afterEach(cleanup);
+
+  it("opens an automation event's originating configuration", () => {
+    render(
+      <OverviewLast24h
+        events={[
+          {
+            kind: "automation_run",
+            at: createdAt,
+            workspace_id: "ws-1",
+            automation_id: "auto 1",
+            task_id: "task-auto",
+            title: "Scheduled digest",
+          },
+        ]}
+        workspaceNames={{ "ws-1": "Board One" }}
+      />,
+    );
+    expect(screen.getByTestId("overview-event").getAttribute("href")).toBe(
+      "/settings/workspaces/ws-1/automations/auto%201",
+    );
+  });
+});
