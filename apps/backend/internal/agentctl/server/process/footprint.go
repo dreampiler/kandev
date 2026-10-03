@@ -59,3 +59,25 @@ func (m *Manager) OwnedFootprint() ProcessFootprint {
 	defer m.mu.Unlock()
 	return m.ownedFootprint()
 }
+
+// descendsFromProcess walks a parent chain with a bounded hop count so a cycle
+// introduced by process-identifier reuse cannot loop forever.
+//
+// The walk is identical on every platform, so it lives here rather than in a
+// tagged file: the Linux build does not include the other-unix file, and a
+// platform-specific copy would leave one target without it.
+func descendsFromProcess(pid, rootPID int, parentOf map[int]int) bool {
+	const maxAncestryHops = 256
+	current := pid
+	for hop := 0; hop < maxAncestryHops; hop++ {
+		if current == rootPID {
+			return true
+		}
+		parent, ok := parentOf[current]
+		if !ok || parent == current || parent <= 0 {
+			return false
+		}
+		current = parent
+	}
+	return false
+}

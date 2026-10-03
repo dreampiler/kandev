@@ -90,24 +90,6 @@ func windowsProcessParents() (map[int]int, bool) {
 	return parentOf, true
 }
 
-// descendsFromProcess walks a parent chain with a bounded hop count so a cycle
-// introduced by process-identifier reuse cannot loop forever.
-func descendsFromProcess(pid, rootPID int, parentOf map[int]int) bool {
-	const maxAncestryHops = 256
-	current := pid
-	for hop := 0; hop < maxAncestryHops; hop++ {
-		if current == rootPID {
-			return true
-		}
-		parent, ok := parentOf[current]
-		if !ok || parent == current || parent <= 0 {
-			return false
-		}
-		current = parent
-	}
-	return false
-}
-
 // windowsProcessMemory reports commit charge and resident bytes for one process.
 // It fails closed: an unreadable process reports readable=false rather than
 // zeros, so a permissions denial is never presented as "this process is free".

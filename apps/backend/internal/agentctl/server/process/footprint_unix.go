@@ -75,21 +75,3 @@ func psProcessTable() (parentOf map[int]int, residentOf map[int]uint64, ok bool)
 	}
 	return parentOf, residentOf, true
 }
-
-// descendsFromProcess walks a parent chain with a bounded hop count so a cycle
-// introduced by process-identifier reuse cannot loop forever.
-func descendsFromProcess(pid, rootPID int, parentOf map[int]int) bool {
-	const maxAncestryHops = 256
-	current := pid
-	for hop := 0; hop < maxAncestryHops; hop++ {
-		if current == rootPID {
-			return true
-		}
-		parent, ok := parentOf[current]
-		if !ok || parent == current || parent <= 0 {
-			return false
-		}
-		current = parent
-	}
-	return false
-}
