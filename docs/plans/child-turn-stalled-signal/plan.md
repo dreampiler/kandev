@@ -1,6 +1,6 @@
 ---
 created: 2026-10-01
-status: draft
+status: approved
 requirements:
   - REQ-TASKS-CHILD-STALL-001
   - REQ-TASKS-CHILD-STALL-002
@@ -14,17 +14,15 @@ legacy_specs: []
 
 ## Scope and status
 
-This package supplies the missing reviewable requirements, design, plan, and
-work orders. It does not implement the feature. The later reassignment permits
-these design files despite the earlier task-plan sentence excluding repository
-files. Unrelated dirty work remains outside this package. No commit, PR,
-runtime change, or permanent test is part of this design turn.
+This package supplies the reviewable requirements, design, plan, and work
+orders for the child-turn stalled signal. The owner requested implementation
+on 2026-10-04; the work orders below are the implementation scope.
 
 Tasks owns the durable parent/child, turn, entry, and notification contract.
 The [requirements](../../specs/tasks/requirements/child-turn-stalled-signal.md)
-and [system design](../../specs/tasks/system-design/child-turn-stalled-signal.md)
-are both draft. Existing stall recovery and peer-report batch designs are
-adjacent, not dependencies or permission to implement their changes.
+are active and the [system design](../../specs/tasks/system-design/child-turn-stalled-signal.md)
+is current. Existing stall recovery and peer-report batch designs are
+adjacent, not dependencies.
 
 ## Owner decision
 
@@ -60,10 +58,13 @@ runtime. Monetary cost cannot be calculated without model pricing and
 input/output counts. No paid classifier is assumed or authorized; one would
 require a revised cost comparison and explicit scope.
 
-Selecting A required moving the classifier to the producer and revising
-Task 02 before implementation. This design handoff requests no immediate
-approval or model switch and does not claim a confirmed implementation
-decision.
+Selecting A moved the classifier to the producer. The 2026-10-04 implementation
+request added three owner requirements, recorded as AC-TASKS-CHILD-STALL-001.4,
+002.5, and 002.6: a reminder for an unanswered parent question, a wait plus
+operator notification when the parent primary session is unavailable, and
+folding of alerts queued for the same parent. Folding bounds parent turns when
+alerts arrive while the parent is busy; the 45/day figure stays a sizing input,
+not a cap.
 
 ## Delivery order
 
@@ -71,10 +72,9 @@ decision.
 2. [Task 02: Classify at producer](task-02-candidate-classification.md), after 01.
 3. [Task 03: Deliver and expose parent alerts](task-03-parent-delivery.md), after 02.
 
-All work orders are pending. No implementation delegation is authorized. A
-later implementation instruction precedes execution. The table/schema,
-classifier, and queue delivery form sequential verification boundaries, not
-independently released features.
+The owner's 2026-10-04 request authorizes execution in this order. Settlement
+capture, classification, and queue delivery form sequential verification
+boundaries, not independently released features; they ship as one feature.
 
 ## ASCII UI preview
 
@@ -103,8 +103,7 @@ the same child from the existing conversation route.
 
 ## Verification strategy and risks
 
-No production or test execution belongs to this design turn. Work orders specify
-targeted existing tests and explicitly invoked temporary Go overlays for new
+Work orders specify targeted existing tests and explicitly invoked temporary Go overlays for new
 behavior. Put temporary cases under the OS temporary directory, outside normal
 test discovery; remove overlays after retaining concise results. Do not commit
 new permanent tests without separate authorization. Focused rendered desktop
@@ -113,7 +112,9 @@ and phone checks cover UI-01 after implementation; do not run the whole suite.
 Required scenario coverage across 01-03: successful ordinary turn, every cause,
 optional versus required completion signal, abandonment, rejected dispatch,
 same-step re-entry, deferred transition race, duplicate/reordered event, busy or
-offline parent, Auto-run OFF, pending question, queue full, failed reads, crash
+offline parent, Auto-run OFF, pending question, unanswered parent question
+reminder, failed or missing parent primary session, folding of several alerts
+for one parent, queue full, failed reads, crash
 at queue insertion, producer restart, retry exhaustion, retention replay, and
 zero workflow mutations. An unresolved external dispatch is not proof of an
 exactly-once model turn. New source symbols and test names in work orders are
@@ -133,3 +134,8 @@ tests. Catalog lookup discovers both new task specifications. Scoped
 `git diff --check` passed, but does not examine untracked new files; those
 files were read separately for links, encoding, and whitespace. Implementation
 and rendered verification are not run and all work orders remain pending.
+
+On 2026-10-04, after recording the owner's implementation request and added
+requirements, `python -X utf8 scripts/list-docs.py validate` (344 decisions,
+1,340 specifications) and `python -X utf8 scripts/lint-spec-files.py --all`
+passed.

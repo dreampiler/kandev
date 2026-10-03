@@ -34,7 +34,11 @@ or receipt table is used. Likely files:
 `apps/backend/internal/orchestrator/messagequeue/`, orchestrator queued dispatch
 and event handlers, task handlers/service and backend wiring; existing web
 conversation message rendering and locale catalogs only if required for the new
-system-item metadata. Read the scoped backend/web guidance before implementation.
+system-item metadata. Also covers folding of alerts queued for the same parent
+(AC-TASKS-CHILD-STALL-002.6) and the wait plus one operator notification when
+the parent primary session is missing, failed, or cancelled
+(AC-TASKS-CHILD-STALL-002.5). Read the scoped backend/web guidance before
+implementation.
 
 ## Exclusions
 
@@ -80,7 +84,8 @@ go test -p 2 -tags fts5 -overlay "$env:TEMP\kandev-child-turn-stalled-signal\ove
 Cases: repeated/reordered candidate, queue insert crash before acknowledgement,
 consumed queue replay, offline/busy parent, queue full, Auto-run OFF, pending
 question dedup, changed primary, reparent/workspace/entry race, read error,
-retry exhaustion/operator retry, and stale queue dispatch. Assert one attributed
+retry exhaustion/operator retry, stale queue dispatch, folding of three alerts
+into one queue item, and failed parent primary with later replacement. Assert one attributed
 history item and no task/session lifecycle mutation by the notification path.
 
 For any locale/rendering changes, from `apps/web`:

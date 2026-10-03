@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-10-01
 owners:
@@ -17,10 +17,10 @@ turn identity, workflow entry, and parent-session delivery are task primitives;
 Office terminal-child waves remain a separate contract.
 
 The owner selected option A (producer-qualified direct parent delivery) on
-2026-10-03. The producer classifies each live settlement and enqueues
-qualified alerts directly to the parent's primary session. No internal
-candidate feed, monitor classifier, consumer lease, or separate receipt storage
-is used. Implementation requires a later implementation instruction. See the
+2026-10-03 and requested implementation on 2026-10-04. The producer classifies
+each live settlement and enqueues qualified alerts directly to the parent's
+primary session. No internal candidate feed, monitor classifier, consumer
+lease, or separate receipt storage is used. See the
 [plan](../../../plans/child-turn-stalled-signal/plan.md).
 
 ## Terms
@@ -32,6 +32,9 @@ is used. Implementation requires a later implementation instruction. See the
 - **Candidate:** a live settlement that the producer has classified as an
   actionable stall.
 - **Alert:** one classified item queued for the current parent's primary session.
+- **Parent question:** a question an autopilot child asked its direct parent
+  with `ask_parent_question_kandev`; it stays pending until the parent replies
+  with `reply_to_question_id`.
 
 ## Requirements
 
@@ -53,6 +56,12 @@ workflow completion.
   before parent delivery. A committed deferred transition, same-step re-entry,
   reparenting, archive, terminal state, or resumed execution shall prevent stale
   delivery. Failed reads shall defer delivery without workflow mutation.
+- **AC-TASKS-CHILD-STALL-001.4:** A child waiting on a pending parent question
+  shall not alert while the original question delivery is still queued or
+  running for the parent. Once a parent turn that started after the question
+  settles, the parent primary session is idle, and the question is still
+  pending, the waiting child shall produce one alert for that child turn. An
+  answered question suppresses the alert.
 
 ### REQ-TASKS-CHILD-STALL-002: Durable selective delivery
 
@@ -74,6 +83,15 @@ or unauthorized wakes.
   shall not move either task's workflow, complete a task, answer a question,
   cancel a session, or authorize a new agent action independently of the existing
   queue dispatch policy.
+- **AC-TASKS-CHILD-STALL-002.5:** When the parent has no primary session or its
+  primary session is failed or cancelled, the candidate shall wait for the
+  parent's next promptable primary session and the operator shall receive one
+  notification for that candidate. The producer shall not create a session or
+  select a sibling session.
+- **AC-TASKS-CHILD-STALL-002.6:** A new alert for a parent session whose queue
+  tail is a pending, undispatched alert shall fold into that item, so alerts
+  accumulated while the parent is busy are handled in one parent turn. Each
+  folded candidate keeps its own replay identity.
 
 ### REQ-TASKS-CHILD-STALL-003: Attribution and operating visibility
 
@@ -93,8 +111,9 @@ or unauthorized wakes.
 
 ## Exclusions
 
-No implementation, permanent tests, deployment, settings changes, public
-webhook, new autonomous recovery policy, transcript scanning model, parent
-priority lane, or replacement of Office all-children-terminal wake receipts is
-authorized by this package. Traffic observations are sizing input, not runtime
-thresholds. Existing question and task-completion contracts remain authoritative.
+No deployment, settings changes, public webhook, new autonomous recovery
+policy, transcript scanning model, parent priority lane, automatic answer to a
+parent question, or replacement of Office all-children-terminal wake receipts
+is part of this contract. Traffic observations are sizing input, not runtime
+thresholds. Existing question and task-completion contracts remain
+authoritative.

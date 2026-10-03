@@ -30,9 +30,12 @@ Implement the producer-side classifier that qualifies each live settlement
 using structured evidence already available in the task system. The
 classification result is persisted alongside the candidate in the completion
 transaction. No external monitor, paid classifier, or unstructured transcript
-interpretation is used. Likely files: new focused helpers under
-`apps/backend/internal/task/service/`, task repository interface/SQLite files,
-and `apps/backend/internal/backendapp/` wiring.
+interpretation is used. A pending parent question holds the candidate and links
+it to the question; the producer promotes it once a parent turn that started
+after the question settles without answering it (AC-TASKS-CHILD-STALL-001.4).
+Likely files: a pure classifier package under `apps/backend/internal/task/`,
+an orchestrator-owned producer loop with `Start`/`Stop`, and
+`apps/backend/internal/backendapp/` wiring.
 
 ## Exclusions
 
@@ -60,13 +63,15 @@ go test -p 2 -tags fts5 -overlay "$env:TEMP\kandev-child-turn-stalled-signal\ove
 Cover all causes, required/optional signal, unknown evidence, ordinary success,
 active execution, reparenting/workspace mismatch, archive/terminal state,
 same-step re-entry, pending/committed deferred transition, read failure, duplicate
-and reordered event, restart, capped retry, and retention replay.
+and reordered event, restart, capped retry, retention replay, held parent
+question promotion after an unanswering parent turn, and answered-question
+suppression.
 Assert no workflow mutation and no parent-slot acquisition during classification.
 Record exact executed case counts and cleanup owned temporary files.
 
 ## Dependencies, risks, results
 
-Depends on Task 01 and owner selection of A. The producer classifier must use
+Depends on Task 01. The producer classifier must use
 only structured evidence available at settlement time; if a cause cannot be
 classified without unstructured interpretation, return an explicit unresolved
 diagnostic for owner decision rather than adding inference costs. Results: not

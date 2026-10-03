@@ -21,16 +21,19 @@ system_design:
 
 ## Summary and scope
 
-Capture the task's workflow entry and parent/workspace at turn start, distinguish
-accepted live execution from reserve/abandon/cancel paths, and persist one
-candidate alongside genuine live completion. Add the narrow internal event as
-an acceleration hint, not durable storage. Read backend scoped guidance first.
+Capture the task's workflow entry and parent/workspace at turn start in the
+turn-insert transaction (`child_stall_start` turn metadata), record the
+settlement discriminator for abandoned and explicitly cancelled turns, and add
+the dialect-neutral scan that lists unresolved child-turn settlements. The turn
+row is the durable candidate record; `turn.completed` is only a wake-up hint.
+Read backend scoped guidance first.
 
 Likely files: `apps/backend/internal/task/service/service_turns.go`,
-`internal/task/models/` turn models, `internal/task/repository/interface.go`,
-`internal/task/repository/sqlite/conversation_receipts.go`, repository schema
-and cleanup registry, and `internal/events/` event constants. Paths beginning
-with `internal/` are relative to `apps/backend`.
+`internal/task/models/` turn metadata keys, `internal/task/repository/interface.go`,
+`internal/task/repository/sqlite/session.go` and `conversation_receipts.go`
+(turn insert and abandon), and the orchestrator explicit-cancellation path.
+No table or column is added. Paths beginning with `internal/` are relative to
+`apps/backend`.
 
 ## Exclusions
 
@@ -70,6 +73,6 @@ specific unavailable test environment. Remove owned temporary files afterward.
 
 ## Dependencies, risks, results
 
-Requires owner selection of A and explicit implementation instruction.
+Owner selected A (2026-10-03) and requested implementation (2026-10-04).
 Completion callers may not all represent live settlement; trace them before
 wiring the new producer. Results: not implemented; no tests run in design turn.

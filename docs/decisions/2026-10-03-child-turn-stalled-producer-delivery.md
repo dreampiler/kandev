@@ -33,7 +33,7 @@ ambiguous insertion without creating duplicate parent items. The design does
 not add a candidate feed, monitor consumer, lease, or separate receipt table.
 Operators still need bounded diagnostics for pre-queue failures and delivery
 lag. Desktop and phone must expose the same attributed alert and child link.
-Implementation requires a later explicit owner request.
+The owner requested implementation on 2026-10-04.
 
 ## Alternatives Considered
 
