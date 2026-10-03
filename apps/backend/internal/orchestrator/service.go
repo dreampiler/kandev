@@ -694,6 +694,11 @@ type Service struct {
 	repo          sessionExecutorStore
 	promptTargets taskPullRequestTargetStore
 	agentManager  executor.AgentManagerClient
+	// runtimeFootprintProjection is the last observed per-session agent-runtime
+	// footprint. It is replaced wholesale on every maintenance tick and read by
+	// the diagnostic surface, so it is guarded rather than mutated in place.
+	runtimeFootprintMu         sync.Mutex
+	runtimeFootprintProjection RuntimeFootprintProjection
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
