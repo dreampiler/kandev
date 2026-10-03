@@ -26,7 +26,6 @@ func TestWindowsSetProcGroupDoesNotSuspendSharedHelpers(t *testing.T) {
 	require.NotNil(t, cmd.SysProcAttr)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
 	require.Zero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
-	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW)
 }
 
 func TestWindowsSetAgentProcGroupStartsSuspended(t *testing.T) {
@@ -36,7 +35,6 @@ func TestWindowsSetAgentProcGroupStartsSuspended(t *testing.T) {
 	require.NotNil(t, cmd.SysProcAttr)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
-	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW)
 }
 
 func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
@@ -46,7 +44,24 @@ func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
 	require.NotNil(t, cmd.SysProcAttr)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP)
 	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED)
-	require.NotZero(t, cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW)
+}
+
+func TestWindowsProcGroupsHideConsoleWindow(t *testing.T) {
+	for name, configure := range map[string]func(*exec.Cmd){
+		"setProcGroup":        setProcGroup,
+		"setManagedProcGroup": setManagedProcGroup,
+		"setAgentProcGroup":   setAgentProcGroup,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0])
+			configure(cmd)
+
+			require.NotNil(t, cmd.SysProcAttr)
+			flags := cmd.SysProcAttr.CreationFlags
+			require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
+			require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+		})
+	}
 }
 
 func TestWindowsProcessLifecycleJobKillsDescendants(t *testing.T) {

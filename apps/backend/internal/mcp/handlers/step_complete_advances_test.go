@@ -59,6 +59,7 @@ func newTestWorkflowController(t *testing.T) (*workflowctrl.Controller, *workflo
 }
 
 func TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal(t *testing.T) {
+	moveToNext := []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}}
 	cases := []struct {
 		name                      string
 		autoAdvanceRequiresSignal bool
@@ -66,16 +67,8 @@ func TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal(t *te
 		wantAdvances              bool
 		wantNote                  bool
 	}{
-		{
-			name:                      "signal-gated step with a move action advances",
-			autoAdvanceRequiresSignal: true,
-			onTurnComplete: []wfmodels.OnTurnCompleteAction{
-				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "next"}},
-			},
-			wantAdvances: true,
-			wantNote:     false,
-		},
-		{name: "non-signal-gated step does not advance", autoAdvanceRequiresSignal: false, wantAdvances: false, wantNote: true},
+		{name: "signal-gated step with a move action advances", autoAdvanceRequiresSignal: true, onTurnComplete: moveToNext, wantAdvances: true, wantNote: false},
+		{name: "non-signal-gated step does not advance", autoAdvanceRequiresSignal: false, onTurnComplete: moveToNext, wantAdvances: false, wantNote: true},
 	}
 
 	for _, tc := range cases {
@@ -118,6 +111,95 @@ func TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal(t *te
 	}
 }
 
+// TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance
+// covers a signal-gated step whose on_turn_complete has no move action the
+// workflow engine would run. The signal is still accepted and recorded, but
+// the response must say it will not move the task instead of reporting
+// advances:true for a transition that does not exist.
+func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *testing.T) {
+	cases := []struct {
+		name           string
+		onTurnComplete []wfmodels.OnTurnCompleteAction
+	}{
+		{name: "no on_turn_complete actions"},
+		{
+			name:           "disable_plan_mode only",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteDisablePlanMode}},
+		},
+		{
+			name:           "move_to_step without a target step",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToStep}},
+		},
+		{
+			name: "move_to_step targeting current step",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type:   wfmodels.OnTurnCompleteMoveToStep,
+				Config: map[string]interface{}{"step_id": "step-no-move"},
+			}},
+		},
+		{
+			name: "self-targeting move blocks later move",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{
+				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step-no-move"}},
+				{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]interface{}{"step_id": "step-later"}},
+			},
+		},
+		{
+			name: "move_to_next that requires approval",
+			onTurnComplete: []wfmodels.OnTurnCompleteAction{{
+				Type:   wfmodels.OnTurnCompleteMoveToNext,
+				Config: map[string]interface{}{"requires_approval": true},
+			}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			taskSvc, taskRepo := newTestTaskService(t)
+			ctrl, wfRepo := newTestWorkflowController(t)
+			ctx := context.Background()
+
+			seedStepCompleteTarget(t, taskRepo, "task-no-move", "session-no-move", "step-no-move", models.TaskSessionStateRunning)
+			seedAgentProfileSnapshot(t, taskRepo, "session-no-move", "claude-no-move")
+			require.NoError(t, wfRepo.CreateStep(ctx, &wfmodels.WorkflowStep{
+				ID:                        "step-no-move",
+				WorkflowID:                "wf-no-move",
+				Name:                      "Waiting",
+				Position:                  0,
+				AutoAdvanceRequiresSignal: true,
+				Events:                    wfmodels.StepEvents{OnTurnComplete: tc.onTurnComplete},
+			}))
+
+			recorder := &mcpRecordingEventBus{}
+			h := newStepCompleteHandler(t, taskSvc, taskRepo, recorder)
+			h.workflowCtrl = ctrl
+
+			msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+				"task_id":    "task-no-move",
+				"session_id": "session-no-move",
+				"summary":    "implementation finished",
+			})
+			resp, err := h.handleStepComplete(ctx, msg)
+			require.NoError(t, err)
+			require.NotNil(t, resp)
+
+			var payload map[string]interface{}
+			require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+			assert.Equal(t, true, payload["accepted"], "accepted must stay true: the signal was recorded")
+			assert.Equal(t, false, payload["advances"], "a step without a move action cannot advance on the signal")
+			note, _ := payload["note"].(string)
+			assert.Contains(t, note, "on_turn_complete", "the note must name the missing on_turn_complete move action")
+
+			session, err := taskRepo.GetTaskSession(ctx, "session-no-move")
+			require.NoError(t, err)
+			signal, has := models.LoadPendingStepSignal(session.Metadata)
+			require.True(t, has, "an accepted signal is durably recorded")
+			assert.Equal(t, "step-no-move", signal.StepID)
+			assert.Len(t, recorder.events, 1, "an accepted signal is published once")
+		})
+	}
+}
+
 // TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure pins the
 // never-guess rule: when the step lookup itself fails (here, the step row
 // simply does not exist in the workflow store), the response must not
@@ -149,46 +231,4 @@ func TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure(t *testing.T) {
 	assert.Equal(t, true, payload["accepted"])
 	assert.NotContains(t, payload, "advances", "a failed step lookup must never guess an advances value")
 	assert.NotContains(t, payload, "note")
-}
-
-// TestHandleStepComplete_RejectsSignalWithoutTransition pins the fix for the
-// silent no-op: a signal-gated step with no on_turn_complete move action can
-// never advance, so the handler must reject the signal with a validation error
-// and must not durably record it or publish a bus event. Recording the signal
-// would let the orchestrator consume it and still leave the task parked.
-func TestHandleStepComplete_RejectsSignalWithoutTransition(t *testing.T) {
-	taskSvc, taskRepo := newTestTaskService(t)
-	ctrl, wfRepo := newTestWorkflowController(t)
-	ctx := context.Background()
-
-	seedStepCompleteTarget(t, taskRepo, "task-no-transition", "session-no-transition", "step-no-transition", models.TaskSessionStateRunning)
-	seedAgentProfileSnapshot(t, taskRepo, "session-no-transition", "claude-no-transition")
-	require.NoError(t, wfRepo.CreateStep(ctx, &wfmodels.WorkflowStep{
-		ID:                        "step-no-transition",
-		WorkflowID:                "wf-no-transition",
-		Name:                      "Waiting",
-		Position:                  0,
-		AutoAdvanceRequiresSignal: true,
-		// No on_turn_complete move action: this step cannot advance.
-	}))
-
-	recorder := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, taskSvc, taskRepo, recorder)
-	h.workflowCtrl = ctrl
-
-	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
-		"task_id":    "task-no-transition",
-		"session_id": "session-no-transition",
-		"summary":    "implementation finished",
-	})
-	resp, err := h.handleStepComplete(ctx, msg)
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
-	assert.Empty(t, recorder.events, "a rejected signal must not publish a bus event")
-
-	session, err := taskRepo.GetTaskSession(ctx, "session-no-transition")
-	require.NoError(t, err)
-	_, has := models.LoadPendingStepSignal(session.Metadata)
-	assert.False(t, has, "a rejected signal must not be durably recorded")
 }

@@ -77,7 +77,7 @@
   "blockedNeedsApprovals_other": "병합하려면 승인이 {{count}}개 더 필요합니다.",
   "blockedStatusCheck": "필수 상태 검사가 아직 통과하지 않았습니다.",
   "botComments": "봇 댓글 (",
-  "byAuthorOpenedAgo": "{{author}} 작성 · {{time}}에 열림",
+  "byAuthorOpenedAgo": "{{author}} 작성 · {{time}} 열림",
   "changeConnection": "연결 변경",
   "changeGithubConnection": "GitHub 연결 변경",
   "changesRequested": "변경 요청됨",
@@ -219,7 +219,7 @@
   "prDiscoveryLastFailure": "마지막 실패: {{time}}",
   "prDiscoveryAffectedTargets_one": "영향받은 대상: {{count}}",
   "prDiscoveryAffectedTargets_other": "영향받은 대상: {{count}}",
-  "prDiscoveryRetryAt": "{{time}} 후 다시 시도",
+  "prDiscoveryRetryAt": "다음 재시도: {{time}}",
   "prDiscoveryUnknownTime": "시각 알 수 없음",
   "githubApp": "GitHub App",
   "githubAppAdded": "GitHub App을 추가했습니다",
@@ -298,6 +298,7 @@
   "limitsGithubPullRequestsAndIssues": "이 워크스페이스에 표시되거나 가져오는 GitHub 풀 리퀘스트 및 이슈를 제한합니다.",
   "loadingAccounts": "계정 불러오는 중...",
   "loadingOrganizations": "조직 불러오는 중...",
+  "loadingPullRequests": "풀 리퀘스트를 불러오는 중...",
   "loadingRegisteredApps": "등록된 App 불러오는 중...",
   "loadingTaskAccess": "작업 접근 불러오는 중...",
   "localAndWorktreeTasksUseHost": "로컬 및 워크트리 작업은 호스트에서 볼 수 있는 Git 또는 SSH 자격 증명을 사용합니다. Docker, SSH, 클라우드 작업은 해당 실행기에 구성된 자격 증명을 사용합니다.",
@@ -352,7 +353,7 @@
   "openDetails": "{{title}} 세부 정보 열기",
   "openGithubAppSettings": "GitHub App 설정 열기",
   "openGithubFilters": "GitHub 필터 열기",
-  "openSettingsToSeePrsAndIssues": "풀 리퀘스트와 이슈를 보려면 <0>GitHub 설정 열기</0>.",
+  "openSettingsToSeePrsAndIssues": "풀 리퀘스트와 이슈를 보려면 <0>GitHub 설정</0>을 여세요.",
   "optionalFallsBackToStepDefault": "선택 사항, 단계 기본값으로 대체됩니다.",
   "optionalFallsBackToStepDefault2": "선택 사항, 단계 기본값으로 대체됩니다. 에이전트가 실행될 실행기 환경입니다.",
   "optionallyConnectYourGithubUserFor": "My GitHub와 사람이 귀속되는 작업을 위해 선택적으로 GitHub 사용자를 연결하세요. 이 ID는 관리형 에이전트에게 절대 제공되지 않으며, 워크스페이스 자동화는 계속 App으로 동작합니다.",
@@ -650,6 +651,5 @@
   "mergeQueueRecoveryStatusRepairRequested": "이 제거에 대한 복구를 요청했습니다.",
   "mergeQueueRecoveryStatusRepairRequestedWaiting": "복구를 요청했습니다. 재대기 전에 새 커밋을 기다리는 중입니다.",
   "mergeQueueRecoveryStatusWaitingForCommit": "재대기 전에 새 커밋을 기다리는 중입니다.",
-  "mergeQueueRecoveryStatusWaitingForChecks": "새 헤드를 감지했습니다. 필수 검사를 기다리는 중입니다.",
-  "loadingPullRequests": "풀 리퀘스트를 불러오는 중..."
+  "mergeQueueRecoveryStatusWaitingForChecks": "새 헤드를 감지했습니다. 필수 검사를 기다리는 중입니다."
 }

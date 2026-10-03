@@ -70,16 +70,9 @@ var (
 // launch work for this run.
 var ErrAutomationRunNotDispatchable = errors.New("automation: run is not dispatchable")
 
-// ErrRunDeferred signals that the orchestrator refused the launch at the
-// session ceiling and recorded a ceiling_deferred replay. It is not a
-// failure: the task exists and owns the run, the sweep will retry the launch
-// once capacity frees up, and the eventual turn settles the run. DispatchRun
-// must therefore leave the row open (task_created) instead of marking it
-// failed, and its orchestrator caller must not delete the task.
-//
-// The orchestrator cannot be imported here (import cycle), so the
-// orchestrator's dispatch closures translate its own ceiling sentinel into
-// this one before returning to DispatchRun.
+// ErrRunDeferred is returned by a DispatchRun callback whose launch was queued
+// for a later replay instead of started. The run stays triggered and bound to
+// its task; the replay dispatches it through DispatchRun again.
 var ErrRunDeferred = errors.New("automation: run launch deferred")
 
 // RunStopper cancels one exact task/session/turn binding. The bool is false
@@ -1390,7 +1383,10 @@ func (s *Service) automationRunLock(automationID string) func() {
 // DispatchRun serializes the fallible agent dispatch with exact-run stop and
 // deletion. The callback is invoked only while the admitted run is still
 // open; its exact task/session/turn identity is bound before the lock is
-// released, so a stop can never settle a different firing.
+// released, so a stop can never settle a different firing. A callback that
+// returns ErrRunDeferred leaves the run open for a later dispatch; any other
+// callback error fails the run and is returned unchanged once that failure is
+// recorded, or wrapped when recording it fails.
 func (s *Service) DispatchRun(
 	ctx context.Context,
 	runID string,
@@ -1420,18 +1416,10 @@ func (s *Service) DispatchRun(
 	}
 
 	dispatchResult, err := dispatch()
+	if errors.Is(err, ErrRunDeferred) {
+		return err
+	}
 	if err != nil {
-		if errors.Is(err, ErrRunDeferred) {
-			// The ceiling refused the launch, not the run: the task already
-			// owns this row and the sweep will retry. Advance the row from
-			// triggered to task_created (this is what MarkRun{Succeeded,Failed}
-			// ByTaskID settles on) without marking it failed, and hand the
-			// caller a distinguishable non-failure so it skips cleanup.
-			if markErr := s.store.MarkRunTaskCreated(ctx, runID, run.TaskID); markErr != nil {
-				return fmt.Errorf("%w (mark run task_created: %v)", err, markErr)
-			}
-			return err
-		}
 		return s.markDispatchFailed(ctx, runID, err)
 	}
 	if dispatchResult.TaskID == "" || dispatchResult.SessionID == "" || dispatchResult.TurnID == "" {
@@ -1950,6 +1938,11 @@ func (s *Service) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionI
 // the run, e.g. a permission prompt an automation run can't answer.
 func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
 	return s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg)
+}
+
+// MarkDeferredRunFailedByTaskID closes an unbound run after its queued task is deleted.
+func (s *Service) MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	return s.store.MarkDeferredRunFailedByTaskID(ctx, taskID, errMsg)
 }
 
 // MarkRunSucceededByTaskID transitions a still-pending run (task_created)
