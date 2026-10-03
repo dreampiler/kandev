@@ -346,6 +346,21 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	)
 }
 
+// RouteAfterInterruptedFailure preserves the failed session's executor scope.
+func (r *ProfileExecutionResolver) RouteAfterInterruptedFailure(ctx context.Context, sessionID, profileID, candidateID string, generation int64, failure *routingerr.Error) (dynamic.RouteDecision, error) {
+	if r.engine == nil || sessionID == "" {
+		return dynamic.RouteDecision{}, errors.New("dynamic profile execution is not configured")
+	}
+	if err := r.ValidateProfile(ctx, profileID); err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	profile, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.ApplyInterruptedFailureContext(ctx, sessionID, profile, generation, candidateID, failure)
+}
+
 // ClaimUnclassifiedFallbackLaunch performs the final contextual fence before
 // a detached automatic successor begins launch work.
 func (r *ProfileExecutionResolver) ClaimUnclassifiedFallbackLaunch(

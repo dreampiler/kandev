@@ -2,7 +2,7 @@
 status: draft
 system: agents
 created: 2026-08-13
-updated: 2026-09-28
+updated: 2026-10-04
 owners:
   - cfl
 ---
@@ -13,6 +13,22 @@ owners:
 Users often name profiles by the capability they want rather than a provider brand. A task can use a profile named Frontier for planning and one named Balanced for execution. The dynamic profile selects Claude, Codex, OpenCode, or another provider from an ordered list of complete agent profiles.
 
 ## Requirements
+
+### REQ-AGENTS-DYNAMIC-MIDTURN-001: Interrupted task continuation
+
+Task-owned dynamic turns can continue existing work after a known provider failure.
+This exception does not authorize replay by concrete profiles, utility calls or Office.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.1:** A current, correlated terminal `quota_limited`, `rate_limited`, `provider_unavailable`, `provider_overloaded` or `model_capacity` failure with fallback allowed shall immediately advance to the next eligible different model after output or tool activity, bypassing same-candidate retry and reset waits. Pre-result policy shall remain unchanged.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.2:** The failed execution resource shall be suspended once using its existing account/model identity and reset policy. All configured routes to the failed model, including equivalent `opencode-go/<model>` and `opencode/<model>` routes, shall remain excluded within this chain.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.3:** Task, logical session, conversation, workflow step and dynamic profile identity shall remain unchanged while a new downstream execution claims the next route generation.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.4:** The successor's first prompt shall identify interrupted work and instruct it to inspect the work folder, Git state, existing PR state and task plan before repeating work. It shall preserve user requests, question barriers, workflow rules and the completion-tool final-action contract.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.5:** Authentication, missing credentials, payment/subscription, cancellation, user denial, task/repository/local-runtime and unclassified post-result failures shall require manual recovery.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.6:** The exact OpenCode terminal envelope `Internal error: OpenCode service failure` shall classify as provider unavailable only for `opencode-acp`. Generic internal errors, other adapters and auth/billing collisions shall not gain this exception.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.7:** Duplicate, stale and cancelled failures shall neither launch another successor nor penalize a replacement resource. Route claims, prompt/execution ownership and service shutdown shall fence advancement.
+- **AC-AGENTS-DYNAMIC-MIDTURN-001.8:** Exhaustion shall persist visible manual recovery without wrapping, clearing exclusions or scheduling a fresh-selection resource timer. An explicit new user attempt may start a fresh chain.
 
 ### REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001: Dynamic Agent Routing
 

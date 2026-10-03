@@ -2,7 +2,7 @@
 status: draft
 system: platform
 created: 2026-08-08
-updated: 2026-09-17
+updated: 2026-10-04
 owners:
   - Kandev
 ---
@@ -37,7 +37,7 @@ duplicate transcript rows or stale recovery context.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.5:** Structured metadata and exact signatures outrank broad text patterns. Collision tests enforce deterministic priority.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.6:** Adding a known provider message normally adds a sanitized fixture and catalogue rule. It does not add an orchestration or UI branch.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.7:** Classification is deterministic in this version. Calling a model to classify an error or extract timing data is deferred.
-- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.8:** Automatic retry, reset waiting, or fallback requires evidence tied to the current invocation and a failure boundary that is known to be pre-result and effect-safe.
+- **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.8:** Automatic retry, reset waiting or fallback requires current, pre-result, effect-safe evidence, except for [REQ-AGENTS-DYNAMIC-MIDTURN-001](../../agents/requirements/dynamic-agent-routing.md).
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.9:** While an eligible interactive transient retry is pending, desktop and mobile task chat shall show the retry reason, provider, attempt count, countdown, and Cancel action only while the backend owns that retry.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10:** When an interactive transient retry succeeds, is exhausted, reaches a terminal state, is stopped, or is cancelled, the system shall attempt to durably retire every outstanding retry notice for the session so that a successful cleanup prevents the notice from reappearing after the session becomes idle, the task changes, the page reloads, or another viewer observes the session. If listing or deletion fails, the system shall log and swallow the failure so a later authorized cleanup can retry the remaining notices.
 - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.11:** After authorization, cancelling an interactive transient retry shall attempt to retire outstanding retry notices even when the retry loop has already ended. Cancelling an active loop shall also expose manual Resume and Start fresh recovery actions. Listing or deletion failures follow AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10. A denied or foreign task-session pair shall not expose whether retry state or retry notices exist.
