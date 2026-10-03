@@ -200,7 +200,7 @@ func TestDynamicSuccessorContinuationOmitsFailedAgentDiagnostics(t *testing.T) {
 	}
 	evidence := fixture.svc.unclassifiedPromptEvidence(fixture.ctx, data, session)
 	_, continuation, err := fixture.svc.routeDynamicFailureDecision(
-		fixture.ctx, session, task, fixture.resolver.NewConductor(nil), fixture.failure(), evidence, true,
+		fixture.ctx, session, task, fixture.resolver.NewConductor(nil), fixture.failure(), evidence, true, false,
 	)
 	if err != nil {
 		t.Fatalf("routeDynamicFailureDecision: %v", err)

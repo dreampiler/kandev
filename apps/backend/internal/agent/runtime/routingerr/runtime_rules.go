@@ -18,6 +18,16 @@ import (
 // custom matcher instead.
 var runtimeEnvironmentRules = []runtimeRule{
 	{
+		id:         "opencode.service_failure.v1",
+		providerID: "opencode-acp",
+		match: func(text string) bool {
+			return strings.EqualFold(strings.TrimSpace(text), "Internal error: OpenCode service failure")
+		},
+		build: func(string) *Error {
+			return &Error{Code: CodeProviderUnavailable, Confidence: ConfHigh}
+		},
+	},
+	{
 		// npm 9 and npm 10 use different casing for the error prefix. Require
 		// both the ETARGET code and the matching package@version diagnostic in
 		// one bounded sample so generic disconnects and registry errors do not

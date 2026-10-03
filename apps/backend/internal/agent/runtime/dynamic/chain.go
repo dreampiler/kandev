@@ -13,6 +13,7 @@ import (
 // automatic transition returns to an earlier tier or a candidate already tried
 // in the same chain.
 type SelectionChain struct {
+	Interrupted       bool     `json:"interrupted,omitempty"`
 	Version           int      `json:"version"`
 	LogicalProfileID  string   `json:"logical_profile_id"`
 	StartGeneration   int64    `json:"start_generation"`

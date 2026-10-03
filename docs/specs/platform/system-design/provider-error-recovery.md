@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-09-15
+updated: 2026-10-04
 owners:
   - Kandev
 ---
@@ -145,9 +145,8 @@ An unknown string alone never authorizes recovery. Historical attempts retain th
 
 Classification does not by itself authorize retry or switching.
 
-- Automatic retry, reset waiting, or fallback requires evidence tied to the
-  current invocation and a failure boundary that is known to be pre-result and
-  effect-safe.
+- Automatic retry, reset waiting or fallback requires current, pre-result,
+  effect-safe evidence, except for [task interruption](../../agents/system-design/dynamic-agent-routing-01.md).
 - A provider-supported resumable retry guarantee can satisfy this gate when it
   identifies the same provider-native session and generation.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
@@ -157,9 +156,8 @@ Classification does not by itself authorize retry or switching.
   projection](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection)
   is not assistant output for this gate; non-diagnostic later progress
   restores the normal output/effect safety fence.
-- User configuration cannot override this gate. An unsafe transient or hard
-  failure stops for manual recovery even when its class policy requests retry
-  or skip.
+- User configuration cannot override this gate. Unsafe failures stay manual
+  unless the task interruption exception admits them.
 
 #### Cursor retry-safety semantics
 

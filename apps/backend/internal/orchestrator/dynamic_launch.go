@@ -860,7 +860,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	guardHeld bool,
 ) dynamicFailureRouteResult {
 	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
-	if unclassified && !guardHeld && data.SessionID != "" {
+	if (unclassified || dynamicruntime.InterruptedFailureAllowed(classified)) && !guardHeld && data.SessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 		lock.Lock()
 		defer func() {
@@ -876,6 +876,14 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	if !ok {
 		return dynamicFailureRouteResult{}
 	}
+	if s.supersededInterruptedDynamicAttempt(data, session) {
+		return dynamicFailureRouteResult{handled: true}
+	}
+	if data.EvidenceKnown && (data.OutputObserved || data.EffectObserved) &&
+		!s.currentInterruptedDynamicAttempt(data, session) {
+		return dynamicFailureRouteResult{}
+	}
+	interrupted := s.interruptedDynamicFailure(ctx, data, session, classified)
 	reason := "dynamic_recovery_declined"
 	if classified != nil {
 		reason = string(classified.Code)
@@ -913,7 +921,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		return dynamicFailureRouteResult{}
 	}
 	decision, continuationInput, err := s.routeDynamicFailureDecision(
-		ctx, session, task, conductor, classified, evidence, unclassified,
+		ctx, session, task, conductor, classified, evidence, unclassified, interrupted,
 	)
 	if decision.Generation > 0 {
 		generation = decision.Generation
@@ -938,6 +946,7 @@ func (s *Service) routeDynamicFailureDecision(
 	classified *routingerr.Error,
 	evidence dynamicruntime.UnclassifiedFailureEvidence,
 	unclassified bool,
+	interrupted bool,
 ) (dynamicruntime.RouteDecision, dynamicruntime.ContinuationInput, error) {
 	var decision dynamicruntime.RouteDecision
 	var continuationInput dynamicruntime.ContinuationInput
@@ -952,7 +961,11 @@ func (s *Service) routeDynamicFailureDecision(
 			ctx, task, session.ID, "", "The previous agent attempt failed.",
 		)
 		limitDynamicRecoveryContext(&continuationInput)
-		if err == nil {
+		continuationInput.Interrupted = interrupted
+		if err == nil && interrupted {
+			decision, err = conductor.RouteAfterInterruptedFailure(ctx, session.ID, session.AgentProfileID,
+				session.ExecutionProfileID, session.RouteGeneration, classified)
+		} else if err == nil {
 			decision, err = conductor.RouteAfterFailure(
 				ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
 				session.RouteGeneration, classified,
@@ -983,8 +996,9 @@ func (s *Service) prepareDynamicFailureEvidence(
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
-	eligible := classified.FallbackAllowed && dynamicPreResultSafe(data)
-	if !eligible && isUsageLimitFailure(classified) {
+	eligible := classified.FallbackAllowed && dynamicPreResultSafe(data) ||
+		s.interruptedDynamicFailure(ctx, data, session, classified)
+	if !eligible && isUsageLimitFailure(classified) && s.currentInterruptedDynamicAttempt(data, session) {
 		// The attempt stays with the operator because it already produced
 		// output, but the exhausted resource is still suspended so the next
 		// selection does not choose it again.
