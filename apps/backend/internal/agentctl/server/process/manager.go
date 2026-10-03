@@ -247,9 +247,6 @@ type Manager struct {
 	// VS Code server manager (lazy-initialized on demand)
 	vscode   *VscodeManager
 	vscodeMu sync.Mutex
-	// vscodeBindHost overrides the code-server bind address for tests; empty
-	// keeps the production wildcard bind.
-	vscodeBindHost string
 
 	// Git operator for git operations (lazy-initialized)
 	gitOperator   *GitOperator
@@ -3458,20 +3455,8 @@ func (m *Manager) startVscode(theme string) error {
 
 	strategy := codeServerInstallStrategy(m.logger)
 	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
-	if m.vscodeBindHost != "" {
-		m.vscode.bindHost = m.vscodeBindHost
-	}
 	m.vscode.Start()
 	return nil
-}
-
-// SetVscodeBindHost overrides the code-server bind address for tests. Empty
-// restores the production wildcard bind. A loopback override keeps a temporary
-// test binary from prompting for Windows Firewall access.
-func (m *Manager) SetVscodeBindHost(host string) {
-	m.vscodeMu.Lock()
-	defer m.vscodeMu.Unlock()
-	m.vscodeBindHost = host
 }
 
 // codeServerInstallStrategy returns a tarball strategy that auto-installs code-server.
