@@ -14,10 +14,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// setProcGroup configures the command to run in its own process group.
+// setProcGroup configures the command to run in its own process group. HideWindow
+// hides a newly created console while keeping the process attached to it.
 func setProcGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_NO_WINDOW,
+		HideWindow:    true,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
 	}
 }
 

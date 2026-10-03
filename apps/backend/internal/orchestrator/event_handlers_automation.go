@@ -44,6 +44,10 @@ type automationRunBinding interface {
 	MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status automation.RunStatus, errMsg string) error
 }
 
+type deferredAutomationRunCloser interface {
+	MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error
+}
+
 type automationDispatchReader interface {
 	GetAutomationForDispatch(ctx context.Context, id string) (*automation.Automation, error)
 }
@@ -779,14 +783,12 @@ func (s *Service) dispatchAutomationRun(
 	if err := dispatcher.DispatchRun(ctx, runID, action, reason, dispatch); err == nil {
 		return true
 	} else if errors.Is(err, automation.ErrRunDeferred) {
-		// The session ceiling refused the launch, not the run. DispatchRun has
-		// already left the row open (task_created) and the ceiling sweep owns
-		// retrying the launch, so neither onFailure (which would strand a claim
-		// the replay needs) nor cleanupFailedAutomationTask (which would delete
-		// the task the deferred record lives on) may run here.
-		s.logger.Info("automation run launch deferred by session ceiling; will replay once capacity frees up",
+		// The run stays open and owns its task; the ceiling sweep replays the
+		// queued start, so the task and the queued record must both remain.
+		s.logger.Info("automation run start queued by the session ceiling",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
-			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			zap.String("task_id", taskID), zap.String("run_id", runID))
+		return true
 	} else {
 		if onFailure != nil {
 			onFailure()
@@ -794,21 +796,9 @@ func (s *Service) dispatchAutomationRun(
 		s.logger.Error("failed to dispatch automation run",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	}
+	s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	return true
-}
-
-// mapAutomationDispatchError translates the orchestrator's ceiling-deferral
-// sentinel into the automation package's own ErrRunDeferred. The automation
-// package cannot import the orchestrator (import cycle), so DispatchRun needs
-// this distinguishable non-failure to know it must keep the run row open
-// (task_created) instead of marking it failed.
-func mapAutomationDispatchError(err error) error {
-	if errors.Is(err, ErrCeilingLaunchDeferred) {
-		return automation.ErrRunDeferred
-	}
-	return err
 }
 
 func (s *Service) cleanupFailedAutomationTask(ctx context.Context, automationID, taskID string, action automation.ThreadAction) {
@@ -868,12 +858,6 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		}
 		result, err := s.promptAutomationContinuation(ctx, task, session, prompt)
 		if err != nil {
-			if errors.Is(err, ErrCeilingLaunchDeferred) {
-				// Keep the refreshed continuation metadata in place: the
-				// deferred replay captured this prompt, and restoring the
-				// snapshot would strand it.
-				return automation.RunDispatch{}, automation.ErrRunDeferred
-			}
 			restore()
 			return automation.RunDispatch{}, err
 		}
@@ -955,8 +939,7 @@ func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automati
 		run = &automationRunLaunch{RunID: runID, ThreadAction: action, ThreadReason: reason}
 	}
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
-		result, err := s.startAutomationTask(ctx, a, task, workflowStepID, run)
-		return result, mapAutomationDispatchError(err)
+		return s.startAutomationTask(ctx, a, task, workflowStepID, run)
 	}, nil) {
 		return
 	}
@@ -982,6 +965,8 @@ func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automati
 		zap.String("automation_id", a.ID))
 }
 
+// startAutomationTask starts the task an automation run created. run names
+// that run so a start queued by the session ceiling keeps it for the replay.
 func (s *Service) startAutomationTask(
 	ctx context.Context,
 	a *automation.Automation,
@@ -1003,82 +988,7 @@ func (s *Service) startAutomationTask(
 		nil,
 		startTaskOptions{AutomationRun: run},
 	)
-	if err != nil {
-		return automation.RunDispatch{}, err
-	}
-	if execution == nil || execution.SessionID == "" || execution.TurnID == "" {
-		return automation.RunDispatch{}, errors.New(errAutomationStartNoIdentity)
-	}
-	return automation.RunDispatch{TaskID: task.ID, SessionID: execution.SessionID, TurnID: execution.TurnID}, nil
-}
-
-const errAutomationStartNoIdentity = "automation task start returned no session or turn identity"
-
-// ceilingPayloadAutomationRunKey is the "start" replay payload key holding the
-// automationRunLaunch a deferred launch serves.
-const ceilingPayloadAutomationRunKey = "automation_run"
-
-// automationRunLaunch names the admitted automation run a task start serves,
-// with the thread disposition its binding records.
-type automationRunLaunch struct {
-	RunID        string                  `json:"run_id"`
-	ThreadAction automation.ThreadAction `json:"thread_action"`
-	ThreadReason string                  `json:"thread_reason"`
-}
-
-// automationRunFromCeilingPayload returns the run a deferred start serves, or
-// nil for a launch that serves none.
-func automationRunFromCeilingPayload(payload map[string]interface{}) *automationRunLaunch {
-	var run *automationRunLaunch
-	decodeCeilingPayloadField(payload[ceilingPayloadAutomationRunKey], &run)
-	if run == nil || run.RunID == "" {
-		return nil
-	}
-	return run
-}
-
-// settleReplayedAutomationStart gives a replayed automation start the run
-// bookkeeping of the direct launch: a dispatched launch is bound to its exact
-// run, and a launch that failed for a non-ceiling reason fails the run and
-// abandons the record, because a retained record could later dispatch a turn
-// for a run that is already terminal.
-func (s *Service) settleReplayedAutomationStart(
-	ctx context.Context,
-	taskID string,
-	run *automationRunLaunch,
-	execution *executor.TaskExecution,
-	launchErr error,
-	outcome ceilingReplayOutcome,
-) ceilingReplayOutcome {
-	if run == nil {
-		return outcome
-	}
-	switch outcome {
-	case ceilingReplaySucceeded:
-		if execution.SessionID == "" || execution.TurnID == "" {
-			s.failDeferredAutomationRun(ctx, taskID, run, errAutomationStartNoIdentity)
-			return outcome
-		}
-		s.bindAutomationRun(ctx, run.RunID, taskID, execution.SessionID, execution.TurnID,
-			run.ThreadAction, run.ThreadReason, "ceiling-replay")
-	case ceilingReplayFailed:
-		s.failDeferredAutomationRun(ctx, taskID, run, launchErr.Error())
-		return ceilingReplayAbandoned
-	}
-	return outcome
-}
-
-// failDeferredAutomationRun settles the run of a deferred start that will not
-// launch. The run row was written before the launch, so it would otherwise sit
-// at task_created forever and hold a max_concurrent_runs slot with no
-// completion event coming to free it.
-func (s *Service) failDeferredAutomationRun(ctx context.Context, taskID string, run *automationRunLaunch, errMsg string) {
-	if run == nil {
-		return
-	}
-	if !s.markExactAutomationRunTerminal(ctx, run.RunID, "", "", false, errMsg) {
-		s.markAutomationRunTerminal(ctx, taskID, false, errMsg)
-	}
+	return automationRunDispatchFor(task.ID, execution, err)
 }
 
 // Repository-selector disposition tokens (A5's wire format). A bare token is

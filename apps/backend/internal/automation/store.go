@@ -1407,28 +1407,6 @@ func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason
 	return nil
 }
 
-// MarkRunTaskCreated advances an admitted run from triggered to task_created
-// when its launch was deferred by the session ceiling. The task already owns
-// the row (BindRunTask set task_id before dispatch); no session/turn exists
-// yet because the launch never happened. task_created is the state the
-// ceiling sweep's eventual turn settlement (MarkRun{Succeeded,Failed}ByTaskID)
-// matches, so the row is neither stuck open nor falsely failed while the
-// launch waits for capacity.
-func (s *Store) MarkRunTaskCreated(ctx context.Context, runID, taskID string) error {
-	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
-		UPDATE automation_runs
-		SET task_id = CASE WHEN ? <> '' THEN ? ELSE task_id END, status = ?
-		WHERE id = ? AND status = ?`),
-		taskID, taskID, string(RunStatusTaskCreated), runID, string(RunStatusTriggered))
-	if err != nil {
-		return err
-	}
-	if affected, _ := res.RowsAffected(); affected == 0 {
-		return fmt.Errorf("automation run %s is not an admitted triggered run", runID)
-	}
-	return nil
-}
-
 func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),
@@ -1526,6 +1504,21 @@ func (s *Store) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID,
 // dead. No-op if no matching run is found.
 func (s *Store) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
 	return s.updateRunTerminalStatus(ctx, taskID, RunStatusFailed, errMsg)
+}
+
+// MarkDeferredRunFailedByTaskID closes an unbound run when its queued task is deleted.
+// This update does not take the automation lock because task deletion can run
+// inside automation cleanup that already holds that lock.
+func (s *Store) MarkDeferredRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
+	if taskID == "" {
+		return nil
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE automation_runs SET status = ?, error_message = ?
+		WHERE task_id = ? AND status = ?
+			AND COALESCE(session_id, '') = '' AND COALESCE(turn_id, '') = ''`),
+		string(RunStatusFailed), errMsg, taskID, string(RunStatusTriggered))
+	return err
 }
 
 // MarkRunSucceededByTaskID flips the most recent task_created run for a task

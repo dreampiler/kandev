@@ -176,9 +176,7 @@ func seam1StartPayload(
 	if opts.ceilingEntryBinding != nil {
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*opts.ceilingEntryBinding)
 	}
-	// Written only when a run is named, so a start without one stays
-	// equivalent to a record persisted before this key existed.
-	if opts.AutomationRun != nil && opts.AutomationRun.RunID != "" {
+	if opts.AutomationRun != nil {
 		payload[ceilingPayloadAutomationRunKey] = opts.AutomationRun
 	}
 	return payload
