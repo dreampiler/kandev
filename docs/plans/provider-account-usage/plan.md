@@ -8,6 +8,8 @@ requirements:
   - REQ-COSTS-PROVIDER-USAGE-004
   - REQ-COSTS-PROVIDER-USAGE-005
   - REQ-COSTS-PROVIDER-USAGE-006
+  - REQ-AGENTS-TIER-SELECTION-001
+  - REQ-AGENTS-TIER-SELECTION-003
 system_design:
   - ../../specs/costs/system-design/provider-account-usage.md
   - ../../specs/agents/system-design/dynamic-profile-tier-selection.md
