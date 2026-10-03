@@ -129,6 +129,7 @@ func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
 	messageTool, ok := tools["message_task_kandev"]
 	require.True(t, ok)
 	assert.Contains(t, tools, "stop_task_kandev")
+	assert.Contains(t, tools, "reorder_child_tasks_kandev")
 
 	schema, err := json.Marshal(messageTool.Tool.InputSchema)
 	require.NoError(t, err)
@@ -153,6 +154,7 @@ func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
 	assert.Contains(t, context, fmt.Sprintf(`delivery_mode="%s" or omit it`, defaultValue))
 	assert.Contains(t, context, "direct parent")
 	assert.Contains(t, context, "stop_task_kandev")
+	assert.Contains(t, context, "reorder_child_tasks_kandev")
 	assert.Contains(t, context, "halt-only")
 	assert.Contains(t, context, "no replacement turn")
 }
@@ -167,6 +169,8 @@ func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			s := New(backend, "session", "task", 10005, log, "", false, mode)
 			assert.NotContains(t, s.mcpServer.ListTools(), "stop_task_kandev")
+			assert.NotContains(t, s.mcpServer.ListTools(), "reorder_child_tasks_kandev")
+			assert.NotContains(t, context, "reorder_child_tasks_kandev")
 			assert.NotContains(t, context, "stop_task_kandev")
 			assert.NotContains(t, context, "delivery_mode")
 		})

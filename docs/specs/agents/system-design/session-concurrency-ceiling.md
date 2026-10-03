@@ -36,7 +36,7 @@ in force when enabled.
 | `sessionCeilingController` | Counts persisted `STARTING`/`RUNNING` sessions and process-local reservations. It admits, refuses, confirms, and releases launches. |
 | Orchestrator launch seams | Pass the launch origin and complete replay payload to the controller. They consume a reservation only after launch success. |
 | `deferCeilingRefusal` | Merges the ceiling-owned keys into task `deferred_launch` with compare-and-set semantics. |
-| Ceiling sweep | Lists tasks with ceiling records, validates eligibility, and dispatches the stored launch kind. |
+| Ceiling sweep | Lists tasks with ceiling records, sorts by priority rank, position, original ceiling queue time, and ID, validates eligibility and retry due time, and dispatches the stored launch kind. |
 | Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
 

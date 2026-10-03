@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -50,7 +51,7 @@ const (
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
-// every ceiling-deferred task once, in id-ascending order (AC-50c), retrying
+// every ceiling-deferred task once, in priority/position/queue-time/ID order, retrying
 // each in turn. A candidate that fails for a non-ceiling reason is skipped
 // for the rest of this pass (AC-15d) rather than retried immediately or
 // stopping the pass.
@@ -67,6 +68,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
 		return
 	}
+	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
 	paced := isPeriodicCeilingSweep(ctx)
 	if paced {
 		deferred := make(map[string]struct{}, len(tasks))

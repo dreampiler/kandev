@@ -279,7 +279,10 @@ const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
 	"Only the target task's direct parent may call it. Required params: task_id. " +
 	"A stopped session is CANCELLED and cannot be resumed, so message_task_kandev will not restart it: " +
-	"use spawn_session_kandev to put the task back to work."
+	"use spawn_session_kandev to put the task back to work.\n" +
+	"- reorder_child_tasks_kandev: Set the processing order of direct children in the same workflow step and band. " +
+	"Required: ordered_task_ids. Optional: placement (in_place by default, or front). " +
+	"Use ordering for scheduling; use blocked_by only when a task consumes another task's output."
 
 // taskTitleSection is included only for task sessions whose task metadata says
 // the provisional title still needs an agent-generated replacement. It ends in
