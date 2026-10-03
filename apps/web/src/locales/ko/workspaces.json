@@ -23,6 +23,7 @@
   "closeRepositoryEditor": "리포지토리 편집기 닫기",
   "confirmDelete": "삭제 확인",
   "copyFiles": "파일 복사",
+  "copyFilesDestination": "항목은 이 리포지토리의 워크트리 루트에 저장됩니다. 작업에 리포지토리가 두 개 이상 연결되면 에이전트의 작업 디렉터리는 한 단계 위인 작업 루트이므로, 여기에 둔 파일은 에이전트에게 전달되지 않습니다.",
   "copyFilesHelp": "Gitignore 대상 경로를 새 워크트리로 복사합니다. 항목에 <0>{{symlink}}</0>를 덧붙이면 메인 리포지토리로 연결합니다. <2>{{symlink}}</2>로 끝나는 리터럴 파일 이름에는 <1>{{escapedSymlink}}</1>을 사용하세요.",
   "copyFilesPathsResolved": "경로는 리포지토리 루트를 기준으로 확인되며 각 새 워크트리에 상대 위치를 유지한 채 반영됩니다. 워크트리에 이미 있는 파일은 덮어쓰지 않습니다.",
   "copyFilesPatternBraces": "<0>{{braces}}</0> 중괄호 대안, 예: <1>{{example}}</1>",
@@ -94,7 +95,7 @@
   "noDefault": "기본값 없음",
   "noExecutorsAvailable": "사용 가능한 실행기 없음",
   "noRepositoriesFound": "리포지토리를 찾을 수 없습니다.",
-  "noRepositoriesScanHomeHint": "아직 리포지토리를 찾지 못했습니다. Home 폴더를 검사해 Git 프로젝트를 검색하세요.",
+  "noRepositoriesScanHomeHint": "아직 찾은 리포지토리가 없습니다. Home 폴더를 검사해 Git 프로젝트를 검색하세요.",
   "noScriptsYet": "아직 스크립트가 없습니다.",
   "noWorkspacesConfigured": "구성된 워크스페이스가 없습니다. 시작하려면 첫 워크스페이스를 추가하세요.",
   "patternSyntax": "패턴 구문",
@@ -271,11 +272,10 @@
   "placement.moved": "워크스페이스를 이동했습니다.",
   "placement.failed": "워크스페이스를 이동하지 못했습니다.",
   "placement.ownerOnly": "워크스페이스 소유자만 이동할 수 있습니다",
-  "idlePolicyDescription": "이 작업공간에서 쉬고 있는 ACP 에이전트를 일시 중지해 자원 사용을 줄입니다. 기본적으로 꺼져 있습니다.",
+  "idlePolicyDescription": "이 워크스페이스에서 쉬고 있는 ACP 에이전트를 일시 중지해 리소스 사용을 줄입니다. 기본적으로 꺼져 있습니다.",
   "idlePolicyResumeDescription": "작업을 열거나 메시지를 보내면 선택한 세션이 다시 시작됩니다.",
-  "idlePolicyTitle": "자원 절약",
+  "idlePolicyTitle": "리소스 절약",
   "idleSuspensionEnabled": "쉬는 ACP 에이전트 일시 중지",
   "idleTimeoutMinutes": "유휴 시간 제한(분)",
-  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요.",
-  "copyFilesDestination": "항목은 이 리포지토리의 워크트리 루트에 저장됩니다. 작업에 리포지토리가 두 개 이상 연결되면 에이전트의 작업 디렉터리는 한 단계 위인 작업 루트이므로, 여기에 둔 파일은 에이전트에게 전달되지 않습니다."
+  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요."
 }

@@ -10,21 +10,24 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestConfigureProcessTreeSuppressesConsoleWindow(t *testing.T) {
+func TestConfigureProcessTreeHidesConsoleWindow(t *testing.T) {
 	cmd := exec.Command("cmd.exe")
-
 	configureProcessTree(cmd)
 
 	if cmd.SysProcAttr == nil {
 		t.Fatal("configureProcessTree did not set process attributes")
 	}
-	if cmd.SysProcAttr.CreationFlags&syscall.CREATE_NEW_PROCESS_GROUP == 0 {
-		t.Fatalf("CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", cmd.SysProcAttr.CreationFlags)
+	flags := cmd.SysProcAttr.CreationFlags
+	if flags&syscall.CREATE_NEW_PROCESS_GROUP == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
 	}
-	if cmd.SysProcAttr.CreationFlags&windows.CREATE_SUSPENDED == 0 {
-		t.Fatalf("CreationFlags = %#x, want CREATE_SUSPENDED", cmd.SysProcAttr.CreationFlags)
+	if flags&windows.CREATE_SUSPENDED == 0 {
+		t.Fatalf("CreationFlags = %#x, want CREATE_SUSPENDED", flags)
 	}
-	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
-		t.Fatalf("CreationFlags = %#x, want CREATE_NO_WINDOW", cmd.SysProcAttr.CreationFlags)
+	if !cmd.SysProcAttr.HideWindow {
+		t.Fatal("HideWindow = false, want true")
+	}
+	if flags&windows.CREATE_NO_WINDOW != 0 {
+		t.Fatalf("CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
 	}
 }

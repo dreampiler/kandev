@@ -64,7 +64,6 @@
   "office": "오피스",
   "offline": "오프라인",
   "openStatus": "상태 열기",
-  "overview": "개요",
   "pausedBadge": "일시 중지",
   "pollModeFastLabel": "포커스됨, 2초 폴링",
   "pollModePausedLabel": "구독자 없음",
@@ -134,9 +133,10 @@
   "previousPage": "이전",
   "queryRefreshing": "작업 업데이트 중...",
   "queryRefreshFailed": "작업을 새로 고치지 못했습니다.",
-  "queryInvalid": "이 작업 보기를 불러오지 못했습니다. 필터와 보기 설정을 확인하세요.",
+  "queryInvalid": "이 작업 뷰를 불러오지 못했습니다. 필터와 뷰 설정을 확인하세요.",
   "filterListLimit": "{{filter}} 필터에 선택 항목이 너무 많습니다. 최대 {{limit}}개까지 선택하세요.",
   "filterValueLimit": "{{filter}} 필터의 값이 너무 깁니다. 최대 {{limit}}바이트까지 사용하세요.",
-  "filterInvalid": "{{filter}} 필터가 올바르지 않습니다. 값과 연산자를 확인하세요.",
-  "filterCountLimit": "이 보기에 필터가 너무 많습니다. 최대 {{limit}}개까지 사용하세요."
+  "filterInvalid": "{{filter}} 필터가 잘못되었습니다. 값과 연산자를 확인하세요.",
+  "filterCountLimit": "이 뷰에 필터가 너무 많습니다. 최대 {{limit}}개까지 사용하세요.",
+  "overview": "개요"
 }

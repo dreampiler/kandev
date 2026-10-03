@@ -8,57 +8,47 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A launch refused at the session ceiling is not a dispatch failure: the task
-// already owns the run, so DispatchRun must leave the row open at task_created
-// (not failed) and return the distinguishable ErrRunDeferred so the
-// orchestrator skips task cleanup. The eventual turn settles the run by task.
-func TestDispatchRunKeepsDeferredRunOpenAndSettleable(t *testing.T) {
-	svc := newTestService(t)
-	ctx := context.Background()
-	a := &Automation{WorkspaceID: "ws-1", Name: "deferred", Enabled: true, MaxConcurrentRuns: 1}
-	require.NoError(t, svc.store.CreateAutomation(ctx, a))
+// A deferred launch leaves the admitted run open and bound to its task, so a
+// later dispatch can still bind the launch it makes; any other dispatch error
+// still fails the run. Either way the callback's error is returned unchanged.
+func TestDispatchRunDeferredLaunchLeavesTheRunOpen(t *testing.T) {
+	cases := []struct {
+		name        string
+		dispatchErr error
+		wantStatus  RunStatus
+	}{
+		{name: "deferred", dispatchErr: ErrRunDeferred, wantStatus: RunStatusTriggered},
+		{name: "failed", dispatchErr: errors.New("executor unavailable"), wantStatus: RunStatusFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newTestService(t)
+			ctx := context.Background()
+			a := &Automation{WorkspaceID: "ws-1", Name: "deferred", Enabled: true, MaxConcurrentRuns: 1}
+			require.NoError(t, svc.store.CreateAutomation(ctx, a))
+			run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
+			require.NoError(t, svc.store.CreateRun(ctx, run))
+			require.NoError(t, svc.store.BindRunTask(ctx, run.ID, "task-1", ""))
 
-	run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
-	require.NoError(t, svc.store.CreateRun(ctx, run))
-	// The orchestrator creates and binds the task before dispatch.
-	require.NoError(t, svc.store.BindRunTask(ctx, run.ID, "task-1", ""))
+			err := svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+				return RunDispatch{}, tc.dispatchErr
+			})
+			require.Same(t, tc.dispatchErr, err)
 
-	err := svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
-		return RunDispatch{}, ErrRunDeferred
-	})
-	require.ErrorIs(t, err, ErrRunDeferred)
-
-	got, err := svc.store.GetRun(ctx, run.ID)
-	require.NoError(t, err)
-	require.Equal(t, RunStatusTaskCreated, got.Status,
-		"a deferred launch must be left open, not marked failed")
-	require.Equal(t, "task-1", got.TaskID)
-
-	require.NoError(t, svc.store.MarkRunSucceededByTaskID(ctx, "task-1"))
-	got, err = svc.store.GetRun(ctx, run.ID)
-	require.NoError(t, err)
-	require.Equal(t, RunStatusSucceeded, got.Status,
-		"the sweep's eventual turn must still be able to settle the deferred run")
-}
-
-// An ordinary dispatch error must still fail the run, so the deferral branch
-// cannot swallow real failures.
-func TestDispatchRunStillFailsOnAnOrdinaryDispatchError(t *testing.T) {
-	svc := newTestService(t)
-	ctx := context.Background()
-	a := &Automation{WorkspaceID: "ws-1", Name: "hard-fail", Enabled: true, MaxConcurrentRuns: 1}
-	require.NoError(t, svc.store.CreateAutomation(ctx, a))
-
-	run := &AutomationRun{AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTriggered}
-	require.NoError(t, svc.store.CreateRun(ctx, run))
-
-	boom := errors.New("executor unavailable")
-	err := svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
-		return RunDispatch{}, boom
-	})
-	require.ErrorIs(t, err, boom)
-
-	got, err := svc.store.GetRun(ctx, run.ID)
-	require.NoError(t, err)
-	require.Equal(t, RunStatusFailed, got.Status)
+			got, err := svc.store.GetRun(ctx, run.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantStatus, got.Status)
+			require.Equal(t, "task-1", got.TaskID)
+			if tc.wantStatus != RunStatusTriggered {
+				return
+			}
+			require.NoError(t, svc.DispatchRun(ctx, run.ID, ThreadActionCreated, "created", func() (RunDispatch, error) {
+				return RunDispatch{TaskID: "task-1", SessionID: "session-1", TurnID: "turn-1"}, nil
+			}))
+			bound, err := svc.store.GetRun(ctx, run.ID)
+			require.NoError(t, err)
+			require.Equal(t, RunStatusTaskCreated, bound.Status)
+			require.Equal(t, "turn-1", bound.TurnID)
+		})
+	}
 }
