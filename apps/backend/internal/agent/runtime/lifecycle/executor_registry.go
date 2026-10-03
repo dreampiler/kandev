@@ -69,6 +69,23 @@ func (r *ExecutorRegistry) List() []executor.Name {
 	return names
 }
 
+// RuntimeFootprintReader returns the registered backend that can report
+// host-local process footprints, if exactly one can. Remote executors own their
+// process lifetimes on another host and do not implement the capability; an
+// installation with no host-local reader reports no footprint rather than a
+// partial one.
+func (r *ExecutorRegistry) RuntimeFootprintReader() (RuntimeFootprintReader, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	for _, rt := range r.backends {
+		if reader, ok := rt.(RuntimeFootprintReader); ok {
+			return reader, true
+		}
+	}
+	return nil, false
+}
+
 // HealthCheckAll performs health checks on all registered runtimes.
 // Returns a map of runtime names to errors. A nil error indicates the runtime is healthy.
 func (r *ExecutorRegistry) HealthCheckAll(ctx context.Context) map[executor.Name]error {

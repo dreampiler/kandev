@@ -38,6 +38,9 @@ func (h *WorkspaceHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces", h.httpListWorkspaces)
 	api.POST("/workspaces", h.httpCreateWorkspace)
 	api.GET("/workspaces/:id", h.httpGetWorkspace)
+	// A sub-resource, so it resolves beside the :id wildcard rather than under
+	// /workspaces/:id/runtime-footprint being mistaken for the workspace itself.
+	api.GET("/workspaces/:id/runtime-footprint", h.httpGetRuntimeFootprint)
 	api.PATCH("/workspaces/:id", h.httpUpdateWorkspace)
 	api.DELETE("/workspaces/:id", h.httpDeleteWorkspace)
 }
@@ -119,6 +122,18 @@ func (h *WorkspaceHandlers) httpGetWorkspace(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, h.withAccess(c.Request.Context(), workspace))
+}
+
+// httpGetRuntimeFootprint returns the live agent-runtime footprint for the tasks
+// in this workspace. Authorization lives in the service call, which resolves and
+// authorizes the workspace before any footprint row is read.
+func (h *WorkspaceHandlers) httpGetRuntimeFootprint(c *gin.Context) {
+	footprint, err := h.service.WorkspaceRuntimeFootprint(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "runtime footprint not found")
+		return
+	}
+	c.JSON(http.StatusOK, footprint)
 }
 
 type httpUpdateWorkspaceRequest struct {

@@ -146,12 +146,28 @@ func TestClassifyIdleReclaimDisposition(t *testing.T) {
 			want:           idleReclaimDispositionReclaimed,
 		},
 		{
-			name:           "failed session is never reclaimed",
+			name:           "failed session reclaims even though a runtime probe still sees the process",
 			state:          models.TaskSessionStateFailed,
-			agentRunning:   false,
+			agentRunning:   true,
 			hasActiveTurn:  false,
 			hasResumeToken: true,
-			want:           idleReclaimDispositionSkippedState,
+			want:           idleReclaimDispositionReclaimed,
+		},
+		{
+			name:           "cancelled session reclaims even though a runtime probe still sees the process",
+			state:          models.TaskSessionStateCancelled,
+			agentRunning:   true,
+			hasActiveTurn:  false,
+			hasResumeToken: true,
+			want:           idleReclaimDispositionReclaimed,
+		},
+		{
+			name:           "failed session with an active turn is still skipped",
+			state:          models.TaskSessionStateFailed,
+			agentRunning:   false,
+			hasActiveTurn:  true,
+			hasResumeToken: true,
+			want:           idleReclaimDispositionSkippedTurn,
 		},
 		{
 			name:           "live runtime blocks reclaim",
@@ -485,9 +501,8 @@ func TestReclaimIdleSessionFailsClosedOnLivenessProbeError(t *testing.T) {
 // TestReclaimIdleSessionRefusesWrongState proves non-idle non-terminal
 // states are never reclaimed: a RUNNING or STARTING session that happens
 // to have no live runtime must wait for explicit completion, not get
-// reaped by idle reclaim. Failed and Cancelled have dedicated cancellation
-// cleanup paths (handleTerminalSessionOnStartup, the cancel pipelines)
-// and are deliberately excluded from the reclaim predicate.
+// reaped by idle reclaim. Failed and Cancelled are terminal and are
+// reclaimed by TestReclaimIdleSessionReleasesTerminalSession instead.
 func TestReclaimIdleSessionRefusesWrongState(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -495,8 +510,6 @@ func TestReclaimIdleSessionRefusesWrongState(t *testing.T) {
 	}{
 		{name: "running", state: models.TaskSessionStateRunning},
 		{name: "starting", state: models.TaskSessionStateStarting},
-		{name: "failed", state: models.TaskSessionStateFailed},
-		{name: "cancelled", state: models.TaskSessionStateCancelled},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -532,6 +545,56 @@ func TestReclaimIdleSessionRefusesWrongState(t *testing.T) {
 			}
 			if row.Status != models.ExecutorRunningStatusRunning {
 				t.Fatalf("%s session must not be reclaimed; status = %q", tt.state, row.Status)
+			}
+		})
+	}
+}
+
+// TestReclaimIdleSessionReleasesTerminalSession proves a session that reached a
+// terminal state while its agent process is still alive gets its runtime
+// released and its row repaired. The startup and cancel pipelines cannot cover
+// this case, so without this the runtime and its row are retained for the life
+// of the installation and re-adopted by the next startup recovery.
+func TestReclaimIdleSessionReleasesTerminalSession(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			repo := setupTestRepo(t)
+			ctx := context.Background()
+			now := time.Now().UTC()
+			sessionID := "s-terminal-" + string(state)
+			seedTaskAndSession(t, repo, "task-"+sessionID, sessionID, state)
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: sessionID, SessionID: sessionID, TaskID: "task-" + sessionID,
+				AgentExecutionID: "exec-" + sessionID,
+				Runtime:          agentruntime.RuntimeStandalone,
+				Status:           models.ExecutorRunningStatusRunning,
+				LocalPID:         1234,
+				CreatedAt:        now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("upsert: %v", err)
+			}
+
+			// The liveness probe still sees the agent process alive, which is
+			// exactly the retained footprint under test.
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{
+				isAgentRunning: true,
+			})
+			svc.turnService = &inactiveTurnService{}
+
+			if err := svc.reclaimIdleSession(ctx, sessionID); err != nil &&
+				!errors.Is(err, context.Canceled) {
+				t.Fatalf("reclaimIdleSession: %v", err)
+			}
+
+			row, err := repo.GetExecutorRunningBySessionID(ctx, sessionID)
+			if err != nil {
+				t.Fatalf("row missing after reclaim: %v", err)
+			}
+			if row.Status != models.ExecutorRunningStatusStopped {
+				t.Fatalf("terminal session runtime retained; status = %q", row.Status)
 			}
 		})
 	}

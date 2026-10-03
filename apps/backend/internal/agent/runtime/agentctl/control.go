@@ -629,6 +629,54 @@ func (c *ControlClient) ShutdownControlServer(ctx context.Context) error {
 }
 
 // ListInstances lists all running agent instances.
+// RuntimeFootprint is one live runtime's process and memory footprint as the
+// control server measured it over the descendant tree it owns. Attribution is
+// by instance and session identity, never by a process name or a bare process
+// identifier. The projection carries no transcript content, credential, resume
+// token, or command line.
+//
+// UnreadableProcesses is the lower-bound marker: when it is nonzero the byte
+// totals cover only the processes the control server could actually measure.
+type RuntimeFootprint struct {
+	InstanceID      string    `json:"instance_id"`
+	SessionID       string    `json:"session_id,omitempty"`
+	TaskID          string    `json:"task_id,omitempty"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+	LastActivity    time.Time `json:"last_activity"`
+	Processes       int       `json:"processes"`
+	CommittedBytes  uint64    `json:"committed_bytes"`
+	ResidentBytes   uint64    `json:"resident_bytes"`
+	UnreadableCount int       `json:"unreadable_processes"`
+}
+
+// ListRuntimeFootprints reads every live runtime's footprint. It is read-only
+// and best-effort: a control server that cannot enumerate or measure returns an
+// error rather than a partial answer presented as complete.
+func (c *ControlClient) ListRuntimeFootprints(ctx context.Context) ([]RuntimeFootprint, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/runtime-footprint", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list runtime footprint: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to list runtime footprint: status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Footprints []RuntimeFootprint `json:"footprints"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode runtime footprint: %w", err)
+	}
+	return result.Footprints, nil
+}
 func (c *ControlClient) ListInstances(ctx context.Context) ([]*InstanceInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/v1/instances", nil)
 	if err != nil {
