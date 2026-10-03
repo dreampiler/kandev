@@ -609,6 +609,15 @@ type SessionRepository interface {
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	// CommitWorkspaceRecoveryErrorIfCurrent projects a verified workspace
+	// recovery refusal only while the captured session, execution, environment,
+	// complete selected repository inventory, ownership generation, and current
+	// error stamp still match.
+	CommitWorkspaceRecoveryErrorIfCurrent(
+		ctx context.Context,
+		observation models.WorkspaceRecoveryErrorObservation,
+		errorValue models.LastAgentError,
+	) (stored bool, activeStamp string, err error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
@@ -726,6 +735,9 @@ type RepositorySetRepository interface {
 	// non-nil, replaces its whole membership in the same transaction so the two
 	// cannot land apart. A nil repositoryItems leaves membership untouched.
 	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
+	// PatchRepositorySet writes only supplied metadata and membership fields in
+	// one transaction. Omitted fields retain their current persisted values.
+	PatchRepositorySet(ctx context.Context, id string, patch *models.RepositorySetPatch) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -738,6 +750,9 @@ type RepositoryBranchPolicyRepository interface {
 	ListRepositoryBranchPolicies(ctx context.Context, repositoryID string) ([]*models.RepositoryBranchPolicy, error)
 	ListRepositoryBranchPoliciesByWorkspace(ctx context.Context, workspaceID string) ([]*models.RepositoryBranchPolicy, error)
 	UpdateRepositoryBranchPolicy(ctx context.Context, policy *models.RepositoryBranchPolicy) error
+	PatchRepositoryBranchPolicy(ctx context.Context, id, repositoryID string, patch *models.RepositoryBranchPolicyPatch,
+		normalize func(*models.RepositoryBranchPolicy) (*models.RepositoryBranchPolicy, error),
+	) (*models.RepositoryBranchPolicy, error)
 	DeleteRepositoryBranchPolicy(ctx context.Context, id string) (bool, error)
 	CreateRepositoryBranchPoliciesIfEmpty(ctx context.Context, repositoryID string, policies []*models.RepositoryBranchPolicy) error
 }

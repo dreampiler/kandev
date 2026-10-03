@@ -186,9 +186,12 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		return nil, fmt.Errorf("unsupported session settings policy: %d", settingsPolicy)
 	}
 	rt := agentConfig.Runtime()
+	if err := validateRequiredNativeConversation(ctx, existingSessionID, rt.SessionConfig.NativeSessionResume); err != nil {
+		return nil, err
+	}
 	if settingsPolicy == SessionSettingsPolicyProviderRestored &&
 		(!rt.SessionConfig.NativeSessionResume || existingSessionID == "") {
-		return nil, fmt.Errorf("provider-restored recovery requires a native resumable session identity")
+		return nil, fmt.Errorf("native conversation restore requires a native resumable session identity")
 	}
 	sm.logger.Info("initializing ACP session",
 		zap.String("agent_type", agentConfig.ID()),
@@ -205,7 +208,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		sm.logger.Error("ACP initialize failed",
 			zap.String("agent_type", agentConfig.ID()),
 			zap.Error(err))
-		return nil, fmt.Errorf("initialize failed: %w", err)
+		return nil, &SessionInitializationPhaseError{Phase: SessionInitializationPhaseACPInitialize, Cause: err}
 	}
 
 	result := &InitializeResult{
@@ -253,12 +256,12 @@ func (sm *SessionManager) createOrLoadSession(
 		if err == nil {
 			return sessionID, nil
 		}
-		if settingsPolicy == SessionSettingsPolicyProviderRestored {
-			sm.logger.Warn("session/load failed during provider-restored recovery, preserving session identity",
+		if settingsPolicy == SessionSettingsPolicyProviderRestored || requiredNativeConversationID(ctx) != "" {
+			sm.logger.Warn("session/load failed during native conversation restore, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
 				zap.Error(err))
-			return "", fmt.Errorf("provider-restored recovery could not load the stored session: %w", err)
+			return "", fmt.Errorf("native conversation restore could not load the stored session: %w", err)
 		}
 		// If the underlying ACP connection is dead (peer disconnected, context
 		// cancelled), session/new on the same client will return the same
@@ -658,6 +661,9 @@ func (sm *SessionManager) initializeACPConnection(
 	client, releaseClient = execution.AcquireAgentCtlClient()
 	if client == nil {
 		return ctx, nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if execution.RequiredNativeConversationID != "" {
+		ctx = context.WithValue(ctx, requiredNativeConversationKey{}, execution.RequiredNativeConversationID)
 	}
 	result, err := sm.InitializeSessionWithSettingsPolicy(
 		ctx, client, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers,
