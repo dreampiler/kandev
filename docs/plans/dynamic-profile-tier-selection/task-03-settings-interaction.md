@@ -244,6 +244,18 @@ a future reader should add a `data-testid` rather than reach for a position.
 - `pnpm exec vitest run <11 suites>` — 85 tests, including the two new touch-target
   cases
 
+### E2E green readback on this head
+
+`E2E Shard 13/14` **pass** (28m26s, 251 passed) and `E2E Shard 14/14` **pass**
+(22m48s, 254 passed) on run 37083338560 for head `e1d490931`. Neither shard
+reports a failure in `dynamic-agent-profile-card.spec.ts` or
+`mobile-dynamic-agent-profile-card.spec.ts`.
+
+Shard 13's single failure is
+`e2e/tests/review/mobile-submodule-review.spec.ts` ("keeps nested scope and diff
+context touch-reachable"), a file this branch does not touch. It is the same
+unrelated submodule-review spec already identified as a fork-main baseline.
+
 ### E2E could not be executed on this host
 
 Both specs are written and extend the existing suites as the work order asks:
