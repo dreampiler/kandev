@@ -72,9 +72,7 @@ func (p *ChildStallProducer) deliver(
 	var stale *childStallStaleError
 	switch {
 	case errors.As(err, &stale):
-		state.State, state.Reason = string(stale.decision.Outcome), stale.decision.Reason
-		p.persist(ctx, turn, state, stale.decision.Outcome != childstall.OutcomeHeld, now)
-		recordChildStallReason(stale.decision.Reason)
+		p.applyStale(ctx, turn, state, stale.decision, now)
 		return
 	case err != nil:
 		p.retryLater(ctx, turn, state, decision, err, now)
@@ -113,6 +111,27 @@ func (p *ChildStallProducer) markDelivered(
 		zap.String("queue_id", state.QueueID),
 		zap.String("cause", string(decision.Cause)),
 		zap.Duration("settlement_to_queue", lag))
+}
+
+// applyStale records a candidate that stopped qualifying at the admission
+// boundary. Only a suppressed or unknown outcome resolves it; a held
+// candidate stays held and a settling one is classified again next pass.
+func (p *ChildStallProducer) applyStale(
+	ctx context.Context,
+	turn *models.Turn,
+	state models.ChildStallState,
+	decision childstall.Decision,
+	now time.Time,
+) {
+	switch decision.Outcome {
+	case childstall.OutcomeSuppressed, childstall.OutcomeUnknown:
+		state.State, state.Reason = string(decision.Outcome), decision.Reason
+		p.persist(ctx, turn, state, true, now)
+		recordChildStallReason(decision.Reason)
+	case childstall.OutcomeHeld:
+		state.State, state.Cause, state.QuestionID = string(decision.Outcome), string(decision.Cause), decision.QuestionID
+		p.persist(ctx, turn, state, false, now)
+	}
 }
 
 // waitForParent keeps a qualified candidate until the parent has a promptable
@@ -185,7 +204,11 @@ func (p *ChildStallProducer) admitAlert(
 	}
 	var queued *messagequeue.QueuedMessage
 	err = queue.WithSessionAdmission(ctx, parentSession.ID, func(admittedCtx context.Context) error {
-		if decision := p.recheck(admittedCtx, turn, start); decision.Outcome != childstall.OutcomeQualified {
+		decision, recheckErr := p.recheck(admittedCtx, turn, start)
+		if recheckErr != nil {
+			return fmt.Errorf("recheck child stall candidate: %w", recheckErr)
+		}
+		if decision.Outcome != childstall.OutcomeQualified {
 			return &childStallStaleError{decision: decision}
 		}
 		var admitErr error
@@ -204,18 +227,23 @@ func (p *ChildStallProducer) admitAlert(
 	return queued, identity, err
 }
 
-// recheck re-reads the candidate's evidence at a delivery boundary.
-func (p *ChildStallProducer) recheck(ctx context.Context, turn *models.Turn, start models.ChildStallStart) childstall.Decision {
+// recheck re-reads the candidate's evidence at a delivery boundary. A read
+// failure is returned so the candidate stays retryable.
+func (p *ChildStallProducer) recheck(
+	ctx context.Context,
+	turn *models.Turn,
+	start models.ChildStallStart,
+) (childstall.Decision, error) {
 	now := p.now()
 	evidence, err := p.gatherEvidence(ctx, turn, start, now)
 	if err != nil {
-		return childstall.Decision{Outcome: childstall.OutcomeSettling}
+		return childstall.Decision{}, err
 	}
 	decision := childstall.Classify(evidence, p.policy)
 	if decision.Outcome == childstall.OutcomeHeld {
 		decision = p.promoteHeld(ctx, decision, now)
 	}
-	return decision
+	return decision, nil
 }
 
 // childStallKey is the caller-owned queue admission identity derived from
