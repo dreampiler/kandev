@@ -257,6 +257,14 @@ actions affects the next route decision and does not rewrite route history.
 - Switching to another concrete profile always creates a fresh downstream ACP
   session. A resume token from one concrete profile is never supplied to
   another.
+- Before changing the concrete execution profile, the orchestrator compares
+  its ID with the stored `execution_profile_id`. A changed nonempty ID clears
+  provider-native ACP identity, runtime settings, explicit runtime overrides,
+  mode, configuration baseline, cached model state, and context window in the
+  same guarded session-row update. Both route-decision persistence and resolved
+  execution projection use this path. A same-candidate retry or restart keeps
+  those settings, including user-selected models. An initial selection with no
+  previous concrete profile keeps its initial user selections.
 - Before the replacement prompt, Kandev creates a bounded continuation package
   from the task description, current workflow step, user messages and durable
   conversation summary, tool/result summary, repository status and diff
