@@ -9,6 +9,7 @@ import type {
 } from "@/lib/api/domains/dynamic-preview-api";
 import type { DynamicPreviewLoadState } from "@/hooks/domains/settings/use-dynamic-selection-preview";
 import { settingsActionClassName } from "./settings-control";
+import { hasSuspensionDetail, PreviewSuspension } from "./dynamic-preview-suspension";
 
 type DynamicAgentPreviewProps = {
   state: DynamicPreviewLoadState;
@@ -20,6 +21,7 @@ const INELIGIBLE_REASON_KEYS: Record<string, string> = {
   reserved_share: "agents:dynamicPreviewIneligibleReserved",
   already_tried: "agents:dynamicPreviewIneligibleTried",
   circuit_open: "agents:dynamicPreviewIneligibleCircuit",
+  circuit_probing: "agents:dynamicPreviewSuspensionProbing",
   disabled: "agents:dynamicPreviewIneligibleDisabled",
   not_selectable: "agents:dynamicPreviewIneligibleUnusable",
 };
@@ -190,7 +192,8 @@ function PreviewCandidateRow({
           {t("agents:dynamicModelReservedShare")}: {candidate.reserved_share_pct}%
         </span>
       ) : null}
-      {!candidate.eligible ? (
+      {hasSuspensionDetail(candidate) ? <PreviewSuspension candidate={candidate} /> : null}
+      {!hasSuspensionDetail(candidate) && !candidate.eligible ? (
         <span className="text-muted-foreground">
           {t(reasonKey(candidate.ineligible_reason ?? ""))}
         </span>

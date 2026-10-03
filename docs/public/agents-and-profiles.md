@@ -423,6 +423,30 @@ provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
 
+#### Provider usage limits
+
+When a candidate hits a usage limit, Kandev pauses the resource that ran out
+and uses it again after the reset:
+
+- OpenCode Go and free models pause only the model that hit its limit, so
+  sibling models and free models stay available.
+- An OpenCode Go limit without a reset time pauses the model for 2 hours, up to
+  three times, then 24 hours, then until the next monthly reset. The count
+  starts over once the model produces output again.
+- A reset reported by the provider, either in the error or in its usage data,
+  is used instead.
+- A limit reported after the attempt already produced output still pauses the
+  model, while that attempt waits for manual recovery.
+- When every candidate is paused, the session waits and Kandev retries it at the
+  earliest reset, including after a restart.
+
+The **Provider limits** card in **Settings > Agents**, also shown on the page of
+a profile whose model has a provider prefix, sets a provider's monthly reset
+when the provider does not report one, and can block every paid model of a
+provider until a time you saw on its console. The current-choice preview shows
+whether a paused candidate is still waiting, being retried, or expired and
+retried on the next selection.
+
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a
 candidate's `policies` object, set `unclassified` to:
