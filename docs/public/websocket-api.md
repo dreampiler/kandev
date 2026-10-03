@@ -269,6 +269,30 @@ If `intent` is omitted, the backend infers it from those fields. That inference 
 
 A successful response contains `success`, `task_id`, `state`, and usually `session_id`; it can also contain `agent_execution_id`, `worktree_path`, and `worktree_branch`. Session states use uppercase values such as `CREATED`, `STARTING`, `RUNNING`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`.
 
+### Repair preserved workspace inventory
+
+`session.recover` accepts the task-scoped `repair_workspace_inventory` action when a Worktree resume fails because the canonical environment inventory is missing or has a stale branch-slot identity. This is a preservation-only recovery action, not a general database editor. The server derives the workspace, repository, environment, row, path, and branch from the authorized task and session; clients provide only `task_id`, `session_id`, `action`, and a non-empty retry-stable `idempotency_key`. The key remains bound to the original session and derived checkout identity after repair; reusing it for another session conflicts. Active borrowers of the same environment block repair, and inherited resumes must pass the environment owner’s preservation attestation. Repositories with external Git clean/process filters require manual recovery.
+
+```json
+{
+  "id": "repair-inventory-1",
+  "type": "request",
+  "action": "session.recover",
+  "payload": {
+    "task_id": "task-uuid",
+    "session_id": "session-uuid",
+    "action": "repair_workspace_inventory",
+    "idempotency_key": "incident-2026-09-01-attempt-1"
+  }
+}
+```
+
+The action succeeds only when Kandev proves one unmatched canonical slot, one server-owned managed checkout, the exact registered Git worktree and branch, an unchanged HEAD plus dirty/untracked content, current database revisions, and no competing task session. It then inserts or corrects only that environment-repository row and appends an audit receipt in one transaction. The unchanged checkout is inspected again, and matching post-repair evidence must be durably recorded, before the resume proceeds through the normal fail-closed inventory validator.
+
+The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
 
 ### Search work-item references over HTTP
@@ -277,9 +301,29 @@ The structured chat composer's `#` search calls `GET /api/v1/workspaces/:workspa
 
 A successful response returns the normalized query and an ordered `groups` array. Each group includes `source`, `provider`, `kind`, `display_name`, `kind_label`, `status`, and `results`. One source can report `not_configured`, `unauthorized`, `rate_limited`, `timeout`, `upstream_error`, or `unsupported_scope` while the request remains HTTP 200 and other groups remain usable. Each result is a versioned `EntityReference` with the fields described below; raw provider errors and credentials are not returned.
 
+### Workflow snapshot coverage
+
+Workflow and workspace snapshot responses can include `task_coverage` alongside
+`tasks`: `workspace_id`, `workflow_id`, `membership: "active"`, `total`, `complete`,
+and `ordering_profile`. The total describes the collection before `task_limit`
+truncation. Boot snapshots use `taskCoverage` for the same metadata and mark
+omitted rows incomplete. Missing metadata never establishes completeness.
+
+The workflow list with `include_hidden=true` can also include
+`task_workflow_coverage`, containing `workspace_id`, `workflow_ids`, and `complete`.
+It identifies every scope containing eligible active tasks, including hidden
+workflows and the empty identifier for unassigned tasks. Empty scopes need no task
+fetch. The boot workflow state carries this as `taskWorkflowCoverage`.
+
+The web client evaluates complete resident views with the verified
+`sqlite_nocase_v1` ordering profile. `server_only` and unknown profiles retain
+server evaluation. Complete active coverage cannot satisfy archived views.
+WebSocket updates maintain shared task records; a reconnect gap invalidates
+coverage until an authoritative snapshot recovers it.
+
 ### Query sidebar tasks over HTTP
 
-The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
+When a view is not covered by current workspace data, the web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspaceId/sidebar/query`. The route uses the normal workspace authorization boundary and the authenticated user's saved pin and ordering preferences.
 
 ```json
 {
@@ -297,6 +341,20 @@ The web sidebar reads one bounded page through `POST /api/v1/workspaces/:workspa
 `page` is one-based. `page_size` defaults to 100 and cannot exceed 100. The server filters and orders the complete view before selecting the page. It clamps a page that is beyond the current result and returns `query_key`, `page`, `page_size`, `total_tasks`, `total_visible_tasks`, `has_previous`, `has_next`, and ordered `entries`. Entries can be group headings, task rows, or continuation context for a task whose parent is on another page. Group headings and continuation entries are not included in `total_visible_tasks`.
 
 The route is read-only. It rejects unknown request fields and limits the request body to 256 KiB. Clients must not send pin, manual ordering, or subtask-order preferences in the query; the server reads those from the authenticated user's settings. The existing workspace task-list route remains available for its other callers.
+
+A query accepts up to 20 filter clauses. Each `in` or `not_in` membership filter
+accepts up to 1,000 values, including an empty list. Each decoded string is
+limited to 256 UTF-8 bytes; JSON escaping does not consume that decoded limit.
+Repository values are repository names, while workflow values are workflow IDs.
+
+Invalid queries return HTTP 400 with the existing `error` string and an additive
+`error_code: "sidebar_query_invalid"`. The `details` object includes a stable
+`reason` and, where relevant, a zero-based `filter_index` and numeric `limit`.
+Reasons include `list_count`, `scalar_length`, `clause_count`, `invalid_clause`,
+`malformed_query`, `page_bounds`, `sorting`, `grouping`, `collapsed_count`, and
+`locale`. Clients should render their own localized recovery message and treat
+unknown reasons as invalid input. Authorization failures remain separate from
+query validation.
 
 ### Send a user turn
 

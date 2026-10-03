@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +41,7 @@ func buildCommandString(cmd []string) string {
 
 var (
 	ErrAgentNotFound                        = errors.New("agent not found")
+	ErrAgentFeatureDisabled                 = errors.New("agent feature is disabled")
 	ErrAgentAlreadyExists                   = errors.New("agent already exists")
 	ErrAgentProfileNotFound                 = errors.New("agent profile not found")
 	ErrAgentMcpUnsupported                  = errors.New("mcp not supported by agent")
@@ -75,6 +77,7 @@ type Controller struct {
 	automationDeps              AutomationDependencyChecker
 	utilityDeps                 UtilityDependencyChecker
 	mcpService                  *mcpconfig.Service
+	cursorMCPDiscoverySource    *cursorMCPDiscoverySource
 	hostUtility                 hostUtilityProvider
 	jobStore                    *JobStore
 	updateJobStore              *AgentUpdateJobStore
@@ -89,6 +92,13 @@ type Controller struct {
 	runtimeUpdateStatusNow      func() time.Time
 	runtimeUpdateStatusResolver RuntimeUpdateStatusResolver
 	runtimeUpdateStatusLookup   chan struct{}
+	runtimeUpdateStatusFlight   singleflight.Group
+	runtimeAutoUpdateStore      *managedruntime.AutoUpdateStore
+	runtimeUpdateNotifier       RuntimeUpdateNotifier
+	runtimeBackgroundMu         sync.Mutex
+	runtimeBackground           *runtimeUpdateBackground
+	runtimeAutoUpdateMu         sync.Mutex
+	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
 }
 
@@ -251,6 +261,10 @@ type hostUtilityProvider interface {
 	) (hostutility.ModelConfigResolution, error)
 }
 
+type profileHostUtilityProvider interface {
+	ProbeProfileCapabilities(context.Context, string, hostutility.ProfileCapabilityRequest) (hostutility.ProfileCapabilityResult, error)
+}
+
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,
 ) *Controller {
 	return &Controller{
@@ -259,6 +273,7 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 		agentRegistry:             agentRegistry,
 		sessionChecker:            sessionChecker,
 		mcpService:                mcpconfig.NewService(repo),
+		cursorMCPDiscoverySource:  newCursorMCPDiscoverySource(),
 		logger:                    log.WithFields(zap.String("component", "agent-settings-controller")),
 		runtimeUpdateStatusCache:  make(map[string]runtimeUpdateStatusCacheEntry),
 		runtimeUpdateStatusNow:    time.Now,
@@ -444,6 +459,7 @@ func (c *Controller) initializeUpdateJobStore() {
 		c.managedRuntimeSelections,
 	)
 	c.updateJobStore.SetStatusInvalidator(c.InvalidateRuntimeUpdateStatus)
+	c.updateJobStore.onFinished = c.retainAutomaticOutcome
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

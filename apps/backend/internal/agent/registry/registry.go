@@ -62,12 +62,14 @@ func NewRegistry(log *logger.Logger) *Registry {
 }
 
 // LoadDefaults loads default agent configurations
-func (r *Registry) LoadDefaults() {
+func (r *Registry) LoadDefaults(codexAppServerEnabled ...bool) {
+	nativeEnabled := len(codexAppServerEnabled) > 0 && codexAppServerEnabled[0]
 	all := []agents.Agent{
 		agents.NewDynamicAgent(),
 		agents.NewAuggie(),
 		agents.NewClaudeACP(),
 		agents.NewCodexACP(),
+		agents.NewCodexAppServer(nativeEnabled),
 		agents.NewCopilotACP(),
 		agents.NewGemini(),
 		agents.NewOpenCodeACP(),
@@ -79,6 +81,7 @@ func (r *Registry) LoadDefaults() {
 		agents.NewPiACP(),
 		agents.NewCursorACP(),
 		agents.NewKimiACP(),
+		agents.NewMiniMaxACP(),
 		agents.NewKiroACP(),
 		agents.NewQoderACP(),
 		agents.NewTraeACP(),

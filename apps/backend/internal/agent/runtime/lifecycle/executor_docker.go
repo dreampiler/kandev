@@ -82,7 +82,7 @@ type DockerExecutor struct {
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
 	newClientFunc   func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
-	brokerPreflight func(context.Context, brokerAgentctlProcessClient, string, map[string]string) error
+	brokerPreflight func(context.Context, agentctlProcessClient, string, map[string]string) error
 
 	// endpoints resolves container ports for the reconnect path. Nil means
 	// the daemon shares the backend's network, so a published port is
@@ -216,7 +216,9 @@ func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreate
 		return nil, fmt.Errorf("%w: existing Docker workspace could not be attached", models.ErrWorkspaceReuseUnsafe)
 	}
 
-	r.seedSessionDir(baseCtx, req)
+	if err := r.seedSessionDir(baseCtx, req); err != nil {
+		return nil, fmt.Errorf("prepare agent session configuration: %w", err)
+	}
 
 	containerCfg, err := r.buildContainerLaunchConfig(req)
 	if err != nil {
@@ -294,9 +296,9 @@ func (r *DockerExecutor) tryReconnect(ctx context.Context, dockerClient *docker.
 // bundles into the per-container session dir. Replaces the older pattern of
 // bind-mounting the host's whole ~/.<agent>, which leaked absolute host
 // paths into agent state DBs and broke resume on codex.
-func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) {
+func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreateRequest) error {
 	if req.AgentConfig == nil || r.kandevHomeDir == "" {
-		return
+		return nil
 	}
 	instanceRoot := InstanceSessionRoot(r.kandevHomeDir, req.InstanceID)
 	selectedBundles := selectedPortableConfigBundleIDs(req.Metadata)
@@ -315,6 +317,7 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 			zap.String("agent_id", req.AgentConfig.ID()),
 			zap.Error(err))
 	}
+	return nil
 }
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) (ContainerConfig, error) {
@@ -637,10 +640,12 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:            instanceID,
-		WorkspacePath: dockerWorkspacePath,
-		AgentType:     agentType,
-		Env:           selectedCheckoutAgentEnv(req.Env, req.Metadata),
+		ID:                    instanceID,
+		WorkspacePath:         dockerWorkspacePath,
+		Protocol:              req.Protocol,
+		CodexAppServerEnabled: req.CodexAppServerEnabled,
+		AgentType:             agentType,
+		Env:                   selectedCheckoutAgentEnv(req.Env, req.Metadata),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

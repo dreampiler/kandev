@@ -40,6 +40,10 @@ import {
   type ReviewProgressPRSource,
   type PRCommitForMerge,
 } from "./changes-panel-helpers";
+import {
+  groupChangedFileTargetsByRepository,
+  type ChangedFileTarget,
+} from "./changes-timeline-selection";
 import type {
   CommitDetailTarget,
   CommitFileNavigationRequest,
@@ -49,27 +53,27 @@ import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { gitOperationLabel } from "@/hooks/use-git-with-feedback";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 import type { RemoteContributionRelation } from "@/hooks/domains/session/remote-contribution-relation";
-import {
-  remoteContributionActionPolicy,
-  remoteContributionActionReasonKey,
-} from "@/hooks/domains/session/remote-contribution-relation";
-import {
-  buildRemoteContributionResolutionTarget,
-  type RemoteContributionResolutionTarget,
-} from "./use-remote-contribution-resolution";
+import type { RemoteContributionResolutionTarget } from "./changes-panel-contribution-state";
+import { useChangesPanelContributionState } from "./changes-panel-contribution-state";
 import { useRemoteContributionResolution } from "./use-remote-contribution-resolution";
 import { useTranslation } from "react-i18next";
 import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import type { WorkspaceRestorationAttempt } from "@/lib/state/slices/session-runtime/workspace-restoration";
+import {
+  deriveChangesPanelToolbarStatus,
+  useChangesPanelGitStatus,
+  type ChangesPanelGitStatus,
+} from "./changes-panel-git-status";
+import { ChangesInlineCommitState } from "./changes-inline-commit-state";
+import {
+  useChangesInlineCommitDetails,
+  useChangesPanelContextIdentity,
+} from "./use-changes-inline-commit-details";
 
 function useChangesPanelStoreData() {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useEnvironmentSessionId();
-  const taskTitle = useAppStore((state) => {
-    if (!state.tasks.activeTaskId) return undefined;
-    return state.kanban.tasks.find((t: { id: string }) => t.id === state.tasks.activeTaskId)?.title;
-  });
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
@@ -86,7 +90,6 @@ function useChangesPanelStoreData() {
   return {
     activeTaskId,
     activeSessionId,
-    taskTitle,
     baseBranch,
     gitCredentialDisplay,
   };
@@ -129,6 +132,7 @@ export type ChangesPanelBodyProps = {
   comparisonTargets: string[];
   comparisonUnavailable: boolean;
   comparisonErrorCode: string | null;
+  gitStatus: ChangesPanelGitStatus;
   isLoading: boolean;
   loadingOperation: string | null;
   dialogs: DialogsType;
@@ -144,9 +148,9 @@ export type ChangesPanelBodyProps = {
   onUnstageAll: () => void;
   onStage: (path: string, repo?: string) => Promise<void>;
   onUnstage: (path: string, repo?: string) => Promise<void>;
-  onBulkStage: (paths: string[]) => void;
-  onBulkUnstage: (paths: string[]) => void;
-  onBulkDiscard: (paths: string[], anchor?: HTMLElement) => void;
+  onBulkStage: (files: ChangedFileTarget[]) => void;
+  onBulkUnstage: (files: ChangedFileTarget[]) => void;
+  onBulkDiscard: (files: ChangedFileTarget[], anchor?: HTMLElement) => void;
   onPush: () => void;
   onForcePush: () => void;
   stagedFileCount: number;
@@ -170,6 +174,9 @@ export type ChangesPanelBodyProps = {
   restoreWorkspaceDisabled?: boolean;
   /** Monotonic token used to expand both histories after comparison navigation. */
   comparisonRequestToken?: number;
+  inlineCommitDetails: ChangesInlineCommitState;
+  inlineCommitDetailVersion: number;
+  contextKey: string;
 };
 
 function usePerRepoCallbacks(
@@ -361,57 +368,46 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
   return Object.keys(files ?? {}).length > 0;
 }
 
-function useChangesPanelResolutionTarget(
-  relation: RemoteContributionRelation,
-  repositoryScope: string,
-  selectedPR: TaskPR | null | undefined,
-  t: (key: string) => string,
+function useReviewRepositoryNames(
+  repoNames: string[],
+  cumulativeFiles: Parameters<typeof getCumulativeReviewRepositoryNames>[0],
 ) {
-  const remoteRepositoryLabel = t("task:remoteRepository");
   return useMemo(
-    () =>
-      buildRemoteContributionResolutionTarget(
-        relation,
-        repositoryScope,
-        selectedPR,
-        remoteRepositoryLabel,
-      ),
-    [relation, repositoryScope, selectedPR, remoteRepositoryLabel],
+    () => [...repoNames, ...getCumulativeReviewRepositoryNames(cumulativeFiles)],
+    [repoNames, cumulativeFiles],
   );
 }
 
 export function useChangesPanelData() {
-  const { t } = useTranslation();
   const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
+  const changesContext = useChangesPanelContextIdentity();
+  const inlineCommitDetails = useChangesInlineCommitDetails(changesContext);
   const workspaceRestoration = useWorkspaceRestoration(activeTaskId, activeSessionId);
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
+  const gitStatusPresentation = useChangesPanelGitStatus(
+    activeSessionId,
+    git.gitStatus,
+    git.statusByRepo,
+  );
+  const refreshStatus = deriveChangesPanelToolbarStatus(
+    gitStatusPresentation,
+    inlineCommitDetails.pendingRequestCount > 0,
+  );
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
-  const reviewRepositoryNames = useMemo(
-    () => [...git.repoNames, ...getCumulativeReviewRepositoryNames(git.cumulativeDiff?.files)],
-    [git.repoNames, git.cumulativeDiff],
-  );
+  const reviewRepositoryNames = useReviewRepositoryNames(git.repoNames, git.cumulativeDiff?.files);
   const prData = useChangesPanelPRData(reviewRepositoryNames, activeSessionId);
   const resolution = useRemoteContributionResolution(
     activeSessionId,
     prData.refreshProviderEvidence,
   );
-  const resolutionTarget = useChangesPanelResolutionTarget(
+  const contributionState = useChangesPanelContributionState(
     prData.relation,
     prData.repositoryScope,
     prData.selectedPR,
-    t,
   );
-  const remoteActionPolicy = useMemo(
-    () => remoteContributionActionPolicy(prData.relation),
-    [prData.relation],
-  );
-  const pullDisabledReason = useMemo(() => {
-    const key = remoteContributionActionReasonKey(prData.relation, "pull");
-    return key ? t(key) : undefined;
-  }, [prData.relation, t]);
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
@@ -451,7 +447,11 @@ export function useChangesPanelData() {
   return {
     activeTaskId,
     activeSessionId,
+    contextKey: changesContext.contextKey,
+    inlineCommitDetails,
+    refreshStatus,
     git,
+    gitStatusPresentation,
     baseBranchDisplay,
     baseBranchByRepo,
     unstagedFiles,
@@ -469,11 +469,11 @@ export function useChangesPanelData() {
     gitCredentialDisplay,
     walkthroughRequestReady,
     resolution,
-    resolutionTarget,
+    resolutionTarget: contributionState.resolutionTarget,
     workspaceRestoration,
-    pushDisabled: remoteActionPolicy.pushDisabled,
-    pullDisabled: remoteActionPolicy.pullDisabled,
-    pullDisabledReason,
+    pushDisabled: contributionState.remoteActionPolicy.pushDisabled,
+    pullDisabled: contributionState.remoteActionPolicy.pullDisabled,
+    pullDisabledReason: contributionState.pullDisabledReason,
     ...prData,
   };
 }
@@ -537,11 +537,15 @@ function buildChangesPanelWorkspaceActions(
     onUnstageAll: git.unstageAll,
     onStage: (path, repo) => git.stageFile([path], repo).then(() => undefined),
     onUnstage: (path, repo) => git.unstageFile([path], repo).then(() => undefined),
-    onBulkStage: (paths) => {
-      git.stageFile(paths).catch(() => undefined);
+    onBulkStage: (files) => {
+      for (const group of groupChangedFileTargetsByRepository(files)) {
+        git.stageFile(group.paths, group.repositoryName).catch(() => undefined);
+      }
     },
-    onBulkUnstage: (paths) => {
-      git.unstageFile(paths).catch(() => undefined);
+    onBulkUnstage: (files) => {
+      for (const group of groupChangedFileTargetsByRepository(files)) {
+        git.unstageFile(group.paths, group.repositoryName).catch(() => undefined);
+      }
     },
     onBulkDiscard: localDialogs.handleBulkDiscardClick,
     onPush: () => gitHandlers.handlePush(),
@@ -590,6 +594,10 @@ export function buildChangesPanelBodyProps(
     comparisonTargets: git.comparisonTargets,
     comparisonUnavailable: git.comparisonUnavailable,
     comparisonErrorCode: git.comparisonErrorCode,
+    gitStatus: data.gitStatusPresentation,
+    inlineCommitDetails: data.inlineCommitDetails.state,
+    inlineCommitDetailVersion: data.inlineCommitDetails.version,
+    contextKey: data.contextKey,
     isLoading: git.isLoading,
     loadingOperation: git.loadingOperation,
     dialogs: data.dialogs,

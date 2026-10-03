@@ -106,6 +106,8 @@ type persistedWorktreeBranchMetadata struct {
 }
 
 type taskResourceCleanupSnapshot struct {
+	// InventoryRepair retains the successor's provenance through progress saves.
+	InventoryRepair        json.RawMessage                            `json:"inventory_repair,omitempty"`
 	Sessions               []*models.TaskSession                      `json:"sessions,omitempty"`
 	Worktrees              []*worktree.Worktree                       `json:"worktrees,omitempty"`
 	WorktreeHeadOIDs       map[string]string                          `json:"worktree_head_oids,omitempty"`
@@ -430,6 +432,20 @@ func (s *Service) startTaskResourceCleanup(job *models.TaskResourceCleanupJob) {
 // StartTaskResourceCleanupWorker owns the install-wide durable task cleanup
 // loop. StopTaskResourceCleanupWorker joins it during backend shutdown.
 func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("task resource cleanup worker context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.resourceCleanups == nil {
+		return nil
+	}
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if s.resourceCleanups == nil {
 		return nil
 	}
@@ -445,21 +461,33 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	s.cleanupWorkerWake = wake
 	s.cleanupWorkerWG.Add(1)
 	s.cleanupWorkerMu.Unlock()
-	resumeErr := s.resumeTaskResourceCleanupJobs(workerCtx, startupPreparedCutoff)
-	go s.runTaskResourceCleanupWorker(workerCtx, wake, resumeErr != nil, startupPreparedCutoff)
-	return resumeErr
+	go s.runTaskResourceCleanupWorker(workerCtx, wake, startupPreparedCutoff)
+	return nil
 }
 
 func (s *Service) runTaskResourceCleanupWorker(
 	ctx context.Context,
 	wake <-chan struct{},
-	resumePending bool,
 	startupPreparedCutoff time.Time,
 ) {
 	defer s.cleanupWorkerWG.Done()
 	ticker := time.NewTicker(taskResourceCleanupRetryDelay)
 	defer ticker.Stop()
+	resumePending := true
 	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if resumePending {
+			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
+				if ctx.Err() == nil {
+					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
+				}
+			} else {
+				resumePending = false
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -467,13 +495,6 @@ func (s *Service) runTaskResourceCleanupWorker(
 		case <-wake:
 		}
 		if resumePending {
-			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
-				if ctx.Err() == nil {
-					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
-				}
-				continue
-			}
-			resumePending = false
 			continue
 		}
 		if err := s.processDueTaskResourceCleanupJobs(ctx); err != nil && ctx.Err() == nil {
@@ -483,6 +504,8 @@ func (s *Service) runTaskResourceCleanupWorker(
 }
 
 func (s *Service) StopTaskResourceCleanupWorker() {
+	s.cleanupWorkerLifecycleMu.Lock()
+	defer s.cleanupWorkerLifecycleMu.Unlock()
 	s.cleanupWorkerMu.Lock()
 	cancel := s.cleanupWorkerCancel
 	s.cleanupWorkerCancel = nil
@@ -617,8 +640,15 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			s.logger.Warn("resumed task resource cleanup job failed",
-				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			current, reloadErr := s.resourceCleanups.GetTaskResourceCleanupJob(ctx, job.ID)
+			if reloadErr != nil {
+				s.logger.Warn("claim task resource cleanup job reload failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+					zap.Error(err), zap.String("reload_error", reloadErr.Error()))
+			} else if current != nil && current.State == models.TaskResourceCleanupStatePending {
+				s.logger.Warn("claim task resource cleanup job failed",
+					zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+			}
 		}
 	}
 	return reconcileErr
@@ -1411,8 +1441,26 @@ func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.T
 		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
+		s.logger.Warn("complete claimed task resource cleanup job failed during retry transition",
+			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID),
+			zap.Int("attempt", job.Attempts), zap.Error(err), zap.String("cleanup_error", cleanupErr.Error()))
 		return errors.Join(cleanupErr, err)
 	}
+	fields := []zap.Field{
+		zap.String("job_id", job.ID),
+		zap.String("task_id", job.TaskID),
+		zap.Int("attempt", job.Attempts),
+		zap.String("state", string(state)),
+		zap.Error(cleanupErr),
+	}
+	var inspErr *worktree.CleanupInspectionError
+	if errors.As(cleanupErr, &inspErr) {
+		fields = append(fields,
+			zap.String("stage", inspErr.Stage),
+			zap.String("reason", inspErr.Reason),
+		)
+	}
+	s.logger.Warn("task resource cleanup job entered retry wait or failed", fields...)
 	return cleanupErr
 }
 

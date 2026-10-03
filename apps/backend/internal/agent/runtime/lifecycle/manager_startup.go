@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -107,6 +108,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	defer func() {
+		if retErr == nil {
+			return
+		}
+		_, _, onInitialPromptFailure := execution.takeInitialPromptDispatchCallbacks()
+		if onInitialPromptFailure != nil {
+			onInitialPromptFailure()
+		}
+	}()
 	if err := execution.contextResetAdmissionError(); err != nil {
 		return err
 	}
@@ -196,7 +206,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
+	agentDisplayName := m.resolveAgentDisplayName(operationCtx, execution)
 
 	execution.remoteInstanceLifecycleMu.Lock()
 	if err := m.admitExecutionOwner(operationCtx, &LaunchRequest{
@@ -227,10 +237,10 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution)
 		if err != nil {
 			execution.remoteInstanceLifecycleMu.Unlock()
-			return err
+			return routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, execution.AgentID, err)
 		}
 
 		m.logger.Info("agent process started",
@@ -240,7 +250,10 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	}
 	execution.remoteInstanceLifecycleMu.Unlock()
 
-	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
+	if err := m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription); err != nil {
+		return routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, execution.AgentID, err)
+	}
+	return nil
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
@@ -500,25 +513,54 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 }
 
 func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
-	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+	if req == nil {
 		return nil
 	}
+	if req.Metadata != nil {
+		managedMetadata := make(map[string]interface{}, len(req.Metadata))
+		for key, value := range req.Metadata {
+			managedMetadata[key] = value
+		}
+		delete(managedMetadata, managedGoCacheMetadataKey)
+		req.Metadata = managedMetadata
+	}
+	req.managedGoCachePath = ""
+	warnFallback := func(reason string) {
+		fields := []zap.Field{zap.String("reason", reason)}
+		if req.TaskID != "" {
+			fields = append(fields, zap.String("task_id", req.TaskID))
+		}
+		if req.SessionID != "" {
+			fields = append(fields, zap.String("session_id", req.SessionID))
+		}
+		m.logger.Warn("managed Go cache preparation skipped; continuing without managed override", fields...)
+	}
+	if m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
 	if err != nil {
-		return fmt.Errorf("prepare managed Go cache: %w", err)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("prepare managed Go cache: %w", err)
+		}
+		warnFallback("preparation_failed")
+		return nil
 	}
 	path := env["GOCACHE"]
 	if path == "" {
 		return nil
 	}
 	if !filepath.IsAbs(path) {
-		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+		warnFallback("invalid_output")
+		return nil
 	}
 	path = filepath.Clean(path)
-	if req.Env == nil {
-		req.Env = make(map[string]string)
-	}
-	req.Env["GOCACHE"] = path
 	if req.Metadata == nil {
 		req.Metadata = make(map[string]interface{})
 	}
@@ -565,6 +607,14 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 		m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlError, execution, err.Error())
 		return
 	}
+	// Comparison configuration must arrive before readiness exposes workspace
+	// access or the cached poll mode starts fresh Git scans.
+	client, releaseClient = execution.AcquireAgentCtlClient()
+	if client != nil {
+		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
+		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
+		releaseClient()
+	}
 	execution.MarkAgentctlReady()
 
 	elapsed := time.Since(opStart)
@@ -582,17 +632,6 @@ func (m *Manager) waitForAgentctlReady(execution *AgentExecution) {
 	// default slow poll mode even though the frontend already sent focus,
 	// and git state updates take up to 30s to reach the UI.
 	m.flushCachedPollMode(execution.SessionID)
-	// Seed the workspace's per-repo base-branch map. LaunchRequest metadata
-	// only carries it on the full launch path, so workspaces created by an
-	// agent starting on an already-prepared workspace, or by lazy recovery
-	// after a restart, would otherwise have none — and their branch diff stat
-	// would silently fall back to an integration branch.
-	client, releaseClient = execution.AcquireAgentCtlClient()
-	if client != nil {
-		m.pushTaskBaseBranches(ctx, execution.TaskID, execution.ID, client)
-		m.pushTaskComparisonTargets(ctx, execution.TaskID, execution.ID, client)
-		releaseClient()
-	}
 	// Use the timeout context for event publishing instead of a fresh Background context
 	m.eventPublisher.PublishAgentctlEvent(ctx, events.AgentctlReady, execution, "")
 }

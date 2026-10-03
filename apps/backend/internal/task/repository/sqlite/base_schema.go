@@ -43,6 +43,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
 		r.initClarificationInboxSidecarSchema,
+		r.initBackgroundWorkSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -62,6 +63,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureWorkspaceIndexes,
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
+		r.initWorkspaceInventoryRecoverySchema,
 		r.initConversationSourceSchema,
 		r.cleanupLegacyConversationJournal,
 	}
@@ -112,6 +114,39 @@ func (r *Repository) ensureTaskEnvironmentRecoveryClaimsSchema() error {
 		return fmt.Errorf("required task recovery claim migration: %w", err)
 	}
 	return nil
+}
+
+const workspaceInventoryRecoverySchemaDDL = `
+	CREATE TABLE IF NOT EXISTS workspace_inventory_recovery_receipts (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		task_environment_id TEXT NOT NULL,
+		task_repository_id TEXT NOT NULL,
+		environment_repo_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL,
+		idempotency_key TEXT NOT NULL,
+		request_hash TEXT NOT NULL,
+		result_code TEXT NOT NULL,
+		receipt_json TEXT NOT NULL,
+		post_repair_matched BOOLEAN NOT NULL DEFAULT FALSE,
+		post_repair_verified_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		UNIQUE(task_id, idempotency_key),
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment
+		ON workspace_inventory_recovery_receipts(task_environment_id, created_at);
+
+	CREATE INDEX IF NOT EXISTS idx_workspace_inventory_recovery_environment_repo
+		ON workspace_inventory_recovery_receipts(task_id, environment_repo_id, created_at);
+`
+
+func (r *Repository) initWorkspaceInventoryRecoverySchema() error {
+	_, err := r.db.Exec(workspaceInventoryRecoverySchemaDDL)
+	return err
 }
 
 // ensureArchivedBranchCandidatesIndex runs after ownership normalization so
@@ -330,6 +365,7 @@ func (r *Repository) ensureRunnerProjectionTables() error {
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 		profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse',
 		profile_session_end_policy TEXT NOT NULL DEFAULT 'park',
+		disable_unclassified_fallback INTEGER NOT NULL DEFAULT 0,
 		stage_type TEXT NOT NULL DEFAULT 'custom',
 		session_target TEXT,
 		auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
@@ -404,6 +440,8 @@ const infraSchemaDDL = `
 		default_environment_id TEXT DEFAULT '',
 		default_agent_profile_id TEXT DEFAULT '',
 		default_config_agent_profile_id TEXT DEFAULT '',
+		acp_idle_suspension_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+		acp_idle_timeout_minutes INTEGER NOT NULL DEFAULT 120 CHECK (acp_idle_timeout_minutes > 0),
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
@@ -447,6 +485,8 @@ const infraSchemaDDL = `
 		executor_id TEXT NOT NULL,
 		runtime TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'starting',
+		idle_suspension_state TEXT NOT NULL DEFAULT '',
+		idle_suspension_policy_updated_at TIMESTAMP,
 		resumable INTEGER NOT NULL DEFAULT 0,
 		resume_token TEXT DEFAULT '',
 		agent_execution_id TEXT DEFAULT '',
@@ -1245,6 +1285,8 @@ const sessionWorktreeSchemaDDL = `
 		worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown',
 		worktree_integration_ref TEXT NOT NULL DEFAULT '',
 		worktree_recovery_head_sha TEXT NOT NULL DEFAULT '',
+		worktree_source_clone_path TEXT NOT NULL DEFAULT '',
+		worktree_source_common_dir TEXT NOT NULL DEFAULT '',
 		worktree_branch_compacted_at TIMESTAMP,
 		position INTEGER DEFAULT 0,
 		error_message TEXT DEFAULT '',

@@ -297,7 +297,7 @@ export type StatusMetadata = {
   status?: string;
   stage?: string;
   message?: string;
-  variant?: "default" | "warning" | "error";
+  variant?: "default" | "warning" | "error" | "resume_settings_provider_restored";
   cancelled?: boolean;
   // Transient provider-error retry state. Present on the yellow "retrying"
   // status message the orchestrator emits during backoff.
@@ -307,6 +307,12 @@ export type StatusMetadata = {
   retry_in_seconds?: number;
   retry_at?: string;
   failure_code?: string;
+  effective_model_known?: boolean;
+  effective_model_id?: string;
+  effective_model_name?: string;
+  effective_mode_known?: boolean;
+  effective_mode_id?: string;
+  resolved_error_stamp?: string;
   // Running-only action notices are hidden once the session settles. They use
   // compact neutral presentation instead of the normal recovery/error card.
   action_visibility?: "running";
@@ -340,6 +346,7 @@ export type MessageAction = {
   type: "archive_task" | "delete_task" | "ws_request";
   label: string;
   tooltip?: string;
+  tooltip_key?: string;
   variant?: "default" | "destructive";
   icon?: string;
   params?: Record<string, unknown>;

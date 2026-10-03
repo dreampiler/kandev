@@ -272,6 +272,13 @@ type UserSettingsProvider interface {
 	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
 }
 
+// AgentProfileVerifier reports whether an agent profile ID names an existing
+// profile. It exists so create-task can refuse an unresolvable profile before
+// it writes anything, rather than failing later in the asynchronous launch.
+type AgentProfileVerifier interface {
+	AgentProfileExists(ctx context.Context, profileID string) (bool, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
 	automationCreator      AutomationCreator
@@ -294,7 +301,10 @@ type Handlers struct {
 	messageQueue           MessageQueuer
 	promptResolver         PromptReferenceResolver
 	promptReader           PromptReader
+	promptWriter           PromptWriter
+	promptAuthEnabled      func() bool
 	userSettingsProvider   UserSettingsProvider
+	agentProfileVerifier   AgentProfileVerifier
 	settingsRegistry       *settingscatalog.Registry
 	settingsOperations     SettingsOperations
 	logger                 *logger.Logger
@@ -463,6 +473,13 @@ func (h *Handlers) SetConfigDeps(
 	h.mcpConfigSvc = mcpConfigSvc
 }
 
+// SetAgentProfileVerifier wires the profile-existence check used to refuse a
+// caller-supplied agent_profile_id before a task is created. Task modes need it
+// too, so it is not part of SetConfigDeps.
+func (h *Handlers) SetAgentProfileVerifier(verifier AgentProfileVerifier) {
+	h.agentProfileVerifier = verifier
+}
+
 // SetSettingsBroadcaster wires the notification path used by settings writes
 // that originate in legacy MCP configuration tools.
 func (h *Handlers) SetSettingsBroadcaster(broadcaster interface{ Broadcast(*ws.Message) }) {
@@ -587,6 +604,10 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 	}
 	if h.promptReader != nil {
 		h.registerPromptHandlers(d)
+	}
+	if h.promptWriter != nil {
+		d.RegisterFunc(ws.ActionMCPCreateSharedPrompt, h.handleCreateSharedPrompt)
+		d.RegisterFunc(ws.ActionMCPUpdateSharedPrompt, h.handleUpdateSharedPrompt)
 	}
 	if h.workflowSvc != nil {
 		h.registerWorkflowHandlers(d)
@@ -916,6 +937,13 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: resolvedStepID,
 	}
+	if err := h.validateExplicitAgentProfile(ctx, req.AgentProfileID); err != nil {
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, errMCPAgentProfileInvalid) {
+			code = ws.ErrorCodeValidation
+		}
+		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
+	}
 	launchConfig, metadata, err := h.resolveMCPLaunchMetadataWithSource(
 		ctx, pendingTask, req.AgentProfileID, req.ExecutorProfileID, req.SourceTaskID, req.SourceSessionID,
 	)
@@ -952,7 +980,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			SessionID: req.SourceSessionID,
 		})
 	}
-	result, err := h.taskSvc.CreateTask(createCtx, &service.CreateTaskRequest{
+	createReq := &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
 		WorkspaceID:            req.WorkspaceID,
 		WorkflowID:             req.WorkflowID,
@@ -969,7 +997,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		StartAgent:             startAgent,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
-	})
+	}
+	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
 		code := classifyCreateTaskError(err)
@@ -1001,6 +1030,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(result.Task),
 			Deduplicated:     true,
 			CreationComplete: result.Outcome == service.CreateTaskOutcomeFoundSettled,
+			ParentResolution: admission.parentResolution.forOutcome(false),
 		})
 	}
 	task := result.Task
@@ -1030,8 +1060,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Settlement (create-sequence step 7): after policy attach, before
-	// auto-start dispatch.
-	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, task.ExternalID)
+	// auto-start dispatch. The normalized request identity survives a release
+	// during synchronous creation, even when the refreshed task has lost it.
+	settled, survivor, settleErr := h.taskSvc.SettleExternalID(ctx, task.ID, createReq.ExternalID)
 	if settleErr != nil {
 		if errors.Is(settleErr, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -1048,6 +1079,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			TaskDTO:          dto.FromTask(survivor),
 			Deduplicated:     false,
 			CreationComplete: true,
+			ParentResolution: admission.parentResolution.forOutcome(true),
 		})
 	}
 
@@ -1076,6 +1108,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		TaskDTO:          response,
 		Deduplicated:     false,
 		CreationComplete: true,
+		ParentResolution: admission.parentResolution.forOutcome(true),
 	})
 }
 
@@ -1085,8 +1118,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 // booleans, not presence-only markers, mirroring the REST create response.
 type mcpCreateTaskResult struct {
 	dto.TaskDTO
-	Deduplicated     bool `json:"deduplicated"`
-	CreationComplete bool `json:"creation_complete"`
+	Deduplicated     bool                           `json:"deduplicated"`
+	CreationComplete bool                           `json:"creation_complete"`
+	ParentResolution *mcpCreateTaskParentResolution `json:"parent_resolution,omitempty"`
 }
 
 func classifyCreateTaskError(err error) string {
@@ -1391,6 +1425,57 @@ type mcpAutoStartConfig struct {
 }
 
 var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because the selected task profile policy, workflow, and workspace defaults did not resolve a profile")
+
+// errMCPAgentProfileInvalid marks a caller-supplied agent_profile_id that does
+// not name an existing profile. It is a validation failure, not a server error.
+var errMCPAgentProfileInvalid = errors.New("invalid agent_profile_id")
+
+// mcpReasonKey is the field name used for a machine-readable cause in MCP
+// result payloads.
+const mcpReasonKey = "reason"
+
+// mcpTaskAgentProfilePolicyValues are the two values of the per-user
+// mcp_task_agent_profile_default setting. The create-task tool description
+// names them, so callers reasonably pass them as the argument; they are not
+// argument values and must be refused with a message that says so.
+var mcpTaskAgentProfilePolicyValues = map[string]struct{}{
+	string(usermodels.MCPTaskAgentProfileDefaultCurrentTask):      {},
+	string(usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault): {},
+}
+
+// validateExplicitAgentProfile resolves a caller-supplied agent_profile_id
+// before anything is created.
+//
+// An unresolvable value used to survive the whole create path: it counted as an
+// explicit profile, which skipped creating-session, parent and workspace-default
+// resolution, and only failed later inside the fire-and-forget auto-start
+// goroutine, whose error reached the log and nothing else. The caller already
+// had a success result and a task stuck in CREATED with no session.
+//
+// An omitted argument is not validated: it keeps the documented resolution
+// precedence.
+func (h *Handlers) validateExplicitAgentProfile(ctx context.Context, agentProfileID string) error {
+	if agentProfileID == "" {
+		return nil
+	}
+	if _, isPolicy := mcpTaskAgentProfilePolicyValues[agentProfileID]; isPolicy {
+		return fmt.Errorf(
+			"%w: %q is a value of the mcp_task_agent_profile_default user setting, not an agent profile ID; "+
+				"omit agent_profile_id to use the configured policy",
+			errMCPAgentProfileInvalid, agentProfileID)
+	}
+	if h.agentProfileVerifier == nil {
+		return nil
+	}
+	exists, err := h.agentProfileVerifier.AgentProfileExists(ctx, agentProfileID)
+	if err != nil {
+		return fmt.Errorf("verify agent_profile_id: %w", err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: no agent profile %q exists", errMCPAgentProfileInvalid, agentProfileID)
+	}
+	return nil
+}
 
 // autoStartTask launches an agent session for a newly created task in the background.
 // It is kept as a small compatibility wrapper for direct tests; handleCreateTask
@@ -1799,17 +1884,50 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 		if err != nil {
 			h.logger.Error("failed to auto-start task",
 				zap.String("task_id", task.ID), zap.Error(err))
+			h.recordAutoStartFailure(ctx, task.ID, err.Error())
 			return
 		}
 		if resp == nil {
 			h.logger.Error("auto-start returned no response",
 				zap.String("task_id", task.ID))
+			h.recordAutoStartFailure(ctx, task.ID, "auto-start returned no session")
 			return
 		}
 		h.logger.Info("auto-started agent for MCP-created task",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", resp.SessionID))
 	}()
+}
+
+// recordAutoStartFailure stores why an auto-start failed on the task itself.
+//
+// The launch runs in a goroutine after the creating tool call has already
+// returned success, so its error otherwise reaches only the backend log. Going
+// through the task service means the failure also travels on the task event
+// stream, which is what makes it visible to the kanban and to a caller polling
+// the task.
+func (h *Handlers) recordAutoStartFailure(ctx context.Context, taskID, reason string) {
+	if h.taskSvc == nil || taskID == "" {
+		return
+	}
+	task, err := h.taskSvc.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		h.logger.Warn("could not read task to record auto-start failure",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	metadata := make(map[string]interface{}, len(task.Metadata)+1)
+	for key, value := range task.Metadata {
+		metadata[key] = value
+	}
+	metadata[models.MetaKeyAutoStartError] = map[string]interface{}{
+		mcpReasonKey:  reason,
+		"occurred_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if _, err := h.taskSvc.UpdateTask(ctx, taskID, &service.UpdateTaskRequest{Metadata: metadata}); err != nil {
+		h.logger.Warn("failed to record auto-start failure on task",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 // inheritFromTask fills agentProfileID and executorProfileID from another task's
@@ -2011,7 +2129,7 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 		"title":    task.Title,
 	}
 	if !accepted {
-		result["reason"] = reason
+		result[mcpReasonKey] = reason
 		return ws.NewResponse(msg.ID, msg.Action, result)
 	}
 	if h.titleBranchRenamer != nil {
@@ -2496,9 +2614,11 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 // actually move the task, alongside the accepted:true response
 // handleStepComplete always returns. accepted only means the signal was
 // durably recorded — a step whose AutoAdvanceRequiresSignal is false never
-// reads it, so the caller can accept a signal that changes nothing. ok is
-// false (both other return values ignored) when the current step cannot be
-// resolved: the caller must never guess this field into existence.
+// reads it, and a signal-gated step whose on_turn_complete has no move that
+// runs automatically reads it without transitioning, so the caller can accept
+// a signal that changes nothing. ok is false (both other return values
+// ignored) when the current step cannot be resolved: the caller must never
+// guess this field into existence.
 func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowStepID string) (advances bool, note string, ok bool) {
 	if h.workflowCtrl == nil || workflowStepID == "" {
 		return false, "", false
@@ -2507,10 +2627,14 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 	if err != nil || resp == nil || resp.Step == nil {
 		return false, "", false
 	}
-	if resp.Step.AutoAdvanceRequiresSignal {
-		return true, "", true
+	if !resp.Step.AutoAdvanceRequiresSignal {
+		return false, "this step does not advance on a completion signal", true
 	}
-	return false, "this step does not advance on a completion signal", true
+	if !resp.Step.AdvancesOnTurnComplete() {
+		return false, "this step has no on_turn_complete move that runs automatically, " +
+			"so the signal will not move the task", true
+	}
+	return true, "", true
 }
 
 func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
@@ -2567,8 +2691,8 @@ func (h *Handlers) handleDuplicateStepComplete(
 		}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"accepted": false,
-		"reason":   "already_signaled",
+		"accepted":   false,
+		mcpReasonKey: "already_signaled",
 	})
 }
 
@@ -2678,9 +2802,9 @@ func (h *Handlers) publishStepCompletionEvent(
 //   - WAITING/COMPLETED: message is recorded and the agent is prompted (auto-resuming if needed)
 //   - CREATED          : message is recorded then the agent is started with it as initial prompt
 //
-// Strict validation: missing sender_task_id, self-message, and unknown sender
-// task all reject with an MCP error rather than silently delivering an
-// unattributed message.
+// Strict validation: missing sender_task_id, same-session targets, and unknown
+// sender tasks reject with an MCP error. Same-task messages are allowed only
+// when session_id names a distinct sibling session.
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID            string `json:"task_id"`
@@ -4651,10 +4775,11 @@ func (h *Handlers) publishQueueStatusEvent(
 // the event-based fallback in the orchestrator handles resuming with a new turn.
 func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		SessionID string                   `json:"session_id"`
-		TaskID    string                   `json:"task_id"`
-		Questions []clarification.Question `json:"questions"`
-		Context   string                   `json:"context"`
+		SessionID         string                   `json:"session_id"`
+		TaskID            string                   `json:"task_id"`
+		Questions         []clarification.Question `json:"questions"`
+		Context           string                   `json:"context"`
+		AllowFreeTextOnly bool                     `json:"allow_free_text_only,omitempty"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -4665,7 +4790,11 @@ func (h *Handlers) handleAskUserQuestion(ctx context.Context, msg *ws.Message) (
 	// Single source of truth — same validator the HTTP handler uses, so
 	// duplicate IDs / bad option counts / empty prompts can't slip through
 	// either path.
-	if errMsg := clarification.NormalizeAndValidateQuestions(req.Questions); errMsg != "" {
+	validateQuestions := clarification.NormalizeAndValidateQuestions
+	if req.AllowFreeTextOnly {
+		validateQuestions = clarification.NormalizeAndValidateQuestionsAllowFreeTextOnly
+	}
+	if errMsg := validateQuestions(req.Questions); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
 	}
 

@@ -168,7 +168,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 />
 
 1. **Set a title.** If the title field appears, enter up to 60 characters. With **Agent-generated task titles** enabled, Kandev uses the prompt's first six words as a provisional title. See [advanced task creation](#let-the-agent-name-new-tasks).
-2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task.
+2. **Choose a workspace and workflow.** Kandev can infer them from the current view. A regular task must belong to a workflow. Use the arrow between the workflow and step names to see where each start action places the task. Open the workflow selector to compare the ordered steps in each available workflow. If a preview fails, select **Retry** on that row. Your workflow selection and task draft stay unchanged.
 3. **Choose a source:**
 
    | Source     | Use it for                                        | Notes                                                                                                                                                                                                                                        |
@@ -639,10 +639,28 @@ Choose **Last activity** when you want to review tasks by the least recent user 
 
 Each sidebar view shows up to 100 task rows at a time. Views with more than 100 matching rows show **Previous** and **Next** controls. Filters, grouping, and collapsed groups are applied before paging, so headings do not use task slots. Paging keeps the open task and conversation in place. This applies to active and archived tasks in built-in, saved, and draft views.
 
+Views already covered by the current homepage data appear immediately, without
+another sidebar request. Larger covered views also page through the data already
+loaded. Archived views and incomplete data use bounded server pages.
+
+Returning to a recently opened server-backed view can show its first page while
+it refreshes in the background. Refreshing keeps the list in place; no updating
+banner shifts the rows. These pages are kept only in the current browser session,
+for up to five minutes. Task changes, workspace changes, and signing out invalidate
+the relevant pages. Switching views leaves your open conversation in place,
+including in the phone **Tasks** drawer.
+
+If loading fails, the sidebar shows one message. **Retry** reloads a recoverable
+failure; rows already shown remain visible during a failed refresh. If a filter
+is invalid, use **Filters** to correct the indicated selection instead. Repository
+and workflow selections support up to 1,000 values per filter; the limits apply
+to each selected value, not to the combined selection.
+
 - Search matches tasks without changing their state.
+- On Kanban and Pipeline boards, selecting a repository includes tasks linked to it, including tasks whose primary repository is different.
 - The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, tap the listing-title dropdown to open **View options** and expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
-- **List** can group by **State**, **Workflow**, **Repository**, or **None**.
+- **List** can group by **Workflow step**, **Workflow**, **Repository**, or **None**. Workflow step uses configured step names and order, such as Backlog, Work, or Review. The icon on each task still shows its runtime status, which can differ from its workflow step. Old State grouping preferences and links open workflow step grouping.
 - **List** can sort by updated time, created time, or title in either direction.
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.
@@ -792,6 +810,15 @@ On phones, use the bottom navigation to open **Chat**, **Files**, or
 **Terminal** as a full-screen surface. Phone navigation keeps its existing
 layout and does not change the wider task-panel choice.
 
+When switching tasks, available task details and cached conversations appear
+while the selected task refreshes. Loading settings or another panel does not
+cover the conversation. A task or conversation that has not loaded yet still
+needs to be fetched.
+
+In **Files**, you can open available files while other expanded folders finish
+loading. If a folder refresh fails, available rows remain usable and **Retry**
+appears below the tree.
+
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
 ## Office documents, labels, and blockers
@@ -857,6 +884,8 @@ Select an archived task to read its saved conversation in the current page. Arch
 
 If task or workspace preparation fails, select **Show details** in the error strip above the session tabs. It opens the available recovery actions. The strip stays visible when you switch sessions and disappears after recovery succeeds. Archiving during recovery stops that recovery path without starting a fallback restore. For session recovery behavior, see [Sessions and review](sessions-and-review.md).
 
+If Quick Chat setup fails after a session is created, Kandev keeps the chat in your tab strip with its preparation details and safe error details so you can inspect the failure or retry. A failure before a session exists keeps your selected agent and repository choices on the setup form with an inline error and a **Retry** action.
+
 <details>
 <summary>Worktree recovery after archive</summary>
 
@@ -868,6 +897,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 
 **Delete**
 
+- While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.

@@ -41,7 +41,7 @@ func TestHandleCompleteEventMarkState_DefersUninitializedStartupFailure(t *testi
 		t.Fatalf("add execution: %v", err)
 	}
 
-	mgr.handleCompleteEventMarkState(execution, &agentctl.AgentEvent{
+	callCompletionStateWithStartupLease(t, mgr, execution, &agentctl.AgentEvent{
 		Type:  streams.EventTypeComplete,
 		Error: "Agent process exited with code 1",
 		Data:  map[string]any{"is_error": true},
@@ -134,6 +134,10 @@ func TestStartupGenerationPublishesOriginatingAttemptIDOnReusedExecution(t *test
 	}
 	if streamEvents[0].AttemptID != "attempt-new" {
 		t.Fatalf("replacement stream attempt ID = %q, want attempt-new", streamEvents[0].AttemptID)
+	}
+	if streamEvents[0].SessionSettingsSourceGeneration != newGeneration {
+		t.Fatalf("replacement stream source generation = %d, want %d",
+			streamEvents[0].SessionSettingsSourceGeneration, newGeneration)
 	}
 }
 

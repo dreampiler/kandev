@@ -27,6 +27,12 @@
   "agentFallbackInfoLabel": "說明代理程式備援",
   "agentFallbackPlaceholder": "選擇備援模型…",
   "agentGeneratedTaskTitles": "由代理程式產生任務標題",
+  "agentTabCloseButton": "代理程式標籤關閉按鈕",
+  "agentTabCloseButtonDescription": "選擇桌面端代理程式標籤上的 X 執行的操作。",
+  "deleteSession": "刪除工作階段",
+  "hidePanel": "隱藏面板",
+  "deleteSessionCloseDescription": "請求確認，然後永久刪除對話。",
+  "hidePanelCloseDescription": "僅關閉面板。稍後可從 + > 代理程式重新開啟。",
   "agentGeneratedTaskTitlesDescription": "啟用後，新建任務和子任務表單會隱藏手動標題欄位，並要求填寫提示詞。Kandev 會立即使用提示詞的前六個詞產生臨時標題，然後讓代理程式將其替換為約三個詞的簡潔標題。如果代理程式無法重新命名任務，你仍可編輯臨時標題。現有任務和經過編輯的任務會繼續顯示常規標題欄位。",
   "agentGeneratedTaskTitlesDisabledHint": "預設關閉；請先儲存此設定，再開啟建立對話方塊。",
   "animateRichOutputCharts": "為代理程式展示的圖表啟用動畫",
@@ -56,7 +62,7 @@
   "autoFallbackHelpTitle": "自動備援",
   "autoFallbackInfoLabel": "說明自動備援",
   "requireExactModel": "要求精確模型",
-  "requireExactModelHelper": "僅當此精確模型已公佈併成功應用時才啟動工作階段。關閉此選項後，已儲存的備援設定仍可使用。",
+  "requireExactModelHelper": "僅當此精確模型已公佈並成功套用時才啟動工作階段。關閉此選項後，已儲存的備援設定仍可使用。",
   "requireExactModelInfoLabel": "說明精確模型要求",
   "requireExactModelHelpTitle": "要求精確模型",
   "requireExactModelHelp": "如果設定的模型未公佈或無法應用，工作階段將失敗。自動和明確指定的備援設定會保留，但不會生效。",
@@ -881,5 +887,7 @@
   "queueMaximumShort": "限制每個工作階段的待處理訊息數。0 表示無限制。",
   "queueMergeShort": "在代理讀取前合併佇列中的相關訊息。",
   "queueAutoMergeShort": "自動合併相容的連續訊息。",
-  "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。"
+  "sleepShort": "任務執行期間防止執行 Kandev 的計算機休眠。",
+  "promptAllowAgentEdits": "允許代理程式編輯",
+  "promptAgentEditsDescription": "代理程式可以修改此提示詞，影響所有使用它的位置。"
 }

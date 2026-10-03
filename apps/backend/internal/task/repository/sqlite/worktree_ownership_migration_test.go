@@ -99,10 +99,13 @@ func openLegacyDB(t *testing.T) *sqlx.DB {
 
 func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	t.Helper()
-	// The final git snapshot table owns a foreign key to task_environments.
-	// Recreate it in its legacy session-owned shape before dropping the
-	// environment tables, otherwise PostgreSQL correctly rejects the rewind.
+	// Final-schema tables own foreign keys to task_environments. Recreate or
+	// remove them before dropping the environment tables, otherwise PostgreSQL
+	// correctly rejects this test-only rewind.
 	replaceGitSnapshotTableWithLegacy(t, &Repository{db: db, ro: db})
+	if _, err := db.Exec(`DROP TABLE workspace_inventory_recovery_receipts`); err != nil {
+		t.Fatalf("drop final workspace inventory receipts: %v", err)
+	}
 	if _, err := db.Exec(`DROP TABLE task_environment_recovery_claims`); err != nil {
 		t.Fatalf("drop recovery claims: %v", err)
 	}
@@ -432,6 +435,41 @@ func TestCutover_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 	if session.TaskEnvironmentID != "env-1" {
 		t.Fatalf("session env = %q, want env-1", session.TaskEnvironmentID)
+	}
+}
+
+func TestCutoverPreservesManagedCloneSourceIdentity(t *testing.T) {
+	db := openLegacyDB(t)
+	for _, column := range []string{
+		"worktree_source_clone_path TEXT NOT NULL DEFAULT ''",
+		"worktree_source_common_dir TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := db.Exec("ALTER TABLE task_environment_repos ADD COLUMN " + column); err != nil {
+			t.Fatalf("add source clone column: %v", err)
+		}
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-source", taskID: "task-source", repoID: "repo-source", sessionID: "session-source"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-source", seed.repoID, "main", "/tasks/source/repo", "main", "active", now)
+	seedLegacyFlatEnv(t, db, seed, "wt-source", "/tasks/source/repo", "main", now)
+	seedLegacyEnvRepo(t, db, "env-repo-source", seed.envID, seed.repoID, "wt-source", "/tasks/source/repo", "main", now)
+	if _, err := db.Exec(`UPDATE task_environment_repos SET worktree_source_clone_path = ?, worktree_source_common_dir = ? WHERE id = ?`,
+		"/managed/legacy/repo", "/managed/legacy/repo/.git", "env-repo-source"); err != nil {
+		t.Fatalf("seed source clone identity: %v", err)
+	}
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	if len(env.Repos) != 1 || env.Repos[0].WorktreeSourceClonePath != "/managed/legacy/repo" ||
+		env.Repos[0].WorktreeSourceCommonDir != "/managed/legacy/repo/.git" {
+		t.Fatalf("managed clone source identity was not preserved: %+v", env.Repos)
 	}
 }
 

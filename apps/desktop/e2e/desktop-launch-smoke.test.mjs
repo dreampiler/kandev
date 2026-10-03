@@ -12,10 +12,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   HEALTH_REQUESTED_TIMEOUT_MS,
   ROOT_REQUESTED_TIMEOUT_MS,
+  parseProcessStatuses,
   waitForHttp,
   writeJsonAtomically,
   createAtomicRecordWriter,
   waitForFile,
+  writeInstanceRecord,
   writeFakeRuntime,
   writeReleaseShapedRuntime,
 } from "./desktop-launch-smoke.mjs";
@@ -56,6 +58,36 @@ const STARTUP_COPY_KEYS = [
   "startupFailureTitle",
 ];
 
+test("process-status parsing preserves PID ownership and zombie state", () => {
+  assert.deepEqual(parseProcessStatuses(" 123 45 Sl+\n 124 45 Z\n"), [
+    { pid: 123, parentPid: 45, state: "Sl+" },
+    { pid: 124, parentPid: 45, state: "Z" },
+  ]);
+  assert.deepEqual(parseProcessStatuses("\n"), []);
+  assert.throws(() => parseProcessStatuses("not a process row"), /invalid process status row/);
+});
+
+test("empty status-1 ps failures mean there are no child processes", () => {
+  const noChildren = Object.assign(new Error("ps found no child processes"), {
+    status: 1,
+    stdout: " \n",
+  });
+  let statuses;
+  assert.doesNotThrow(() => {
+    statuses = parseProcessStatuses(noChildren);
+  });
+  assert.deepEqual(statuses, []);
+
+  const partialOutputFailure = Object.assign(new Error("ps failed after partial output"), {
+    status: 1,
+    stdout: "not a process row",
+  });
+  assert.throws(() => parseProcessStatuses(partialOutputFailure), partialOutputFailure);
+
+  const otherFailure = Object.assign(new Error("ps failed"), { status: 2, stdout: "" });
+  assert.throws(() => parseProcessStatuses(otherFailure), otherFailure);
+});
+
 async function withTempDir(run) {
   const dir = await mkdtemp(join(tmpdir(), "wait-for-file-"));
   try {
@@ -92,6 +124,21 @@ test("waitForFile resolves once the target file appears", async () => {
     const target = join(dir, "marker");
     const write = new Promise((r) => setTimeout(r, 50)).then(() => writeFile(target, "1"));
     await Promise.all([waitForFile(target, 2_000), write]);
+  });
+});
+
+test("instance records remain valid during concurrent updates", async () => {
+  await withTempDir(async (dir) => {
+    const target = join(dir, "instance.json");
+    await writeInstanceRecord(dir, { pid: 1, payload: "a".repeat(100_000) });
+    const writes = Array.from({ length: 30 }, (_, i) =>
+      writeInstanceRecord(dir, { pid: i + 2, payload: "b".repeat(100_000) }),
+    );
+    const reads = Array.from({ length: 100 }, async () => {
+      const record = JSON.parse(await readFile(target, "utf8"));
+      assert.equal(record.payload.length, 100_000);
+    });
+    await Promise.all([...writes, ...reads]);
   });
 });
 

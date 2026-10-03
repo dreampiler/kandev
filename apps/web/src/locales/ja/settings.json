@@ -1,4 +1,10 @@
 {
+  "agentTabCloseButton": "エージェントタブの閉じるボタン",
+  "agentTabCloseButtonDescription": "デスクトップのエージェントタブで、×ボタンを押したときの動作を選択します。",
+  "deleteSession": "セッションを削除",
+  "hidePanel": "パネルを非表示",
+  "deleteSessionCloseDescription": "確認後、会話を完全に削除します。",
+  "hidePanelCloseDescription": "パネルのみを閉じます。後で「+ > エージェント」から開き直せます。",
   "aSecretNameAndValueAreRequired": "シークレット名と値が必要。",
   "aSecretNameIsRequired": "シークレット名が必要。",
   "aboutAffectedKandevMcpTools": "影響を受ける Kandev MCP ツールについて",
@@ -881,5 +887,7 @@
   "queueMaximumShort": "セッションごとの保留メッセージ数を制限します。0 は無制限です。",
   "queueMergeShort": "エージェントが読む前に、関連する保留メッセージをまとめます。",
   "queueAutoMergeShort": "互換性のある連続メッセージを自動的にまとめます。",
-  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。"
+  "sleepShort": "タスクの実行中、Kandev が動作するコンピューターのスリープを防ぎます。",
+  "promptAllowAgentEdits": "エージェントによる編集を許可",
+  "promptAgentEditsDescription": "エージェントがこのプロンプトを変更すると、使用されているすべての箇所に反映されます。"
 }

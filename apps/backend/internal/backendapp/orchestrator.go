@@ -91,6 +91,7 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
+	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -211,6 +212,8 @@ func provideOrchestrator(
 	// Wired unconditionally: dependencies are a core Kanban relationship, not an
 	// Office feature.
 	orchestratorSvc.SetTaskDependencyReader(taskSvc)
+	orchestratorSvc.SetBackgroundWorkObserver(taskSvc)
+	taskSvc.SetBackgroundWorkActionDispatcher(lifecycleMgr)
 
 	// Let the task service read the orchestrator's task-level
 	// parked_on_background_work OR-aggregate and its own monotonic revision so
@@ -512,6 +515,19 @@ func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
 		WorkspaceMethod: policy.WorkspaceMethod,
 		WorkspaceActor:  policy.WorkspaceActor,
 	}, nil
+}
+
+// pluginRuntimeAPIURL is the Kandev API URL plugin executor environments call
+// back to. It exists only when an externally reachable base URL is configured.
+func pluginRuntimeAPIURL(cfg *config.Config) string {
+	if cfg == nil {
+		return ""
+	}
+	publicBaseURL := strings.TrimRight(strings.TrimSpace(cfg.GitHubCredentialBroker.PublicBaseURL), "/")
+	if publicBaseURL == "" {
+		return ""
+	}
+	return publicBaseURL + "/api/v1"
 }
 
 func githubCredentialBrokerEndpoint(cfg *config.Config) string {

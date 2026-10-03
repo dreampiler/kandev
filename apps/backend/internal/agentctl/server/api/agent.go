@@ -13,12 +13,14 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	protocol "github.com/kandev/kandev/pkg/codexappserver"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -69,8 +71,9 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID  string            `json:"session_id"`
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	SessionID             string                        `json:"session_id"`
+	McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -79,6 +82,17 @@ type LoadSessionResponse struct {
 	SessionID  string                     `json:"session_id,omitempty"`
 	ModelState *streams.SessionModelState `json:"model_state,omitempty"`
 	Error      string                     `json:"error,omitempty"`
+}
+
+type ForkSessionRequest struct {
+	SessionID       string `json:"session_id"`
+	CompletedTurnID string `json:"completed_turn_id"`
+}
+
+type ForkSessionResponse struct {
+	Success   bool   `json:"success"`
+	SessionID string `json:"session_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // PromptRequest is a request to send a prompt to the agent
@@ -317,6 +331,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSNewSession(ctx, msg)
 	case "agent.session.load":
 		return s.handleWSLoadSession(ctx, msg)
+	case "agent.session.fork":
+		return s.handleWSForkSession(ctx, msg)
 	case "agent.prompt":
 		return s.handleWSPrompt(ctx, msg)
 	case "agent.cancel":
@@ -347,6 +363,38 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnknownAction, fmt.Sprintf("unknown action: %s", msg.Action), nil)
 		return resp
 	}
+}
+
+func (s *Server) handleWSForkSession(ctx context.Context, msg *ws.Message) *ws.Message {
+	var req ForkSessionRequest
+	if err := msg.ParsePayload(&req); err != nil || req.SessionID == "" || req.CompletedTurnID == "" {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id and completed_turn_id are required", nil)
+		return resp
+	}
+	agentAdapter := s.procMgr.GetAdapter()
+	if agentAdapter == nil {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
+		return resp
+	}
+	forkable, ok := agentAdapter.(adapter.ForkableSession)
+	if !ok {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent does not support conversation forks", nil)
+		return resp
+	}
+	forkCtx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
+	defer cancel()
+	sessionID, err := forkable.ForkSession(forkCtx, req.SessionID, req.CompletedTurnID)
+	if err != nil {
+		s.logger.Error(msg.Action+" failed", zap.Error(err))
+		code := ws.ErrorCodeInternalError
+		if errors.Is(err, protocol.ErrForkPrecondition) {
+			code = ws.ErrorCodeConflict
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
+		return resp
+	}
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, ForkSessionResponse{Success: true, SessionID: sessionID})
+	return resp
 }
 
 func (s *Server) handleWSPermissionCancel(msg *ws.Message) *ws.Message {
@@ -470,12 +518,12 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 	kandevMcpSse := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportSSE,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathSSE),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
 	}
 	kandevMcpHttp := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportHTTP,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
@@ -629,6 +677,10 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
 		return resp
 	}
+	if req.SessionSettingsPolicy != "" && req.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "unsupported session settings policy", nil)
+		return resp
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
@@ -661,6 +713,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
+	ctx = streams.WithSessionSettingsPolicy(ctx, req.SessionSettingsPolicy)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
@@ -854,13 +907,28 @@ func (s *Server) handleWSSetMode(ctx context.Context, msg *ws.Message) *ws.Messa
 		SessionID string `json:"session_id"`
 		ModeID    string `json:"mode_id"`
 	}
-	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+	var result streams.ModeResult
+	resp := s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
 		ms, ok := a.(adapter.ModeSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support mode switching")
 		}
-		return ms.SetMode(ctx, req.ModeID)
+		var err error
+		result, err = ms.SetMode(ctx, req.ModeID)
+		return err
 	})
+	if resp.Type == ws.MessageTypeError {
+		return resp
+	}
+	// The caller needs the mode the agent ended up in, not the one it asked
+	// for: a clamped mode is otherwise reported as a clean apply.
+	settled, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"success":   true,
+		"requested": result.Requested,
+		"effective": result.Effective,
+		"confirmed": result.Confirmed,
+	})
+	return settled
 }
 
 // adapterAction extracts common boilerplate for WS handlers that operate on the agent adapter:
@@ -907,15 +975,23 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 
 func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID              string                        `json:"config_id"`
+		Value                 string                        `json:"value"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}
 	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		policy := req.SessionSettingsPolicy
+		if policy == "" {
+			policy = streams.SessionSettingsPolicyStrict
+		}
+		if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+			return fmt.Errorf("unsupported session settings policy %q", policy)
+		}
 		cs, ok := a.(adapter.ConfigOptionSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support set_config_option")
 		}
-		return cs.SetConfigOption(ctx, req.ConfigID, req.Value)
+		return cs.SetConfigOption(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
 	})
 }
 
