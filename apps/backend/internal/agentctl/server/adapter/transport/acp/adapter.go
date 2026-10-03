@@ -279,15 +279,22 @@ type Adapter struct {
 	// modeObserved closes on each mode report so a waiter can settle.
 	modeObserved chan struct{}
 	// A timed-out set_mode can report after the next request starts. ACP mode
-	// reports have no request ID, so that next request cannot claim the report.
+	// reports have no request ID, so an uncorrelated report cannot resolve an
+	// earlier uncertain result, even if it arrives while the adapter is idle.
 	modeOutcomeUncertain bool
-	modeChangeActive     bool
 
 	// Available config options from the most recent session creation/load.
 	// Used by emitSetModelEvent to include cached options in the convergence
 	// event emitted after SetModel succeeds so the frontend doesn't lose
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
+
+	// sessionSettingsPolicy is host-selected provenance for unsolicited
+	// settings reports from the currently loaded session. Explicit setter
+	// outcomes are emitted separately without this marker.
+	sessionSettingsPolicy streams.SessionSettingsPolicy
+	// sessionSettingsGeneration is monotonic for this adapter across session transitions.
+	sessionSettingsGeneration uint64
 
 	dialect acpDialect
 

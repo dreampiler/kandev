@@ -38,6 +38,7 @@ import (
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/profiles"
 	"github.com/kandev/kandev/internal/startup"
+	"github.com/kandev/kandev/internal/task/inventoryrepair"
 
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
@@ -254,6 +255,10 @@ func Run(args []string, build BuildInfo) int {
 	// backend cannot reconcile or migrate the live home before its bind fails.
 	owner, err := acquireRuntimeStateOwnership(cfg)
 	if err != nil {
+		if errors.Is(err, inventoryrepair.ErrRepairPending) {
+			fmt.Fprintf(os.Stderr, "Backend startup refused: %v\n", err)
+			return 1
+		}
 		writeDesktopStartupConflictMarker(os.Stderr, cfg, err)
 		fmt.Fprintf(os.Stderr,
 			"Failed to acquire backend runtime-state ownership: %v; use a separate KANDEV_HOME_DIR for an intentional second instance\n",
@@ -318,7 +323,14 @@ func acquireRuntimeStateOwnership(cfg *config.Config) (*ownershiplock.Owner, err
 	if err != nil {
 		return nil, fmt.Errorf("resolve backend runtime-state ownership: %w", err)
 	}
-	return ownershiplock.Acquire(targets)
+	owner, err := ownershiplock.Acquire(targets)
+	if err != nil {
+		return nil, err
+	}
+	if err := inventoryrepair.CheckPendingTargets(targets); err != nil {
+		return nil, errors.Join(err, owner.Close())
+	}
+	return owner, nil
 }
 
 // setBuildInfo stamps the package-level build variables with the provided
@@ -687,8 +699,10 @@ func startAgentInfrastructure(
 	// terminal sees the same variables the agent subprocess and the repository
 	// setup script get.
 	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+	lifecycleMgr.SetSessionSettingsSnapshotWriter(repos.Task)
 	if services.Plugins != nil {
 		lifecycleMgr.SetPluginExecutorProfileLoader(services.Task)
+		lifecycleMgr.SetPluginRuntimeAPIURL(pluginRuntimeAPIURL(cfg))
 		services.Plugins.SetExecutorProviderInventoryReader(repos.Task)
 		pluginExecutor := lifecycle.NewPluginRemoteExecutor(services.Plugins, log)
 		pluginExecutor.SetRecoveryDependencies(services.Task, repos.Task)
@@ -1090,6 +1104,7 @@ func startGatewayAndServe(
 	}
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionGitRefreshProvider(buildSessionGitRefreshProvider(repos.Task, lifecycleMgr, log))
 	gateway.Hub.SetConversationSourceReader(services.Task)
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
@@ -1388,6 +1403,7 @@ func startGatewayAndServe(
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	hostUtilityCtx, hostUtilityCancel := context.WithCancel(ctx)
+	hostUtilityReady := make(chan struct{})
 	var hostUtilityWG sync.WaitGroup
 	hostUtilityWG.Add(1)
 	go func() {
@@ -1395,6 +1411,7 @@ func startGatewayAndServe(
 		if err := hostUtilityMgr.Start(hostUtilityCtx); err != nil {
 			log.Warn("host utility manager bootstrap error", zap.Error(err))
 		}
+		close(hostUtilityReady)
 		// Reconcile profiles against fresh probe results — seeds defaults for
 		// newly probed agents, heals stale profile models/modes, cleans up
 		// orphans referencing removed agents.
@@ -1445,6 +1462,16 @@ func startGatewayAndServe(
 			}
 		})
 	}
+	agentSettingsController.SetRuntimeUpdateNotifier(notificationSvc)
+	stopRuntimeUpdates := agentSettingsController.StartRuntimeUpdateBackground(ctx, hostUtilityReady)
+	stopRuntimeUpdatesCleanup := func() error { stopRuntimeUpdates(); return nil }
+	addCleanup(stopRuntimeUpdatesCleanup)
+	restoreCleanups = append(restoreCleanups, stopRuntimeUpdatesCleanup)
+	gateway.Hub.AddUserSubscriptionListener(func(string) {
+		if err := agentSettingsController.ReplayRuntimeUpdateNotices(ctx); err != nil && ctx.Err() == nil {
+			log.Debug("runtime update replay unavailable")
+		}
+	})
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(processRuntimeContext(ctx), eventBus, gateway.Hub, log)
@@ -1696,7 +1723,7 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, log))
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
 	return svc
 }
 

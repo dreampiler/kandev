@@ -16,12 +16,7 @@ import {
   mergeOrphanPendingActionProjection,
 } from "./task-session-projection-actions";
 import { reconcileMessages } from "./message-signature";
-import {
-  buildPromptMessageActions,
-  fanOutTranscriptPrompts,
-  removePromptMessage,
-  updatePromptMessage,
-} from "./prompt-message-actions";
+import { resolveRunningNotices } from "./running-notice-activity";
 import { purgeSessionRuntimeState } from "@/lib/state/slices/session-runtime/session-runtime-slice";
 import { mergeTaskSession } from "./session-merge";
 import { syncEnvironmentMapping, syncPrepareProgress } from "./session-environment-sync";
@@ -80,6 +75,7 @@ function applyMessageMeta(
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mergeMessageFields(target: Record<string, unknown>, source: Record<string, any>) {
+  const noticeResolved = (target.metadata as Message["metadata"])?.running_notice_resolved === true;
   for (const key of Object.keys(source)) {
     if (
       key === "metadata" &&
@@ -90,6 +86,12 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
     if (source[key] !== undefined) {
       target[key] = source[key];
     }
+  }
+  if (noticeResolved && target.metadata) {
+    target.metadata = {
+      ...(target.metadata as Message["metadata"]),
+      running_notice_resolved: true,
+    };
   }
 }
 
@@ -229,12 +231,6 @@ function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: Ta
 
 export const defaultSessionState: SessionSliceState = {
   messages: { bySession: {}, metaBySession: {} },
-  messagePrompts: {
-    bySession: {},
-    metaBySession: {},
-    generationBySession: {},
-    refreshGenerationBySession: {},
-  },
   turns: {
     bySession: {},
     activeBySession: {},
@@ -302,12 +298,13 @@ function buildSetMessagesMetadata(set: ImmerSet) {
     });
 }
 
-/** Builds the transcript update action and keeps the prompt cache in sync. */
+/** Builds the transcript update action. */
 function buildUpdateMessage(set: ImmerSet) {
   return (message: Parameters<SessionSlice["updateMessage"]>[0]) =>
     set((draft) => {
       const messages = draft.messages.bySession[message.session_id];
       if (messages) {
+        resolveRunningNotices(messages, message);
         const index = messages.findIndex((entry) => entry.id === message.id);
         if (index !== -1) {
           const merged = { ...messages[index] };
@@ -318,7 +315,6 @@ function buildUpdateMessage(set: ImmerSet) {
           messages[index] = merged;
         }
       }
-      updatePromptMessage(draft, message);
     });
 }
 
@@ -341,6 +337,7 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const sessionId = message.session_id;
         if (!draft.messages.bySession[sessionId]) draft.messages.bySession[sessionId] = [];
+        resolveRunningNotices(draft.messages.bySession[sessionId], message);
         const existingIndex = draft.messages.bySession[sessionId].findIndex(
           (entry) => entry.id === message.id,
         );
@@ -355,7 +352,6 @@ function buildMessageActions(set: ImmerSet) {
             message as unknown as Record<string, unknown>,
           );
         }
-        fanOutTranscriptPrompts(draft, [message]);
       }),
     updateMessage: buildUpdateMessage(set),
     updateMessages: (messages: Parameters<SessionSlice["updateMessages"]>[0]) =>
@@ -366,11 +362,11 @@ function buildMessageActions(set: ImmerSet) {
             sessionMessages = draft.messages.bySession[message.session_id] = [];
           }
           if (sessionMessages) {
+            resolveRunningNotices(sessionMessages, message);
             const hasMessage = sessionMessages.some((entry) => entry.id === message.id);
             if (hasMessage) mergeMessageAtIndex(sessionMessages, message);
             else if (isTransientRetryNotice(message)) sessionMessages.push(message);
           }
-          updatePromptMessage(draft, message);
         }
       }),
     removeMessage: (
@@ -380,7 +376,6 @@ function buildMessageActions(set: ImmerSet) {
       set((draft) => {
         const messages = draft.messages.bySession[sessionId];
         if (messages) draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
-        removePromptMessage(draft, sessionId, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -400,7 +395,6 @@ function buildMessageActions(set: ImmerSet) {
         }
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     prependMessages: (
       sessionId: string,
@@ -416,7 +410,6 @@ function buildMessageActions(set: ImmerSet) {
         ];
         ensureMessageMeta(draft.messages.metaBySession, sessionId);
         if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
-        fanOutTranscriptPrompts(draft, messages);
       }),
     setMessagesMetadata: buildSetMessagesMetadata(set),
     setMessagesLoading: buildSetMessagesLoading(set),
@@ -686,10 +679,6 @@ function buildRemoveTaskSessionAction(set: ImmerSet) {
       // Drop the conversation history owned by this session.
       delete draft.messages.bySession[sessionId];
       delete draft.messages.metaBySession[sessionId];
-      delete draft.messagePrompts.bySession[sessionId];
-      delete draft.messagePrompts.metaBySession[sessionId];
-      const generations = (draft.messagePrompts.generationBySession ??= {});
-      generations[sessionId] = (generations[sessionId] ?? 0) + 1;
       delete draft.turns.bySession[sessionId];
       delete draft.turns.activeBySession[sessionId];
       delete draft.turns.loadedBySession[sessionId];
@@ -1027,7 +1016,6 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
-  ...buildPromptMessageActions(set),
   ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
   ...buildTaskSessionReconciliationActions(set),
@@ -1055,6 +1043,10 @@ export const createSessionSlice: StateCreator<
   setActiveModel: (sessionId, modelId) =>
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
+    }),
+  clearActiveModel: (sessionId) =>
+    set((draft) => {
+      delete draft.activeModel.bySessionId[sessionId];
     }),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),

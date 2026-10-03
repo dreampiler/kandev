@@ -56,6 +56,7 @@ export type FileChangeFacet = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
 };
 
 export type FileInfo = {
@@ -68,6 +69,7 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  diff_state?: "pending" | "ready" | "unavailable";
   staged_change?: FileChangeFacet;
   unstaged_change?: FileChangeFacet;
   /** Frontend-only projection used when one raw path appears in both change sections. */
@@ -86,6 +88,13 @@ export type FileInfo = {
 };
 
 export type GitStatusEntry = {
+  status_state?: "ready" | "loading" | "unavailable";
+  files_complete?: boolean;
+  detail_state?: "pending" | "ready" | "unavailable";
+  error_code?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
   branch: string | null;
   remote_branch: string | null;
   modified: string[];
@@ -128,6 +137,20 @@ export type GitStatusState = {
    * environment ID then repository name. Empty for single-repo workspaces.
    */
   byEnvironmentRepo: Record<string, Record<string, GitStatusEntry>>;
+  /** Foreground status recovery keyed by environment when repository inventory is unknown. */
+  refreshByEnvironmentId?: Record<string, GitStatusRefreshState>;
+  /** Foreground status recovery keyed by environment and repository scope. */
+  refreshByEnvironmentRepo?: Record<string, Record<string, GitStatusRefreshState>>;
+};
+
+export type GitStatusRefreshState = {
+  state: "pending" | "unavailable";
+  error_code?: string;
+  request_id?: string;
+  tracker_id?: string;
+  tracker_epoch?: number;
+  snapshot_revision?: number;
+  timestamp?: string;
 };
 
 // Git Snapshot types for historical tracking
@@ -231,6 +254,8 @@ export type SessionModeState = {
     {
       currentModeId: string;
       availableModes: SessionModeEntry[];
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /**
        * The mode Kandev asked for when the session did not end up in it. Set
        * so a clamped mode is distinguishable from an applied one.
@@ -294,6 +319,8 @@ export type SessionModelsState = {
       configOptions: ConfigOptionEntry[];
       configOptionsSettled?: boolean;
       configBaseline?: Record<string, string>;
+      /** Marks the effective selector snapshot restored after explicit recovery. */
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model. */
       fallbackModel?: string;
     }
@@ -405,6 +432,8 @@ export type PrepareStepInfo = {
   name: string;
   kind?: string;
   remotePlatform?: string;
+  mcpServerId?: string;
+  mcpProvider?: string;
   failureCode?: string;
   command?: string;
   status: string;
@@ -419,6 +448,8 @@ export type PrepareStepInfo = {
 export type SessionPrepareState = {
   sessionId: string;
   status: string;
+  preparationId?: string;
+  preparationStartedAt?: string;
   steps: PrepareStepInfo[];
   errorMessage?: string;
   durationMs?: number;
@@ -520,6 +551,11 @@ export type SessionRuntimeSliceActions = {
   /** Returns true when the update meaningfully changed git state (so callers
    *  can invalidate derived caches without repeating the deep comparison). */
   setGitStatus: (taskEnvironmentId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatusRefresh: (
+    taskEnvironmentId: string,
+    repositoryName: string | undefined,
+    refresh: GitStatusRefreshState | null,
+  ) => void;
   clearGitStatus: (sessionId: string) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
@@ -552,6 +588,7 @@ export type SessionRuntimeSliceActions = {
     modeId: string,
     availableModes?: SessionModeEntry[],
     requestedModeId?: string,
+    settingsPolicy?: "provider_restored" | "strict",
   ) => void;
   clearSessionMode: (sessionId: string) => void;
   // Agent capabilities actions
@@ -564,6 +601,7 @@ export type SessionRuntimeSliceActions = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      settingsPolicy?: "provider_restored";
       /** Set when the session started on the profile's fallback model
        *  because the configured start model was unavailable. */
       fallbackModel?: string;

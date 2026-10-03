@@ -61,14 +61,7 @@ export type MobileKanbanState = {
 /** Core, host-defined mobile panels. Kept as a named union (rather than
  *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
  *  still works unchanged after MobileSessionPanel grew a plugin variant. */
-export type MobileSessionCorePanel =
-  | "chat"
-  | "plan"
-  | "changes"
-  | "files"
-  | "terminal"
-  | "review"
-  | "prompt-history";
+export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
 
 /** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
  *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
@@ -175,6 +168,13 @@ export type QuickChatSessionTombstone = {
   tombstonedAt: string;
 };
 
+export type ConfigChatRestartState = {
+  sessionId: string;
+  status: "restarting" | "uncertain";
+  source: "local" | "server";
+  error?: string;
+};
+
 export type QuickChatState = {
   isOpen: boolean;
   sessions: QuickChatSession[];
@@ -187,6 +187,7 @@ export type QuickChatState = {
   lastSettledAtBySession: Record<string, string>;
   sessionOwnership: Record<string, QuickChatSessionOwnership>;
   syncRevisionByWorkspace: Record<string, number>;
+  configChatRestarts: Record<string, ConfigChatRestartState>;
   tombstonedSessions: Record<string, QuickChatSessionTombstone>;
   /** Optimistic mixed-tab order keyed by workspace until the save settles. */
   tabOrderByWorkspace: Record<string, string[]>;
@@ -223,6 +224,11 @@ export type TaskDeletedNotification = {
 };
 
 export type UpdateAvailableNotification = {
+  agent_name?: string;
+  runtime_id?: string;
+  display_name?: string;
+  previous_version?: string;
+  runtime_update_status?: "available" | "succeeded" | "failed" | "interrupted";
   version: string;
   url?: string;
   title: string;
@@ -323,6 +329,7 @@ export type UISliceState = {
   taskDeletedNotification: TaskDeletedNotification | null;
   /** Set when the background updates poller reports a newly detected release. */
   updateAvailableNotification: UpdateAvailableNotification | null;
+  updateAvailableNotificationQueue: UpdateAvailableNotification[];
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
   sidebarViewsByWorkspace: Record<string, SidebarSliceState>;
@@ -428,6 +435,13 @@ export type UISliceActions = {
     state: { pending: boolean; error: string | null },
   ) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  setConfigChatRestart: (workspaceId: string, restart: ConfigChatRestartState | null) => void;
+  syncConfigChatRestart: (workspaceId: string, pending: boolean, sessionId?: string) => void;
+  replaceConfigChatSession: (
+    workspaceId: string,
+    oldSessionId: string,
+    replacement: QuickChatSession,
+  ) => void;
   /** Opens Quick Chat after the requested workspace list becomes authoritative. */
   requestQuickChatOpen: (
     workspaceId: string,

@@ -766,6 +766,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 	providerID := data.AgentID
 	message := data.ErrorMessage
 	var resetHint *time.Time
+	var occurredAt time.Time
 	if providerError := data.ProviderError; providerError != nil {
 		// Provider rules are keyed by agent ID. OpenCode diagnostics carry the
 		// model-provider ID instead ("opencode-go"), which has no rules; keeping
@@ -779,6 +780,7 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 			message = providerError.Message
 		}
 		resetHint = providerError.ResetAt
+		occurredAt = providerError.OccurredAt
 	}
 	phase := routingerr.PhasePromptSend
 	if data.DynamicRouteAttempt {
@@ -794,12 +796,33 @@ func classifyKanbanFailure(data watcher.AgentEventData) *routingerr.Error {
 			phase = routingerr.PhaseStreaming
 		}
 	}
-	return routingerr.Classify(routingerr.Input{
+	classified := routingerr.Classify(routingerr.Input{
 		Phase:      phase,
 		ProviderID: providerID,
 		ResetHint:  resetHint,
+		OccurredAt: occurredAt,
 		Stderr:     message,
 	})
+	if data.DynamicRouteAttempt && data.EvidenceKnown && !data.OutputObserved && !data.EffectObserved &&
+		data.ProviderError != nil && data.ProviderError.Valid() &&
+		data.ProviderError.DiagnosticIdentityComplete && completeProviderDiagnosticSource(data.ProviderError.Source) &&
+		classified.Code == routingerr.CodeAgentRuntime && classified.Class == routingerr.ClassUnclassified &&
+		classified.ClassifierRule == "phase.poststart.unknown" {
+		// An exact terminal provider diagnostic can identify the unknown result
+		// shape without changing the global post-start classifier contract.
+		classified = cloneRoutingErrorWithCode(classified, routingerr.CodeUnknownProvider)
+	}
+	return classified
+}
+
+func cloneRoutingErrorWithCode(classified *routingerr.Error, code routingerr.Code) *routingerr.Error {
+	if classified == nil {
+		return nil
+	}
+	clone := *classified
+	clone.Code = code
+	clone.Class = routingerr.ClassForCode(code)
+	return &clone
 }
 
 func transientFailureLabel(classified *routingerr.Error) string {

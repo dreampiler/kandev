@@ -2,6 +2,9 @@ import { claimSessionRecovery, usePendingSessionRecovery } from "./session-recov
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+import { useAppStore } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { TaskSession } from "@/lib/types/http";
 import {
   asRecoveryError,
   branchRecoveryDetails,
@@ -19,7 +22,13 @@ export type SessionRecoveryBusyAction = SessionRecoveryAction | "restore" | null
 
 export type ManualSessionRecoveryFailure = {
   operation: "resume" | "restore_workspace";
+  sessionId: string;
+  errorStamp: string | null;
+  requestKey: string;
+  operationId: number;
 };
+
+const FAILED_TO_RESUME_MESSAGE_KEY = "task:failedToResumeSession";
 
 type SessionRecoveryActionsOptions = {
   taskId: string;
@@ -52,6 +61,91 @@ function guardOrFallbackError(
 }
 
 type RecoveryOperation = { requestKey: string; sessionKey: string; operationId: number };
+
+type RecoveryFailureAssociation = {
+  managedClone: ReturnType<typeof managedCloneRelocationRecoveryDetails>;
+  errorStamp: string | null;
+  requestKey: string;
+};
+
+function recoveryFailureAssociation({
+  cause,
+  operation,
+  errorStamp,
+  taskId,
+  sessionId,
+  isCurrentOperation,
+  isCurrentSession,
+  matchesLatestErrorStamp,
+}: {
+  cause: unknown;
+  operation: RecoveryOperation;
+  errorStamp?: string | null;
+  taskId: string;
+  sessionId: string;
+  isCurrentOperation: (operation: RecoveryOperation) => boolean;
+  isCurrentSession: (operation: RecoveryOperation) => boolean;
+  matchesLatestErrorStamp: (stamp: string | undefined) => boolean;
+}): RecoveryFailureAssociation | null {
+  const managedClone = managedCloneRelocationRecoveryDetails(cause);
+  const currentOperation = isCurrentOperation(operation);
+  const isSuccessorRelocation =
+    managedClone?.kind === "managed_clone_relocation_required" &&
+    isCurrentSession(operation) &&
+    matchesLatestErrorStamp(managedClone.error_stamp);
+  if (!currentOperation && !isSuccessorRelocation) return null;
+
+  const associatedStamp = isSuccessorRelocation
+    ? (managedClone.error_stamp ?? errorStamp ?? null)
+    : (errorStamp ?? null);
+  const requestKey = currentOperation
+    ? operation.requestKey
+    : `${taskId}\u0000${sessionId}\u0000${associatedStamp ?? ""}`;
+  return { managedClone, errorStamp: associatedStamp, requestKey };
+}
+
+function hasNativeACPSessionToken(session: TaskSession): boolean {
+  if (
+    typeof session.downstream_acp_session_id === "string" &&
+    session.downstream_acp_session_id.trim()
+  ) {
+    return true;
+  }
+  const acp = session.metadata?.acp;
+  if (!acp || typeof acp !== "object" || Array.isArray(acp)) return false;
+  const nativeSessionId = (acp as Record<string, unknown>).session_id;
+  return typeof nativeSessionId === "string" && nativeSessionId.trim().length > 0;
+}
+
+function isProviderRestoredResumeEligible(
+  state: AppState,
+  taskId: string,
+  sessionId: string,
+): boolean {
+  const session = state.taskSessions.items[sessionId];
+  if (
+    !session ||
+    session.task_id !== taskId ||
+    session.state !== "FAILED" ||
+    session.is_passthrough ||
+    !hasNativeACPSessionToken(session)
+  ) {
+    return false;
+  }
+
+  const task = state.kanban.tasks.find((candidate) => candidate.id === taskId);
+  if (task?.isFromOffice) return false;
+  const quickChatOwnsTaskSession = state.quickChat.sessions.some(
+    (candidate) =>
+      candidate.kind === "chat" && candidate.sessionId === sessionId && candidate.taskId === taskId,
+  );
+  if (!task && !quickChatOwnsTaskSession) return false;
+
+  const profileId = session.execution_profile_id || session.agent_profile_id;
+  if (!profileId) return false;
+  const profile = state.agentProfiles.items.find((candidate) => candidate.id === profileId);
+  return !!profile && !profile.cli_passthrough && profile.agent_name.toLowerCase() === "auggie";
+}
 
 /** Fences in-flight recovery calls so a stale response cannot write newer state. */
 function useRecoveryOperationFence(
@@ -108,6 +202,9 @@ export function useSessionRecoveryActions({
   errorStamp,
 }: SessionRecoveryActionsOptions) {
   const { t } = useTranslation();
+  const providerRestoredResumeEligible = useAppStore((state) =>
+    isProviderRestoredResumeEligible(state, taskId, sessionId),
+  );
   const pendingKey = `${taskId}\u0000${sessionId}`;
   const sharedBusyAction = usePendingSessionRecovery(pendingKey);
   const sessionKey = pendingKey;
@@ -124,6 +221,7 @@ export function useSessionRecoveryActions({
   const [recoveryNotice, setRecoveryNotice] = useState<string | null>(null);
   const [manualRecoveryFailure, setManualRecoveryFailure] =
     useState<ManualSessionRecoveryFailure | null>(null);
+  const [localResultRequestKey, setLocalResultRequestKey] = useState<string | null>(null);
 
   useEffect(() => {
     setBusyAction(null);
@@ -135,34 +233,58 @@ export function useSessionRecoveryActions({
     setLastFailedAction(null);
     setRecoveryNotice(null);
     setManualRecoveryFailure(null);
+    setLocalResultRequestKey(null);
   }, [requestKey]);
 
-  const recoveryError = combineRecoveryErrors(resumeError, restoreError, t);
+  const localResultIsCurrent = localResultRequestKey === requestKey;
+  const recoveryError = localResultIsCurrent
+    ? combineRecoveryErrors(resumeError, restoreError, t)
+    : null;
 
   const handleRecoveryFailure = useCallback(
     (cause: unknown, operation: RecoveryOperation, action: SessionRecoveryAction) => {
+      const association = recoveryFailureAssociation({
+        cause,
+        operation,
+        errorStamp,
+        taskId,
+        sessionId,
+        isCurrentOperation,
+        isCurrentSession,
+        matchesLatestErrorStamp,
+      });
+      if (!association) return;
       const guard = sessionRecoveryGuardDetails(cause);
-      const managedClone = managedCloneRelocationRecoveryDetails(cause);
-      const currentOperation = isCurrentOperation(operation);
-      const currentRelocationRequirement =
-        managedClone?.kind === "managed_clone_relocation_required" &&
-        isCurrentSession(operation) &&
-        (currentOperation || matchesLatestErrorStamp(managedClone.error_stamp));
-      if (!currentOperation && !currentRelocationRequirement) return;
+      const { managedClone, errorStamp: associatedStamp, requestKey } = association;
+      setLocalResultRequestKey(requestKey);
       if (managedClone?.kind === "managed_clone_relocation_required") {
         setManagedCloneRecoveryStamp(managedClone.error_stamp ?? errorStamp ?? null);
       } else if (managedClone?.kind === "managed_clone_relocation_stale") {
         setManagedCloneRecoveryStamp(null);
       }
-      setResumeError(guardOrFallbackError(cause, guard, t, t("task:failedToResumeSession")));
+      setResumeError(guardOrFallbackError(cause, guard, t, t(FAILED_TO_RESUME_MESSAGE_KEY)));
       setRestoreError(null);
       setBranchDetails(guard ? null : branchRecoveryDetails(cause));
       setGuardDetails(guard);
       setLastFailedAction(action);
       setRecoveryNotice(null);
-      setManualRecoveryFailure({ operation: "resume" });
+      setManualRecoveryFailure({
+        operation: "resume",
+        sessionId,
+        errorStamp: associatedStamp,
+        requestKey,
+        operationId: operation.operationId,
+      });
     },
-    [errorStamp, isCurrentOperation, isCurrentSession, matchesLatestErrorStamp, t],
+    [
+      errorStamp,
+      isCurrentOperation,
+      isCurrentSession,
+      matchesLatestErrorStamp,
+      sessionId,
+      taskId,
+      t,
+    ],
   );
 
   const handleRecover = useCallback(
@@ -174,17 +296,31 @@ export function useSessionRecoveryActions({
       try {
         const recoveryStamp = managedCloneRecoveryStamp ?? errorStamp;
         if (action === "relocate_and_resume") {
-          await requestSessionRecover(
+          await requestSessionRecover({
             taskId,
             sessionId,
             action,
-            t("task:failedToResumeSession"),
-            recoveryStamp,
-          );
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+            errorStamp: recoveryStamp,
+          });
+        } else if (action === "resume" && providerRestoredResumeEligible) {
+          await requestSessionRecover({
+            taskId,
+            sessionId,
+            action,
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+            settingsPolicy: "provider_restored",
+          });
         } else {
-          await requestSessionRecover(taskId, sessionId, action, t("task:failedToResumeSession"));
+          await requestSessionRecover({
+            taskId,
+            sessionId,
+            action,
+            failureMessage: t(FAILED_TO_RESUME_MESSAGE_KEY),
+          });
         }
         if (!isCurrentOperation(operation)) return false;
+        setLocalResultRequestKey(operation.requestKey);
         setResumeError(null);
         setRestoreError(null);
         setBranchDetails(null);
@@ -209,6 +345,7 @@ export function useSessionRecoveryActions({
       isCurrentOperation,
       managedCloneRecoveryStamp,
       pendingKey,
+      providerRestoredResumeEligible,
       sessionId,
       taskId,
       t,
@@ -224,6 +361,7 @@ export function useSessionRecoveryActions({
     try {
       await restoreSessionWorkspace(taskId, sessionId, t("task:failedToRestoreWorkspace"));
       if (!isCurrentOperation(operation)) return;
+      setLocalResultRequestKey(operation.requestKey);
       setResumeError(null);
       setRestoreError(null);
       setBranchDetails(null);
@@ -234,11 +372,18 @@ export function useSessionRecoveryActions({
       setManualRecoveryFailure(null);
     } catch (cause) {
       if (!isCurrentOperation(operation)) return;
+      setLocalResultRequestKey(operation.requestKey);
       const guard = sessionRecoveryGuardDetails(cause);
       setRestoreError(guardOrFallbackError(cause, guard, t, t("task:failedToRestoreWorkspace")));
       setGuardDetails(guard ?? guardDetails);
       setRecoveryNotice(null);
-      setManualRecoveryFailure({ operation: "restore_workspace" });
+      setManualRecoveryFailure({
+        operation: "restore_workspace",
+        sessionId,
+        errorStamp: errorStamp ?? null,
+        requestKey: operation.requestKey,
+        operationId: operation.operationId,
+      });
     } finally {
       release();
       if (isCurrentOperation(operation)) setBusyAction(null);
@@ -260,12 +405,13 @@ export function useSessionRecoveryActions({
   return {
     busyAction: sharedBusyAction ?? busyAction,
     recoveryError,
-    branchDetails,
-    guardDetails,
-    managedCloneRecoveryStamp,
-    lastFailedAction,
-    recoveryNotice,
-    manualRecoveryFailure,
+    branchDetails: localResultIsCurrent ? branchDetails : null,
+    guardDetails: localResultIsCurrent ? guardDetails : null,
+    managedCloneRecoveryStamp: localResultIsCurrent ? managedCloneRecoveryStamp : null,
+    lastFailedAction: localResultIsCurrent ? lastFailedAction : null,
+    recoveryNotice: localResultIsCurrent ? recoveryNotice : null,
+    manualRecoveryFailure: localResultIsCurrent ? manualRecoveryFailure : null,
+    providerRestoredResumeEligible,
     handleRecover,
     handleRestore,
     handleRetry,

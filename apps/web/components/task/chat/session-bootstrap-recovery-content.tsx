@@ -5,17 +5,57 @@ import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery
 import { SessionErrorDetails } from "@/components/task/session-error-details";
 import type { SessionRecoveryBusyAction } from "@/hooks/domains/session/use-session-recovery-actions";
 import type { TaskStatusSummaryActiveError } from "@/lib/types/task-status-summary";
-import {
-  causeLabel,
-  operationLabel,
-  type RecoveryCardModel,
-} from "./session-bootstrap-recovery-model";
+import type { RecoveryCardModel } from "./session-bootstrap-recovery-model";
 
 type RecoveryCardCopy = {
   launchNeedsAttention: string;
   launchErrorNoChanges: string;
   sessionRecoveryDetails: string;
 };
+
+function RecoveryCardNotices({
+  model,
+  profileExists,
+  copy,
+  t,
+}: {
+  model: RecoveryCardModel;
+  profileExists: boolean;
+  copy: RecoveryCardCopy;
+  t: (key: string) => string;
+}) {
+  return (
+    <>
+      {model.noPromptSent ? (
+        <p className="mt-1 text-xs text-muted-foreground" data-testid="session-bootstrap-no-prompt">
+          {t("task:sessionBootstrapNoPromptSent")}
+        </p>
+      ) : null}
+      {model.workspaceStatus ? (
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="session-recovery-workspace-status"
+        >
+          {model.workspaceStatus}
+        </p>
+      ) : null}
+      {model.freshStartWarning ? (
+        <p
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="session-recovery-fresh-start-warning"
+        >
+          {t("task:sessionRecoveryFreshStartWarning")}
+        </p>
+      ) : null}
+      <p className="mt-2 text-xs text-muted-foreground" data-testid="session-bootstrap-no-change">
+        {copy.launchErrorNoChanges}
+      </p>
+      {!profileExists ? (
+        <p className="mt-1 text-xs text-muted-foreground">{t("task:agentProfileNoLongerExists")}</p>
+      ) : null}
+    </>
+  );
+}
 
 function BootstrapRecoveryActions({
   profileExists,
@@ -24,6 +64,7 @@ function BootstrapRecoveryActions({
   blocked,
   canRestore,
   needsManagedCloneRelocation,
+  providerRestoredResumeEligible,
   onResume,
   onRestore,
   onFreshStart,
@@ -36,6 +77,7 @@ function BootstrapRecoveryActions({
   blocked: boolean;
   canRestore: boolean;
   needsManagedCloneRelocation: boolean;
+  providerRestoredResumeEligible: boolean;
   onResume: () => void;
   onRestore: () => void;
   onFreshStart: () => void;
@@ -56,6 +98,9 @@ function BootstrapRecoveryActions({
         {
           kind: "resume",
           label: t("task:resume"),
+          disclosure: providerRestoredResumeEligible
+            ? t("task:providerRestoredResumeDisclosure")
+            : undefined,
           onClick: onResume,
           disabled: !profileExists,
           testId: "recovery-resume-button",
@@ -105,6 +150,7 @@ export function RecoveryCardContent({
   model,
   error,
   profileExists,
+  providerRestoredResumeEligible,
   busyAction,
   hasBranchRecovery,
   blocked,
@@ -116,11 +162,12 @@ export function RecoveryCardContent({
   onNewBranch,
   onRelocate,
   copy,
-  translate,
+  t,
 }: {
   model: RecoveryCardModel;
   error: TaskStatusSummaryActiveError;
   profileExists: boolean;
+  providerRestoredResumeEligible: boolean;
   busyAction: SessionRecoveryBusyAction;
   hasBranchRecovery: boolean;
   blocked: boolean;
@@ -132,25 +179,15 @@ export function RecoveryCardContent({
   onNewBranch: () => void;
   onRelocate: () => void;
   copy: RecoveryCardCopy;
-  translate: (key: string) => string;
+  t: (key: string) => string;
 }) {
-  const profileMissing = translate("task:agentProfileNoLongerExists");
   const title = needsManagedCloneRelocation
-    ? translate("task:managedCloneRelocationTitle")
-    : translate(model.titleKey);
+    ? t("task:managedCloneRelocationTitle")
+    : t(model.titleKey);
   const summary = needsManagedCloneRelocation
-    ? translate("task:managedCloneRelocationBody")
+    ? t("task:managedCloneRelocationBody")
     : model.summary;
-  const details = [
-    ...model.causes.map((cause) =>
-      [operationLabel(cause.operation, translate), causeLabel(cause.code, translate), cause.detail]
-        .filter(Boolean)
-        .join("\n"),
-    ),
-    error.details,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+  const details = model.hasTypedSelectionCause ? "" : (error.details ?? "");
   return (
     <div className="min-w-0 flex-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -159,13 +196,13 @@ export function RecoveryCardContent({
           <span className="text-xs text-muted-foreground">{copy.launchNeedsAttention}</span>
         ) : null}
       </div>
-      <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
-      <p className="mt-2 text-xs text-muted-foreground" data-testid="session-bootstrap-no-change">
-        {copy.launchErrorNoChanges}
-      </p>
-      {!profileExists && <p className="mt-1 text-xs text-muted-foreground">{profileMissing}</p>}
+      {summary && (model.showSummary || needsManagedCloneRelocation) ? (
+        <p className="mt-1 max-w-prose break-words text-sm text-muted-foreground">{summary}</p>
+      ) : null}
+      <RecoveryCardNotices model={model} profileExists={profileExists} copy={copy} t={t} />
       <BootstrapRecoveryActions
         profileExists={profileExists}
+        providerRestoredResumeEligible={providerRestoredResumeEligible}
         busyAction={busyAction}
         hasBranchRecovery={hasBranchRecovery}
         blocked={blocked}
@@ -182,6 +219,7 @@ export function RecoveryCardContent({
           testId="session-bootstrap-recovery-details"
           textTestId="session-bootstrap-cause-details"
           label={copy.sessionRecoveryDetails}
+          structuredFields={model.detailFields}
         >
           {details}
         </SessionErrorDetails>

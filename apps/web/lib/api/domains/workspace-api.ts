@@ -1,4 +1,4 @@
-import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
+import { ApiError, fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client";
 import type {
   ListWorkspacesResponse,
   ListRepositoriesResponse,
@@ -330,6 +330,29 @@ export type QuickChatRepositoryInput = {
   base_branch: string;
 };
 
+export type QuickChatStartErrorBody = {
+  error?: string;
+  task_id?: string;
+  session_id?: string;
+};
+
+export function getQuickChatRetainedSessionFromError(
+  error: unknown,
+): { taskId: string; sessionId: string } | null {
+  if (error instanceof ApiError && error.body && typeof error.body === "object") {
+    const body = error.body as QuickChatStartErrorBody;
+    if (
+      typeof body.task_id === "string" &&
+      body.task_id &&
+      typeof body.session_id === "string" &&
+      body.session_id
+    ) {
+      return { taskId: body.task_id, sessionId: body.session_id };
+    }
+  }
+  return null;
+}
+
 export type StartQuickChatResponse = {
   task_id: string;
   session_id: string;
@@ -359,6 +382,8 @@ export type QuickChatSessionResponse = {
 export type ListQuickChatSessionsResponse = {
   sessions: QuickChatSessionResponse[];
   task_sessions: TaskSession[];
+  config_chat_restart_pending?: boolean;
+  config_chat_retiring_session_id?: string;
 };
 
 /**
@@ -397,4 +422,29 @@ export async function startConfigChat(
     ...options,
     init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
   });
+}
+
+export type ConfigChatRestartFailure = {
+  code: string;
+  stage: "validate" | "stop" | "delete" | "create" | "start";
+  old_deleted: boolean;
+  replacement?: StartConfigChatResponse;
+};
+
+export async function restartConfigChat(
+  workspaceId: string,
+  payload: { task_id: string; session_id: string },
+  confirmationId: string,
+) {
+  return fetchJson<StartConfigChatResponse>(
+    `/api/v1/workspaces/${workspaceId}/config-chat/restart`,
+    {
+      cache: "no-store",
+      init: {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "X-Kandev-Task-Delete-Confirmation": confirmationId },
+      },
+    },
+  );
 }
