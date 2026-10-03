@@ -146,7 +146,7 @@ func previewSelection(candidate *dto.DynamicAgentCandidateDTO) dynamic.Selection
 	}
 	for _, window := range source.Model.Windows {
 		converted := dynamic.UsageWindow{
-			Period: window.Period, Unit: window.Unit, Limit: window.Limit,
+			Period: window.Period, Unit: window.Unit, Limit: window.Limit, Scope: window.Scope,
 		}
 		if window.Reset != nil {
 			converted.ResetAnchor = window.Reset.Anchor

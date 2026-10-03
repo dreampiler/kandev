@@ -1064,6 +1064,7 @@ type dynamicRouteUsageWindow struct {
 	Unit   string                `json:"unit"`
 	Limit  string                `json:"limit"`
 	Reset  *dynamicRouteResetDoc `json:"reset"`
+	Scope  string                `json:"scope"`
 }
 
 type dynamicRouteResetDoc struct {
@@ -1104,7 +1105,9 @@ func (d dynamicRouteModelDocument) toModelOptions() dynamic.ModelOptions {
 		ReservedUserSharePct: d.ReservedUserSharePct,
 	}
 	for _, window := range d.Windows {
-		converted := dynamic.UsageWindow{Period: window.Period, Unit: window.Unit, Limit: window.Limit}
+		converted := dynamic.UsageWindow{
+			Period: window.Period, Unit: window.Unit, Limit: window.Limit, Scope: window.Scope,
+		}
 		if window.Reset != nil {
 			converted.ResetAnchor = window.Reset.Anchor
 			converted.Timezone = window.Reset.Timezone

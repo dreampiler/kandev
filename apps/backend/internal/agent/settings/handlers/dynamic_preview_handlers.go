@@ -35,3 +35,15 @@ func (h *Handlers) httpPreviewDynamicProfile(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 }
+
+// httpListProfileUsage returns every concrete profile's provider usage for the
+// agents settings list.
+func (h *Handlers) httpListProfileUsage(c *gin.Context) {
+	resp, err := h.controller.ListProfileUsage(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to list agent profile usage", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list agent profile usage"})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}

@@ -16,8 +16,12 @@ func defaultBillingType() usage.BillingType {
 // claudeBillingType detects whether the Claude agent is using OAuth
 // subscription credentials. Computed on every call (the read is a small
 // local file) so logging in after the backend started is picked up without
-// a restart.
+// a restart. A long-lived OAuth token in the process environment is inherited
+// by a host-run Claude agent, so it also counts as a subscription credential.
 func claudeBillingType() usage.BillingType {
+	if os.Getenv(usage.ClaudeOAuthTokenEnv) != "" {
+		return usage.BillingTypeSubscription
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return usage.BillingTypeAPIKey

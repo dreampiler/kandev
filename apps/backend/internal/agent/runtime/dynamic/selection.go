@@ -52,7 +52,20 @@ type UsageWindow struct {
 	Limit       string
 	ResetAnchor string
 	Timezone    string
+	// Scope is WindowScopeCandidate or WindowScopeAccount.
+	Scope string
 }
+
+// Manual window scopes. A candidate window counts only the candidate's own
+// recorded usage; an account window counts every profile on the same provider
+// account, because some providers enforce one quota across all of its models.
+const (
+	WindowScopeCandidate = "candidate"
+	WindowScopeAccount   = "account"
+)
+
+// AccountScoped reports whether the window counts the whole account.
+func (w UsageWindow) AccountScoped() bool { return w.Scope == WindowScopeAccount }
 
 // LimitValue parses the allowance exactly. Callers must not treat an unparsable
 // value as zero usage or unlimited capacity.

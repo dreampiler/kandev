@@ -125,6 +125,10 @@ type DynamicAgentUsageWindowDTO struct {
 	Unit   string                      `json:"unit"`
 	Limit  string                      `json:"limit"`
 	Reset  *DynamicAgentResetAnchorDTO `json:"reset,omitempty"`
+	// Scope is "candidate" (the default when empty) or "account". An account
+	// window sums the recorded usage of every profile on the same provider
+	// account, for quotas a provider counts across all of the account's models.
+	Scope string `json:"scope,omitempty"`
 }
 
 type DynamicAgentResetAnchorDTO struct {

@@ -15,6 +15,7 @@ const (
 	codexUsageURL      = "https://chatgpt.com/backend-api/wham/usage"
 	codexRefreshURL    = "https://auth.openai.com/oauth/token"
 	codexOAuthClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+	codexProvider      = "openai"
 )
 
 // CodexUsageClient fetches utilization from the ChatGPT Codex usage API.
@@ -79,10 +80,10 @@ type codexUsageResponse struct {
 func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
 	auth, err := c.readAuth()
 	if err != nil {
-		return nil, fmt.Errorf("codex usage: %w", err)
+		return nil, &FetchError{Provider: codexProvider, Reason: FailureCredentialMissing, Err: err}
 	}
 	if auth.Tokens == nil || auth.Tokens.AccessToken == "" {
-		return nil, fmt.Errorf("codex usage: no ChatGPT OAuth tokens in %s", c.authPath)
+		return nil, &FetchError{Provider: codexProvider, Reason: FailureCredentialMissing}
 	}
 
 	status, body, err := c.getUsage(ctx, auth.Tokens)
@@ -92,7 +93,7 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 	if status == http.StatusUnauthorized && auth.Tokens.RefreshToken != "" {
 		refreshed, refreshErr := c.refreshTokens(ctx, auth.Tokens)
 		if refreshErr != nil {
-			return nil, fmt.Errorf("codex usage: refresh token: %w", refreshErr)
+			return nil, &FetchError{Provider: codexProvider, Reason: FailureUnauthorized, Err: refreshErr}
 		}
 		status, body, err = c.getUsage(ctx, refreshed)
 		if err != nil {
@@ -100,7 +101,7 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		}
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("codex usage: unexpected status %d: %s", status, body)
+		return nil, statusFailure(codexProvider, status)
 	}
 	return parseCodexUsage(body, time.Now())
 }
@@ -117,13 +118,13 @@ func (c *CodexUsageClient) getUsage(ctx context.Context, tokens *codexAuthTokens
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("codex usage: http: %w", err)
+		return 0, nil, &FetchError{Provider: codexProvider, Reason: FailureNetwork, Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, fmt.Errorf("codex usage: read body: %w", err)
+		return 0, nil, &FetchError{Provider: codexProvider, Reason: FailureNetwork, Err: err}
 	}
 	return resp.StatusCode, body, nil
 }
@@ -131,7 +132,7 @@ func (c *CodexUsageClient) getUsage(ctx context.Context, tokens *codexAuthTokens
 func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 	var raw codexUsageResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("codex usage: decode: %w", err)
+		return nil, &FetchError{Provider: codexProvider, Reason: FailureDecode, Err: err}
 	}
 	// Non-nil so the API serializes `windows` as an array even when empty.
 	windows := make([]UtilizationWindow, 0, 2)
@@ -149,7 +150,7 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 		})
 	}
 	return &ProviderUsage{
-		Provider:  "openai",
+		Provider:  codexProvider,
 		Plan:      raw.PlanType,
 		Windows:   windows,
 		FetchedAt: now,

@@ -78,10 +78,13 @@ the no-revisit rule applies to automatic transition chains in both layouts.
   circuit/backoff restrictions. Missing, expired, invalid or unavailable usage
   shall not be represented as zero usage or unlimited capacity.
 - **AC-AGENTS-TIER-SELECTION-003.3:** Each model row shall offer free,
-  subscription or metered cost classification, automatic usage for Claude and
-  Codex, manual limits, or no usage source. Automatic usage shall match the
-  candidate's actual supported account binding; unavailable bindings shall be
-  reported rather than replaced by another account's usage.
+  subscription or metered cost classification, automatic usage, manual limits,
+  or no usage source. Automatic usage shall match the candidate's actual
+  supported account binding; unavailable bindings shall be reported rather than
+  replaced by another account's usage. Usage belongs to the concrete profile's
+  account ([provider account usage](../../costs/requirements/provider-account-usage.md)),
+  so a row without manual limits ranks on that account's reading whenever one
+  exists; no usage source only decides the free/unknown fallback without one.
 - **AC-AGENTS-TIER-SELECTION-003.4:** Manual limits shall support 5-hour, day,
   week and calendar-month windows, a reset basis, and a positive money or token
   allowance. Kandev-recorded session usage in that window shall determine the

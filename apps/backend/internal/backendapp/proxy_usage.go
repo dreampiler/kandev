@@ -20,17 +20,22 @@ const claudeACPAgentID = "claude-acp"
 // New proxies add a resolver and register it in defaultUsageProxyResolver;
 // direct provider usage clients remain untouched.
 type usageProxyResolver interface {
-	Resolve(profile *settingsmodels.AgentProfile) (client agentusage.ProviderUsageClient, cacheKey string, ok bool)
+	// Resolve receives the profile and its agent type. The type comes from the
+	// profile's agent row; profile.AgentID is that row's ID, not the type.
+	Resolve(profile *settingsmodels.AgentProfile, agentType string) (client agentusage.ProviderUsageClient, cacheKey string, ok bool)
 }
 
 type usageProxyResolvers []usageProxyResolver
 
-func (resolvers usageProxyResolvers) Resolve(profile *settingsmodels.AgentProfile) (agentusage.ProviderUsageClient, string, bool) {
+func (resolvers usageProxyResolvers) Resolve(
+	profile *settingsmodels.AgentProfile,
+	agentType string,
+) (agentusage.ProviderUsageClient, string, bool) {
 	for _, resolver := range resolvers {
 		if resolver == nil {
 			continue
 		}
-		if client, cacheKey, ok := resolver.Resolve(profile); ok {
+		if client, cacheKey, ok := resolver.Resolve(profile, agentType); ok {
 			return client, cacheKey, true
 		}
 	}
@@ -48,16 +53,19 @@ func defaultUsageProxyResolver() usageProxyResolver {
 // environment or proxy key to a remote control plane while rendering usage.
 type teamClaudeUsageResolver struct{}
 
-func (teamClaudeUsageResolver) Resolve(profile *settingsmodels.AgentProfile) (agentusage.ProviderUsageClient, string, bool) {
-	statusURL, ok := teamClaudeStatusURL(profile)
+func (teamClaudeUsageResolver) Resolve(
+	profile *settingsmodels.AgentProfile,
+	agentType string,
+) (agentusage.ProviderUsageClient, string, bool) {
+	statusURL, ok := teamClaudeStatusURL(profile, agentType)
 	if !ok {
 		return nil, "", false
 	}
 	return agentusage.NewTeamClaudeUsageClient(statusURL), agentusage.CacheKey("teamclaude", statusURL), true
 }
 
-func teamClaudeStatusURL(profile *settingsmodels.AgentProfile) (string, bool) {
-	if profile == nil || profile.AgentID != claudeACPAgentID {
+func teamClaudeStatusURL(profile *settingsmodels.AgentProfile, agentType string) (string, bool) {
+	if profile == nil || agentType != claudeACPAgentID {
 		return "", false
 	}
 	if profileEnvValue(profile, usageProxyVendorEnv) != "teamclaude" {

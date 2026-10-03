@@ -37,6 +37,9 @@ const (
 	dynamicSelectionUnitMoney  = "money"
 	dynamicSelectionUnitTokens = "tokens"
 
+	dynamicSelectionScopeCandidate = "candidate"
+	dynamicSelectionScopeAccount   = "account"
+
 	dynamicSelectionMaxManualWindows = 8
 	dynamicSelectionMaxReservedPct   = 100
 )
@@ -141,6 +144,11 @@ func normalizeDynamicUsageWindow(position int, window *dto.DynamicAgentUsageWind
 	}
 	if window.Reset == nil {
 		return fmt.Errorf("%w: %s.reset is required", ErrDynamicProfileRule, field)
+	}
+	switch window.Scope {
+	case "", dynamicSelectionScopeCandidate, dynamicSelectionScopeAccount:
+	default:
+		return fmt.Errorf("%w: %s.scope=%q", ErrDynamicProfileRule, field, window.Scope)
 	}
 	if err := validateDynamicResetAnchor(window.Reset); err != nil {
 		return fmt.Errorf("%w: %s.reset: %w", ErrDynamicProfileRule, field, err)

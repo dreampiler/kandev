@@ -44,6 +44,64 @@ type UtilizationWindow struct {
 	// a display label is not an identity, so such a window cannot be matched to
 	// a candidate and is unavailable for a pace score.
 	AmbiguousModelScope bool `json:"ambiguous_model_scope,omitempty"`
+
+	// Scope names which class of the account's models the window limits. An
+	// account-wide plan window applies to every model; a free-request quota
+	// only limits free models and a premium cap only premium ones.
+	Scope WindowScope `json:"scope,omitempty"`
+
+	// LimitReached records that the provider itself reports the window as
+	// exhausted. It is kept even when the window has no usable reset, because an
+	// exhausted account is a known fact rather than unknown usage.
+	LimitReached bool `json:"limit_reached,omitempty"`
+}
+
+// WindowScope names the class of models a provider window limits.
+type WindowScope string
+
+const (
+	// WindowScopeAllModels is an account-wide window.
+	WindowScopeAllModels WindowScope = ""
+	// WindowScopePaidModels limits only models billed against the plan.
+	WindowScopePaidModels WindowScope = "paid_models"
+	// WindowScopeFreeModels limits only the provider's free models.
+	WindowScopeFreeModels WindowScope = "free_models"
+	// WindowScopePremiumModels limits only the provider's premium models.
+	WindowScopePremiumModels WindowScope = "premium_models"
+)
+
+// ModelClass is a provider's own classification of one model. The unknown
+// class matches only account-wide windows, so an unclassified model is never
+// charged with a class-specific quota it may not belong to.
+type ModelClass string
+
+const (
+	ModelClassUnknown  ModelClass = ""
+	ModelClassFree     ModelClass = "free"
+	ModelClassStandard ModelClass = "standard"
+	ModelClassPremium  ModelClass = "premium"
+)
+
+// AppliesTo reports whether a window with this scope limits a model of the
+// given class.
+func (s WindowScope) AppliesTo(class ModelClass) bool {
+	switch s {
+	case WindowScopeAllModels:
+		return true
+	case WindowScopeFreeModels:
+		return class == ModelClassFree
+	case WindowScopePaidModels:
+		return class == ModelClassStandard || class == ModelClassPremium
+	case WindowScopePremiumModels:
+		return class == ModelClassPremium
+	default:
+		return false
+	}
+}
+
+// Exhausted reports whether the window is known to have no remaining capacity.
+func (w UtilizationWindow) Exhausted() bool {
+	return w.LimitReached || w.UtilizationPct >= 100
 }
 
 // UsableFor reports whether this window can score a pace for the given model.

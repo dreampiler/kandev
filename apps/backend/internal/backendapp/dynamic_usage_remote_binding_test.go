@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/registry"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
@@ -36,6 +34,7 @@ type stubProxyResolver struct {
 
 func (s stubProxyResolver) Resolve(
 	*settingsmodels.AgentProfile,
+	string,
 ) (agentusage.ProviderUsageClient, string, bool) {
 	return s.client, "remote-binding-test", true
 }
@@ -66,7 +65,6 @@ func TestRemoteExecutionDoesNotBorrowHostAccountUsage(t *testing.T) {
 		settingsStore: &stubSettingsStore{profiles: map[string]*settingsmodels.AgentProfile{
 			"candidate-a": {ID: "candidate-a", AgentID: "antigravity-acp", BillingType: "subscription"},
 		}},
-		agentRegistry: subscriptionRegistry(t),
 		proxyResolver: stubProxyResolver{client: client},
 	}
 	adapter.svc.Register("candidate-a", client, "test-cache-key")
@@ -117,7 +115,6 @@ func TestManualWindowsStillWorkForRemoteCandidates(t *testing.T) {
 		settingsStore: &stubSettingsStore{profiles: map[string]*settingsmodels.AgentProfile{
 			"candidate-a": {ID: "candidate-a", AgentID: "antigravity-acp", BillingType: "subscription"},
 		}},
-		agentRegistry: subscriptionRegistry(t),
 	}
 	manual := &fakeManualTotals{totals: sqliterepo.ManualWindowUsage{
 		CostSubcents: 500_000, EventCount: 2,
@@ -159,14 +156,8 @@ func (s *stubSettingsStore) GetAgentProfile(
 	return nil, nil
 }
 
-// subscriptionRegistry provides a real subscription-billing agent whose usage
-// client is registered per profile, so the test controls what the account reader
-// returns instead of depending on host credential files.
-func subscriptionRegistry(t *testing.T) *registry.Registry {
-	t.Helper()
-	reg := registry.NewRegistry(newTestLogger())
-	if err := reg.Register(agents.NewAntigravityACP()); err != nil {
-		t.Fatalf("register subscription agent: %v", err)
-	}
-	return reg
+// GetAgent reports no agent row, so the adapter treats the profile's agent ID
+// as the agent type, which is how these fixtures name it.
+func (s *stubSettingsStore) GetAgent(context.Context, string) (*settingsmodels.Agent, error) {
+	return nil, nil
 }

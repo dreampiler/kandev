@@ -27,6 +27,10 @@ type WindowObservation struct {
 	// ledger total with an unpriced or incompletely measured event. The figure
 	// stays visible as a lower bound but must not produce a pace.
 	Partial bool
+	// Exhausted marks a window the provider reports as used up. When the window
+	// has no usable span, its usage is still a known fact: the candidate is
+	// scored as busy as possible rather than left unknown.
+	Exhausted bool
 }
 
 func (w WindowObservation) partial() bool { return w.Partial && !w.ExplicitNoWindow }
@@ -113,7 +117,10 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 	if window.UsageFraction == nil {
 		return PaceScore{}, false
 	}
-	if !window.ResetAt.After(window.StartAt) || !now.Before(window.ResetAt) || now.Before(window.StartAt) {
+	if !window.ResetAt.After(window.StartAt) {
+		return exhaustedWithoutSpan(window)
+	}
+	if !now.Before(window.ResetAt) || now.Before(window.StartAt) {
 		return PaceScore{}, false
 	}
 	elapsed := now.Sub(window.StartAt).Seconds() / window.ResetAt.Sub(window.StartAt).Seconds()
@@ -129,6 +136,26 @@ func paceForWindow(now time.Time, window WindowObservation) (PaceScore, bool) {
 		HasRecord:       true,
 		FloorApplied:    elapsed < minPaceElapsed,
 		ObservedAt:      window.ObservedAt,
+	}, true
+}
+
+// exhaustedWithoutSpan scores a used-up window whose elapsed share is unknown.
+// The elapsed floor is the most conservative divisor, so the candidate ranks
+// behind every candidate whose window still has capacity.
+func exhaustedWithoutSpan(window WindowObservation) (PaceScore, bool) {
+	if !window.Exhausted {
+		return PaceScore{}, false
+	}
+	usage := math.Max(*window.UsageFraction, 1)
+	return PaceScore{
+		Known:         true,
+		Complete:      true,
+		Pace:          usage / minPaceElapsed,
+		Controlling:   window.Label,
+		UsageFraction: usage,
+		HasRecord:     true,
+		FloorApplied:  true,
+		ObservedAt:    window.ObservedAt,
 	}, true
 }
 
