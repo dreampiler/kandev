@@ -121,13 +121,13 @@ func (m *ControlServer) setupRoutes() {
 	// Health check
 	m.router.GET("/health", m.handleHealth)
 
-	// Bootstrap handshake ??nonce-authenticated, returns the self-generated auth token
+	// Bootstrap handshake — nonce-authenticated, returns the self-generated auth token
 	m.router.POST("/auth/handshake", m.handleHandshake)
 
-	// Identity/capability ??unauthenticated, decides adoption compatibility
+	// Identity/capability — unauthenticated, decides adoption compatibility
 	m.router.GET("/identity", m.handleIdentity)
 
-	// Ownership proof ??unauthenticated, establishes to an adopting backend
+	// Ownership proof — unauthenticated, establishes to an adopting backend
 	// that this process holds the credential before that backend sends it
 	m.router.POST("/ownership/prove", m.handleOwnershipProve)
 
