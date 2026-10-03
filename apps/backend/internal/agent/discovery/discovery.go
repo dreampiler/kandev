@@ -4,10 +4,12 @@ package discovery
 
 import (
 	"context"
+	"strconv"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
@@ -54,6 +56,13 @@ type Registry struct {
 	// land in between; the sweep carries the generation it began with and
 	// discards its results when that no longer matches.
 	generation uint64
+
+	// sweeps lets concurrent callers share one in-flight sweep, keyed by the
+	// generation it started in so a caller arriving after an invalidation
+	// never receives the superseded sweep's results.
+	sweeps singleflight.Group
+	// sweepListeners observe every sweep whose results become the cache.
+	sweepListeners []func([]Availability)
 }
 
 // LoadRegistry creates a new discovery registry backed by the agent registry.
@@ -82,7 +91,8 @@ func (r *Registry) enabledAgents() []agents.Agent {
 }
 
 // Detect checks whether each agent is installed by calling IsInstalled.
-// Results are cached with a TTL to avoid redundant detection on repeated calls.
+// Results are cached with a TTL to avoid redundant detection on repeated calls,
+// and callers that miss the cache together share one sweep.
 func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
 	if cached := r.getCached(); cached != nil {
 		return cached, nil
@@ -92,16 +102,69 @@ func (r *Registry) Detect(ctx context.Context) ([]Availability, error) {
 	startedAt := r.generation
 	r.mu.RUnlock()
 
+	// The shared sweep must not end with whichever caller started it, so it
+	// runs detached from that caller and is bounded by detectAllTimeout.
+	sweepCtx := context.WithoutCancel(ctx)
+	ch := r.sweeps.DoChan(strconv.FormatUint(startedAt, 10), func() (interface{}, error) {
+		return r.sweep(sweepCtx, startedAt), nil
+	})
+	select {
+	case res := <-ch:
+		results := res.Val.([]Availability)
+		copied := make([]Availability, len(results))
+		copy(copied, results)
+		return copied, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// sweep detects every agent and publishes the results as the cache when no
+// invalidation landed while it ran.
+func (r *Registry) sweep(ctx context.Context, startedAt uint64) []Availability {
 	results := r.detectAll(ctx)
 
 	r.mu.Lock()
-	if r.generation == startedAt {
+	published := r.generation == startedAt
+	if published {
 		r.cachedResults = results
 		r.cachedAt = time.Now()
 	}
+	listeners := r.sweepListeners
 	r.mu.Unlock()
 
-	return results, nil
+	if published {
+		for _, listener := range listeners {
+			listener(results)
+		}
+	}
+	return results
+}
+
+// OnSweep registers a listener called with the results of every sweep that
+// becomes the cache. Cache hits do not call it. The listener runs on the
+// sweeping goroutine, must not block, and must not modify the results.
+func (r *Registry) OnSweep(listener func([]Availability)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.sweepListeners = append(r.sweepListeners, listener)
+}
+
+// AgentAvailability reports whether the named agent is installed, from the
+// same cached sweep the discovery endpoints serve. known is false when the
+// sweep has no answer for the agent: it is virtual, unregistered, or its
+// detection failed or did not finish within the sweep budget.
+func (r *Registry) AgentAvailability(ctx context.Context, name string) (available, known bool, err error) {
+	results, err := r.Detect(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	for _, result := range results {
+		if result.Name == name {
+			return result.Available, true, nil
+		}
+	}
+	return false, false, nil
 }
 
 // InvalidateCache clears the cached detection results, forcing the next

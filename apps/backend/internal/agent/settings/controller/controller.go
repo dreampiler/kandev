@@ -293,6 +293,7 @@ func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 		c.updateJobStore = nil
 		return
 	}
+	c.connectInstallationStatus(h)
 	c.SetRuntimeUpdater(&hostRuntimeUpdater{
 		host:     h,
 		executor: execDirectCommandExecutor{},
@@ -334,6 +335,31 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 		c.logger.Info("install succeeded", zap.String("agent", agentName))
 	}, c.maintenance)
 	c.initializeUpdateJobStore()
+}
+
+// connectInstallationStatus makes capability status follow discovery: the
+// host utility reads installation from the discovery sweep, every sweep
+// re-measures agents the host utility still records as not installed, and a
+// status that changes in the background reaches open pages.
+func (c *Controller) connectInstallationStatus(h *hostutility.Manager) {
+	h.SetCapabilityChangeListener(c.BroadcastAvailableAgents)
+	if c.discovery == nil {
+		return
+	}
+	h.SetInstallationSource(c.discovery)
+	c.discovery.OnSweep(func(results []discovery.Availability) {
+		h.RecheckNotInstalled(availableAgentNames(results))
+	})
+}
+
+func availableAgentNames(results []discovery.Availability) []string {
+	names := make([]string, 0, len(results))
+	for _, result := range results {
+		if result.Available {
+			names = append(names, result.Name)
+		}
+	}
+	return names
 }
 
 // kickCapabilityProbe refreshes one agent's capability cache off the request
