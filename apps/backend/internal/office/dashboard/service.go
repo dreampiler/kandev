@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -443,6 +444,12 @@ type DashboardService struct {
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
+	overviewReader        OverviewReader                  // optional; nil keeps the aggregate to its original counts
+	questionLister        AnswerableQuestionLister        // optional; nil omits answerable questions from the overview
+	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
+	overviewSessionLimit  int                             // instance session limit shown on the overview
+	overview              *overviewCache                  // lazily created by overviewCacheOrInit
+	overviewOnce          sync.Once
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

@@ -673,6 +673,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"office_overview_scope":                    models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
@@ -760,6 +761,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		TerminalLinkBehavior:              "new_tab",
 		ChangesPanelLayout:                defaultChangesPanelLayout,
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
+		OfficeOverviewScope:               models.OfficeOverviewScopeOffice,
 		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorDeleteSession,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
@@ -868,6 +870,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize                  int                                     `json:"terminal_font_size"`
 		ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 		LastSeenDisplay                   json.RawMessage                         `json:"last_seen_display"`
+		OfficeOverviewScope               json.RawMessage                         `json:"office_overview_scope"`
 		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
@@ -1067,6 +1070,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
+	settings.OfficeOverviewScope = normalizeOfficeOverviewScopeStored(payload.OfficeOverviewScope)
 	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
@@ -1119,6 +1123,17 @@ func normalizeLastSeenDisplayStored(raw json.RawMessage) string {
 		return models.LastSeenDisplayAbsolute
 	}
 	return models.NormalizeLastSeenDisplay(value)
+}
+
+// normalizeOfficeOverviewScopeStored maps a stored JSON value to the canonical
+// overview scope, coercing every non-"reachable" value to "office" so a
+// hand-edited blob cannot widen the overview or fail the settings read.
+func normalizeOfficeOverviewScopeStored(raw json.RawMessage) string {
+	var value string
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return models.OfficeOverviewScopeOffice
+	}
+	return models.NormalizeOfficeOverviewScope(value)
 }
 
 func normalizeAgentTabCloseBehaviorStored(raw json.RawMessage) string {

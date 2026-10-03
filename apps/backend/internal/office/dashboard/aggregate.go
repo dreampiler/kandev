@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"sort"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -40,6 +40,11 @@ type WorkspaceAggregateEntry struct {
 	PendingApprovals int    `json:"pending_approvals"`
 	AgentCount       int    `json:"agent_count"`
 	RunningAgents    int    `json:"running_agents"`
+	// IsOffice reports whether the workspace has an Office workflow, so the
+	// client can link to the right home view.
+	IsOffice bool                      `json:"is_office"`
+	Metrics  *OverviewWorkspaceMetrics `json:"metrics,omitempty"`
+	Parents  []OverviewParentTask      `json:"parents,omitempty"`
 }
 
 // WorkspaceAggregateResponse is the read-only multi-workspace overview: one
@@ -47,6 +52,16 @@ type WorkspaceAggregateEntry struct {
 type WorkspaceAggregateResponse struct {
 	Workspaces     []WorkspaceAggregateEntry `json:"workspaces"`
 	RecentActivity []*models.ActivityEntry   `json:"recent_activity"`
+	// Scope is the caller's overview scope ("office" or "reachable").
+	Scope       string    `json:"scope"`
+	GeneratedAt time.Time `json:"generated_at"`
+	ComputeMs   int64     `json:"compute_ms"`
+	// The sections below are present only when the overview reader is wired.
+	System          *OverviewSystem          `json:"system,omitempty"`
+	Models          []OverviewModel          `json:"models,omitempty"`
+	BlockedAccounts []OverviewBlockedAccount `json:"blocked_accounts,omitempty"`
+	Last24h         []OverviewEvent          `json:"last_24h,omitempty"`
+	NeedsHuman      []OverviewHumanItem      `json:"needs_human,omitempty"`
 }
 
 // workspaceAgentCounts holds the per-workspace agent totals for the aggregate.
@@ -55,21 +70,25 @@ type workspaceAgentCounts struct {
 	running int
 }
 
-// GetWorkspacesAggregate builds the read-only Office overview from the
-// identity-scoped workspace list, using batched repository reads per dimension.
-// Counts default to zero for a workspace with no matching rows; the activity
-// feed is merged across the selected Office workspaces, newest first.
+// GetWorkspacesAggregate returns the read-only overview from the
+// identity-scoped workspace list, narrowed by the caller's overview scope.
+// One snapshot per (caller, scope) is computed with sequential batched reads
+// and served from memory for overviewCacheTTL; concurrent misses share one
+// computation.
 func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*WorkspaceAggregateResponse, error) {
-	if s.workspaceLister == nil {
-		return nil, ErrWorkspaceAggregateUnavailable
-	}
-	workspaces, err := s.workspaceLister.ListWorkspaces(ctx)
+	snap, err := s.loadOverviewSnapshot(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return snap.resp, nil
+}
 
-	ordered, ids := officeAggregateWorkspaces(workspaces)
-
+// buildAggregateBase builds the original per-workspace counts and merged
+// activity feed for the selected workspaces. Counts default to zero for a
+// workspace with no matching rows; the activity feed is newest first.
+func (s *DashboardService) buildAggregateBase(
+	ctx context.Context, ordered []*taskmodels.Workspace, ids []string,
+) (*WorkspaceAggregateResponse, error) {
 	breakdowns, err := s.repo.QueryWorkspaceTaskBreakdowns(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -111,28 +130,10 @@ func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*Workspa
 			PendingApprovals: approvals[w.ID],
 			AgentCount:       agents.total,
 			RunningAgents:    agents.running,
+			IsOffice:         w.OfficeWorkflowID != "",
 		})
 	}
 	return &WorkspaceAggregateResponse{Workspaces: entries, RecentActivity: activity}, nil
-}
-
-func officeAggregateWorkspaces(workspaces []*taskmodels.Workspace) ([]*taskmodels.Workspace, []string) {
-	ids := make([]string, 0, len(workspaces))
-	ordered := make([]*taskmodels.Workspace, 0, len(workspaces))
-	for _, workspace := range workspaces {
-		if workspace == nil || workspace.ID == "" || workspace.OfficeWorkflowID == "" {
-			continue
-		}
-		ids = append(ids, workspace.ID)
-		ordered = append(ordered, workspace)
-	}
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].Name != ordered[j].Name {
-			return ordered[i].Name < ordered[j].Name
-		}
-		return ordered[i].ID < ordered[j].ID
-	})
-	return ordered, ids
 }
 
 // aggregateAgentCounts totals and running-agents per workspace from the shared
@@ -162,7 +163,7 @@ func (s *DashboardService) aggregateAgentCounts(ctx context.Context) (map[string
 }
 
 // getWorkspacesAggregate serves GET /workspaces/aggregate. It is a read-only
-// overview of every Office workspace the caller can reach; the workspace list
+// overview of the workspaces in the caller's scope; the workspace list
 // is already identity-scoped by the lister, so this handler does no
 // per-workspace ownership loop.
 func (h *Handler) getWorkspacesAggregate(c *gin.Context) {

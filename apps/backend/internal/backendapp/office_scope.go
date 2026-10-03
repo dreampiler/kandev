@@ -152,6 +152,10 @@ var officeWorkspacelessPrefixes = map[string]string{
 var officeOwnerAggregateRoutes = map[string]string{
 	"/workspaces/aggregate": "read-only multi-workspace overview; the handler lists only the caller's own " +
 		"workspaces via the identity-scoped task service",
+	"/workspaces/aggregate/tasks": "read-only overview task list; the workspace must be in the caller's own " +
+		"identity-scoped overview or the handler answers 404",
+	"/workspaces/aggregate/running": "read-only cross-workspace running list drawn from the caller's own " +
+		"identity-scoped overview",
 }
 
 // officeBodyScopeResolvers covers routes that name their resource in the JSON

@@ -1,0 +1,333 @@
+package dashboard
+
+import (
+	"context"
+	"expvar"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
+)
+
+// Office overview scopes (the user setting office_overview_scope).
+const (
+	OverviewScopeOffice    = "office"
+	OverviewScopeReachable = "reachable"
+)
+
+// overviewPendingApprovalLimit bounds the approvals listed under "needs a
+// person"; the count still covers every pending approval.
+const overviewPendingApprovalLimit = 50
+
+// overviewEventLimit bounds each event source and the merged event list.
+const (
+	overviewEventSourceLimit = 20
+	overviewEventLimit       = 50
+	overviewParentLimit      = 5
+)
+
+// OverviewReader is the read-only persistence surface behind the overview.
+// Implemented by the Office sqlite repository.
+type OverviewReader interface {
+	ListOverviewOpenTasks(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewTaskRow, error)
+	CountOverviewChildren(ctx context.Context, parentIDs []string) (map[string]int, error)
+	ListOverviewSessionsForTasks(ctx context.Context, taskIDs []string) ([]*sqlite.OverviewSessionRow, error)
+	LastAgentOutputBySession(ctx context.Context, sessionIDs []string) (map[string]time.Time, error)
+	ListOverviewQueues(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewQueueRow, error)
+	FirstQueuedMessageBySession(ctx context.Context, sessionIDs []string) (map[string]string, error)
+	ListOverviewCompleted(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) (map[string]int, []*sqlite.OverviewCompletedRow, error)
+	ListOverviewProfileSessions(
+		ctx context.Context, workspaceIDs []string, since time.Time,
+	) ([]*sqlite.OverviewProfileSessionRow, error)
+	ListOverviewProfiles(ctx context.Context, profileIDs []string) ([]*sqlite.OverviewProfileRow, error)
+	ListOverviewBlockedProviders(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewBlockedProviderRow, error)
+	ListOverviewPendingApprovals(ctx context.Context, workspaceIDs []string, limit int) ([]*sqlite.OverviewApprovalRow, error)
+	ListOverviewAutomationTasks(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewAutomationTaskRow, error)
+}
+
+// AnswerableQuestionLister lists answerable clarification bundles of the
+// given sessions. Implemented by the task repository so the overview shares
+// the inbox's definition of "answerable".
+type AnswerableQuestionLister interface {
+	ListAnswerableClarificationsForSessions(
+		ctx context.Context, sessionIDs []string,
+	) ([]taskmodels.ClarificationBundleSummary, error)
+}
+
+// OverviewScopeSource reads the caller's overview scope setting.
+type OverviewScopeSource interface {
+	OfficeOverviewScope(ctx context.Context) (string, error)
+}
+
+// SetOverviewReader wires the overview read surface. Without it the aggregate
+// keeps its original Office-only counts and the list routes respond 503.
+func (s *DashboardService) SetOverviewReader(r OverviewReader) { s.overviewReader = r }
+
+// SetAnswerableQuestionLister wires the answerable-question source.
+func (s *DashboardService) SetAnswerableQuestionLister(l AnswerableQuestionLister) {
+	s.questionLister = l
+}
+
+// SetOverviewScopeSource wires the per-user scope setting. Without it the
+// overview uses the Office scope.
+func (s *DashboardService) SetOverviewScopeSource(src OverviewScopeSource) { s.scopeSource = src }
+
+// SetOverviewSessionLimit records the instance session limit shown next to
+// the running-session count.
+func (s *DashboardService) SetOverviewSessionLimit(limit int) { s.overviewSessionLimit = limit }
+
+// overviewSnapshot is one computed overview, shared by the summary response
+// and the list routes for the cache lifetime.
+type overviewSnapshot struct {
+	resp         *WorkspaceAggregateResponse
+	now          time.Time
+	names        map[string]string
+	tasks        []*overviewTask
+	sessions     []*sqlite.OverviewSessionRow // RUNNING or STARTING
+	queues       []*sqlite.OverviewQueueRow
+	completed    []*sqlite.OverviewCompletedRow
+	lastOutput   map[string]time.Time
+	profileNames map[string]string
+	taskTitles   map[string]string
+
+	firstLinesOnce sync.Once
+	firstLines     map[string]string
+	firstLinesErr  error
+}
+
+// overviewScope resolves the caller's scope, falling back to Office.
+func (s *DashboardService) overviewScope(ctx context.Context) string {
+	if s.scopeSource == nil {
+		return OverviewScopeOffice
+	}
+	scope, err := s.scopeSource.OfficeOverviewScope(ctx)
+	if err != nil || scope != OverviewScopeReachable {
+		return OverviewScopeOffice
+	}
+	return scope
+}
+
+// loadOverviewSnapshot returns the caller's cached snapshot or builds it.
+func (s *DashboardService) loadOverviewSnapshot(ctx context.Context) (*overviewSnapshot, error) {
+	if s.workspaceLister == nil {
+		return nil, ErrWorkspaceAggregateUnavailable
+	}
+	scope := s.overviewScope(ctx)
+	key := overviewCallerKey(ctx) + "|" + scope
+	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
+		return s.buildOverviewSnapshot(ctx, scope)
+	})
+}
+
+func (s *DashboardService) overviewCacheOrInit() *overviewCache {
+	s.overviewOnce.Do(func() {
+		if s.overview == nil {
+			s.overview = newOverviewCache(overviewCacheTTL)
+		}
+	})
+	return s.overview
+}
+
+func (s *DashboardService) buildOverviewSnapshot(ctx context.Context, scope string) (*overviewSnapshot, error) {
+	started := time.Now()
+	workspaces, err := s.workspaceLister.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ordered, ids := aggregateWorkspaces(workspaces, scope)
+	resp, err := s.buildAggregateBase(ctx, ordered, ids)
+	if err != nil {
+		return nil, err
+	}
+	snap := &overviewSnapshot{resp: resp, now: started.UTC(), names: map[string]string{}}
+	for _, w := range ordered {
+		snap.names[w.ID] = w.Name
+	}
+	resp.Scope = scope
+	if s.overviewReader != nil {
+		if err := s.fillOverview(ctx, snap, ids); err != nil {
+			return nil, err
+		}
+	}
+	resp.GeneratedAt = snap.now
+	resp.ComputeMs = time.Since(started).Milliseconds()
+	return snap, nil
+}
+
+// fillOverview runs the overview reads one after another on the read-only
+// handle and assembles every section from them.
+func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnapshot, ids []string) error {
+	th := defaultOverviewThresholds
+	since := snap.now.Add(-th.Window)
+	if err := s.loadOverviewTasks(ctx, snap, ids, th); err != nil {
+		return err
+	}
+	counts, completed, err := s.overviewReader.ListOverviewCompleted(ctx, ids, since, 0)
+	if err != nil {
+		return err
+	}
+	snap.completed = completed
+	childCounts, err := s.overviewReader.CountOverviewChildren(ctx, overviewParentIDs(snap.tasks))
+	if err != nil {
+		return err
+	}
+	assembleWorkspaceMetrics(snap, counts, childCounts)
+	if err := s.assembleModels(ctx, snap, ids, since); err != nil {
+		return err
+	}
+	if err := s.assembleNeedsHuman(ctx, snap, ids); err != nil {
+		return err
+	}
+	automation, err := s.overviewReader.ListOverviewAutomationTasks(ctx, ids, since, overviewEventSourceLimit)
+	if err != nil {
+		return err
+	}
+	assembleSystem(snap, s.overviewSessionLimit)
+	snap.resp.Last24h = assembleEvents(snap, automation, since)
+	return nil
+}
+
+// loadOverviewTasks reads the open tasks, their sessions, last outputs and
+// queues, then classifies every task.
+func (s *DashboardService) loadOverviewTasks(
+	ctx context.Context, snap *overviewSnapshot, ids []string, th overviewThresholds,
+) error {
+	rows, err := s.overviewReader.ListOverviewOpenTasks(ctx, ids)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*overviewTask, len(rows))
+	taskIDs := make([]string, 0, len(rows))
+	snap.taskTitles = make(map[string]string, len(rows))
+	for _, row := range rows {
+		t := &overviewTask{row: row}
+		byID[row.ID] = t
+		snap.tasks = append(snap.tasks, t)
+		taskIDs = append(taskIDs, row.ID)
+		snap.taskTitles[row.ID] = row.Title
+	}
+	sessions, err := s.overviewReader.ListOverviewSessionsForTasks(ctx, taskIDs)
+	if err != nil {
+		return err
+	}
+	outputIDs := groupOverviewSessions(snap, byID, sessions)
+	if snap.lastOutput, err = s.overviewReader.LastAgentOutputBySession(ctx, outputIDs); err != nil {
+		return err
+	}
+	if snap.queues, err = s.overviewReader.ListOverviewQueues(ctx, ids); err != nil {
+		return err
+	}
+	for _, q := range snap.queues {
+		if t := byID[q.TaskID]; t != nil {
+			t.queued += q.Count
+			if t.oldestQueue.IsZero() || q.Oldest.Before(t.oldestQueue) {
+				t.oldestQueue = q.Oldest
+			}
+		}
+		if _, ok := snap.taskTitles[q.TaskID]; !ok {
+			snap.taskTitles[q.TaskID] = q.TaskTitle
+		}
+	}
+	for _, t := range snap.tasks {
+		t.classify(snap.now, th, snap.lastOutput)
+	}
+	return nil
+}
+
+// groupOverviewSessions attaches sessions to their tasks, records the running
+// ones, and returns the ids whose last output is worth looking up: every
+// live session plus each task's newest session.
+func groupOverviewSessions(
+	snap *overviewSnapshot, byID map[string]*overviewTask, sessions []*sqlite.OverviewSessionRow,
+) []string {
+	newest := map[string]*sqlite.OverviewSessionRow{}
+	var ids []string
+	for _, sess := range sessions {
+		t := byID[sess.TaskID]
+		if t == nil {
+			continue
+		}
+		t.sessions = append(t.sessions, sess)
+		if cur := newest[sess.TaskID]; cur == nil || sess.StartedAt.After(cur.StartedAt) {
+			newest[sess.TaskID] = sess
+		}
+		if isLiveSessionState(sess.State) {
+			ids = append(ids, sess.ID)
+		}
+		if sess.State == sessionStateRunning || sess.State == sessionStateStarting {
+			snap.sessions = append(snap.sessions, sess)
+		}
+	}
+	for _, sess := range newest {
+		if !isLiveSessionState(sess.State) {
+			ids = append(ids, sess.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func overviewParentIDs(tasks []*overviewTask) []string {
+	var ids []string
+	for _, t := range tasks {
+		if t.row.OpenChildCount > 0 {
+			ids = append(ids, t.row.ID)
+		}
+	}
+	return ids
+}
+
+// aggregateWorkspaces selects the workspaces for the scope from the
+// identity-scoped list and sorts them by name. The Office scope keeps only
+// workspaces with an Office workflow; the reachable scope keeps all of them.
+func aggregateWorkspaces(workspaces []*taskmodels.Workspace, scope string) ([]*taskmodels.Workspace, []string) {
+	ids := make([]string, 0, len(workspaces))
+	ordered := make([]*taskmodels.Workspace, 0, len(workspaces))
+	for _, workspace := range workspaces {
+		if workspace == nil || workspace.ID == "" {
+			continue
+		}
+		if scope != OverviewScopeReachable && workspace.OfficeWorkflowID == "" {
+			continue
+		}
+		ordered = append(ordered, workspace)
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].Name != ordered[j].Name {
+			return ordered[i].Name < ordered[j].Name
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	for _, workspace := range ordered {
+		ids = append(ids, workspace.ID)
+	}
+	return ordered, ids
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+// processStartedAt reads the process start time the Office loop metrics
+// publish; zero when unavailable.
+func processStartedAt() time.Time {
+	v := expvar.Get("office_loop_process_started_at")
+	if v == nil {
+		return time.Time{}
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.Trim(v.String(), `"`))
+	if err != nil {
+		return time.Time{}
+	}
+	return at.UTC()
+}

@@ -106,6 +106,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
+	OfficeOverviewScope               *string
 	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
@@ -179,6 +180,17 @@ func (s *Service) PreferredShell(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return settings.PreferredShell, nil
+}
+
+// OfficeOverviewScope returns the caller's Office overview scope without the
+// sidebar projection GetUserSettings performs, since the overview reads it on
+// every request.
+func (s *Service) OfficeOverviewScope(ctx context.Context) (string, error) {
+	settings, err := s.repo.GetUserSettings(ctx, s.settingsUserID(ctx))
+	if err != nil {
+		return models.OfficeOverviewScopeOffice, err
+	}
+	return models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope), nil
 }
 
 // GetDefaultUtilitySettings returns the user's default utility agent/model settings.
@@ -426,6 +438,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyLastSeenDisplay(settings, req.LastSeenDisplay); err != nil {
+		return err
+	}
+	if err := applyOfficeOverviewScope(settings, req.OfficeOverviewScope); err != nil {
 		return err
 	}
 	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
@@ -899,6 +914,20 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 	return nil
 }
 
+// applyOfficeOverviewScope validates and applies the Office overview scope
+// enum (office or reachable).
+func applyOfficeOverviewScope(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.OfficeOverviewScopeOffice && v != models.OfficeOverviewScopeReachable {
+		return errors.New("office_overview_scope must be 'office' or 'reachable'")
+	}
+	settings.OfficeOverviewScope = v
+	return nil
+}
+
 // applyLastSeenDisplay validates and applies the last-seen display enum
 // (absolute or relative).
 func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
@@ -1224,6 +1253,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"office_overview_scope":                    models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
