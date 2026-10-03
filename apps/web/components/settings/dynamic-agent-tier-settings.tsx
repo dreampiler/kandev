@@ -132,6 +132,8 @@ function TierModeSelect({
           <SelectItem value="order">{t("agents:dynamicTierModeOrder")}</SelectItem>
           <SelectItem value="pace">{t("agents:dynamicTierModePace")}</SelectItem>
           <SelectItem value="cost">{t("agents:dynamicTierModeCost")}</SelectItem>
+          <SelectItem value="random">{t("task:random")}</SelectItem>
+          <SelectItem value="round_robin">{t("agents:dynamicTierModeRoundRobin")}</SelectItem>
         </SelectContent>
       </Select>
     </div>

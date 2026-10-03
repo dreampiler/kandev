@@ -65,7 +65,7 @@ export type DynamicAgentPolicy = {
   selection?: DynamicAgentSelection;
 };
 
-export type DynamicTierMode = "order" | "pace" | "cost";
+export type DynamicTierMode = "order" | "pace" | "cost" | "random" | "round_robin";
 export type DynamicTierFailureDirection = "same_tier_next" | "next_tier";
 export type DynamicModelCostClass = "free" | "subscription" | "metered";
 export type DynamicModelUsageSource = "automatic" | "manual" | "none";

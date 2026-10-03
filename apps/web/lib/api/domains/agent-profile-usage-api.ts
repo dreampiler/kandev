@@ -25,6 +25,21 @@ export type AgentProfileRecordedUsage = {
   profile_count: number;
 };
 
+export type AgentProfileInternalUsage = {
+  profile_count: number;
+  windows: { label: string; turns: number; tokens_total: number; cost_subcents: number }[];
+};
+
+export type AgentProfileLimitHits = {
+  count: number;
+  last_at: string;
+  median_turns_5h: number;
+  median_turns_day: number;
+  median_tokens_day: number;
+  median_turns_week: number;
+  median_tokens_week: number;
+};
+
 export type AgentProfileUsage = {
   profile_id: string;
   state: AgentProfileUsageState;
@@ -37,6 +52,8 @@ export type AgentProfileUsage = {
   fetched_at?: string;
   windows: AgentProfileUsageWindow[];
   recorded?: AgentProfileRecordedUsage;
+  internal?: AgentProfileInternalUsage;
+  limit_hits?: AgentProfileLimitHits;
 };
 
 export type ListAgentProfileUsageResponse = {

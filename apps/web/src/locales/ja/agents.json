@@ -479,5 +479,8 @@
   "dynamicWindowScopeCandidate": "この候補",
   "dynamicWindowScopeAccount": "アカウント全体",
   "dynamicPreviewCompareCandidates": "すべての候補を比較",
-  "dynamicPreviewUsageOnAgents": "各プロファイルの使用量は「設定 > エージェント」に表示されます。"
+  "dynamicPreviewUsageOnAgents": "各プロファイルの使用量は「設定 > エージェント」に表示されます。",
+  "dynamicTierModeRoundRobin": "ラウンドロビン",
+  "profileUsageInternal": "このアカウントの記録ターン: 5時間 {{h5}}、24時間 {{day}}、7日 {{week}}",
+  "profileUsageLimitHits": "30日間の上限到達: {{hits}}回。到達時の中央値: 24時間で {{turns}} ターン、最終 {{relative}}"
 }

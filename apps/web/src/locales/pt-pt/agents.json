@@ -479,5 +479,8 @@
   "dynamicWindowScopeCandidate": "Este candidato",
   "dynamicWindowScopeAccount": "Toda a conta",
   "dynamicPreviewCompareCandidates": "Comparar todos os candidatos",
-  "dynamicPreviewUsageOnAgents": "O uso de cada perfil é mostrado em Definições > Agentes."
+  "dynamicPreviewUsageOnAgents": "O uso de cada perfil é mostrado em Definições > Agentes.",
+  "dynamicTierModeRoundRobin": "Rotativo",
+  "profileUsageInternal": "Turnos registados nesta conta: 5 h {{h5}}, 24 h {{day}}, 7 d {{week}}",
+  "profileUsageLimitHits": "Limites atingidos em 30 dias: {{hits}}. Mediana ao atingir: {{turns}} turnos em 24 h, último {{relative}}"
 }

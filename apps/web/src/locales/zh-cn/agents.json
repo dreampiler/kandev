@@ -479,5 +479,8 @@
   "dynamicWindowScopeCandidate": "此候选",
   "dynamicWindowScopeAccount": "整个账户",
   "dynamicPreviewCompareCandidates": "比较所有候选",
-  "dynamicPreviewUsageOnAgents": "每个配置文件的用量显示在“设置 > 智能体”中。"
+  "dynamicPreviewUsageOnAgents": "每个配置文件的用量显示在“设置 > 智能体”中。",
+  "dynamicTierModeRoundRobin": "轮流",
+  "profileUsageInternal": "此账户记录的轮次：5 小时 {{h5}}，24 小时 {{day}}，7 天 {{week}}",
+  "profileUsageLimitHits": "30 天内达到上限：{{hits}} 次。达到时的中位数：24 小时 {{turns}} 轮，最近 {{relative}}"
 }

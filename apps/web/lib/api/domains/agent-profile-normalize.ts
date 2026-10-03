@@ -218,7 +218,7 @@ function normalizeDynamicPolicy(
   };
 }
 
-const dynamicTierModes = ["order", "pace", "cost"] as const;
+const dynamicTierModes = ["order", "pace", "cost", "random", "round_robin"] as const;
 const dynamicTierFailureDirections = ["same_tier_next", "next_tier"] as const;
 const dynamicModelCostClasses = ["free", "subscription", "metered"] as const;
 const dynamicModelUsageSources = ["automatic", "manual", "none"] as const;

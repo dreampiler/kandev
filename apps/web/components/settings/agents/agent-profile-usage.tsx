@@ -35,7 +35,8 @@ function failureReasonKey(reason: string | undefined): string {
  */
 export function AgentProfileUsageLine({ profileId }: { profileId: string }) {
   const usage = useAgentProfileUsage(profileId);
-  if (!usage || usage.state === "unsupported") return null;
+  if (!usage) return null;
+  if (usage.state === "unsupported" && !usage.internal && !usage.limit_hits) return null;
   return <AgentProfileUsageView usage={usage} />;
 }
 
@@ -64,12 +65,48 @@ export function AgentProfileUsageView({
     ));
   }
   return (
-    <div
-      className="mt-1 flex flex-wrap items-center gap-1.5 pl-3.5 text-xs text-muted-foreground"
-      data-testid="agent-profile-usage"
-    >
-      {content}
+    <div className="mt-1 grid gap-1 pl-3.5 text-xs text-muted-foreground">
+      {usage.state === "unsupported" ? null : (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="agent-profile-usage">
+          {content}
+        </div>
+      )}
+      <InternalUsage usage={usage} now={now} />
     </div>
+  );
+}
+
+/**
+ * Kandev's own accumulation for the account, and where recorded limit hits
+ * happened. Both exist even when the provider publishes nothing, which is what
+ * lets an undisclosed limit be estimated.
+ */
+function InternalUsage({ usage, now }: { usage: AgentProfileUsage; now: number }) {
+  const { t } = useTranslation();
+  const turns = (label: string) =>
+    formatNumber(usage.internal?.windows.find((window) => window.label === label)?.turns ?? 0);
+  const hits = usage.limit_hits;
+  return (
+    <>
+      {usage.internal ? (
+        <span data-testid="agent-profile-usage-internal">
+          {t("agents:profileUsageInternal", {
+            h5: turns("5h"),
+            day: turns("day"),
+            week: turns("week"),
+          })}
+        </span>
+      ) : null}
+      {hits ? (
+        <span data-testid="agent-profile-usage-limit-hits">
+          {t("agents:profileUsageLimitHits", {
+            hits: formatNumber(hits.count),
+            turns: formatNumber(hits.median_turns_day),
+            relative: formatRelativeTime(hits.last_at, now),
+          })}
+        </span>
+      ) : null}
+    </>
   );
 }
 

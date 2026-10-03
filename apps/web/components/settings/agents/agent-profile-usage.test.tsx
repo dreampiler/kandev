@@ -73,4 +73,37 @@ describe("AgentProfileUsageView", () => {
       "agents:profileUsageRecordedToday",
     );
   });
+
+  it("shows the account's recorded turns and where limit hits happened", () => {
+    render(
+      <AgentProfileUsageView
+        now={Date.parse("2026-10-04T12:00:00Z")}
+        usage={usage({
+          state: "unsupported",
+          internal: {
+            profile_count: 5,
+            windows: [
+              { label: "5h", turns: 12, tokens_total: 1, cost_subcents: 0 },
+              { label: "day", turns: 41, tokens_total: 1, cost_subcents: 0 },
+              { label: "week", turns: 300, tokens_total: 1, cost_subcents: 0 },
+            ],
+          },
+          limit_hits: {
+            count: 3,
+            last_at: "2026-10-04T10:00:00Z",
+            median_turns_5h: 30,
+            median_turns_day: 120,
+            median_tokens_day: 1,
+            median_turns_week: 400,
+            median_tokens_week: 1,
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByTestId("agent-profile-usage")).toBeNull();
+    expect(screen.getByTestId("agent-profile-usage-internal").textContent).toContain('"day":"41"');
+    expect(screen.getByTestId("agent-profile-usage-limit-hits").textContent).toContain(
+      '"turns":"120"',
+    );
+  });
 });

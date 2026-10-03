@@ -307,7 +307,13 @@ export function normalizeReservedShare(model: DynamicModelPolicy): DynamicModelP
   return model;
 }
 
-export const tierModeOptions: readonly DynamicTierMode[] = ["order", "pace", "cost"];
+export const tierModeOptions: readonly DynamicTierMode[] = [
+  "order",
+  "pace",
+  "cost",
+  "random",
+  "round_robin",
+];
 export const tierFailureOptions: readonly DynamicTierFailureDirection[] = [
   "same_tier_next",
   "next_tier",

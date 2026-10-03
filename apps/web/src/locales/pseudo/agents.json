@@ -479,5 +479,8 @@
   "dynamicWindowScopeCandidate": "Ţĥĩś ćàńďĩďàţē",
   "dynamicWindowScopeAccount": "Ŵĥōĺē àććōũńţ",
   "dynamicPreviewCompareCandidates": "Ćōḿƥàŕē àĺĺ ćàńďĩďàţēś",
-  "dynamicPreviewUsageOnAgents": "Ēàćĥ ƥŕōƒĩĺē'ś ũśàĝē ĩś śĥōŵń ũńďēŕ Śēţţĩńĝś > Àĝēńţś."
+  "dynamicPreviewUsageOnAgents": "Ēàćĥ ƥŕōƒĩĺē'ś ũśàĝē ĩś śĥōŵń ũńďēŕ Śēţţĩńĝś > Àĝēńţś.",
+  "dynamicTierModeRoundRobin": "Ŕōũńď ŕōƀĩń",
+  "profileUsageInternal": "Ŕēćōŕďēď ţũŕńś ōń ţĥĩś àććōũńţ: 5ĥ {{h5}}, 24ĥ {{day}}, 7ď {{week}}",
+  "profileUsageLimitHits": "Ĺĩḿĩţ ĥĩţś ĩń 30 ďàŷś: {{hits}}. Ḿēďĩàń àţ à ĥĩţ: {{turns}} ţũŕńś ĩń 24ĥ, ĺàśţ {{relative}}"
 }
