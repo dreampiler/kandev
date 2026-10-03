@@ -86,10 +86,12 @@ type OverviewProfileSessionRow struct {
 	StartedAt      time.Time
 }
 
-// OverviewProfileRow names an agent profile for the model card links.
+// OverviewProfileRow names an agent profile and its agent for the model card
+// links (the settings route addresses an agent by name).
 type OverviewProfileRow struct {
 	ID          string `db:"id"`
 	AgentID     string `db:"agent_id"`
+	AgentName   string `db:"agent_name"`
 	Name        string `db:"name"`
 	DisplayName string `db:"agent_display_name"`
 }
@@ -384,8 +386,10 @@ func (r *Repository) ListOverviewProfiles(ctx context.Context, profileIDs []stri
 	for _, batch := range workspaceIDBatches(profileIDs) {
 		placeholders, args := placeholdersFor(batch)
 		var rows []*OverviewProfileRow
-		query := `SELECT id, agent_id, COALESCE(name, '') AS name, COALESCE(agent_display_name, '') AS agent_display_name
-			FROM agent_profiles WHERE id IN (` + strings.Join(placeholders, ",") + `)`
+		query := `SELECT p.id, p.agent_id, COALESCE(a.name, '') AS agent_name, COALESCE(p.name, '') AS name,
+			       COALESCE(p.agent_display_name, '') AS agent_display_name
+			FROM agent_profiles p LEFT JOIN agents a ON a.id = p.agent_id
+			WHERE p.id IN (` + strings.Join(placeholders, ",") + `)`
 		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
 			return nil, err
 		}

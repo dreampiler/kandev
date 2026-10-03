@@ -56,6 +56,7 @@ func overviewFixture(t *testing.T) *testDeps {
 	insertOverviewTask(t, deps, "t-done", "ws-office", "COMPLETED", "", now)
 	insertOverviewTask(t, deps, "t-fail", "ws-kanban", "IN_PROGRESS", "", now)
 	insertOverviewTask(t, deps, "t-hidden", "ws-hidden", "IN_PROGRESS", "", now)
+	mustExec(t, deps, `INSERT INTO agents (id, name, created_at, updated_at) VALUES ('agent-a', 'claude-code', ?, ?)`, now, now)
 	mustExec(t, deps, `INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, created_at, updated_at)
 		VALUES ('p1', 'agent-a', 'fast', 'Agent A', ?, ?)`, now, now)
 	insertOverviewSession(t, deps, "s-run", "t-run", "RUNNING", "", now.Add(-40*time.Minute))
@@ -159,7 +160,7 @@ func TestOverviewMetricsAndSections(t *testing.T) {
 	if sys == nil || sys.RunningSessions != 1 || sys.SessionLimit != 8 || sys.UndeliverableMessages != 1 || sys.Problems != 2 {
 		t.Fatalf("system = %+v", sys)
 	}
-	if len(resp.Models) != 1 || resp.Models[0].AgentID != "agent-a" || resp.Models[0].Failed24h != 1 ||
+	if len(resp.Models) != 1 || resp.Models[0].AgentName != "claude-code" || resp.Models[0].Failed24h != 1 ||
 		len(resp.Models[0].Errors) != 1 {
 		t.Fatalf("models = %+v; want profile p1 with one failure kind", resp.Models)
 	}

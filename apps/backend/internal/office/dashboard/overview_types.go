@@ -126,6 +126,7 @@ type OverviewErrorKind struct {
 type OverviewModel struct {
 	AgentProfileID string              `json:"agent_profile_id"`
 	AgentID        string              `json:"agent_id"`
+	AgentName      string              `json:"agent_name"`
 	Name           string              `json:"name"`
 	Sessions24h    int                 `json:"sessions_24h"`
 	Running        int                 `json:"running"`
