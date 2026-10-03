@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DynamicPreviewCandidate,
@@ -196,13 +196,17 @@ describe("DynamicAgentPreview suspension states", () => {
         onRetry={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("dynamic-preview-suspension-waiting").textContent).toContain(
+    // The comparison list is the surface that enumerates every candidate. The
+    // selected candidate is also summarized above it, so a state assertion is
+    // scoped to the list to count each row once.
+    const all = within(screen.getByTestId("dynamic-preview-all-candidates"));
+    expect(all.getByTestId("dynamic-preview-suspension-waiting").textContent).toContain(
       "agents:dynamicPreviewSuspendedModel",
     );
-    expect(screen.getByTestId("dynamic-preview-suspension-expired").textContent).toBe(
+    expect(all.getByTestId("dynamic-preview-suspension-expired").textContent).toBe(
       "agents:dynamicPreviewSuspensionExpired",
     );
-    expect(screen.getByTestId("dynamic-preview-suspension-probing")).toBeTruthy();
+    expect(all.getByTestId("dynamic-preview-suspension-probing")).toBeTruthy();
     expect(container.textContent).not.toContain("agents:dynamicPreviewIneligibleCircuit");
   });
 

@@ -555,8 +555,11 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		}
 		if state.Status == dynamicRouteStatusWaiting {
 			// A route that exhausted every candidate has no pending candidate to
-			// resume; retrying it is a fresh selection.
-			return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
+			// resume, so retrying it is a fresh selection with no preference. A
+			// preference here would make the engine refuse every other candidate
+			// while the preferred one stays suspended, so a session that waited
+			// on one candidate could never reach a candidate that already freed up.
+			return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", "")
 		}
 		decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
 		if resumeErr == nil {
