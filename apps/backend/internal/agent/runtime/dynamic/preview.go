@@ -34,6 +34,19 @@ type PreviewEntry struct {
 	IneligibleReason string
 	Score            PaceScore
 	CostClass        CostClass
+	// Suspension is the candidate's resource health at ObservedAt. An expired
+	// suspension leaves the candidate eligible: the next selection retries it.
+	Suspension CandidateSuspension
+}
+
+// WithSuspensions attaches each candidate's resource health to the preview.
+func (p SelectionPreview) WithSuspensions(suspensions map[string]CandidateSuspension) SelectionPreview {
+	for index := range p.Considered {
+		if suspension, ok := suspensions[p.Considered[index].CandidateID]; ok {
+			p.Considered[index].Suspension = suspension
+		}
+	}
+	return p
 }
 
 // PreviewState separates the states a preview must distinguish rather than

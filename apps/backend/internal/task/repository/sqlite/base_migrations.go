@@ -102,6 +102,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("task_sessions.downstream_acp_session_id", `ALTER TABLE task_sessions ADD COLUMN downstream_acp_session_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.continuation_json", `ALTER TABLE dynamic_route_states ADD COLUMN continuation_json TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("dynamic_route_states.policy_state_json", `ALTER TABLE dynamic_route_states ADD COLUMN policy_state_json TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("dynamic_resource_circuits.strikes", `ALTER TABLE dynamic_resource_circuits ADD COLUMN strikes INTEGER NOT NULL DEFAULT 0`)
 	if err := r.backfillLegacyActiveDynamicRoutes(); err != nil {
 		return err
 	}

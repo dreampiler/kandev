@@ -150,6 +150,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
+	if observedOutput {
+		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+	}
 	if observedOutput || observedEffect {
 		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
