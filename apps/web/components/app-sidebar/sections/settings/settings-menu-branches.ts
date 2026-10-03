@@ -14,6 +14,7 @@ import {
   workspaceSettingsHref,
 } from "@/lib/settings/workspace-settings-tabs";
 import { orderWorkspacesForDisplay } from "@/lib/settings/workspace-display-order";
+import { DYNAMIC_AGENT_NAME } from "@/lib/settings/agent-display-order";
 
 /**
  * What the settings menu grows *underneath* a row when a tree mode is on.
@@ -296,7 +297,7 @@ export function buildAgentsBranch(
         label: { text: agent.profiles[0].agentDisplayName || agent.name },
         agentName: agent.name,
         ownsPrefixes: [`${agentHref}/`],
-        ...(detectedNames && !detectedNames.has(agent.name)
+        ...(isUndetectedInstallation(agent.name, detectedNames)
           ? { badge: "not-installed" as const }
           : {}),
         // The agent is kandev's; only the profiles under it are the user's.
@@ -311,6 +312,16 @@ export function buildAgentsBranch(
           })),
       };
     });
+}
+
+/**
+ * Whether the scan has run and did not find this agent's CLI. The virtual
+ * Dynamic family has no CLI to find — discovery never lists it — so it is never
+ * "not installed".
+ */
+function isUndetectedInstallation(name: string, detectedNames?: ReadonlySet<string>): boolean {
+  if (!detectedNames || name === DYNAMIC_AGENT_NAME) return false;
+  return !detectedNames.has(name);
 }
 
 /**

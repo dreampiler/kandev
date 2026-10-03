@@ -289,6 +289,27 @@ describe("buildAgentsBranch", () => {
     ]);
   });
 
+  it("badges an agent the scan did not find, once the scan has run", () => {
+    const [missing] = buildAgentsBranch(AGENTS, new Set<string>());
+    expect(missing.badge).toBe("not-installed");
+
+    const [found] = buildAgentsBranch(AGENTS, new Set([AGENTS[0].name]));
+    expect(found.badge).toBeUndefined();
+
+    const [beforeScan] = buildAgentsBranch(AGENTS);
+    expect(beforeScan.badge).toBeUndefined();
+  });
+
+  // @covers AC-AGENTS-INSTALL-DETECTION-002.6
+  it("never badges the virtual Dynamic family, which discovery does not list", () => {
+    const dynamicAgent = {
+      name: "dynamic",
+      profiles: [{ id: "dynamic-1", name: "Balanced", agentDisplayName: "Dynamic" }],
+    };
+    const [agent] = buildAgentsBranch([dynamicAgent], new Set([AGENTS[0].name]));
+    expect(agent.badge).toBeUndefined();
+  });
+
   it("drops an agent with no profiles rather than rendering a dead row", () => {
     expect(buildAgentsBranch([{ name: "empty", profiles: [] }])).toEqual([]);
   });
