@@ -186,7 +186,7 @@ func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapsho
 		}
 		snap.profileNames[p.ID] = name
 		if c := cards[p.ID]; c != nil {
-			c.AgentID, c.Name = p.AgentID, name
+			c.AgentID, c.AgentName, c.Name = p.AgentID, p.AgentName, name
 		}
 	}
 	return nil
