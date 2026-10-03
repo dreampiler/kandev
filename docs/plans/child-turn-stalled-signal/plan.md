@@ -1,6 +1,6 @@
 ---
 created: 2026-10-01
-status: approved
+status: implemented
 requirements:
   - REQ-TASKS-CHILD-STALL-001
   - REQ-TASKS-CHILD-STALL-002

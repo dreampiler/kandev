@@ -18,6 +18,14 @@ type autoMergedValues struct {
 }
 
 func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, bool) {
+	if childStallAlertsMergeable(target, source) && !target.IsDurableDelivery() && len(source.Attachments) == 0 {
+		return &autoMergedValues{
+			content:     joinAutoMergeContent(target.Content, source.Content),
+			attachments: append([]MessageAttachment(nil), target.Attachments...),
+			metadata:    mergeChildStallAlertMetadata(target.Metadata, source.Metadata),
+			queuedAt:    latestQueuedAt(target.QueuedAt, source.QueuedAt),
+		}, true
+	}
 	if !autoMergeAllowed(target, source) || !autoMetadataEquivalent(target.Metadata, source.Metadata) {
 		return nil, false
 	}

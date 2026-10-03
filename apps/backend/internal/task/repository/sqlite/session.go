@@ -74,6 +74,9 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
 		stamped = true
 	}
+	if found {
+		r.stampChildStallStartInTx(ctx, tx, turn)
+	}
 
 	if err := r.insertTurnRow(ctx, tx, turn); err != nil {
 		return false, err
@@ -429,21 +432,6 @@ func (r *Repository) CompleteTurn(ctx context.Context, id string) error {
 		SET completed_at = ?, updated_at = ?
 		WHERE id = ?
 	`), now, now, id)
-	return err
-}
-
-// AbandonTurn marks a turn as completed with completed_at = started_at, giving it
-// zero duration. Used when a turn was orphaned by an interruption (backend
-// restart, agent crash) and the previous "running" window was not real work —
-// recording `now` would inflate analytics and the UI's last-turn duration with
-// hours of dead time.
-func (r *Repository) AbandonTurn(ctx context.Context, id string) error {
-	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_turns
-		SET completed_at = started_at, updated_at = ?
-		WHERE id = ? AND completed_at IS NULL
-	`), now, id)
 	return err
 }
 

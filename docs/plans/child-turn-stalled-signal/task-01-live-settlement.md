@@ -1,7 +1,7 @@
 ---
 id: "01-live-settlement"
 title: "Capture live settlement and durable identity"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -75,4 +75,13 @@ specific unavailable test environment. Remove owned temporary files afterward.
 
 Owner selected A (2026-10-03) and requested implementation (2026-10-04).
 Completion callers may not all represent live settlement; trace them before
-wiring the new producer. Results: not implemented; no tests run in design turn.
+wiring the new producer.
+
+Results (2026-10-04): turn insert stamps `child_stall_start` for child tasks in
+both insert paths; `AbandonTurn` records the abandoned settlement atomically for
+child turns; explicit user cancellation marks the captured child turn. The
+temporary overlay `TestChildTurnSettlementStampAndScan` passed on SQLite
+(stamp on both insert paths, root turn unstamped, abandon marker, idempotent
+abandon, unresolved scan and resolved exclusion, scan window, latest completed
+turn). PostgreSQL was not run: no `KANDEV_TEST_POSTGRES_DSN` in this
+environment.
