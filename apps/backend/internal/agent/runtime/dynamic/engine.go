@@ -53,7 +53,7 @@ type Engine struct {
 	states      map[string]RouteState
 	persistence Persistence
 	loader      StateLoader
-	probes      map[string]ProbeLease
+	probes      map[string][]ProbeLease
 	usage       UsageSnapshotProvider
 	history     SelectionHistory
 	pick        func(n int) int
@@ -61,6 +61,10 @@ type Engine struct {
 	// profile, until the durable history reflects them.
 	recentPicks map[string]map[string]time.Time
 	limits      LimitObserver
+	calendar    LimitCalendar
+	// resourceWait is notified after a selection exhausts every candidate
+	// because each one is suspended, with the earliest suspension end.
+	resourceWait func(sessionID string, generation int64, deadline time.Time)
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -73,7 +77,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		now:         time.Now,
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
-		probes:      make(map[string]ProbeLease),
+		probes:      make(map[string][]ProbeLease),
 		retryClaims: make(map[string]int64),
 		pick:        defaultRandomPick,
 	}
@@ -262,8 +266,10 @@ func (e *Engine) selectWithPlan(
 
 // persistExhaustedSelection records the all-ineligible outcome through the
 // existing waiting/manual-recovery path without starting another session,
-// spinning or recycling tried candidates. The chain and its reason survive, so
-// no timer silently clears the exclusions.
+// spinning or recycling tried candidates. The chain and its reason survive.
+// Only when every enabled candidate is suspended does the state carry a
+// deadline: the observer then retries with a fresh selection once the earliest
+// suspension ends, because time alone makes that candidate usable again.
 func (e *Engine) persistExhaustedSelection(
 	ctx context.Context,
 	sessionID string,
@@ -284,11 +290,22 @@ func (e *Engine) persistExhaustedSelection(
 	if exhausted, err := carrySelectionChain("", chain.forProfile(profile.ID, generation)); err == nil {
 		nextState.PolicyStateJSON = exhausted
 	}
+	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt)
+	if resourceWait {
+		if marked, err := withResourceWait(nextState.PolicyStateJSON, deadline); err == nil {
+			nextState.PolicyStateJSON = marked
+		} else {
+			resourceWait = false
+		}
+	}
 	if err := e.persistNoEligible(ctx, expectedGeneration, nextState); err != nil {
 		delete(e.states, sessionID)
 		return RouteDecision{}, err
 	}
 	e.states[sessionID] = nextState
+	if resourceWait && e.resourceWait != nil {
+		e.resourceWait(sessionID, generation, deadline)
+	}
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
 	}
@@ -337,17 +354,49 @@ func (e *Engine) eligibilityFor(profile Profile, preferredProfileID string) map[
 // only. It takes the probe lease when a circuit is open so the successor gets a
 // real launch attempt rather than being skipped on a stale verdict.
 func (e *Engine) claimProbe(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
-	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
-		return true
-	}
-	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
-	if !ok {
+	return e.admitCandidate(candidate, sessionID, generation, now)
+}
+
+// admitCandidate applies every resource gate to one candidate: an operator
+// block, then the account circuit and the model circuit. An open circuit admits
+// the candidate only through its exclusive probe lease. When both circuits are
+// open both leases are required, so a partial claim is handed back.
+func (e *Engine) admitCandidate(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
+	if candidate.SuspendedUntil.After(now) {
 		return false
 	}
-	// The caller owns the generation fencing. The conductor releases this
-	// lease after the concrete launch result is known.
-	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+	var leases []ProbeLease
+	for _, key := range candidate.resourceKeys() {
+		if !e.circuits.IsOpen(key, now) {
+			continue
+		}
+		lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
+		if !ok {
+			for _, acquired := range leases {
+				e.circuits.ReleaseProbe(acquired, false, 0)
+			}
+			return false
+		}
+		leases = append(leases, lease)
+	}
+	if len(leases) > 0 {
+		// The caller owns the generation fencing. The conductor releases these
+		// leases after the concrete launch result is known.
+		e.probes[probeKey(sessionID, generation, candidate.ID)] = leases
+	}
 	return true
+}
+
+// resourceKeys lists the circuits that gate a candidate.
+func (c Candidate) resourceKeys() []string {
+	keys := make([]string, 0, 2)
+	if c.BindingKey != "" {
+		keys = append(keys, c.BindingKey)
+	}
+	if c.ModelKey != "" && c.ModelKey != c.BindingKey {
+		keys = append(keys, c.ModelKey)
+	}
+	return keys
 }
 
 func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteState, bool, error) {
@@ -375,17 +424,7 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
 		return false
 	}
-	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
-		return true
-	}
-	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
-	if !ok {
-		return false
-	}
-	// The caller owns the generation fencing. The conductor releases this
-	// lease after the concrete launch result is known.
-	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
-	return true
+	return e.admitCandidate(candidate, sessionID, generation, now)
 }
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
@@ -533,7 +572,7 @@ func (e *Engine) ApplyFailureContext(
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
-	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	e.openCircuitForFailure(ctx, profile, currentCandidateID, failure)
 	e.observeLimit(ctx, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
@@ -1504,12 +1543,10 @@ func (e *Engine) ReleaseProbe(decision RouteDecision, success bool) {
 	}
 	e.mu.Lock()
 	key := probeKey(decision.SessionID, decision.Generation, decision.ExecutionProfileID)
-	lease, ok := e.probes[key]
-	if ok {
-		delete(e.probes, key)
-	}
+	leases := e.probes[key]
+	delete(e.probes, key)
 	e.mu.Unlock()
-	if ok {
+	for _, lease := range leases {
 		e.circuits.ReleaseProbe(lease, success, circuitBackoff)
 	}
 }
@@ -1518,21 +1555,25 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
 }
 
-func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
+func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, candidateID string, failure *routingerr.Error) {
 	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
 		return
 	}
-	for _, candidate := range profile.Candidates {
-		if candidate.ID != candidateID || candidate.BindingKey == "" {
-			continue
-		}
-		until := e.now().Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
-			until = *failure.ResetHint
-		}
-		e.circuits.Open(candidate.BindingKey, until, failure.Code)
+	candidate, ok := candidateByID(profile, candidateID)
+	if !ok {
 		return
 	}
+	key := suspensionTarget(candidate, failure.Code)
+	if key == "" {
+		return
+	}
+	now := e.now()
+	until := e.suspensionUntil(ctx, candidate, failure, e.circuits.NextStrike(key), now)
+	// A repeat failure inside a running block never shortens it.
+	if running := e.circuits.Inspect(key, now); running.State == ResourceWaiting && running.Until.After(until) {
+		until = running.Until
+	}
+	e.circuits.Open(key, until, failure.Code)
 }
 
 const circuitBackoff = time.Minute

@@ -361,16 +361,25 @@ func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
 	for id, reason := range ineligible {
 		merged[id] = reason
 	}
+	suspensions := s.previewSuspensions(ctx, profile, now)
 	for _, candidate := range profile.Candidates {
 		if _, decided := merged[candidate.ID]; decided {
+			continue
+		}
+		if code := suspensionIneligibility(suspensions[candidate.ID]); code != "" {
+			merged[candidate.ID] = code
+			continue
+		}
+		if _, detailed := suspensions[candidate.ID]; detailed {
 			continue
 		}
 		if open, known := s.circuitOpen(ctx, candidate.ID, now); known && open {
 			merged[candidate.ID] = dynamicruntime.IneligibleCircuit
 		}
 	}
-	inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
-	return dynamicruntime.PreviewSelectionWith(profile, inputs, merged, "", dynamicruntime.SelectionChain{}, now)
+inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
+	return dynamicruntime.PreviewSelectionWith(profile, inputs, merged, "", dynamicruntime.SelectionChain{}, now).
+		WithSuspensions(suspensions)
 }
 
 // lastPicked reads the round-robin history for a saved profile. A draft that
