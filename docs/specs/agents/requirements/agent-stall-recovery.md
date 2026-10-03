@@ -295,7 +295,9 @@ sanitized diagnostic message for the collapsed technical-details surface.
 ## Out of scope
 
 - Automatically timing out, cancelling, or killing a turn that has already
-  produced a turn event, based only on inactivity.
+  produced a turn event within the 15-minute window. After 15 minutes of honest
+  inactivity the turn becomes terminal under
+  [prolonged stall inactivity teardown](agent-stall-inactivity-teardown.md).
 - Making the stop path reach an execution for a task; that contract belongs
   to [task stop reachability](../../tasks/requirements/task-stop-reachability.md).
 - Making the inactivity threshold user-configurable.

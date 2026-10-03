@@ -30,6 +30,18 @@ The Office cost dashboard shows `$0` for every agent running on a subscription p
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.9:** Antigravity ACP profiles have `subscription` billing type. Kandev reads quota without a model turn through `agy -p "/usage" --output-format json` and selects only the `Gemini Models` group.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.10:** Each active Gemini bucket becomes a utilization window with `100 * (1 - remaining_fraction)` percent used and its `reset_time`. Buckets without a valid reset time are omitted.
 
+### REQ-COSTS-SUBSCRIPTION-USAGE-002: Global Antigravity profile quota visibility
+
+**Intent:** A user can inspect the Gemini quota of a global Antigravity profile without creating or binding an Office agent. The quota source and window semantics remain those of REQ-COSTS-SUBSCRIPTION-USAGE-001.
+
+#### Acceptance criteria
+
+- **AC-COSTS-SUBSCRIPTION-USAGE-002.1:** When a user opens a saved global Antigravity profile in agent settings, the profile shall show every active Gemini usage window's label, percentage used, and reset instant in readable text on desktop and phone. The reset instant shall be visible without hover.
+- **AC-COSTS-SUBSCRIPTION-USAGE-002.2:** The displayed values shall come from the same `Gemini Models` usage source, conversion, and cache as AC-COSTS-SUBSCRIPTION-USAGE-001.9 and .10; reading them shall neither start a model turn nor create or rebind an Office agent.
+- **AC-COSTS-SUBSCRIPTION-USAGE-002.3:** When the usage source is unavailable or returns no active Gemini window, the profile shall show a clear unavailable state and a retry action; it shall never present another model group's quota or a fabricated zero percent.
+- **AC-COSTS-SUBSCRIPTION-USAGE-002.4:** A quota read shall use the saved profile's identity and shall not alter its configuration or unsaved edits. A nonexistent profile shall be distinguishable from an unavailable quota source.
+- **AC-COSTS-SUBSCRIPTION-USAGE-002.5:** On a phone, the quota section shall be reachable through the existing agent-settings navigation, fit within one vertical scroll, and expose any retry action by touch and keyboard.
+
 ## Migrated source detail
 
 ## Why
