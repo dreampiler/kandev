@@ -14,6 +14,30 @@ import (
 // ceiling value itself, not its plumbing.
 const ceilingSweepInterval = 20 * time.Second
 
+// ceilingSweepCause records why a pass is running. A release-driven pass retries
+// every deferred launch immediately, because capacity it can see freeing up must
+// not wait on retry pacing; a periodic pass is the backstop and applies it.
+type ceilingSweepCause int
+
+const (
+	ceilingSweepPeriodic ceilingSweepCause = iota
+	ceilingSweepSignal
+)
+
+type ceilingSweepCauseContextKey struct{}
+
+func withCeilingSweepCause(ctx context.Context, cause ceilingSweepCause) context.Context {
+	return context.WithValue(ctx, ceilingSweepCauseContextKey{}, cause)
+}
+
+// isPeriodicCeilingSweep reports whether ctx carries the periodic cause. A
+// context with no cause — a direct drain from a caller that is not the sweeper —
+// is not paced.
+func isPeriodicCeilingSweep(ctx context.Context) bool {
+	cause, ok := ctx.Value(ceilingSweepCauseContextKey{}).(ceilingSweepCause)
+	return ok && cause == ceilingSweepPeriodic
+}
+
 // ceilingSweeper owns the AC-50 background goroutine: the AC-17a periodic
 // sweep and AC-15's retry-on-release driver are one component, modelled on
 // idleSessionReaper ("a single owner of one background goroutine on
@@ -41,7 +65,7 @@ func newCeilingSweeper() *ceilingSweeper {
 
 // start launches the sweeper loop with the given tick callback. Idempotent:
 // a second call on a running sweeper is a no-op.
-func (r *ceilingSweeper) start(parent context.Context, tick func(ctx context.Context)) bool {
+func (r *ceilingSweeper) start(parent context.Context, tick func(ctx context.Context, cause ceilingSweepCause)) bool {
 	if r == nil || tick == nil {
 		return false
 	}
@@ -98,7 +122,7 @@ func (r *ceilingSweeper) signalNow() {
 // The tick runs synchronously in this one goroutine, so two ticks — whether
 // both timer-driven, both signal-driven, or one of each — can never overlap
 // (AC-50a).
-func (r *ceilingSweeper) runLoop(ctx context.Context, tick func(ctx context.Context)) {
+func (r *ceilingSweeper) runLoop(ctx context.Context, tick func(ctx context.Context, cause ceilingSweepCause)) {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {
@@ -106,9 +130,9 @@ func (r *ceilingSweeper) runLoop(ctx context.Context, tick func(ctx context.Cont
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tick(ctx)
+			tick(ctx, ceilingSweepPeriodic)
 		case <-r.signal:
-			tick(ctx)
+			tick(ctx, ceilingSweepSignal)
 		}
 	}
 }
@@ -151,9 +175,9 @@ func (s *Service) signalCeilingSweep() {
 // ceilingSweepTick is the AC-50 tick body. It is both AC-7's periodic
 // backstop and AC-15/AC-17a's retry driver, because AC-50 states they are
 // one component sharing one goroutine.
-func (s *Service) ceilingSweepTick(ctx context.Context) {
+func (s *Service) ceilingSweepTick(ctx context.Context, cause ceilingSweepCause) {
 	if s.sessionCeiling != nil {
 		s.sessionCeiling.expireStaleReservations()
 	}
-	s.drainDeferredCeilingLaunches(ctx)
+	s.drainDeferredCeilingLaunches(withCeilingSweepCause(ctx, cause))
 }

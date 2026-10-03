@@ -211,8 +211,19 @@ func (s *Service) admitOrDeferSeam1(
 
 	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,
 		decision.population, decision.populationKnown, decision.ceiling); err != nil {
-		s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
-			zap.String("task_id", taskID), zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
+		// A replay that owns the dispatch claim is retrying the very record it
+		// is holding, so a refusal it cannot re-persist leaves that record
+		// queued exactly as it was. That is the deferred condition, not an
+		// operational failure, and reporting it at error level attached a stack
+		// trace to every sweep tick for as long as the ceiling stayed saturated.
+		// deferCeilingRefusal already logged why the record was kept.
+		if claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); claim != nil {
+			s.logger.Zap().Debug("ceiling replay could not re-persist its record; the stored record stays queued",
+				zap.String("task_id", taskID), zap.Error(err))
+		} else {
+			s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
+				zap.String("task_id", taskID), zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
+		}
 		return nil, false, err
 	}
 	return nil, true, nil

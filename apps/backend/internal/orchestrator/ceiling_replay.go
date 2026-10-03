@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -53,6 +54,9 @@ const (
 // each in turn. A candidate that fails for a non-ceiling reason is skipped
 // for the rest of this pass (AC-15d) rather than retried immediately or
 // stopping the pass.
+//
+// A periodic pass skips a task whose retry is not due yet; a release-driven
+// pass, and any direct caller that is not the sweeper, retries everything.
 func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
@@ -63,7 +67,20 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
 		return
 	}
+	paced := isPeriodicCeilingSweep(ctx)
+	if paced {
+		deferred := make(map[string]struct{}, len(tasks))
+		for _, task := range tasks {
+			if task != nil {
+				deferred[task.ID] = struct{}{}
+			}
+		}
+		s.deferredRetrySchedule.prune(deferred)
+	}
 	for _, task := range tasks {
+		if paced && !s.deferredRetrySchedule.beginAttempt(task.ID) {
+			continue
+		}
 		s.retryOneDeferredCeilingLaunch(ctx, task)
 	}
 }
@@ -154,6 +171,11 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		// task's fault; leave it for the next tick to see the current state.
 		return
 	}
+	// Re-bind the retry schedule to the record this pass actually read, so a
+	// record replaced while it waited starts from the base interval instead of
+	// inheriting the previous launch's backoff.
+	s.deferredRetrySchedule.observe(task.ID, ceilingDeferralIdentityKey(deferral))
+
 	deferral, err = s.enrichCeilingDeferralBinding(ctx, task, deferral)
 	if err != nil {
 		if errors.Is(err, ErrCeilingLaunchSuperseded) {
@@ -172,6 +194,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	s.reconcileDeferredCeilingTaskState(ctx, task, deferral)
 
 	if reasonCode, detail, drop := s.evaluateCeilingDropReasons(ctx, task, deferral); drop {
+		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
 	}
@@ -214,12 +237,15 @@ func (s *Service) settleCeilingReplay(
 ) {
 	switch outcome {
 	case ceilingReplaySucceeded:
+		s.deferredRetrySchedule.settle(task.ID)
 		claim.settle(ctx)
 		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplaySuperseded:
+		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonSuperseded, "workflow destination changed before dispatch")
 	case ceilingReplayRunClosed:
+		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed)
 	case ceilingReplayFailed:
@@ -415,6 +441,14 @@ func (s *Service) clearCeilingDeferredRecord(ctx context.Context, taskID string,
 		zap.String("task_id", taskID))
 }
 
+// ceilingDeferralIdentityKey fingerprints a queued launch for the retry
+// schedule. Kind and queue time are the identity sameCeilingDeferralIdentity
+// compares, so two records that differ only in capacity observations or surface
+// bookkeeping share a key and keep their backoff.
+func ceilingDeferralIdentityKey(deferral models.CeilingDeferral) string {
+	return string(deferral.Kind) + "|" + deferral.QueuedAt.UTC().Format(time.RFC3339Nano)
+}
+
 // sameCeilingDeferralIdentity compares the stable identity of one queued
 // launch. Capacity observations and surface bookkeeping may change while a
 // record waits, but a replacement workflow entry must never inherit the state
@@ -517,10 +551,21 @@ func boolField(payload map[string]interface{}, key string) bool {
 }
 
 // int64Field reads an integer out of a generically-decoded payload map. A
-// JSON round trip through map[string]interface{} always decodes numbers as
-// float64, so this cannot type-assert int64 directly like boolField does.
+// stored payload reaches the orchestrator through the repository's own read
+// path, which decodes with json.Decoder.UseNumber, so a stored integer arrives
+// as json.Number rather than the float64 an ordinary
+// map[string]interface{} decode would produce. All three representations are
+// accepted: missing the json.Number case silently reads every stored integer as
+// zero, which makes a re-derived launch payload differ from the record it came
+// from and turns a repeat refusal into a launch collision.
 func int64Field(payload map[string]interface{}, key string) int64 {
 	switch v := payload[key].(type) {
+	case json.Number:
+		parsed, err := v.Int64()
+		if err != nil {
+			return 0
+		}
+		return parsed
 	case float64:
 		return int64(v)
 	case int64:
@@ -636,7 +681,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	// would otherwise never fire and a still-refused replay would be
 	// misclassified as ceilingReplayFailed (a non-ceiling failure), skipping
 	// the AC-49g card-surface retry and logging a misleading warning.
-	if errors.Is(err, ErrCeilingLaunchDeferred) {
+	if errors.Is(err, ErrCeilingLaunchDeferred) || errors.Is(err, ErrCeilingLaunchConflict) {
 		return ceilingReplayStillDeferred
 	}
 	if errors.Is(err, errCeilingAutomationRunClosed) {
