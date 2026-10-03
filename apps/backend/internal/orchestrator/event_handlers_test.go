@@ -1919,14 +1919,15 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
 	svc := &Service{
-		logger:             log,
-		repo:               repo,
-		workflowStepGetter: stepGetter,
-		taskRepo:           taskRepo,
-		agentManager:       agentMgr,
-		messageQueue:       newAuthoritativeMemoryQueue(repo, log),
-		executor:           exec,
-		scheduler:          sched,
+		logger:                log,
+		repo:                  repo,
+		workflowStepGetter:    stepGetter,
+		taskRepo:              taskRepo,
+		agentManager:          agentMgr,
+		messageQueue:          newAuthoritativeMemoryQueue(repo, log),
+		executor:              exec,
+		scheduler:             sched,
+		deferredRetrySchedule: newDeferredRetrySchedule(),
 	}
 	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
 		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)

@@ -9,9 +9,11 @@ import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { AgentLogo } from "@/components/agent-logo";
 import { DynamicAgentCandidateList } from "@/components/settings/dynamic-agent-candidate-list";
+import { DynamicAgentPreview } from "@/components/settings/dynamic-agent-preview";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
 import { ProfileNameField } from "@/components/settings/profile-form-fields";
 import { useDynamicAgentProfileEditorState } from "@/components/settings/dynamic-agent-profile-editor-state";
+import { settingsTouchSwitchClassName } from "@/components/settings/settings-control";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 
 type DynamicAgentProfileEditorProps = {
@@ -85,6 +87,40 @@ function DynamicProfileEditorHeader({
   );
 }
 
+/**
+ * Keep-model is a profile-wide preference rather than a per-tier one, so it sits
+ * with the other routing explanation instead of inside a candidate row.
+ */
+function DynamicKeepModelPreference({
+  enabled,
+  onChange,
+}: {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className="flex min-h-11 items-center justify-between gap-3 rounded-md border p-3"
+      data-testid="dynamic-keep-model-preference"
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{t("agents:dynamicKeepModelWhileRunning")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("agents:dynamicKeepModelWhileRunningDescription")}
+        </p>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={onChange}
+        data-testid="dynamic-keep-model-toggle"
+        aria-label={t("agents:dynamicKeepModelWhileRunning")}
+        className={settingsTouchSwitchClassName()}
+      />
+    </div>
+  );
+}
+
 export function DynamicAgentProfileEditor({
   agent,
   profile,
@@ -113,6 +149,15 @@ export function DynamicAgentProfileEditor({
         onChange={state.updateName}
       />
       <DynamicRoutingPolicyHelp />
+      <DynamicKeepModelPreference
+        enabled={state.keepModelWhileRunning}
+        onChange={state.updateKeepModelWhileRunning}
+      />
+      <DynamicAgentPreview
+        state={state.preview.state}
+        labelFor={state.labelForCandidate}
+        onRetry={state.preview.refresh}
+      />
       <DynamicAgentCandidateList
         candidates={state.candidates}
         concreteProfiles={state.concreteProfiles}
@@ -121,6 +166,10 @@ export function DynamicAgentProfileEditor({
         addCandidate={state.addCandidate}
         moveCandidate={state.moveCandidate}
         removeCandidate={state.removeCandidate}
+        toggleJoin={state.toggleJoin}
+        updateTierPolicy={state.updateTierPolicy}
+        updateCandidateModel={state.updateCandidateModel}
+        updateManualWindow={state.updateManualWindow}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
       />

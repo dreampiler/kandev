@@ -1135,6 +1135,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "child-task-ordering", enabled: kanban, register: func(s *Server) { s.registerReorderChildTasksTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
@@ -1573,6 +1574,28 @@ Removing the last edge unblocks the task but does NOT start it: an automatic sta
 			mcp.WithString("depends_on_task_id", mcp.Required(), mcp.Description("The predecessor task to unlink.")),
 		),
 		s.wrapHandler("remove_task_dependency_kandev", s.removeTaskDependencyHandler()),
+	)
+}
+
+// registerReorderChildTasksTool registers reorder_child_tasks_kandev. It is a
+// kanban-task-only group (not part of registerKanbanTools) so the automation
+// catalog, which is composed from registerKanbanTools, does not gain it.
+func (s *Server) registerReorderChildTasksTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("reorder_child_tasks_kandev",
+			mcp.WithDescription(`Set the processing order of your same-workspace direct children in one workflow step and band (admitted or queued). Use ordering for scheduling; use blocked_by only when a task consumes another task's output. placement="in_place" (default) permutes the named tasks within their current slots; placement="front" puts them ahead of the rest, preserving the remaining relative order. The board and queued admission use the new order. A membership conflict is retried once, then reported. Returns the band's task IDs and positions.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithArray("ordered_task_ids", mcp.Required(), mcp.Items(map[string]any{"type": "string"}),
+				mcp.Description("Your direct child task IDs (full UUIDs) in the desired order, first = processed first.")),
+			mcp.WithString("placement",
+				mcp.Enum("in_place", "front"),
+				mcp.DefaultString("in_place"),
+				mcp.Description(`"in_place" (default): reorder only within the named tasks' current slots. "front": move the named tasks to the head of their band.`)),
+		),
+		s.wrapHandler("reorder_child_tasks_kandev", s.reorderChildTasksHandler()),
 	)
 }
 

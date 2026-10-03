@@ -1184,6 +1184,12 @@ type Service struct {
 	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
 	ceilingSweeper *ceilingSweeper
 
+	// deferredRetrySchedule paces the periodic sweep's retries of launches the
+	// session ceiling refused. A released reservation retries immediately, so
+	// pacing only bounds work nobody freed capacity for. See
+	// ceiling_retry_schedule.go.
+	deferredRetrySchedule *deferredRetrySchedule
+
 	// ceilingCredentialReminter re-mints short-lived Office runtime
 	// credentials immediately before a ceiling-deferred "start" replay. Nil
 	// is the common case; see CeilingLaunchCredentialReminter.
@@ -1762,6 +1768,7 @@ func NewService(
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
+		deferredRetrySchedule:        newDeferredRetrySchedule(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),

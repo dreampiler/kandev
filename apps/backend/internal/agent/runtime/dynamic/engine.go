@@ -54,6 +54,7 @@ type Engine struct {
 	persistence Persistence
 	loader      StateLoader
 	probes      map[string]ProbeLease
+	usage       UsageSnapshotProvider
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -140,6 +141,50 @@ func (e *Engine) selectContext(
 	preferredProfileID string,
 	reason string,
 ) (RouteDecision, error) {
+	return e.selectWithPlan(ctx, sessionID, profile, expectedGeneration,
+		func(RouteState, bool) selectionPlan {
+			return ResolveSelection(profile, excludeProfileID, preferredProfileID,
+				e.eligibilityFor(profile, preferredProfileID))
+		}, reason)
+}
+
+// selectAfterFailure resolves a permitted fallback successor. The tier's
+// configured direction applies here and only here, because this is the failure
+// transition rather than a fresh selection. It continues the durable chain, so
+// neither direction can return to an earlier tier or a candidate already tried
+// in this chain, including after a restart.
+func (e *Engine) selectAfterFailure(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	failedCandidateID string,
+	reason string,
+) (RouteDecision, error) {
+	return e.selectWithPlan(ctx, sessionID, profile, expectedGeneration,
+		func(state RouteState, exists bool) selectionPlan {
+			chain := selectionChainFor(state, exists, profile)
+			return ResolveFallbackSelection(profile, failedCandidateID, "", chain,
+				e.eligibilityFor(profile, ""))
+		}, reason)
+}
+
+// selectWithPlan claims one generation for a resolved search plan. The usage
+// snapshot is fetched outside the engine lock, and one observation answers the
+// whole decision so every candidate in a tier is compared against the same
+// clock and the same evidence. The plan is resolved under the lock so a fallback
+// reads the chain committed by the generation it is replacing.
+func (e *Engine) selectWithPlan(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	plan func(RouteState, bool) selectionPlan,
+	reason string,
+) (RouteDecision, error) {
+	observedAt := e.now()
+	scores := e.usageSnapshot(ctx, profile)
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, exists, err := e.loadStateLocked(ctx, sessionID)
@@ -154,48 +199,82 @@ func (e *Engine) selectContext(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 	generation := currentGeneration + 1
-	now := e.now()
-	for _, candidate := range profile.Candidates {
-		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
-			continue
-		}
-		decision := RouteDecision{
-			SessionID:          sessionID,
-			LogicalProfileID:   profile.ID,
-			ExecutionProfileID: candidate.ID,
-			Generation:         generation,
-			ProfileVersion:     profile.Version,
-			Reason:             reason,
-			Status:             routeStatusStarting,
-		}
-		nextState := RouteState{
-			SessionID:          sessionID,
-			LogicalProfileID:   profile.ID,
-			ExecutionProfileID: candidate.ID,
-			Generation:         generation,
-			ProfileVersion:     profile.Version,
-			Status:             routeStatusStarting,
-			UpdatedAt:          now,
-		}
-		if exists && state.Status == routeStatusActionRequired &&
-			state.LogicalProfileID == profile.ID && state.ExecutionProfileID == candidate.ID &&
-			state.ProfileVersion == profile.Version {
-			nextState.PolicyStateJSON = carryUnclassifiedStreak(state.PolicyStateJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified)
-		}
-		if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
-			delete(e.states, sessionID)
-			return RouteDecision{}, err
-		}
-		e.states[sessionID] = nextState
-		return decision, nil
+
+	resolved := plan(state, exists)
+	// Only the selected candidate attempts the existing probe claim; ranking and
+	// preview never acquire a half-open lease.
+	claim := func(candidate Candidate) bool {
+		return e.claimProbe(candidate, sessionID, generation, observedAt)
 	}
+	winner := resolved.firstSelectable(scores, observedAt, claim)
+	if !winner.ok {
+		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain)
+	}
+	candidate, tier := winner.candidate, winner.tier
+	chain := resolved.chain.forProfile(profile.ID, generation).withTried(candidate.ID)
+	chain.LastTierHeadID = tier.HeadID
+	chainJSON, chainErr := carrySelectionChain(state.PolicyStateJSON, chain)
+	if chainErr != nil {
+		delete(e.states, sessionID)
+		return RouteDecision{}, chainErr
+	}
+	decision := RouteDecision{
+		SessionID:          sessionID,
+		LogicalProfileID:   profile.ID,
+		ExecutionProfileID: candidate.ID,
+		Generation:         generation,
+		ProfileVersion:     profile.Version,
+		Reason:             selectionReason(candidate, tier, resolved, reason),
+		Status:             routeStatusStarting,
+	}
+	nextState := RouteState{
+		SessionID:          sessionID,
+		LogicalProfileID:   profile.ID,
+		ExecutionProfileID: candidate.ID,
+		Generation:         generation,
+		ProfileVersion:     profile.Version,
+		Status:             routeStatusStarting,
+		PolicyStateJSON:    chainJSON,
+		UpdatedAt:          observedAt,
+	}
+	if exists && state.Status == routeStatusActionRequired &&
+		state.LogicalProfileID == profile.ID && state.ExecutionProfileID == candidate.ID &&
+		state.ProfileVersion == profile.Version {
+		nextState.PolicyStateJSON = carryUnclassifiedStreak(
+			chainJSON, profile.ID, candidate.ID, profile.Version, candidate.Policies.Unclassified,
+		)
+	}
+	if err := e.claimAndPersist(ctx, expectedGeneration, decision, nextState); err != nil {
+		delete(e.states, sessionID)
+		return RouteDecision{}, err
+	}
+	e.states[sessionID] = nextState
+	return decision, nil
+}
+
+// persistExhaustedSelection records the all-ineligible outcome through the
+// existing waiting/manual-recovery path without starting another session,
+// spinning or recycling tried candidates. The chain and its reason survive, so
+// no timer silently clears the exclusions.
+func (e *Engine) persistExhaustedSelection(
+	ctx context.Context,
+	sessionID string,
+	profile Profile,
+	expectedGeneration int64,
+	generation int64,
+	observedAt time.Time,
+	chain SelectionChain,
+) (RouteDecision, error) {
 	nextState := RouteState{
 		SessionID:        sessionID,
 		LogicalProfileID: profile.ID,
 		Generation:       generation,
 		ProfileVersion:   profile.Version,
 		Status:           "waiting",
-		UpdatedAt:        now,
+		UpdatedAt:        observedAt,
+	}
+	if exhausted, err := carrySelectionChain("", chain.forProfile(profile.ID, generation)); err == nil {
+		nextState.PolicyStateJSON = exhausted
 	}
 	if err := e.persistNoEligible(ctx, expectedGeneration, nextState); err != nil {
 		delete(e.states, sessionID)
@@ -205,6 +284,62 @@ func (e *Engine) selectContext(
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
 	}
+}
+
+// selectionChainFor returns the chain to apply to this decision. A chain from a
+// different logical profile, or one that was never started, is not inherited.
+func selectionChainFor(state RouteState, exists bool, profile Profile) SelectionChain {
+	if !exists {
+		return SelectionChain{}
+	}
+	chain, err := decodeSelectionChain(state.PolicyStateJSON)
+	if err != nil || !chain.valid() || chain.LogicalProfileID != profile.ID {
+		return SelectionChain{}
+	}
+	return chain
+}
+
+func (c SelectionChain) forProfile(profileID string, generation int64) SelectionChain {
+	chain := c
+	chain.Version = selectionChainVersion
+	chain.LogicalProfileID = profileID
+	if chain.StartGeneration == 0 {
+		chain.StartGeneration = generation
+	}
+	return chain
+}
+
+// eligibilityFor marks candidates that are out before any ranking happens. The
+// circuit verdict is deliberately absent: it is rechecked for the selected
+// candidate during its claim.
+func (e *Engine) eligibilityFor(profile Profile, preferredProfileID string) map[string]string {
+	eligible := make(map[string]string, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		switch {
+		case !candidate.Enabled:
+			eligible[candidate.ID] = IneligibleDisabled
+		case preferredProfileID != "" && candidate.ID != preferredProfileID:
+			eligible[candidate.ID] = IneligibleUnusable
+		}
+	}
+	return eligible
+}
+
+// claimProbe applies the existing circuit admission to the chosen candidate
+// only. It takes the probe lease when a circuit is open so the successor gets a
+// real launch attempt rather than being skipped on a stale verdict.
+func (e *Engine) claimProbe(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
+	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
+		return true
+	}
+	lease, ok := e.circuits.AcquireProbe(candidate.BindingKey, probeLeaseDuration)
+	if !ok {
+		return false
+	}
+	// The caller owns the generation fencing. The conductor releases this
+	// lease after the concrete launch result is known.
+	e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+	return true
 }
 
 func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteState, bool, error) {
@@ -424,6 +559,11 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 
+	// The usage observation is taken before the engine lock so a slow provider
+	// read cannot block other sessions, and so every candidate the successor
+	// search ranks is compared against one clock and one set of evidence.
+	scores := e.usageSnapshot(ctx, profile)
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, err := e.currentUnclassifiedRouteState(ctx, sessionID, profile, expectedGeneration, currentCandidateID)
@@ -453,7 +593,7 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_manual_recovery")
 	}
 	return e.routeToUnclassifiedSuccessor(
-		ctx, state, profile, currentCandidateID, expectedGeneration, failure, evidence, policyState,
+		ctx, state, profile, currentCandidateID, expectedGeneration, failure, evidence, policyState, scores,
 	)
 }
 
@@ -570,15 +710,41 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	failure *routingerr.Error,
 	evidence UnclassifiedFailureEvidence,
 	policyState PolicyState,
+	scores map[string]PaceScore,
 ) (RouteDecision, error) {
-	successor, found := e.firstSelectableUnclassifiedSuccessor(profile, currentCandidateID, state.SessionID, expectedGeneration)
-	if !found {
-		return e.persistUnclassifiedManual(ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted")
+	observedAt := e.now()
+
+	successor, ok := e.unclassifiedSuccessor(
+		state, profile, currentCandidateID, expectedGeneration, scores, observedAt,
+	)
+	if !ok {
+		return e.persistUnclassifiedManual(
+			ctx, state, state.PolicyStateJSON, policyState, failure, "unclassified_candidates_exhausted",
+		)
 	}
-	decision, nextState := unclassifiedSuccessorRoute(state, profile, successor, expectedGeneration, failure, e.now())
-	if persistedDecision, err := e.recordUnclassifiedSuccessor(
+	// The transition continues the durable chain, so a candidate already tried in
+	// this chain and an earlier tier both stay excluded.
+	chain, chainErr := decodeSelectionChain(state.PolicyStateJSON)
+	if chainErr != nil {
+		delete(e.states, state.SessionID)
+		return RouteDecision{}, chainErr
+	}
+	generation := expectedGeneration + 1
+	chain = chain.forProfile(profile.ID, generation).withTried(successor.winner.candidate.ID)
+	chain.LastTierHeadID = successor.winner.tier.HeadID
+	chainJSON, chainErr := carrySelectionChain(state.PolicyStateJSON, chain)
+	if chainErr != nil {
+		delete(e.states, state.SessionID)
+		return RouteDecision{}, chainErr
+	}
+	decision, nextState := unclassifiedSuccessorRoute(
+		state, profile, successor.winner.candidate, successor.winner.tier, successor.plan,
+		generation, failure, chainJSON, observedAt,
+	)
+	persistedDecision, err := e.recordUnclassifiedSuccessor(
 		ctx, expectedGeneration, decision, nextState, evidence, &policyState, state, failure,
-	); err != nil {
+	)
+	if err != nil {
 		return persistedDecision, err
 	}
 	e.states[state.SessionID] = nextState
@@ -586,39 +752,56 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	return decision, nil
 }
 
-func (e *Engine) firstSelectableUnclassifiedSuccessor(
+// unclassifiedSuccessor runs the ordinary tier search space against the
+// unclassified path's narrower admission scope. The selector is shared so this
+// path honors the tier's selection rule and failure direction and cannot return
+// to an earlier tier or an already-tried candidate, while eligibility stays
+// exactly as narrow as it was before tiers existed.
+func (e *Engine) unclassifiedSuccessor(
+	state RouteState,
 	profile Profile,
-	currentCandidateID, sessionID string,
-	generation int64,
-) (Candidate, bool) {
-	for index, item := range profile.Candidates {
-		if item.ID != currentCandidateID {
+	currentCandidateID string,
+	expectedGeneration int64,
+	scores map[string]PaceScore,
+	now time.Time,
+) (tierSelection, bool) {
+	generation := expectedGeneration + 1
+	ineligible := make(map[string]string, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		if candidate.ID == currentCandidateID {
 			continue
 		}
-		for _, candidate := range profile.Candidates[index+1:] {
-			if e.candidateSelectable(candidate, sessionID, generation+1, "", "", e.now()) {
-				return candidate, true
-			}
+		if e.candidateSelectable(candidate, state.SessionID, generation, "", "", now) {
+			continue
 		}
-		break
+		ineligible[candidate.ID] = IneligibleCircuit
 	}
-	return Candidate{}, false
+	chain, err := decodeSelectionChain(state.PolicyStateJSON)
+	if err != nil {
+		return tierSelection{}, false
+	}
+	resolved := ResolveFallbackSelection(profile, currentCandidateID, "", chain, ineligible)
+	winner := resolved.firstSelectable(scores, now, nil)
+	return winner.withPlan(resolved), winner.ok
 }
 
 func unclassifiedSuccessorRoute(
 	state RouteState,
 	profile Profile,
 	successor Candidate,
-	expectedGeneration int64,
+	tier Tier,
+	plan selectionPlan,
+	generation int64,
 	failure *routingerr.Error,
+	policyStateJSON string,
 	updatedAt time.Time,
 ) (RouteDecision, RouteState) {
-	generation := expectedGeneration + 1
 	decision := RouteDecision{
 		SessionID: state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
-		ProfileVersion: profile.Version, Reason: "policy_skip",
-		Status: routeStatusStarting, ErrorCode: failure.Code,
+		ProfileVersion: profile.Version,
+		Reason:         selectionReason(successor, tier, plan, "policy_skip"),
+		Status:         routeStatusStarting, ErrorCode: failure.Code,
 		ErrorClass:       routingerr.ClassUnclassified,
 		CatalogueVersion: routingerr.CatalogueVersion,
 		PendingOutcome:   routingpolicy.OutcomeSkip,
@@ -627,7 +810,8 @@ func unclassifiedSuccessorRoute(
 		SessionID: state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
 		ProfileVersion: profile.Version, Status: routeStatusStarting,
-		UpdatedAt: updatedAt,
+		PolicyStateJSON: policyStateJSON,
+		UpdatedAt:       updatedAt,
 	}
 	return decision, nextState
 }
@@ -793,7 +977,20 @@ func (e *Engine) applyPolicyFailure(
 	}
 
 	if evaluation.Kind == routingpolicy.DecisionSkip {
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "policy_skip")
+		// Tier direction and the durable chain decide the successor. The failed
+		// candidate is the one the direction is measured from.
+		decision, err := e.selectAfterFailure(
+			ctx, sessionID, profile, expectedGeneration, currentCandidateID, "policy_skip",
+		)
+		if err != nil {
+			return RouteDecision{}, err
+		}
+		// The successor inherits the failure class that caused the skip so the
+		// existing manual/retry reason codes stay intact.
+		decision.ErrorCode = evaluation.Code
+		decision.ErrorClass = evaluation.Class
+		decision.CatalogueVersion = evaluation.CatalogueVersion
+		return decision, nil
 	}
 	nextState := state
 	if !exists {

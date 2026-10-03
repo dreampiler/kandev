@@ -511,6 +511,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 		SessionID: session.ID, LogicalProfileID: session.AgentProfileID,
 		Decision: decision, Prompt: options.Prompt,
 		PriorACPSession: session.DownstreamACPSessionID,
+		ExecutorID:      session.ExecutorID,
 	}
 	if prebuiltContinuation != nil {
 		selected.PrebuiltContinuation = prebuiltContinuation
@@ -759,6 +760,32 @@ func (s *Service) dynamicLaunchDecision(
 		}
 		return decision, true, nil
 	}
+	if !s.profileExecutionResolver.KeepModelWhileRunning(ctx, session.AgentProfileID) {
+		// Keep-model off compares capacity again before a new user turn. This runs
+		// at the idle boundary before any launch, so it never interrupts an
+		// admitted turn or background work, and a failure to compare falls back
+		// to the incumbent rather than moving work on a guess.
+		reevaluated, err := s.reevaluateDynamicModelForNewTurn(ctx, session, *state)
+		if err != nil {
+			return decision, true, nil
+		}
+		resolved, err := s.profileExecutionResolver.ResolveExisting(
+			ctx, session.ID, session.AgentProfileID, reevaluated.ExecutionProfileID,
+			reevaluated.Generation, reevaluated.ProfileVersion, "keep_model_reevaluated",
+		)
+		if err != nil {
+			return decision, true, nil
+		}
+		if session.ExecutionProfileID == resolved.ExecutionProfileID &&
+			session.RouteGeneration == resolved.Generation {
+			return resolved.Decision, true, nil
+		}
+		applyResolvedExecution(session, resolved)
+		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+			return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+		}
+		return resolved.Decision, true, nil
+	}
 	resolved, err := s.profileExecutionResolver.ResolveExisting(
 		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, "durable_route_state",
@@ -775,6 +802,24 @@ func (s *Service) dynamicLaunchDecision(
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.Decision, true, nil
+}
+
+// reevaluateDynamicModelForNewTurn runs one fresh comparison for a session whose
+// profile does not keep its model. The incumbent is not preferred, so the
+// ranking decides; if nothing is eligible the caller keeps the current route
+// rather than disturbing a session that is already running.
+func (s *Service) reevaluateDynamicModelForNewTurn(
+	ctx context.Context,
+	session *models.TaskSession,
+	state dynamicruntime.RouteState,
+) (dynamicruntime.RouteDecision, error) {
+	decision, err := s.profileExecutionResolver.ReevaluateForNewTurn(
+		ctx, session.ID, session.AgentProfileID, state.Generation, session.ExecutorID,
+	)
+	if err != nil {
+		return dynamicruntime.RouteDecision{}, err
+	}
+	return decision, nil
 }
 
 // routeDynamicAgentFailure applies the configured action for a classified

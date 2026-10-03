@@ -61,6 +61,50 @@ export type DynamicAgentPolicy = {
   transient: DynamicErrorPolicy;
   hard: DynamicErrorPolicy;
   unclassified: DynamicUnclassifiedPolicy;
+  /** Additive tier and model options. Absent means legacy ordered routing. */
+  selection?: DynamicAgentSelection;
+};
+
+export type DynamicTierMode = "order" | "pace" | "cost";
+export type DynamicTierFailureDirection = "same_tier_next" | "next_tier";
+export type DynamicModelCostClass = "free" | "subscription" | "metered";
+export type DynamicModelUsageSource = "automatic" | "manual" | "none";
+export type DynamicUsageWindowPeriod = "five_hour" | "day" | "week" | "month";
+export type DynamicUsageWindowUnit = "money" | "tokens";
+
+/**
+ * One candidate row's tier and model options. `tier` is present only on a
+ * tier's first row; every row stores its own join flag and model options.
+ */
+export type DynamicAgentSelection = {
+  joinPrevious: boolean;
+  tier?: DynamicTierPolicy;
+  model: DynamicModelPolicy;
+};
+
+export type DynamicTierPolicy = {
+  mode: DynamicTierMode;
+  onFailure: DynamicTierFailureDirection;
+};
+
+export type DynamicModelPolicy = {
+  cost: DynamicModelCostClass | "";
+  usageSource: DynamicModelUsageSource;
+  reservedUserSharePct: number;
+  windows?: DynamicUsageWindow[];
+};
+
+export type DynamicUsageWindow = {
+  period: DynamicUsageWindowPeriod;
+  unit: DynamicUsageWindowUnit;
+  /** Positive decimal string, so a money allowance keeps subcent precision. */
+  limit: string;
+  reset: DynamicUsageReset;
+};
+
+export type DynamicUsageReset = {
+  anchor: string;
+  timezone: string;
 };
 
 export type DynamicAgentCandidate = {
@@ -75,6 +119,11 @@ export type DynamicAgentCandidate = {
 export type DynamicAgentProfile = {
   version: number;
   candidates: DynamicAgentCandidate[];
+  /**
+   * Profile-wide continuity preference, not a selection mode. Undefined means
+   * the request omitted it and the server preserves the saved value.
+   */
+  keepModelWhileRunning?: boolean;
 };
 
 export type UtilizationWindow = {

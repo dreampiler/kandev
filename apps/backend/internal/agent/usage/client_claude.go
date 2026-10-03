@@ -151,27 +151,37 @@ func claudeWindows(raw claudeUsageResponse, now time.Time) []UtilizationWindow {
 	}
 	windows := make([]UtilizationWindow, 0, 2)
 	if raw.FiveHour != nil {
-		windows = append(windows, UtilizationWindow{
-			Label:          claudeLabel5Hour,
-			UtilizationPct: raw.FiveHour.Utilization,
-			ResetAt:        parseResetAt(raw.FiveHour.ResetsAt, now, 5*time.Hour),
-		})
+		windows = append(windows, claudeFixedWindow(claudeLabel5Hour, raw.FiveHour, now, 5*time.Hour))
 	}
 	if raw.SevenDay != nil {
-		windows = append(windows, UtilizationWindow{
-			Label:          claudeLabel7Day,
-			UtilizationPct: raw.SevenDay.Utilization,
-			ResetAt:        parseResetAt(raw.SevenDay.ResetsAt, now, 7*24*time.Hour),
-		})
+		windows = append(windows, claudeFixedWindow(claudeLabel7Day, raw.SevenDay, now, 7*24*time.Hour))
 	}
 	return windows
+}
+
+// claudeFixedWindow builds a window for the named known duration, so routing
+// gets a numeric length rather than having to parse the display label. A reset
+// that cannot be parsed yields a zero start, which makes the window unusable.
+func claudeFixedWindow(label string, raw *claudeUsageWindow, now time.Time, duration time.Duration) UtilizationWindow {
+	resetAt := parseResetAt(raw.ResetsAt, now, duration)
+	window := UtilizationWindow{
+		Label:           label,
+		UtilizationPct:  raw.Utilization,
+		ResetAt:         resetAt,
+		DurationSeconds: int64(duration / time.Second),
+	}
+	if !resetAt.IsZero() {
+		window.StartAt = resetAt.Add(-duration)
+	}
+	return window
 }
 
 func claudeLimitWindows(limits []claudeLimit) []UtilizationWindow {
 	var windows []UtilizationWindow
 	for _, l := range limits {
 		label := claudeLimitLabel(l)
-		if label == "" {
+		duration, known := claudeWindowDuration(l.Kind)
+		if label == "" || !known {
 			continue
 		}
 		resetAt, err := time.Parse(time.RFC3339, l.ResetsAt)
@@ -179,13 +189,34 @@ func claudeLimitWindows(limits []claudeLimit) []UtilizationWindow {
 			continue
 		}
 		windows = append(windows, UtilizationWindow{
-			Label:          label,
-			UtilizationPct: l.Percent,
-			ResetAt:        resetAt,
+			Label:           label,
+			UtilizationPct:  l.Percent,
+			ResetAt:         resetAt,
+			DurationSeconds: int64(duration / time.Second),
+			StartAt:         resetAt.Add(-duration),
+			// A scoped limit names only a display name, which is not an identity,
+			// so it cannot be matched to a candidate and stays unusable.
+			AmbiguousModelScope: l.Kind == claudeLimitWeeklyScoped,
 		})
 	}
 	return windows
 }
+
+// claudeWindowDuration maps a known provider window kind to its numeric length.
+// An unknown kind has no duration, so it is skipped for routing rather than
+// guessed from its display label.
+func claudeWindowDuration(kind string) (time.Duration, bool) {
+	switch kind {
+	case "session":
+		return 5 * time.Hour, true
+	case "weekly_all", claudeLimitWeeklyScoped:
+		return 7 * 24 * time.Hour, true
+	default:
+		return 0, false
+	}
+}
+
+const claudeLimitWeeklyScoped = "weekly_scoped"
 
 func claudeLimitLabel(l claudeLimit) string {
 	switch l.Kind {

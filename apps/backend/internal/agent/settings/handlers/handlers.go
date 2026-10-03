@@ -91,6 +91,11 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
+	// The current-choice preview is computationally read-only, so it is
+	// registered without the mutation interlock: an existing settings lock
+	// permits it while continuing to block every mutation.
+	api.POST("/agent-profiles/dynamic-preview", cfg, h.httpPreviewDynamicProfile)
+	api.POST("/agent-profiles/:id/dynamic-preview", cfg, h.httpPreviewDynamicProfile)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {

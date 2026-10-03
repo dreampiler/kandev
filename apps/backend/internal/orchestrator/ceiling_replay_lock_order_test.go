@@ -389,7 +389,7 @@ func TestCeilingReplayClaimAndShutdownProgress(t *testing.T) {
 	svc.ceilingSweeper.interval = time.Hour
 	tickStarted := make(chan struct{})
 	releaseTick := make(chan struct{})
-	require.True(t, svc.ceilingSweeper.start(ctx, func(context.Context) {
+	require.True(t, svc.ceilingSweeper.start(ctx, func(context.Context, ceilingSweepCause) {
 		close(tickStarted)
 		<-releaseTick
 	}))

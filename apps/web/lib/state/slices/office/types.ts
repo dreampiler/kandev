@@ -21,6 +21,11 @@ export type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profi
 
 import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profile";
 import type { QuorumResponseDTO, TaskQuorumSliceState } from "./quorum-types";
+import type {
+  OverviewParentTask,
+  OverviewSections,
+  OverviewWorkspaceMetrics,
+} from "./overview-types";
 
 export type SkillSourceType =
   | "inline"
@@ -440,15 +445,21 @@ export type WorkspaceAggregateEntry = {
   pending_approvals: number;
   agent_count: number;
   running_agents: number;
+  /** Whether the workspace has an Office workflow (decides its home link). */
+  is_office?: boolean;
+  metrics?: OverviewWorkspaceMetrics;
+  parents?: OverviewParentTask[];
 };
 
 /**
- * Normalized store shape for the multi-workspace overview: the workspace list
- * plus a merged recent-activity feed (activity entries normalized to camelCase).
+ * Normalized store shape for the multi-workspace overview: the workspace list,
+ * a merged recent-activity feed (activity entries normalized to camelCase),
+ * and the overview sections as served.
  */
 export type WorkspaceAggregate = {
   workspaces: WorkspaceAggregateEntry[];
   recentActivity: ActivityEntry[];
+  sections?: OverviewSections;
 };
 
 /**

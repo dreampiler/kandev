@@ -78,6 +78,16 @@ type Manager struct {
 	managedRuntimeSelections      managedruntime.SelectionReader
 	startCancel                   context.CancelFunc
 	stopped                       bool
+
+	installSource       InstallationSource
+	capabilityListener  func()
+	installRecheckDelay time.Duration
+	recheckGroup        singleflight.Group
+	// background tracks re-measurements running outside any request. Stop
+	// cancels backgroundCtx and waits for them.
+	background       sync.WaitGroup
+	backgroundCtx    context.Context
+	backgroundCancel context.CancelFunc
 }
 
 // ProviderGatewayAuthResolver resolves provider authentication for a saved
@@ -141,6 +151,7 @@ func NewManager(
 	if _, err := cryptorand.Read(profileKey); err != nil {
 		panic("host utility profile cache key initialization failed")
 	}
+	backgroundCtx, backgroundCancel := context.WithCancel(context.Background())
 	return &Manager{
 		registry:                      reg,
 		controlHost:                   controlHost,
@@ -157,6 +168,9 @@ func NewManager(
 		profileContextGenerations:     make(map[string]uint64),
 		profileContextGenerationNodes: make(map[string]*list.Element),
 		profileContextGenerationOrder: list.New(),
+		installRecheckDelay:           defaultInstallRecheckDelay,
+		backgroundCtx:                 backgroundCtx,
+		backgroundCancel:              backgroundCancel,
 	}
 }
 
@@ -248,6 +262,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		})
 	}
 	_ = g.Wait()
+	m.scheduleInstallRecheck()
 	return nil
 }
 
@@ -255,6 +270,14 @@ func (m *Manager) Start(ctx context.Context) error {
 // Only dirs owned by this process are removed; other kandev processes' dirs
 // are untouched.
 func (m *Manager) Stop(ctx context.Context) {
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	if m.backgroundCancel != nil {
+		m.backgroundCancel()
+	}
+	m.background.Wait()
+
 	if m.modelCache != nil {
 		m.modelCache.clear()
 	}
@@ -374,7 +397,7 @@ func (m *Manager) bootstrapAgent(ctx context.Context, ia agents.InferenceAgent) 
 	}
 
 	// Pre-check installation so we can skip expensive probes.
-	if disc, err := ag.IsInstalled(ctx); err != nil || disc == nil || !disc.Available {
+	if installed, err := m.agentInstalled(ctx, ag); err != nil || !installed {
 		msg := "agent not installed"
 		if err != nil {
 			msg = err.Error()
@@ -575,7 +598,7 @@ func (m *Manager) getInstance(ctx context.Context, agentType string) (*instance,
 		}
 		// Pre-check installation so Refresh surfaces `not_installed`
 		// instead of collapsing it into `failed` via createInstance errors.
-		if disc, derr := ag.IsInstalled(ctx); derr != nil || disc == nil || !disc.Available {
+		if installed, ierr := m.agentInstalled(ctx, ag); ierr != nil || !installed {
 			return nil, errAgentNotInstalled
 		}
 		created, cerr := m.createInstance(ctx, agentType)

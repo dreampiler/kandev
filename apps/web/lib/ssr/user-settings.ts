@@ -21,6 +21,7 @@ import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
   LastSeenDisplay,
+  OfficeOverviewScope,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -100,6 +101,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     terminalFontSize: null,
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
+    officeOverviewScope: "office",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     sidebarHoverEnabled: true,
@@ -123,6 +125,11 @@ export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" 
 /** Parses the changes panel layout, defaulting to "tree". */
 export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
   return value === "flat" ? "flat" : "tree";
+}
+
+/** Parses the Office overview scope, defaulting to "office". */
+export function parseOfficeOverviewScope(value: string | undefined): OfficeOverviewScope {
+  return value === "reachable" ? "reachable" : "office";
 }
 
 /** Parses the last-seen display format, defaulting to "absolute". */
@@ -317,6 +324,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       current.releaseNotesLastSeenVersion,
     ),
     lastSeenDisplay: mapDefined(s.last_seen_display, current.lastSeenDisplay, parseLastSeenDisplay),
+    officeOverviewScope: mapDefined(
+      s.office_overview_scope,
+      current.officeOverviewScope,
+      parseOfficeOverviewScope,
+    ),
   };
 }
 

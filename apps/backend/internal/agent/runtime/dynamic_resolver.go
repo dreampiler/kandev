@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -43,11 +44,12 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles        store.Repository
-	dynamic         store.DynamicProfileRepository
-	engine          *dynamic.Engine
-	bindingResolver *dynamic.CredentialBindingResolver
-	enabled         atomic.Bool
+	profiles         store.Repository
+	dynamic          store.DynamicProfileRepository
+	engine           *dynamic.Engine
+	bindingResolver  *dynamic.CredentialBindingResolver
+	sessionExecutors SessionExecutorResolver
+	enabled          atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -74,6 +76,113 @@ func (r *ProfileExecutionResolver) Enabled() bool { return r.enabled.Load() }
 // the concrete profile through the resolver's conservative fallback.
 func (r *ProfileExecutionResolver) SetCredentialBindingResolver(resolver *dynamic.CredentialBindingResolver) {
 	r.bindingResolver = resolver
+}
+
+// KeepModelWhileRunning reports the profile-wide continuity preference. A load
+// failure answers true, the documented default, because failing open toward
+// stickiness keeps an admitted turn on its current candidate rather than
+// silently moving work when the preference could not be read.
+func (r *ProfileExecutionResolver) KeepModelWhileRunning(
+	ctx context.Context,
+	logicalProfileID string,
+) bool {
+	if r == nil || !r.Enabled() {
+		return true
+	}
+	profile, err := r.loadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return true
+	}
+	return profile.KeepModelWhileRunning
+}
+
+// ReevaluateForNewTurn runs one fresh capacity comparison for a session whose
+// profile does not keep its chosen model. The incumbent is not preferred, so the
+// tier ranking decides which candidate a new user turn should use. The caller
+// invokes it at the idle boundary before launching, so an admitted turn is never
+// interrupted.
+func (r *ProfileExecutionResolver) ReevaluateForNewTurn(
+	ctx context.Context,
+	sessionID string,
+	logicalProfileID string,
+	expectedGeneration int64,
+	executorID string,
+) (dynamic.RouteDecision, error) {
+	if r == nil || r.engine == nil {
+		return dynamic.RouteDecision{}, errors.New("dynamic routing is not configured")
+	}
+	profile, err := r.loadDynamicProfileForExecutor(ctx, logicalProfileID, executorID)
+	if err != nil {
+		return dynamic.RouteDecision{}, err
+	}
+	return r.engine.SelectContext(ctx, sessionID, profile, expectedGeneration, "")
+}
+
+// LoadDynamicProfileForExecutor loads the profile with the execution environment
+// of the session that will run it. The executor lives on the task session, so
+// this is how a remote execution is distinguished from a host one and kept from
+// inheriting the host's provider account usage.
+func (r *ProfileExecutionResolver) LoadDynamicProfileForExecutor(
+	ctx context.Context,
+	profileID string,
+	executorID string,
+) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForExecutor(ctx, profileID, executorID)
+}
+
+// LoadDynamicProfileForSession loads the profile with the execution environment
+// resolved from the session. It is the form every selection entry point uses, so
+// a session's executor reaches usage attribution without each caller threading it.
+func (r *ProfileExecutionResolver) LoadDynamicProfileForSession(
+	ctx context.Context,
+	profileID string,
+	sessionID string,
+) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
+}
+
+// executionEnvironment reports the candidate's execution environment for a
+// session. The executor lives on the task session rather than the agent profile,
+// so this is the only place it can be known authoritatively; an unqualified
+// session is treated as the host default, which is what an unqualified profile
+// launches on.
+// executionEnvironment reports the candidate's execution environment for a
+// session, using the single classification the runtime owns.
+func executionEnvironment(executorID string) string {
+	if dynamic.IsRemoteExecutor(executorID) {
+		return strings.TrimSpace(executorID)
+	}
+	return "local"
+}
+
+// OpenCircuit reports whether a concrete candidate's own credential binding is
+// currently paused. The settings preview uses it so a prediction accounts for
+// route health exactly as a live selection does, rather than naming a candidate
+// an actual selection would refuse.
+//
+// A candidate whose profile or binding cannot be resolved reports an unknown
+// verdict instead of a healthy one: the caller must not present an unverified
+// candidate as selectable.
+func (r *ProfileExecutionResolver) OpenCircuit(
+	ctx context.Context,
+	executionProfileID string,
+	now time.Time,
+) (open bool, known bool) {
+	if r == nil || r.engine == nil || r.profiles == nil || executionProfileID == "" {
+		return false, false
+	}
+	profile, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
+	if err != nil || profile == nil || profile.DeletedAt != nil {
+		return false, false
+	}
+	key := dynamic.ResourceKey(dynamic.ScopeProfile, executionProfileID)
+	if r.bindingResolver != nil {
+		key = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
+		)
+	}
+	return r.engine.Circuits().IsOpen(key, now), true
 }
 
 // NewConductor creates the lifecycle-facing conductor with the same engine,
@@ -197,7 +306,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if sessionID == "" {
 		sessionID = "utility:" + uuid.NewString()
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -237,7 +346,7 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	if err := r.ValidateProfile(ctx, profileID); err != nil {
 		return dynamic.RouteDecision{}, err
 	}
-	profile, err := r.loadDynamicProfile(ctx, profileID)
+	profile, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return dynamic.RouteDecision{}, err
 	}
@@ -483,7 +592,7 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 			return ProfileExecution{}, dynamic.ErrRecoveryPending
 		}
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -622,7 +731,7 @@ func (r *ProfileExecutionResolver) resolve(
 	if r.dynamic == nil || r.engine == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -738,7 +847,68 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	return agent.Name, nil
 }
 
+// SessionExecutorResolver reports the executor a session runs on. The executor
+// lives on the task session rather than the agent profile, so it is the only
+// authoritative source for whether a candidate's agent authenticates against the
+// backend host's provider account.
+//
+// A resolver that returns an empty executor keeps the host default, which is
+// what an unqualified session launches on.
+type SessionExecutorResolver func(ctx context.Context, sessionID string) (string, error)
+
+// SetSessionExecutorResolver injects the session-executor lookup. With it, every
+// selection entry point carries the execution environment into usage
+// attribution, instead of only the paths that thread an executor explicitly.
+func (r *ProfileExecutionResolver) SetSessionExecutorResolver(
+	resolve SessionExecutorResolver,
+) {
+	r.sessionExecutors = resolve
+}
+
+// sessionExecutor resolves a session's executor, degrading to empty when the
+// lookup is unavailable or fails. Degrading to the host default rather than
+// remote keeps the established behaviour for callers that cannot be classified,
+// while an executor that is positively known to be remote is never lost.
+func (r *ProfileExecutionResolver) sessionExecutor(ctx context.Context, sessionID string) string {
+	if r == nil || r.sessionExecutors == nil || sessionID == "" {
+		return ""
+	}
+	executorID, err := r.sessionExecutors(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(executorID)
+}
+
 func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profileID string) (dynamic.Profile, error) {
+	return r.loadDynamicProfileForExecutor(ctx, profileID, "")
+}
+
+// loadDynamicProfileForSession resolves the execution environment from an
+// explicit executor when the caller has one, and otherwise from the session. An
+// explicit value wins so a caller that already knows the executor is never
+// second-guessed by a lookup.
+func (r *ProfileExecutionResolver) loadDynamicProfileForSession(
+	ctx context.Context,
+	profileID string,
+	sessionID string,
+	executorID string,
+) (dynamic.Profile, error) {
+	if strings.TrimSpace(executorID) == "" {
+		executorID = r.sessionExecutor(ctx, sessionID)
+	}
+	return r.loadDynamicProfileForExecutor(ctx, profileID, executorID)
+}
+
+// loadDynamicProfileForExecutor loads the profile and marks every candidate's
+// execution environment. Passing the session's executor ID is what lets usage
+// attribution tell a host execution from a remote one; omitting it keeps the
+// host default, which is what an unqualified profile launches on.
+func (r *ProfileExecutionResolver) loadDynamicProfileForExecutor(
+	ctx context.Context,
+	profileID string,
+	executorID string,
+) (dynamic.Profile, error) {
 	if !r.enabled.Load() {
 		return dynamic.Profile{}, ErrDynamicRoutingDisabled
 	}
@@ -755,61 +925,91 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	}
 	profile := dynamic.Profile{
 		ID: profileID, Version: config.Version,
-		Candidates: make([]dynamic.Candidate, 0, len(routes)),
+		KeepModelWhileRunning: config.KeepModelWhileRunning,
+		Candidates:            make([]dynamic.Candidate, 0, len(routes)),
 	}
+	remoteExecution := executionEnvironment(executorID) != "local"
 	for _, route := range routes {
-		candidate := dynamic.Candidate{
-			ID: route.ExecutionProfileID, Enabled: route.Enabled,
-			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
-		}
-		if route.RulesJSON != "" {
-			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
-			if policyErr != nil {
-				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
-			}
-			candidate.Policies = policy
-			candidate.Rules = legacyRules
-		}
-		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
-		switch {
-		case profileErr != nil:
-			if errors.Is(profileErr, sql.ErrNoRows) || errors.Is(profileErr, store.ErrAgentProfileDeleted) {
-				candidate.Enabled = false
-			} else {
-				return dynamic.Profile{}, fmt.Errorf("load dynamic candidate %s: %w", route.ExecutionProfileID, profileErr)
-			}
-		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
-			candidate.Enabled = false
-		case r.bindingResolver != nil:
-			binding := profileCredentialBindingDescriptor(concrete)
-			candidate.BindingKey = dynamic.ResourceKey(
-				dynamic.ScopeCredential,
-				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
-			)
+		candidate, err := r.resolveDynamicCandidate(ctx, route, remoteExecution)
+		if err != nil {
+			return dynamic.Profile{}, err
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil
 }
 
-func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {
+// resolveDynamicCandidate turns one saved route into a runtime candidate. A
+// deleted or disabled concrete profile leaves the row present but disabled, so
+// the tier layout and its numbering survive an operator removing a model.
+func (r *ProfileExecutionResolver) resolveDynamicCandidate(
+	ctx context.Context,
+	route agentsettingsmodels.DynamicAgentRoute,
+	remoteExecution bool,
+) (dynamic.Candidate, error) {
+	candidate := dynamic.Candidate{
+		ID: route.ExecutionProfileID, Enabled: route.Enabled,
+		BindingKey:      dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
+		RemoteExecution: remoteExecution,
+	}
+	if route.RulesJSON != "" {
+		policy, legacyRules, selection, err := decodeDynamicRoutePolicy(route.RulesJSON)
+		if err != nil {
+			return dynamic.Candidate{}, fmt.Errorf(
+				"decode dynamic route %s: %w", route.ExecutionProfileID, err)
+		}
+		candidate.Policies = policy
+		candidate.Rules = legacyRules
+		candidate.Selection = selection
+	}
+	concrete, err := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
+	switch {
+	case err != nil:
+		if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, store.ErrAgentProfileDeleted) {
+			return dynamic.Candidate{}, fmt.Errorf(
+				"load dynamic candidate %s: %w", route.ExecutionProfileID, err)
+		}
+		candidate.Enabled = false
+	case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
+		candidate.Enabled = false
+	default:
+		// The launched model identifies which provider windows belong to this
+		// candidate, so a window scoped to another model cannot be its usage.
+		candidate.ModelID = strings.TrimSpace(concrete.Model)
+	}
+	if candidate.Enabled && r.bindingResolver != nil {
+		candidate.BindingKey = dynamic.ResourceKey(
+			dynamic.ScopeCredential,
+			r.bindingResolver.Resolve(
+				profileCredentialBindingDescriptor(concrete), route.ExecutionProfileID,
+			),
+		)
+	}
+	return candidate, nil
+}
+
+// decodeDynamicRoutePolicy splits the stored document into the failure-policy
+// half consumed by routingpolicy and the additive selection half consumed by
+// tier routing. Failure-policy evaluation never sees selection, and an absent
+// selection yields the legacy ordered defaults.
+func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, dynamic.Selection, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
 	if _, hasVersion := fields["version"]; hasVersion {
 		var document routingpolicy.Document
 		if err := json.Unmarshal([]byte(raw), &document); err != nil {
-			return routingpolicy.Document{}, nil, err
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 		}
 		if err := routingpolicy.ValidateDocument(document); err != nil {
-			return routingpolicy.Document{}, nil, err
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 		}
-		return document, nil, nil
+		return document, nil, decodeDynamicRouteSelection(fields), nil
 	}
 	var legacy map[string]dynamic.Action
 	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
 	document := routingpolicy.DefaultDocument()
 	classActions := make(map[routingerr.Class]dynamic.Action)
@@ -821,10 +1021,10 @@ func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dy
 		}
 		class := routingerr.ClassForCode(routingerr.Code(key))
 		if class != routingerr.ClassTransient && class != routingerr.ClassHard {
-			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rule %q is not a provider error code", key)
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, fmt.Errorf("legacy rule %q is not a provider error code", key)
 		}
 		if previous, ok := classActions[class]; ok && previous != action {
-			return routingpolicy.Document{}, nil, fmt.Errorf("legacy rules conflict for %s errors", class)
+			return routingpolicy.Document{}, nil, dynamic.Selection{}, fmt.Errorf("legacy rules conflict for %s errors", class)
 		}
 		classActions[class] = action
 		if class == routingerr.ClassTransient {
@@ -834,9 +1034,84 @@ func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dy
 		}
 	}
 	if err := routingpolicy.ValidateDocument(document); err != nil {
-		return routingpolicy.Document{}, nil, err
+		return routingpolicy.Document{}, nil, dynamic.Selection{}, err
 	}
-	return document, legacy, nil
+	return document, legacy, dynamic.Selection{}, nil
+}
+
+// dynamicRouteSelectionDocument is the additive selection subobject. A missing
+// or empty document is the legacy ordered configuration, not an error.
+type dynamicRouteSelectionDocument struct {
+	JoinPrevious bool                       `json:"join_previous"`
+	Tier         *dynamicRouteTierDocument  `json:"tier"`
+	Model        *dynamicRouteModelDocument `json:"model"`
+}
+
+type dynamicRouteTierDocument struct {
+	Mode      string `json:"mode"`
+	OnFailure string `json:"on_failure"`
+}
+
+type dynamicRouteModelDocument struct {
+	Cost                 string                    `json:"cost"`
+	UsageSource          string                    `json:"usage_source"`
+	ReservedUserSharePct int                       `json:"reserved_user_share_pct"`
+	Windows              []dynamicRouteUsageWindow `json:"windows"`
+}
+
+type dynamicRouteUsageWindow struct {
+	Period string                `json:"period"`
+	Unit   string                `json:"unit"`
+	Limit  string                `json:"limit"`
+	Reset  *dynamicRouteResetDoc `json:"reset"`
+}
+
+type dynamicRouteResetDoc struct {
+	Anchor   string `json:"anchor"`
+	Timezone string `json:"timezone"`
+}
+
+func decodeDynamicRouteSelection(fields map[string]json.RawMessage) dynamic.Selection {
+	raw, ok := fields["selection"]
+	if !ok {
+		return dynamic.Selection{}
+	}
+	var document dynamicRouteSelectionDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return dynamic.Selection{}
+	}
+	return document.toSelection()
+}
+
+func (d dynamicRouteSelectionDocument) toSelection() dynamic.Selection {
+	selection := dynamic.Selection{JoinPrevious: d.JoinPrevious}
+	if d.Tier != nil {
+		selection.Tier = &dynamic.TierPolicy{
+			Mode:      dynamic.TierMode(d.Tier.Mode),
+			OnFailure: dynamic.FailureDirection(d.Tier.OnFailure),
+		}
+	}
+	if d.Model != nil {
+		selection.Model = d.Model.toModelOptions()
+	}
+	return selection
+}
+
+func (d dynamicRouteModelDocument) toModelOptions() dynamic.ModelOptions {
+	options := dynamic.ModelOptions{
+		Cost:                 dynamic.CostClass(d.Cost),
+		UsageSource:          dynamic.UsageSource(d.UsageSource),
+		ReservedUserSharePct: d.ReservedUserSharePct,
+	}
+	for _, window := range d.Windows {
+		converted := dynamic.UsageWindow{Period: window.Period, Unit: window.Unit, Limit: window.Limit}
+		if window.Reset != nil {
+			converted.ResetAnchor = window.Reset.Anchor
+			converted.Timezone = window.Reset.Timezone
+		}
+		options.Windows = append(options.Windows, converted)
+	}
+	return options
 }
 
 func legacyActionPolicy(action dynamic.Action) routingpolicy.Policy {

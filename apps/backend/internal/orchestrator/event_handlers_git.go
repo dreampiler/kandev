@@ -436,7 +436,12 @@ func (s *Service) resolveEffectivePushTaskIDForSession(
 	if repositoryID != "" && !s.taskHoldsRepository(ctx, store, ownerTaskID, repositoryID) {
 		return taskID
 	}
-	s.logger.Info("redirecting push-detected PR/MR association to workspace group owner",
+	// Debug, not Info: every PR-watch reconciliation pass re-derives this
+	// redirect for each session that has a branch, so at INFO a workspace group
+	// with several members emitted one line per member per poll cycle forever
+	// without recording a single new decision. The redirect rule itself is
+	// documented above.
+	s.logger.Debug("redirecting push-detected PR/MR association to workspace group owner",
 		zap.String("from_task_id", taskID),
 		zap.String("to_task_id", ownerTaskID))
 	return ownerTaskID

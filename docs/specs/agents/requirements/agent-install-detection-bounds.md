@@ -46,6 +46,38 @@ that is already known to be unusable.
 - **AC-AGENTS-INSTALL-DETECTION-001.7:** No new configuration, setting, or
   exported API is introduced to control a detection bound.
 
+### REQ-AGENTS-INSTALL-DETECTION-002: One installation answer across surfaces
+
+**Intent:** An agent that discovery reports installed is never shown as "not
+installed" by the capability record that drives agent badges, profile panels,
+and pickers. One failed measurement, typically taken at boot under load, must
+not outlive the next successful one, and a virtual agent family that has no
+executable is never presented as an uninstalled CLI.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-INSTALL-DETECTION-002.1:** The host utility decides whether an
+  agent is installed from the same discovery sweep the discovery endpoints
+  serve. It runs the agent's own detection only when that sweep has no answer
+  for the agent.
+- **AC-AGENTS-INSTALL-DETECTION-002.2:** Every discovery sweep that reports an
+  agent available re-measures that agent's capability when its record says
+  `not_installed`. Records in any other status are left alone.
+- **AC-AGENTS-INSTALL-DETECTION-002.3:** Agents that boot left `not_installed`
+  are measured once more after a delay longer than the discovery cache TTL, so
+  the record converges even when no page triggers a sweep.
+- **AC-AGENTS-INSTALL-DETECTION-002.4:** A re-measurement that moves an agent
+  out of `not_installed` publishes the available-agents snapshot so open pages
+  update without a reload. An agent that is still not installed publishes
+  nothing.
+- **AC-AGENTS-INSTALL-DETECTION-002.5:** Concurrent callers that miss the
+  discovery cache share one sweep, and a caller that leaves does not cancel the
+  sweep the others are waiting on.
+- **AC-AGENTS-INSTALL-DETECTION-002.6:** The settings menu never marks the
+  virtual Dynamic family as not installed.
+- **AC-AGENTS-INSTALL-DETECTION-002.7:** Stopping the host utility cancels and
+  waits for every background re-measurement, and none starts afterwards.
+
 ## Migrated source detail
 
 ## Why
@@ -96,3 +128,5 @@ than intermittently.
 ## Implementation plan
 
 [Agent install detection bounds](../../../plans/agent-install-detection-bounds/plan.md)
+
+[Agent capability install status](../../../plans/agent-capability-install-status/plan.md)

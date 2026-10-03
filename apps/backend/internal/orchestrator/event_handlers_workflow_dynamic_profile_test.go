@@ -253,7 +253,11 @@ func newWorkflowOfficeDynamicProfileResolver(
 		}
 	}
 	if err := repo.CreateDynamicAgentProfile(ctx,
-		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
+		&agentsettingsmodels.DynamicAgentProfile{
+			// The documented default is on. Leaving the Go zero value here would
+			// store false, which silently turns the continuity comparison on.
+			ProfileID: dynamicProfileID, Version: 1, KeepModelWhileRunning: true,
+		},
 		[]agentsettingsmodels.DynamicAgentRoute{{
 			DynamicProfileID: dynamicProfileID, ExecutionProfileID: concreteProfileID, Enabled: true,
 		}},
@@ -371,6 +375,71 @@ type workflowDynamicCandidate struct {
 	cliPassthrough     bool
 }
 
+// newWorkflowDynamicProfileResolverWithCandidatesAndKeepModel is the shared
+// fixture with an explicit continuity preference, so the keep-on and keep-off
+// paths are exercised against the same rows.
+func newWorkflowDynamicProfileResolverWithCandidatesAndKeepModel(
+	t *testing.T,
+	dynamicProfileID string,
+	candidates []workflowDynamicCandidate,
+	keepModelWhileRunning bool,
+	engineOptions ...dynamicruntime.EngineOption,
+) *agentruntime.ProfileExecutionResolver {
+	t.Helper()
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	repo, cleanup, err := agentsettingsstore.Provide(db, db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cleanup() })
+	ctx := context.Background()
+	for _, agent := range []*agentsettingsmodels.Agent{
+		{ID: "dynamic", Name: "dynamic"},
+		{ID: "concrete-agent", Name: "concrete-agent"},
+	} {
+		if err := repo.CreateAgent(ctx, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	profiles := []*agentsettingsmodels.AgentProfile{{
+		ID: dynamicProfileID, AgentID: "dynamic", Name: "Continuity", Enabled: true,
+	}}
+	for _, candidate := range candidates {
+		profiles = append(profiles, &agentsettingsmodels.AgentProfile{
+			ID: candidate.executionProfileID, AgentID: "concrete-agent",
+			Name: candidate.executionProfileID, Enabled: true, CLIPassthrough: candidate.cliPassthrough,
+		})
+	}
+	for _, profile := range profiles {
+		if err := repo.CreateAgentProfile(ctx, profile); err != nil {
+			t.Fatal(err)
+		}
+	}
+	routes := make([]agentsettingsmodels.DynamicAgentRoute, 0, len(candidates))
+	for position, candidate := range candidates {
+		routes = append(routes, agentsettingsmodels.DynamicAgentRoute{
+			DynamicProfileID:   dynamicProfileID,
+			Position:           position,
+			ExecutionProfileID: candidate.executionProfileID,
+			Enabled:            candidate.enabled,
+			RulesJSON:          candidate.rulesJSON,
+		})
+	}
+	if err := repo.CreateDynamicAgentProfile(ctx,
+		&agentsettingsmodels.DynamicAgentProfile{
+			ProfileID: dynamicProfileID, Version: 1, KeepModelWhileRunning: keepModelWhileRunning,
+		},
+		routes,
+	); err != nil {
+		t.Fatal(err)
+	}
+	return agentruntime.NewProfileExecutionResolver(repo, dynamicruntime.NewEngine(engineOptions...), true)
+}
+
 func newWorkflowDynamicProfileResolverWithCandidates(
 	t *testing.T,
 	dynamicProfileID string,
@@ -422,7 +491,11 @@ func newWorkflowDynamicProfileResolverWithCandidates(
 		})
 	}
 	if err := repo.CreateDynamicAgentProfile(ctx,
-		&agentsettingsmodels.DynamicAgentProfile{ProfileID: dynamicProfileID, Version: 1},
+		&agentsettingsmodels.DynamicAgentProfile{
+			// The documented default is on. Leaving the Go zero value here would
+			// store false, which silently turns the continuity comparison on.
+			ProfileID: dynamicProfileID, Version: 1, KeepModelWhileRunning: true,
+		},
 		routes,
 	); err != nil {
 		t.Fatal(err)

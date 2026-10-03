@@ -470,6 +470,71 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
+#### Group candidates into tiers
+
+Each candidate row has an `=` control between its up and down arrows. Turn it on
+to join that row with the row above it. Joined rows form one tier, shown as a
+numbered group, and only the tier's first row carries its selection settings.
+The first row's `=` control is disabled because it has no row above it.
+
+A tier selects among its own rows and never reaches into another tier:
+
+| Selection | Behavior |
+| --- | --- |
+| **Ordered** | Uses the row order as written. This is the default. |
+| **Lowest usage pace** | Prefers the row with the lowest ratio of used allowance to elapsed window. |
+| **Lowest cost** | Prefers **Free**, then **Subscription**, then **Metered**. |
+
+Tiers are always tried in list order. There is no profile-wide selection mode.
+
+Each row also has a **When the candidate fails** setting for its tier:
+
+- **Next candidate in this tier** tries the tier's remaining rows using its
+  selection rule, then advances to later tiers.
+- **Next tier** skips the rest of the tier and advances directly.
+
+Reordering, joining, splitting, and removing keep model settings with their
+concrete candidate. Joining a row uses the tier above it; splitting copies the
+tier settings to both new heads so neither loses them. Moving a row across a tier
+boundary clears the affected joins rather than silently joining two rows that
+were never related. Tier numbers close up, and an empty group never survives.
+
+#### Describe each candidate's cost and usage
+
+**Model settings** on a row configure cost class, usage source, manual windows,
+and a reserved share. They belong to that candidate alone, unlike tier settings.
+
+- **Usage source: Automatic** reads that candidate's own account usage for
+  Claude and Codex. A binding the provider does not support stays unknown; it is
+  never replaced with another account's usage.
+- **Usage source: Manual limits** sums the usage Kandev recorded for that
+  candidate inside windows you define: 5 hours, a day, a week, or a calendar
+  month, measured in money or tokens, with a reset anchor and timezone. A monthly
+  plan resets on the calendar month, not a fixed 30 days.
+- **No usage source** leaves usage unknown. Under **Lowest usage pace** an
+  unknown row sorts after known ones; under **Lowest cost** its cost class still
+  decides.
+
+The recorded total is a lower bound: it covers what Kandev observed, which is not
+necessarily the provider's own remaining quota.
+
+**Reserved share (%)** defaults to `0`, so nothing is held back until you set it.
+A positive share stops Kandev choosing that candidate once recorded usage
+reaches the remainder, leaving that capacity for you. It is shown separately
+from observed usage and never changes how pace is calculated. It needs a usage
+source to be observable, so it is unavailable until you select one.
+
+The profile-level **Keep the chosen model while work runs** switch is on by
+default. With it on, usage changes and newly available capacity do not move
+running work to a different model; Kandev compares candidates again at a new
+session or at an eligible failure. The preference is stored per profile and
+travels with save, reload, and duplication.
+
+**Would choose now** shows which candidate a new selection would pick right now,
+with its tier, reason, and the usage, elapsed, and pace figures behind the
+choice. It is a prediction for the next selection, not a promise to switch a
+running session, and it never saves settings or starts work.
+
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
