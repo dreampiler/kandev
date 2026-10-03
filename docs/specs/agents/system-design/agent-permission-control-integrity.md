@@ -432,6 +432,12 @@ or on network access. Backend integration coverage asserts the same contract at
 
 ## Failure modes
 
+- Startup checks the current session's select option with category `mode`, or
+  its legacy available-mode list when no mode config option exists. If the
+  requested value is absent, it sends no mode request and retains the provider
+  default with a structured warning naming requested and effective modes. An
+  unknown catalog uses the normal application and confirmation path. Manual
+  mode changes and context reset keep their existing validation behavior.
 - An authoritative settings response can confirm a mode without notifications.
   Without either source, an explicit start mode remains unconfirmed and the
   first prompt stays blocked with a visible reason.

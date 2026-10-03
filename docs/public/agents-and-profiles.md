@@ -343,7 +343,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
 | Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
 | Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
-| Mode                         | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. An explicit mode must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
+| Mode                         | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. If the advertised catalog excludes the requested mode, startup retains the provider default and logs a warning. Supported explicit modes must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
 | Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
 | CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
 | Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
@@ -396,6 +396,11 @@ profiles in the order that Kandev must try them. The logical dynamic profile
 stays selected in the task and utility binding, while each launch uses one
 concrete candidate behind the scenes. Candidates must be enabled, launchable
 profiles. Dynamic profiles and rich Office profiles cannot be candidates.
+
+Switching candidates uses the new candidate's model and mode defaults. Saved
+provider settings and user overrides from the previous candidate are cleared.
+Retrying the same candidate preserves those settings, including a model you
+selected in the session.
 
 Use the **Dynamic agents** card at the top of **Settings > Agents** to create
 and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
