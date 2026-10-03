@@ -102,6 +102,7 @@ function PreviewSummary({
     );
   }
 
+  const selected = preview.considered.find((candidate) => candidate.selected);
   return (
     <div className="grid min-w-0 gap-2" data-testid="dynamic-preview-ready">
       <p className="text-sm font-medium">
@@ -119,16 +120,33 @@ function PreviewSummary({
           </span>
         ) : null}
       </div>
-      <ul className="grid gap-1">
-        {preview.considered.map((candidate) => (
+      {selected ? (
+        <ul className="grid gap-1" data-testid="dynamic-preview-selected">
           <PreviewCandidateRow
-            key={candidate.execution_profile_id}
-            candidate={candidate}
-            label={labelFor(candidate.execution_profile_id)}
+            candidate={selected}
+            label={labelFor(selected.execution_profile_id)}
             usageComplete={preview.usage_complete}
           />
-        ))}
-      </ul>
+        </ul>
+      ) : null}
+      {/* Usage belongs to each profile and is listed once under Settings >
+          Agents; the full comparison stays available on demand. */}
+      <details className="text-xs" data-testid="dynamic-preview-all-candidates">
+        <summary className="cursor-pointer text-muted-foreground">
+          {t("agents:dynamicPreviewCompareCandidates")}
+        </summary>
+        <ul className="mt-1 grid gap-1">
+          {preview.considered.map((candidate) => (
+            <PreviewCandidateRow
+              key={candidate.execution_profile_id}
+              candidate={candidate}
+              label={labelFor(candidate.execution_profile_id)}
+              usageComplete={preview.usage_complete}
+            />
+          ))}
+        </ul>
+        <p className="mt-1 text-muted-foreground">{t("agents:dynamicPreviewUsageOnAgents")}</p>
+      </details>
     </div>
   );
 }

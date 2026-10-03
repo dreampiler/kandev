@@ -71,6 +71,11 @@ export type DynamicModelCostClass = "free" | "subscription" | "metered";
 export type DynamicModelUsageSource = "automatic" | "manual" | "none";
 export type DynamicUsageWindowPeriod = "five_hour" | "day" | "week" | "month";
 export type DynamicUsageWindowUnit = "money" | "tokens";
+/**
+ * `account` sums the recorded usage of every profile on the same provider
+ * account, for quotas a provider counts across all of an account's models.
+ */
+export type DynamicUsageWindowScope = "candidate" | "account";
 
 /**
  * One candidate row's tier and model options. `tier` is present only on a
@@ -100,6 +105,8 @@ export type DynamicUsageWindow = {
   /** Positive decimal string, so a money allowance keeps subcent precision. */
   limit: string;
   reset: DynamicUsageReset;
+  /** Absent means the candidate's own recorded usage. */
+  scope?: DynamicUsageWindowScope;
 };
 
 export type DynamicUsageReset = {

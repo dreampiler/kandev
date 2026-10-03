@@ -1,6 +1,6 @@
 ---
 created: 2026-10-03
-status: in_progress
+status: done
 requirements:
   - REQ-COSTS-PROVIDER-USAGE-001
   - REQ-COSTS-PROVIDER-USAGE-002
@@ -34,7 +34,7 @@ usage endpoint answered 200 with a weekly window.
 ## Work orders
 
 - [x] [Task 01: Backend usage sources and list API](task-01-backend-usage-sources.md)
-- [ ] [Task 02: Usage on the agents settings list](task-02-agents-list-usage.md) (depends on Task 01)
+- [x] [Task 02: Usage on the agents settings list](task-02-agents-list-usage.md) (depends on Task 01)
 
 ## ASCII UI preview
 

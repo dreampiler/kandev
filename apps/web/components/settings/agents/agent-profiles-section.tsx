@@ -29,6 +29,7 @@ import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { AgentProfileUsageLine } from "./agent-profile-usage";
 
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
@@ -314,6 +315,7 @@ function ProfileRowCard({
             </Badge>
             {profile.mode && <Badge variant="secondary">{profile.mode}</Badge>}
           </div>
+          <AgentProfileUsageLine profileId={profile.id} />
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
           {canManage &&

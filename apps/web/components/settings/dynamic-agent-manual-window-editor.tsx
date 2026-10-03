@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type {
   DynamicUsageWindow,
   DynamicUsageWindowPeriod,
+  DynamicUsageWindowScope,
   DynamicUsageWindowUnit,
 } from "@/lib/types/agent-profile";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
@@ -80,6 +81,7 @@ export function ManualWindowEditor({
         </div>
         <WindowUnitSelect window={window} onChange={onChange} />
       </div>
+      <WindowScopeSelect window={window} onChange={onChange} />
       <div className="grid gap-2">
         <Label htmlFor={`window-limit-${window.period}`}>{t("agents:dynamicWindowLimit")}</Label>
         <Input
@@ -159,6 +161,41 @@ function WindowUnitSelect({
         <SelectContent>
           <SelectItem value="money">{t("agents:dynamicWindowUnitMoney")}</SelectItem>
           <SelectItem value="tokens">{t("agents:dynamicWindowUnitTokens")}</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function WindowScopeSelect({
+  window,
+  onChange,
+}: {
+  window: DynamicUsageWindow;
+  onChange: (window: DynamicUsageWindow) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={`window-scope-${window.period}`}>{t("agents:dynamicWindowScope")}</Label>
+      <Select
+        value={window.scope ?? "candidate"}
+        onValueChange={(value) => {
+          const scope = value as DynamicUsageWindowScope;
+          const { scope: _previous, ...rest } = window;
+          onChange(scope === "account" ? { ...rest, scope } : rest);
+        }}
+      >
+        <SelectTrigger
+          id={`window-scope-${window.period}`}
+          className={settingsControlClassName("w-full")}
+          aria-label={t("agents:dynamicWindowScope")}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="candidate">{t("agents:dynamicWindowScopeCandidate")}</SelectItem>
+          <SelectItem value="account">{t("agents:dynamicWindowScopeAccount")}</SelectItem>
         </SelectContent>
       </Select>
     </div>

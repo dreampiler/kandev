@@ -1,7 +1,7 @@
 ---
 id: "02-agents-list-usage"
 title: "Show provider usage on the agents settings list"
-status: todo
+status: done
 wave: 2
 depends_on:
   - "01-backend-usage-sources"
@@ -55,4 +55,11 @@ cd apps/web && pnpm exec vitest run <changed test files>
 
 ## Results
 
-Pending.
+- Profile rows render `AgentProfileUsageLine`, which reads one shared list per
+  page (`useAgentProfileUsage`) refreshed at most once a minute.
+- Manual windows offer "This candidate" or "Whole account"; the scope
+  round-trips through read and save.
+- The dynamic preview shows the selected candidate and reason, with the full
+  comparison behind a disclosure that points to Settings > Agents.
+- `pnpm run typecheck`, `pnpm run i18n:check`, eslint and prettier on the
+  changed files, and vitest over the changed and adjacent settings tests pass.
