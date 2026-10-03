@@ -415,6 +415,52 @@ func TestClassify_OpenCodeCreditRuleRejectsUnrelatedText(t *testing.T) {
 	}
 }
 
+func TestClassify_OpenCodeGoUsageLimitExceededIsHighConfidenceQuota(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		Stderr:     "AI_APICallError: Go usage limit exceeded",
+	})
+	if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard {
+		t.Fatalf("classification = %+v, want high-confidence hard quota_limited", e)
+	}
+	if e.ClassifierRule != "opencode.acp.go_usage_limit.v1" {
+		t.Fatalf("classifier rule = %s, want opencode.acp.go_usage_limit.v1", e.ClassifierRule)
+	}
+	if !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
+		t.Fatalf("Go usage limit recovery flags violated: %+v", e)
+	}
+	if e.ResetHint != nil {
+		t.Fatalf("ResetHint = %v, want none for a notice without a reset time", e.ResetHint)
+	}
+}
+
+func TestClassify_OpenCodeGoUsageLimitKeepsStderrResetHint(t *testing.T) {
+	resetInjection()
+	resetAt := time.Date(2026, 10, 3, 15, 19, 0, 0, time.UTC)
+	e := Classify(Input{
+		Phase:      PhaseStreaming,
+		ProviderID: "opencode-acp",
+		ResetHint:  &resetAt,
+		Stderr:     "AI_APICallError: Go usage limit exceeded\nAI_APICallError: 5-hour usage limit reached. Resets in 4hr 19min.",
+	})
+	if e.Code != CodeQuotaLimited || e.ClassifierRule != "opencode.stderr.usage_limit.v1" {
+		t.Fatalf("classification = %+v, want the detailed stderr usage-limit rule", e)
+	}
+	if e.ResetHint == nil || !e.ResetHint.Equal(resetAt) {
+		t.Fatalf("ResetHint = %v, want stderr reset %v", e.ResetHint, resetAt)
+	}
+}
+
+func TestClassify_GoUsageLimitRuleIsOpenCodeOnly(t *testing.T) {
+	resetInjection()
+	e := Classify(Input{Phase: PhaseStreaming, ProviderID: "codex-acp", Stderr: "AI_APICallError: Go usage limit exceeded"})
+	if e.Code == CodeQuotaLimited || e.ClassifierRule == "opencode.acp.go_usage_limit.v1" {
+		t.Fatalf("other providers must not use the OpenCode Go rule: %+v", e)
+	}
+}
+
 func TestClassify_OpenCodePaymentRequiredNeedsUserAction(t *testing.T) {
 	resetInjection()
 	cases := []struct {
