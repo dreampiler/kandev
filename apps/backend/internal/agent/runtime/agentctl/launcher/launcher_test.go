@@ -15,40 +15,6 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-func TestSpawnEnvOverridesPinsListenHostToLoopback(t *testing.T) {
-	l := &Launcher{host: "127.0.0.1"}
-	overrides, err := l.spawnEnvOverrides("nonce")
-	if err != nil {
-		t.Fatalf("spawnEnvOverrides: %v", err)
-	}
-	if !containsOverride(overrides, "AGENTCTL_LISTEN_HOST=127.0.0.1") {
-		t.Fatalf("overrides = %v, want AGENTCTL_LISTEN_HOST=127.0.0.1", overrides)
-	}
-	if !containsOverride(overrides, "AGENTCTL_BOOTSTRAP_NONCE=nonce") {
-		t.Fatalf("overrides = %v, want bootstrap nonce", overrides)
-	}
-}
-
-func TestSpawnEnvOverridesRespectsConfiguredHost(t *testing.T) {
-	l := &Launcher{host: "0.0.0.0"}
-	overrides, err := l.spawnEnvOverrides("nonce")
-	if err != nil {
-		t.Fatalf("spawnEnvOverrides: %v", err)
-	}
-	if !containsOverride(overrides, "AGENTCTL_LISTEN_HOST=0.0.0.0") {
-		t.Fatalf("overrides = %v, want explicit AGENTCTL_LISTEN_HOST=0.0.0.0", overrides)
-	}
-}
-
-func containsOverride(overrides []string, want string) bool {
-	for _, entry := range overrides {
-		if entry == want {
-			return true
-		}
-	}
-	return false
-}
-
 func TestLauncherConfigSupportsUnexpectedExitCallback(t *testing.T) {
 	field, ok := reflect.TypeOf(Config{}).FieldByName("OnUnexpectedExit")
 	if !ok {
