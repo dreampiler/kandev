@@ -185,6 +185,12 @@ subscription/metered without usable windows stays unknown. Circuit eligibility i
 including free candidates. The existing Kandev one-minute or trusted-reset
 backoff remains; no external escalating-backoff policy is imported.
 
+Usage limits of providers that meter each model (OpenCode Go, free
+models) suspend only that model; OpenCode Go blocks without a known reset use
+2h, 2h, 2h, 24h and then the next monthly reset, and real output clears the
+count. A fully consumed observed usage window or an operator-entered provider
+block supplies a known end. Free models are never covered by a provider block.
+
 Cost order is free, subscription, metered, then unknown
 legacy classification; row order breaks ties within a class. This reflects
 configured marginal-cost classes and does not claim numerical metered-price
@@ -264,7 +270,10 @@ existing manual retry behavior. Profile edits preserve tried IDs for the active
 chain and intersect eligibility with current rows, rather than clearing history.
 If the old tier boundary cannot be reconciled after an edit, use existing manual
 recovery instead of returning to earlier rows. All-ineligible state persists the
-chain and reason across restart; no timer silently clears tried candidates.
+chain and reason across restart. Only when every enabled candidate is suspended
+does the waiting state carry the earliest suspension end; a durable timer then
+runs the retry route action, which is a fresh selection. Any other exhausted
+chain stays a manual decision.
 
 ## Continuity
 

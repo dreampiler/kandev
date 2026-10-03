@@ -36,6 +36,10 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
+	// strikes counts consecutive suspensions. Only a recorded success clears
+	// it, so a probe launch that starts but then hits the limit again still
+	// moves the next suspension up its ladder.
+	strikes int
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.
@@ -46,6 +50,7 @@ type CircuitSnapshot struct {
 	Until      time.Time
 	Code       routingerr.Code
 	ProbeUntil time.Time
+	Strikes    int
 }
 
 // CircuitPersistence stores shared resource health across backend restarts.
@@ -115,6 +120,7 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 		r.circuits[snapshot.Key] = circuit{
 			state: snapshot.State, until: snapshot.Until,
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
+			strikes: snapshot.Strikes,
 		}
 	}
 	return nil
@@ -127,8 +133,110 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.flushPendingLocked(key)
-	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code}
+	previous := r.circuits[key]
+	strikes := previous.strikes + 1
+	if previous.state == CircuitOpen && r.now().Before(previous.until) {
+		// Another attempt hit the same running suspension: it is the same
+		// incident, so it does not count again.
+		strikes = previous.strikes
+	}
+	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, strikes: strikes}
 	_ = r.persistSnapshotLocked(key)
+	r.logger.Info("dynamic resource suspended",
+		zap.String("key", key),
+		zap.String("code", string(code)),
+		zap.Time("until", until),
+		zap.Int("strikes", strikes),
+	)
+}
+
+// NextStrike returns the strike number a failure recorded now would carry.
+func (r *CircuitRegistry) NextStrike(key string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry := r.circuits[key]
+	if entry.state == CircuitOpen && r.now().Before(entry.until) {
+		return entry.strikes
+	}
+	return entry.strikes + 1
+}
+
+// RecordSuccess clears the strike count after the resource produced real
+// output. An expired or probing circuit closes as well, because the output is
+// stronger evidence than the probe launch. A circuit whose block is still
+// running stays open: a concurrent failure reopened it after this output.
+func (r *CircuitRegistry) RecordSuccess(key string) {
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok {
+		return
+	}
+	now := r.now()
+	if entry.state == CircuitOpen && now.Before(entry.until) {
+		return
+	}
+	if entry.state == CircuitClosed && entry.strikes == 0 {
+		return
+	}
+	r.flushPendingLocked(key)
+	r.circuits[key] = circuit{state: CircuitClosed}
+	_ = r.persistSnapshotLocked(key)
+	r.logger.Info("dynamic resource suspension cleared after output",
+		zap.String("key", key),
+		zap.Int("previous_strikes", entry.strikes),
+	)
+}
+
+// ResourceState is the read-only health of one resource circuit.
+type ResourceState string
+
+const (
+	// ResourceAvailable means no suspension applies.
+	ResourceAvailable ResourceState = "none"
+	// ResourceWaiting means a suspension is running until Until.
+	ResourceWaiting ResourceState = "waiting"
+	// ResourceExpired means the suspension ended and the next selection may
+	// claim the probe.
+	ResourceExpired ResourceState = "expired"
+	// ResourceProbing means another selection holds the probe until Until.
+	ResourceProbing ResourceState = "probing"
+)
+
+// ResourceStatus describes one circuit without mutating it.
+type ResourceStatus struct {
+	State   ResourceState
+	Until   time.Time
+	Code    routingerr.Code
+	Strikes int
+}
+
+// Inspect reports a circuit's health at now. It takes no probe lease, so a
+// preview can tell an expired suspension from a running one while IsOpen keeps
+// answering open for both until a selection claims the probe.
+func (r *CircuitRegistry) Inspect(key string, now time.Time) ResourceStatus {
+	if key == "" {
+		return ResourceStatus{State: ResourceAvailable}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed {
+		return ResourceStatus{State: ResourceAvailable, Strikes: entry.strikes}
+	}
+	status := ResourceStatus{Code: entry.code, Strikes: entry.strikes}
+	switch {
+	case entry.state == CircuitHalfOpen && now.Before(entry.probeUntil):
+		status.State, status.Until = ResourceProbing, entry.probeUntil
+	case now.Before(entry.until):
+		status.State, status.Until = ResourceWaiting, entry.until
+	default:
+		status.State, status.Until = ResourceExpired, entry.until
+	}
+	return status
 }
 
 func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
@@ -185,6 +293,8 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	r.flushPendingLocked(lease.Key)
 	entry.probeUntil = time.Time{}
 	if success {
+		// A successful launch only proves the process started. The strike
+		// count survives until RecordSuccess sees real output.
 		entry.state = CircuitClosed
 		entry.until = time.Time{}
 		entry.code = ""
@@ -241,7 +351,7 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	}
 	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
 		Key: key, State: entry.state, Until: entry.until,
-		Code: entry.code, ProbeUntil: entry.probeUntil,
+		Code: entry.code, ProbeUntil: entry.probeUntil, Strikes: entry.strikes,
 	})
 	if err != nil {
 		_, alreadyPending := r.pending[key]

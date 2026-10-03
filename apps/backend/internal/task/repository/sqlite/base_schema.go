@@ -205,6 +205,15 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			until_at TIMESTAMP,
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
+			strikes INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_provider_limits (
+			provider TEXT PRIMARY KEY,
+			monthly_reset_at TIMESTAMP,
+			monthly_reset_timezone TEXT NOT NULL DEFAULT '',
+			block_until TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL
 		);
 

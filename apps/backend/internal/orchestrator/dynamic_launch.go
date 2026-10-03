@@ -983,7 +983,19 @@ func (s *Service) prepareDynamicFailureEvidence(
 	if !s.clearStreakAfterCurrentClassifiedFailure(ctx, data, session) {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
-	return dynamicruntime.UnclassifiedFailureEvidence{}, classified.FallbackAllowed && dynamicPreResultSafe(data)
+	eligible := classified.FallbackAllowed && dynamicPreResultSafe(data)
+	if !eligible && isUsageLimitFailure(classified) {
+		// The attempt stays with the operator because it already produced
+		// output, but the exhausted resource is still suspended so the next
+		// selection does not choose it again.
+		s.profileExecutionResolver.RecordResourceFailure(ctx, session.ExecutionProfileID, classified)
+	}
+	return dynamicruntime.UnclassifiedFailureEvidence{}, eligible
+}
+
+func isUsageLimitFailure(classified *routingerr.Error) bool {
+	return classified != nil &&
+		(classified.Code == routingerr.CodeQuotaLimited || classified.Code == routingerr.CodeRateLimited)
 }
 
 func (s *Service) prepareUnclassifiedFailureEvidence(

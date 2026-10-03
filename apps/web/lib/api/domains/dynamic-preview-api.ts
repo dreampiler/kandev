@@ -27,6 +27,14 @@ export type DynamicPreviewCandidate = {
   elapsed_floor_used: boolean;
   cost_class?: string;
   reserved_share_pct: number;
+  /**
+   * waiting: blocked until suspended_until. probing: another selection is
+   * retrying it now. expired: the block ended and the next selection retries it.
+   */
+  suspension_state?: "waiting" | "probing" | "expired";
+  suspended_until?: string;
+  suspension_scope?: "model" | "credential" | "provider";
+  suspension_source?: "failure" | "manual";
 };
 
 export type DynamicPreviewResponse = {
