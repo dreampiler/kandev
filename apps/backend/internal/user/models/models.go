@@ -45,6 +45,23 @@ func NormalizeStartupPage(value string) string {
 	return StartupPageTaskOverview
 }
 
+// Office overview scopes. "office" (default) keeps the overview to the
+// caller's Office workspaces; "reachable" widens it to every workspace the
+// caller can already open. Either way the workspace list stays caller-scoped.
+const (
+	OfficeOverviewScopeOffice    = "office"
+	OfficeOverviewScopeReachable = "reachable"
+)
+
+// NormalizeOfficeOverviewScope returns the canonical overview scope:
+// reachable is accepted as-is, anything else is coerced to office.
+func NormalizeOfficeOverviewScope(value string) string {
+	if value == OfficeOverviewScopeReachable {
+		return value
+	}
+	return OfficeOverviewScopeOffice
+}
+
 const (
 	LastSeenDisplayAbsolute = "absolute"
 	LastSeenDisplayRelative = "relative"
@@ -184,8 +201,9 @@ type UserSettings struct {
 	TerminalLinkBehavior              string                            `json:"terminal_link_behavior"` // "new_tab" | "browser_panel"
 	TerminalFontFamily                string                            `json:"terminal_font_family"`
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
-	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
-	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	ChangesPanelLayout                string                            `json:"changes_panel_layout"`  // "flat" | "tree"
+	LastSeenDisplay                   string                            `json:"last_seen_display"`     // "absolute" | "relative"
+	OfficeOverviewScope               string                            `json:"office_overview_scope"` // "office" | "reachable"
 	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`

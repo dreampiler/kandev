@@ -3,6 +3,8 @@ status: draft
 system: office
 requirements:
   - REQ-OFFICE-WORKSPACE-OVERVIEW-001
+  - REQ-OFFICE-WORKSPACE-OVERVIEW-002
+  - REQ-OFFICE-WORKSPACE-OVERVIEW-003
 created: 2026-09-29
 owners:
   - kandev
@@ -12,7 +14,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design defines the read-only overview for several Office workspaces.
+This design defines the read-only overview for several workspaces.
 The Office system owns the aggregate view. The task service owns workspace visibility. The task and Office repositories own their existing data.
 
 ## Requirement mapping
@@ -20,6 +22,8 @@ The Office system owns the aggregate view. The task service owns workspace visib
 | Requirement | Design section |
 | --- | --- |
 | `REQ-OFFICE-WORKSPACE-OVERVIEW-001` | Components, control flow, and security |
+| `REQ-OFFICE-WORKSPACE-OVERVIEW-002` | Scope |
+| `REQ-OFFICE-WORKSPACE-OVERVIEW-003` | Overview sections, statuses, and resource use |
 
 ## Components and responsibilities
 
@@ -53,6 +57,19 @@ The overview state is not stored as a separate record. The database remains the 
 7. The page shows one card per workspace and one merged activity list. Workspace cards select a workspace through `workspaceId`.
 8. The hook refreshes the response every 30 seconds while mounted.
 
+## Scope
+
+The user setting `office_overview_scope` is stored with the other user settings. `DashboardService` reads it through `OverviewScopeSource`. The user service implements that interface without the sidebar projection. The `office` scope keeps workspaces with an Office workflow ID. The `reachable` scope keeps the whole identity-scoped list. Both start from the task service's `ListWorkspaces`. When Organizations is enabled, that list is already bounded to the caller's organization.
+
+## Overview sections, statuses, and resource use
+
+- `apps/backend/internal/office/dashboard/overview.go` builds one snapshot per caller and scope. `overview_cache.go` keeps it for 20 seconds and joins concurrent misses with `singleflight`. The cache key carries the caller because the workspace list is identity-scoped.
+- `apps/backend/internal/office/repository/sqlite/aggregate_overview.go` holds the reads. Each read takes a batch of workspace, task, or session IDs and runs on the read-only handle, one after another. Last output is one seek per live session on the `(task_session_id, author_type, created_at)` index. Step entry is one seek per open task on the `(task_id, occurred_at)` transition index. Message content and metadata are never selected.
+- Answerable questions use the task repository's `ListAnswerableClarificationsForSessions`. It shares the inbox's answerable predicate and bounds the grouped scan to the live sessions of the snapshot.
+- `overview_status.go` holds every time limit in `defaultOverviewThresholds`. It judges each open task from task and session states. Each reason is a code with values.
+- `GET /api/v1/office/workspaces/aggregate/tasks` and `GET /api/v1/office/workspaces/aggregate/running` filter the same snapshot. The tasks route answers 404 for a workspace outside the snapshot. Only the queue list reads the head of each queue, once per snapshot.
+- The page loads lists only while expanded. `use-workspace-aggregate.ts` and `use-overview-list.ts` refresh every 30 seconds, and only while the document is visible.
+
 ## Failure and recovery
 
 If the workspace lister is not configured, the endpoint returns HTTP 503. If a repository read fails, the endpoint returns HTTP 500.
@@ -74,3 +91,5 @@ The dashboard service takes its workspace list from the task service. It does no
 ## Observability
 
 The endpoint uses the existing Office HTTP logging and error reporting. It adds no metric or log identity labels.
+
+Automation-created tasks carry `automation_id` in task metadata. The bounded automation-task query extracts only this identifier through the database dialect helper. Automation events open the originating workspace automation settings, while legacy rows without an identifier retain their task link.

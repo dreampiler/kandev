@@ -77,6 +77,7 @@ type UserSettingsDTO struct {
 	TerminalFontSize                  int                                     `json:"terminal_font_size"`
 	ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 	LastSeenDisplay                   string                                  `json:"last_seen_display"`
+	OfficeOverviewScope               string                                  `json:"office_overview_scope"`
 	AgentTabCloseBehavior             string                                  `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                    `json:"app_status_bar_enabled"`
@@ -195,6 +196,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout                *string                            `json:"changes_panel_layout,omitempty"`
 	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
+	OfficeOverviewScope               *string                            `json:"office_overview_scope,omitempty"`
 	AgentTabCloseBehavior             *string                            `json:"agent_tab_close_behavior,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
@@ -397,6 +399,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontSize:                  settings.TerminalFontSize,
 		ChangesPanelLayout:                settings.ChangesPanelLayout,
 		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		OfficeOverviewScope:               models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
