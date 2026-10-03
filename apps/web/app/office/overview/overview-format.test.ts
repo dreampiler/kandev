@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { i18n, t } from "@/lib/i18n";
+import { i18n } from "@/lib/i18n";
 import { durationFromMinutes, queueStatusLabel, reasonText, statusLabel } from "./overview-format";
+
+const t = i18n.getFixedT(null, "translation");
 
 describe("overview reason and status copy", () => {
   afterEach(async () => {

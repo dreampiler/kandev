@@ -3,6 +3,8 @@ created: 2026-09-29
 status: complete
 requirements:
   - REQ-OFFICE-WORKSPACE-OVERVIEW-001
+  - REQ-OFFICE-WORKSPACE-OVERVIEW-002
+  - REQ-OFFICE-WORKSPACE-OVERVIEW-003
 system_design:
   - ../../specs/office/system-design/workspace-overview.md
 ---
@@ -51,6 +53,11 @@ The phone layout stacks the same workspace cards and activity rows. Each row rem
 ## Work order
 
 - [Task 01: Add the read-only workspace overview](task-01-cross-workspace-overview.md)
+- [Task 02: Extend scope, sections, and lazy lists](task-02-overview-sections.md)
+
+## Expanded overview preview
+
+`UI-02` extends the loaded page with an Office-only or reachable-workspace scope picker. Six system cards show uptime, active tasks, running AI sessions, queued messages, human-action items, and blocked model accounts. Task, session, and queue cards open separate inline lists. Each workspace card shows six metrics, problem counts, parent groups, and an expandable task table. Human-action items, the last 24 hours, and model health follow. On phone layouts the same sections stack vertically. Links open the workspace, exact task/session, inbox, automation, or agent profile they describe.
 
 ## Verification strategy
 
