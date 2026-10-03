@@ -19,10 +19,9 @@ var shortMonthNames = [...]string{
 	"jul", "aug", "sep", "oct", "nov", "dec",
 }
 
-// parseResetHint extracts a provider-supplied retry time from free text. It
-// returns nil when no plausible timestamp is present. The timestamp is a local
-// wall-clock time because providers render the notice in the user's locale.
-func parseResetHint(text string) *time.Time {
+// parseResetHintAt extracts a provider-supplied retry time in the specified
+// clock. A date without a year may cross from December into January.
+func parseResetHintAt(text string, location *time.Location, now time.Time) *time.Time {
 	match := resetHintPattern.FindStringSubmatch(text)
 	if match == nil {
 		return nil
@@ -35,11 +34,15 @@ func parseResetHint(text string) *time.Time {
 	if !ok {
 		return nil
 	}
-	year, ok := resetYear(match[3])
+	year, ok := resetYear(match[3], now.In(location))
 	if !ok {
 		return nil
 	}
-	hour, ok := parseIntInRange(match[4], 0, 23)
+	hourMin, hourMax := 0, 23
+	if match[7] != "" {
+		hourMin, hourMax = 1, 12
+	}
+	hour, ok := parseIntInRange(match[4], hourMin, hourMax)
 	if !ok {
 		return nil
 	}
@@ -51,7 +54,13 @@ func parseResetHint(text string) *time.Time {
 	if !ok {
 		return nil
 	}
-	parsed := time.Date(year, month, day, applyMeridiem(hour, match[7]), minute, second, 0, time.Local)
+	parsed := time.Date(year, month, day, applyMeridiem(hour, match[7]), minute, second, 0, location)
+	if parsed.Year() != year || parsed.Month() != month || parsed.Day() != day {
+		return nil
+	}
+	if match[3] == "" && now.In(location).Month() == time.December && month == time.January {
+		parsed = parsed.AddDate(1, 0, 0)
+	}
 	return &parsed
 }
 
@@ -68,9 +77,9 @@ func monthFromName(name string) (time.Month, bool) {
 	return 0, false
 }
 
-func resetYear(raw string) (int, bool) {
+func resetYear(raw string, now time.Time) (int, bool) {
 	if raw == "" {
-		return time.Now().Year(), true
+		return now.Year(), true
 	}
 	return parseIntInRange(raw, 1970, 9999)
 }

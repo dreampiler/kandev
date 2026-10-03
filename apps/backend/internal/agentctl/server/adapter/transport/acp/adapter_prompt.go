@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -217,7 +218,11 @@ func (a *Adapter) sendPrompt(
 		// asynchronously. Drain it before returning the error so a diagnostic
 		// agent_message_chunk cannot be overtaken by the terminal failure event.
 		a.syncNotifQueue()
-		return normalizePromptErrorAfterCancel(traceCtx, err)
+		normalized := normalizePromptErrorAfterCancel(traceCtx, err)
+		if normalized != err || traceCtx.Err() != nil || a.agentID != codexAgentID {
+			return normalized
+		}
+		return codexQuotaPromptError(turn, normalized)
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -373,6 +378,25 @@ func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error
 		return errPromptAbandonedAfterCancel
 	}
 	return err
+}
+
+func codexQuotaPromptError(turn *promptTurnState, err error) error {
+	var requestErr *acp.RequestError
+	if !errors.As(err, &requestErr) || requestErr == nil ||
+		!strings.EqualFold(strings.TrimSpace(requestErr.Message), "Internal error") {
+		return err
+	}
+	notice := turn.codexQuotaFailureNotice()
+	if notice == "" {
+		return err
+	}
+	return &providerPromptError{
+		ProviderError: streams.ProviderError{
+			Source: streams.ProviderErrorSourceCodexACP, ProviderID: codexAgentID,
+			Message: notice, OccurredAt: time.Now().UTC(),
+		},
+		Cause: err,
+	}
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {

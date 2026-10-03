@@ -345,6 +345,7 @@ type promptTurnState struct {
 	evidenceMu        sync.Mutex
 	codexSystemError  bool
 	codexCapacity     bool
+	codexQuotaNotice  string
 	cursorRetriable   bool
 	cursorRetriableAt time.Time
 	allowHandoff      bool
@@ -379,6 +380,24 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError
+}
+
+func (t *promptTurnState) setCodexQuotaNotice(message string) {
+	t.evidenceMu.Lock()
+	t.codexQuotaNotice = message
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) codexQuotaFailureNotice() string {
+	if t == nil {
+		return ""
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if !t.codexSystemError {
+		return ""
+	}
+	return t.codexQuotaNotice
 }
 
 func (t *promptTurnState) setCursorRetriable() {

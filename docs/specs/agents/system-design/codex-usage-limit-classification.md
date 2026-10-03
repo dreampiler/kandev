@@ -29,9 +29,12 @@ classification rules of other providers.
 - **`routingerr.Classify`** owns the final classification result. After the
   rule pass, it fills a missing reset hint for quota and rate errors from the
   notice text.
-- **`routingerr.parseResetHint`** owns text parsing of the retry time. It is
+- **`routingerr.parseResetHintAt`** owns text parsing of the retry time. It is
   independent of any provider rule and returns no hint when the text has no
   plausible timestamp.
+- **`agentctl` Codex ACP adapter** keeps a bounded, sanitized quota notice for
+  the current prompt. A matching `systemError` marker and generic terminal ACP
+  error project it as a typed provider error. Ordinary output clears the notice.
 - **`internal/orchestrator` manual recovery** owns recognition of the failure
   that must retain a queued prompt. It normalizes the typographic apostrophe
   before matching.
@@ -44,8 +47,9 @@ classification rules of other providers.
 ## Classification
 
 Codex ACP emits the usage-limit notice as a plain agent message and the
-terminal ACP error is only `Internal error`, so the provider rule must match
-the notice text rather than only the machine tokens. The codex quota rule
+terminal ACP error is only `Internal error`, so the adapter carries the
+correlated notice into that terminal error before the provider rule runs. The
+codex quota rule
 accepts both `you've hit your usage limit` (U+0027) and `you’ve hit your usage
 limit` (U+2019), alongside the existing machine tokens. A match yields a
 high-confidence `quota_limited` classification whose fallback is allowed, which
@@ -57,8 +61,11 @@ Providers such as codex state the retry time only in the human notice, for
 example `try again at Sep 27th, 2026 3:09 AM`, not in a structured field.
 `Classify` therefore derives the hint from the notice when the incoming
 `ResetHint` is nil and the classification is `quota_limited` or
-`rate_limited`. The derived timestamp is a local wall-clock value because the
-provider renders the notice in the user's locale.
+`rate_limited`. Codex's observed retry clock is GMT; its timestamp is parsed
+as UTC rather than using the backend host's local timezone. Other providers
+retain their local-clock interpretation. Invalid calendar dates and 12-hour
+clock values produce no hint; a yearless January date seen in December rolls
+into the next year.
 
 A structured `ResetHint` supplied by the adapter always wins: text parsing runs
 only when the field is absent. When the text contains no plausible timestamp,
@@ -70,7 +77,8 @@ Manual recovery inspects the prompt error text to decide whether a queued
 prompt must be retained. Because codex renders the notice with a typographic
 apostrophe, recovery normalizes U+2019 to U+0027 before matching, so both
 `usageLimitExceeded` and `you've hit your usage limit` are recognized
-regardless of the apostrophe form.
+regardless of the apostrophe form. The adapter's correlated terminal error
+contains the sanitized notice instead of the generic ACP error text.
 
 ## Failure and recovery
 

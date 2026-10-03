@@ -298,6 +298,19 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	}
 	systemError := event.Type == streams.EventTypeSessionInfo && codexSystemErrorMeta(event.SessionMeta)
 	capacity := event.Type == streams.EventTypeMessageChunk && codexModelCapacityMessage(event.Text)
+	if event.Type == streams.EventTypeMessageChunk && event.Role != acpUserRole {
+		classified := routingerr.Classify(routingerr.Input{
+			Phase: routingerr.PhasePromptSend, ProviderID: codexAgentID, Stderr: event.Text,
+		})
+		if event.ProviderDiagnosticCandidate && classified.Code == routingerr.CodeQuotaLimited &&
+			classified.Confidence == routingerr.ConfHigh {
+			turn.setCodexQuotaNotice(streams.SanitizeProviderMessage(event.Text))
+		} else if !capacity {
+			turn.setCodexQuotaNotice("")
+		}
+	} else if event.Type == streams.EventTypeToolCall || event.Type == streams.EventTypeReasoning {
+		turn.setCodexQuotaNotice("")
+	}
 	if !systemError && !capacity {
 		return false
 	}

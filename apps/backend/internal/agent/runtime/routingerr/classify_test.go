@@ -312,11 +312,33 @@ func TestClassify_CodexUsageLimitPlainText(t *testing.T) {
 			if !e.FallbackAllowed {
 				t.Fatalf("quota failure must allow fallback: %+v", e)
 			}
-			want := time.Date(2026, time.September, 27, 3, 9, 0, 0, time.Local)
+			want := time.Date(2026, time.September, 27, 3, 9, 0, 0, time.UTC)
 			if e.ResetHint == nil || !e.ResetHint.Equal(want) {
 				t.Fatalf("ResetHint = %v, want %v", e.ResetHint, want)
 			}
 		})
+	}
+}
+
+func TestParseResetHintRejectsInvalidCalendarAndClock(t *testing.T) {
+	for _, notice := range []string{
+		"try again at Feb 30th, 2026 3:09 AM",
+		"try again at Sep 27th, 2026 13:09 PM",
+		"try again at Sep 27th, 2026 0:09 AM",
+		"try again at Sep 27th, 2026 24:09",
+	} {
+		if got := parseResetHintAt(notice, time.UTC, time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)); got != nil {
+			t.Errorf("parseResetHintAt(%q) = %v, want nil", notice, got)
+		}
+	}
+}
+
+func TestParseResetHintYearlessNewYear(t *testing.T) {
+	now := time.Date(2026, time.December, 31, 23, 0, 0, 0, time.UTC)
+	want := time.Date(2027, time.January, 1, 0, 30, 0, 0, time.UTC)
+	got := parseResetHintAt("try again at Jan 1st 12:30 AM", time.UTC, now)
+	if got == nil || !got.Equal(want) {
+		t.Fatalf("reset hint = %v, want %v", got, want)
 	}
 }
 

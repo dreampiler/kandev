@@ -179,7 +179,11 @@ func Classify(in Input) *Error {
 		// Providers such as codex state the retry time only in the human
 		// notice, not in a structured field. Deriving it here lets every
 		// consumer (short retry, circuit breaker) honor it uniformly.
-		if hint := parseResetHint(in.Stderr + "\n" + in.Stdout); hint != nil {
+		location := time.Local
+		if in.ProviderID == "codex-acp" {
+			location = time.UTC
+		}
+		if hint := parseResetHintAt(in.Stderr+"\n"+in.Stdout, location, time.Now()); hint != nil {
 			e.ResetHint = hint
 		}
 	}
