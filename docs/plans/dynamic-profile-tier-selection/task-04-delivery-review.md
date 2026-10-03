@@ -270,19 +270,33 @@ above.
 
 ### Three-model review, run 3 of 3 (Opus 5.5)
 
-Not run. The `openrouter/anthropic/claude-opus-5.5` route refused the request
-with "This request would exceed your available credits given your current
-in-flight requests", and `llmgateway` and `opencode/*` routes for the same model
-are unavailable on this host (`Dev Pass credit limit reached`, `Model access is
-disabled`).
-- **Cause:** provider credit exhaustion, not a property of the review.
-- **Impact:** two of three reviews completed. The third model has not seen the
-  snapshot.
-- **Next owner:** this task, once the route has credit.
-- **Resume condition:** `opencode run -m openrouter/anthropic/claude-opus-5.5`
-  against `.rv-brief.md` completes and its findings are verified the same way.
-  The package's completion criterion for a three-model review is not met until
-  then.
+Not run. Blocked on provider funding, not on model availability.
+
+`.rv-brief.md` points at the final snapshot `e1d490931`. The
+`openrouter/anthropic/claude-opus-5.5` route is routable — a no-model readiness
+probe returned `OK` — but the full review is refused with "This request would
+exceed your available credits given your current in-flight requests." Two
+attempts were made, both exit code 1, the second after the E2E run drained
+in-flight load as the error text advises. The other two configured routes for the
+same model fail earlier still: `llmgateway/claude-opus-5-5` reports "Dev Plan
+credit limit reached. Upgrade your plan or wait for renewal on 10/7/2026" and
+`opencode/claude-opus-5-5` reports "Upstream request failed: Insufficient account
+funds".
+
+No review report was produced on any route, so there is no parser acceptance and
+no inference or `modelUsage` receipt to record. The failed attempts cost nothing;
+the one trivial readiness prompt is the only spend.
+
+- **Cause:** provider funding exhausted on all three configured Opus 5.5 routes.
+- **Impact:** the three-model review criterion is **not met**. It is not reduced
+  to two, and PR #44 stays unmerged.
+- **Next owner:** parent control, which owns the credential and cost decision.
+- **Resume condition:** with funding restored, or another already-approved
+  authenticated route confirmed, run the review once against `.rv-brief.md` at
+  `e1d490931`, then verify its findings against the code the way the first two
+  were handled, and record the actual model name, the route/inference/process
+  receipts, `modelUsage`, parser acceptance and cost. The three-model completion
+  criterion is not met until then.
 
  Formal RV, PR, runtime replacement and upstream publication were not
 performed during planning.
