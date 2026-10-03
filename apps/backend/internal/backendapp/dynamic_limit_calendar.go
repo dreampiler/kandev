@@ -46,7 +46,7 @@ func (c *dynamicLimitCalendar) ExhaustedUntil(
 ) (time.Time, bool) {
 	var until time.Time
 	for _, window := range c.observedWindows(ctx, candidate) {
-		if window.UtilizationPct < 100 || !window.ResetAt.After(now) {
+		if !window.Exhausted() || !window.ResetAt.After(now) {
 			continue
 		}
 		if window.ResetAt.After(until) {
