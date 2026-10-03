@@ -151,3 +151,36 @@ func publishRuntimeFootprint(snapshot agentruntime.RuntimeFootprintSnapshot) {
 		Complete:           snapshot.Complete,
 	})
 }
+
+// RuntimeFootprintRows returns one row per live runtime the last observation
+// found. It implements the task service's footprint provider so the read can be
+// served on the workspace-scoped HTTP surface.
+func (s *Service) RuntimeFootprintRows() []agentruntime.SessionRuntimeFootprint {
+	projection := s.RuntimeFootprint()
+	rows := make([]agentruntime.SessionRuntimeFootprint, 0, len(projection.Runtimes))
+	for _, row := range projection.Runtimes {
+		rows = append(rows, agentruntime.SessionRuntimeFootprint{
+			SessionID:           row.SessionID,
+			TaskID:              row.TaskID,
+			ExecutionID:         row.ExecutionID,
+			Runtime:             row.Runtime,
+			Status:              row.Status,
+			Processes:           row.Processes,
+			CommittedBytes:      row.CommittedBytes,
+			ResidentBytes:       row.ResidentBytes,
+			UnreadableProcesses: row.UnreadableProcesses,
+			LastActivityAt:      row.LastActivityAt,
+		})
+	}
+	return rows
+}
+
+// RuntimeFootprintComplete reports whether the last observation succeeded.
+func (s *Service) RuntimeFootprintComplete() bool {
+	return s.RuntimeFootprint().Complete
+}
+
+// RuntimeFootprintObservedAt is when the last observation was taken.
+func (s *Service) RuntimeFootprintObservedAt() time.Time {
+	return s.RuntimeFootprint().ObservedAt
+}
