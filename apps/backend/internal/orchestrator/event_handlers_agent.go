@@ -2149,7 +2149,11 @@ func (s *Service) handleQueuedMessageExecutionError(
 		// "failed to ensure session is running: context deadline exceeded")
 		// says nothing about the message itself; keep it for the next
 		// delivery trigger instead of dropping it.
-		errors.Is(err, context.DeadlineExceeded) {
+		errors.Is(err, context.DeadlineExceeded) ||
+		// The queue operation could not acquire its session admission, so it
+		// never reached queue state. Treat it like any other bounded wait:
+		// requeue for the next delivery trigger rather than losing the message.
+		errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}

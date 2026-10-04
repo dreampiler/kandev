@@ -181,6 +181,9 @@ func (h *QueueHandlers) wsSetAutoRun(ctx context.Context, msg *ws.Message) (*ws.
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
 		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg, err)
+		}
 		h.logger.Error("failed to set queue Auto-run", zap.String(fieldSessionID, req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set queue Auto-run", nil)
 	}
@@ -403,6 +406,9 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 			if errors.Is(err, messagequeue.ErrEntryNotFound) {
 				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
 			}
+			if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+				return queueAdmissionErrorResponse(msg, err)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		h.publishStatus(ctx, req.SessionID)
@@ -432,6 +438,9 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 		}
 		if isQueueIdentityError(err) {
 			return queueAccessDeniedResponse(msg), nil
+		}
+		if errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return queueAdmissionErrorResponse(msg, err)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -850,4 +859,13 @@ func (h *QueueHandlers) publishIdentityStatus(
 func isQueueIdentityError(err error) bool {
 	return errors.Is(err, messagequeue.ErrSessionIdentityMismatch) ||
 		errors.Is(err, messagequeue.ErrTaskInactive)
+}
+
+// queueAdmissionErrorResponse reports a queue operation that could not acquire
+// its session admission within the admission budget. Another admitted callback on
+// the same session is still running, so the operation did not reach queue state;
+// the result is retryable rather than a failure of the requested change.
+func queueAdmissionErrorResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeUnavailable,
+		"Session queue is busy; retry the operation", nil)
 }
