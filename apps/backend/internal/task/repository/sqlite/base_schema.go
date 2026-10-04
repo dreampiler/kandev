@@ -38,6 +38,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initSessionModelCatalogsSchema,
 		r.initDynamicRoutingSchema,
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
@@ -1082,6 +1083,32 @@ func (r *Repository) initSessionSchema() error {
 		return err
 	}
 	return r.initSubagentContextSchema()
+}
+
+// initSessionModelCatalogsSchema creates the shared provider-catalog store that
+// keeps one copy of a provider's model and config-option catalog instead of one
+// copy per task session.
+//
+// The table deliberately has no foreign key: a catalog is installation-scoped
+// evidence about a provider's advertised catalog, not session state, and it
+// must outlive the sessions that referenced it so their persisted selection
+// still resolves. Revisions are append-only (see
+// StoreSessionModelCatalog), so the id is the storage identity of one
+// observed catalog.
+func (r *Repository) initSessionModelCatalogsSchema() error {
+	_, err := r.db.ExecContext(r.migrationContext(), `
+		CREATE TABLE IF NOT EXISTS session_model_catalogs (
+			id TEXT PRIMARY KEY,
+			catalog_key TEXT NOT NULL,
+			revision BIGINT NOT NULL,
+			catalog_json TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_session_model_catalogs_key_revision
+			ON session_model_catalogs(catalog_key, revision);
+	`)
+	return err
 }
 
 // initSubagentContextSchema creates task_session_subagents, the durable

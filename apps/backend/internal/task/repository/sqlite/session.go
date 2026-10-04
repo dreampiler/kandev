@@ -1051,7 +1051,7 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		}
 	}
 
-	metadataJSON, err := json.Marshal(session.Metadata)
+	metadataJSON, err := json.Marshal(models.SessionMetadataForWrite(session.Metadata))
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
 	}
@@ -1376,6 +1376,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		session.CompletedAt = &completedAt.Time
 	}
 	if err := unmarshalSessionJSON(metadataJSON, &session.Metadata, "agent session metadata"); err != nil {
+		return nil, err
+	}
+	if err := resolveSessionModelCatalog(ctx, r, session.Metadata); err != nil {
 		return nil, err
 	}
 	if err := unmarshalSessionJSON(agentProfileSnapshotJSON, &session.AgentProfileSnapshot, "agent profile snapshot"); err != nil {
@@ -2861,7 +2864,7 @@ func (r *Repository) UpdateSessionMetadata(ctx context.Context, sessionID string
 }
 
 func marshalSessionMetadata(metadata map[string]interface{}) (string, error) {
-	metadataJSON, err := json.Marshal(metadata)
+	metadataJSON, err := json.Marshal(models.SessionMetadataForWrite(metadata))
 	if err != nil {
 		return "", fmt.Errorf("failed to serialize metadata: %w", err)
 	}
@@ -2892,6 +2895,13 @@ func (r *Repository) updateSessionMetadataJSON(
 // using the active database dialect. Unlike UpdateSessionMetadata (which does
 // a full replacement), this preserves all other metadata keys.
 func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	if key == models.SessionMetaKeyACPModelState {
+		slimmed, err := r.shareSessionModelCatalog(ctx, sessionID, value)
+		if err != nil {
+			return err
+		}
+		value = slimmed
+	}
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("failed to serialize metadata value: %w", err)
@@ -4056,7 +4066,13 @@ func (r *Repository) scanTaskSessions(ctx context.Context, rows *sql.Rows) ([]*m
 		}
 		result = append(result, session)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := resolveSessionModelCatalogs(ctx, r, result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // scanTaskSessionRow scans a single row into a TaskSession, applying all field mappings and JSON unmarshalling.

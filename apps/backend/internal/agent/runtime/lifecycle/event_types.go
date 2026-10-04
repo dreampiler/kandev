@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
@@ -722,44 +723,22 @@ func (p SessionModelSelectionWarningEventPayload) GetSessionID() string {
 
 // SessionModelsSnapshot is the persisted provider-derived state needed to
 // hydrate the task model selector before live session events reconnect.
-type SessionModelsSnapshot struct {
-	CurrentModelID            string                        `json:"current_model_id"`
-	CurrentModeID             string                        `json:"current_mode_id,omitempty"`
-	SettingsAttemptID         string                        `json:"settings_attempt_id,omitempty"`
-	SettingsPolicy            streams.SessionSettingsPolicy `json:"settings_policy,omitempty"`
-	SettingsSourceExecutionID string                        `json:"settings_source_execution_id,omitempty"`
-	SettingsSourceGeneration  uint64                        `json:"settings_source_generation,omitempty"`
-	CurrentModelGeneration    uint64                        `json:"current_model_generation,omitempty"`
-	CurrentModeGeneration     uint64                        `json:"current_mode_generation,omitempty"`
-	Models                    []streams.SessionModelInfo    `json:"models"`
-	ConfigOptions             []streams.ConfigOption        `json:"config_options,omitempty"`
-	ConfigOptionsSettled      bool                          `json:"config_options_settled,omitempty"`
-}
+//
+// The contract lives in task/models because the task SQLite repository stores
+// it and resolves its shared catalog reference; this alias keeps the runtime
+// call sites unchanged.
+type SessionModelsSnapshot = models.SessionModelsSnapshot
+
+// SessionModelCatalog is the provider-advertised static catalog a snapshot can
+// reference instead of storing its own copy.
+type SessionModelCatalog = models.SessionModelCatalog
+
+// SessionModelCatalogRef names one stored catalog revision.
+type SessionModelCatalogRef = models.SessionModelCatalogRef
 
 // LoadSessionModelsSnapshot decodes typed and JSON-rehydrated metadata values.
 func LoadSessionModelsSnapshot(raw any) (SessionModelsSnapshot, bool) {
-	if raw == nil {
-		return SessionModelsSnapshot{}, false
-	}
-	if snapshot, ok := raw.(SessionModelsSnapshot); ok {
-		return snapshot, sessionModelsSnapshotPresent(snapshot)
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return SessionModelsSnapshot{}, false
-	}
-	var snapshot SessionModelsSnapshot
-	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return SessionModelsSnapshot{}, false
-	}
-	return snapshot, sessionModelsSnapshotPresent(snapshot)
-}
-
-func sessionModelsSnapshotPresent(snapshot SessionModelsSnapshot) bool {
-	return snapshot.CurrentModelID != "" || snapshot.CurrentModeID != "" ||
-		snapshot.SettingsAttemptID != "" || snapshot.SettingsPolicy != "" ||
-		snapshot.SettingsSourceExecutionID != "" || snapshot.SettingsSourceGeneration != 0 || len(snapshot.Models) > 0 ||
-		len(snapshot.ConfigOptions) > 0 || snapshot.ConfigOptionsSettled
+	return models.LoadSessionModelsSnapshot(raw)
 }
 
 // LoadMCPAttachmentHistory decodes typed and JSON-rehydrated MCP attachment
