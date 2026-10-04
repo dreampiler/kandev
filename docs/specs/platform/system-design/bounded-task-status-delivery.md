@@ -149,6 +149,15 @@ already cached the task's workspace before deletion.
   auto-merge enabled, but it never carries the per-pull-request option list.
   Integration option updates refresh the authoritative keyed pull-request
   observations through the existing task-summary projector.
+- `launch_queue` is refreshed only from task-row sources (`task.created`,
+  `task.updated`, `task.state_changed`), `task.session.state_changed`, and
+  `message.queue.status_changed`, plus the first observation for a task with no
+  persisted summary. A ceiling deferral is written on the task row and every such
+  write publishes a task event, and the displayed capacity moves only when a
+  session enters or leaves the admitted population, so no other source can change
+  it. A source outside that set retains the last observation instead of re-reading
+  the task row and the install-wide admitted-session population; per-message and
+  per-turn traffic therefore never scales the summary's read volume.
 - A semantic no-op does not increment `revision` or emit an update.
 - For valid summaries, `TaskStatusSummary.SemanticEqual` uses the same
   canonical semantic payload as `SemanticJSON` and the repository's no-op

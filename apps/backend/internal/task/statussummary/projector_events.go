@@ -445,6 +445,23 @@ func (p *Projector) restoreCompletionGate(ctx context.Context, taskID string, st
 	return nil
 }
 
+// isLaunchQueueRefreshEvent names the sources that can change a task's launch
+// queue. A ceiling deferral is written on the task row and every such write
+// publishes a task event, and the displayed capacity only moves when a session
+// enters or leaves the admitted population, so per-message, per-turn and
+// per-activity sources cannot change it. Reloading on those would re-read the
+// task row and the install-wide admitted-session population once per tool
+// update. The set is closed: a newly subscribed source must be classified here.
+func isLaunchQueueRefreshEvent(eventType string) bool {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
+		events.TaskSessionStateChanged, events.MessageQueueStatusChanged:
+		return true
+	default:
+		return false
+	}
+}
+
 func isCompletionGateRefreshEvent(eventType string) bool {
 	switch eventType {
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
