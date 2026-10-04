@@ -1105,5 +1105,6 @@
   "overviewNeverSynced": "尚未同步",
   "overviewRefreshLabel": "自动同步周期",
   "overviewRefreshSeconds_one": "每{{seconds}}秒",
-  "overviewRefreshSeconds_other": "每{{seconds}}秒"
+  "overviewRefreshSeconds_other": "每{{seconds}}秒",
+  "overviewUsageStaleObserved": "最后已知值，读取于 {{relative}}"
 }

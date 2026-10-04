@@ -377,7 +377,7 @@ func (s *dynamicUsageSnapshot) PreviewDynamicSelection(
 			merged[candidate.ID] = dynamicruntime.IneligibleCircuit
 		}
 	}
-inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
+	inputs := dynamicruntime.RankOptions{Scores: scores, Pick: rand.IntN, LastPicked: s.lastPicked(ctx, profile)}
 	return dynamicruntime.PreviewSelectionWith(profile, inputs, merged, "", dynamicruntime.SelectionChain{}, now).
 		WithSuspensions(suspensions)
 }

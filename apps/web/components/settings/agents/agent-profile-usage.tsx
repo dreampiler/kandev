@@ -71,6 +71,13 @@ export function AgentProfileUsageView({
           {content}
         </div>
       )}
+      {usage.stale && usage.fetched_at ? (
+        <span data-testid="agent-profile-usage-stale">
+          {t("agents:profileUsageStaleObserved", {
+            relative: formatRelativeTime(usage.fetched_at, now),
+          })}
+        </span>
+      ) : null}
       <InternalUsage usage={usage} now={now} />
     </div>
   );

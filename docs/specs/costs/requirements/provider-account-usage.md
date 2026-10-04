@@ -53,6 +53,14 @@ account's consumption.
   report a bounded reason (missing credential, unauthorized, HTTP status,
   network, decode) and log it at most once per account per fifteen minutes,
   without a credential or provider response body.
+- **AC-COSTS-PROVIDER-USAGE-001.4:** When a provider returns a rate limit (HTTP status 429),
+  the system shall back off retries using `Retry-After` if supplied, or exponential
+  backoff capped at 15 minutes, suppressing redundant requests across all profiles sharing
+  that account.
+- **AC-COSTS-PROVIDER-USAGE-001.5:** While an account is in backoff, if a previous successful
+  reading exists within a bounded stale age (30 minutes), the system shall serve that
+  reading flagged as stale and display its observation timestamp, rather than showing the
+  account as unavailable.
 
 ### REQ-COSTS-PROVIDER-USAGE-002: OpenCode provider accounts
 

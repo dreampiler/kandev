@@ -90,7 +90,7 @@ func getBearerJSON(
 		return &FetchError{Provider: provider, Reason: FailureNetwork, Err: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return statusFailure(provider, resp.StatusCode)
+		return statusFailure(provider, resp.StatusCode, resp.Header)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return &FetchError{Provider: provider, Reason: FailureDecode, Err: err}

@@ -1105,5 +1105,6 @@
   "overviewNeverSynced": "Ainda não sincronizado",
   "overviewRefreshLabel": "Intervalo de sincronização automática",
   "overviewRefreshSeconds_one": "a cada {{seconds}} segundo",
-  "overviewRefreshSeconds_other": "a cada {{seconds}} segundos"
+  "overviewRefreshSeconds_other": "a cada {{seconds}} segundos",
+  "overviewUsageStaleObserved": "Último valor conhecido, lido {{relative}}"
 }

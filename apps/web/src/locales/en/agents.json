@@ -506,5 +506,6 @@
   "dynamicPreviewUsageOnAgents": "Each profile's usage is shown under Settings > Agents.",
   "dynamicTierModeRoundRobin": "Round robin",
   "profileUsageInternal": "Recorded turns on this account: 5h {{h5}}, 24h {{day}}, 7d {{week}}",
-  "profileUsageLimitHits": "Limit hits in 30 days: {{hits}}. Median at a hit: {{turns}} turns in 24h, last {{relative}}"
+  "profileUsageLimitHits": "Limit hits in 30 days: {{hits}}. Median at a hit: {{turns}} turns in 24h, last {{relative}}",
+  "profileUsageStaleObserved": "Last-known value, read {{relative}}"
 }
