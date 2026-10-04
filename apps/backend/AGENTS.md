@@ -136,6 +136,7 @@ replace state verification, installation association, or HMAC verification.
 - Idempotent by `OperationID`; session-scoped data bag via `MachineState.Data`
 
 **Agent Runtime** (`internal/agent/runtime/`) is the single seam for launching, resuming, stopping, and observing agent executions. ADR 0004 introduced this in Phase 1 of task-model-unification. The public surface is `runtime.Runtime` (`runtime.go`); a thin facade (`facade.go`) delegates to a `Backend` (satisfied by `*lifecycle.Manager`). Run-owned executions use `runtime.LaunchSpec.Owner` (`kind=run`) with durable run-session identity; admission fails closed before allocation and lifecycle registration, and `runtime.Start` rolls back failed startup while task launches keep task/session checks.
+**Foreground tool progress:** the terminal watchdog uses instance-local `agent.tool.progress` CPU/root-exit evidence with bounded 45-minute inactivity for executing tools. An exited shell's server cannot replace its foreground root. Background admission and explicit completion-signal recovery are unchanged; see the agent stall recovery design.
 
 **Run scheduling ownership:** `internal/runs/` is generic; `internal/runs/models` owns the shared run-row and run-event data contracts. Only `internal/backendapp/` constructs and owns the single `internal/runs/scheduler` and its lifecycle. Office adapters may depend on runs, but generic runs must not import `internal/office` or its subpackages. Office retains launch, causation, routing, and backpressure policy. See ADR `2026-09-26-run-contract-ownership`.
 

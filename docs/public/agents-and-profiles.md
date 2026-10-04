@@ -269,6 +269,24 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
+### Quiet tool calls
+
+A tool can perform useful work without sending new agent messages. While a tool
+is executing, Kandev checks for increasing output or observable foreground CPU
+activity. Confirmed progress keeps the turn running, including for work that
+takes longer than 45 minutes in total.
+
+If progress cannot be confirmed, an executing tool has a 45-minute inactivity
+allowance. Without an executing tool, the ordinary allowance is 15 minutes.
+Pending tools and permission requests do not obtain the longer allowance. When
+Kandev can confirm that the invoking shell has exited, a surviving background
+server does not extend that shell call's lifetime. If the shell cannot be
+identified reliably, the bounded fallback applies.
+
+The existing waiting notice and **Cancel turn** action remain available. A
+terminal inactivity failure ends the affected turn without advancing its
+workflow step. These timeouts are not configurable.
+
 ### Runtime notifications and automatic updates
 
 Kandev checks enabled, available agent runtimes in the background, including

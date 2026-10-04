@@ -430,10 +430,14 @@ type ShellExecPayload struct {
 
 // ShellExecOutput contains the result of a shell command execution.
 type ShellExecOutput struct {
-	ExitCode  *int   `json:"exit_code,omitempty"`
-	Stdout    string `json:"stdout,omitempty"`
-	Stderr    string `json:"stderr,omitempty"`
-	Truncated bool   `json:"truncated,omitempty"`
+	ProgressBytes         uint64 `json:"-"`
+	ObservedTerminalBytes uint64 `json:"-"`
+	ObservedContentBytes  uint64 `json:"-"`
+	ObservedResultBytes   uint64 `json:"-"`
+	ExitCode              *int   `json:"exit_code,omitempty"`
+	Stdout                string `json:"stdout,omitempty"`
+	Stderr                string `json:"stderr,omitempty"`
+	Truncated             bool   `json:"truncated,omitempty"`
 	// Internal stream state keeps the serialized combined flag accurate across replacements.
 	StdoutTruncated bool `json:"-"`
 	StderrTruncated bool `json:"-"`

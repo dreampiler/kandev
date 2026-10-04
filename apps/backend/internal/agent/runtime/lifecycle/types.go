@@ -352,6 +352,9 @@ type AgentExecution struct {
 	promptActivityEpoch uint64
 	lastActivityAtMu    sync.Mutex
 	activeTool          *activeTopLevelTool
+	openTools           map[string]activeTopLevelTool
+	toolRevision        uint64
+	lastToolProgressAt  time.Time
 	activeToolMu        sync.RWMutex
 
 	// Fires once on the first agent event to publish AgentRunning.
@@ -476,22 +479,43 @@ func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func() error, fun
 }
 
 type activeTopLevelTool struct {
-	ToolCallID string
-	Name       string
-	Title      string
-	Status     string
+	ToolCallID       string
+	Name             string
+	Title            string
+	Status           string
+	OutputBytes      uint64
+	OutputText       string
+	ForegroundExited bool
 }
 
 func (e *AgentExecution) setActiveTool(tool activeTopLevelTool) {
 	e.activeToolMu.Lock()
+	if e.openTools == nil {
+		e.openTools = make(map[string]activeTopLevelTool)
+	}
+	if tool.Status == toolStatusComplete || tool.Status == "completed" || tool.Status == "success" || tool.Status == toolStatusError || tool.Status == toolStatusFailed || tool.Status == "cancelled" {
+		delete(e.openTools, tool.ToolCallID)
+	} else {
+		e.openTools[tool.ToolCallID] = tool
+	}
+	e.toolRevision++
 	e.activeTool = &tool
 	e.activeToolMu.Unlock()
 }
 
 func (e *AgentExecution) clearActiveTool(toolCallID string) {
 	e.activeToolMu.Lock()
+	delete(e.openTools, toolCallID)
+	e.toolRevision++
 	if e.activeTool != nil && e.activeTool.ToolCallID == toolCallID {
 		e.activeTool = nil
+		for _, remaining := range e.openTools {
+			copy := remaining
+			e.activeTool = &copy
+			if toolIsExecuting(remaining.Status) {
+				break
+			}
+		}
 	}
 	e.activeToolMu.Unlock()
 }
@@ -499,6 +523,8 @@ func (e *AgentExecution) clearActiveTool(toolCallID string) {
 func (e *AgentExecution) resetActiveTool() {
 	e.activeToolMu.Lock()
 	e.activeTool = nil
+	e.openTools = nil
+	e.toolRevision++
 	e.activeToolMu.Unlock()
 }
 
@@ -596,8 +622,10 @@ func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bo
 }
 
 func (e *AgentExecution) armPromptActivity() {
+	e.resetActiveTool()
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastToolProgressAt = time.Time{}
 	e.agentEventSincePrompt = false
 	e.providerDiagnosticCandidate = false
 	e.providerDiagnosticText = ""

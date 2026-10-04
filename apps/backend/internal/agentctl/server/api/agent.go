@@ -361,6 +361,8 @@ func (s *Server) handleAgentStreamRequest(ctx context.Context, msg *ws.Message) 
 		return s.handleWSStderr(ctx, msg)
 	case "agent.background.probe":
 		return s.handleWSBackgroundProbe(ctx, msg)
+	case "agent.tool.progress":
+		return s.handleWSToolProgress(ctx, msg)
 	case "agent.session.set_mode":
 		return s.handleWSSetMode(ctx, msg)
 	case "agent.session.set_model":

@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-29
-updated: 2026-09-02
+updated: 2026-10-05
 owners:
   - Kandev
 ---
@@ -10,7 +10,9 @@ owners:
 
 ## Overview
 
-An agent turn can remain `RUNNING` after it stops emitting events. Silence alone is ambiguous because a legitimate long-running tool may also be quiet, but some agents know that their provider stream has failed and fail to close the ACP prompt. Users need Kandev to distinguish trustworthy terminal evidence from mere inactivity so a failed turn is not presented as healthy work.
+Quiet tools can perform legitimate work, while failed provider streams can
+leave turns `RUNNING`. Recovery distinguishes foreground progress,
+trustworthy terminal evidence, and bounded inactivity.
 
 ## Terminology
 
@@ -43,6 +45,9 @@ An agent turn can remain `RUNNING` after it stops emitting events. Silence alone
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.9:** When an execution emits only metadata frames after a prompt is dispatched, the system shall not extend the five-minute inactivity threshold; only a turn event or newly delivered user input for the current prompt shall restart it.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.10:** When a never-started prompt is classified as a launch failure, the system shall stop its agent execution so no agent process for that session remains running, and shall record the failure even when the stop fails.
 - **AC-AGENTS-AGENT-STALL-RECOVERY-001.11:** When the terminal never-started classification is applied, the session and task shall settle in `FAILED` with the launch-failure message; the teardown shall not replace that state with a cancellation state.
+
+Executing tools and prolonged inactivity follow the
+[foreground tool progress requirements](tool-stall-progress.md).
 
 ## Migrated source detail
 
@@ -97,9 +102,9 @@ task in `FAILED`.
 - A failed reconciliation does not lose the signal. Later watchdog ticks
   retry a `WAITING_FOR_INPUT` session while the matching signal remains.
 
-With the never-started classification, this is one of the two automatic
-state-changing exceptions to the advisory inactivity rule. Silence after a turn
-event, without an accepted explicit completion signal, remains advisory.
+These explicit-signal and never-started exceptions remain unchanged. Prolonged
+inactivity is also terminal under REQ-AGENTS-TOOL-STALL-PROGRESS-001; its clock
+accounts for executing tools and confirmed foreground progress.
 
 ### Correlated terminal diagnostics
 
@@ -248,9 +253,10 @@ sanitized diagnostic message for the collapsed technical-details surface.
 - **GIVEN** the never-started classification is applied, **WHEN** the session
   and task settle in `FAILED`, **THEN** the agent execution is stopped and a
   later stop request for that task does not find a live process.
-- **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
-  threshold passes and the user does not cancel, **THEN** Kandev leaves the
-  turn and process running.
+- **GIVEN** a quiet foreground tool with continuing confirmed progress,
+  **WHEN** total runtime passes the ordinary inactivity threshold, **THEN**
+  Kandev leaves the turn and process running. An unobservable tool remains
+  bounded by its 45-minute inactivity allowance.
 - **GIVEN** a current-step completion signal is at least ten minutes old and
   the tracked prompt has also been inactive for ten minutes, **WHEN** the
   session is still `RUNNING` or `STARTING`, **THEN** the watchdog settles the
@@ -296,8 +302,8 @@ sanitized diagnostic message for the collapsed technical-details surface.
 
 ## Out of scope
 
-- Automatically timing out, cancelling, or killing a turn that has already
-  produced a turn event, based only on inactivity.
+- Adding automatic retries or replacing the current conversation after a
+  prolonged-inactivity termination.
 - Making the stop path reach an execution for a task; that contract belongs
   to [task stop reachability](../../tasks/requirements/task-stop-reachability.md).
 - Making the inactivity threshold user-configurable.

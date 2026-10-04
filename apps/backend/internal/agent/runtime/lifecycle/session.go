@@ -34,7 +34,7 @@ const (
 	pendingDispatchedPromptWaitTimeout = 10 * time.Second
 
 	// stallEscalationThreshold is how long a prompt may receive no agent
-	// activity before waitForPromptDone treats the execution as unrecoverable.
+	// activity without an executing tool before the prompt is unrecoverable.
 	// The judge is activity-based (lastActivityAt), never wall time, so a long
 	// turn that keeps emitting events is not escalated. Chosen above the
 	// 5-minute advisory stall report and the 10-minute stuck-signal watchdog
@@ -43,6 +43,8 @@ const (
 	// returns ErrCancelEscalated and the session leaves the STARTING/RUNNING
 	// ceiling population.
 	stallEscalationThreshold = 15 * time.Minute
+	// Executing tools get a bounded inactivity allowance, refreshed by verified progress.
+	toolStallEscalationThreshold = 45 * time.Minute
 )
 
 // ErrSteerNotDispatched reports that a steer found no active prompt generation
@@ -1286,6 +1288,7 @@ func (sm *SessionManager) waitForPromptDone(
 	defer stallTicker.Stop()
 	stallReported := false
 	terminalReported := false
+	var terminalActivityEpoch uint64
 	startupGeneration := execution.startupAttemptSnapshot()
 
 	for {
@@ -1351,7 +1354,11 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
-			lastActivity, agentEventSeen, activityEpoch := execution.promptActivitySnapshot()
+			execution.probeToolProgress(ctx, promptGeneration, startupGeneration)
+			lastActivity, agentEventSeen, activityEpoch, toolRevision := execution.promptStallSnapshot()
+			if terminalReported && terminalActivityEpoch != activityEpoch {
+				terminalReported = false
+			}
 			elapsed := time.Since(lastActivity)
 			neverStarted := !agentEventSeen
 
@@ -1390,7 +1397,11 @@ func (sm *SessionManager) waitForPromptDone(
 			// so a real completion that arrived first wins; the receive case
 			// above then wraps the signal's cancel-release error as
 			// ErrCancelEscalated.
-			if elapsed >= stallEscalationThreshold {
+			threshold := execution.stallThreshold()
+			if elapsed >= threshold {
+				if !execution.stallSnapshotCurrent(activityEpoch, toolRevision) {
+					continue
+				}
 				// The terminal classification applies only to a prompt that
 				// produced turn events: a never-started prompt is already
 				// terminal from the five-minute never-started branch and must
@@ -1407,13 +1418,16 @@ func (sm *SessionManager) waitForPromptDone(
 						true,
 					)
 					terminalReported = true
+					terminalActivityEpoch = activityEpoch
 				}
 				sm.logger.Error("agent stall escalation: no events within stall escalation threshold; injecting synthetic completion",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),
 					zap.Bool("never_started", neverStarted))
-				execution.signalPromptCompletionForStartupGeneration(
+				execution.signalStallCompletion(
 					startupGeneration,
+					activityEpoch,
+					toolRevision,
 					PromptCompletionSignal{
 						IsError:          true,
 						Error:            "cancel escalated: agent produced no events within stall escalation threshold",

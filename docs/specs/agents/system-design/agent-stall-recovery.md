@@ -1,9 +1,11 @@
 ---
-status: draft
+status: current
 system: agents
 requirements:
   - REQ-AGENTS-AGENT-STALL-RECOVERY-001
+  - REQ-AGENTS-TOOL-STALL-PROGRESS-001
 created: 2026-09-02
+updated: 2026-10-05
 owners:
   - Kandev
 ---
@@ -27,6 +29,7 @@ reaching an execution from a task ID to
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-AGENT-STALL-RECOVERY-001` | [Prompt progress clock](#prompt-progress-clock), [Watchdog classification](#watchdog-classification), [Terminal teardown](#terminal-teardown), [Failure and recovery](#failure-and-recovery) |
+| `REQ-AGENTS-TOOL-STALL-PROGRESS-001` | [Foreground tool progress](#foreground-tool-progress) |
 
 ## Components and responsibilities
 
@@ -50,13 +53,12 @@ The published stall payload is unchanged: task, session, and execution
 identity, prompt generation, last-activity time, elapsed duration, activity
 epoch, optional active-tool identity, and the `NeverStarted` discriminator.
 
-The prompt progress timestamp is the single clock behind that payload. Exactly
-four inputs advance it:
+The genuine prompt-activity timestamp is advanced by these inputs:
 
 | Input | Meaning |
 | --- | --- |
 | Prompt dispatch | A new prompt is armed; the clock restarts and the discriminator is cleared |
-| Turn event | Assistant text, reasoning, tool call, tool update, plan, or permission request |
+| Turn event | Assistant text, reasoning, tool call, meaningful tool update, plan, or permission request |
 | Terminal completion | The prompt's own completion or error frame |
 | User steer | New user input delivered into the running turn |
 
@@ -123,9 +125,54 @@ never. No separate clock is introduced for it.
 
 ### Watchdog classification
 
-Classification is a pure read of the snapshot. An advisory stall leaves task
-state, session state, prompt admission, and process liveness untouched. A
-never-started stall is terminal.
+An advisory stall leaves task state, session state, prompt admission, and
+process liveness untouched. Never-started and prolonged-inactivity
+classifications are terminal. The latter uses the foreground-tool policy below.
+
+### Foreground tool progress
+
+The lifecycle stores current open top-level calls by tool ID, preserving
+overlapping calls and clearing them on prompt dispatch. Pending/permission
+states do not count as executing. Status transitions and newly accepted output
+are meaningful activity; repeated tool-status/cumulative-output frames are not.
+ACP normalization carries a monotonic output byte counter separately from its
+bounded display buffers.
+
+The terminal watchdog uses the later of genuine activity and validated tool
+CPU progress, with a 45-minute inactivity allowance while an executing tool
+remains open. Confirmed progress restarts this clock; there is no total-runtime
+limit. The separate CPU timestamp does not create a turn event or change the
+never-started discriminator. The existing completion-signal consumer continues
+to use genuine activity.
+
+An optional instance-local agentctl stream action, `agent.tool.progress`,
+accepts the ACP session identity and tool IDs. Agentctl binds these IDs to
+observed normalized calls, not caller-supplied PIDs or timestamps. It samples
+its own process namespace and returns `running`, `exited`, or `unknown` plus
+whether comparable CPU counters increased. Requests have a five-second budget;
+unsupported actions and observation failures supply no progress.
+
+For shell calls, association requires an exact command argument match on a
+unique new shell descended from the agent. A five-second pre-event allowance
+accounts for shell launch preceding the normalized start notification. Ambiguous
+roots remain unknown. Identity uses PID plus OS creation identity; only matched
+process identities across samples contribute CPU deltas. Windows uses Toolhelp,
+GetProcessTimes, a zero-time process wait, and a bounded hidden command-line
+query. Linux reads process identity and CPU counters from `/proc`. Other
+platforms explicitly use the bounded fallback.
+
+After a pinned invoking shell exits, agentctl never promotes a surviving server
+to foreground root. Lifecycle ignores its CPU and drain-only updates and uses
+the ordinary 15-minute foreground inactivity policy. A shell that exits before
+reliable observation stays unknown, so the fallback still terminates it after
+45 minutes without validated progress.
+
+Both sides reject observations invalidated by tool changes. Lifecycle also
+checks the client, prompt, startup, activity epoch, and open-tool revision before
+applying progress or injecting terminal completion. Process inspection holds no
+execution/activity locks across I/O. Terminal publication retains the existing
+bounded failure-first teardown path; real completion or a successor generation
+cannot be overwritten by a stale watchdog decision.
 
 ### Terminal teardown
 
