@@ -587,6 +587,10 @@ type Service struct {
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
 	foregroundActivity ForegroundActivityProvider
+	// runtimeFootprintProvider surfaces the orchestrator's last observed live
+	// agent-runtime footprint for the workspace-scoped diagnostic read. Optional;
+	// when unset that read reports no measurement rather than an empty reading.
+	runtimeFootprintProvider RuntimeFootprintProvider
 	// taskParkedProvider resolves the task-level parked_on_background_work
 	// OR-aggregate and its own monotonic revision (satisfied by the
 	// orchestrator; spec: docs/specs/disambiguate-waiting/spec.md). Carried on

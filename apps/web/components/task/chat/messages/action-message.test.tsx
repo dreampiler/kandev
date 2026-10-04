@@ -230,6 +230,27 @@ function renderActionWithStore(
 }
 
 describe("ActionMessage — transient retry (warning variant)", () => {
+  it("announces legacy retry status politely", () => {
+    renderAction(retryMessage(), "WAITING_FOR_INPUT");
+    const notice = screen.getByTestId("transient-retry-card");
+    expect(notice.getAttribute("role")).toBe("status");
+    expect(notice.getAttribute("aria-live")).toBe("polite");
+  });
+  it.each(["FAILED", "CANCELLED", "COMPLETED"] as const)(
+    "hides an orphaned continuation notice in %s after cleanup fails",
+    (state) => {
+      const message = retryMessage();
+      message.metadata = {
+        ...message.metadata,
+        recovery_mode: "continue",
+        recovery_phase: "continuing",
+      };
+      renderAction(message, state);
+      expect(screen.queryByTestId("transient-retry-card")).toBeNull();
+      expect(screen.queryByTestId(CANCEL_TEST_ID)).toBeNull();
+    },
+  );
+
   it("renders the retrying copy in amber, not red", () => {
     renderAction(retryMessage(), "WAITING_FOR_INPUT");
     const text = screen.getByLabelText("Retry countdown");
@@ -890,6 +911,49 @@ describe("ActionMessage — provider quota recovery", () => {
 
     expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
     expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — managed runtime startup recovery", () => {
+  it("shows typed early-exit cause and actual attempts in the startup recovery card", () => {
+    renderAction(
+      retryMessage({
+        type: "error",
+        content: "managed runtime startup failed",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "managed_runtime_startup",
+          startup_reason: "early_exit",
+          startup_attempts: 2,
+          error_output: "reason=early_exit attempts=2",
+          actions: [
+            {
+              type: "ws_request",
+              label: "Retry runtime",
+              test_id: MANAGED_RUNTIME_RETRY_TEST_ID,
+              params: {
+                method: SESSION_RECOVER_METHOD,
+                payload: {
+                  task_id: TEST_TASK_ID,
+                  session_id: TEST_SESSION_ID,
+                  action: "runtime_retry",
+                },
+              },
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+    );
+
+    const card = screen.getByTestId("managed-runtime-startup-recovery");
+    expect(card.textContent).toContain("Agent stopped during startup");
+    expect(card.textContent).toContain(
+      "The agent process exited before initialization. Startup was attempted 2 times.",
+    );
+    expect(screen.getAllByTestId(MANAGED_RUNTIME_RETRY_TEST_ID)).toHaveLength(1);
+    expect(screen.getByText(TECHNICAL_DETAILS).closest("details")?.open).toBe(false);
   });
 });
 

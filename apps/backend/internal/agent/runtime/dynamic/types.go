@@ -40,6 +40,13 @@ type Candidate struct {
 	ID         string
 	Enabled    bool
 	BindingKey string
+	// ModelKey identifies this candidate's model on its account. It is set only
+	// for models whose provider meters each model separately, and usage-limit
+	// failures then pause this key instead of BindingKey.
+	ModelKey string
+	// SuspendedUntil is an operator-entered block covering this candidate's
+	// provider. The candidate is not selectable before it.
+	SuspendedUntil time.Time
 	// ModelID is the concrete model this candidate launches. A provider window
 	// scoped to a different model is another model's consumption, so it must not
 	// score this candidate. Empty means the candidate's model is not identified,
@@ -95,8 +102,12 @@ type PolicyState struct {
 	ResetWaitUsed    bool                      `json:"reset_wait_used"`
 	ResetWaitClasses map[routingerr.Class]bool `json:"reset_wait_classes,omitempty"`
 	Deadline         *time.Time                `json:"deadline,omitempty"`
-	PendingOutcome   routingpolicy.Outcome     `json:"pending_outcome"`
-	Unclassified     *UnclassifiedStreak       `json:"unclassified_streak,omitempty"`
+	// ResourceWait marks a waiting state whose every candidate is suspended.
+	// Its Deadline is the earliest suspension end, when a fresh selection is
+	// attempted again.
+	ResourceWait   bool                  `json:"resource_wait,omitempty"`
+	PendingOutcome routingpolicy.Outcome `json:"pending_outcome"`
+	Unclassified   *UnclassifiedStreak   `json:"unclassified_streak,omitempty"`
 	// SelectionChain is the durable no-revisit record for the current
 	// transition chain. It is carried across retry, skip and restart and is
 	// only cleared by a closed chain, never by a policy counter reset.

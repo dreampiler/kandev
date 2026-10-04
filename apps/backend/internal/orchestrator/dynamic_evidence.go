@@ -37,6 +37,9 @@ type promptAttemptEvidence struct {
 	dynamic                bool
 	streakResetInProgress  bool
 	streakResetComplete    bool
+	// resourceSuccessClaimed records that this attempt's first real output
+	// already cleared its resource suspension history.
+	resourceSuccessClaimed bool
 }
 
 // normalizeDiagnosticText applies streams.SanitizeProviderMessage so a raw

@@ -72,7 +72,8 @@ type Controller struct {
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
 	dynamicPreview              DynamicPreviewProvider
-	profileUsage                ProfileUsageProvider
+profileUsage                ProfileUsageProvider
+	providerLimits              ProviderLimitService
 	sessionChecker              SessionChecker
 	watcherDeps                 WatcherDependencyChecker
 	routingTierDeps             RoutingTierDependencyChecker

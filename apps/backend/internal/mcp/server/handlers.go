@@ -1352,7 +1352,15 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError("task_id is required"), nil
 		}
 
-		payload := map[string]string{"task_id": taskID}
+		arguments, marshalErr := json.Marshal(req.GetArguments())
+		if marshalErr != nil {
+			return mcp.NewToolResultError("invalid plan read arguments"), nil
+		}
+		options, parseErr := taskcontract.ParsePlanReadOptions(arguments)
+		if parseErr != nil {
+			return mcp.NewToolResultError(parseErr.Error()), nil
+		}
+		payload := planReadRequestPayload(taskID, options)
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
 			return mcp.NewToolResultError(planToolError(err)), nil
@@ -1387,6 +1395,20 @@ func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
+}
+
+func planReadRequestPayload(taskID string, options taskcontract.PlanReadOptions) map[string]interface{} {
+	payload := map[string]interface{}{"task_id": taskID}
+	if options.Offset != nil {
+		payload["offset"] = *options.Offset
+	}
+	if options.Limit != nil {
+		payload["limit"] = *options.Limit
+	}
+	if options.ExpectedVersion != nil {
+		payload["expected_version"] = *options.ExpectedVersion
+	}
+	return payload
 }
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {

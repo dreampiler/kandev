@@ -39,6 +39,13 @@ type DynamicTierPreviewDTO struct {
 	ElapsedFloorUsed   bool    `json:"elapsed_floor_used"`
 	CostClass          string  `json:"cost_class,omitempty"`
 	ReservedSharePct   int     `json:"reserved_share_pct"`
+	// Suspension separates a running block (waiting, until SuspendedUntil), a
+	// block another selection is probing, and an expired block the next
+	// selection retries. It is absent when no suspension applies.
+	SuspensionState  string     `json:"suspension_state,omitempty"`
+	SuspendedUntil   *time.Time `json:"suspended_until,omitempty"`
+	SuspensionScope  string     `json:"suspension_scope,omitempty"`
+	SuspensionSource string     `json:"suspension_source,omitempty"`
 }
 
 // DynamicPreviewDTO answers "which candidate would be chosen now". It is a
@@ -193,7 +200,7 @@ func previewDTO(preview dynamic.SelectionPreview, candidates []dto.DynamicAgentC
 		ObservedAt: preview.ObservedAt, Considered: make([]DynamicTierPreviewDTO, 0, len(preview.Considered)),
 	}
 	for _, entry := range preview.Considered {
-		result.Considered = append(result.Considered, DynamicTierPreviewDTO{
+		result.Considered = append(result.Considered, withPreviewSuspension(DynamicTierPreviewDTO{
 			Position:           positions[entry.CandidateID],
 			ExecutionProfileID: entry.CandidateID,
 			TierIndex:          entry.TierIndex,
@@ -209,7 +216,7 @@ func previewDTO(preview dynamic.SelectionPreview, candidates []dto.DynamicAgentC
 			ElapsedFloorUsed:   entry.Score.FloorApplied,
 			CostClass:          string(entry.CostClass),
 			ReservedSharePct:   reserved[entry.CandidateID],
-		})
+		}, entry.Suspension))
 	}
 	if winner, ok := selectedScore(result.Considered); ok {
 		result.UsageComplete = winner.UsageComplete

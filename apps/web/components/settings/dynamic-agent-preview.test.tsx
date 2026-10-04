@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   DynamicPreviewCandidate,
@@ -157,5 +157,86 @@ describe("DynamicAgentPreview with a prediction", () => {
     const ready = screen.getByTestId("dynamic-preview-ready");
     expect(ready.textContent).toContain("agents:dynamicPreviewUsageIncomplete");
     expect(ready.textContent).toContain("agents:dynamicModelReservedShare");
+  });
+});
+
+describe("DynamicAgentPreview suspension states", () => {
+  afterEach(cleanup);
+
+  it("tells a running suspension from an expired one", () => {
+    const { container } = render(
+      <DynamicAgentPreview
+        state={{
+          status: "ready",
+          preview: preview({
+            candidate_id: "b",
+            considered: [
+              considered({
+                execution_profile_id: "a",
+                selected: false,
+                eligible: false,
+                ineligible_reason: "circuit_open",
+                suspension_state: "waiting",
+                suspension_scope: "model",
+                suspension_source: "failure",
+                suspended_until: "2026-10-04T02:00:00Z",
+              }),
+              considered({ execution_profile_id: "b", suspension_state: "expired" }),
+              considered({
+                execution_profile_id: "c",
+                selected: false,
+                eligible: false,
+                ineligible_reason: "circuit_probing",
+                suspension_state: "probing",
+              }),
+            ],
+          }),
+        }}
+        labelFor={labelFor}
+        onRetry={vi.fn()}
+      />,
+    );
+    // The comparison list is the surface that enumerates every candidate. The
+    // selected candidate is also summarized above it, so a state assertion is
+    // scoped to the list to count each row once.
+    const all = within(screen.getByTestId("dynamic-preview-all-candidates"));
+    expect(all.getByTestId("dynamic-preview-suspension-waiting").textContent).toContain(
+      "agents:dynamicPreviewSuspendedModel",
+    );
+    expect(all.getByTestId("dynamic-preview-suspension-expired").textContent).toBe(
+      "agents:dynamicPreviewSuspensionExpired",
+    );
+    expect(all.getByTestId("dynamic-preview-suspension-probing")).toBeTruthy();
+    expect(container.textContent).not.toContain("agents:dynamicPreviewIneligibleCircuit");
+  });
+
+  it("labels an operator block as a provider setting", () => {
+    render(
+      <DynamicAgentPreview
+        state={{
+          status: "ready",
+          preview: preview({
+            candidate_id: "b",
+            considered: [
+              considered({
+                execution_profile_id: "a",
+                selected: false,
+                eligible: false,
+                ineligible_reason: "circuit_open",
+                suspension_state: "waiting",
+                suspension_scope: "provider",
+                suspension_source: "manual",
+                suspended_until: "2026-10-07T14:20:00Z",
+              }),
+            ],
+          }),
+        }}
+        labelFor={labelFor}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("dynamic-preview-suspension-waiting").textContent).toContain(
+      "agents:dynamicPreviewSuspendedManual",
+    );
   });
 });

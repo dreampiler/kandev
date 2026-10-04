@@ -645,6 +645,7 @@ func startAgentInfrastructure(
 		inheritedRecordScope,
 		services.Task,
 		services.Task,
+		services.Task,
 		repos.Task,
 		startupRecoveryGuard,
 	)
@@ -1409,7 +1410,11 @@ func startGatewayAndServe(
 		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
 	}
 	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
-	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
+agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
+	agentSettingsController.SetProviderLimitService(newProviderLimitService(
+		repos.Task, repos.AgentSettings,
+		newDynamicLimitCalendar(services.UsageAdapter, repos.Task),
+	))
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)

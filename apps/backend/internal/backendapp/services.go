@@ -349,7 +349,7 @@ func initDynamicRuntimeResolver(
 	if err := dynamicCircuits.Restore(ctx); err != nil {
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
 	}
-	accounts := newAccountUsageReader(usageAdapter, repos.Task)
+accounts := newAccountUsageReader(usageAdapter, repos.Task)
 	dynamicEngine := dynamicruntime.NewEngine(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
@@ -359,6 +359,7 @@ func initDynamicRuntimeResolver(
 		),
 		dynamicruntime.WithSelectionHistory(routeSelectionHistory{repo: repos.Task}),
 		dynamicruntime.WithLimitObserver(newUsageLimitRecorder(accounts, repos.Task, log)),
+		dynamicruntime.WithLimitCalendar(newDynamicLimitCalendar(usageAdapter, repos.Task)),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {
@@ -370,6 +371,7 @@ func initDynamicRuntimeResolver(
 		cfg.Features.DynamicAgentRouting,
 	)
 	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
+	dynamicResolver.SetProviderLimitReader(repos.Task)
 	// The executor lives on the task session, so this is what lets a selection
 	// tell a host execution from a container, SSH or Kubernetes one. Without it
 	// every candidate would read the backend host's provider account, which is a

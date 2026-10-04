@@ -24,6 +24,11 @@ export type ActionMeta = {
   reset_at?: string;
   remediation_url?: string;
   retrying?: boolean;
+  recovery_mode?: string;
+  recovery_phase?: string;
+  recovery_disposition?: string;
+  recovery_reason?: string;
+  attempts_started?: number;
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
@@ -34,6 +39,9 @@ export type ActionMeta = {
   occurred_at?: string;
   execution_id?: string;
   failure_details?: string;
+  startup_reason?: string;
+  startup_attempts?: number;
+  startup_npm_code?: string;
   attempt_id?: string;
   phase?: string;
 };
