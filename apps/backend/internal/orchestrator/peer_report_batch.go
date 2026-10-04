@@ -47,6 +47,14 @@ func (s *Service) dispatchPeerReportBatchForSession(
 	batch []*messagequeue.QueuedMessage,
 ) bool {
 	composed := messagequeue.ComposePeerReportBatch(batch)
+	if !s.messageQueue.PeerReportBatchClaimRewriteSupported() {
+		// Folding needs the leading claim to be rewritten to the composed
+		// prompt, so a repository that cannot rewrite it delivers the batch one
+		// row at a time instead of risking a restart that restores only the
+		// leading report.
+		s.requeuePeerReportBatch(ctx, identity, batch[1:])
+		return s.dispatchTakenQueuedMessageForSession(ctx, identity, batch[0], true)
+	}
 	if !s.peerReportBatchStillDispatchable(ctx, identity, composed, batch) {
 		s.requeuePeerReportBatch(ctx, identity, batch)
 		return false

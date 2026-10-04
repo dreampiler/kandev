@@ -46,9 +46,9 @@ without spending one queue slot and one turn per report.
   report count and a maximum combined report size. Reports beyond either bound
   shall remain queued for a later turn rather than being dropped or truncated.
 - **AC-TASKS-PEER-REPORT-BATCH-001.5:** Reserving a batch shall not change queue
-  accounting. Reserved rows shall stay in the queue until they are settled
-  exactly as a single reserved row is settled today, and `queue_full` accounting
-  shall be unchanged by reservation.
+  accounting. A reserved row leaves the queue and is tracked in its dispatch
+  claim, and a batch shall be settled exactly as a single reserved row is
+  settled today, so `queue_full` accounting shall be unchanged by reservation.
 - **AC-TASKS-PEER-REPORT-BATCH-001.6:** A dispatch that cannot start shall return
   every reserved row of the batch to the queue in its original order, so no
   report is lost and no later row overtakes an undelivered report.

@@ -80,9 +80,12 @@ had already received.
 
 Because a folded row's report is physically inside the leading row, the leading
 row's claim is the only claim that must decide delivery. Once the batch passes
-its incarnation and dispatch-input checks, `markFoldedPeerReportClaimsAccepted`
-accepts every trailing row's claim before the worker is launched. From then on
-the batch has a single settlement owner:
+its incarnation and dispatch-input checks, `settlePeerReportBatchClaims`
+records the composed prompt on the leading row's claim and then accepts every
+trailing row's claim, before the worker is launched. The order matters: the
+claim was written at reserve time, when the leading row still held only its own
+report, so a restart before the rewrite would replay the batch without the
+folded reports. From then on the batch has a single settlement owner:
 
 - If the turn is accepted, the leading row's claim is accepted by the existing
   post-dispatch path and every claim in the batch is settled.
@@ -115,3 +118,12 @@ and more reports arrive than a single bounded turn can absorb, admission still
 rejects the surplus. Batching reduces how quickly a fan-out burst fills the
 queue; it does not make exhaustion impossible, and no requirement claims
 otherwise.
+
+Folding also depends on the queue repository. `RewritePendingQueueDispatchMessage`
+is an optional capability asserted separately from the dispatch-claim settlement
+contract, so a repository that keeps the settlement but cannot rewrite an
+unsettled claim returns `ErrQueueDispatchClaimRewriteUnsupported` instead of a
+silent success. `PeerReportBatchClaimRewriteSupported` then reports that
+folding is unavailable, and the drain dispatches the leading row alone and
+returns the folded rows to the head. A repository that persists no dispatch
+claims at all needs no rewrite, so it keeps folding.

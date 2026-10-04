@@ -254,3 +254,56 @@ func findDispatchClaim(t *testing.T, pending []PendingQueueDispatch, entryID str
 	t.Fatalf("no dispatch claim for entry %s", entryID)
 	return nil
 }
+
+// settlementOnlyClaimRepository persists dispatch claims but cannot rewrite one,
+// which is every repository that implemented the settlement contract before the
+// batch rewrite existed. Folding a batch needs that rewrite, but losing the
+// settlement interface would silently turn every acceptance into a no-op.
+type settlementOnlyClaimRepository struct {
+	Repository
+	accepted []string
+	deleted  []string
+}
+
+func (r *settlementOnlyClaimRepository) ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error) {
+	return nil, nil
+}
+
+func (r *settlementOnlyClaimRepository) MarkPendingQueueDispatchAccepted(_ context.Context, msg *QueuedMessage) error {
+	r.accepted = append(r.accepted, msg.ID)
+	return nil
+}
+
+func (r *settlementOnlyClaimRepository) DeletePendingQueueDispatch(_ context.Context, msg *QueuedMessage) error {
+	r.deleted = append(r.deleted, msg.ID)
+	return nil
+}
+
+func TestRewritePendingQueueDispatchMessage_KeepsSettlementForARepositoryWithoutRewrite(t *testing.T) {
+	memory := newPeerReportBatchFixture(t, NewMemoryRepository()).repo
+	repo := &settlementOnlyClaimRepository{Repository: memory}
+	svc := newPeerReportBatchService(t, repo)
+	msg := &QueuedMessage{ID: "entry", TaskID: "task", SessionID: "session"}
+
+	require.NoError(t, svc.MarkPendingQueueDispatchAccepted(context.Background(), msg))
+	require.NoError(t, svc.DeletePendingQueueDispatch(context.Background(), msg))
+	require.Equal(t, []string{"entry"}, repo.accepted)
+	require.Equal(t, []string{"entry"}, repo.deleted)
+
+	require.ErrorIs(t,
+		svc.RewritePendingQueueDispatchMessage(context.Background(), msg),
+		ErrQueueDispatchClaimRewriteUnsupported,
+		"an absent rewrite must be reported, not reported as a settled claim")
+	require.False(t, svc.PeerReportBatchClaimRewriteSupported())
+}
+
+// A repository that persists no dispatch claims has nothing a restart could
+// restore, so folding stays available and every settlement stays a no-op.
+func TestRewritePendingQueueDispatchMessage_AllowsFoldingWithoutClaimPersistence(t *testing.T) {
+	svc := newPeerReportBatchFixture(t, NewMemoryRepository())
+	msg := &QueuedMessage{ID: "entry", TaskID: "task", SessionID: "session"}
+
+	require.False(t, svc.PendingQueueDispatchPersistenceAvailable())
+	require.NoError(t, svc.RewritePendingQueueDispatchMessage(context.Background(), msg))
+	require.True(t, svc.PeerReportBatchClaimRewriteSupported())
+}
