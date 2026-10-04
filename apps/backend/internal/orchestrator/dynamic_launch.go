@@ -208,6 +208,7 @@ func (s *Service) persistDynamicLaunchDecision(
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
+	previousState := session.State
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Status
@@ -226,7 +227,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
 	}
-	return s.repo.UpdateTaskSession(ctx, session)
+	return s.updateDynamicLaunchSession(ctx, session, previousExecutionProfileID, previousState)
 }
 
 func (s *Service) persistDynamicACPSession(
@@ -780,8 +781,7 @@ func (s *Service) dynamicLaunchDecision(
 			session.RouteGeneration == resolved.Generation {
 			return resolved.Decision, true, nil
 		}
-		applyResolvedExecution(session, resolved)
-		if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+		if err := s.persistResolvedExecution(ctx, session, resolved); err != nil {
 			return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 		}
 		return resolved.Decision, true, nil
@@ -797,8 +797,7 @@ func (s *Service) dynamicLaunchDecision(
 		session.RouteGeneration == resolved.Generation {
 		return resolved.Decision, true, nil
 	}
-	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistResolvedExecution(ctx, session, resolved); err != nil {
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.Decision, true, nil
