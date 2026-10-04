@@ -86,19 +86,33 @@ func antigravityWindow(bucket antigravityBucket) (UtilizationWindow, bool) {
 	if err != nil {
 		return UtilizationWindow{}, false // Disabled buckets have no reset time.
 	}
-	label := bucket.Window
-	switch bucket.Window {
-	case "5h":
-		label = claudeLabel5Hour
-	case "weekly":
-		label = claudeLabel7Day
-	}
+	label, duration := antigravityWindowShape(bucket.Window)
 	if label == "" {
 		label = bucket.ID
 	}
-	return UtilizationWindow{
+	window := UtilizationWindow{
 		Label:          label,
 		UtilizationPct: (1 - *bucket.RemainingFraction) * 100,
 		ResetAt:        resetAt,
-	}, true
+	}
+	// A window the bucket report does not name keeps no duration, which leaves
+	// it unknown for routing rather than scored against a guessed length.
+	if duration > 0 {
+		window.DurationSeconds = int64(duration / time.Second)
+		window.StartAt = resetAt.Add(-duration)
+	}
+	return window, true
+}
+
+// antigravityWindowShape maps a reported bucket window to its display label and
+// numeric length. An unrecognized window has no known length and reports zero.
+func antigravityWindowShape(window string) (string, time.Duration) {
+	switch window {
+	case "5h":
+		return claudeLabel5Hour, 5 * time.Hour
+	case "weekly":
+		return claudeLabel7Day, 7 * 24 * time.Hour
+	default:
+		return window, 0
+	}
 }
