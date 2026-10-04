@@ -107,3 +107,38 @@ describe("AgentProfileUsageView", () => {
     );
   });
 });
+
+describe("AgentProfileUsageView - stale observation", () => {
+  afterEach(() => cleanup());
+
+  it("renders age line for a stale reading and is absent for a fresh one", () => {
+    const now = Date.parse("2026-10-03T12:00:00Z");
+    const fetchedAt = "2026-10-03T11:45:00Z";
+    const { rerender } = render(
+      <AgentProfileUsageView
+        now={now}
+        usage={usage({
+          stale: true,
+          fetched_at: fetchedAt,
+          windows: [{ label: "5-hour", utilization_pct: 50 }],
+        })}
+      />,
+    );
+    const staleEl = screen.getByTestId("agent-profile-usage-stale");
+    expect(staleEl).toBeDefined();
+    expect(staleEl.textContent).toContain("agents:profileUsageStaleObserved");
+
+    // Fresh reading has no stale element
+    rerender(
+      <AgentProfileUsageView
+        now={now}
+        usage={usage({
+          stale: false,
+          fetched_at: fetchedAt,
+          windows: [{ label: "5-hour", utilization_pct: 50 }],
+        })}
+      />,
+    );
+    expect(screen.queryByTestId("agent-profile-usage-stale")).toBeNull();
+  });
+});

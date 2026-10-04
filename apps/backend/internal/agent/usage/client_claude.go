@@ -202,7 +202,7 @@ func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte,
 		return nil, &FetchError{Provider: claudeProvider, Reason: FailureNetwork, Err: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, statusFailure(claudeProvider, resp.StatusCode)
+		return nil, statusFailure(claudeProvider, resp.StatusCode, resp.Header)
 	}
 	return body, nil
 }

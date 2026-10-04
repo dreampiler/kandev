@@ -50,6 +50,7 @@ export type AgentProfileUsage = {
   plan?: string;
   model_class?: string;
   fetched_at?: string;
+  stale?: boolean;
   windows: AgentProfileUsageWindow[];
   recorded?: AgentProfileRecordedUsage;
   internal?: AgentProfileInternalUsage;

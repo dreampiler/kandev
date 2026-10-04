@@ -129,6 +129,7 @@ type ProviderUsage struct {
 	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
 	Windows   []UtilizationWindow `json:"windows"`
 	FetchedAt time.Time           `json:"fetched_at"`
+	Stale     bool                `json:"stale,omitempty"`
 }
 
 // ProviderUsageClient fetches live utilization from a provider API.

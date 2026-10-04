@@ -15,6 +15,7 @@ type AgentProfileUsageDTO struct {
 	Plan       string                       `json:"plan,omitempty"`
 	ModelClass string                       `json:"model_class,omitempty"`
 	FetchedAt  *time.Time                   `json:"fetched_at,omitempty"`
+	Stale      bool                         `json:"stale,omitempty"`
 	Windows    []AgentProfileUsageWindowDTO `json:"windows"`
 	// Recorded is the account's usage Kandev itself recorded in the current UTC
 	// day. It is reported for accounts whose provider publishes no usage API,
