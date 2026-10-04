@@ -160,7 +160,7 @@
   "dynamicRouteRetryDescription": "提供商出错后重试同一候选配置。适用于可能暂时恢复的故障。",
   "dynamicRouteStopDescription": "此候选配置失败后停止路由。任务会等待手动恢复操作。",
   "dynamicRouteTryNextDescription": "本次执行跳过此候选配置，继续使用下一个符合条件的配置。",
-  "dynamicRoutingPolicyExcluded": "对于任务、仓库、权限、工具或运行时错误、传输中断，或执行中途结果不明确的情况，Kandev 不会切换。这些情况会停止并等待手动恢复，以避免重复工作。",
+  "dynamicRoutingPolicyExcluded": "任务所属的回合因已识别的提供商故障（配额、速率限制、可用性、过载或模型容量）中断时，Kandev 会在下一个不同的模型上继续。任务、仓库、权限、工具或运行时错误、传输中断、取消或用户拒绝、回合之后的未分类结果，以及没有可用候选的链路，都会停止并等待手动恢复。",
   "dynamicRoutingPolicyRecovery": "切换后，发生故障的提供商会暂停 1 分钟，或者暂停到已提供的重置时间。之后，Kandev 会先执行一次独占健康探测，再次使用该提供商。",
   "dynamicRoutingPolicySwitchable": "切换可以由已分类的提供商故障触发，包括身份验证或订阅问题、缺少凭据或配置、配额或速率限制、模型不可用、容量不足、网络问题，以及提供商不可用或过载。",
   "dynamicRoutingPolicyTitle": "Kandev 何时切换候选配置",

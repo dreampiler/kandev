@@ -12,6 +12,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 // usageFailureLogInterval bounds how often one account's failing usage read is
@@ -218,12 +219,13 @@ func newUsageProviderAdapter(
 	settingsStore settingsstore.Repository,
 	log *logger.Logger,
 	openRouterDailyLimit int,
+	secretStore secrets.SecretStore,
 ) *usageProviderAdapter {
 	return &usageProviderAdapter{
 		svc:           agentusage.NewUsageService(),
 		settingsStore: settingsStore,
 		proxyResolver: defaultUsageProxyResolver(),
-		bindings:      newUsageBindingResolver(openRouterDailyLimit),
+		bindings:      newUsageBindingResolver(openRouterDailyLimit, secretStore),
 		log:           log,
 	}
 }

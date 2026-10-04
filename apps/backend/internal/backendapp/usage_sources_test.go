@@ -62,6 +62,6 @@ func TestClaudeCredentialPrecedence(t *testing.T) {
 	}
 	binding, _ = testBindingResolver(t, processEnv).Resolve(secretOnly, claudeACPAgentID)
 	if binding.accountKey != claudeProcessEnvAccount {
-		t.Fatalf("account = %q, want a secret-store value left unrevealed", binding.accountKey)
+		t.Fatalf("account = %q, want the process token when no secret store is configured", binding.accountKey)
 	}
 }
