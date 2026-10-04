@@ -40,12 +40,19 @@ func MayClassify(in Input) bool {
 // matching rule requires. gateTokens is the union of those literals over the
 // whole catalogue, so a rule can never match text the gate rejects.
 //
-// The union is deliberately derived from the rule patterns themselves (see
-// patternGateTokens) rather than hand-listed, because a hand-listed token set
-// rots silently: a new rule whose literals were never added would stop being
-// detected while still reading as covered. Rules that match through a custom
-// matcher instead of a pattern carry their tokens in gateTokensByRuleID.
+// The union is derived from the rule patterns themselves (see patternGateTokens)
+// rather than hand-listed, because a hand-listed token set rots silently: a new
+// rule whose literals were never added would stop being detected while still
+// reading as covered. Rules that match through a custom matcher instead of a
+// pattern carry their tokens in gateTokensByRuleID.
+//
+// When any rule in the catalogue cannot prove a required literal, the gate is
+// off: the answer becomes true for every text, which is the same classification
+// behaviour as before the gate existed.
 func mayMatchText(text string) bool {
+	if !gateEnabled {
+		return true
+	}
 	if text == "" {
 		return false
 	}
@@ -66,8 +73,9 @@ func mayMatchText(text string) bool {
 const gateTokenMinLen = 4
 
 // gateTokens is the sorted, de-duplicated union of every rule's required
-// literals.
-var gateTokens = buildGateTokens()
+// literals. gateEnabled is false when the catalogue holds a rule the derivation
+// cannot cover, in which case the gate stops rejecting anything.
+var gateTokens, gateEnabled = buildGateTokens()
 
 // gateTokensByRuleID supplies gate tokens for the cases a pattern cannot cover:
 // rules that match through a custom matcher, and patterns whose every match path
@@ -79,35 +87,49 @@ var gateTokensByRuleID = map[string][]string{
 	"cursor.retriable_stream_reset.v1": {"retriableerror"},
 }
 
-func buildGateTokens() []string {
+// buildGateTokens collects the catalogue's required literals. It reports false
+// when some rule has no derivable token and no declaration, because the union
+// would then not cover that rule and the gate could reject text it matches.
+func buildGateTokens() ([]string, bool) {
 	seen := make(map[string]struct{})
+	covered := true
+	collect := func(ruleID string, pattern *regexp.Regexp) {
+		if !collectRuleTokens(seen, ruleID, pattern) {
+			covered = false
+		}
+	}
 	for _, rules := range providerRules {
 		for _, r := range rules {
-			collectRuleTokens(seen, r.id, r.pattern)
+			collect(r.id, r.pattern)
 		}
 	}
 	for _, r := range providerNeutralRules {
-		collectRuleTokens(seen, r.id, r.pattern)
+		collect(r.id, r.pattern)
 	}
 	for _, r := range runtimeEnvironmentRules {
-		collectRuleTokens(seen, r.id, r.pattern)
+		collect(r.id, r.pattern)
 	}
 	tokens := make([]string, 0, len(seen))
 	for token := range seen {
 		tokens = append(tokens, token)
 	}
 	sort.Strings(tokens)
-	return tokens
+	return tokens, covered
 }
 
-func collectRuleTokens(seen map[string]struct{}, ruleID string, pattern *regexp.Regexp) {
+func collectRuleTokens(seen map[string]struct{}, ruleID string, pattern *regexp.Regexp) bool {
 	tokens := patternGateTokens(pattern)
 	if len(tokens) == 0 {
-		tokens = gateTokensByRuleID[ruleID]
+		declared, ok := gateTokensByRuleID[ruleID]
+		if !ok {
+			return false
+		}
+		tokens = declared
 	}
 	for _, token := range tokens {
 		seen[strings.ToLower(token)] = struct{}{}
 	}
+	return true
 }
 
 // patternGateTokens returns every literal the gate may look for on behalf of
@@ -118,8 +140,8 @@ func collectRuleTokens(seen map[string]struct{}, ruleID string, pattern *regexp.
 // gate conservative. Harvesting every run in a pattern is not enough: for
 // `x(?:verylongtoken)?y` or `ab|verylongtoken` only "verylongtoken" is long
 // enough to gate with, yet "xy" and "ab" match without it, so a pattern-wide
-// harvest would reject real matches. A pattern with such a path must declare
-// its tokens in gateTokensByRuleID, one per path.
+// harvest would reject real matches. A pattern with such a path must declare its
+// tokens in gateTokensByRuleID, one per path.
 func patternGateTokens(pattern *regexp.Regexp) []string {
 	terms := patternRequiredTerms(pattern)
 	if len(terms) == 0 {
@@ -185,8 +207,8 @@ func mergeAdjacentLiterals(re *syntax.Regexp) *syntax.Regexp {
 
 // maxRequiredTerms bounds the disjunctive form. Crossing a concatenation with
 // several alternations grows exponentially, and a rule that wide cannot be
-// declared either, so the derivation gives up and the guard test demands a
-// narrower pattern.
+// declared either, so the derivation reports no cover and the gate turns itself
+// off rather than rejecting text a rule may match.
 const maxRequiredTerms = 64
 
 // requiredTerms returns the literals every match of re is guaranteed to carry,
