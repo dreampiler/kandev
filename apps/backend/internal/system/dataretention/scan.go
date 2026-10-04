@@ -270,7 +270,9 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 	target.Eligible++
 	target.Bytes += reduced.RemovedBytes
 	if !mutate {
-		return "", nil
+		// A dry run still reports the candidate so the caller can tell "there is
+		// work to gate on" from "nothing matched in this batch".
+		return row.ID, nil
 	}
 	tx, ok := q.(*sqlx.Tx)
 	if !ok {
@@ -299,7 +301,7 @@ func (s *Service) scanJobBatch(ctx context.Context, q sqlx.QueryerContext, r *re
 		}
 		p := &r.Progress
 		if p.Job == "" {
-			id, err := tasksqlite.NextSucceededCleanupJobID(ctx, q, p.JobAfter, p.UpperJob)
+			id, err := tasksqlite.NextSucceededCleanupJobID(ctx, q, p.JobAfter, p.UpperJob, r.Operation.CleanupCutoff)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return false, err
 			}

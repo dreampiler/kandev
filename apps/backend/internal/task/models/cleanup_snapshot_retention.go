@@ -120,14 +120,3 @@ func encodeWithMarker(fields rawPayloadObject, marker map[string]any, snapshot s
 	}
 	return string(encoded), removedBytes, true, nil
 }
-
-// CleanupSnapshotReduced reports whether a succeeded cleanup job's snapshot was
-// already reduced, so a pass can distinguish reduced rows from untouched ones.
-func CleanupSnapshotReduced(snapshot string) bool {
-	var fields rawPayloadObject
-	if json.Unmarshal([]byte(snapshot), &fields) != nil {
-		return false
-	}
-	_, reduced := fields[snapshotReducedKey]
-	return reduced
-}

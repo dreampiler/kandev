@@ -164,12 +164,15 @@ func WriteReducedMessageMetadata(ctx context.Context, tx *sqlx.Tx, id, expected,
 	return nil
 }
 
-// NextSucceededCleanupJobID returns the next succeeded job after the cursor.
-func NextSucceededCleanupJobID(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
+// NextSucceededCleanupJobID returns the next succeeded job completed at or
+// before the cutoff. The window is part of the cursor query so an out-of-window
+// job is never counted as a scanned row or charged to the batch byte budget.
+func NextSucceededCleanupJobID(ctx context.Context, q sqlx.QueryerContext, after, upper string, cutoff time.Time) (string, error) {
 	var id string
 	err := sqlx.GetContext(ctx, q, &id, `SELECT id FROM task_resource_cleanup_jobs
-	 WHERE state=? AND id>? AND id<=? ORDER BY id LIMIT 1`,
-		models.TaskResourceCleanupStateSucceeded, after, upper)
+	 WHERE state=? AND id>? AND id<=? AND completed_at IS NOT NULL
+	 AND julianday(completed_at)<=julianday(?) ORDER BY id LIMIT 1`,
+		models.TaskResourceCleanupStateSucceeded, after, upper, cutoff.UTC().Format(time.RFC3339Nano))
 	return id, err
 }
 
@@ -213,27 +216,4 @@ func WriteReducedCleanupSnapshot(ctx context.Context, tx *sqlx.Tx, id, expected,
 		return errors.New("cleanup_snapshot_conflict")
 	}
 	return nil
-}
-
-// CountSucceededCleanupJobs returns the row count and stored snapshot bytes of
-// succeeded jobs completed at or before the cutoff, without materializing a
-// payload. It backs the settings analysis estimate.
-func CountSucceededCleanupJobs(ctx context.Context, q sqlx.QueryerContext, driverName string, cutoff time.Time) (int64, int64, error) {
-	if err := requireSQLite(driverName); err != nil {
-		return 0, 0, err
-	}
-	arg := cutoff.UTC().Format(time.RFC3339Nano)
-	var rows, bytes int64
-	if err := sqlx.GetContext(ctx, q, &rows, `SELECT COUNT(*) FROM task_resource_cleanup_jobs
-	 WHERE state=? AND completed_at IS NOT NULL AND julianday(completed_at)<=julianday(?)`,
-		models.TaskResourceCleanupStateSucceeded, arg); err != nil {
-		return 0, 0, err
-	}
-	if err := sqlx.GetContext(ctx, q, &bytes, `SELECT COALESCE(SUM(LENGTH(CAST(resource_snapshot AS BLOB))),0)
-	 FROM task_resource_cleanup_jobs
-	 WHERE state=? AND completed_at IS NOT NULL AND julianday(completed_at)<=julianday(?)`,
-		models.TaskResourceCleanupStateSucceeded, arg); err != nil {
-		return 0, 0, err
-	}
-	return rows, bytes, nil
 }

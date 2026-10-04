@@ -20,8 +20,9 @@ func (a Age) Validate() error {
 	return nil
 }
 
-// Cutoff returns the oldest timestamp a pass may touch. Equal timestamps are
-// retained, so a row exactly at the boundary survives this pass.
+// Cutoff returns the oldest timestamp a pass may touch. The window is inclusive
+// of the cutoff, so a row completed or archived exactly at the boundary is in
+// scope for this pass.
 func (a Age) Cutoff(now time.Time) time.Time {
 	return now.UTC().AddDate(0, 0, -a.Days)
 }
