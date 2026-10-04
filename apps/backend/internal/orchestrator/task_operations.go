@@ -9545,14 +9545,8 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 		return false, nil
 	}
 	s.pruneStaleChildStallAlerts(ctx, identity)
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
-	if err != nil {
-		return false, err
-	}
-	if !autoRun {
-		return false, nil
-	}
-	return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok), nil
+	dispatched, _, err := s.reserveAndDispatchQueueHead(ctx, identity)
+	return dispatched, err
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/

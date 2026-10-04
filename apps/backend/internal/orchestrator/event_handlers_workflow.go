@@ -5601,14 +5601,14 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 		return queueDrainSkipped
 	}
 	s.pruneStaleChildStallAlerts(ctx, queueIdentity)
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
+	dispatched, autoRun, err := s.reserveAndDispatchQueueHead(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped
 	}
 	if !autoRun {
 		return queueDrainPaused
 	}
-	if s.dispatchTakenQueuedMessageForSession(ctx, queueIdentity, queuedMsg, ok) {
+	if dispatched {
 		return queueDrainDispatched
 	}
 	return queueDrainSkipped
