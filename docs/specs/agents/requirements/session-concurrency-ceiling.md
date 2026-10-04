@@ -17,7 +17,9 @@ controls admission of agent executions. Tasks own their durable deferral data.
 
 The disabled default, Settings opt-in, live application, and queue explanation
 are implemented. Delivery and verification are recorded in the
-[opt-in plan](../../../plans/session-ceiling-opt-in/plan.md).
+[opt-in plan](../../../plans/session-ceiling-opt-in/plan.md). The reserved control
+lane is delivered by the
+[control-lane plan](../../../plans/control-session-capacity/plan.md).
 
 ## Terminology
 

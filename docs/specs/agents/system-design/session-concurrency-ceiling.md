@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-SESSION-CEILING-001
   - REQ-AGENTS-SESSION-CEILING-002
+  - REQ-AGENTS-SESSION-CEILING-003
 ---
 
 # Session Concurrency Ceiling System Design
