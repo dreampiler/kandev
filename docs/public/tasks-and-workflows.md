@@ -249,9 +249,12 @@ Kandev remembers draft or recently used repository, branch, executor, and profil
 When the selected profile is dynamic, the task keeps one logical profile and one
 session tab while Kandev chooses a concrete candidate in the configured order.
 Provider errors before a result may move execution to the next configured
-candidate. Kandev does not switch candidates after an ambiguous started turn.
-If the route has no eligible candidate, wait for the current turn to settle and
-use the session's **Retry current agent** or **Try next agent** recovery action.
+candidate. A started turn switches candidates automatically only for a recognized
+quota, rate-limit, provider availability, overload or model-capacity failure in a
+task-owned session with observed output or tool activity; any other ambiguous
+started turn keeps its current candidate. If the route has no eligible candidate,
+wait for the current turn to settle and use the session's **Retry current agent**
+or **Try next agent** recovery action.
 
 Every editable local repository row in **New Task** offers **Refresh repositories** and **Create new repository**, including populated lists and empty search results. Refresh updates the available repositories without changing your selections. It stays visible but disabled during the request.
 

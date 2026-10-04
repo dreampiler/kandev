@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -27,12 +28,18 @@ const ClaudeOAuthTokenEnv = "CLAUDE_CODE_OAUTH_TOKEN"
 
 const claudeProvider = "anthropic"
 
+// TokenResolver supplies the OAuth token a usage read must authenticate with.
+// It is called once per read, so a rotated credential is picked up without a
+// restart, and its result is used only as the request bearer.
+type TokenResolver func(ctx context.Context) (string, error)
+
 // ClaudeUsageClient fetches utilization from the Anthropic OAuth usage API.
-// It authenticates either with a static OAuth token, which it never refreshes
-// or persists, or with the CLI credentials file.
+// It authenticates with a static OAuth token, which it never refreshes or
+// persists, with a token resolved per read, or with the CLI credentials file.
 type ClaudeUsageClient struct {
 	credentialsPath string
 	staticToken     string
+	tokenResolver   TokenResolver
 	usageURL        string
 	refreshURL      string
 	httpClient      *http.Client
@@ -56,6 +63,19 @@ func NewClaudeUsageClientWithOAuthToken(token string) *ClaudeUsageClient {
 		usageURL:    claudeUsageURL,
 		refreshURL:  claudeRefreshURL,
 		httpClient:  &http.Client{Timeout: 10 * time.Second},
+	}
+}
+
+// NewClaudeUsageClientWithTokenResolver creates a client that asks resolve for
+// the OAuth token on every read. It is how a profile whose token lives in a
+// secret store is read without the token ever being held by Kandev as a
+// configured value.
+func NewClaudeUsageClientWithTokenResolver(resolve TokenResolver) *ClaudeUsageClient {
+	return &ClaudeUsageClient{
+		tokenResolver: resolve,
+		usageURL:      claudeUsageURL,
+		refreshURL:    claudeRefreshURL,
+		httpClient:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -135,11 +155,19 @@ func (c *ClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, err
 	}, nil
 }
 
-// accessToken resolves the bearer token and the plan it belongs to. A static
-// token is used as given; the credentials file is refreshed when it expires.
+// accessToken resolves the bearer token and the plan it belongs to. A static or
+// per-read token is used as given; the credentials file is refreshed when it
+// expires.
 func (c *ClaudeUsageClient) accessToken(ctx context.Context) (token string, plan string, err error) {
 	if c.staticToken != "" {
 		return c.staticToken, "", nil
+	}
+	if c.tokenResolver != nil {
+		token, err := c.tokenResolver(ctx)
+		if err != nil || strings.TrimSpace(token) == "" {
+			return "", "", &FetchError{Provider: claudeProvider, Reason: FailureCredentialMissing, Err: err}
+		}
+		return token, "", nil
 	}
 	creds, err := c.readCredentials()
 	if err != nil {

@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 const (
@@ -55,6 +57,10 @@ func catalogModelClass(catalog agentusage.ModelClassifier, modelID string) model
 type usageBindingResolver struct {
 	home   string
 	getenv func(string) string
+	// secretStore reveals a token the profile references instead of carrying.
+	// It is the same source the launch path resolves the agent environment
+	// from, so a profile's usage is read from the account its agent uses.
+	secretStore secrets.SecretStore
 	// openRouterDailyLimit is the configured free-model daily allowance.
 	openRouterDailyLimit int
 
@@ -63,9 +69,14 @@ type usageBindingResolver struct {
 	llmGatewayCatalog agentusage.ModelClassifier
 }
 
-func newUsageBindingResolver(openRouterDailyLimit int) *usageBindingResolver {
+func newUsageBindingResolver(openRouterDailyLimit int, secretStore secrets.SecretStore) *usageBindingResolver {
 	home, _ := os.UserHomeDir()
-	return &usageBindingResolver{home: home, getenv: os.Getenv, openRouterDailyLimit: openRouterDailyLimit}
+	return &usageBindingResolver{
+		home:                 home,
+		getenv:               os.Getenv,
+		secretStore:          secretStore,
+		openRouterDailyLimit: openRouterDailyLimit,
+	}
 }
 
 func (r *usageBindingResolver) catalogs() (agentusage.ModelClassifier, agentusage.ModelClassifier) {
@@ -117,11 +128,27 @@ func (r *usageBindingResolver) Resolve(
 // claudeProcessEnvAccount groups profiles that inherit the Kandev process token.
 const claudeProcessEnvAccount = "anthropic:process-env"
 
+// claudeProfileSecretAccountPrefix groups profiles whose Claude OAuth token is
+// one secret-store reference, so they share a single cached read.
+const claudeProfileSecretAccountPrefix = "anthropic:profile-secret:"
+
+// errClaudeTokenUnavailable replaces every secret-store failure on this path.
+// A store error names the secret it could not reveal, and the account key must
+// stay safe to log, so neither the id nor the store error is carried onward.
+var errClaudeTokenUnavailable = errors.New("claude oauth token unavailable")
+
 // claudeBinding follows the credential precedence a host-run Claude agent sees:
-// a token in the profile's own environment, then one inherited from the Kandev
-// process, then the CLI credentials file.
+// a token the profile's own environment references or carries, then one
+// inherited from the Kandev process, then the CLI credentials file.
 func (r *usageBindingResolver) claudeBinding(profile *settingsmodels.AgentProfile, model string) usageBinding {
 	binding := usageBinding{source: usageSourceProviderAPI, modelID: model, class: fixedModelClass(agentusage.ModelClassUnknown)}
+	if secretID := profileEnvSecretID(profile, agentusage.ClaudeOAuthTokenEnv); secretID != "" && r.secretStore != nil {
+		accountKey := claudeProfileSecretAccountPrefix + secretID
+		binding.client = agentusage.NewClaudeUsageClientWithTokenResolver(r.claudeSecretToken(secretID))
+		binding.cacheKey = agentusage.CacheKey("anthropic", accountKey)
+		binding.accountKey = accountKey
+		return binding
+	}
 	if token := profileEnvLiteral(profile, agentusage.ClaudeOAuthTokenEnv); token != "" {
 		binding.client = agentusage.NewClaudeUsageClientWithOAuthToken(token)
 		binding.cacheKey = agentusage.CacheKey("anthropic", "profile-env:"+profile.ID)
@@ -139,6 +166,27 @@ func (r *usageBindingResolver) claudeBinding(profile *settingsmodels.AgentProfil
 	binding.cacheKey = agentusage.CacheKey("anthropic", credPath)
 	binding.accountKey = "anthropic:" + credPath
 	return binding
+}
+
+// claudeSecretToken reads the profile's token from the secret store at read
+// time, with the same global-scope rule the launch path applies to agent
+// profile environment. The value is handed straight to the provider request:
+// it is never stored, logged, or returned to a client.
+func (r *usageBindingResolver) claudeSecretToken(secretID string) agentusage.TokenResolver {
+	return func(ctx context.Context) (string, error) {
+		if scoped, ok := r.secretStore.(secrets.ScopedSecretStore); ok {
+			token, err := scoped.RevealGlobal(ctx, secretID)
+			if err != nil || strings.TrimSpace(token) == "" {
+				return "", errClaudeTokenUnavailable
+			}
+			return token, nil
+		}
+		token, err := r.secretStore.Reveal(ctx, secretID)
+		if err != nil || strings.TrimSpace(token) == "" {
+			return "", errClaudeTokenUnavailable
+		}
+		return token, nil
+	}
 }
 
 // OpenCode model IDs are "<provider>/<model>"; the provider prefix selects the
@@ -190,12 +238,25 @@ func (r *usageBindingResolver) openCodeBinding(model string) (usageBinding, bool
 	}
 }
 
-// profileEnvLiteral returns a literal profile environment value. A value held
-// in the secret store is not revealed for a usage read.
+// profileEnvLiteral returns a literal profile environment value. An entry that
+// references a secret has no literal value and is read through the secret
+// store instead.
 func profileEnvLiteral(profile *settingsmodels.AgentProfile, key string) string {
 	for _, env := range profile.EnvVars {
 		if env.Key == key {
 			return strings.TrimSpace(env.Value)
+		}
+	}
+	return ""
+}
+
+// profileEnvSecretID returns the secret a profile environment entry references.
+// A secret reference is the credential the agent itself runs with, so it
+// outranks a literal value for the same key.
+func profileEnvSecretID(profile *settingsmodels.AgentProfile, key string) string {
+	for _, env := range profile.EnvVars {
+		if env.Key == key {
+			return strings.TrimSpace(env.SecretID)
 		}
 	}
 	return ""

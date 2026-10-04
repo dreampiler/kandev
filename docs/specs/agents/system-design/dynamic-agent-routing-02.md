@@ -230,8 +230,9 @@ require the current exclusive probe lease.
   ACP diagnostic and immediately settles with a matching structured provider
   error, **WHEN** no assistant output or tool activity follows and the
   transient policy is exhausted with `skip`, **THEN** the same logical dynamic
-  session advances to the next eligible candidate. **GIVEN** later output,
-  tool activity, or a mismatched terminal error, **THEN** it does not switch.
+  session advances to the next eligible candidate. **GIVEN** a mismatched
+  terminal error, or output and tool activity in a session that is not
+  task-owned, **THEN** it does not switch.
 - **GIVEN** a hard quota error includes a trusted reset in one minute, **WHEN**
   the policy permits reset waits up to five minutes, **THEN** the route waits
   durably and retries the same candidate after the reset.
