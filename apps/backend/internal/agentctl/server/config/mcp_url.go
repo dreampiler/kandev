@@ -15,14 +15,14 @@ import (
 func MCPReachableHost(listenHost string) string {
 	host := strings.TrimSpace(strings.Trim(listenHost, "[]"))
 	if host == "" {
-		return "127.0.0.1"
+		return loopbackHost
 	}
 	if addr, err := netip.ParseAddr(host); err == nil {
 		if addr.IsUnspecified() {
 			if addr.Is6() {
 				return "::1"
 			}
-			return "127.0.0.1"
+			return loopbackHost
 		}
 		return addr.String()
 	}

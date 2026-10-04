@@ -38,6 +38,10 @@ const (
 	windowsOS  = "windows"
 	pathEnvKey = "PATH"
 
+	// loopbackHost is both the default listener bind and the narrowest host
+	// advertised to a process that has to reach that listener.
+	loopbackHost = "127.0.0.1"
+
 	defaultUnownedPeriod      = 10 * time.Minute
 	defaultDetachedEventLimit = 100
 
@@ -563,7 +567,7 @@ func (c *Config) ListenHost() string {
 	if c.ListenHostOverride != "" {
 		return c.ListenHostOverride
 	}
-	return "127.0.0.1"
+	return loopbackHost
 }
 
 // MCPReachableHost returns an agent-facing host for the current listener.
