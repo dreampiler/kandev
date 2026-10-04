@@ -3,7 +3,6 @@ import type { DashboardData, WorkspaceAggregateEntry } from "@/lib/state/slices/
 import type { OverviewSections } from "@/lib/state/slices/office/overview-types";
 import type { QuorumResponseDTO } from "@/lib/state/slices/office/quorum-types";
 import { normalizeOfficeTask, type OfficeTaskWire } from "./office-task-normalize";
-import type { RawActivityEntry } from "./office-activity-normalize";
 
 const BASE = "/api/v1/office";
 
@@ -606,7 +605,6 @@ export function getDashboard(workspaceId: string, options?: ApiRequestOptions) {
 
 export type WorkspaceAggregateWire = OverviewSections & {
   workspaces: WorkspaceAggregateEntry[];
-  recent_activity: RawActivityEntry[];
 };
 
 export function getWorkspaceAggregate(options?: ApiRequestOptions) {

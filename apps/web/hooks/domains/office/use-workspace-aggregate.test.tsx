@@ -29,7 +29,6 @@ const response = {
       running_agents: 0,
     },
   ],
-  recent_activity: [],
 };
 
 // The sections an aggregate without overview data normalizes to.
@@ -79,13 +78,12 @@ describe("useWorkspaceAggregate", () => {
     expect(result.current.loadState).toBe("loaded");
     expect(setWorkspaceAggregate).toHaveBeenCalledWith({
       workspaces: response.workspaces,
-      recentActivity: [],
       sections: emptySections,
     });
     expect(getWorkspaceAggregate).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(60_000);
     });
 
     expect(getWorkspaceAggregate).toHaveBeenCalledTimes(2);
@@ -103,7 +101,7 @@ describe("useWorkspaceAggregate", () => {
     expect(setWorkspaceAggregate).not.toHaveBeenCalled();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(60_000);
     });
 
     expect(result.current.loadState).toBe("loaded");
@@ -156,7 +154,6 @@ describe("useWorkspaceAggregate", () => {
     expect(setWorkspaceAggregate).toHaveBeenCalledTimes(1);
     expect(setWorkspaceAggregate).toHaveBeenCalledWith({
       workspaces: [{ ...response.workspaces[0], name: "Current workspace" }],
-      recentActivity: [],
       sections: emptySections,
     });
   });

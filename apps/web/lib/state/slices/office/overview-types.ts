@@ -8,6 +8,14 @@
 
 export type OverviewScope = "office" | "reachable";
 
+/**
+ * Workspace-card order on the overview. It is applied to the cards already in
+ * the browser, so a card that arrives late still lands in its sorted place.
+ */
+export const OVERVIEW_SORT_OPTIONS = ["name", "recent", "problems"] as const;
+
+export type OverviewSort = (typeof OVERVIEW_SORT_OPTIONS)[number];
+
 export type OverviewStatus = "error" | "stalled" | "delayed" | "running" | "waiting" | "blocked";
 
 export type OverviewQueueStatus = "undeliverable" | "delayed" | "waiting";
@@ -27,9 +35,26 @@ export type OverviewSystem = {
   queued_messages: number;
   undeliverable_messages: number;
   needs_human: number;
+  /** Provider-health blocks only. */
   blocked_accounts: number;
+  /** Provider-health blocks plus open dynamic circuits; absent means unknown. */
+  blocked_accounts_total?: number;
   earliest_unblock_at?: string;
   problems: number;
+  /** The limits the status rules applied, so the UI explains the same rules. */
+  problem_thresholds?: OverviewThresholds;
+};
+
+export type OverviewThresholds = {
+  no_output_minutes: number;
+  starting_minutes: number;
+  not_advancing_minutes: number;
+  queue_idle_minutes: number;
+  queue_busy_minutes: number;
+  dwell_in_progress_minutes: number;
+  dwell_review_minutes: number;
+  dwell_hold_minutes: number;
+  window_hours: number;
 };
 
 export type OverviewWorkspaceMetrics = {
@@ -61,15 +86,29 @@ export type OverviewParentTask = {
   open_children: number;
 };
 
+export type OverviewModelKind = "concrete" | "dynamic";
+
 export type OverviewModel = {
   agent_profile_id: string;
   agent_id: string;
   agent_name: string;
   name: string;
+  kind: OverviewModelKind;
   sessions_24h: number;
   running: number;
   failed_24h: number;
   errors: { kind: string; count: number }[] | null;
+};
+
+/** One open dynamic-routing resource circuit the overview was told about. */
+export type OverviewBlockedCircuit = {
+  resource_key: string;
+  scope: string;
+  scope_value: string;
+  state: string;
+  code?: string;
+  until?: string;
+  strikes: number;
 };
 
 export type OverviewBlockedAccount = {
@@ -84,6 +123,7 @@ export type OverviewBlockedAccount = {
 
 export type OverviewEventKind =
   | "server_started"
+  | "task_created"
   | "task_completed"
   | "session_failed"
   | "automation_run";
@@ -108,6 +148,8 @@ export type OverviewHumanItem = {
   task_title?: string;
   session_id?: string;
   approval_type?: string;
+  /** How many occurrences this row stands for; always at least one. */
+  count: number;
   created_at: string;
 };
 
@@ -188,6 +230,7 @@ export type OverviewSections = {
   system?: OverviewSystem;
   models?: OverviewModel[];
   blocked_accounts?: OverviewBlockedAccount[];
+  blocked_circuits?: OverviewBlockedCircuit[];
   last_24h?: OverviewEvent[];
   needs_human?: OverviewHumanItem[];
 };

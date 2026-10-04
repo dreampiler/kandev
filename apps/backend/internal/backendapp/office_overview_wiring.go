@@ -26,6 +26,7 @@ func wireOfficeOverview(
 	}
 	if taskRepo != nil {
 		dashboard.SetAnswerableQuestionLister(taskRepo)
+		dashboard.SetDynamicCircuitLister(taskRepo)
 	}
 	if userSvc != nil {
 		dashboard.SetOverviewScopeSource(userSvc)

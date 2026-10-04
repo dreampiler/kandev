@@ -17,6 +17,13 @@ import {
 import { type UserSettingsState } from "@/lib/state/slices/settings/types";
 import type { SidebarTaskPrefsApi, UserSettings, UserSettingsResponse } from "@/lib/types/http";
 import { parseSidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
+import {
+  OVERVIEW_REFRESH_SECONDS_DEFAULT,
+  OVERVIEW_REFRESH_SECONDS_MAX,
+  OVERVIEW_REFRESH_SECONDS_MIN,
+  clampOverviewRefreshSeconds,
+} from "@/lib/settings/overview-refresh";
+import { OVERVIEW_SORT_OPTIONS, type OverviewSort } from "@/lib/state/slices/office/overview-types";
 import { parseSidebarTaskColors } from "@/lib/task-colors";
 import type {
   LspStatusLocation,
@@ -102,6 +109,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
     officeOverviewScope: "office",
+    officeOverviewRefreshSeconds: OVERVIEW_REFRESH_SECONDS_DEFAULT,
+    officeOverviewSort: "name",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     sidebarHoverEnabled: true,
@@ -132,7 +141,28 @@ export function parseOfficeOverviewScope(value: string | undefined): OfficeOverv
   return value === "reachable" ? "reachable" : "office";
 }
 
-/** Parses the last-seen display format, defaulting to "absolute". */
+/**
+ * Parses the overview auto-refresh period. The default is slower than the
+ * interval the overview shipped with, so a missing or invalid stored value
+ * never increases query load.
+ */
+export function parseOfficeOverviewRefreshSeconds(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) return OVERVIEW_REFRESH_SECONDS_DEFAULT;
+  if (value < OVERVIEW_REFRESH_SECONDS_MIN || value > OVERVIEW_REFRESH_SECONDS_MAX) {
+    return OVERVIEW_REFRESH_SECONDS_DEFAULT;
+  }
+  return clampOverviewRefreshSeconds(value);
+}
+
+/**
+ * Parses the overview workspace-card order. An unrecognized stored value
+ * becomes the name order, so the cards always have a defined order.
+ */
+export function parseOfficeOverviewSort(value: string | undefined): OverviewSort {
+  return OVERVIEW_SORT_OPTIONS.includes(value as OverviewSort) ? (value as OverviewSort) : "name";
+}
+
+/** Parses the overview last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
 }
@@ -328,6 +358,16 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       s.office_overview_scope,
       current.officeOverviewScope,
       parseOfficeOverviewScope,
+    ),
+    officeOverviewRefreshSeconds: mapDefined(
+      s.office_overview_refresh_seconds,
+      current.officeOverviewRefreshSeconds,
+      parseOfficeOverviewRefreshSeconds,
+    ),
+    officeOverviewSort: mapDefined(
+      s.office_overview_sort,
+      current.officeOverviewSort,
+      parseOfficeOverviewSort,
     ),
   };
 }

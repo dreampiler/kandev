@@ -10,7 +10,13 @@ type ClarificationBundleSummary struct {
 	PendingID string
 	SessionID string
 	TaskID    string
-	CreatedAt time.Time
+	// QuestionID identifies the question a bundle asks. It is the identity two
+	// bundles share when the same question is asked again, so a consumer can
+	// group repeats without comparing prose. A bundle without one is still
+	// answerable; only the shared expression's answerable filter requires a
+	// non-empty id.
+	QuestionID string
+	CreatedAt  time.Time
 }
 
 // ListClarificationBundlesOptions filters and paginates

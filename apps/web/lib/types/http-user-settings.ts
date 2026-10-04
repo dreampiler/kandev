@@ -6,6 +6,10 @@ export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
 export type OfficeOverviewScope = "office" | "reachable";
 
+import type { OverviewSort } from "@/lib/state/slices/office/overview-types";
+
+export type { OverviewSort };
+
 export type SavedLayout = {
   id: string;
   name: string;
@@ -244,6 +248,8 @@ export type UserSettings = {
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
   office_overview_scope?: OfficeOverviewScope;
+  office_overview_refresh_seconds?: number;
+  office_overview_sort?: OverviewSort;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;
@@ -336,6 +342,8 @@ export type UserSettingsUpdatePayload = {
   changes_panel_layout?: "flat" | "tree";
   last_seen_display?: LastSeenDisplay;
   office_overview_scope?: OfficeOverviewScope;
+  office_overview_refresh_seconds?: number;
+  office_overview_sort?: OverviewSort;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;

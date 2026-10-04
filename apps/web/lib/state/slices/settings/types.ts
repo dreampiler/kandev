@@ -15,6 +15,7 @@ import type {
   LspStatusLocation,
   LastSeenDisplay,
   OfficeOverviewScope,
+  OverviewSort,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -491,6 +492,8 @@ export type UserSettingsState = {
   changesPanelLayout: "flat" | "tree";
   lastSeenDisplay: LastSeenDisplay;
   officeOverviewScope: OfficeOverviewScope;
+  officeOverviewRefreshSeconds: number;
+  officeOverviewSort: OverviewSort;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   sidebarHoverEnabled: boolean;

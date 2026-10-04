@@ -22,11 +22,15 @@ const (
 // person"; the count still covers every pending approval.
 const overviewPendingApprovalLimit = 50
 
-// overviewEventLimit bounds each event source and the merged event list.
+// overviewEventKindLimit bounds one kind's contribution to the last-24-hours
+// list and overviewEventMergeLimit the merged list. Both sit at or above the 50
+// rows the screen shows, because that screen filters by kind and only then caps
+// what it renders: a kind cut short here could never be reached through its
+// chip.
 const (
-	overviewEventSourceLimit = 20
-	overviewEventLimit       = 50
-	overviewParentLimit      = 5
+	overviewEventKindLimit  = 50
+	overviewEventMergeLimit = 250
+	overviewParentLimit     = 5
 )
 
 // OverviewReader is the read-only persistence surface behind the overview.
@@ -50,6 +54,9 @@ type OverviewReader interface {
 	ListOverviewAutomationTasks(
 		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 	) ([]*sqlite.OverviewAutomationTaskRow, error)
+	ListOverviewCreatedTasks(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewCreatedTaskRow, error)
 }
 
 // AnswerableQuestionLister lists answerable clarification bundles of the
@@ -100,6 +107,10 @@ type overviewSnapshot struct {
 	firstLinesOnce sync.Once
 	firstLines     map[string]string
 	firstLinesErr  error
+
+	// circuitsAvailable records whether the dynamic-circuit source answered.
+	// Absent means unknown, never "no circuits".
+	circuitsAvailable bool
 }
 
 // overviewScope resolves the caller's scope, falling back to Office.
@@ -122,7 +133,26 @@ func (s *DashboardService) loadOverviewSnapshot(ctx context.Context) (*overviewS
 	scope := s.overviewScope(ctx)
 	key := overviewCallerKey(ctx) + "|" + scope
 	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
-		return s.buildOverviewSnapshot(ctx, scope)
+		return s.buildOverviewSnapshot(ctx, scope, "")
+	})
+}
+
+// loadWorkspaceSnapshot returns the snapshot narrowed to one workspace of the
+// caller's scope, cached under its own key so the per-workspace reads compute
+// and expire independently of the whole-scope one.
+func (s *DashboardService) loadWorkspaceSnapshot(
+	ctx context.Context, workspaceID string,
+) (*overviewSnapshot, error) {
+	if s.workspaceLister == nil {
+		return nil, ErrWorkspaceAggregateUnavailable
+	}
+	if workspaceID == "" {
+		return nil, ErrOverviewWorkspaceNotFound
+	}
+	scope := s.overviewScope(ctx)
+	key := overviewCallerKey(ctx) + "|" + scope + "|ws:" + workspaceID
+	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
+		return s.buildOverviewSnapshot(ctx, scope, workspaceID)
 	})
 }
 
@@ -135,13 +165,25 @@ func (s *DashboardService) overviewCacheOrInit() *overviewCache {
 	return s.overview
 }
 
-func (s *DashboardService) buildOverviewSnapshot(ctx context.Context, scope string) (*overviewSnapshot, error) {
+// buildOverviewSnapshot computes the overview for the caller's scope, or for
+// one workspace of it when only is set. A workspace outside the caller's scope
+// answers ErrOverviewWorkspaceNotFound rather than an empty overview, so a
+// foreign or nonexistent workspace is indistinguishable from a miss.
+func (s *DashboardService) buildOverviewSnapshot(
+	ctx context.Context, scope, only string,
+) (*overviewSnapshot, error) {
 	started := time.Now()
 	workspaces, err := s.workspaceLister.ListWorkspaces(ctx)
 	if err != nil {
 		return nil, err
 	}
 	ordered, ids := aggregateWorkspaces(workspaces, scope)
+	if only != "" {
+		ordered, ids = narrowToWorkspace(ordered, only)
+		if len(ids) == 0 {
+			return nil, ErrOverviewWorkspaceNotFound
+		}
+	}
 	resp, err := s.buildAggregateBase(ctx, ordered, ids)
 	if err != nil {
 		return nil, err
@@ -185,12 +227,19 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 	if err := s.assembleNeedsHuman(ctx, snap, ids); err != nil {
 		return err
 	}
-	automation, err := s.overviewReader.ListOverviewAutomationTasks(ctx, ids, since, overviewEventSourceLimit)
+	if err := s.assembleDynamicCircuits(ctx, snap); err != nil {
+		return err
+	}
+	automation, err := s.overviewReader.ListOverviewAutomationTasks(ctx, ids, since, overviewEventKindLimit)
 	if err != nil {
 		return err
 	}
-	assembleSystem(snap, s.overviewSessionLimit)
-	snap.resp.Last24h = assembleEvents(snap, automation, since)
+	created, err := s.overviewReader.ListOverviewCreatedTasks(ctx, ids, since, overviewEventKindLimit)
+	if err != nil {
+		return err
+	}
+	assembleSystem(snap, s.overviewSessionLimit, th)
+	snap.resp.Last24h = assembleEvents(snap, automation, created, since)
 	return nil
 }
 
@@ -272,6 +321,17 @@ func groupOverviewSessions(
 	}
 	sort.Strings(ids)
 	return ids
+}
+
+// narrowToWorkspace keeps only the named workspace of an already ordered,
+// already scoped list.
+func narrowToWorkspace(ordered []*taskmodels.Workspace, workspaceID string) ([]*taskmodels.Workspace, []string) {
+	for _, workspace := range ordered {
+		if workspace.ID == workspaceID {
+			return []*taskmodels.Workspace{workspace}, []string{workspaceID}
+		}
+	}
+	return nil, nil
 }
 
 func overviewParentIDs(tasks []*overviewTask) []string {

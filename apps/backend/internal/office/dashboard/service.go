@@ -446,6 +446,7 @@ type DashboardService struct {
 	workspaceLister       WorkspaceLister                 // optional; nil disables the multi-workspace aggregate endpoint
 	overviewReader        OverviewReader                  // optional; nil keeps the aggregate to its original counts
 	questionLister        AnswerableQuestionLister        // optional; nil omits answerable questions from the overview
+	circuitLister         DynamicCircuitLister            // optional; nil reports dynamic blocks as unknown rather than absent
 	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
 	overviewSessionLimit  int                             // instance session limit shown on the overview
 	overview              *overviewCache                  // lazily created by overviewCacheOrInit

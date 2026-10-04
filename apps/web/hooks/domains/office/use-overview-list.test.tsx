@@ -38,13 +38,13 @@ describe("useOverviewList", () => {
     expect(result.current.loadState).toBe("loaded");
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
+      await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(load).toHaveBeenCalledTimes(2);
 
     setVisibility("hidden");
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(90_000);
+      await vi.advanceTimersByTimeAsync(180_000);
     });
     expect(load).toHaveBeenCalledTimes(2);
   });

@@ -144,7 +144,7 @@ func clarificationSidecarPredicate(sidecar *models.ClarificationSidecarFilter) (
 // admitted here with no resolvable question_id could be listed but could
 // never be answered.
 func clarificationBundleQuery(drv, joinExtra, whereExtra string) string {
-	return "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
+	return "SELECT b.pending_id, b.session_id, b.task_id, b.created_at, b.question_id\n" +
 		clarificationBundleTableExpr(drv, joinExtra, whereExtra, "") +
 		"\nORDER BY b.created_at ASC, b.pending_id ASC\nLIMIT ?"
 }
@@ -192,7 +192,8 @@ func clarificationBundleTableExpr(drv, joinExtra, whereExtra, innerExtra string)
 				COALESCE(NULLIF(MIN(m.task_id), ''), MIN(ts.task_id)) AS task_id,
 				MIN(m.created_at) AS created_at,
 				MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
-				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id
+				MAX(CASE WHEN %[7]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id,
+				MIN(%[7]s) AS question_id
 			FROM task_session_messages m
 			JOIN task_sessions ts ON ts.id = m.task_session_id
 			WHERE m.type = 'clarification_request'
@@ -236,7 +237,7 @@ func (r *Repository) ListAnswerableClarificationsForSessions(
 			args[i] = id
 		}
 		inner := "AND m.task_session_id IN (" + strings.Join(placeholders, ", ") + ")"
-		query := "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
+		query := "SELECT b.pending_id, b.session_id, b.task_id, b.created_at, b.question_id\n" +
 			clarificationBundleTableExpr(drv, "", "", inner) +
 			"\nORDER BY b.created_at ASC, b.pending_id ASC"
 		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
@@ -263,12 +264,12 @@ func scanClarificationBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clar
 	for rows.Next() {
 		var b models.ClarificationBundleSummary
 		if isPostgres {
-			if err := rows.Scan(&b.PendingID, &b.SessionID, &b.TaskID, &b.CreatedAt); err != nil {
+			if err := rows.Scan(&b.PendingID, &b.SessionID, &b.TaskID, &b.CreatedAt, &b.QuestionID); err != nil {
 				return nil, err
 			}
 		} else {
 			var createdAtRaw string
-			if err := rows.Scan(&b.PendingID, &b.SessionID, &b.TaskID, &createdAtRaw); err != nil {
+			if err := rows.Scan(&b.PendingID, &b.SessionID, &b.TaskID, &createdAtRaw, &b.QuestionID); err != nil {
 				return nil, err
 			}
 			b.CreatedAt = parseLegacyTimestamp(createdAtRaw)

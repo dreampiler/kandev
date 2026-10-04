@@ -62,6 +62,45 @@ func NormalizeOfficeOverviewScope(value string) string {
 	return OfficeOverviewScopeOffice
 }
 
+// Office overview workspace-card order. The order is applied to the cards the
+// client already holds, so it costs no extra read and a card that arrives late
+// still lands in its sorted place.
+const (
+	OfficeOverviewSortName     = "name"
+	OfficeOverviewSortRecent   = "recent"
+	OfficeOverviewSortProblems = "problems"
+)
+
+// NormalizeOfficeOverviewSort returns the canonical card order; anything
+// unrecognized is coerced to the name order.
+func NormalizeOfficeOverviewSort(value string) string {
+	switch value {
+	case OfficeOverviewSortRecent, OfficeOverviewSortProblems:
+		return value
+	}
+	return OfficeOverviewSortName
+}
+
+// Overview auto-refresh interval bounds. The default is deliberately slower
+// than the interval the overview shipped with, so enabling the setting never
+// increases query load; a faster interval stays an operator choice.
+const (
+	OfficeOverviewRefreshSecondsDefault = 60
+	OfficeOverviewRefreshSecondsMin     = 15
+	OfficeOverviewRefreshSecondsMax     = 3600
+)
+
+// NormalizeOfficeOverviewRefreshSeconds returns a refresh period inside the
+// supported bounds. Any stored or submitted value outside them, including zero
+// and a negative number, becomes the default rather than a disabled or
+// hammering poller.
+func NormalizeOfficeOverviewRefreshSeconds(value int) int {
+	if value < OfficeOverviewRefreshSecondsMin || value > OfficeOverviewRefreshSecondsMax {
+		return OfficeOverviewRefreshSecondsDefault
+	}
+	return value
+}
+
 const (
 	LastSeenDisplayAbsolute = "absolute"
 	LastSeenDisplayRelative = "relative"
@@ -204,6 +243,8 @@ type UserSettings struct {
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"`  // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`     // "absolute" | "relative"
 	OfficeOverviewScope               string                            `json:"office_overview_scope"` // "office" | "reachable"
+	OfficeOverviewRefreshSeconds      int                               `json:"office_overview_refresh_seconds"`
+	OfficeOverviewSort                string                            `json:"office_overview_sort"` // "name" | "recent" | "problems"
 	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`

@@ -23,10 +23,6 @@ type WorkspaceLister interface {
 // reached without a wired workspace lister.
 var ErrWorkspaceAggregateUnavailable = errors.New("multi-workspace aggregate is not configured")
 
-// aggregateActivityLimit bounds the merged recent-activity feed returned with
-// the aggregate, regardless of workspace count.
-const aggregateActivityLimit = 20
-
 // WorkspaceAggregateEntry is one workspace row in the multi-workspace
 // aggregate overview (GET /workspaces/aggregate).
 type WorkspaceAggregateEntry struct {
@@ -48,10 +44,10 @@ type WorkspaceAggregateEntry struct {
 }
 
 // WorkspaceAggregateResponse is the read-only multi-workspace overview: one
-// entry per visible workspace plus a merged recent-activity feed.
+// entry per visible workspace. The recent-activity feed is not part of it; the
+// overview reports the last 24 hours through Last24h instead.
 type WorkspaceAggregateResponse struct {
-	Workspaces     []WorkspaceAggregateEntry `json:"workspaces"`
-	RecentActivity []*models.ActivityEntry   `json:"recent_activity"`
+	Workspaces []WorkspaceAggregateEntry `json:"workspaces"`
 	// Scope is the caller's overview scope ("office" or "reachable").
 	Scope       string    `json:"scope"`
 	GeneratedAt time.Time `json:"generated_at"`
@@ -60,6 +56,10 @@ type WorkspaceAggregateResponse struct {
 	System          *OverviewSystem          `json:"system,omitempty"`
 	Models          []OverviewModel          `json:"models,omitempty"`
 	BlockedAccounts []OverviewBlockedAccount `json:"blocked_accounts,omitempty"`
+	// BlockedCircuits are the open dynamic-routing resource circuits. Their
+	// presence says nothing about availability on its own; System carries
+	// whether the circuits source answered.
+	BlockedCircuits []OverviewBlockedCircuit `json:"blocked_circuits,omitempty"`
 	Last24h         []OverviewEvent          `json:"last_24h,omitempty"`
 	NeedsHuman      []OverviewHumanItem      `json:"needs_human,omitempty"`
 }
@@ -83,9 +83,8 @@ func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*Workspa
 	return snap.resp, nil
 }
 
-// buildAggregateBase builds the original per-workspace counts and merged
-// activity feed for the selected workspaces. Counts default to zero for a
-// workspace with no matching rows; the activity feed is newest first.
+// buildAggregateBase builds the per-workspace counts for the selected
+// workspaces. Counts default to zero for a workspace with no matching rows.
 func (s *DashboardService) buildAggregateBase(
 	ctx context.Context, ordered []*taskmodels.Workspace, ids []string,
 ) (*WorkspaceAggregateResponse, error) {
@@ -96,19 +95,6 @@ func (s *DashboardService) buildAggregateBase(
 	approvals, err := s.repo.CountPendingApprovalsByWorkspaces(ctx, ids)
 	if err != nil {
 		return nil, err
-	}
-	activity, err := s.repo.ListActivityEntriesForWorkspaces(ctx, ids, aggregateActivityLimit)
-	if err != nil {
-		return nil, err
-	}
-	activityByWorkspace := make(map[string][]*models.ActivityEntry)
-	for _, entry := range activity {
-		if entry != nil {
-			activityByWorkspace[entry.WorkspaceID] = append(activityByWorkspace[entry.WorkspaceID], entry)
-		}
-	}
-	for workspaceID, entries := range activityByWorkspace {
-		s.enrichActivityLabels(ctx, workspaceID, entries, nil)
 	}
 	agentCounts, err := s.aggregateAgentCounts(ctx)
 	if err != nil {
@@ -133,7 +119,7 @@ func (s *DashboardService) buildAggregateBase(
 			IsOffice:         w.OfficeWorkflowID != "",
 		})
 	}
-	return &WorkspaceAggregateResponse{Workspaces: entries, RecentActivity: activity}, nil
+	return &WorkspaceAggregateResponse{Workspaces: entries}, nil
 }
 
 // aggregateAgentCounts totals and running-agents per workspace from the shared

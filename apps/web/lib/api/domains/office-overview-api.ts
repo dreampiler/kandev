@@ -1,4 +1,5 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
+import type { WorkspaceAggregateWire } from "@/lib/api/domains/office-extended-api";
 import type {
   OverviewListResponse,
   OverviewRunningKind,
@@ -30,6 +31,19 @@ export function getWorkspaceAggregateRunning(
   const params = new URLSearchParams({ kind, limit: String(limit) });
   return fetchJson<OverviewListResponse>(
     `${BASE}/workspaces/aggregate/running?${params.toString()}`,
+    options,
+  );
+}
+
+/**
+ * One workspace's overview, computed and cached on its own. Each workspace
+ * answers independently, so a slow workspace cannot hold back the ones that are
+ * ready; the caller renders a card as soon as its own read lands.
+ */
+export function getWorkspaceOverview(workspaceId: string, options?: ApiRequestOptions) {
+  const params = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<WorkspaceAggregateWire>(
+    `${BASE}/workspaces/aggregate/workspace?${params.toString()}`,
     options,
   );
 }
