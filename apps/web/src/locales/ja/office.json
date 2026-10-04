@@ -1105,5 +1105,6 @@
   "overviewNeverSynced": "未同期",
   "overviewRefreshLabel": "自動同期間隔",
   "overviewRefreshSeconds_one": "{{seconds}}秒ごと",
-  "overviewRefreshSeconds_other": "{{seconds}}秒ごと"
+  "overviewRefreshSeconds_other": "{{seconds}}秒ごと",
+  "overviewUsageStaleObserved": "最後に確認された値 ({{relative}}に取得)"
 }

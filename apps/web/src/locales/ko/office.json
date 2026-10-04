@@ -1105,5 +1105,6 @@
   "overviewNeverSynced": "아직 동기화하지 않음",
   "overviewRefreshLabel": "자동 동기화 주기",
   "overviewRefreshSeconds_one": "{{seconds}}초마다",
-  "overviewRefreshSeconds_other": "{{seconds}}초마다"
+  "overviewRefreshSeconds_other": "{{seconds}}초마다",
+  "overviewUsageStaleObserved": "마지막 확인 값 ({{relative}} 조회)"
 }

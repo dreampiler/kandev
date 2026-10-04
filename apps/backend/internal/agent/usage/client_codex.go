@@ -101,7 +101,7 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 		}
 	}
 	if status != http.StatusOK {
-		return nil, statusFailure(codexProvider, status)
+		return nil, statusFailure(codexProvider, status, nil)
 	}
 	return parseCodexUsage(body, time.Now())
 }

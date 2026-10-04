@@ -11,7 +11,7 @@ import (
 
 // maxRetryAfter bounds provider-supplied Retry-After hints so an absurd or
 // hostile header cannot park an account indefinitely.
-const maxRetryAfter = 15 * time.Minute
+const maxRetryAfter = maxBackoffTTL
 
 // FetchFailure is a bounded reason a usage read failed. It is safe to log and to
 // return to clients because it never carries a credential or a provider body.
@@ -93,14 +93,14 @@ func ParseRetryAfter(value string, now time.Time) time.Duration {
 // statusFailure classifies a non-OK provider response. Authentication and
 // permission refusals are separated so an operator can tell a missing scope
 // from a provider outage. When header is provided, Retry-After is parsed.
-func statusFailure(provider string, status int, header ...http.Header) *FetchError {
+func statusFailure(provider string, status int, header http.Header) *FetchError {
 	reason := FailureHTTPStatus
 	if status == http.StatusUnauthorized || status == http.StatusForbidden {
 		reason = FailureUnauthorized
 	}
 	var retryAfter time.Duration
-	if len(header) > 0 && header[0] != nil {
-		retryAfter = ParseRetryAfter(header[0].Get("Retry-After"), time.Now())
+	if header != nil {
+		retryAfter = ParseRetryAfter(header.Get("Retry-After"), time.Now())
 	}
 	return &FetchError{Provider: provider, Reason: reason, Status: status, RetryAfter: retryAfter}
 }

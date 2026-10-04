@@ -215,9 +215,12 @@ func TestUsageCache_ConcurrentCallersCoalesce(t *testing.T) {
 	cache := NewUsageCache()
 	var calls int32
 	startBlock := make(chan struct{})
+	started := make(chan struct{})
+	var once sync.Once
 
 	fetchFn := func(ctx context.Context) (*ProviderUsage, error) {
 		atomic.AddInt32(&calls, 1)
+		once.Do(func() { close(started) })
 		<-startBlock
 		return &ProviderUsage{Provider: "anthropic", Plan: "team"}, nil
 	}
@@ -231,8 +234,7 @@ func TestUsageCache_ConcurrentCallersCoalesce(t *testing.T) {
 		}()
 	}
 
-	// Give goroutines time to block on keyLock
-	time.Sleep(10 * time.Millisecond)
+	<-started
 	close(startBlock)
 	wg.Wait()
 

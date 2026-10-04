@@ -436,7 +436,7 @@ function ModelCard({ model }: { model: OverviewModel }) {
  * A concrete profile's provider usage. An absent or unusable read is reported
  * as such; it is never shown as zero usage or as nothing wrong.
  */
-function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
+export function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
   const { t } = useTranslation();
   if (!usage) {
     return (
@@ -459,7 +459,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
     );
   }
   const windows = usage.windows ?? [];
-  if (windows.length === 0) return null;
+  if (windows.length === 0 && !usage.stale) return null;
   return (
     <div className="mt-1 space-y-0.5 text-xs" data-testid="overview-model-usage">
       {windows.map((window) => (
@@ -476,6 +476,13 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
           )}
         </div>
       ))}
+      {usage.stale && usage.fetched_at && (
+        <div className="text-muted-foreground" data-testid="overview-model-usage-stale">
+          {t("office:overviewUsageStaleObserved", {
+            relative: relativeTime(usage.fetched_at),
+          })}
+        </div>
+      )}
     </div>
   );
 }

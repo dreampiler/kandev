@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -193,9 +194,11 @@ func (c *UsageCache) storeFailure(key string, err error) {
 
 	var delay time.Duration
 	var fetchErr *FetchError
-	if errors.As(err, &fetchErr) && fetchErr.RetryAfter > 0 {
+	switch {
+	case errors.As(err, &fetchErr) && fetchErr.RetryAfter > 0:
 		delay = fetchErr.RetryAfter
-	} else {
+		e.failures = 0
+	case errors.As(err, &fetchErr) && fetchErr.Status == http.StatusTooManyRequests:
 		shift := e.failures - 1
 		if shift < 0 {
 			shift = 0
@@ -204,6 +207,8 @@ func (c *UsageCache) storeFailure(key string, err error) {
 			shift = 10
 		}
 		delay = failureCacheTTL * time.Duration(1<<shift)
+	default:
+		delay = failureCacheTTL
 	}
 	if delay > maxBackoffTTL {
 		delay = maxBackoffTTL
