@@ -54,7 +54,7 @@ export const defaultOfficeState: OfficeSliceState = {
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
     taskQuorum: { byTaskId: {} },
-    pause: { record: null, status: "unknown", requestSeq: 0, appliedSeq: 0 },
+    pause: { record: null, status: "unknown", workspaceId: null, requestSeq: 0, appliedSeq: 0 },
   },
 };
 
@@ -404,12 +404,18 @@ function createPauseActions(set: SetFn) {
       });
       return tag;
     },
-    // Mount, and every change of selected workspace: status `unknown`,
-    // clear the record. The caller issues the read separately.
-    resetPauseState: () =>
+    // Starting a read for the selected workspace: status `loading`.
+    // The record is cleared only when the workspace changed, so a
+    // same-workspace remount re-reads while the last state stays on screen.
+    // The caller issues the read separately.
+    beginPauseRead: (workspaceId: string) =>
       set((draft) => {
-        draft.office.pause.status = "unknown";
-        draft.office.pause.record = null;
+        const pause = draft.office.pause;
+        if (pause.workspaceId !== workspaceId) {
+          pause.workspaceId = workspaceId;
+          pause.record = null;
+        }
+        pause.status = "loading";
       }),
     applyPauseResponse: (
       tag: number,
@@ -430,9 +436,9 @@ function createPauseActions(set: SetFn) {
             pause.record = outcome.paused ? outcome.record : null;
             return;
           case "read-failure":
-            // Status `unknown`; the record is not cleared, so a pause
+            // Status `error`; the record is not cleared, so a pause
             // already read stays on screen (marked stale by the caller).
-            pause.status = "unknown";
+            pause.status = "error";
             return;
           case "mutate-failure":
             // Status and record unchanged; the caller surfaces the failure.
