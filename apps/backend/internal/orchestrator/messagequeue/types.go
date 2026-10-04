@@ -170,6 +170,10 @@ var (
 	// ErrQueueDispatchClaimChanged means the durable ordinary-dispatch claim
 	// was cleared or transferred before its worker attempted to settle it.
 	ErrQueueDispatchClaimChanged = errors.New("queue dispatch claim changed")
+	// ErrQueueDispatchClaimRewriteUnsupported means the repository cannot
+	// rewrite an unsettled dispatch claim, so several rows must not be folded
+	// into one dispatch: a restart would restore only the leading row.
+	ErrQueueDispatchClaimRewriteUnsupported = errors.New("queue dispatch claim rewrite unsupported")
 	// ErrLifecycleReservationChanged means a newer lifecycle delivery attempt
 	// replaced the reservation being acknowledged.
 	ErrLifecycleReservationChanged = errors.New("lifecycle reservation changed")

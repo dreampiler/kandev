@@ -2887,10 +2887,23 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 	})
 }
 
+// pendingQueueDispatchRepository is the settlement contract every repository
+// with durable dispatch claims implements. Widening it would silently disable
+// settlement for every other implementer, because each service method treats a
+// failed assertion as "nothing to settle".
 type pendingQueueDispatchRepository interface {
 	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
 	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
 	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
+}
+
+// pendingQueueDispatchClaimRewriter is the optional half of that contract: a
+// repository that persists claims but cannot rewrite an unsettled one cannot
+// fold several rows into a single dispatch, because a restart would restore only
+// the leading row. It is asserted separately so that a repository without it
+// keeps the settlement it already had.
+type pendingQueueDispatchClaimRewriter interface {
+	RewritePendingQueueDispatchMessage(context.Context, *QueuedMessage) error
 }
 
 // PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
@@ -2900,12 +2913,49 @@ func (s *Service) PendingQueueDispatchPersistenceAvailable() bool {
 	return ok
 }
 
+// PeerReportBatchClaimRewriteSupported reports whether several reserved queue
+// rows may be folded into one dispatch. Folding needs no claim rewrite when the
+// repository persists no dispatch claims at all, because nothing survives a
+// restart to restore; with claims it needs a rewritable one, because otherwise a
+// restart would restore only the leading row. A repository that persists claims
+// it cannot rewrite is refused.
+func (s *Service) PeerReportBatchClaimRewriteSupported() bool {
+	if _, ok := s.repo.(pendingQueueDispatchRepository); !ok {
+		return true
+	}
+	_, ok := s.repo.(pendingQueueDispatchClaimRewriter)
+	return ok
+}
+
 func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueueDispatch, error) {
 	repo, ok := s.repo.(pendingQueueDispatchRepository)
 	if !ok {
 		return nil, errors.New("pending queue dispatch persistence unavailable")
 	}
 	return repo.ListPendingQueueDispatches(ctx)
+}
+
+// RewritePendingQueueDispatchMessage replaces the recovery payload of an
+// unsettled dispatch claim so a restart restores what was actually handed to the
+// agent. A batch composes several rows into the leading row's prompt after the
+// claim was written, so without this the restored row would carry only the
+// leading report. An accepted claim is never rewritten.
+func (s *Service) RewritePendingQueueDispatchMessage(
+	ctx context.Context,
+	msg *QueuedMessage,
+) error {
+	if _, ok := s.repo.(pendingQueueDispatchRepository); !ok {
+		// No dispatch claim is persisted, so no restart can restore a prompt
+		// that was never recorded.
+		return nil
+	}
+	repo, ok := s.repo.(pendingQueueDispatchClaimRewriter)
+	if !ok {
+		return ErrQueueDispatchClaimRewriteUnsupported
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.RewritePendingQueueDispatchMessage(admittedCtx, msg)
+	})
 }
 
 func (s *Service) MarkPendingQueueDispatchAccepted(
