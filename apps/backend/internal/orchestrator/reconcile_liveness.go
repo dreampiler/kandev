@@ -284,23 +284,37 @@ const (
 // Why include Completed in the allowed set: the subtask terminal collapse
 // in setSessionWaitingForInputIfRequested writes session.state=Completed
 // when the agent's last turn did not request input, and the parent task
-// has no further use for the provider-runtime reservation. Failed and
-// Cancelled are deliberately excluded — those have separate cancellation
-// cleanup paths (handleTerminalSessionOnStartup and the cancel pipelines)
-// that already reconcile executor rows.
+// has no further use for the provider-runtime reservation.
+//
+// Failed and Cancelled are reclaimed by this same primitive rather than deferred
+// to the startup and cancel pipelines. Those pipelines only observe a session
+// that was already terminal when the backend booted or when the cancel request
+// arrived, so a session that reaches a terminal state while its agent process is
+// still alive keeps a runtime and its executors_running row indefinitely. That
+// retained process tree is the measured footprint this reclaim exists to
+// release. A terminal session cannot receive a message, so its runtime has no
+// remaining reader; the active-turn guard below is what still protects a turn
+// that is genuinely in flight.
 func classifyIdleReclaim(
 	sessionState models.TaskSessionState,
 	agentRunning, hasActiveTurn, hasResumeToken bool,
 	rowStatus string,
 ) idleReclaimDisposition {
+	terminal := false
 	switch sessionState {
 	case models.TaskSessionStateWaitingForInput,
 		models.TaskSessionStateIdle,
 		models.TaskSessionStateCompleted:
+	case models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		terminal = true
 	default:
 		return idleReclaimDispositionSkippedState
 	}
-	if agentRunning {
+	// A terminal session is reclaimed even when the liveness probe still sees its
+	// agent process: that surviving process is the retained footprint. A
+	// non-terminal session must not be, because its runtime is still resumable.
+	if agentRunning && !terminal {
 		return idleReclaimDispositionSkippedLive
 	}
 	if hasActiveTurn {

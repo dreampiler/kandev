@@ -15,10 +15,11 @@ import (
 //
 // The reaper is a single owner of one background goroutine on Service. It
 // The reaper runs two separate policies over executors_running. The existing
-// disconnected-owner pass reclaims dead rows after a minimum age and never
-// stops a live process. The workspace ACP policy separately suspends settled,
-// resumable sessions when their workspace opts in; it stops only the selected
-// ACP process and preserves task-owned resources.
+// disconnected-owner pass reclaims dead rows after a minimum age, and stops
+// the agent runtime behind a session that is already terminal. The workspace
+// ACP policy separately suspends settled, resumable sessions when their
+// workspace opts in; it stops only the selected ACP process and preserves
+// task-owned resources.
 //
 // Two constants:
 //   - idleReaperInterval: how often the reaper scans. Short enough to
@@ -37,10 +38,13 @@ import (
 // edit and re-deploy; consumers do not.
 //
 // Disconnected-owner reclaim invariants:
-//   - Never call StopAgent / StopAgentWithReason / Kill. reclaimIdleSession
-//     routes through repairDeadRowLiveness (status=stopped, LocalPID=0,
-//     resume_token preserved); a live executor is short-circuited inside
-//     reclaimIdleSession before any side effect.
+//   - Never call StopAgent / StopAgentWithReason / Kill directly. A terminal
+//     session (Failed, Cancelled) is released through reclaimIdleSession,
+//     which routes to the lifecycle cleanup that stops the agent runtime;
+//     a dead row takes the repairDeadRowLiveness path instead (status=stopped,
+//     LocalPID=0, resume_token preserved). A live executor on a resumable
+//     session is short-circuited inside reclaimIdleSession before any side
+//     effect.
 //   - reclaimIdleSession is fail-closed: an uncertain guard is a skip,
 //     never a force. The reaper just calls the primitive in a loop,
 //     so the same invariant carries.
@@ -233,6 +237,7 @@ func (s *Service) startIdleSessionReaper(ctx context.Context) {
 	if !s.idleReaper.start(ctx, func(tickCtx context.Context) {
 		s.reclaimIdleSessionsOnce(tickCtx)
 		s.suspendWorkspaceIdleSessionsOnce(tickCtx)
+		s.observeRuntimeFootprintOnce(tickCtx)
 		s.reclaimStuckSignalSessionsOnce(tickCtx)
 		s.detectOfficeDecisionWaitingOnce(tickCtx)
 		s.reapStalePendingMovesOnce(tickCtx)

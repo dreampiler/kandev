@@ -317,6 +317,12 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	}, nil
 }
 
+// ReadRuntimeFootprints reads the control server's per-instance footprint. It is
+// read-only and never gates a stop: a failure here leaves reclamation to the
+// existing lifecycle guards.
+func (r *StandaloneExecutor) ReadRuntimeFootprints(ctx context.Context) ([]agentctl.RuntimeFootprint, error) {
+	return r.ctl.ListRuntimeFootprints(ctx)
+}
 func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance.StandaloneInstanceID == "" {
 		return nil // No standalone instance to stop

@@ -135,6 +135,9 @@ func (m *ControlServer) setupRoutes() {
 	api := m.router.Group("/api/v1")
 	api.POST("/instances", m.handleCreateInstance)
 	api.GET("/instances", m.handleListInstances)
+	// A dedicated collection path, not /instances/footprint: the router cannot
+	// resolve a static segment beside the :id wildcard.
+	api.GET("/runtime-footprint", m.handleListInstanceFootprints)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)
@@ -227,6 +230,12 @@ func (m *ControlServer) handleListInstances(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"instances": instances})
 }
 
+// handleListInstanceFootprints returns the per-session footprint of every live
+// instance. It is a read-only observation: no transcript content, credential,
+// resume token, or command line crosses this boundary.
+func (m *ControlServer) handleListInstanceFootprints(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"footprints": m.instMgr.ListInstanceFootprints()})
+}
 func (m *ControlServer) handleGetInstance(c *gin.Context) {
 	id := c.Param("id")
 

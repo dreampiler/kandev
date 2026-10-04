@@ -546,6 +546,24 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 	return result
 }
 
+// ListInstanceFootprints returns the per-session footprint of every live
+// instance. Instances are copied out under the manager lock before measurement,
+// so a process walk never holds it.
+func (m *Manager) ListInstanceFootprints() []RuntimeFootprint {
+	m.mu.RLock()
+	instances := make([]*Instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		instances = append(instances, inst)
+	}
+	m.mu.RUnlock()
+
+	footprints := make([]RuntimeFootprint, 0, len(instances))
+	for _, inst := range instances {
+		footprints = append(footprints, inst.Footprint())
+	}
+	return footprints
+}
+
 // StopInstance stops and removes an instance by ID.
 func (m *Manager) StopInstance(ctx context.Context, id string) error {
 	m.mu.RLock()

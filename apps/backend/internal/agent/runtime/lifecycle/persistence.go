@@ -513,17 +513,73 @@ type pluginExecutorRunningLister interface {
 }
 
 // ListLiveStandaloneExecutorsRunning returns the startup recovery inventory:
-// every live standalone executors_running row, read at startup step 3 before
-// any control-server contact, so the recovery guard can be taken against it
-// (discovery H). Best-effort: a writer that doesn't support listing yields no
-// candidates rather than an error, matching this file's other optional
-// capabilities.
+// every live standalone executors_running row whose owning session can still
+// receive a message, read at startup step 3 before any control-server contact,
+// so the recovery guard can be taken against it (discovery H). Best-effort: a
+// writer that doesn't support listing yields no candidates rather than an error,
+// matching this file's other optional capabilities.
+//
+// A row whose owning session is already terminal is omitted. Recovery
+// correlation re-tracks every live instance that still has a record, so keeping
+// the record would re-adopt the runtime for a session that can no longer receive
+// a message, and the runtime would then be retained for the life of the
+// installation. Omitting the record makes the instance an orphan, which the
+// correlation already stops.
 func (m *Manager) ListLiveStandaloneExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	lister, ok := m.runningWriter.(executorRunningLister)
 	if !ok {
 		return nil, nil
 	}
-	return lister.ListExecutorsRunningLiveStandalone(ctx)
+	rows, err := lister.ListExecutorsRunningLiveStandalone(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return m.dropTerminalSessionRecords(ctx, rows), nil
+}
+
+// dropTerminalSessionRecords removes the records whose owning session is
+// terminal. A session that cannot be read is not evidence of a terminal state,
+// so its record is kept and existing recovery behaviour is unchanged.
+func (m *Manager) dropTerminalSessionRecords(ctx context.Context, rows []*models.ExecutorRunning) []*models.ExecutorRunning {
+	if len(rows) == 0 || m.executorProfileReader == nil {
+		return rows
+	}
+	kept := make([]*models.ExecutorRunning, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || row.SessionID == "" {
+			kept = append(kept, row)
+			continue
+		}
+		session, err := m.executorProfileReader.GetTaskSession(ctx, row.SessionID)
+		if err != nil || session == nil {
+			kept = append(kept, row)
+			continue
+		}
+		if isTerminalRecoverySessionState(session.State) {
+			m.logger.Info("recovery inventory omits terminal session; its instance is stopped as an orphan",
+				zap.String("session_id", row.SessionID),
+				zap.String("session_state", string(session.State)),
+				zap.String("agent_execution_id", row.AgentExecutionID))
+			continue
+		}
+		kept = append(kept, row)
+	}
+	return kept
+}
+
+// isTerminalRecoverySessionState reports whether a session can no longer receive
+// a message, so no runtime behind it has a remaining reader. Created is a
+// never-started placeholder with no runtime, so it is not terminal for this
+// purpose.
+func isTerminalRecoverySessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // ListLivePluginExecutorsRunning includes stopped inventory so callers can
