@@ -48,7 +48,15 @@ func (l ProviderLimit) NextMonthlyReset(now time.Time) (time.Time, bool) {
 // BlockedUntil returns the operator block covering a model of this provider.
 // Free models keep their own limits and are never covered.
 func (l ProviderLimit) BlockedUntil(modelID string, now time.Time) (time.Time, bool) {
-	if l.BlockUntil == nil || !l.BlockUntil.After(now) || IsFreeModel(modelID) {
+	return l.BlockedUntilCandidate(Candidate{ModelID: modelID}, now)
+}
+
+// BlockedUntilCandidate returns the operator block covering one candidate. A
+// free candidate keeps its own limits and is never covered, so a block an
+// operator entered for a provider's paid models never pauses a free model of the
+// same provider.
+func (l ProviderLimit) BlockedUntilCandidate(candidate Candidate, now time.Time) (time.Time, bool) {
+	if l.BlockUntil == nil || !l.BlockUntil.After(now) || freeCandidate(candidate) {
 		return time.Time{}, false
 	}
 	return *l.BlockUntil, true

@@ -1099,6 +1099,20 @@ func decodeDynamicRouteSelection(fields map[string]json.RawMessage) dynamic.Sele
 	return document.toSelection()
 }
 
+// routeCostClass reads the cost class a stored route declares for its model. It
+// decodes only the additive selection half, so a route keeps its configured
+// model classification even when its failure-policy half no longer validates.
+func routeCostClass(rulesJSON string) dynamic.CostClass {
+	if strings.TrimSpace(rulesJSON) == "" {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(rulesJSON), &fields); err != nil {
+		return ""
+	}
+	return decodeDynamicRouteSelection(fields).Model.Cost
+}
+
 func (d dynamicRouteSelectionDocument) toSelection() dynamic.Selection {
 	selection := dynamic.Selection{JoinPrevious: d.JoinPrevious}
 	if d.Tier != nil {

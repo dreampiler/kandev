@@ -57,15 +57,51 @@ func (r *ProfileExecutionResolver) applyResourceLimits(ctx context.Context, cand
 		if !candidate.Enabled || candidate.ModelID == "" {
 			continue
 		}
-		if dynamic.ModelScoped(candidate.ModelID) {
+		if dynamic.ModelScopedCandidate(*candidate) {
 			candidate.ModelKey = dynamic.ResourceKey(dynamic.ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
 		}
 		if limit, ok := limits[dynamic.ProviderOf(candidate.ModelID)]; ok {
-			if until, blocked := limit.BlockedUntil(candidate.ModelID, now); blocked {
+			if until, blocked := limit.BlockedUntilCandidate(*candidate, now); blocked {
 				candidate.SuspendedUntil = until
 			}
 		}
 	}
+}
+
+// declaredFreeModel reports whether a dynamic route stores this concrete
+// profile as a free model. The route row is the reverse direction of a profile
+// load: a failure, a preview and a status query all name the concrete profile,
+// while the configured cost class lives on the route row of the dynamic profile
+// that owns it.
+//
+// The class is a statement about the model rather than about one row, so any
+// referencing route that declares the model free answers free. A profile no
+// dynamic profile references, an unreadable route document, or a non-free class
+// leaves the answer false, which keeps the model ID's own classification in
+// force.
+func (r *ProfileExecutionResolver) declaredFreeModel(ctx context.Context, executionProfileID string) bool {
+	if r.dynamic == nil || executionProfileID == "" {
+		return false
+	}
+	references, err := r.dynamic.ListDynamicProfileReferencesByExecutionProfile(ctx, executionProfileID)
+	if err != nil {
+		return false
+	}
+	for _, reference := range references {
+		_, routes, err := r.dynamic.GetDynamicAgentProfile(ctx, reference.ProfileID)
+		if err != nil {
+			continue
+		}
+		for _, route := range routes {
+			if route.ExecutionProfileID != executionProfileID {
+				continue
+			}
+			if routeCostClass(route.RulesJSON) == dynamic.CostFree {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resourceCandidate builds the resource identity of one concrete profile, the
@@ -82,6 +118,9 @@ func (r *ProfileExecutionResolver) resourceCandidate(ctx context.Context, execut
 		ID: executionProfileID, Enabled: true,
 		ModelID:    strings.TrimSpace(profile.Model),
 		BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, executionProfileID),
+	}
+	if r.declaredFreeModel(ctx, executionProfileID) {
+		candidate.Selection.Model.Cost = dynamic.CostFree
 	}
 	if r.bindingResolver != nil {
 		candidate.BindingKey = dynamic.ResourceKey(
