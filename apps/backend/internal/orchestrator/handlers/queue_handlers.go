@@ -58,7 +58,7 @@ const (
 	queueInvalidReferences      = "Invalid entity references"
 	queueAccessDenied           = "Session not found"
 
-	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
+	// Payload field names ??extracted to satisfy goconst (?? occurrences).
 	fieldTaskID             = "task_id"
 	fieldSessionID          = "session_id"
 	fieldSessionIncarnation = "session_incarnation_id"
@@ -1843,10 +1843,19 @@ func (h *QueueHandlers) settlePendingAttachmentCleanup(
 	}
 }
 
+// pendingAttachmentCleanupMaxAttempts bounds how often one cleanup obligation
+// re-enters the session queue admission. Every attempt holds that admission
+// while it reconciles attachment ownership, so an unbounded retry would starve
+// the session's other queue operations (remove, auto-run, the post-cancel
+// auto-run pause). The durable cleanup row outlives the in-memory obligation,
+// so an exhausted attempt set is resumed by the next cleanup recovery pass
+// instead of being retried in a tight admission loop.
+var pendingAttachmentCleanupMaxAttempts = 60
+
 func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) {
 	defer h.attachmentCleanupWG.Done()
 	delay := 10 * time.Millisecond
-	for {
+	for attempt := 0; attempt < pendingAttachmentCleanupMaxAttempts; attempt++ {
 		if !h.editLeaseActive(pending) {
 			if err := h.runPendingAttachmentCleanup(pending); err == nil {
 				if err := h.deletePendingAttachmentCleanup(pending); err != nil {
@@ -1866,6 +1875,12 @@ func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttac
 			delay *= 2
 		}
 	}
+	h.logger.Warn("queue attachment cleanup attempts exhausted; leaving durable cleanup for recovery",
+		zap.String(fieldSessionID, pending.key.sessionID),
+		zap.String(fieldEntryID, pending.key.entryID))
+	h.attachmentCleanupMu.Lock()
+	delete(h.pendingAttachmentCleanup, pending.key)
+	h.attachmentCleanupMu.Unlock()
 }
 
 func (h *QueueHandlers) deletePendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) error {

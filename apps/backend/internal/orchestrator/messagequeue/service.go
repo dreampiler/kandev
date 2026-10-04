@@ -52,7 +52,7 @@ type Service struct {
 }
 
 type sessionAdmission struct {
-	mu   sync.Mutex
+	gate *sessionAdmissionGate
 	refs int
 }
 
@@ -328,7 +328,11 @@ func (s *Service) SetSessionAutoMerge(
 // WithSessionAdmission runs fn under the per-session queue admission lock.
 // All queue insertion and mutation paths use the same lock. The callback must
 // complete synchronously; queue methods called with its context reuse the held
-// lock.
+// lock. Only acquisition is bounded: it honors the caller's context and is
+// otherwise limited by admissionWaitTimeout, so an operation issued while another
+// admitted callback is still running fails with a timeout instead of waiting
+// without a bound. fn receives the caller's own context, never the acquisition
+// budget, so work the callback hands off outlives the wait it waited for.
 func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn func(context.Context) error) error {
 	if fn == nil {
 		return errors.New("session admission callback is nil")
@@ -338,22 +342,34 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 		if token.sessionID == sessionID {
 			return fn(ctx)
 		}
-		return s.withSessionAdmissionLock(ctx, sessionID, token.afterLifecycleUnlock, fn)
+		waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+		defer cancel()
+		err := s.withSessionAdmissionLock(waitCtx, ctx, sessionID, token.afterLifecycleUnlock, fn)
+		return admissionWaitError(err, ownBudget)
 	}
 
 	var afterLifecycleUnlock []func()
-	s.lifecycleMu.RLock()
+	waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
+	defer cancel()
+	if err := rlockWithContext(waitCtx, &s.lifecycleMu); err != nil {
+		return admissionWaitError(err, ownBudget)
+	}
 	defer func() {
 		s.lifecycleMu.RUnlock()
 		for _, callback := range afterLifecycleUnlock {
 			callback()
 		}
 	}()
-	return s.withSessionAdmissionLock(ctx, sessionID, &afterLifecycleUnlock, fn)
+	err := s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, fn)
+	return admissionWaitError(err, ownBudget)
 }
 
+// withSessionAdmissionLock acquires waitCtx's session gate and runs fn with
+// callbackCtx, so a bounded wait never shortens the lifetime of work the
+// admitted callback starts.
 func (s *Service) withSessionAdmissionLock(
-	ctx context.Context,
+	waitCtx context.Context,
+	callbackCtx context.Context,
 	sessionID string,
 	afterLifecycleUnlock *[]func(),
 	fn func(context.Context) error,
@@ -361,15 +377,23 @@ func (s *Service) withSessionAdmissionLock(
 	s.admissionMu.Lock()
 	entry := s.admissions[sessionID]
 	if entry == nil {
-		entry = &sessionAdmission{}
+		entry = &sessionAdmission{gate: newSessionAdmissionGate()}
 		s.admissions[sessionID] = entry
 	}
 	entry.refs++
 	s.admissionMu.Unlock()
 
-	entry.mu.Lock()
+	if err := entry.gate.lock(waitCtx); err != nil {
+		s.admissionMu.Lock()
+		entry.refs--
+		if entry.refs == 0 && s.admissions[sessionID] == entry {
+			delete(s.admissions, sessionID)
+		}
+		s.admissionMu.Unlock()
+		return err
+	}
 	defer func() {
-		entry.mu.Unlock()
+		entry.gate.unlock()
 		s.admissionMu.Lock()
 		entry.refs--
 		if entry.refs == 0 && s.admissions[sessionID] == entry {
@@ -378,7 +402,7 @@ func (s *Service) withSessionAdmissionLock(
 		s.admissionMu.Unlock()
 	}()
 
-	admittedCtx := context.WithValue(ctx, sessionAdmissionContextKey{}, sessionAdmissionToken{
+	admittedCtx := context.WithValue(callbackCtx, sessionAdmissionContextKey{}, sessionAdmissionToken{
 		service: s, sessionID: sessionID, afterLifecycleUnlock: afterLifecycleUnlock,
 	})
 	return fn(admittedCtx)

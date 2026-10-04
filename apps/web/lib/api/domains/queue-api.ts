@@ -431,10 +431,14 @@ export async function setQueueAutoRun(
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
-    "message.queue.auto_run.set",
-    { ...identity, enabled },
-  );
+  try {
+    return await client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
+      "message.queue.auto_run.set",
+      { ...identity, enabled },
+    );
+  } catch (err) {
+    rethrowQueueError(err, "admission");
+  }
 }
 export type QueueAutoMergePolicyResponse = QueueSessionIdentity & {
   auto_merge_enabled: boolean;
@@ -585,7 +589,7 @@ export async function removeQueuedEntry(
   try {
     return await client.request<{ entry_id: string }>("message.queue.remove", params);
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
