@@ -5597,7 +5597,7 @@ func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, de
 	if err != nil || len(sessions) == 0 {
 		return
 	}
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID)
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary after delete",

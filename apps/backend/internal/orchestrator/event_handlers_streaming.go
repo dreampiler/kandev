@@ -2006,7 +2006,7 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	// with the task's current workflow step and never reuses a session an earlier
 	// profile switch parked, so a surviving predecessor cannot become primary
 	// again and receive the queue.
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID)
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySessionTransferringQueue(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",

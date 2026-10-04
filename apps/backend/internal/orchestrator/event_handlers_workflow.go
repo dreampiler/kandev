@@ -785,7 +785,7 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 			return
 		}
 		if prerequisites != nil && prerequisites.targetStep != nil {
-			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, data.StepTransitionID, false)
+			s.autoStartTaskForLoadedStep(ctx, task, prerequisites.targetStep, "task.moved", data.QueuePromotion, data.StepTransitionID, false, false)
 		} else {
 			s.handleTaskMovedNoSession(ctx, data)
 		}
@@ -1060,7 +1060,7 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 		}()
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, data.StepTransitionID, autoStartOnCreateClaimed)
+	s.autoStartTaskForLoadedStep(ctx, task, targetStep, "task.queue_promoted", true, data.StepTransitionID, autoStartOnCreateClaimed, false)
 }
 
 // handleTaskCreated lets a task that is created directly onto a step whose
@@ -1810,6 +1810,11 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID),
 			zap.Error(err))
+		// The deferred launch attempt ran before the step read, so a step that
+		// cannot be read must still get it: the read failing is not evidence
+		// that the destination cannot run an agent, and dropping the attempt
+		// here would be a stricter outcome than before.
+		s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed)
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
@@ -1821,21 +1826,25 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	// while the task sits there cannot launch it, and the next agent step still
 	// consumes it.
 	//
+	// autoStartTaskForLoadedStep consults the record itself, so retaining it
+	// here has to be threaded into that call rather than just skipping this
+	// function's own attempt.
+	//
 	// Only the step-entry move is narrowed. Dependency resolution, queue
 	// promotion and creation carry their own launch eligibility and are
-	// unchanged, and an unreadable step is not proof of an agentless step, so
-	// that case still fails open.
+	// unchanged, and a step that cannot be read is not proof of an agentless
+	// step, so that case keeps attempting the launch above.
 	if eventName == events.TaskMoved && step != nil && !workflowmove.ShouldAutoStartAgent(step, nil) {
 		s.logger.Debug(eventName+": target step cannot run an agent; deferred launch intent retained",
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID))
-		s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed)
+		s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed, true)
 		return
 	}
 	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
 		return
 	}
-	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed)
+	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed, false)
 }
 
 // autoStartLaunchTokens carries the one-shot lifecycle tokens a launch
@@ -2003,7 +2012,7 @@ func (s *Service) completeAutoStartOnCreate(ctx context.Context, taskID, eventNa
 }
 
 //nolint:cyclop,gocognit,funlen // launch dispatch combines existing workflow gates with durable token ownership
-func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, autoStartOnCreateClaimed bool) {
+func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.Task, step *wfmodels.WorkflowStep, eventName string, restoreQueuePromotion bool, stepTransitionID int64, autoStartOnCreateClaimed bool, retainDeferredLaunch bool) {
 	if task == nil || task.QueuedForStepID != "" || step == nil {
 		if autoStartOnCreateClaimed && task != nil {
 			s.restoreAutoStartOnCreate(ctx, task.ID, eventName)
@@ -2034,8 +2043,14 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
-		return
+	// retainDeferredLaunch leaves the task's deferred launch record untouched.
+	// Its caller has already established that this step cannot run an agent, and
+	// consuming the record here would launch exactly what the caller was
+	// retaining it from.
+	if !retainDeferredLaunch {
+		if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
+			return
+		}
 	}
 	if !workflowmove.ShouldAutoStartAgent(step, nil) {
 		s.logger.Debug(eventName+": target step has no auto-start",

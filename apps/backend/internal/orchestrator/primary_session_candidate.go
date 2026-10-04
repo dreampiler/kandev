@@ -44,8 +44,8 @@ func sessionStatePreference(state models.TaskSessionState) int {
 // unresolvable step, or a step without its own profile imposes no constraint,
 // and neither does a dynamic profile whose concrete resolution is chosen at
 // launch: an unmatched session stays eligible, it merely ranks lower.
-func (s *Service) workflowCompatibleSession(
-	ctx context.Context, task *models.Task, session *models.TaskSession, effectiveProfileID string,
+func workflowCompatibleSession(
+	task *models.Task, session *models.TaskSession, effectiveProfileID string,
 ) bool {
 	if task == nil || task.WorkflowStepID == "" || effectiveProfileID == "" {
 		return true
@@ -71,10 +71,20 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 }
 
 // bestPrimarySessionCandidate returns the session an automatic promotion should
-// take, or "" when no live session remains. Terminal sessions are never
-// candidates: a completed predecessor cannot answer for the task.
+// take, or "" when no eligible session remains.
+//
+// activeOnly preserves each caller's prior eligibility. maybePromotePrimary
+// passes true, so it keeps its historical rule that only a RUNNING or otherwise
+// active session can inherit the primary role: an IDLE session is the case the
+// reported incident turned on, and promoting one would hand it the queue.
+// promoteNextPrimaryAfterRemoval passes false, so it falls back to any
+// non-terminal session, which is still narrower than its previous behaviour of
+// accepting a completed one.
+//
+// Terminal sessions are never candidates under either rule: a completed
+// predecessor cannot answer for the task.
 func (s *Service) bestPrimarySessionCandidate(
-	ctx context.Context, taskID string, sessions []*models.TaskSession, excludeSessionID string,
+	ctx context.Context, taskID string, sessions []*models.TaskSession, excludeSessionID string, activeOnly bool,
 ) string {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
@@ -94,10 +104,13 @@ func (s *Service) bestPrimarySessionCandidate(
 		if isTerminalSessionState(session.State) {
 			continue
 		}
+		if activeOnly && !isActiveSessionState(session.State) {
+			continue
+		}
 		rank := primaryCandidateOther
 		if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
 			rank = primaryCandidateParked
-		} else if s.workflowCompatibleSession(ctx, task, session, effectiveProfileID) {
+		} else if workflowCompatibleSession(task, session, effectiveProfileID) {
 			rank = primaryCandidateCompatible
 		}
 		state := sessionStatePreference(session.State)
