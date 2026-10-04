@@ -8,7 +8,14 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// clarificationSessionIndexName is the partial expression index that lets the
+// clarification bundle reads (the needs-you Inbox page, its hidden count, and
+// the Office overview's answerable-question read) isolate the addressed
+// sessions' clarification messages instead of walking every message row.
+const clarificationSessionIndexName = "idx_messages_clarification_session"
 
 // initSchema creates the database tables if they don't exist and applies
 // pending migrations in order. Steps are sequenced through an explicit
@@ -323,6 +330,21 @@ func (r *Repository) ensureMessageMetadataIndexes() error {
 		"task_session_messages",
 	)
 	if _, err := r.db.ExecContext(r.migrationContext(), lookupIndex); err != nil {
+		return err
+	}
+	// The bundle reads group messages by pending ID under a single message
+	// type. The indexes above all span every message type, so a session-
+	// restricted bundle read walks every message of every addressed session
+	// and discards all but the clarification rows. This partial index carries
+	// that type in its predicate and leaves every other message read's plan
+	// untouched.
+	clarificationIndex := dialect.ClarificationSessionIndexDDL(
+		driver,
+		clarificationSessionIndexName,
+		"task_session_messages",
+		string(models.MessageTypeClarificationRequest),
+	)
+	if _, err := r.db.ExecContext(r.migrationContext(), clarificationIndex); err != nil {
 		return err
 	}
 	return nil
