@@ -35,11 +35,13 @@ func (a *Adapter) observeUsageLimitNotice(sessionID, role, text string) {
 	if buffer == "" {
 		return
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: a.agentID,
-		Stderr:     buffer,
-	})
+	// The buffer stops growing at quotaNoticeBufferBytes, so for the rest of
+	// the turn every chunk would otherwise re-run the whole rule engine over
+	// byte-identical input. Classify once per distinct buffer and reuse it.
+	classified, ok := turn.quotaNoticeClassification(buffer, a.agentID)
+	if !ok {
+		return
+	}
 	if !isUsageLimitNotice(classified) {
 		return
 	}
