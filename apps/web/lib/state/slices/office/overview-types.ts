@@ -100,7 +100,7 @@ export type OverviewModel = {
   errors: { kind: string; count: number }[] | null;
 };
 
-/** One open dynamic-routing resource circuit the overview was told about. */
+/** One dynamic-routing resource circuit the overview was told about. */
 export type OverviewBlockedCircuit = {
   resource_key: string;
   scope: string;
@@ -109,6 +109,15 @@ export type OverviewBlockedCircuit = {
   code?: string;
   until?: string;
   strikes: number;
+  /**
+   * False once the router recovered, so the circuit is not a current block. A
+   * payload from a server without the field keeps its circuits listed, which is
+   * how this screen behaved before the field existed.
+   */
+  blocking?: boolean;
+  profile_id?: string;
+  profile_name?: string;
+  model_name?: string;
 };
 
 export type OverviewBlockedAccount = {

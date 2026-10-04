@@ -19,7 +19,13 @@ import type {
 } from "@/lib/state/slices/office/overview-types";
 import type { AgentProfileUsage } from "@/lib/api/domains/agent-profile-usage-api";
 import { useAgentProfileUsage } from "@/hooks/domains/settings/use-agent-profile-usage";
-import { relativeTime } from "./overview-format";
+import {
+  circuitReason,
+  circuitScope,
+  circuitTitle,
+  isCurrentBlock,
+  relativeTime,
+} from "./overview-format";
 import { MODELS_ANCHOR, NEEDS_HUMAN_ANCHOR } from "./overview-system-cards";
 
 // Catalog keys for the last-24-hours event kinds, not copy.
@@ -348,6 +354,8 @@ function BlockedModelGrid({
   circuitsKnown: boolean;
 }) {
   const { t } = useTranslation();
+  const current = circuits.filter(isCurrentBlock);
+  const cleared = circuits.filter((circuit) => !isCurrentBlock(circuit));
   if (!circuitsKnown) {
     return (
       <p className="text-xs text-muted-foreground" data-testid="overview-circuits-unknown">
@@ -355,41 +363,79 @@ function BlockedModelGrid({
       </p>
     );
   }
-  if (blocked.length === 0 && circuits.length === 0) {
+  if (blocked.length === 0 && current.length === 0 && cleared.length === 0) {
     return <p className="text-xs text-muted-foreground">{t("office:overviewNoBlockedModels")}</p>;
   }
   return (
-    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-      {blocked.map((account) => (
-        <BlockedAccountCard
-          key={`${account.workspace_id}:${account.provider_id}:${account.scope}:${account.scope_value}`}
-          account={account}
-        />
-      ))}
-      {circuits.map((circuit) => (
-        <BlockedCircuitCard key={circuit.resource_key} circuit={circuit} />
-      ))}
+    <div className="space-y-3">
+      {blocked.length === 0 && current.length === 0 ? null : (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {blocked.map((account) => (
+            <BlockedAccountCard
+              key={`${account.workspace_id}:${account.provider_id}:${account.scope}:${account.scope_value}`}
+              account={account}
+            />
+          ))}
+          {current.map((circuit) => (
+            <BlockedCircuitCard key={circuit.resource_key} circuit={circuit} />
+          ))}
+        </div>
+      )}
+      {cleared.length > 0 ? <ClearedCircuitList circuits={cleared} /> : null}
     </div>
   );
 }
 
-/** One open dynamic circuit, with the instant it is expected to clear. */
+/**
+ * Circuits the router already recovered from. They stay reachable for their
+ * strike history but are not current blocks, so they are folded away by default
+ * and never counted as blocked.
+ */
+function ClearedCircuitList({ circuits }: { circuits: OverviewBlockedCircuit[] }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-2" data-testid="overview-cleared-circuits">
+      <button
+        type="button"
+        aria-expanded={open}
+        className="cursor-pointer text-xs font-medium text-muted-foreground"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {t("office:overviewRecentlyClearedCircuits", { count: circuits.length })}
+      </button>
+      {open ? (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {circuits.map((circuit) => (
+            <BlockedCircuitCard key={circuit.resource_key} circuit={circuit} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * One resource circuit, named by the profile and model it covers, with the
+ * reason it is blocked and the instant it is expected to clear.
+ */
 function BlockedCircuitCard({ circuit }: { circuit: OverviewBlockedCircuit }) {
   const { t } = useTranslation();
+  const scope = circuitScope(t, circuit.scope);
+  const reason = circuitReason(t, circuit.code);
   return (
     <div
       className="rounded-md border border-amber-500/40 p-3 text-sm"
       data-testid="overview-blocked-circuit"
     >
-      <span className="font-medium">
-        {circuit.scope_value || circuit.resource_key}
-        {circuit.scope ? ` · ${circuit.scope}` : ""}
-      </span>
+      <span className="font-medium">{circuitTitle(t, circuit)}</span>
+      <div className="mt-1 text-xs text-muted-foreground">
+        {[scope, reason].filter(Boolean).join(" · ")}
+      </div>
       <div className="mt-1 text-xs text-muted-foreground">
         {circuit.until
           ? t("office:overviewClearsAt", { time: relativeTime(circuit.until) })
           : t("office:overviewBlockedNoClearTime")}
-        {circuit.code ? ` · ${circuit.code}` : ""}
       </div>
     </div>
   );

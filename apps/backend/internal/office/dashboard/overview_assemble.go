@@ -183,10 +183,7 @@ func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapsho
 	}
 	snap.profileNames = map[string]string{}
 	for _, p := range profiles {
-		name := p.Name
-		if p.DisplayName != "" && p.DisplayName != p.Name {
-			name = p.DisplayName + " · " + p.Name
-		}
+		name := profileDisplayName(p)
 		snap.profileNames[p.ID] = name
 		if c := cards[p.ID]; c != nil {
 			c.AgentID, c.AgentName, c.Name = p.AgentID, p.AgentName, name
@@ -194,6 +191,16 @@ func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapsho
 		}
 	}
 	return nil
+}
+
+// profileDisplayName is the one name a profile has across the overview: the
+// agent display name qualifies the profile name, so the same profile reads the
+// same in a model card and in a blocked circuit.
+func profileDisplayName(p *sqlite.OverviewProfileRow) string {
+	if p.DisplayName != "" && p.DisplayName != p.Name {
+		return p.DisplayName + " · " + p.Name
+	}
+	return p.Name
 }
 
 // modelKind separates a dynamic profile, which routes one logical session
@@ -372,6 +379,12 @@ func assembleSystem(snap *overviewSnapshot, sessionLimit int, thresholds overvie
 	}
 	circuits := 0
 	for _, circuit := range snap.resp.BlockedCircuits {
+		// A circuit the router already recovered from is reported for its strike
+		// history, not as a block, so it counts neither here nor in the clear-at
+		// instant the card shows.
+		if !circuit.Blocking {
+			continue
+		}
 		circuits++
 		earliestUnblockAt(sys, snap.now, circuit.Until)
 	}
