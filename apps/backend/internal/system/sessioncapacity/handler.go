@@ -25,7 +25,7 @@ func handleGet(service *Service) gin.HandlerFunc {
 			})
 			return
 		}
-		ctx.JSON(http.StatusOK, response)
+		ctx.JSON(http.StatusOK, wireResponse(response))
 	}
 }
 
@@ -56,7 +56,7 @@ func handleUpdate(service *Service) gin.HandlerFunc {
 			}
 			return
 		}
-		ctx.JSON(http.StatusOK, response)
+		ctx.JSON(http.StatusOK, wireResponse(response))
 	}
 }
 
@@ -77,4 +77,17 @@ func decodePatch(body io.Reader) (SettingsPatch, error) {
 		return SettingsPatch{}, err
 	}
 	return patch, nil
+}
+
+// wireResponse keeps control_profile_ids an array on the wire. The service uses
+// nil for "no control profiles", which encodes as null, and the settings screen
+// reads its length.
+func wireResponse(response Response) Response {
+	if response.Settings.ControlProfileIDs == nil {
+		response.Settings.ControlProfileIDs = []string{}
+	}
+	if response.Effective.ControlProfileIDs == nil {
+		response.Effective.ControlProfileIDs = []string{}
+	}
+	return response
 }
