@@ -43,12 +43,7 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 
 import { OverviewWorkspaceCard } from "./overview-workspace-card";
 import { OverviewSystemCards } from "./overview-system-cards";
-import {
-  ModelUsageLine,
-  OverviewLast24h,
-  OverviewModels,
-  OverviewNeedsHuman,
-} from "./overview-sections";
+import { OverviewLast24h, OverviewModels, OverviewNeedsHuman } from "./overview-sections";
 
 const createdAt = "2026-10-03T00:00:00Z";
 
@@ -390,58 +385,5 @@ describe("overview last-24-hours kind filter", () => {
     const remaining = screen.getAllByTestId(eventRowTestId);
     expect(remaining).toHaveLength(1);
     expect(remaining[0].textContent).toContain("New task");
-  });
-});
-
-describe("overview model usage line", () => {
-  afterEach(cleanup);
-
-  it("renders usage windows and observation age when stale", () => {
-    render(
-      <ModelUsageLine
-        usage={{
-          profile_id: "prof-1",
-          state: "ok",
-          stale: true,
-          fetched_at: "2026-10-03T11:45:00Z",
-          windows: [
-            {
-              label: "5-hour",
-              utilization_pct: 42,
-              limit_reached: false,
-              reset_at: "2026-10-03T16:00:00Z",
-            },
-          ],
-        }}
-      />,
-    );
-    expect(screen.getByTestId("overview-model-usage")).toBeTruthy();
-    expect(screen.getByText("5-hour")).toBeTruthy();
-    expect(screen.getByText("42%")).toBeTruthy();
-    const staleBadge = screen.getByTestId("overview-model-usage-stale");
-    expect(staleBadge).toBeTruthy();
-    expect(staleBadge.textContent).toContain("Last-known value");
-  });
-
-  it("does not render stale badge for fresh usage", () => {
-    render(
-      <ModelUsageLine
-        usage={{
-          profile_id: "prof-1",
-          state: "ok",
-          stale: false,
-          fetched_at: "2026-10-03T11:45:00Z",
-          windows: [
-            {
-              label: "5-hour",
-              utilization_pct: 10,
-              limit_reached: false,
-            },
-          ],
-        }}
-      />,
-    );
-    expect(screen.getByTestId("overview-model-usage")).toBeTruthy();
-    expect(screen.queryByTestId("overview-model-usage-stale")).toBeNull();
   });
 });

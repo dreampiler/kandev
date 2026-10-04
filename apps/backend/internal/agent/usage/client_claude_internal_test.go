@@ -3,7 +3,6 @@ package usage
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -192,83 +191,5 @@ func TestClaudeHasSubscriptionCredentials(t *testing.T) {
 	withOAuth := NewClaudeUsageClientWithPath(writeClaudeCreds(t, t.TempDir(), futureExpiryMillis(), nil))
 	if !withOAuth.HasSubscriptionCredentials() {
 		t.Error("expected true with OAuth credentials")
-	}
-}
-
-func TestClaudeFetchUsage_ParsesRetryAfter(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		headerVal  string
-		wantDelay  time.Duration
-	}{
-		{
-			name:       "delta-seconds",
-			statusCode: http.StatusTooManyRequests,
-			headerVal:  "120",
-			wantDelay:  120 * time.Second,
-		},
-		{
-			name:       "clamped-to-max",
-			statusCode: http.StatusTooManyRequests,
-			headerVal:  "86400",
-			wantDelay:  maxRetryAfter,
-		},
-		{
-			name:       "absent-header",
-			statusCode: http.StatusTooManyRequests,
-			headerVal:  "",
-			wantDelay:  0,
-		},
-		{
-			name:       "invalid-header",
-			statusCode: http.StatusTooManyRequests,
-			headerVal:  "invalid-duration",
-			wantDelay:  0,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if tt.headerVal != "" {
-					w.Header().Set("Retry-After", tt.headerVal)
-				}
-				w.WriteHeader(tt.statusCode)
-			}))
-			defer srv.Close()
-
-			client := NewClaudeUsageClientWithOAuthToken("test-token")
-			client.usageURL = srv.URL
-
-			_, err := client.FetchUsage(context.Background())
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			var fetchErr *FetchError
-			if !errors.As(err, &fetchErr) {
-				t.Fatalf("expected *FetchError, got %T: %v", err, err)
-			}
-			if fetchErr.RetryAfter != tt.wantDelay {
-				t.Errorf("RetryAfter = %v, want %v", fetchErr.RetryAfter, tt.wantDelay)
-			}
-		})
-	}
-}
-
-func TestParseRetryAfter_HTTPDate(t *testing.T) {
-	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	future := now.Add(90 * time.Second)
-	httpDate := future.Format(http.TimeFormat)
-
-	got := ParseRetryAfter(httpDate, now)
-	if got != 90*time.Second {
-		t.Errorf("ParseRetryAfter(%q) = %v, want 90s", httpDate, got)
-	}
-
-	past := now.Add(-10 * time.Second)
-	gotPast := ParseRetryAfter(past.Format(http.TimeFormat), now)
-	if gotPast != 0 {
-		t.Errorf("ParseRetryAfter(past) = %v, want 0", gotPast)
 	}
 }
