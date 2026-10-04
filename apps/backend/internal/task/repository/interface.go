@@ -65,6 +65,9 @@ type WorkspaceRepository interface {
 // TaskRepository handles task CRUD and workflow placement.
 // Note: models.TaskRepository is a struct in internal/task/models; no Go conflict exists.
 type TaskRepository interface {
+	// UpdateTaskGitHubIssue sets a complete issue link, or removes it for nil.
+	// It preserves current unrelated metadata and returns the committed candidate.
+	UpdateTaskGitHubIssue(ctx context.Context, id string, link *models.TaskGitHubIssueLink) (*models.Task, error)
 	// MergeTaskMetadata applies ordinary supplied keys to canonical current metadata.
 	// It writes metadata and its timestamp atomically without task-row effects.
 	MergeTaskMetadata(ctx context.Context, id string, metadata map[string]interface{}) error
@@ -488,6 +491,17 @@ type AttachmentRepository interface {
 	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// LaunchAttachmentRollbackRepository restores an unreferenced launch claim
+// when synchronous session admission fails before the task is accepted.
+type LaunchAttachmentRollbackRepository interface {
+	RestoreLaunchMessageAttachments(
+		ctx context.Context,
+		ids []string,
+		ownerID, taskID, sessionID string,
+		expiresAt time.Time,
+	) error
 }
 
 // PreviewFeedbackRepository stores one revisioned pending collection per task.
