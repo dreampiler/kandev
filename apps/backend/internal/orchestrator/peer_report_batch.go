@@ -19,10 +19,16 @@ func (s *Service) reserveAndDispatchQueueHead(
 	identity messagequeue.QueueSessionIdentity,
 ) (bool, bool, error) {
 	batch, autoRun, err := s.messageQueue.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
-	if err != nil {
-		return false, true, err
+	if err != nil || !autoRun {
+		// A reserve that stops part-way still owns the rows it took. They are
+		// already out of the queue, so they have to go back rather than be
+		// dropped with the error.
+		if len(batch) > 0 {
+			s.requeuePeerReportBatch(ctx, identity, batch)
+		}
+		return false, autoRun, err
 	}
-	if !autoRun || len(batch) == 0 {
+	if len(batch) == 0 {
 		return false, autoRun, nil
 	}
 	if len(batch) == 1 {
@@ -45,6 +51,10 @@ func (s *Service) dispatchPeerReportBatchForSession(
 		s.requeuePeerReportBatch(ctx, identity, batch)
 		return false
 	}
+	if !s.settlePeerReportBatchClaims(ctx, identity, composed, batch) {
+		s.requeuePeerReportBatch(ctx, identity, batch)
+		return false
+	}
 	s.publishQueueStatusEventForIdentity(ctx, identity)
 	reservation := s.markQueuedDispatchInFlightWithIdentityLocked(identity, composed.ID, composed)
 	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
@@ -52,6 +62,55 @@ func (s *Service) dispatchPeerReportBatchForSession(
 		return true
 	}
 	go s.executeQueuedMessageWithReservation(identity.SessionID, composed, reservation)
+	return true
+}
+
+// settlePeerReportBatchClaims gives the batch exactly one settlement owner before
+// its worker starts.
+//
+// An ordinary reserve deletes its row and keeps at-least-once recovery in a
+// dispatch claim, and startup restores a claim that was never accepted. Two
+// writes therefore have to happen, in this order:
+//
+//  1. The leading row's claim is rewritten to the composed prompt. The claim was
+//     written at reserve time, when the leading row still held only its own
+//     report, so a restart would otherwise restore the batch without the folded
+//     reports.
+//  2. Every folded row's claim is accepted. A folded row's report now travels
+//     inside the leading row, so the leading row's claim alone must decide
+//     delivery; leaving a folded claim unsettled would restore that report a
+//     second time.
+//
+// If either write fails the batch returns to the queue with every claim still
+// unsettled, so nothing is lost. Accepting the folded claims is deliberately
+// earlier than the leading row's acceptance: a crash in that window leaves the
+// leading claim unaccepted, so startup restores one row holding the whole batch.
+func (s *Service) settlePeerReportBatchClaims(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	composed *messagequeue.QueuedMessage,
+	batch []*messagequeue.QueuedMessage,
+) bool {
+	settleCtx := context.WithoutCancel(ctx)
+	if err := s.messageQueue.RewritePendingQueueDispatchMessage(settleCtx, composed); err != nil {
+		s.logger.Error("failed to record the composed peer report batch as the leading dispatch claim",
+			zap.String("session_id", identity.SessionID),
+			zap.String("task_id", identity.TaskID),
+			zap.String("queue_id", composed.ID),
+			zap.Int("batch_size", len(batch)),
+			zap.Error(err))
+		return false
+	}
+	for _, entry := range batch[1:] {
+		if err := s.messageQueue.MarkPendingQueueDispatchAccepted(settleCtx, entry); err != nil {
+			s.logger.Error("failed to settle folded peer report dispatch claim; a restart may re-deliver this report",
+				zap.String("session_id", identity.SessionID),
+				zap.String("task_id", identity.TaskID),
+				zap.String("queue_id", entry.ID),
+				zap.Error(err))
+			return false
+		}
+	}
 	return true
 }
 

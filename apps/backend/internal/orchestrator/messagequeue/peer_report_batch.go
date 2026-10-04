@@ -84,6 +84,10 @@ func PeerReportSenderTaskID(message *QueuedMessage) string {
 // reserved exactly as ReserveQueuedWithAutoRunForSession reserves it, so a
 // non-batchable head keeps today's behavior, and autoRun keeps the same meaning:
 // false only when Auto-run is OFF.
+//
+// A reserve that stops part-way returns the rows it already took alongside its
+// error, because those rows have left the queue and only the caller can return
+// them. Discarding them would lose their reports.
 func (s *Service) ReservePeerReportBatchWithAutoRunForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
@@ -96,7 +100,7 @@ func (s *Service) ReservePeerReportBatchWithAutoRunForSession(
 		return err
 	})
 	if err != nil {
-		return nil, true, err
+		return batch, autoRun, err
 	}
 	return batch, autoRun, nil
 }
@@ -124,7 +128,14 @@ func (s *Service) reservePeerReportBatch(
 		if len(batch) > 0 && !peerReportFitsBatch(batch[0], message, batchBytes) {
 			// This entry cannot join the batch. Return it to its own position so
 			// the next dispatch settles it in its own turn.
-			return batch, true, s.RequeueAtHeadForSession(ctx, identity, message)
+			if err := s.RequeueAtHeadForSession(ctx, identity, message); err != nil {
+				// The entry left the queue and did not go back, so the caller has
+				// to return it along with the rows this reserve already owns.
+				// Appending keeps the walk order, which is the order the caller
+				// replays the batch in.
+				return append(batch, message), true, err
+			}
+			return batch, true, nil
 		}
 		batch = append(batch, message)
 		if !IsOrdinaryPeerReport(message) {

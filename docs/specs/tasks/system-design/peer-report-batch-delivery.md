@@ -31,14 +31,20 @@ reserves the head exactly as the single-row reserve does.
 The reservation walks the session's ordered pending rows by repeatedly calling
 the existing `ReserveHeadIfAutoRunForSession`, so both the in-memory mutex and
 the SQLite session lock and write transaction already in place keep ordering and
-staleness handling. Reserved rows are not removed from the queue and no new
-queue column is introduced.
+staleness handling. An ordinary row leaves `queued_messages` at reserve time and
+keeps its at-least-once recovery in a `queue_dispatch_claims` row, so this
+capability introduces no new queue column and no new settlement mechanism.
 
 The walk stops at the first row that cannot join the batch. That row is returned
 to its own position with `RequeueAtHeadForSession` so the next drain settles it
 in its own turn. A durable row keeps its queue position while its reservation is
 in flight, so reserving it again returns the same entry; the walk stops on that
 repeat instead of releasing a live reservation.
+
+A reserve that stops part-way owns the rows it already took, because those rows
+have left the queue. `ReservePeerReportBatchWithAutoRunForSession` therefore
+returns them alongside its error, and the caller returns them to the queue rather
+than dropping them with the error.
 
 ## Eligibility boundary
 
@@ -67,14 +73,32 @@ existing dispatch, in-flight marking, and lifecycle claim paths apply unchanged.
 
 ## Settlement
 
-On success the composed entry is dispatched through the same in-flight marking
-and asynchronous execution helpers the single-row path uses, so the underlying
-rows settle as they do today.
+A batch has one prompt but N reserved rows, and only the leading row's dispatch
+claim would otherwise decide delivery. Startup restores any claim that was never
+accepted, so an unsettled trailing claim would re-deliver a report the controller
+had already received.
+
+Because a folded row's report is physically inside the leading row, the leading
+row's claim is the only claim that must decide delivery. Once the batch passes
+its incarnation and dispatch-input checks, `markFoldedPeerReportClaimsAccepted`
+accepts every trailing row's claim before the worker is launched. From then on
+the batch has a single settlement owner:
+
+- If the turn is accepted, the leading row's claim is accepted by the existing
+  post-dispatch path and every claim in the batch is settled.
+- If the turn fails, the leading row is requeued carrying the composed content of
+  the whole batch, so no report is lost, and the already-accepted trailing claims
+  cannot restore the folded rows as duplicates of it.
+
+Accepting the trailing claims before launch is deliberately earlier than the
+leading row's acceptance. A crash in that window leaves the leading claim
+unaccepted, so startup restores one row holding every report in the batch.
 
 If the batch cannot start (replaced session incarnation, or an unreadable
-dispatch-input check), `requeuePeerReportBatch` returns every reserved entry from
-the last one to the first. Requeue-at-position restores each row ahead of later
-rows, so no report is lost and FIFO order is preserved.
+dispatch-input check), no claim has been accepted and `requeuePeerReportBatch`
+returns every reserved entry from the last one to the first. Requeue-at-position
+restores each row ahead of later rows, so no report is lost and FIFO order is
+preserved.
 
 ## Drain integration
 

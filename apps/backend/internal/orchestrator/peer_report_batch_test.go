@@ -72,7 +72,12 @@ func TestDrainQueuedMessage_DeliversChildReportBurstAsOnePrompt(t *testing.T) {
 	require.Contains(t, prompt, "from task child-c")
 	require.Contains(t, prompt, "report one")
 	require.Contains(t, prompt, "report three")
+	// An ordinary reserve removes its row when the batch is taken, so an empty
+	// queue here reports the reserve, not the settlement. Claim settlement for
+	// the same batch is asserted against SQLite in the messagequeue package.
 	require.Zero(t, svc.messageQueue.GetStatus(context.Background(), "s-peer").Count)
+	require.False(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"),
+		"the whole burst was consumed by one turn")
 }
 
 func TestDrainQueuedMessage_KeepsUserInstructionBehindReports(t *testing.T) {

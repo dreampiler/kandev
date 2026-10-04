@@ -179,3 +179,78 @@ func TestIsOrdinaryPeerReport_RejectsNonAgentAndUnattributedEntries(t *testing.T
 		Metadata: map[string]interface{}{MetadataSenderTaskID: "child-a"},
 	}))
 }
+
+// A batch has one prompt but N reserved rows, and an ordinary reserve keeps
+// at-least-once recovery in a dispatch claim that startup restores while it is
+// unaccepted. Only the in-memory repository is covered by the ordering tests
+// above, so this settles the claim contract against the shipped SQLite store.
+func TestReservePeerReportBatch_SettlesEveryReservedDispatchClaim(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	svc := newPeerReportBatchFixture(t, repo)
+	queuePeerReport(t, svc, "child-a", "first report")
+	queuePeerReport(t, svc, "child-b", "second report")
+	queuePeerReport(t, svc, "child-c", "third report")
+
+	ctx := context.Background()
+	batch := reservePeerReportBatch(t, svc, repo)
+	require.Len(t, batch, 3)
+
+	pending, err := repo.ListPendingQueueDispatches(ctx)
+	require.NoError(t, err)
+	require.Len(t, pending, 3, "every reserved row owns a dispatch claim")
+
+	// Folding a row into the leading entry's prompt settles its claim, because
+	// its report now travels inside the leading row.
+	for _, entry := range batch[1:] {
+		require.NoError(t, svc.MarkPendingQueueDispatchAccepted(ctx, entry))
+	}
+	require.NoError(t, svc.MarkPendingQueueDispatchAccepted(ctx, batch[0]))
+
+	pending, err = repo.ListPendingQueueDispatches(ctx)
+	require.NoError(t, err)
+	for _, claim := range pending {
+		require.True(t, claim.Accepted,
+			"an unaccepted claim is restored at startup and re-delivers a report the batch already carried")
+	}
+}
+
+// The leading row's claim is written at reserve time, when it still holds only
+// its own report. A restart that restores it before the rewrite would replay the
+// batch without the folded reports, so the composed prompt has to be recorded on
+// the claim before the batch starts.
+func TestReservePeerReportBatch_LeadingClaimCarriesTheComposedPrompt(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	svc := newPeerReportBatchFixture(t, repo)
+	queuePeerReport(t, svc, "child-a", "first report")
+	queuePeerReport(t, svc, "child-b", "second report")
+
+	ctx := context.Background()
+	batch := reservePeerReportBatch(t, svc, repo)
+	require.Len(t, batch, 2)
+
+	pending, err := repo.ListPendingQueueDispatches(ctx)
+	require.NoError(t, err)
+	leading := findDispatchClaim(t, pending, batch[0].ID)
+	require.NotContains(t, leading.Message.Content, "second report",
+		"the claim stored at reserve time predates the composed prompt")
+
+	composed := ComposePeerReportBatch(batch)
+	require.NoError(t, svc.RewritePendingQueueDispatchMessage(ctx, composed))
+
+	pending, err = repo.ListPendingQueueDispatches(ctx)
+	require.NoError(t, err)
+	leading = findDispatchClaim(t, pending, batch[0].ID)
+	require.Contains(t, leading.Message.Content, "first report")
+	require.Contains(t, leading.Message.Content, "second report")
+}
+
+func findDispatchClaim(t *testing.T, pending []PendingQueueDispatch, entryID string) *PendingQueueDispatch {
+	t.Helper()
+	for i := range pending {
+		if pending[i].Message.ID == entryID {
+			return &pending[i]
+		}
+	}
+	t.Fatalf("no dispatch claim for entry %s", entryID)
+	return nil
+}

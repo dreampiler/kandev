@@ -270,6 +270,39 @@ func (r *sqliteRepository) deletePendingQueueDispatchesBySessionTx(
 	return nil
 }
 
+func (r *sqliteRepository) RewritePendingQueueDispatchMessage(
+	ctx context.Context,
+	msg *QueuedMessage,
+) error {
+	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
+		return err
+	}
+	messageJSON, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal rewritten queue dispatch claim: %w", err)
+	}
+	tx, err := r.beginSessionMutationTx(ctx, msg.SessionID, "rewrite queue dispatch claim")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queue_dispatch_claims SET message_json = ?
+		WHERE entry_id = ? AND session_id = ? AND attempt_id = ? AND accepted = 0
+	`), string(messageJSON), msg.ID, msg.SessionID, msg.dispatchAttemptID)
+	if err != nil {
+		return fmt.Errorf("rewrite queue dispatch claim: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rewrite queue dispatch claim rows affected: %w", err)
+	}
+	if affected != 1 {
+		return ErrQueueDispatchClaimChanged
+	}
+	return tx.Commit()
+}
+
 func (r *sqliteRepository) MarkPendingQueueDispatchAccepted(
 	ctx context.Context,
 	msg *QueuedMessage,

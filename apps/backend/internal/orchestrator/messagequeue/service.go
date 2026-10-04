@@ -2890,6 +2890,7 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 type pendingQueueDispatchRepository interface {
 	ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error)
 	MarkPendingQueueDispatchAccepted(context.Context, *QueuedMessage) error
+	RewritePendingQueueDispatchMessage(context.Context, *QueuedMessage) error
 	DeletePendingQueueDispatch(context.Context, *QueuedMessage) error
 }
 
@@ -2906,6 +2907,24 @@ func (s *Service) ListPendingQueueDispatches(ctx context.Context) ([]PendingQueu
 		return nil, errors.New("pending queue dispatch persistence unavailable")
 	}
 	return repo.ListPendingQueueDispatches(ctx)
+}
+
+// RewritePendingQueueDispatchMessage replaces the recovery payload of an
+// unsettled dispatch claim so a restart restores what was actually handed to the
+// agent. A batch composes several rows into the leading row's prompt after the
+// claim was written, so without this the restored row would carry only the
+// leading report. An accepted claim is never rewritten.
+func (s *Service) RewritePendingQueueDispatchMessage(
+	ctx context.Context,
+	msg *QueuedMessage,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return nil
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.RewritePendingQueueDispatchMessage(admittedCtx, msg)
+	})
 }
 
 func (s *Service) MarkPendingQueueDispatchAccepted(
