@@ -54,6 +54,128 @@ function SessionCapacityLoadError({
   );
 }
 
+type MaximumFieldProps = {
+  label: string;
+  description: string;
+  help: string;
+  inputId: string;
+  testId: string;
+  errorTestId: string;
+  value: string;
+  disabled: boolean;
+  error?: string;
+  min?: number;
+  onChange: (value: string) => void;
+};
+
+function MaximumField({
+  label,
+  description,
+  help,
+  inputId,
+  testId,
+  errorTestId,
+  value,
+  disabled,
+  error,
+  min = 1,
+  onChange,
+}: MaximumFieldProps) {
+  const errorId = `${inputId}-error`;
+  return (
+    <div className="space-y-2">
+      <SettingsRow
+        label={label}
+        description={description}
+        descriptionId={`${inputId}-help`}
+        controlId={inputId}
+        info={
+          <SettingsInfo label={label}>
+            <p>{help}</p>
+          </SettingsInfo>
+        }
+        control={
+          <Input
+            id={inputId}
+            data-testid={testId}
+            type="number"
+            inputMode="numeric"
+            min={min}
+            max={2147483647}
+            step={1}
+            value={value}
+            disabled={disabled}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(event) => onChange(event.target.value)}
+            className={settingsControlClassName("w-full md:w-40")}
+          />
+        }
+      />
+      {error && (
+        <p id={errorId} data-testid={errorTestId} role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ControlProfileField({
+  value,
+  disabled,
+  error,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  const inputId = "session-capacity-control-profiles";
+  const errorId = `${inputId}-error`;
+  const label = t("system:sessionCapacityControlProfilesLabel");
+  return (
+    <div className="space-y-2">
+      <SettingsRow
+        label={label}
+        description={t("settings:sessionControlProfilesShort")}
+        controlId={inputId}
+        info={
+          <SettingsInfo label={label}>
+            <p>{t("system:sessionCapacityControlProfilesHelp")}</p>
+          </SettingsInfo>
+        }
+        control={
+          <Input
+            id={inputId}
+            data-testid="session-capacity-control-profiles"
+            type="text"
+            value={value}
+            disabled={disabled}
+            placeholder="profile-id"
+            aria-invalid={error ? true : undefined}
+            aria-describedby={error ? errorId : undefined}
+            onChange={(event) => onChange(event.target.value)}
+            className={settingsControlClassName("w-full md:w-80")}
+          />
+        }
+      />
+      {error && (
+        <p
+          id={errorId}
+          data-testid="session-capacity-control-profiles-error"
+          role="alert"
+          className="text-sm text-destructive"
+        >
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function SessionCapacitySwitch({
   checked,
   disabled,
@@ -93,80 +215,45 @@ function SessionCapacitySwitch({
   );
 }
 
-function MaximumField({
-  value,
-  disabled,
-  error,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  error?: string;
-  onChange: (value: string) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-2">
-      <SettingsRow
-        label={t("system:sessionCapacityMaximumLabel")}
-        description={t("settings:sessionMaximumShort")}
-        descriptionId="session-capacity-maximum-help"
-        controlId="session-capacity-maximum"
-        info={
-          <SettingsInfo label={t("system:sessionCapacityMaximumLabel")}>
-            {t("system:sessionCapacityMaximumHelp")}
-          </SettingsInfo>
-        }
-        control={
-          <Input
-            id="session-capacity-maximum"
-            data-testid="session-capacity-maximum"
-            type="number"
-            inputMode="numeric"
-            min={1}
-            max={2147483647}
-            step={1}
-            value={value}
-            disabled={disabled}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? "session-capacity-maximum-error" : undefined}
-            onChange={(event) => onChange(event.target.value)}
-            className={settingsControlClassName("w-full md:w-40")}
-          />
-        }
-      />
-      {error && (
-        <p
-          id="session-capacity-maximum-error"
-          data-testid="session-capacity-maximum-error"
-          role="alert"
-          className="text-sm text-destructive"
-        >
-          {error}
-        </p>
-      )}
-    </div>
-  );
-}
-
 function EffectiveCapacity({
   enabled,
   maximum,
+  controlMaximum,
+  controlConfigured,
   source,
   isDirty,
 }: {
   enabled: boolean;
   maximum: number;
+  controlMaximum: number;
+  controlConfigured: boolean;
   source: Parameters<typeof sessionCapacitySourceLabelKey>[0];
   isDirty: boolean;
 }) {
   const { t } = useTranslation();
-  const current = enabled ? String(maximum) : t("system:sessionCapacityNoLimit");
+  const worker = enabled ? String(maximum) : t("system:sessionCapacityNoLimit");
   return (
     <div className="text-xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-muted-foreground">{t("system:sessionCapacityCurrent")}</span>
-        <strong data-testid="session-capacity-effective-value">{current}</strong>
+        <strong data-testid="session-capacity-effective-value">{worker}</strong>
+        {controlConfigured ? (
+          <>
+            <span className="text-muted-foreground">
+              {t("system:sessionCapacityControlCurrent", {
+                control: String(controlMaximum),
+                total: String((enabled ? maximum : 0) + controlMaximum),
+              })}
+            </span>
+            <strong data-testid="session-capacity-control-effective-value">
+              {String(controlMaximum)}
+            </strong>
+          </>
+        ) : (
+          <span className="text-muted-foreground" data-testid="session-capacity-control-none">
+            {t("system:sessionCapacityControlNotConfigured")}
+          </span>
+        )}
         <Badge variant="secondary" data-testid="session-capacity-source">
           {t(sessionCapacitySourceLabelKey(source))}
         </Badge>
@@ -229,22 +316,21 @@ type SessionCapacitySettingsContentProps = {
   withinGroup?: boolean;
 };
 
+type SessionCapacitySettingsState = NonNullable<SessionCapacitySettingsContentProps["state"]>;
+
 export function SessionCapacitySettings() {
   const state = useSessionCapacitySettings();
   return <SessionCapacitySettingsContent state={state} />;
 }
 
-function SessionCapacitySettingsReady({
-  state,
-  withinGroup,
-}: SessionCapacitySettingsContentProps & {
-  state: NonNullable<SessionCapacitySettingsContentProps["state"]>;
-}) {
+function SessionCapacityFields({ state }: { state: SessionCapacitySettingsState }) {
   const { t } = useTranslation();
   const { effective, settings } = state.snapshot!;
   const controlsDisabled = !state.isAdmin || state.isLocked;
   const effectiveEnabled = state.isLocked ? effective.enabled : state.enabledDraft;
   const effectiveMaximum = state.isLocked ? effective.max_sessions : settings.max_sessions;
+  const controlConfigured =
+    effective.control_profile_ids.length > 0 && effective.control_max_sessions > 0;
   const maximumError = sessionCapacityMaximumError({
     isAdmin: state.isAdmin,
     isLocked: state.isLocked,
@@ -252,6 +338,75 @@ function SessionCapacitySettingsReady({
     parsed: state.parsed,
     invalidReason: state.invalidReason,
   });
+
+  return (
+    <>
+      <SessionCapacitySwitch
+        checked={effectiveEnabled}
+        disabled={controlsDisabled}
+        onChange={state.setEnabledDraft}
+      />
+      {effectiveEnabled && (
+        <MaximumField
+          label={t("system:sessionCapacityMaximumLabel")}
+          description={t("settings:sessionMaximumShort")}
+          help={t("system:sessionCapacityMaximumHelp")}
+          inputId="session-capacity-maximum"
+          testId="session-capacity-maximum"
+          errorTestId="session-capacity-maximum-error"
+          value={state.isLocked ? String(effective.max_sessions) : state.maxDraft}
+          disabled={controlsDisabled}
+          error={maximumError}
+          onChange={state.setMaxDraft}
+        />
+      )}
+      <MaximumField
+        label={t("system:sessionCapacityControlMaximumLabel")}
+        description={t("settings:sessionControlMaximumShort")}
+        help={t("system:sessionCapacityControlMaximumHelp")}
+        inputId="session-capacity-control-maximum"
+        testId="session-capacity-control-maximum"
+        errorTestId="session-capacity-control-maximum-error"
+        min={0}
+        value={state.controlMaxDraft}
+        disabled={controlsDisabled}
+        error={state.parsedControl === null ? state.invalidReason : undefined}
+        onChange={state.setControlMaxDraft}
+      />
+      <ControlProfileField
+        value={state.controlProfilesDraft}
+        disabled={controlsDisabled}
+        onChange={state.setControlProfilesDraft}
+      />
+      <EffectiveCapacity
+        enabled={effective.enabled}
+        maximum={effectiveMaximum}
+        controlMaximum={effective.control_max_sessions}
+        controlConfigured={controlConfigured}
+        source={effective.source}
+        isDirty={state.isDirty}
+      />
+      {state.isLocked && <SessionCapacityManagedNotice />}
+      {!state.isAdmin && (
+        <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
+      )}
+      {state.saveFailed && (
+        <Alert variant="destructive">
+          <IconAlertCircle className="size-4" />
+          <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
+        </Alert>
+      )}
+    </>
+  );
+}
+
+function SessionCapacitySettingsReady({
+  state,
+  withinGroup,
+}: SessionCapacitySettingsContentProps & {
+  state: SessionCapacitySettingsState;
+}) {
+  const { t } = useTranslation();
 
   const content = (
     <>
@@ -265,35 +420,7 @@ function SessionCapacitySettingsReady({
         </CardHeader>
       )}
       <CardContent className={withinGroup ? "min-w-0 space-y-5 px-0" : "min-w-0 space-y-5"}>
-        <SessionCapacitySwitch
-          checked={effectiveEnabled}
-          disabled={controlsDisabled}
-          onChange={state.setEnabledDraft}
-        />
-        {effectiveEnabled && (
-          <MaximumField
-            value={state.isLocked ? String(effective.max_sessions) : state.maxDraft}
-            disabled={controlsDisabled}
-            error={maximumError}
-            onChange={state.setMaxDraft}
-          />
-        )}
-        <EffectiveCapacity
-          enabled={effective.enabled}
-          maximum={effectiveMaximum}
-          source={effective.source}
-          isDirty={state.isDirty}
-        />
-        {state.isLocked && <SessionCapacityManagedNotice />}
-        {!state.isAdmin && (
-          <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
-        )}
-        {state.saveFailed && (
-          <Alert variant="destructive">
-            <IconAlertCircle className="size-4" />
-            <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
-          </Alert>
-        )}
+        <SessionCapacityFields state={state} />
       </CardContent>
     </>
   );

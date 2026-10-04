@@ -20,7 +20,7 @@ func TestResolveSessionCapacityStartupRestoresSavedSetting(t *testing.T) {
 		t.Fatalf("save session capacity: %v", err)
 	}
 
-	resolution, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, testLogger(t))
+	resolution, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t))
 	if err != nil {
 		t.Fatalf("resolve session capacity: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestResolveSessionCapacityStartupRestoresSavedSetting(t *testing.T) {
 }
 
 func TestResolveSessionCapacityStartupDefaultsToDisabled(t *testing.T) {
-	resolution, err := resolveSessionCapacityWithStore(nil, sessioncapacity.Environment{}, testLogger(t))
+	resolution, err := resolveSessionCapacityWithStore(nil, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t))
 	if err != nil {
 		t.Fatalf("resolve default session capacity: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestResolveSessionCapacityStartupSurfacesInvalidPersistedSetting(t *testing
 		t.Fatalf("save invalid session capacity: %v", err)
 	}
 
-	if _, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, testLogger(t)); err == nil {
+	if _, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t)); err == nil {
 		t.Fatal("invalid persisted session capacity was silently ignored")
 	}
 }

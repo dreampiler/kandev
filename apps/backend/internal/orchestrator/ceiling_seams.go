@@ -193,12 +193,14 @@ func seam1StartPayload(
 // calling reservation.rebindToSession once the session exists, and calling
 // reservation.consume once the launch actually succeeds.
 func (s *Service) admitOrDeferSeam1(
-	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID, agentProfileID string,
+	origin launchOrigin, startPayload map[string]interface{},
 ) (reservation *seam1Reservation, deferred bool, err error) {
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
-		origin: origin,
-		seam:   "startTask",
+		taskID:         taskID,
+		origin:         origin,
+		seam:           "startTask",
+		agentProfileID: agentProfileID,
 	})
 	if decision.admitted {
 		return &seam1Reservation{

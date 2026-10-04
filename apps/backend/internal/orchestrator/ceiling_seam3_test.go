@@ -19,7 +19,7 @@ func TestAdmitSeam3AdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, refusal := svc.admitSeam3(ctx, "seam3-admit", "seam3-admit-session", launchOriginAutomatic)
+	reservation, refusal := svc.admitSeam3(ctx, "seam3-admit", "seam3-admit-session", "", launchOriginAutomatic)
 	if refusal != nil {
 		t.Fatalf("ensureSessionRunning's own gate refused while under the ceiling: %v", refusal)
 	}
@@ -41,11 +41,11 @@ func TestAdmitSeam3RefusesAutomaticOverCeiling(t *testing.T) {
 		}
 	}
 
-	if _, refusal := svc.admitSeam3(ctx, "seam3-first", "seam3-first-session", launchOriginAutomatic); refusal != nil {
+	if _, refusal := svc.admitSeam3(ctx, "seam3-first", "seam3-first-session", "", launchOriginAutomatic); refusal != nil {
 		t.Fatalf("first ensure was not admitted: %v", refusal)
 	}
 
-	reservation, refusal := svc.admitSeam3(ctx, "seam3-second", "seam3-second-session", launchOriginAutomatic)
+	reservation, refusal := svc.admitSeam3(ctx, "seam3-second", "seam3-second-session", "", launchOriginAutomatic)
 	if refusal == nil {
 		t.Fatal("second automatic ensure over the ceiling was admitted, want refused")
 	}
@@ -73,11 +73,11 @@ func TestAdmitSeam3AdmitsManualOverCeiling(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, refusal := svc.admitSeam3(ctx, "seam3-manual-first", "seam3-manual-first-session", launchOriginAutomatic); refusal != nil {
+	if _, refusal := svc.admitSeam3(ctx, "seam3-manual-first", "seam3-manual-first-session", "", launchOriginAutomatic); refusal != nil {
 		t.Fatalf("first ensure was not admitted: %v", refusal)
 	}
 
-	reservation, refusal := svc.admitSeam3(ctx, "seam3-manual-second", "seam3-manual-second-session", launchOriginManual)
+	reservation, refusal := svc.admitSeam3(ctx, "seam3-manual-second", "seam3-manual-second-session", "", launchOriginManual)
 	if refusal != nil {
 		t.Fatalf("a manual ensure was refused; AC-14 requires it always be admitted: %v", refusal)
 	}
@@ -95,7 +95,7 @@ func TestAdmitOrDeferWorkflowStepEnsureAdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-admit", "seam3-wf-admit-session", "step-1")
+	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-admit", "seam3-wf-admit-session", "", "step-1")
 	if err != nil {
 		t.Fatalf("admitOrDeferWorkflowStepEnsure: %v", err)
 	}
@@ -123,11 +123,11 @@ func TestAdmitOrDeferWorkflowStepEnsureDefersOverCeilingAndRecords(t *testing.T)
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-first", "seam3-wf-first-session", "step-1"); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-first", "seam3-wf-first-session", "", "step-1"); err != nil || deferred {
 		t.Fatalf("first pre-consultation was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-second", "seam3-wf-second-session", "step-2")
+	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-second", "seam3-wf-second-session", "", "step-2")
 	if err != nil {
 		t.Fatalf("admitOrDeferWorkflowStepEnsure: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestAdmitOrDeferWorkflowStepEnsureReportsWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "startSessionForWorkflowStepPreConsult"})
 
-	_, _, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "missing-task", "missing-session", "step-1")
+	_, _, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "missing-task", "missing-session", "", "step-1")
 	if err == nil {
 		t.Fatal("expected an error when the refusal could not be persisted")
 	}

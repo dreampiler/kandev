@@ -18,7 +18,7 @@ func TestAdmitOrDeferSeam4AdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-admit", "seam4-admit-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-admit-session"})
+	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-admit", "seam4-admit-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-admit-session"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam4: %v", err)
 	}
@@ -47,11 +47,11 @@ func TestAdmitOrDeferSeam4DefersAutomaticOverCeiling(t *testing.T) {
 		}
 	}
 
-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-first", "seam4-first-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-first-session"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-first", "seam4-first-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-first-session"}); err != nil || deferred {
 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-second", "seam4-second-session", launchOriginAutomatic, seam4ResumePayload("seam4-second-session", executor.ResumeOptions{AllowBranchReplacement: true}))
+	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-second", "seam4-second-session", "", launchOriginAutomatic, seam4ResumePayload("seam4-second-session", executor.ResumeOptions{AllowBranchReplacement: true}))
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam4: %v", err)
 	}
@@ -85,11 +85,11 @@ func TestAdmitOrDeferSeam4AdmitsManualOverCeiling(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-first", "seam4-manual-first-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-manual-first-session"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-first", "seam4-manual-first-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-manual-first-session"}); err != nil || deferred {
 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-second", "seam4-manual-second-session", launchOriginManual, map[string]interface{}{"session_id": "seam4-manual-second-session"})
+	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-second", "seam4-manual-second-session", "", launchOriginManual, map[string]interface{}{"session_id": "seam4-manual-second-session"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam4: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestAdmitOrDeferSeam4ReportsWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "resumeTaskSession"})
 
-	_, _, err := svc.admitOrDeferSeam4(ctx, "missing-task", "missing-session", launchOriginAutomatic, map[string]interface{}{"session_id": "missing-session"})
+	_, _, err := svc.admitOrDeferSeam4(ctx, "missing-task", "missing-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "missing-session"})
 	if err == nil {
 		t.Fatal("expected an error when the refusal could not be persisted")
 	}
@@ -129,12 +129,12 @@ func TestAdmitOrDeferSeam4UnsetOriginDefaultsAutomatic(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-first", "seam4-unset-first-session", launchOriginAutomatic, map[string]interface{}{}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-first", "seam4-unset-first-session", "", launchOriginAutomatic, map[string]interface{}{}); err != nil || deferred {
 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
 	// launchOrigin("") is neither "manual" nor "automatic".
-	_, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-second", "seam4-unset-second-session", launchOrigin(""), map[string]interface{}{})
+	_, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-second", "seam4-unset-second-session", "", launchOrigin(""), map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam4: %v", err)
 	}

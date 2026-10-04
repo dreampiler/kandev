@@ -24,7 +24,7 @@ func TestAdmitOrDeferSeam1AdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-admit", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-admit", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam1: %v", err)
 	}
@@ -52,11 +52,11 @@ func TestAdmitOrDeferSeam1DefersAutomaticOverCeiling(t *testing.T) {
 		}
 	}
 
-	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-first", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-first", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-second", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
+	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-second", "", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam1: %v", err)
 	}
@@ -87,11 +87,11 @@ func TestAdmitOrDeferSeam1AdmitsManualOverCeiling(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-first", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-first", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-second", launchOriginManual, map[string]interface{}{"prompt": "second"})
+	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-second", "", launchOriginManual, map[string]interface{}{"prompt": "second"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam1: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAdmitOrDeferSeam1ReportsWriteFailure(t *testing.T) {
 
 	// "missing-task" was never created, so the CAS read fails and the refusal
 	// cannot be persisted.
-	_, _, err := svc.admitOrDeferSeam1(ctx, "missing-task", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+	_, _, err := svc.admitOrDeferSeam1(ctx, "missing-task", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
 	if err == nil {
 		t.Fatal("expected an error when the refusal could not be persisted")
 	}

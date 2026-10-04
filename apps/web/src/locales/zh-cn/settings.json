@@ -648,6 +648,8 @@
   "sendTestNotification": "发送测试通知",
   "sendTestNotificationFor": "发送测试通知给 {{name}}",
   "serverConfiguration": "服务器配置",
+  "sessionControlMaximumShort": "在工作者上限之外额外运行。",
+  "sessionControlProfilesShort": "使用管控上限的配置。",
   "sessionLimitShort": "达到会话限制时，将自动启动加入队列。",
   "sessionMaximumShort": "手动启动可以超过此限制。",
   "setTheFontSizeForThe": "设置终端字号。默认值为 13px。",

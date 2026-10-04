@@ -77,6 +77,7 @@ func provideOrchestrator(
 	gitCredentialBroker *gitcredentials.Broker,
 	settingsStore *systemsettings.Store,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	controlSessionCapacityEnvironment sessioncapacity.Environment,
 	trackers ...*requiredstores.Tracker,
 ) (*orchestrator.Service, *messageCreatorAdapter, error) {
 	if lifecycleMgr == nil {
@@ -94,14 +95,18 @@ func provideOrchestrator(
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
-		settingsStore, sessionCapacityEnvironment, log,
+		settingsStore, sessionCapacityEnvironment, controlSessionCapacityEnvironment, log,
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve session capacity settings: %w", err)
 	}
 	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
+	serviceCfg.ControlSessionCapacity = sessionCapacityResolution.Effective.ControlMaxSessions
+	serviceCfg.ControlAgentProfileIDs = sessionCapacityResolution.Effective.ControlProfileIDs
 	log.Info("Session capacity initialized",
 		zap.Int("ceiling", serviceCfg.SessionCapacity),
+		zap.Int("control_ceiling", serviceCfg.ControlSessionCapacity),
+		zap.Int("control_profiles", len(serviceCfg.ControlAgentProfileIDs)),
 		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
 		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
 	namespace := resolveEventNamespace(cfg)
@@ -628,6 +633,7 @@ func queueConfiguration(cfg *config.Config) queuesettings.Configuration {
 func resolveSessionCapacityWithStore(
 	settingsStore *systemsettings.Store,
 	environment sessioncapacity.Environment,
+	controlEnvironment sessioncapacity.Environment,
 	log *logger.Logger,
 ) (sessioncapacity.Resolution, error) {
 	var configured *sessioncapacity.Settings
@@ -638,13 +644,17 @@ func resolveSessionCapacityWithStore(
 		}
 		configured = loaded
 	}
-	resolution, err := sessioncapacity.Resolve(configured, environment)
+	resolution, err := sessioncapacity.ResolveWithControl(configured, environment, controlEnvironment)
 	if err != nil {
 		return sessioncapacity.Resolution{}, err
 	}
 	if resolution.InvalidEnvironment && log != nil {
 		log.Warn("Ignoring invalid session capacity environment value",
 			zap.String("environment_variable", sessioncapacity.EnvironmentVariable))
+	}
+	if resolution.InvalidControlEnvironment && log != nil {
+		log.Warn("Ignoring invalid control session capacity environment value",
+			zap.String("environment_variable", sessioncapacity.ControlEnvironmentVariable))
 	}
 	return resolution, nil
 }

@@ -721,6 +721,8 @@ Workflow WIP limits and the instance-wide session limit control different things
 
 The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
 
+The same section has a second, independent **control session limit** for monitoring and control agents. Name the agent profiles that run as control agents, and their sessions are counted against that limit instead of the one above, so supervision can still start while ordinary work is saturated. With a worker limit of 8 and a control limit of 2, up to 10 sessions run at once. Leave the control profile list empty to keep a single limit. `KANDEV_MAX_CONTROL_SESSIONS` overrides only the control limit, and `0` removes the control lane. Lowering a limit never stops a session that is already running; it only defers new starts.
+
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
 Sessions parked by workflow transitions share the task workspace. Opening one

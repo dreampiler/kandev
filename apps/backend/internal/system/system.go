@@ -73,8 +73,11 @@ type Wiring struct {
 	MessageQueueConfig         queuesettings.Configuration
 	SessionCapacity            sessioncapacity.Target
 	SessionCapacityEnvironment sessioncapacity.Environment
-	TaskSessions               sleepinhibition.SessionReader
-	ToolPayloadChanged         func(context.Context, []string)
+	// ControlSessionCapacityEnvironment is the control lane's own override, read
+	// separately so either lane can be locked without the other.
+	ControlSessionCapacityEnvironment sessioncapacity.Environment
+	TaskSessions                      sleepinhibition.SessionReader
+	ToolPayloadChanged                func(context.Context, []string)
 }
 
 // Service exposes the composed system sub-services. Each field is
@@ -174,9 +177,10 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 			)
 		}
 		if wiring.SessionCapacity != nil {
-			sessionCapacitySvc = sessioncapacity.NewService(
+			sessionCapacitySvc = sessioncapacity.NewServiceWithControl(
 				sessioncapacity.NewStore(settingsStore), wiring.SessionCapacity,
-				wiring.SessionCapacityEnvironment, log,
+				wiring.SessionCapacityEnvironment,
+				wiring.ControlSessionCapacityEnvironment, log,
 			)
 		}
 		if wiring.TaskSessions != nil {

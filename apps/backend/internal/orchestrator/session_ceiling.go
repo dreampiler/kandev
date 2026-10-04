@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // reservationExpiryAllowance is the slice of the backstop that follows the session's
@@ -34,11 +35,17 @@ const (
 const (
 	ceilingFieldReasonCode = "reason_code"
 	ceilingFieldCeiling    = "ceiling"
+	// The class fields are a closed, low-cardinality set: a lane name and two
+	// counts. No task, session or agent identifier is ever one of them.
+	ceilingFieldClass           = "class"
+	ceilingFieldClassCeiling    = "class_ceiling"
+	ceilingFieldClassPopulation = "class_population"
 )
 
 // Reason codes carried verbatim by the admission log line and the card surface.
 const (
 	ceilingReasonRefused           = "ceiling"
+	ceilingReasonControlRefused    = "ceiling_control"
 	ceilingReasonManualOverride    = "ceiling_manual_override"
 	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
 	ceilingReasonSuperseded        = "ceiling_superseded"
@@ -58,19 +65,39 @@ const (
 	ceilingReasonSurfaceWriteFailed = "ceiling_surface_write_failed"
 )
 
+// ceilingClass is the admission lane a session is counted against. The lane is
+// derived from durable data (the session's stored agent profile) by this
+// package alone; a launch caller supplies the profile it already resolved and
+// never the class itself.
+type ceilingClass string
+
+const (
+	// ceilingClassWorker is every session that is not one of the operator's
+	// configured control profiles. It is also the class an unresolvable profile
+	// falls into, so an unknown session can never take capacity reserved for
+	// monitors.
+	ceilingClassWorker ceilingClass = "worker"
+	// ceilingClassControl is a session whose agent profile is in the configured
+	// control profile set. It is admitted against its own ceiling, which is not
+	// drawn from the worker ceiling.
+	ceilingClassControl ceilingClass = "control"
+)
+
 // admittedSessionLister supplies the persisted half of the population. It returns
-// ids rather than a count because the population unions rows with reservations by
+// refs rather than a count because the population unions rows with reservations by
 // session id, so a session holding both is counted once.
 type admittedSessionLister interface {
-	ListAdmittedSessionIDs(ctx context.Context) ([]string, error)
+	ListAdmittedSessionRefs(ctx context.Context) ([]models.AdmittedSessionRef, error)
 }
 
 // ceilingReservation is an in-flight admission held until the session is observed
 // running or the launch fails. sessionID is empty while the reservation is still
 // keyed by a launch-scoped identifier, which is the window between admission at
-// seam 1 and the session's creation.
+// seam 1 and the session's creation. class is fixed at admission so the
+// launch-to-session window counts against the lane it was admitted into.
 type ceilingReservation struct {
 	sessionID string
+	class     ceilingClass
 	takenAt   time.Time
 }
 
@@ -80,6 +107,9 @@ type admissionRequest struct {
 	sessionID string
 	origin    launchOrigin
 	seam      string
+	// agentProfileID is the profile this launch resolved for itself. It is the
+	// only classification input; an empty value is read as worker.
+	agentProfileID string
 }
 
 // admissionDecision is the controller's answer.
@@ -92,6 +122,9 @@ type admissionDecision struct {
 	ceiling         int
 	reasonCode      string
 	handedOff       bool
+	class           ceilingClass
+	classPopulation int
+	classCeiling    int
 }
 
 // SessionCeilingObservation is a point-in-time view of the admission
@@ -102,19 +135,37 @@ type SessionCeilingObservation struct {
 	Limit      int
 	ObservedAt time.Time
 	Known      bool
+	// ControlInUse and ControlLimit report the control lane on its own. Limit
+	// stays the worker ceiling so every existing consumer keeps its meaning.
+	ControlInUse int
+	ControlLimit int
+	// ControlConfigured reports whether a control lane exists at all, so an
+	// install with no control profiles does not display a meaningless zero cap.
+	ControlConfigured bool
+}
+
+// SessionCeilingCapacity is the live capacity pair the controller enforces.
+type SessionCeilingCapacity struct {
+	WorkerCeiling int
+	// ControlCeiling bounds the control lane. Zero means no control lane, in
+	// which case ControlProfileIDs is empty too and every session is a worker.
+	ControlCeiling    int
+	ControlProfileIDs []string
 }
 
 // sessionCeilingController is the single admission controller. Every mutation of
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
-	mu           sync.Mutex
-	ceiling      int
-	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
+	mu              sync.Mutex
+	ceiling         int
+	controlCeiling  int
+	controlProfiles map[string]struct{}
+	reservations    map[string]*ceilingReservation
+	lister          admittedSessionLister
+	logger          *zap.Logger
+	now             func() time.Time
+	newKey          func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -131,21 +182,63 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 	}
 }
 
-// setCeiling changes the effective capacity without replacing the controller.
-// Reservations therefore remain owned by the launch that created them across
-// every Settings update.
-func (c *sessionCeilingController) setCeiling(ceiling int) bool {
+// setCapacity changes the effective capacity of both lanes without replacing
+// the controller. Reservations therefore remain owned by the launch that created
+// them across every Settings update, and a lane that disappears leaves its
+// already-running sessions alone.
+func (c *sessionCeilingController) setCapacity(capacity SessionCeilingCapacity) bool {
 	if c == nil {
 		return false
 	}
 	c.mu.Lock()
 	previous := c.ceiling
-	c.ceiling = ceiling
+	previousControl := c.controlCeiling
+	c.ceiling = capacity.WorkerCeiling
+	c.controlCeiling = capacity.ControlCeiling
+	c.controlProfiles = controlProfileSet(activeControlProfiles(capacity.ControlCeiling, capacity.ControlProfileIDs))
 	c.mu.Unlock()
-	return previous != ceiling
+	return previous != capacity.WorkerCeiling || previousControl != capacity.ControlCeiling
 }
 
-// population returns the admitted session population.
+// classOfLocked is the single classification rule: a session is control exactly
+// when its resolved agent profile is one of the configured control profiles.
+// Everything else, including an absent profile, is worker.
+func (c *sessionCeilingController) classOfLocked(agentProfileID string) ceilingClass {
+	if agentProfileID == "" || len(c.controlProfiles) == 0 {
+		return ceilingClassWorker
+	}
+	if _, isControl := c.controlProfiles[agentProfileID]; isControl {
+		return ceilingClassControl
+	}
+	return ceilingClassWorker
+}
+
+func controlProfileSet(ids []string) map[string]struct{} {
+	if len(ids) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			set[id] = struct{}{}
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// classCeilingLocked returns the ceiling the given lane is admitted against.
+// unlimitedSessionCeiling means no refusal for that lane.
+func (c *sessionCeilingController) classCeilingLocked(class ceilingClass) int {
+	if class == ceilingClassControl && c.controlCeiling != unlimitedSessionCeiling {
+		return c.controlCeiling
+	}
+	return c.ceiling
+}
+
+// population returns the admitted session population across both lanes.
 func (c *sessionCeilingController) population(ctx context.Context) (int, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -168,14 +261,17 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 		observedAt = c.now().UTC()
 	}
 	observation := SessionCeilingObservation{
-		Limit:      c.ceiling,
-		ObservedAt: observedAt,
-		Known:      err == nil,
+		Limit:             c.ceiling,
+		ObservedAt:        observedAt,
+		Known:             err == nil,
+		ControlLimit:      c.controlCeiling,
+		ControlConfigured: len(c.controlProfiles) > 0,
 	}
 	if err != nil {
 		return observation, err
 	}
 	observation.InUse = c.populationLocked(counted)
+	observation.ControlInUse = c.classPopulationLocked(counted, ceilingClassControl)
 	return observation, nil
 }
 
@@ -190,21 +286,29 @@ func (s *Service) CurrentSessionCeilingObservation(ctx context.Context) (Session
 	return s.sessionCeiling.observation(ctx)
 }
 
-// SetSessionCapacity applies the effective install-wide capacity to the
-// existing admission controller. A zero value disables refusal while keeping
-// the controller and its reservations alive for later re-enablement.
-func (s *Service) SetSessionCapacity(capacity int) {
+// SetSessionCapacity applies both lanes' effective capacity to the existing
+// admission controller. A zero worker ceiling disables worker refusal while
+// keeping the controller and its reservations alive for later re-enablement, and
+// a zero control ceiling removes the control lane without touching sessions it
+// already admitted.
+func (s *Service) SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs []string) {
 	if s == nil || s.sessionCeiling == nil {
 		return
 	}
-	changed := s.sessionCeiling.setCeiling(capacity)
+	changed := s.sessionCeiling.setCapacity(SessionCeilingCapacity{
+		WorkerCeiling:     workerCeiling,
+		ControlCeiling:    controlCeiling,
+		ControlProfileIDs: controlProfileIDs,
+	})
 	if !changed {
 		return
 	}
 	if s.logger != nil {
 		s.logger.Info("session ceiling capacity applied",
-			zap.Int("ceiling", capacity),
-			zap.Bool("enabled", capacity != unlimitedSessionCeiling))
+			zap.Int("ceiling", workerCeiling),
+			zap.Int(ceilingFieldClassCeiling, controlCeiling),
+			zap.Int("control_profiles", len(controlProfileIDs)),
+			zap.Bool("enabled", workerCeiling != unlimitedSessionCeiling))
 	}
 	// A sweep both retries newly eligible work after an increase or disable and
 	// refreshes the task projection after any changed observation, including a
@@ -212,8 +316,8 @@ func (s *Service) SetSessionCapacity(capacity int) {
 	s.signalCeilingSweep()
 }
 
-// SessionCapacity returns the current effective limit for the live admission
-// controller. Zero means automatic launches are unlimited.
+// SessionCapacity returns the current effective worker limit for the live
+// admission controller. Zero means automatic worker launches are unlimited.
 func (s *Service) SessionCapacity() int {
 	if s == nil || s.sessionCeiling == nil {
 		return unlimitedSessionCeiling
@@ -223,20 +327,32 @@ func (s *Service) SessionCapacity() int {
 	return s.sessionCeiling.ceiling
 }
 
-// countedRowsLocked reads the persisted half of the population. It is derived at
-// decision time rather than kept as a running tally, so a restart, a panic or a
-// missed release cannot leak capacity permanently.
-func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
-	if c.lister == nil {
-		return map[string]struct{}{}, nil
+// SessionControlCapacity returns the control lane's own effective limit. Zero
+// means no control lane is configured.
+func (s *Service) SessionControlCapacity() int {
+	if s == nil || s.sessionCeiling == nil {
+		return 0
 	}
-	ids, err := c.lister.ListAdmittedSessionIDs(ctx)
+	s.sessionCeiling.mu.Lock()
+	defer s.sessionCeiling.mu.Unlock()
+	return s.sessionCeiling.controlCeiling
+}
+
+// countedRowsLocked reads the persisted half of the population, keyed by session
+// id with the lane each row belongs to. It is derived at decision time rather
+// than kept as a running tally, so a restart, a panic or a missed release cannot
+// leak capacity permanently.
+func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]ceilingClass, error) {
+	if c.lister == nil {
+		return map[string]ceilingClass{}, nil
+	}
+	refs, err := c.lister.ListAdmittedSessionRefs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	counted := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		counted[id] = struct{}{}
+	counted := make(map[string]ceilingClass, len(refs))
+	for _, ref := range refs {
+		counted[ref.ID] = c.classOfLocked(ref.ProfileID)
 	}
 	return counted, nil
 }
@@ -244,8 +360,9 @@ func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[s
 // populationLocked unions the persisted rows with the session-bound reservations by
 // session id, then adds the launch-scoped reservations, each of which can collide
 // with no row because no row for it exists yet. It is deliberately not the sum of
-// two independent numbers.
-func (c *sessionCeilingController) populationLocked(counted map[string]struct{}) int {
+// two independent numbers, and it spans both lanes because the observation
+// surface reports the instance total.
+func (c *sessionCeilingController) populationLocked(counted map[string]ceilingClass) int {
 	population := len(counted)
 	for _, reservation := range c.reservations {
 		if reservation.sessionID == "" {
@@ -259,14 +376,41 @@ func (c *sessionCeilingController) populationLocked(counted map[string]struct{})
 	return population
 }
 
+// classPopulationLocked is populationLocked restricted to one lane. A session
+// bound reservation counts toward the lane it was admitted into, so a relaunch
+// or rebind cannot move occupancy between lanes.
+func (c *sessionCeilingController) classPopulationLocked(counted map[string]ceilingClass, class ceilingClass) int {
+	population := 0
+	for _, rowClass := range counted {
+		if rowClass == class {
+			population++
+		}
+	}
+	for _, reservation := range c.reservations {
+		if reservation.class != class {
+			continue
+		}
+		if reservation.sessionID == "" {
+			population++
+			continue
+		}
+		if _, alreadyCounted := counted[reservation.sessionID]; !alreadyCounted {
+			population++
+		}
+	}
+	return population
+}
+
 // reserveLocked records an in-flight reservation, keyed by session id where one
 // exists and by a launch-scoped identifier otherwise.
-func (c *sessionCeilingController) reserveLocked(sessionID string) string {
+func (c *sessionCeilingController) reserveLocked(sessionID string, class ceilingClass) string {
 	key := sessionID
 	if key == "" {
 		key = c.newKey()
 	}
-	c.reservations[key] = &ceilingReservation{sessionID: sessionID, takenAt: c.now()}
+	c.reservations[key] = &ceilingReservation{
+		sessionID: sessionID, class: class, takenAt: c.now(),
+	}
 	return key
 }
 
@@ -290,38 +434,52 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+	class := c.classOfLocked(req.agentProfileID)
+	if c.classCeilingLocked(class) == unlimitedSessionCeiling {
+		return c.admitUnlimitedLocked(req, origin, class)
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
-		return c.decideUnknownPopulationLocked(req, origin, err)
+		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
-	return c.decideLocked(req, origin, counted)
+	return c.decideLocked(req, origin, class, counted)
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
 // while avoiding a population read that cannot affect an unlimited decision.
-func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, origin launchOrigin) admissionDecision {
-	decision := admissionDecision{admitted: true, ceiling: unlimitedSessionCeiling}
+func (c *sessionCeilingController) admitUnlimitedLocked(
+	req admissionRequest, origin launchOrigin, class ceilingClass,
+) admissionDecision {
+	decision := admissionDecision{
+		admitted: true, ceiling: unlimitedSessionCeiling, class: class,
+	}
 	if req.sessionID != "" {
 		if _, held := c.reservations[req.sessionID]; held {
 			decision.reservationKey = req.sessionID
 			return decision
 		}
 	}
-	decision.reservationKey = c.reserveLocked(req.sessionID)
+	decision.reservationKey = c.reserveLocked(req.sessionID, class)
 	c.logDecision(req, origin, decision)
 	return decision
 }
 
 // decideLocked is the ordinary admission decision, taken against a population the
-// caller has already read inside the critical section.
-func (c *sessionCeilingController) decideLocked(req admissionRequest, origin launchOrigin, counted map[string]struct{}) admissionDecision {
+// caller has already read inside the critical section. The instance total is
+// still reported, but the refusal test is against the requesting lane's own
+// ceiling: a saturated worker lane no longer refuses a control launch, and a
+// saturated control lane never consumes worker capacity.
+func (c *sessionCeilingController) decideLocked(
+	req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
+) admissionDecision {
 	population := c.populationLocked(counted)
+	classCeiling := c.classCeilingLocked(class)
+	classPopulation := c.classPopulationLocked(counted, class)
 
-	if decision, ok := c.alreadyAdmittedLocked(req, counted, population); ok {
+	if decision, ok := c.alreadyAdmittedLocked(
+		req, counted, population, class, classCeiling, classPopulation,
+	); ok {
 		return decision
 	}
 
@@ -329,27 +487,47 @@ func (c *sessionCeilingController) decideLocked(req admissionRequest, origin lau
 		population:      population,
 		populationKnown: true,
 		ceiling:         c.ceiling,
+		class:           class,
+		classCeiling:    classCeiling,
+		classPopulation: classPopulation,
 	}
 	switch {
-	case c.ceiling == unlimitedSessionCeiling || population < c.ceiling:
+	case classCeiling == unlimitedSessionCeiling || classPopulation < classCeiling:
 		decision.admitted = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveLocked(req.sessionID, class)
 	case origin == launchOriginManual:
 		decision.admitted = true
 		decision.manualOverride = true
 		decision.reasonCode = ceilingReasonManualOverride
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveLocked(req.sessionID, class)
 	default:
-		decision.reasonCode = ceilingReasonRefused
+		decision.reasonCode = refusedReasonFor(class)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
 }
 
+// refusedReasonFor keeps the worker lane's historical reason code byte-identical
+// and gives the control lane its own, so an operator reading a card or a log
+// line can tell which lane refused without inferring it from counts.
+func refusedReasonFor(class ceilingClass) string {
+	if class == ceilingClassControl {
+		return ceilingReasonControlRefused
+	}
+	return ceilingReasonRefused
+}
+
 // alreadyAdmittedLocked answers a request for a session that already holds a
 // reservation or is already counted, so one launch consumes at most one unit of
 // capacity however many seams it passes through.
-func (c *sessionCeilingController) alreadyAdmittedLocked(req admissionRequest, counted map[string]struct{}, population int) (admissionDecision, bool) {
+func (c *sessionCeilingController) alreadyAdmittedLocked(
+	req admissionRequest,
+	counted map[string]ceilingClass,
+	population int,
+	class ceilingClass,
+	classCeiling int,
+	classPopulation int,
+) (admissionDecision, bool) {
 	if req.sessionID == "" {
 		return admissionDecision{}, false
 	}
@@ -358,6 +536,9 @@ func (c *sessionCeilingController) alreadyAdmittedLocked(req admissionRequest, c
 		population:      population,
 		populationKnown: true,
 		ceiling:         c.ceiling,
+		class:           class,
+		classCeiling:    classCeiling,
+		classPopulation: classPopulation,
 	}
 	if _, held := c.reservations[req.sessionID]; held {
 		decision.reservationKey = req.sessionID
@@ -372,19 +553,23 @@ func (c *sessionCeilingController) alreadyAdmittedLocked(req admissionRequest, c
 // decideUnknownPopulationLocked fails closed for automatic launches and open for
 // manual ones. Reservations already held are untouched: the failure concerns the
 // counted rows only.
-func (c *sessionCeilingController) decideUnknownPopulationLocked(req admissionRequest, origin launchOrigin, err error) admissionDecision {
+func (c *sessionCeilingController) decideUnknownPopulationLocked(
+	req admissionRequest, origin launchOrigin, class ceilingClass, err error,
+) admissionDecision {
 	c.logger.Error("session ceiling could not read the admitted session population",
 		zap.String("seam", req.seam), zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID), zap.String("origin", string(origin)), zap.Error(err))
 
 	decision := admissionDecision{
-		ceiling:    c.ceiling,
-		reasonCode: ceilingReasonUnknownPopulation,
+		ceiling:      c.ceiling,
+		class:        class,
+		classCeiling: c.classCeilingLocked(class),
+		reasonCode:   ceilingReasonUnknownPopulation,
 	}
 	if origin == launchOriginManual {
 		decision.admitted = true
 		decision.manualOverride = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveLocked(req.sessionID, class)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
@@ -400,9 +585,12 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("origin", string(origin)),
 		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
+		zap.String(ceilingFieldClass, string(decision.class)),
+		zap.Int(ceilingFieldClassCeiling, decision.classCeiling),
 	}
 	if decision.populationKnown {
 		fields = append(fields, zap.Int("population", decision.population))
+		fields = append(fields, zap.Int(ceilingFieldClassPopulation, decision.classPopulation))
 	}
 	if decision.reasonCode != "" {
 		fields = append(fields, zap.String(ceilingFieldReasonCode, decision.reasonCode))
@@ -503,17 +691,23 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+	class := c.classOfLocked(req.agentProfileID)
+	if c.classCeilingLocked(class) == unlimitedSessionCeiling {
+		return c.admitUnlimitedLocked(req, origin, class)
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
-		return c.decideUnknownPopulationLocked(req, origin, err)
+		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
-	if _, isCounted := counted[req.sessionID]; req.sessionID == "" || !isCounted {
-		return c.decideLocked(req, origin, counted)
+	rowClass, isCounted := counted[req.sessionID]
+	if req.sessionID == "" || !isCounted {
+		return c.decideLocked(req, origin, class, counted)
 	}
+	// A relaunch keeps the lane its counted row already occupies. Re-deriving the
+	// class from the caller's profile here could move a running control session
+	// into the worker lane and consume worker capacity for the same process.
+	class = rowClass
 
 	decision := admissionDecision{
 		admitted:        true,
@@ -522,8 +716,13 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		population:      c.populationLocked(counted),
 		populationKnown: true,
 		ceiling:         c.ceiling,
+		class:           class,
+		classCeiling:    c.classCeilingLocked(class),
+		classPopulation: c.classPopulationLocked(counted, class),
 	}
-	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now()}
+	c.reservations[req.sessionID] = &ceilingReservation{
+		sessionID: req.sessionID, class: class, takenAt: c.now(),
+	}
 	c.logDecision(req, origin, decision)
 	return decision
 }

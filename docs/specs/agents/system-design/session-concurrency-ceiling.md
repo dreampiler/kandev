@@ -28,6 +28,7 @@ in force when enabled.
 | --- | --- |
 | `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery) |
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
+| `REQ-AGENTS-SESSION-CEILING-003` | [Control lane](#control-lane), [Settings contract](#settings-contract), [Observability](#observability) |
 
 ## Components and responsibilities
 
@@ -39,6 +40,49 @@ in force when enabled.
 | Ceiling sweep | Lists tasks with ceiling records, sorts by priority rank, position, original ceiling queue time, and ID, validates eligibility and retry due time, and dispatches the stored launch kind. |
 | Task repository and service | Store and update the shared deferred record. Prompt edits update both legacy top-level data and the nested ceiling payload. |
 | Executor callbacks | Confirm or release only when the callback execution still owns the session row. |
+
+## Control lane
+
+The controller admits two classes. `ceilingClassWorker` is every session whose
+stored agent profile is not in the operator's control profile set, plus every
+session whose profile cannot be resolved. `ceilingClassControl` is a session
+whose profile is in that set.
+
+Classification lives in the controller and nowhere else. The repository returns
+each admitted session id with the `agent_profile_id` already stored on its own
+row (`ListAdmittedSessionRefs`, `models.AdmittedSessionRef`); it applies no join
+and no new filter, because a join could change which sessions are counted. Each
+launch seam passes the profile it already resolved — seam 1 and seam 2 the launch
+profile, seam 3, 4 and 5 the session's stored profile — and an unresolvable
+profile is worker. No caller supplies a class.
+
+`admit` reads both lane populations and records the reservation inside the same
+critical section it compared them in, so two concurrent launches still cannot
+take the same free unit in either lane. `decideLocked` compares the requesting
+lane's population against that lane's ceiling: worker against `ceiling`,
+control against `control_ceiling`. The instance total is still reported for the
+observation surface. A reservation carries the class it was admitted into, so a
+launch-scoped reservation, a `rebind` onto the created session, a `rekey` onto a
+replacement, and a `handOffOrAdmit` hand-off all keep occupying the same lane.
+The hand-off additionally takes the class from the counted row it replaces, so a
+relaunch cannot move a running control session into the worker lane.
+
+Refusal is unchanged in kind: the automatic path defers through
+`deferCeilingRefusal` with `ceiling_control` for the control lane and the
+unchanged `ceiling` for the worker lane, and the manual path overrides as before.
+Nothing is terminated: a cap decrease changes future admissions only.
+
+Restart needs no reconciliation code. Populations are derived from persisted rows
+at decision time, so a restarted controller counts each lane from durable state
+and starts with no process-local reservations.
+
+Settings carry `control_max_sessions` and `control_profile_ids` on the same
+`session_capacity` record, with `KANDEV_MAX_CONTROL_SESSIONS` resolved
+independently of `KANDEV_MAX_CONCURRENT_SESSIONS`. The control lane exists only
+when the ceiling is positive and at least one profile is configured; the worker
+switch does not remove it. `Effective` reports `total_max_sessions` and a
+separate `control_locked`. The profile list is trimmed and de-duplicated on write
+so one profile cannot consume two slots.
 
 ## Data and contracts
 
@@ -266,6 +310,12 @@ restart.
 Log applied capacity and its source on initialization and successful changes.
 Reuse existing observation and queue-status projection paths. Never log full
 environment dumps or launch payloads for a settings change.
+
+The admission line carries `class`, `class_ceiling`, and `class_population`
+beside the existing total fields. These three are the whole new label set: a
+closed lane name and two counts, never a task, session, or agent identifier. The
+observation exposes per-lane counts so the settings and status surfaces can show
+them without a second read.
 
 ## Related decisions
 

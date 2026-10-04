@@ -8,27 +8,45 @@ import (
 	"testing"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 type fakeAdmittedLister struct {
-	mu  sync.Mutex
-	ids []string
-	err error
+	mu sync.Mutex
+	// ids and profiles are separate so a test can express a persisted session
+	// that carries no agent profile at all.
+	ids      []string
+	profiles map[string]string
+	err      error
 }
 
-func (f *fakeAdmittedLister) ListAdmittedSessionIDs(context.Context) ([]string, error) {
+func (f *fakeAdmittedLister) ListAdmittedSessionRefs(context.Context) ([]models.AdmittedSessionRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
 		return nil, f.err
 	}
-	return append([]string(nil), f.ids...), nil
+	refs := make([]models.AdmittedSessionRef, 0, len(f.ids))
+	for _, id := range f.ids {
+		refs = append(refs, models.AdmittedSessionRef{ID: id, ProfileID: f.profiles[id]})
+	}
+	return refs, nil
 }
 
 func (f *fakeAdmittedLister) set(ids ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ids = ids
+}
+
+// setWithProfiles persists sessions whose stored agent profile decides the lane
+// they are counted against.
+func (f *fakeAdmittedLister) setWithProfiles(profiles map[string]string, ids ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ids = ids
+	f.profiles = profiles
 }
 
 func (f *fakeAdmittedLister) fail(err error) {

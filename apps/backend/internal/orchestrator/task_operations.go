@@ -725,7 +725,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, session.AgentProfileID, originFromAutoStart(autoStart), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -1532,7 +1532,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, agentProfileID, origin,
 		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
 	if err != nil {
 		return nil, err
@@ -3331,7 +3331,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 				return nil, false, &sessionOpenRecoveryBlockedError{reason: reason}
 			}
 		}
-		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, launchOrigin(options.Origin),
+		return s.admitOrDeferSeam4(admissionCtx, taskID, sessionID, session.AgentProfileID, launchOrigin(options.Origin),
 			seam4ResumePayloadWithBinding(sessionID, options, entryBinding))
 	}()
 	if err != nil {
@@ -3685,7 +3685,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	if session.ReviewStatus == models.ReviewStatusPending {
 		return fmt.Errorf("session is pending approval - use Approve button to proceed or send a message to request changes")
 	}
-	preConsultRes, refused, err := s.admitOrDeferWorkflowStepEnsureWithBinding(ctx, taskID, sessionID, workflowStepID, entryBinding)
+	preConsultRes, refused, err := s.admitOrDeferWorkflowStepEnsureWithBinding(ctx, taskID, sessionID, session.AgentProfileID, workflowStepID, entryBinding)
 	if err != nil {
 		return err
 	}
@@ -4012,7 +4012,7 @@ func (s *Service) coldResumeSession(
 	if err := s.validateContextCeilingEntry(ctx, session.TaskID); err != nil {
 		return s.finishResumeAttemptWithError(startupAttempt, err)
 	}
-	seam3Res, refusal := s.admitSeam3(ctx, session.TaskID, sessionID, origin)
+	seam3Res, refusal := s.admitSeam3(ctx, session.TaskID, sessionID, session.AgentProfileID, origin)
 	if refusal != nil {
 		return startupAttempt, refusal
 	}

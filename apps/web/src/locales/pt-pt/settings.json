@@ -648,6 +648,8 @@
   "sendTestNotification": "Enviar notificação de teste",
   "sendTestNotificationFor": "Enviar notificação de teste para {{name}}",
   "serverConfiguration": "Configuração do servidor",
+  "sessionControlMaximumShort": "Executa para além do limite de trabalhadores.",
+  "sessionControlProfilesShort": "Perfis que usam o limite de controlo.",
   "sessionLimitShort": "Coloca os arranques automáticos em fila ao atingir o limite de sessões.",
   "sessionMaximumShort": "Os arranques manuais podem exceder este limite.",
   "setTheFontSizeForThe": "Defina o tamanho da letra do terminal. A pré-definição é 13px.",
