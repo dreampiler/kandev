@@ -2081,6 +2081,14 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
+	// is_primary is NOT written here for the same reason, and with a worse
+	// consequence: primary ownership is a task-wide invariant that only
+	// SetSessionPrimary* demotes-then-promotes atomically, so a full-row write
+	// carrying a copy read before that transaction silently reasserts the
+	// demoted session. No unique constraint backs the column, so the row lands
+	// without error and the task ends up with two primaries — the older one
+	// answerable for queued work it must never receive again.
+
 	// agent_profile_id is stored as NULL when empty. No unique index
 	// constrains (task_id, agent_profile_id) at this UPDATE path — office
 	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
@@ -2096,14 +2104,14 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
+			review_status = ?, is_passthrough = ?, task_environment_id = ?
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
-		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
+		session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
 		session.ID}
 	if expected != nil {

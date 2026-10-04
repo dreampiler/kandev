@@ -693,7 +693,7 @@ func TestAutoStart_ForkReviewWaitsForManualStart(t *testing.T) {
 	}
 	svc.autoStartReviewTask(ctx, evt, dbTask)
 	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted", 0, false)
-	svc.autoStartTaskForLoadedStep(ctx, dbTask, sg.steps[stepID], "task.moved", false, 0, false)
+	svc.autoStartTaskForLoadedStep(ctx, dbTask, sg.steps[stepID], "task.moved", false, 0, false, false)
 	select {
 	case <-launched:
 		t.Fatal("fork review task launched automatically")
