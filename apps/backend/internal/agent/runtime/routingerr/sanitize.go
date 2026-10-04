@@ -2,6 +2,7 @@ package routingerr
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -321,7 +322,60 @@ var (
 	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
 )
 
+// dateTokenPattern matches a bare calendar date such as 10/7/2026 or
+// 2026-10-07. A provider notice states the date its capacity frees, and the
+// slash form is indistinguishable from a path tail to localUnixPathPattern —
+// "blocked until 10/7/2026" otherwise loses its date to [path-redacted]. Dates
+// carry no account or workspace identifier, so they are masked out of the path
+// pass and restored afterwards.
+var dateTokenPattern = regexp.MustCompile(`\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b`)
+
+// dateMaskPrefix builds a mask token no other redaction rule can match: it
+// carries no '/', ':' or 32-plus-character run, so the path, assignment and
+// opaque-id passes all leave it untouched.
+func dateMaskPrefix(index int) string { return "kandevdatemask" + strconv.Itoa(index) + "x" }
+
+var dateMaskPattern = regexp.MustCompile(`kandevdatemask(\d+)x`)
+
+// maskDateTokens replaces every date with a positional mask token and returns
+// the original dates in the same order.
+func maskDateTokens(s string) (string, []string) {
+	dates := dateTokenPattern.FindAllString(s, -1)
+	if len(dates) == 0 {
+		return s, nil
+	}
+	index := 0
+	masked := dateTokenPattern.ReplaceAllStringFunc(s, func(string) string {
+		token := dateMaskPrefix(index)
+		index++
+		return token
+	})
+	return masked, dates
+}
+
+// unmaskDateTokens restores the masked dates. A token that no longer resolves
+// (for example one left by a truncated excerpt) is left in place: it exposes
+// nothing, and dropping it would corrupt unrelated text.
+func unmaskDateTokens(s string, dates []string) string {
+	if len(dates) == 0 {
+		return s
+	}
+	return dateMaskPattern.ReplaceAllStringFunc(s, func(token string) string {
+		index, err := strconv.Atoi(dateMaskPattern.FindStringSubmatch(token)[1])
+		if err != nil || index < 0 || index >= len(dates) {
+			return token
+		}
+		return dates[index]
+	})
+}
+
 func redactLocalPaths(s string) string {
+	masked, dates := maskDateTokens(s)
+	s = redactLocalPathsMasked(masked)
+	return unmaskDateTokens(s, dates)
+}
+
+func redactLocalPathsMasked(s string) string {
 	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
 		if len(path) >= 4 && path[2:4] == "//" {
 			return path

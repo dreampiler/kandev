@@ -190,6 +190,12 @@ func Classify(in Input) *Error {
 		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
 			hint = parseResetClockHintAt(text, observedAt)
 		}
+		if hint == nil {
+			// A notice may state only the remaining time ("will reset in 1 hour,
+			// 28 minutes") with no date, zone, or wall clock. The elapsed
+			// duration is unambiguous when anchored to the observation instant.
+			hint = parseRelativeResetHintAt(text, observedAt)
+		}
 		if hint != nil {
 			e.ResetHint = hint
 		}

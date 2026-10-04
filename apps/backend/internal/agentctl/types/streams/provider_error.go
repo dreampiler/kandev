@@ -68,6 +68,11 @@ const (
 	// ProviderErrorSourceACPPrompt marks a safe diagnostic projected from a
 	// terminal ACP session/prompt JSON-RPC error.
 	ProviderErrorSourceACPPrompt = "acp_prompt"
+	// ProviderErrorSourceAgentMessage marks a safe diagnostic the agent stated as
+	// an ordinary assistant message. Some providers announce an exhausted quota
+	// this way and then never settle the prompt, so the message is the only
+	// failure signal available.
+	ProviderErrorSourceAgentMessage = "agent_message"
 )
 
 // ProviderError is the bounded, sanitized provider diagnostic that may cross
