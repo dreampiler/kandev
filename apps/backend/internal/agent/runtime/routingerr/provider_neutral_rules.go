@@ -4,6 +4,27 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	// Some providers announce an exhausted quota as an ordinary assistant
+	// message and then never settle the prompt, so the notice is the only
+	// failure signal. The high-confidence rule is anchored to the whole text and
+	// requires the provider's own notice wording, because a rule that ends a
+	// live turn on the bare phrase "usage limit reached" would also match an
+	// agent quoting or explaining that phrase — and an ACP terminal error
+	// carrying only that string must stay a generic failure. The loose rule
+	// keeps such prose classifiable for diagnostics, but at a confidence that
+	// never ends a turn.
+	mustRule(
+		"provider.quota_notice.v1",
+		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d`,
+		CodeQuotaLimited,
+		ConfHigh,
+	),
+	mustRule(
+		"provider.quota_notice_prose.v1",
+		`(?i)\breached\s+your\s+current\s+quota\s+for\s+this\s+period\b`,
+		CodeQuotaLimited,
+		ConfMedium,
+	),
 	mustRule(
 		"provider.model_capacity.v1",
 		`(?i)(?:\bselected\s+model\b[^\n]{0,96}\bat\s+capacity\b|\bmodel\b[^\n]{0,96}\bat\s+capacity\b|\b(?:model|provider)[_-]?capacity(?:_reached)?\b|\b(?:model|provider)\s+capacity\s+(?:is\s+)?(?:reached|unavailable)\b)`,
