@@ -106,7 +106,7 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 			return nil, nil, fmt.Errorf("create backup dir: %w", err)
 		}
 		startup.BeginStep(ctx, startup.StepDatabaseBackup)
-		path, size, err := createPreMigrationBackup(ctx, writer, backupDir, storedVersion)
+		path, size, err := createPreMigrationBackup(ctx, writer, backupDir, storedVersion, log)
 		startup.EndStep(ctx, startup.StepDatabaseBackup)
 		if err != nil {
 			_ = pool.Close()
@@ -143,9 +143,10 @@ func provideSQLite(ctx context.Context, cfg *config.Config, log *logger.Logger, 
 	return pool, cleanup, nil
 }
 
-func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string) (string, int64, error) {
+func createPreMigrationBackup(ctx context.Context, writer *sqlx.DB, backupDir, storedVersion string, log *logger.Logger) (string, int64, error) {
 	path := snapshotPath(backupDir, storedVersion)
-	stagingDir, err := os.MkdirTemp(backupDir, ".kandev-backup-*")
+	SweepStaleBootStaging(backupDir, log)
+	stagingDir, err := os.MkdirTemp(backupDir, bootStagingDirPrefix)
 	if err != nil {
 		return "", 0, fmt.Errorf("create private backup staging directory: %w", err)
 	}
