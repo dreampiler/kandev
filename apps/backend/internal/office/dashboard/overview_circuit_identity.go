@@ -10,8 +10,9 @@ import "strings"
 //   - credential scope: an installation-scoped binding fingerprint, or the
 //     profile-scoped fallback key an adapter gets when it cannot prove a
 //     binding.
-//   - model scope: "<bindingKey>|<ModelID>", so the model is named outright and
-//     the binding part resolves like the credential case.
+//   - model scope: "<bindingKey>|<ModelID>", where bindingKey is itself a
+//     resource key, so the model is named outright and the binding resolves by
+//     the same rule as above.
 //
 // A fingerprint that is not one of these names no profile, and stays unnamed:
 // the overview reports it as unidentifiable rather than guessing.
@@ -48,11 +49,12 @@ func circuitIdentityOf(key string) circuitIdentity {
 		if !hasModel {
 			return circuitIdentity{}
 		}
-		bindingScope, bindingValue, scoped := strings.Cut(binding, ":")
-		if !scoped || bindingScope != "credential" {
-			return circuitIdentity{modelName: model}
-		}
-		return circuitIdentity{profileID: profileIDFromBinding(bindingValue), modelName: model}
+		// The binding part is itself a resource key, so it resolves by the same
+		// rule: a credential fingerprint names a profile only through its
+		// fallback, and a profile-scoped binding names one directly.
+		identity := circuitIdentityOf(binding)
+		identity.modelName = model
+		return identity
 	}
 	return circuitIdentity{}
 }

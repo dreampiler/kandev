@@ -193,16 +193,30 @@ export function shortId(id: string): string {
 }
 
 /**
+ * The identifier an unnamed circuit is reported by. The scope prefix names the
+ * kind of resource, not which one, so it is dropped: a fingerprint's first
+ * characters identify the resource, and the constant scope word does not.
+ */
+function circuitFallbackId(circuit: OverviewBlockedCircuit): string {
+  if (circuit.profile_id) return circuit.profile_id;
+  const value = circuit.scope_value || circuit.resource_key;
+  const binding = value.includes("|") ? value.slice(0, value.lastIndexOf("|")) : value;
+  const withoutScope = binding.includes(":") ? binding.slice(binding.indexOf(":") + 1) : binding;
+  return withoutScope || circuit.resource_key;
+}
+
+/**
  * The blocked circuit's subject: the profile name, qualified by the model when
- * the circuit covers one model. A circuit that names no profile is reported as
- * unidentifiable with a short id, because the raw key is a fingerprint the
- * operator cannot read.
+ * the circuit covers one model. A circuit that names no profile keeps whatever
+ * model it did name, and reports the profile as unidentifiable with a short id,
+ * because the raw key is a fingerprint the operator cannot read.
  */
 export function circuitTitle(t: TFunction, circuit: OverviewBlockedCircuit): string {
   if (!circuit.profile_name) {
-    return t("office:overviewCircuitUnknownName", {
-      id: shortId(circuit.profile_id || circuit.scope_value || circuit.resource_key),
+    const unknown = t("office:overviewCircuitUnknownName", {
+      id: shortId(circuitFallbackId(circuit)),
     });
+    return circuit.model_name ? `${unknown} · ${circuit.model_name}` : unknown;
   }
   return circuit.model_name
     ? `${circuit.profile_name} · ${circuit.model_name}`
