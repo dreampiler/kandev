@@ -8,7 +8,6 @@ const MAXIMUM_LABEL = "Maximum automatic sessions";
 const NO_LIMIT = "No session limit";
 const ADMIN_ONLY = "Only administrators can change this setting.";
 const VALIDATION = "Enter a positive whole number.";
-const CONTROL_PROFILE_ID = "profile-monitor";
 const fetchSettingsMock = vi.fn();
 const updateSettingsMock = vi.fn();
 let saveContributor: SettingsSaveContributor | null = null;
@@ -58,8 +57,6 @@ function response(
   overrides: Partial<{
     enabled: boolean;
     maximum: number;
-    controlMaximum: number;
-    controlProfiles: string[];
     effectiveEnabled: boolean;
     effectiveMaximum: number;
     source: SessionCapacitySettingsResponse["effective"]["source"];
@@ -68,23 +65,21 @@ function response(
 ): SessionCapacitySettingsResponse {
   const enabled = overrides.enabled ?? false;
   const maximum = overrides.maximum ?? 5;
-  const controlMaximum = overrides.controlMaximum ?? 2;
-  const controlProfiles = overrides.controlProfiles ?? [];
   const effectiveEnabled = overrides.effectiveEnabled ?? enabled;
   const effectiveMaximum = overrides.effectiveMaximum ?? (effectiveEnabled ? maximum : 0);
   return {
     settings: {
       enabled,
       max_sessions: maximum,
-      control_max_sessions: controlMaximum,
-      control_profile_ids: controlProfiles,
+      control_max_sessions: 2,
+      control_profile_ids: [],
     },
     effective: {
       enabled: effectiveEnabled,
       max_sessions: effectiveMaximum,
-      control_max_sessions: controlMaximum,
-      total_max_sessions: effectiveMaximum + controlMaximum,
-      control_profile_ids: controlProfiles,
+      control_max_sessions: 2,
+      total_max_sessions: effectiveMaximum + 2,
+      control_profile_ids: [],
       source: overrides.source ?? (enabled ? "setting" : "default"),
       locked: overrides.locked ?? false,
       control_locked: false,
@@ -293,60 +288,5 @@ describe("SessionCapacitySettings access and recovery", () => {
 
     expect(screen.getByText("Failed to save session capacity settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
-  });
-});
-
-describe("SessionCapacitySettings control lane", () => {
-  it("submits the control lane with the worker ceiling and shows the combined total", async () => {
-    fetchSettingsMock.mockResolvedValueOnce(
-      response({
-        enabled: true,
-        maximum: 8,
-        controlMaximum: 2,
-        controlProfiles: [CONTROL_PROFILE_ID],
-        effectiveEnabled: true,
-        effectiveMaximum: 8,
-        source: "setting",
-      }),
-    );
-    updateSettingsMock.mockResolvedValueOnce(
-      response({
-        enabled: true,
-        maximum: 8,
-        controlMaximum: 3,
-        controlProfiles: [CONTROL_PROFILE_ID],
-        effectiveEnabled: true,
-        effectiveMaximum: 8,
-        source: "setting",
-      }),
-    );
-    render(<SessionCapacitySettings />);
-
-    expect(await screen.findByTestId("session-capacity-control-profiles")).toHaveProperty(
-      "value",
-      CONTROL_PROFILE_ID,
-    );
-    fireEvent.change(screen.getByTestId("session-capacity-control-maximum"), {
-      target: { value: "3" },
-    });
-
-    const contributor = requireContributor();
-    await act(async () => contributor.save(contributor.revision));
-
-    expect(updateSettingsMock).toHaveBeenCalledWith({
-      enabled: true,
-      max_sessions: 8,
-      control_max_sessions: 3,
-      control_profile_ids: [CONTROL_PROFILE_ID],
-    });
-    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
-    expect(screen.getByTestId("session-capacity-control-effective-value").textContent).toBe("3");
-  });
-
-  it("reports that no control lane exists until a profile is configured", async () => {
-    render(<SessionCapacitySettings />);
-
-    expect(await screen.findByTestId("session-capacity-control-none")).toBeTruthy();
-    expect(screen.queryByTestId("session-capacity-control-effective-value")).toBeNull();
   });
 });

@@ -31,7 +31,9 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 		t.Fatalf("decode GET: %v", err)
 	}
 	if !reflect.DeepEqual(initial.Settings, Settings{
-		Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions,
+		Enabled:            false,
+		MaxSessions:        DefaultMaxSessions,
+		ControlMaxSessions: DefaultControlMaxSessions,
 	}) {
 		t.Fatalf("initial settings = %+v", initial.Settings)
 	}
@@ -51,7 +53,9 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 		t.Fatalf("decode PATCH: %v", err)
 	}
 	if !reflect.DeepEqual(updated.Settings, Settings{
-		Enabled: true, MaxSessions: 6, ControlMaxSessions: DefaultControlMaxSessions,
+		Enabled:            true,
+		MaxSessions:        6,
+		ControlMaxSessions: DefaultControlMaxSessions,
 	}) {
 		t.Fatalf("updated settings = %+v", updated.Settings)
 	}

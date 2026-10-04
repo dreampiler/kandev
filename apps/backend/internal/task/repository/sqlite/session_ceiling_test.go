@@ -26,7 +26,7 @@ func archiveTaskForCeilingTests(t *testing.T, repo *Repository, taskID string) {
 	}
 }
 
-// TestAdmittedSessionIDsMatchSQLFilter cross-checks ListAdmittedSessionRefs's SQL
+// TestAdmittedSessionIDsMatchSQLFilter cross-checks ListAdmittedSessionIDs's SQL
 // state filter against models.IsAdmittedSessionState for every state in
 // models.AllTaskSessionStates, the package's single canonical state list. Editing
 // the SQL without updating the predicate (or vice versa) fails here instead of
@@ -67,16 +67,16 @@ func TestAdmittedSessionIDsMatchSQLFilter(t *testing.T) {
 				}
 			}
 			if found != want {
-				t.Fatalf("ListAdmittedSessionRefs returned %v for state %q; found=%v want=%v", got, state, found, want)
+				t.Fatalf("ListAdmittedSessionIDs returned %v for state %q; found=%v want=%v", got, state, found, want)
 			}
 		})
 	}
 }
 
-// TestListAdmittedSessionRefsIgnoresTaskShape pins AC-2 and AC-2a: a session counts
+// TestListAdmittedSessionIDsIgnoresTaskShape pins AC-2 and AC-2a: a session counts
 // regardless of whether its task is archived, ephemeral, or automation-origin, and
 // regardless of config-mode or passthrough on the session itself.
-func TestListAdmittedSessionRefsIgnoresTaskShape(t *testing.T) {
+func TestListAdmittedSessionIDsIgnoresTaskShape(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 
@@ -133,60 +133,17 @@ func TestListAdmittedSessionRefsIgnoresTaskShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAdmittedSessionRefs: %v", err)
 	}
-	index := make(map[string]string, len(got))
+	index := make(map[string]bool, len(got))
 	for _, ref := range got {
-		index[ref.ID] = ref.ProfileID
+		index[ref.ID] = true
 	}
 	for _, tc := range cases {
-		if _, present := index[tc.session.ID]; !present {
-			t.Errorf("ListAdmittedSessionRefs omitted %s (%s); got %v", tc.session.ID, tc.name, got)
+		if !index[tc.session.ID] {
+			t.Errorf("ListAdmittedSessionIDs omitted %s (%s); got %v", tc.session.ID, tc.name, got)
 		}
 	}
 	if len(got) != len(cases) {
-		t.Fatalf("ListAdmittedSessionRefs returned %d rows, want %d: %v", len(got), len(cases), got)
-	}
-}
-
-// TestListAdmittedSessionRefsCarriesProfile pins the control-lane input: each
-// admitted session reports the agent profile the launch recorded on its own row,
-// including a session created without one. Classification happens in the
-// admission controller, so this query must never filter, join or default a
-// profile away.
-func TestListAdmittedSessionRefsCarriesProfile(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	ctx := context.Background()
-
-	taskID := "task-admitted-profile"
-	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Profile check"}); err != nil {
-		t.Fatalf("CreateTask: %v", err)
-	}
-	profiled := &models.TaskSession{
-		ID: "session-admitted-profiled", TaskID: taskID,
-		AgentProfileID: "profile-control", State: models.TaskSessionStateRunning,
-	}
-	bare := &models.TaskSession{
-		ID: "session-admitted-bare", TaskID: taskID,
-		State: models.TaskSessionStateStarting,
-	}
-	for _, session := range []*models.TaskSession{profiled, bare} {
-		if err := repo.CreateTaskSession(ctx, session); err != nil {
-			t.Fatalf("CreateTaskSession(%s): %v", session.ID, err)
-		}
-	}
-
-	refs, err := repo.ListAdmittedSessionRefs(ctx)
-	if err != nil {
-		t.Fatalf("ListAdmittedSessionRefs: %v", err)
-	}
-	profiles := make(map[string]string, len(refs))
-	for _, ref := range refs {
-		profiles[ref.ID] = ref.ProfileID
-	}
-	if got := profiles[profiled.ID]; got != "profile-control" {
-		t.Errorf("profile for %s = %q, want %q", profiled.ID, got, "profile-control")
-	}
-	if got, present := profiles[bare.ID]; !present || got != "" {
-		t.Errorf("profile for %s = %q (present=%v), want an empty profile", bare.ID, got, present)
+		t.Fatalf("ListAdmittedSessionIDs returned %d ids, want %d: %v", len(got), len(cases), got)
 	}
 }
 

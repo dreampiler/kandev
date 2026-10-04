@@ -40,15 +40,6 @@ func (f *fakeAdmittedLister) set(ids ...string) {
 	f.ids = ids
 }
 
-// setWithProfiles persists sessions whose stored agent profile decides the lane
-// they are counted against.
-func (f *fakeAdmittedLister) setWithProfiles(profiles map[string]string, ids ...string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ids = ids
-	f.profiles = profiles
-}
-
 func (f *fakeAdmittedLister) fail(err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

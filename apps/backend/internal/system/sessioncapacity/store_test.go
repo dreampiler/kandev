@@ -24,8 +24,7 @@ func TestStoreSaveLoadAndRejectsInvalidPersistedRecords(t *testing.T) {
 		t.Fatalf("save settings: %v", err)
 	}
 	settings, err = store.Load(ctx)
-	if err != nil || settings == nil ||
-		!reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
+	if err != nil || settings == nil || !reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
 		t.Fatalf("load saved = %+v, %v", settings, err)
 	}
 

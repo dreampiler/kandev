@@ -18,15 +18,24 @@ func TestResolveSessionCapacity(t *testing.T) {
 		wantInvalidEnv bool
 	}{
 		{
-			name:          "absent saved state is disabled with remembered default",
-			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions},
-			wantEffective: Effective{ControlMaxSessions: DefaultControlMaxSessions, TotalMaxSessions: DefaultControlMaxSessions, Source: SourceDefault},
+			name: "absent saved state is disabled with remembered default",
+			wantSettings: Settings{
+				Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions,
+			},
+			wantEffective: Effective{
+				Enabled: false, MaxSessions: 0, ControlMaxSessions: DefaultControlMaxSessions,
+				TotalMaxSessions: DefaultControlMaxSessions, Source: SourceDefault,
+			},
 		},
 		{
-			name:          "saved disabled state remembers its maximum",
-			configured:    &Settings{Enabled: false, MaxSessions: 11},
-			wantSettings:  Settings{Enabled: false, MaxSessions: 11},
-			wantEffective: Effective{Source: SourceSetting},
+			name:       "saved disabled state remembers its maximum",
+			configured: &Settings{Enabled: false, MaxSessions: 11},
+			wantSettings: Settings{
+				Enabled: false, MaxSessions: 11,
+			},
+			wantEffective: Effective{
+				Enabled: false, MaxSessions: 0, Source: SourceSetting,
+			},
 		},
 		{
 			name:          "saved enabled state supplies effective capacity",
@@ -35,18 +44,23 @@ func TestResolveSessionCapacity(t *testing.T) {
 			wantEffective: Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
 		},
 		{
-			name:          "valid environment value wins and locks",
-			configured:    saved,
-			environment:   Environment{Value: " 7 ", Present: true},
-			wantSettings:  *saved,
-			wantEffective: Effective{Enabled: true, MaxSessions: 7, TotalMaxSessions: 7, Source: SourceEnvironment, Locked: true},
+			name:         "valid environment value wins and locks",
+			configured:   saved,
+			environment:  Environment{Value: " 7 ", Present: true},
+			wantSettings: *saved,
+			wantEffective: Effective{
+				Enabled: true, MaxSessions: 7, TotalMaxSessions: 7,
+				Source: SourceEnvironment, Locked: true,
+			},
 		},
 		{
-			name:          "zero environment value disables and locks",
-			configured:    saved,
-			environment:   Environment{Value: "0", Present: true},
-			wantSettings:  *saved,
-			wantEffective: Effective{Source: SourceEnvironment, Locked: true},
+			name:         "zero environment value disables and locks",
+			configured:   saved,
+			environment:  Environment{Value: "0", Present: true},
+			wantSettings: *saved,
+			wantEffective: Effective{
+				Enabled: false, MaxSessions: 0, Source: SourceEnvironment, Locked: true,
+			},
 		},
 		{
 			name:           "blank environment falls back without warning",
@@ -81,14 +95,15 @@ func TestResolveSessionCapacity(t *testing.T) {
 			wantInvalidEnv: true,
 		},
 		{
-			name:         "maximum environment value is valid",
-			environment:  Environment{Value: "2147483647", Present: true},
-			wantSettings: Settings{Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions},
+			name:        "maximum environment value is valid",
+			environment: Environment{Value: "2147483647", Present: true},
+			wantSettings: Settings{
+				Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions,
+			},
 			wantEffective: Effective{
-				Enabled: true, MaxSessions: 2147483647,
-				ControlMaxSessions: DefaultControlMaxSessions,
-				TotalMaxSessions:   2147483647,
-				Source:             SourceEnvironment, Locked: true,
+				Enabled: true, MaxSessions: 2147483647, ControlMaxSessions: DefaultControlMaxSessions,
+				TotalMaxSessions: maxSessionsLimit,
+				Source:           SourceEnvironment, Locked: true,
 			},
 		},
 	}
@@ -137,17 +152,16 @@ func TestValidateSavedSettingsRequiresPortablePositiveMaximum(t *testing.T) {
 }
 
 func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
-	settingsJSON, err := json.Marshal(Settings{Enabled: true, MaxSessions: 8, ControlMaxSessions: 2})
+	settingsJSON, err := json.Marshal(Settings{Enabled: true, MaxSessions: 8})
 	if err != nil {
 		t.Fatalf("marshal settings: %v", err)
 	}
-	wantJSON := `{"enabled":true,"max_sessions":8,"control_max_sessions":2,"control_profile_ids":null}`
-	if string(settingsJSON) != wantJSON {
+	if string(settingsJSON) != `{"enabled":true,"max_sessions":8,"control_max_sessions":0,"control_profile_ids":null}` {
 		t.Fatalf("settings JSON = %s", settingsJSON)
 	}
 
 	var patch SettingsPatch
-	if err := json.Unmarshal([]byte(`{"enabled":false,"control_profile_ids":[" profile-a "]}`), &patch); err != nil {
+	if err := json.Unmarshal([]byte(`{"enabled":false}`), &patch); err != nil {
 		t.Fatalf("unmarshal patch: %v", err)
 	}
 	if patch.Enabled == nil || *patch.Enabled {
@@ -156,13 +170,9 @@ func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
 	if patch.MaxSessions != nil {
 		t.Fatalf("omitted max_sessions = %v, want nil", *patch.MaxSessions)
 	}
-	if patch.ControlProfileIDs == nil || len(*patch.ControlProfileIDs) != 1 {
-		t.Fatalf("control_profile_ids patch = %+v", patch.ControlProfileIDs)
-	}
-	got := patch.Apply(Settings{Enabled: true, MaxSessions: 8, ControlMaxSessions: 2})
-	want := Settings{Enabled: false, MaxSessions: 8, ControlMaxSessions: 2, ControlProfileIDs: []string{"profile-a"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("applied patch = %+v, want %+v", got, want)
+	got := patch.Apply(Settings{Enabled: true, MaxSessions: 8})
+	if !reflect.DeepEqual(got, Settings{Enabled: false, MaxSessions: 8}) {
+		t.Fatalf("applied patch = %+v", got)
 	}
 }
 
@@ -171,10 +181,6 @@ func TestSettingsPatchRejectsNullAndWrongTypes(t *testing.T) {
 		`null`,
 		`{"enabled":null}`,
 		`{"max_sessions":null}`,
-		`{"control_max_sessions":null}`,
-		`{"control_profile_ids":null}`,
-		`{"control_profile_ids":"profile-a"}`,
-		`{"control_max_sessions":"2"}`,
 		`{"enabled":"true"}`,
 		`{"max_sessions":"8"}`,
 		`{"max_sessions":1.5}`,
