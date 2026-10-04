@@ -235,9 +235,12 @@ type Manager struct {
 	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
-	updatesCh        chan adapter.AgentEvent
-	adapterStageSeen atomic.Uint64
-	adapterStageAt   atomic.Int64
+	updatesCh            chan adapter.AgentEvent
+	adapterStageSeen     atomic.Uint64
+	adapterStageAt       atomic.Int64
+	toolProgressMu       sync.Mutex
+	toolProgress         map[toolProgressKey]toolProcessObservation
+	toolProgressRevision uint64
 
 	// Pending permission requests waiting for user response
 	pendingPermissions       map[string]*PendingPermission
@@ -1319,6 +1322,7 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// A previous lifecycle may still be live: an agent that exited on its own
 	// never ran teardown, and Start is reachable without an intervening Stop.
 	m.finishPreviousLifecycle(ctx)
+	m.clearToolProgress()
 
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),
@@ -2041,6 +2045,7 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			}
 			m.adapterStageAt.Store(time.Now().UnixNano())
 			m.adapterStageSeen.Add(1)
+			m.recordToolProgress(update)
 			m.recordTerminalOutcome(&update)
 			select {
 			case m.updatesCh <- update:

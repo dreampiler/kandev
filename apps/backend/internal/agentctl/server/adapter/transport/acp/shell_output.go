@@ -172,6 +172,7 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 		return false
 	}
 	shell := payload.ShellExec()
+	observeShellOutputProgress(shell, meta, contents, rawOutput)
 	recognized := false
 	// isFinal tracks whether THIS update carries a definitive completion
 	// signal - either a raw result payload or a reported exit code (the ACP

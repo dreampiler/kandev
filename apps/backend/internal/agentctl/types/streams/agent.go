@@ -223,6 +223,8 @@ type AgentEvent struct {
 
 	// ToolStatus indicates the current status: "started", "running", "completed", "error".
 	ToolStatus string `json:"tool_status,omitempty"`
+	// ToolOutputBytes is monotonic accepted output progress, independent of display truncation.
+	ToolOutputBytes *uint64 `json:"tool_output_bytes,omitempty"`
 
 	// NormalizedPayload contains the normalized tool data as a typed discriminated union.
 	// Provides typed access to tool parameters based on the Kind field.

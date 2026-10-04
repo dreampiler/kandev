@@ -650,7 +650,11 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 // (available_commands_update arriving 50ms after MarkBootReady, etc.) don't
 // accidentally re-arm a freshly-booted no-prompt session as Running.
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
+	execution.observeToolPermission(event)
 	_, isTurnContent := turnContentEventTypes[event.Type]
+	if event.Type == "tool_update" && !execution.observeToolUpdate(event) {
+		isTurnContent = false
+	}
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	if isTurnContent {
 		execution.lastActivityAtMu.Lock()
@@ -684,7 +688,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	if isTerminalToolUpdate(event) {
 		return
 	}
-	if _, ok := turnContentEventTypes[event.Type]; !ok || isProviderDiagnostic {
+	if !isTurnContent || isProviderDiagnostic {
 		return
 	}
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusRunning); err != nil {

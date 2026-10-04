@@ -835,6 +835,11 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if codexParentToolCallID != "" {
 		parentToolCallID = codexParentToolCallID
 	}
+	var outputBytes *uint64
+	if emittedPayload != nil && emittedPayload.ShellExec() != nil && emittedPayload.ShellExec().Output != nil {
+		value := emittedPayload.ShellExec().Output.ProgressBytes
+		outputBytes = &value
+	}
 
 	return &AgentEvent{
 		Type:              streams.EventTypeToolUpdate,
@@ -843,6 +848,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		ParentToolCallID:  parentToolCallID,
 		ToolTitle:         title,
 		ToolStatus:        status,
+		ToolOutputBytes:   outputBytes,
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 	}
