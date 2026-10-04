@@ -30,7 +30,8 @@ const AgentCtlPort = ports.AgentCtl
 
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
-	ID string
+	RequiredNativeConversationID string
+	ID                           string
 	// ResumeAttemptID identifies the immutable recovery attempt that created or
 	// started this execution. It is copied onto every lifecycle callback so a
 	// delayed callback cannot be accepted by a replacement attempt.
@@ -85,9 +86,15 @@ type AgentExecution struct {
 	// FailureCode and FailureDetails carry a bounded, structured startup
 	// diagnostic to the orchestrator. They remain separate from the generic
 	// error message so user-facing recovery can choose a stable presentation.
-	FailureCode    string
-	FailureDetails string
-	ProviderError  *streams.ProviderError
+	FailureCode            string
+	FailureDetails         string
+	StartupFailureReason   string
+	StartupFailureAttempts int
+	StartupFailureNPMCode  string
+	startupFailureMu       sync.RWMutex
+	ProviderError          *streams.ProviderError
+	bootMessageMu          sync.Mutex
+	bootMessageFinalized   bool
 	// metadata is unexported on purpose: it is touched from the launch, prompt
 	// and stop paths concurrently, so all access must go through the metadataMu
 	// helpers in execution_metadata.go.
@@ -1358,12 +1365,13 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
-	TaskID                string
-	TaskScope             TaskLaunchScope
-	SessionSettingsPolicy SessionSettingsPolicy
-	WorkspaceID           string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
-	SessionID             string
-	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	RequiredNativeConversationID string
+	TaskID                       string
+	TaskScope                    TaskLaunchScope
+	SessionSettingsPolicy        SessionSettingsPolicy
+	WorkspaceID                  string // Kandev workspace ID — used to build the scratch dir for repo-less tasks
+	SessionID                    string
+	TaskEnvironmentID            string // Env this session belongs to (shared across sessions in same task)
 	// WorkspaceReuseRequired selects attach-only environment preparation.
 	WorkspaceReuseRequired bool
 	// AllowBranchReplacement is an explicit user-selected recovery permission.
@@ -1624,6 +1632,9 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// RecoveryErrorObservation captures session and owner identity before
+	// selected-workspace inspection so a refusal can be conditionally recorded.
+	RecoveryErrorObservation *models.WorkspaceRecoveryErrorObservation
 	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
 	// used to guard host worktree recovery across inherited environments.
 	EnvironmentOwnerTaskID string

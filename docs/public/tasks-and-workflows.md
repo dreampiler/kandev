@@ -413,7 +413,10 @@ DELETE /api/v1/repository-sets/:id
 `base_branch`; an empty or omitted base uses task defaulting. A supplied list replaces the whole
 membership list, which is also how you reorder one. Omit the field to leave membership untouched.
 Existing clients may send ordered `repository_ids`; those members have no saved bases. Do not send both
-member fields in one request. The same five operations exist as
+member fields in one request. Omitted `name` and `description` fields are also preserved; send an empty
+description to clear it. Concurrent updates to different fields preserve both changes. Updates to the
+same field use the last committed value, and each supplied membership list replaces the entire list.
+The same five operations exist as
 `repository_set.list|create|get|update|delete` WebSocket actions, and
 `repository_set.created|updated|deleted` notifications keep every open client current. See
 [WebSocket API](websocket-api.md).
@@ -774,7 +777,15 @@ Kandev retries temporary connection issues in the background.
 - **Run** stays available when the selected comment and primary session are eligible.
 - A recovered comment must finish browser-draft cleanup before you can run it.
 
-Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `edit_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it. For safe agent corrections, see [Protect task plan writes](automation-and-mcp.md#protect-task-plan-writes).
+
+Large plans support bounded reads through `get_task_plan_kandev(offset, limit)`.
+Ranges count Unicode code points and return exact fragments with a version and
+continuation offset. Pass that version as `expected_version` on later pages
+to detect intervening edits. Omit both range arguments to read the whole plan;
+never use a fragment as a replacement document. See
+[Read only the relevant part of a plan](automation-and-mcp.md#read-only-the-relevant-part-of-a-plan)
+for bounds, pagination, and a fragment-edit example.
 
 ### Protect agent plan writes
 
