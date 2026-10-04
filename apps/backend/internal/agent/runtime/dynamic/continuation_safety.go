@@ -90,6 +90,7 @@ func skipBisectedRunForward(raw string, pos int) int {
 // written by an older process before the redaction rules were added.
 func sanitizeContinuation(continuation Continuation) Continuation {
 	return Continuation{
+		Interrupted:       continuation.Interrupted,
 		TaskDescription:   bounded(routingerr.SanitizeCredentials(continuation.TaskDescription)),
 		WorkflowStep:      bounded(continuation.WorkflowStep),
 		Conversation:      sanitizedTail(continuation.Conversation, continuationFieldLimit),

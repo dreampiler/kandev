@@ -237,6 +237,16 @@ provider credit billing and must not be mislabeled as exact remaining credit.
 
 ## Decision flow and durable chain
 
+Task-owned interrupted failures use the
+[interruption contract](dynamic-agent-routing-01.md#interrupted-task-admission).
+They bypass retry/reset policy while retaining tier order, ranking and failure
+direction. All routes to the failed model join the existing tried candidate IDs.
+Only `opencode-go/` and `opencode/` prefixes share a comparison namespace;
+other providers and complete variant suffixes remain distinct. Blank/default/
+unknown models establish no alias. The chain's internal `interrupted` marker
+survives restart and successor startup failures and prevents exhausted selection
+from arming a resource-wait timer.
+
 Extend `dynamic.Candidate` with normalized tier/model metadata and
 `dynamic.Profile` with the keep preference. Extract a pure ranking helper from
 the growing engine. Consumers still pass one logical profile ID.

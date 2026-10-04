@@ -2839,7 +2839,12 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 // recovery work that must run after that guard is released.
 func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.AgentEventData) func(context.Context) {
 	data = s.withPromptAttemptEvidence(data)
-	defer s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+	keepInterruptedEvidence := false
+	defer func() {
+		if !keepInterruptedEvidence {
+			s.clearPromptAttemptEvidence(data.SessionID, data.AgentExecutionID, data.PromptGeneration)
+		}
+	}()
 	s.logger.Warn("handling agent failed",
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID),
@@ -2857,25 +2862,30 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		return nil
 	}
 	// Short transient provider errors get a paced, visible retry-with-backoff
-	// before any red banner. This is the ONLY non-terminal
-	// failure path, so it runs before automation finalization below — otherwise
+	// before any red banner. Task-owned interruptions take their route first;
+	// both paths run before automation finalization below — otherwise
 	// a transient 529 on an automation run would mark the run failed and
 	// reap its ephemeral worktree out from under the in-flight retry.
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
+	classified := classifyKanbanFailure(data)
+	interrupted := s.preferInterruptedDynamicFailure(ctx, data, classified)
 	continuation, _ := s.transientRetries.Load(data.SessionID)
-	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
+	if data.SessionID != "" && !interrupted && s.handleTransientFailure(ctx, data) {
 		return nil
 	}
-	if entry, ok := continuation.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
-		return s.settleContinuationFailureLocked(ctx, data, entry)
+	if !interrupted {
+		if entry, ok := continuation.(*transientRetryEntry); ok && entry.mode == recoveryModeContinue {
+			return s.settleContinuationFailureLocked(ctx, data, entry)
+		}
 	}
 	s.retireInitialCreatePromptPassthroughForEvent(ctx, data)
 	if data.SessionID != "" {
 		routeResult := s.routeDynamicAgentFailureWithEvidence(
-			ctx, data, classifyKanbanFailure(data), nil, true,
+			ctx, data, classified, nil, true,
 		)
 		if routeResult.handled && !routeResult.manualRecovery {
+			keepInterruptedEvidence = data.OutputObserved || data.EffectObserved
 			return nil
 		}
 	}

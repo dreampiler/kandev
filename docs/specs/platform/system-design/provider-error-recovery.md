@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-09-15
+updated: 2026-10-04
 owners:
   - Kandev
 ---
@@ -146,8 +146,9 @@ An unknown string alone never authorizes recovery. Historical attempts retain th
 Classification does not by itself authorize retry or switching.
 
 - Original-prompt replay, reset waiting, and fallback require current-invocation,
-  pre-result, effect-safe evidence. Native continuation has a separate
-  [interruption contract](provider-interruption-continuation.md).
+  pre-result, effect-safe evidence, except for task-owned dynamic mid-turn
+  recovery ([requirement](../../agents/requirements/dynamic-agent-routing.md)).
+  Native continuation has a separate [contract](provider-interruption-continuation.md).
 - A provider-supported resumable retry guarantee can satisfy this gate when it
   identifies the same provider-native session and generation.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
@@ -157,9 +158,8 @@ Classification does not by itself authorize retry or switching.
   projection](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection)
   is not assistant output for this gate; non-diagnostic later progress
   restores the normal output/effect safety fence.
-- User configuration cannot override this gate. An unsafe transient or hard
-  failure stops for manual recovery even when its class policy requests retry
-  or skip.
+- User configuration cannot override this gate. Unsafe failures stay manual
+  unless the task interruption exception admits them.
 
 #### Cursor retry-safety semantics
 

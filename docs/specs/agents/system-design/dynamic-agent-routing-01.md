@@ -3,8 +3,9 @@ status: draft
 system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
+  - REQ-AGENTS-DYNAMIC-MIDTURN-001
 created: 2026-08-13
-updated: 2026-08-17
+updated: 2026-10-04
 owners:
   - cfl
 ---
@@ -19,6 +20,22 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-MIDTURN-001` | [Interrupted task admission](#interrupted-task-admission) |
+
+## Interrupted task admission
+
+`dynamic_midturn_recovery.go` admits current task-owned dynamic failures after
+output or effects for the five semantic codes in the interruption requirement.
+It requires matching logical route, execution and prompt evidence, excludes
+Office and cancelled sessions, and runs before same-provider transient retry.
+Both terminal streaming errors and `agent.failed` use the same route entry.
+The central classifier scopes the exact OpenCode service envelope to
+`opencode-acp`; structured status and auth/billing rules retain precedence.
+
+`Conductor.RouteAfterInterruptedFailure` invokes the dedicated engine transition.
+Its status snapshot claim precedes resource suspension, and its next-generation
+claim precedes the existing detached stop/launch worker. Normal pre-result
+policy and healthy model continuity remain unchanged.
 
 ## Migrated source detail
 
@@ -211,7 +228,8 @@ fields, ordering, legacy normalization, validation, and unknown-error behavior
 are owned by [Provider Error Recovery](../../platform/requirements/provider-error-recovery.md).
 Unknown failures stop automatic recovery except for the opt-in
 [repeated-failure extension](dynamic-unclassified-fallback.md).
-Ambiguous, stale, or effect-unsafe failures always stop automatic recovery.
+Ambiguous and stale failures stop automatic recovery. Post-result failures also
+stop except for [interrupted task admission](#interrupted-task-admission).
 
 If no candidate is eligible, the task remains assigned to the dynamic profile
 and enters a visible waiting or action-required state. It is not reassigned to a
@@ -232,6 +250,8 @@ A running dynamic session reconsiders its route only when:
 
 - the active turn settles with a current, effect-safe classified provider
   error covered by the candidate's class policy,
+- a task-owned interrupted turn settles with an eligible known provider failure
+  under the interruption exception,
 - a persisted retry or reset-wait deadline becomes due,
 - the user requests Retry now, Skip now, Cancel wait, or another explicit
   route action,

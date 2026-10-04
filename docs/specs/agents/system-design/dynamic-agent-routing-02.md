@@ -3,8 +3,9 @@ status: draft
 system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
+  - REQ-AGENTS-DYNAMIC-MIDTURN-001
 created: 2026-08-13
-updated: 2026-09-03
+updated: 2026-10-04
 owners:
   - cfl
 ---
@@ -19,6 +20,22 @@ This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-
 | Requirement | Design section |
 | --- | --- |
 | `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-AGENTS-DYNAMIC-MIDTURN-001` | [Interrupted continuation and exhaustion](#interrupted-continuation-and-exhaustion) |
+
+## Interrupted continuation and exhaustion
+
+An admitted interruption keeps the logical task/session identity and launches
+a fresh downstream execution through the existing service-owned detached worker.
+The bounded, redacted continuation carries an internal `Interrupted` mode.
+`ContinuationPrompt` renders trusted folder/Git/PR/plan inspection instructions
+outside the untrusted reference-data block. Failed assistant and tool text remain
+excluded from recovery context; the successor inspects durable artifacts.
+
+`SelectionChain.Interrupted` and its tried candidate IDs persist in the existing
+policy JSON without a migration. The mode survives successor startup failures.
+Exhaustion persists `action_required`, retains exclusions and never arms a
+resource-wait timer. Auth, billing and unclassified post-result failures stay
+manual; utility and Office admission remain unchanged.
 
 ## Migrated source detail
 
@@ -112,7 +129,8 @@ require the current exclusive probe lease.
   circuit transition wins. Other failures extend evidence without starting
   duplicate probes.
 - If every route is open, tasks wait under the same logical profile and expose
-  the earliest known recovery time and remediation actions.
+  the earliest known recovery time and remediation actions. An interrupted
+  chain instead requires manual recovery without a fresh-selection timer.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
 - If an error is unclassified, Kandev enters manual recovery except for the
@@ -121,8 +139,8 @@ require the current exclusive probe lease.
 - If an ACP diagnostic is followed by a matching high-confidence terminal
   provider error before any other output or tool activity, the transcript keeps
   the diagnostic but the shared recovery evidence treats the attempt as
-  pre-result. A mismatch or later progress remains effect-unsafe and enters
-  manual recovery.
+  pre-result. A mismatch or later progress remains effect-unsafe; only the
+  task interruption exception can continue an eligible known provider failure.
 - If a trusted reset is beyond the configured maximum wait, Kandev does not
   wait for or shorten it. It proceeds to retry or the exhausted outcome.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its

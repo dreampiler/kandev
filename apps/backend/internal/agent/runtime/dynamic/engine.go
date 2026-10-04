@@ -291,6 +291,10 @@ func (e *Engine) persistExhaustedSelection(
 		nextState.PolicyStateJSON = exhausted
 	}
 	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt)
+	if chain.Interrupted {
+		nextState.Status = routeStatusActionRequired
+		resourceWait = false
+	}
 	if resourceWait {
 		if marked, err := withResourceWait(nextState.PolicyStateJSON, deadline); err == nil {
 			nextState.PolicyStateJSON = marked

@@ -425,6 +425,14 @@ provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
 
+For task-owned dynamic sessions, a recognized quota, rate-limit, provider
+availability, overload or model-capacity failure after output or tool activity
+automatically switches to the next eligible different model. This skips the
+failed model's retry/reset waits and equivalent OpenCode gateway routes.
+The new execution continues in the same conversation and first inspects the
+work folder, Git state, existing PR and task plan. Authentication, payment,
+unclassified failures and exhausted candidates require manual recovery.
+
 #### Provider usage limits
 
 When a candidate hits a usage limit, Kandev pauses the resource that ran out
@@ -438,9 +446,10 @@ and uses it again after the reset:
 - A reset reported by the provider, either in the error or in its usage data,
   is used instead.
 - A limit reported after the attempt already produced output still pauses the
-  model, while that attempt waits for manual recovery.
+  model. An eligible interrupted task continues on the next different model.
 - When every candidate is paused, the session waits and Kandev retries it at the
-  earliest reset, including after a restart.
+  earliest reset, including after a restart. An exhausted interrupted chain
+  stays in manual recovery.
 
 The **Provider limits** card in **Settings > Agents**, also shown on the page of
 a profile whose model has a provider prefix, sets a provider's monthly reset

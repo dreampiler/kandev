@@ -232,6 +232,23 @@ func (c *Conductor) RouteAfterFailure(
 	)
 }
 
+// RouteAfterInterruptedFailure is called only for correlated task-owned turns.
+func (c *Conductor) RouteAfterInterruptedFailure(ctx context.Context, sessionID, logicalProfileID, currentExecutionProfileID string, generation int64, failure *routingerr.Error) (RouteDecision, error) {
+	if c.engine == nil || c.profiles == nil {
+		return RouteDecision{}, errors.New("dynamic conductor is not configured")
+	}
+	if resolver, ok := c.profiles.(interface {
+		RouteAfterInterruptedFailure(context.Context, string, string, string, int64, *routingerr.Error) (RouteDecision, error)
+	}); ok {
+		return resolver.RouteAfterInterruptedFailure(ctx, sessionID, logicalProfileID, currentExecutionProfileID, generation, failure)
+	}
+	profile, err := c.profiles.LoadDynamicProfile(ctx, logicalProfileID)
+	if err != nil {
+		return RouteDecision{}, err
+	}
+	return c.engine.ApplyInterruptedFailureContext(ctx, sessionID, profile, generation, currentExecutionProfileID, failure)
+}
+
 // RouteAfterUnclassifiedFailure applies the narrow opt-in policy using
 // caller-supplied evidence from a trusted task/runtime boundary.
 func (c *Conductor) RouteAfterUnclassifiedFailure(
@@ -457,6 +474,7 @@ func (c *Conductor) buildContinuation(ctx context.Context, input ContinuationInp
 }
 
 type ContinuationInput struct {
+	Interrupted       bool
 	TaskDescription   string
 	WorkflowStep      string
 	UserMessages      []string
@@ -468,6 +486,7 @@ type ContinuationInput struct {
 }
 
 type Continuation struct {
+	Interrupted       bool
 	TaskDescription   string
 	WorkflowStep      string
 	Conversation      string
@@ -493,6 +512,7 @@ const continuationFieldLimit = 4000
 // credential-only tier instead.
 func BuildBoundedContinuation(input ContinuationInput) Continuation {
 	return Continuation{
+		Interrupted:       input.Interrupted,
 		TaskDescription:   bounded(routingerr.SanitizeCredentials(input.TaskDescription)),
 		WorkflowStep:      bounded(input.WorkflowStep),
 		Conversation:      boundedConversation(input.UserMessages, input.Conversation),
@@ -722,6 +742,9 @@ func boundedConversation(userMessages []string, conversation string) string {
 func ContinuationPrompt(prompt string, continuation Continuation) string {
 	prompt = strings.TrimSpace(routingerr.SanitizeCredentialsUnbounded(prompt))
 	continuation = sanitizeContinuation(continuation)
+	if continuation.Interrupted {
+		prompt += "\n\n[Kandev interrupted work continuation]\nThe predecessor stopped during work. Inspect the work folder, Git state, existing PR state, and task plan before repeating work. Continue the existing task in this conversation. Preserve user requests, question barriers, workflow rules, task identity, and the step_complete final-action contract."
+	}
 	fields := make([]string, 0, 7)
 	if continuation.TaskDescription != "" {
 		fields = append(fields, "Task: "+continuation.TaskDescription)
