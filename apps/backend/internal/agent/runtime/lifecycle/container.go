@@ -928,6 +928,12 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 		fmt.Sprintf("AGENTCTL_PORT=%d", AgentCtlPort),
 		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_BASE=%d", dockerAgentctlInstancePortBase),
 		fmt.Sprintf("AGENTCTL_INSTANCE_PORT_MAX=%d", dockerAgentctlInstancePortMax),
+		// agentctl binds loopback unless told otherwise, and the backend
+		// reaches it from outside the container, so the containerized listener
+		// has to be reachable on all interfaces. Bootstrap authentication is
+		// what protects this surface; loopback remains the default everywhere
+		// else so a host-run agentctl never opens a Windows firewall prompt.
+		"AGENTCTL_LISTEN_HOST=0.0.0.0",
 	)
 
 	// Inject bootstrap nonce for agentctl handshake (NOT the auth token)
