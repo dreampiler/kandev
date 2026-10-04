@@ -61,6 +61,7 @@ function response(
     effectiveMaximum: number;
     source: SessionCapacitySettingsResponse["effective"]["source"];
     locked: boolean;
+    controlLocked: boolean;
   }> = {},
 ): SessionCapacitySettingsResponse {
   const enabled = overrides.enabled ?? false;
@@ -82,7 +83,7 @@ function response(
       control_profile_ids: [],
       source: overrides.source ?? (enabled ? "setting" : "default"),
       locked: overrides.locked ?? false,
-      control_locked: false,
+      control_locked: overrides.controlLocked ?? false,
     },
   };
 }
@@ -288,5 +289,44 @@ describe("SessionCapacitySettings access and recovery", () => {
 
     expect(screen.getByText("Failed to save session capacity settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
+  });
+});
+
+describe("SessionCapacitySettings control-lane lock", () => {
+  it("names the control variable when only the control lane is locked", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ enabled: true, maximum: 8, controlLocked: true }),
+    );
+    render(<SessionCapacitySettings />);
+
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    expect(screen.getByText(/KANDEV_MAX_CONTROL_SESSIONS/)).toBeTruthy();
+    expect(screen.queryByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)).toBeNull();
+    // A control-only lock still freezes every control, so the saved control
+    // ceiling is what the read-only field shows.
+    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("value", "2");
+    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("disabled", true);
+    expect(requireContributor().canSave).toBe(false);
+  });
+
+  it("names both variables when both lanes are locked", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({
+        enabled: true,
+        maximum: 8,
+        effectiveMaximum: 9,
+        source: "environment",
+        locked: true,
+        controlLocked: true,
+      }),
+    );
+    render(<SessionCapacitySettings />);
+
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    const notice = screen
+      .getByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)
+      .textContent?.replace(/\s+/g, " ");
+    expect(notice).toContain("KANDEV_MAX_CONCURRENT_SESSIONS");
+    expect(notice).toContain("KANDEV_MAX_CONTROL_SESSIONS");
   });
 });

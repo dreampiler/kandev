@@ -299,9 +299,12 @@ export function useSessionCapacitySettings() {
   const workerLocked = load.snapshot?.effective.locked === true;
   const controlLocked = load.snapshot?.effective.control_locked === true;
   const isLocked = workerLocked || controlLocked;
-  const lockedVariable = controlLocked
-    ? SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE
-    : SESSION_CAPACITY_ENVIRONMENT_VARIABLE;
+  // Both lanes can be owned by their own variable at once, so the notice names
+  // every variable that actually holds a ceiling rather than one representative.
+  const lockedVariable = [
+    ...(workerLocked ? [SESSION_CAPACITY_ENVIRONMENT_VARIABLE] : []),
+    ...(controlLocked ? [SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE] : []),
+  ].join(", ");
   const invalidReason = sessionCapacityInvalidReason({
     t,
     isAdmin,
