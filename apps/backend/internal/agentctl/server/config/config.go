@@ -38,6 +38,10 @@ const (
 	windowsOS  = "windows"
 	pathEnvKey = "PATH"
 
+	// loopbackHost is both the default listener bind and the narrowest host
+	// advertised to a process that has to reach that listener.
+	loopbackHost = "127.0.0.1"
+
 	defaultUnownedPeriod      = 10 * time.Minute
 	defaultDetachedEventLimit = 100
 
@@ -545,23 +549,25 @@ func (c *Config) BootstrapNonceFingerprint() string {
 
 // ListenHost returns the interface agentctl should bind its HTTP listeners to.
 //
-// When no AuthToken is configured the bearer-token middleware is a pass-through
-// (auth disabled), which would otherwise expose command/shell/process routes
-// unauthenticated. In that case we bind to loopback only so the surface is
-// never reachable beyond the local host. This does not affect the normal flow:
-// the launcher always injects AGENTCTL_BOOTSTRAP_NONCE, so a token is generated
-// and auth is enforced — including Docker, where the backend must reach agentctl
-// across the container boundary and an all-interfaces bind is required.
+// The default is loopback. Every deployment that needs a wider bind says so
+// explicitly — the launcher passes its own host, the Docker container env
+// passes 0.0.0.0, Kubernetes passes its control host, and SSH passes loopback.
+// That default matters on Windows in particular: an all-interfaces bind from a
+// non-installed binary path (a worktree build, a temp copy) makes Windows raise
+// the "allow this app to communicate on public and private networks" firewall
+// prompt, once per distinct path, and those rules accumulate.
 //
-// An empty return means "all interfaces" (the historical ":port" form).
+// When no AuthToken is configured the bearer-token middleware is also a
+// pass-through, so loopback is what keeps the command/shell/process routes from
+// being reachable beyond this host.
+//
+// An empty return value means "all interfaces" (the historical ":port" form)
+// and is only reachable through ListenHostOverride.
 func (c *Config) ListenHost() string {
 	if c.ListenHostOverride != "" {
 		return c.ListenHostOverride
 	}
-	if c.AuthToken == "" {
-		return "127.0.0.1"
-	}
-	return ""
+	return loopbackHost
 }
 
 // MCPReachableHost returns an agent-facing host for the current listener.

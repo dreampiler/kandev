@@ -846,10 +846,10 @@ func TestListenHost(t *testing.T) {
 			t.Fatalf("ListenHost() = %q, want 127.0.0.1 when auth disabled", got)
 		}
 	})
-	t.Run("token binds all interfaces", func(t *testing.T) {
+	t.Run("token still binds loopback unless widened", func(t *testing.T) {
 		cfg := &Config{AuthToken: "secret"}
-		if got := cfg.ListenHost(); got != "" {
-			t.Fatalf("ListenHost() = %q, want \"\" (all interfaces) when auth enabled", got)
+		if got := cfg.ListenHost(); got != loopbackHost {
+			t.Fatalf("ListenHost() = %q, want %s even with auth enabled", got, loopbackHost)
 		}
 	})
 }
