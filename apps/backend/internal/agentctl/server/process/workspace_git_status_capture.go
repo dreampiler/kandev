@@ -287,21 +287,12 @@ func (wt *WorkspaceTracker) captureBasicGitStatusSeed(ctx context.Context, statu
 
 func (wt *WorkspaceTracker) captureGitStatusComparisonEvidence(ctx context.Context, status types.GitStatusUpdate, comparison ComparisonResolution) (gitStatusComparisonEvidence, error) {
 	evidence := gitStatusComparisonEvidence{baseRef: wt.resolveBaseBranch(ctx), aheadRef: wt.resolveAheadBehindRef(ctx)}
-	var err error
-	evidence.baseOID, err = wt.gitRefOID(ctx, evidence.baseRef)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.aheadOID, err = wt.gitRefOID(ctx, evidence.aheadRef)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.remoteHeadOID, err = wt.gitRefOID(ctx, status.RemoteBranch)
-	if err != nil {
-		return gitStatusComparisonEvidence{}, err
-	}
-	evidence.comparisonOID, err = wt.gitRefOID(ctx, comparison.Ref)
-	return evidence, err
+	oids := wt.gitRefOIDs(ctx, []string{evidence.baseRef, evidence.aheadRef, status.RemoteBranch, comparison.Ref})
+	evidence.baseOID = oids[evidence.baseRef]
+	evidence.aheadOID = oids[evidence.aheadRef]
+	evidence.remoteHeadOID = oids[status.RemoteBranch]
+	evidence.comparisonOID = oids[comparison.Ref]
+	return evidence, nil
 }
 
 func (wt *WorkspaceTracker) validateBasicGitStatusCapture(
@@ -461,19 +452,118 @@ func (wt *WorkspaceTracker) gitDirectory(ctx context.Context) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func (wt *WorkspaceTracker) gitRefOID(ctx context.Context, ref string) (string, error) {
+// safeGitRefForOID reports whether ref may be handed to rev-parse for object
+// resolution. It is the allowlist gitRefOID has always applied, kept separate so
+// the batched form validates every ref the same way before any of them is passed.
+func safeGitRefForOID(ref string) bool {
 	if ref == "" {
-		return "", nil
+		return false
 	}
-	if !gitObjectIDPattern.MatchString(ref) {
-		rest, hasOriginPrefix := strings.CutPrefix(ref, "origin/")
-		check := ref
-		if hasOriginPrefix {
-			check = rest
+	if gitObjectIDPattern.MatchString(ref) {
+		return true
+	}
+	rest, hasOriginPrefix := strings.CutPrefix(ref, "origin/")
+	check := ref
+	if hasOriginPrefix {
+		check = rest
+	}
+	return safeBranchRefPattern.MatchString(check) && !strings.Contains(check, "..") && !strings.HasSuffix(check, ".lock")
+}
+
+// gitRefOIDs resolves several refs to commit OIDs in one Git process.
+//
+// A zero exit is what makes a batch usable: rev-parse prints one line per
+// argument only when every argument resolved, and it stops at the first one that
+// did not, so a failed batch is discarded and each ref is resolved on its own.
+// That fallback also covers the echo case, where rev-parse prints an unresolvable
+// argument back unchanged and an argument that is already object-ID shaped would
+// be indistinguishable from a resolved OID. A batch that fails therefore yields
+// exactly what the previous per-ref resolution yielded.
+func (wt *WorkspaceTracker) gitRefOIDs(ctx context.Context, refs []string) map[string]string {
+	oids := make(map[string]string, len(refs))
+	resolvable := make([]string, 0, len(refs))
+	seen := make(map[string]bool, len(refs))
+	for _, ref := range refs {
+		if seen[ref] {
+			continue
 		}
-		if !safeBranchRefPattern.MatchString(check) || strings.Contains(check, "..") || strings.HasSuffix(check, ".lock") {
-			return "", nil
+		seen[ref] = true
+		if !safeGitRefForOID(ref) {
+			oids[ref] = ""
+			continue
 		}
+		resolvable = append(resolvable, ref)
+	}
+	if len(resolvable) == 0 {
+		return oids
+	}
+	if len(resolvable) == 1 {
+		oid, err := wt.gitRefOID(ctx, resolvable[0])
+		if err != nil {
+			oids[resolvable[0]] = ""
+			return oids
+		}
+		oids[resolvable[0]] = oid
+		return oids
+	}
+
+	args := make([]string, 0, len(resolvable)+1)
+	args = append(args, "rev-parse")
+	for _, ref := range resolvable {
+		args = append(args, ref+"^{commit}")
+	}
+	out, err := wt.runGitOutput(ctx, args...)
+	if err != nil {
+		return wt.gitRefOIDsIndividually(ctx, resolvable)
+	}
+
+	lines := gitResolvedOIDLines(out)
+	if len(lines) != len(resolvable) {
+		return wt.gitRefOIDsIndividually(ctx, resolvable)
+	}
+	for i, ref := range resolvable {
+		oids[ref] = resolvedOIDOrEmpty(lines[i])
+	}
+	return oids
+}
+
+// gitRefOIDsIndividually is the per-ref fallback for a batch whose output could
+// not be mapped back to its arguments.
+func (wt *WorkspaceTracker) gitRefOIDsIndividually(ctx context.Context, refs []string) map[string]string {
+	oids := make(map[string]string, len(refs))
+	for _, ref := range refs {
+		oid, err := wt.gitRefOID(ctx, ref)
+		if err != nil {
+			oids[ref] = ""
+			continue
+		}
+		oids[ref] = oid
+	}
+	return oids
+}
+
+func gitResolvedOIDLines(out []byte) []string {
+	trimmed := strings.TrimRight(string(out), "\r\n")
+	if trimmed == "" {
+		return nil
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimSpace(line)
+	}
+	return lines
+}
+
+func resolvedOIDOrEmpty(line string) string {
+	if gitObjectIDPattern.MatchString(line) {
+		return line
+	}
+	return ""
+}
+
+func (wt *WorkspaceTracker) gitRefOID(ctx context.Context, ref string) (string, error) {
+	if !safeGitRefForOID(ref) {
+		return "", nil
 	}
 	out, err := wt.runGitOutput(ctx, "rev-parse", "--verify", ref+"^{commit}")
 	if err != nil {
