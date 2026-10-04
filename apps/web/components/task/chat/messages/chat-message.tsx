@@ -27,6 +27,7 @@ import { entityReferencesFromMetadata } from "@/lib/entity-references/message-re
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { renderUserMessageBody } from "./user-message-body";
+import { ChildStallAlertSummary, childStallAlertsFromMetadata } from "./child-stall-alert-summary";
 
 type ChatMessageProps = {
   comment: Message;
@@ -106,6 +107,16 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_session_name?: string;
 };
 
+function senderTaskFromMetadata(metadata: UserMessageMetadata | undefined): SenderTaskInfo | null {
+  if (!metadata?.sender_task_id) return null;
+  return {
+    id: metadata.sender_task_id,
+    snapshotTitle: metadata.sender_task_title || "",
+    sessionId: metadata.sender_session_id,
+    sessionName: metadata.sender_session_name,
+  };
+}
+
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
   const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
@@ -116,14 +127,8 @@ function parseUserMessageMetadata(comment: Message) {
   const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
-  const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
-    ? {
-        id: metadata.sender_task_id,
-        snapshotTitle: metadata.sender_task_title || "",
-        sessionId: metadata.sender_session_id,
-        sessionName: metadata.sender_session_name,
-      }
-    : null;
+  const childStallAlerts = childStallAlertsFromMetadata(comment.metadata);
+  const senderTask = childStallAlerts.length === 0 ? senderTaskFromMetadata(metadata) : null;
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
@@ -136,6 +141,7 @@ function parseUserMessageMetadata(comment: Message) {
     hasAttachments,
     senderTask,
     workflowMessage,
+    childStallAlerts,
   };
 }
 
@@ -291,6 +297,7 @@ function UserMessageContent({
     hasAttachments,
     senderTask,
     workflowMessage,
+    childStallAlerts,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -304,6 +311,7 @@ function UserMessageContent({
           senderTask={senderTask}
           workflowMessage={workflowMessage}
         />
+        <ChildStallAlertSummary alerts={childStallAlerts} />
         <div
           data-testid="user-message-bubble"
           className={cn(

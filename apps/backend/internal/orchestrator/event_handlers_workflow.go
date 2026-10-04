@@ -5600,6 +5600,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if !ok {
 		return queueDrainSkipped
 	}
+	s.pruneStaleChildStallAlerts(ctx, queueIdentity)
 	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, queueIdentity)
 	if err != nil {
 		return queueDrainSkipped

@@ -1,7 +1,7 @@
 ---
 id: "02-candidate-classification"
 title: "Classify at producer"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-live-settlement"
@@ -74,5 +74,11 @@ Record exact executed case counts and cleanup owned temporary files.
 Depends on Task 01. The producer classifier must use
 only structured evidence available at settlement time; if a cause cannot be
 classified without unstructured interpretation, return an explicit unresolved
-diagnostic for owner decision rather than adding inference costs. Results: not
-implemented; no tests run in design turn.
+diagnostic for owner decision rather than adding inference costs.
+
+Results (2026-10-04): the pure classifier lives in `internal/task/childstall`.
+Temporary overlay `TestChildTurnClassification` passed 28 cases covering every
+cause, required versus optional signal, unknown entry, abandonment,
+cancellation, settle grace, deletion, archive, terminal state, reparenting,
+workspace change, resumed execution, same-step re-entry, pending and
+unprocessed signal, and held parent-question promotion.

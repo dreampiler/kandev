@@ -1,7 +1,7 @@
 ---
 id: "03-parent-delivery"
 title: "Deliver and expose parent alerts"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-candidate-classification"
@@ -107,4 +107,13 @@ instance changes. Clean owned fixtures/overlays after results are recorded.
 Depends on Task 02. The queue has no external-model exactly-once guarantee;
 preserve its ambiguous-dispatch recovery rather than issuing another prompt.
 Question delivery and admission locking need explicit integration verification.
-Results: not implemented; no tests or rendered checks run in design turn.
+Results (2026-10-04): temporary overlays passed:
+`TestChildTurnDeliveryFoldsAlertsForOneParent` (SQLite and memory queue: three
+alerts fold into one item with Auto-merge disabled, keyed replay, non-alert
+adjacency, full-queue fold), and orchestrator scenarios with `-race` and the
+package goroutine-leak check: missing signal with folding and dispatch-time
+pruning, failed parent with one operator notification and delivery to the
+replacement primary, unanswered parent question (held while queued or running,
+one reminder after the parent settles), answered question suppression, and
+producer start/stop. A temporary happy-dom render check of the alert summary
+passed; a real desktop and phone browser check was not run.
