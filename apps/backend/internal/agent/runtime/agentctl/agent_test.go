@@ -1067,10 +1067,13 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 
 	// Add a pending request
 	ch := make(chan *ws.Message, 1)
+	c.mu.Lock()
+	streamConn := c.agentStreamConn
+	c.mu.Unlock()
 	c.pendingMu.Lock()
 	c.pendingRequests["pending-test"] = ch
 	c.pendingRequestConns = make(map[string]*websocket.Conn)
-	c.pendingRequestConns["pending-test"] = c.agentStreamConn
+	c.pendingRequestConns["pending-test"] = streamConn
 	c.pendingMu.Unlock()
 
 	// Wait for disconnect
@@ -1092,6 +1095,64 @@ func TestStreamUpdates_DisconnectCleansPending(t *testing.T) {
 	if count != 0 {
 		t.Fatalf("expected 0 pending requests after disconnect, got %d", count)
 	}
+}
+
+func TestHasAgentStreamBecomesFalseBeforeDisconnectCallbacksDrain(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	closePeer := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+		payload, _ := json.Marshal(AgentEvent{Type: streams.EventTypeMessageChunk, Text: "queued"})
+		_ = conn.WriteMessage(websocket.TextMessage, payload)
+		<-closePeer
+	}))
+	defer server.Close()
+
+	handlerStarted := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	disconnected := make(chan struct{})
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          newTestLogger(),
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+	if err := c.StreamUpdates(context.Background(), func(AgentEvent) {
+		close(handlerStarted)
+		<-releaseHandler
+	}, nil, func(error) { close(disconnected) }); err != nil {
+		t.Fatalf("StreamUpdates: %v", err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("event handler did not start")
+	}
+	close(closePeer)
+
+	deadline := time.Now().Add(time.Second)
+	for c.HasAgentStream() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if c.HasAgentStream() {
+		t.Fatal("HasAgentStream remained true after the websocket read loop observed disconnect")
+	}
+	select {
+	case <-disconnected:
+		t.Fatal("disconnect callback ran before the ordered event worker drained")
+	default:
+	}
+	close(releaseHandler)
+	select {
+	case <-disconnected:
+	case <-time.After(time.Second):
+		t.Fatal("disconnect callback did not run after the event worker drained")
+	}
+	c.Close()
 }
 
 // TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse is the regression
