@@ -23,10 +23,10 @@ func (r *Repository) ListUnresolvedClarificationBundles(ctx context.Context, opt
 
 	drv := r.ro.DriverName()
 	joinExtra, joinArgs := clarificationSidecarJoin(opts.Sidecar)
+	innerExtra, innerArgs := clarificationWorkspaceScanRestriction(opts.WorkspaceID)
 	whereExtra, whereArgs := clarificationBundleWhereClause(opts)
-	args := append(append([]interface{}{}, joinArgs...), whereArgs...)
-	query := clarificationBundleQuery(drv, joinExtra, whereExtra)
-	args = append(args, opts.Limit+1)
+	query := clarificationBundleQuery(drv, joinExtra, whereExtra, innerExtra)
+	args := append(clarificationBundleArgs(innerArgs, joinArgs, whereArgs), opts.Limit+1)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
@@ -45,6 +45,39 @@ func (r *Repository) ListUnresolvedClarificationBundles(ctx context.Context, opt
 		page.HasMore = true
 	}
 	return page, nil
+}
+
+// clarificationBundleArgs concatenates the bound args of one bundle query in
+// the order clarificationBundleTableExpr emits their placeholders: the inner
+// scan restriction first (it lives inside the grouped subquery), then the
+// sidecar join, then the outer WHERE conditions. The page query appends its own
+// LIMIT placeholder after these.
+func clarificationBundleArgs(innerArgs, joinArgs, whereArgs []interface{}) []interface{} {
+	args := make([]interface{}, 0, len(innerArgs)+len(joinArgs)+len(whereArgs))
+	args = append(args, innerArgs...)
+	args = append(args, joinArgs...)
+	return append(args, whereArgs...)
+}
+
+// clarificationWorkspaceScanRestriction bounds the grouped message scan to the
+// sessions that belong to opts.WorkspaceID, so a workspace read walks that
+// workspace's messages through the (task_session_id, pending_id) index instead
+// of every clarification message in task_session_messages — the same bounding
+// ListAnswerableClarificationsForSessions applies to an explicit session list.
+//
+// It narrows the scan, never the result: the authoritative workspace predicate
+// stays on the joined task row in clarificationBundleWhereClause, and a message
+// is attributed to its session's task (the same attribution the query's own
+// JOIN task_sessions already relies on), so a bundle whose message rows carry a
+// legacy empty task_id still resolves through MIN(ts.task_id) inside the
+// workspace. An empty WorkspaceID adds no restriction, leaving unscoped callers
+// (every MCP caller) byte-for-byte unchanged.
+func clarificationWorkspaceScanRestriction(workspaceID string) (string, []interface{}) {
+	if workspaceID == "" {
+		return "", nil
+	}
+	return "AND m.task_session_id IN (SELECT ws.id FROM task_sessions ws JOIN tasks wt ON wt.id = ws.task_id WHERE wt.workspace_id = ?)",
+		[]interface{}{workspaceID}
 }
 
 // clarificationBundleWhereClause builds the extra AND-ed WHERE conditions
@@ -143,28 +176,28 @@ func clarificationSidecarPredicate(sidecar *models.ClarificationSidecarFilter) (
 // answer_question_kandev's pre-claim validation already rejects. A bundle
 // admitted here with no resolvable question_id could be listed but could
 // never be answered.
-func clarificationBundleQuery(drv, joinExtra, whereExtra string) string {
+func clarificationBundleQuery(drv, joinExtra, whereExtra, innerExtra string) string {
 	return "SELECT b.pending_id, b.session_id, b.task_id, b.created_at\n" +
-		clarificationBundleTableExpr(drv, joinExtra, whereExtra, "") +
+		clarificationBundleTableExpr(drv, joinExtra, whereExtra, innerExtra) +
 		"\nORDER BY b.created_at ASC, b.pending_id ASC\nLIMIT ?"
 }
 
 // clarificationBundleCountQuery is clarificationBundleQuery's aggregate
-// sibling: the same bundle-visibility predicate, unbounded (no ORDER BY, no
-// LIMIT), reduced to a workspace-wide COUNT and the earliest still-hidden
-// snooze expiry. Used only with a Sidecar filter set to Only=true (needs-you-
-// inbox design, "Persistence" and "Data and contracts" hidden_count /
-// next_snooze_expiry).
-func clarificationBundleCountQuery(drv, joinExtra, whereExtra string) string {
-	return "SELECT COUNT(*), MIN(cs.snooze_until)\n" + clarificationBundleTableExpr(drv, joinExtra, whereExtra, "")
+// sibling: the same bundle-visibility predicate and the same scan bounding,
+// unbounded (no ORDER BY, no LIMIT), reduced to a workspace-wide COUNT and the
+// earliest still-hidden snooze expiry. Used only with a Sidecar filter set to
+// Only=true (needs-you-inbox design, "Persistence" and "Data and contracts"
+// hidden_count / next_snooze_expiry).
+func clarificationBundleCountQuery(drv, joinExtra, whereExtra, innerExtra string) string {
+	return "SELECT COUNT(*), MIN(cs.snooze_until)\n" + clarificationBundleTableExpr(drv, joinExtra, whereExtra, innerExtra)
 }
 
 // clarificationBundleTableExpr is the shared FROM/JOIN/WHERE expression both
 // queries above select from. See clarificationBundleQuery's doc comment for
 // what each conjunct means; kept in one place so the count query cannot drift
 // from the page query's notion of "answerable". innerExtra is AND-ed into the
-// grouped message scan itself (empty for the inbox queries), so a caller that
-// already knows its sessions can bound the scan rather than filter after it.
+// grouped message scan itself, so a caller that already knows its sessions or
+// its workspace can bound the scan rather than filter after it.
 func clarificationBundleTableExpr(drv, joinExtra, whereExtra, innerExtra string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
