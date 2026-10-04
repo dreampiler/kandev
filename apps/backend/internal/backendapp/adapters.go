@@ -18,6 +18,7 @@ import (
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
@@ -305,6 +306,11 @@ type lifecycleAdapter struct {
 // failed silently in production: the watchdog's inactivity gate never
 // engaged (WO-38 review), and handleAgentStalled's ActivityEpoch check
 // always bailed out whenever a payload carried a nonzero epoch.
+// SnapshotRuntimeFootprint is pinned for the same reason: the maintenance tick
+// observes live runtime footprint by asserting the agent manager to a narrow
+// unexported interface (internal/orchestrator/runtime_footprint.go). A missing
+// forwarding method leaves that assertion false, so every observation returns
+// early and the published projection stays at its zero value forever.
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
@@ -316,7 +322,16 @@ var _ interface {
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
 	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
+	SnapshotRuntimeFootprint(ctx context.Context) agentruntime.RuntimeFootprintSnapshot
 } = (*lifecycleAdapter)(nil)
+
+// SnapshotRuntimeFootprint forwards one live-footprint observation to the
+// lifecycle manager. The adapter is what the orchestrator holds as its agent
+// manager, so an observation only reaches the manager while this forwarding
+// exists.
+func (a *lifecycleAdapter) SnapshotRuntimeFootprint(ctx context.Context) agentruntime.RuntimeFootprintSnapshot {
+	return a.mgr.SnapshotRuntimeFootprint(ctx)
+}
 
 // newLifecycleAdapter creates a new lifecycle adapter
 func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *logger.Logger) *lifecycleAdapter {
