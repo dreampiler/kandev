@@ -164,10 +164,14 @@ type OverviewModel struct {
 	Errors         []OverviewErrorKind `json:"errors"`
 }
 
-// OverviewBlockedCircuit is one open dynamic-routing resource circuit. It is
-// the dynamic counterpart of a provider-health block: the router is avoiding
-// this resource until Until, and the state is unknown rather than healthy when
-// the circuits source is unavailable.
+// OverviewBlockedCircuit is one dynamic-routing resource circuit that is not
+// plainly healthy. It is the dynamic counterpart of a provider-health block: the
+// router is avoiding this resource until Until, and the state is unknown rather
+// than healthy when the circuits source is unavailable.
+//
+// A circuit that already recovered is reported too, because its retained strike
+// history is why the durable source still lists it. Blocking separates the two,
+// so the current-block list and the blocked count never carry a cleared resource.
 type OverviewBlockedCircuit struct {
 	ResourceKey string     `json:"resource_key"`
 	Scope       string     `json:"scope"`
@@ -176,6 +180,17 @@ type OverviewBlockedCircuit struct {
 	Code        string     `json:"code,omitempty"`
 	Until       *time.Time `json:"until,omitempty"`
 	Strikes     int        `json:"strikes"`
+	// Blocking is true while the router is still avoiding this resource. A
+	// half-open circuit holds a probe lease, so it is not selectable either.
+	Blocking bool `json:"blocking"`
+	// ProfileID is the agent profile this circuit was recorded for, when the
+	// circuit key names one. It is empty for a binding fingerprint that no
+	// profile claims, which is not an error and not a guessable identity.
+	ProfileID   string `json:"profile_id,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
+	// ModelName is the concrete model of a model-scoped circuit, and empty for
+	// a circuit that covers a whole profile or account.
+	ModelName string `json:"model_name,omitempty"`
 }
 
 // OverviewBlockedAccount is one provider account the router is avoiding.

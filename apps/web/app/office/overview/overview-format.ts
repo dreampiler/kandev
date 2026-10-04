@@ -1,6 +1,7 @@
 import type { TFunction } from "i18next";
 import { formatCompactDuration, formatRelativeTime } from "@/lib/i18n/formats";
 import type {
+  OverviewBlockedCircuit,
   OverviewQueueItem,
   OverviewQueueStatus,
   OverviewReason,
@@ -65,6 +66,34 @@ const DURATION_REASON_KEYS: Record<string, string> = {
   queue_not_delivered: "office:overviewReasonQueueNotDelivered",
   turn_not_finishing: "office:overviewReasonTurnNotFinishing",
 };
+
+/**
+ * Blocked-circuit reason codes phrased in plain words. A code with no entry
+ * stays the wire code: the circuit registry classifies reasons this screen does
+ * not invent wording for.
+ */
+const CIRCUIT_REASON_KEYS: Record<string, string> = {
+  rate_limited: "office:overviewCircuitReasonRateLimited",
+  quota_limited: "office:overviewCircuitReasonQuotaLimited",
+  provider_unavailable: "office:overviewCircuitReasonProviderUnavailable",
+  model_capacity: "office:overviewCircuitReasonModelCapacity",
+};
+
+/** What a blocked circuit's scope covers, in the operator's terms. */
+const CIRCUIT_SCOPE_KEYS: Record<string, string> = {
+  credential: "office:overviewCircuitScopeAccount",
+  model: "office:overviewCircuitScopeModel",
+  profile: "office:overviewCircuitScopeProfile",
+};
+
+/**
+ * A circuit that still keeps the router off its resource. A payload from a
+ * server that does not report the field lists every circuit, which is how this
+ * screen behaved before the field existed.
+ */
+export function isCurrentBlock(circuit: OverviewBlockedCircuit): boolean {
+  return circuit.blocking !== false;
+}
 
 export const PROBLEM_STATUSES: ReadonlySet<OverviewStatus> = new Set([
   "error",
@@ -161,4 +190,48 @@ export function statusTone(status: OverviewStatus | OverviewQueueStatus | undefi
 /** Short display form of an id for table rows. */
 export function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+/**
+ * The identifier an unnamed circuit is reported by. The scope prefix names the
+ * kind of resource, not which one, so it is dropped: a fingerprint's first
+ * characters identify the resource, and the constant scope word does not.
+ */
+function circuitFallbackId(circuit: OverviewBlockedCircuit): string {
+  if (circuit.profile_id) return circuit.profile_id;
+  const value = circuit.scope_value || circuit.resource_key;
+  const binding = value.includes("|") ? value.slice(0, value.lastIndexOf("|")) : value;
+  const withoutScope = binding.includes(":") ? binding.slice(binding.indexOf(":") + 1) : binding;
+  return withoutScope || circuit.resource_key;
+}
+
+/**
+ * The blocked circuit's subject: the profile name, qualified by the model when
+ * the circuit covers one model. A circuit that names no profile keeps whatever
+ * model it did name, and reports the profile as unidentifiable with a short id,
+ * because the raw key is a fingerprint the operator cannot read.
+ */
+export function circuitTitle(t: TFunction, circuit: OverviewBlockedCircuit): string {
+  if (!circuit.profile_name) {
+    const unknown = t("office:overviewCircuitUnknownName", {
+      id: shortId(circuitFallbackId(circuit)),
+    });
+    return circuit.model_name ? `${unknown} · ${circuit.model_name}` : unknown;
+  }
+  return circuit.model_name
+    ? `${circuit.profile_name} · ${circuit.model_name}`
+    : circuit.profile_name;
+}
+
+/** A blocked circuit's reason in plain words, or the wire code when unphrased. */
+export function circuitReason(t: TFunction, code: string | undefined): string {
+  if (!code) return "";
+  const key = CIRCUIT_REASON_KEYS[code];
+  return key ? t(key) : code;
+}
+
+/** What a blocked circuit's scope covers, or "" for a scope with no wording. */
+export function circuitScope(t: TFunction, scope: string): string {
+  const key = CIRCUIT_SCOPE_KEYS[scope];
+  return key ? t(key) : "";
 }

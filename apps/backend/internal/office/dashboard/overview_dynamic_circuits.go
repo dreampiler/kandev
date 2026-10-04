@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -56,15 +57,59 @@ func (s *DashboardService) assembleDynamicCircuits(ctx context.Context, snap *ov
 		return err
 	}
 	snap.circuitsAvailable = true
+	identities := make([]circuitIdentity, 0, len(circuits))
 	for _, circuit := range circuits {
 		scope, value := splitCircuitKey(circuit.Key)
+		identity := circuitIdentityOf(circuit.Key)
+		identities = append(identities, identity)
 		snap.resp.BlockedCircuits = append(snap.resp.BlockedCircuits, OverviewBlockedCircuit{
 			ResourceKey: circuit.Key, Scope: scope, ScopeValue: value,
 			State: circuit.State, Code: circuit.Code, Strikes: circuit.Strikes,
-			Until: timePtr(circuit.Until),
+			Until: timePtr(circuit.Until), Blocking: circuitBlocking(circuit.State),
+			ProfileID: identity.profileID, ModelName: identity.modelName,
 		})
 	}
+	s.nameCircuits(ctx, snap, identities)
 	return nil
+}
+
+// nameCircuits attaches the agent profile name of every circuit that names a
+// profile. The profile ids come from the circuit keys themselves, so this reads
+// no routing state and no new table: it is the same profile read the model cards
+// use. A read that fails, or a profile that no longer resolves, leaves that
+// circuit unnamed, which the screen reports as unidentifiable.
+func (s *DashboardService) nameCircuits(ctx context.Context, snap *overviewSnapshot, identities []circuitIdentity) {
+	missing := unresolvedCircuitProfileIDs(snap, identities)
+	if len(missing) > 0 && s.overviewReader != nil {
+		sort.Strings(missing)
+		if profiles, err := s.overviewReader.ListOverviewProfiles(ctx, missing); err == nil {
+			if snap.profileNames == nil {
+				snap.profileNames = map[string]string{}
+			}
+			for _, profile := range profiles {
+				snap.profileNames[profile.ID] = profileDisplayName(profile)
+			}
+		}
+	}
+	for i := range snap.resp.BlockedCircuits {
+		circuit := &snap.resp.BlockedCircuits[i]
+		circuit.ProfileName = snap.profileNames[circuit.ProfileID]
+	}
+}
+
+// unresolvedCircuitProfileIDs collects the profile ids the snapshot cannot name
+// yet, so the profile read covers exactly the circuits that still need it.
+func unresolvedCircuitProfileIDs(snap *overviewSnapshot, identities []circuitIdentity) []string {
+	missing := make([]string, 0, len(identities))
+	seen := map[string]bool{}
+	for _, identity := range identities {
+		if identity.profileID == "" || snap.profileNames[identity.profileID] != "" || seen[identity.profileID] {
+			continue
+		}
+		seen[identity.profileID] = true
+		missing = append(missing, identity.profileID)
+	}
+	return missing
 }
 
 // GetWorkspaceOverview returns the overview narrowed to one workspace of the
