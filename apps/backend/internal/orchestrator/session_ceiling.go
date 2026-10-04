@@ -109,7 +109,8 @@ type admissionRequest struct {
 	seam      string
 	// agentProfileID is the profile this launch resolved for itself. It is the
 	// only classification input; an empty value is read as worker.
-	agentProfileID string
+	agentProfileID  string
+	yieldToDeferred func(context.Context, ceilingClass) bool
 }
 
 // admissionDecision is the controller's answer.
@@ -443,7 +444,7 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
-	return c.decideLocked(req, origin, class, counted)
+	return c.decideLocked(ctx, req, origin, class, counted)
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
@@ -471,7 +472,7 @@ func (c *sessionCeilingController) admitUnlimitedLocked(
 // ceiling: a saturated worker lane no longer refuses a control launch, and a
 // saturated control lane never consumes worker capacity.
 func (c *sessionCeilingController) decideLocked(
-	req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
+	ctx context.Context, req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
 ) admissionDecision {
 	population := c.populationLocked(counted)
 	classCeiling := c.classCeilingLocked(class)
@@ -492,6 +493,9 @@ func (c *sessionCeilingController) decideLocked(
 		classPopulation: classPopulation,
 	}
 	switch {
+	case origin != launchOriginManual && classPopulation < classCeiling &&
+		req.yieldToDeferred != nil && req.yieldToDeferred(ctx, class):
+		decision.reasonCode = refusedReasonFor(class)
 	case classCeiling == unlimitedSessionCeiling || classPopulation < classCeiling:
 		decision.admitted = true
 		decision.reservationKey = c.reserveLocked(req.sessionID, class)
@@ -702,7 +706,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	}
 	rowClass, isCounted := counted[req.sessionID]
 	if req.sessionID == "" || !isCounted {
-		return c.decideLocked(req, origin, class, counted)
+		return c.decideLocked(ctx, req, origin, class, counted)
 	}
 	// A relaunch keeps the lane its counted row already occupies. Re-deriving the
 	// class from the caller's profile here could move a running control session

@@ -74,7 +74,7 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 	ctx context.Context, taskID, sessionID, agentProfileID string, origin launchOrigin, seam string,
 	kind models.CeilingLaunchKind, payload map[string]interface{}, failureContext string,
 ) (*sessionKeyedCeilingReservation, bool, error) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
+	decision := s.admitCeilingLaunch(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
 		agentProfileID: agentProfileID,
 	})

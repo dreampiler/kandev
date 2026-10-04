@@ -62,7 +62,7 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 		relaunchPayload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*binding)
 	}
 	sessionID, _ := relaunchPayload[metaKeySessionID].(string)
-	decision := s.sessionCeiling.handOffOrAdmit(ctx, admissionRequest{
+	decision := s.handOffOrAdmitCeilingLaunch(ctx, admissionRequest{
 		taskID:         taskID,
 		sessionID:      sessionID,
 		origin:         origin,
