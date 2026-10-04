@@ -21,8 +21,6 @@ import {
   useSessionCapacitySettings,
 } from "./use-session-capacity-settings";
 
-const ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
-
 function SessionCapacityLoadError({
   onRetry,
   withinGroup = false,
@@ -265,14 +263,14 @@ function EffectiveCapacity({
   );
 }
 
-function SessionCapacityManagedNotice() {
+function SessionCapacityManagedNotice({ variable }: { variable: string }) {
   const { t } = useTranslation();
   return (
     <Alert>
       <IconLock className="size-4" />
       <AlertTitle>{t("system:sessionCapacityEnvironmentLockTitle")}</AlertTitle>
       <AlertDescription>
-        {t("system:sessionCapacityEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE })}
+        {t("system:sessionCapacityEnvironmentLocked", { variable })}
       </AlertDescription>
     </Alert>
   );
@@ -338,6 +336,8 @@ function SessionCapacityFields({ state }: { state: SessionCapacitySettingsState 
     parsed: state.parsed,
     invalidReason: state.invalidReason,
   });
+  const controlMaximumError =
+    !state.isLocked && state.parsedControl === null ? state.invalidReason : undefined;
 
   return (
     <>
@@ -368,9 +368,9 @@ function SessionCapacityFields({ state }: { state: SessionCapacitySettingsState 
         testId="session-capacity-control-maximum"
         errorTestId="session-capacity-control-maximum-error"
         min={0}
-        value={state.controlMaxDraft}
+        value={state.isLocked ? String(effective.control_max_sessions) : state.controlMaxDraft}
         disabled={controlsDisabled}
-        error={state.parsedControl === null ? state.invalidReason : undefined}
+        error={controlMaximumError}
         onChange={state.setControlMaxDraft}
       />
       <ControlProfileField
@@ -386,7 +386,7 @@ function SessionCapacityFields({ state }: { state: SessionCapacitySettingsState 
         source={effective.source}
         isDirty={state.isDirty}
       />
-      {state.isLocked && <SessionCapacityManagedNotice />}
+      {state.isLocked && <SessionCapacityManagedNotice variable={state.lockedVariable} />}
       {!state.isAdmin && (
         <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
       )}

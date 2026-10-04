@@ -23,6 +23,9 @@ import { useSettingsSaveContributor } from "../settings-save-provider";
 
 const MAX_SESSIONS_LIMIT = 2147483647;
 
+export const SESSION_CAPACITY_ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
+export const SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONTROL_SESSIONS";
+
 export function parseSessionCapacityMaximum(value: string): number | null {
   const trimmed = value.trim();
   if (!/^\d+$/.test(trimmed)) return null;
@@ -157,6 +160,7 @@ function sessionCapacityInvalidReason({
   t,
   isAdmin,
   isLocked,
+  lockedVariable,
   enabled,
   parsed,
   parsedControl,
@@ -164,15 +168,14 @@ function sessionCapacityInvalidReason({
   t: (key: string, values?: Record<string, unknown>) => string;
   isAdmin: boolean;
   isLocked: boolean;
+  lockedVariable: string;
   enabled: boolean;
   parsed: number | null;
   parsedControl: number | null;
 }): string | undefined {
   if (!isAdmin) return t("system:sessionCapacityAdminOnly");
   if (isLocked) {
-    return t("system:sessionCapacityEnvironmentLocked", {
-      variable: "KANDEV_MAX_CONCURRENT_SESSIONS",
-    });
+    return t("system:sessionCapacityEnvironmentLocked", { variable: lockedVariable });
   }
   if (enabled && parsed === null) return t("system:sessionCapacityValidation");
   if (parsedControl === null) return t("system:sessionCapacityControlValidation");
@@ -291,11 +294,19 @@ export function useSessionCapacitySettings() {
   const parsed = parseSessionCapacityMaximum(load.maxDraft);
   const parsedControl = parseSessionCapacityControlMaximum(load.controlMaxDraft);
   const isAdmin = role === undefined || role === "admin";
-  const isLocked = load.snapshot?.effective.locked === true;
+  // The backend locks the whole settings document when either lane's ceiling has an
+  // environment override, so the UI must treat control_locked as a lock too.
+  const workerLocked = load.snapshot?.effective.locked === true;
+  const controlLocked = load.snapshot?.effective.control_locked === true;
+  const isLocked = workerLocked || controlLocked;
+  const lockedVariable = controlLocked
+    ? SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE
+    : SESSION_CAPACITY_ENVIRONMENT_VARIABLE;
   const invalidReason = sessionCapacityInvalidReason({
     t,
     isAdmin,
     isLocked,
+    lockedVariable,
     enabled: load.enabledDraft,
     parsed,
     parsedControl,
@@ -321,6 +332,7 @@ export function useSessionCapacitySettings() {
     savedControlMaximum: saved.controlMaximum,
     isAdmin,
     isLocked,
+    lockedVariable,
     invalidReason,
     saveFailed,
   };
