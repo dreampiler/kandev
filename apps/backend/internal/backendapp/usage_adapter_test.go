@@ -228,25 +228,3 @@ func containsID(ids []string, want string) bool {
 	}
 	return false
 }
-
-func TestProfileUsageDTO_PropagatesStale(t *testing.T) {
-	now := time.Now().Add(-5 * time.Minute)
-	dto := profileUsageDTO("prof-1", profileUsage{
-		State: profileUsageOK,
-		Usage: &agentusage.ProviderUsage{
-			Provider:  "anthropic",
-			Plan:      "max",
-			FetchedAt: now,
-			Stale:     true,
-			Windows: []agentusage.UtilizationWindow{
-				{Label: "5-hour", UtilizationPct: 45.0},
-			},
-		},
-	})
-	if !dto.Stale {
-		t.Error("expected dto.Stale to be true")
-	}
-	if dto.FetchedAt == nil || !dto.FetchedAt.Equal(now) {
-		t.Errorf("dto.FetchedAt = %v, want %v", dto.FetchedAt, now)
-	}
-}

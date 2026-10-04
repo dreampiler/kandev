@@ -436,7 +436,7 @@ function ModelCard({ model }: { model: OverviewModel }) {
  * A concrete profile's provider usage. An absent or unusable read is reported
  * as such; it is never shown as zero usage or as nothing wrong.
  */
-export function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
+function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
   const { t } = useTranslation();
   if (!usage) {
     return (
