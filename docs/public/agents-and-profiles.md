@@ -440,10 +440,15 @@ When a candidate hits a usage limit, Kandev pauses the resource that ran out
 and uses it again after the reset:
 
 - OpenCode Go and free models pause only the model that hit its limit, so
-  sibling models and free models stay available.
-- An OpenCode Go limit without a reset time pauses the model for 2 hours, up to
-  three times, then 24 hours, then until the next monthly reset. The count
-  starts over once the model produces output again.
+  sibling models and free models stay available. A model counts as free when the
+  profile's model cost is set to free, or when its model ID marks it free.
+- A paid-model limit without a reset time pauses the model for OpenCode Go and
+  the whole account for every other paid provider: 2 hours, up to three times,
+  then 24 hours, then until the next monthly reset. The count starts over once
+  the model produces output again.
+- A free-model limit without a reset time pauses that model for 1 minute, then
+  5, 15 and 30 minutes, then 1, 2 and 4 hours. The count starts over once the
+  model produces output again.
 - A reset reported by the provider, either in the error or in its usage data,
   is used instead.
 - A limit reported after the attempt already produced output still pauses the

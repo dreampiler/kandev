@@ -104,6 +104,27 @@ func policyForModel(modelID string) limitPolicy {
 // the model rather than the whole account.
 func ModelScoped(modelID string) bool { return policyForModel(modelID).modelScoped }
 
+// freeCandidate reports whether a candidate runs a free model. The route's own
+// cost class is the configured statement about the model, and it is what names a
+// free model whose ID carries no free marker; the ID's own marker keeps a
+// legacy row free without a stored class.
+func freeCandidate(candidate Candidate) bool {
+	return candidate.Selection.Model.Cost == CostFree || IsFreeModel(candidate.ModelID)
+}
+
+// ModelScopedCandidate reports whether usage-limit failures of this candidate
+// suspend only its model rather than the whole account.
+func ModelScopedCandidate(candidate Candidate) bool {
+	return policyForCandidate(candidate).modelScoped
+}
+
+func policyForCandidate(candidate Candidate) limitPolicy {
+	if freeCandidate(candidate) {
+		return limitPolicy{modelScoped: true, ladder: freeRateLimitLadder}
+	}
+	return policyForModel(candidate.ModelID)
+}
+
 // isUsageLimitCode is the set of failures that report exhausted capacity rather
 // than a broken account. Only these follow the model scope and the ladder.
 func isUsageLimitCode(code routingerr.Code) bool {
@@ -136,7 +157,7 @@ func WithLimitCalendar(calendar LimitCalendar) EngineOption {
 // profile spend the same exhausted quota in turn.
 func suspensionTarget(candidate Candidate, code routingerr.Code) string {
 	if isUsageLimitCode(code) && candidate.ModelKey != "" &&
-		policyForModel(candidate.ModelID).modelScoped {
+		policyForCandidate(candidate).modelScoped {
 		return candidate.ModelKey
 	}
 	return candidate.BindingKey
@@ -157,7 +178,7 @@ func (e *Engine) suspensionUntil(
 	if failure.ResetHint != nil && failure.ResetHint.After(until) {
 		return *failure.ResetHint
 	}
-	policy := policyForModel(candidate.ModelID)
+	policy := policyForCandidate(candidate)
 	if !isUsageLimitCode(failure.Code) || len(policy.ladder) == 0 {
 		return until
 	}
