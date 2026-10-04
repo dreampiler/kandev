@@ -484,6 +484,54 @@ func (r *Repository) ListOverviewAutomationTasks(
 	return out, nil
 }
 
+// OverviewCreatedTaskRow is a task created inside the window that no other
+// last-24-hours source already reports. ParentTitle names the task it was
+// created under, empty for a top-level task.
+type OverviewCreatedTaskRow struct {
+	ID           string `db:"id"`
+	WorkspaceID  string `db:"workspace_id"`
+	Title        string `db:"title"`
+	ParentTitle  string `db:"parent_title"`
+	CreatedAtRaw string `db:"created_at"`
+	CreatedAt    time.Time
+}
+
+// ListOverviewCreatedTasks returns the tasks created since `since` in the
+// supplied workspaces, newest first, up to limit. Automation-created tasks are
+// left out because the automation source already reports them.
+func (r *Repository) ListOverviewCreatedTasks(
+	ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+) ([]*OverviewCreatedTaskRow, error) {
+	var out []*OverviewCreatedTaskRow
+	for _, batch := range workspaceIDBatches(workspaceIDs) {
+		placeholders, args := placeholdersFor(batch)
+		args = append(args, since, limit)
+		var rows []*OverviewCreatedTaskRow
+		query := `
+			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title,
+			       COALESCE(p.title, '') AS parent_title,
+			       CAST(t.created_at AS TEXT) AS created_at
+			FROM tasks t
+			LEFT JOIN tasks p ON p.id = t.parent_id
+			WHERE t.workspace_id IN (` + strings.Join(placeholders, ",") + `)
+			  AND t.is_ephemeral = 0` + andNotAutomationOriginT + `
+			  AND t.created_at >= ?
+			ORDER BY t.created_at DESC LIMIT ?`
+		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+	}
+	for _, row := range out {
+		row.CreatedAt = parseSqliteTime(row.CreatedAtRaw)
+	}
+	sortByTimeDesc(out, func(row *OverviewCreatedTaskRow) time.Time { return row.CreatedAt })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
 func sortByTimeDesc[T any](rows []T, at func(T) time.Time) {
 	sort.SliceStable(rows, func(i, j int) bool { return at(rows[i]).After(at(rows[j])) })
 }

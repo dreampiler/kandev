@@ -149,7 +149,11 @@ func TestOfficeScopeAggregateAuthDisabledPassthrough(t *testing.T) {
 // guarded like the aggregate itself: a real identity reaches them and an
 // agent token never does.
 func TestOfficeScopeAggregateListRoutes(t *testing.T) {
-	for _, route := range []string{"/workspaces/aggregate/tasks", "/workspaces/aggregate/running"} {
+	for _, route := range []string{
+		"/workspaces/aggregate/workspace",
+		"/workspaces/aggregate/tasks",
+		"/workspaces/aggregate/running",
+	} {
 		h := newOfficeScopeHarness(t)
 		code, reached := driveOfficeAggregatePath(t, h, h.authSvc,
 			&authn.Identity{UserID: officeScopeUserA, Role: authn.RoleMember}, nil, "", route)

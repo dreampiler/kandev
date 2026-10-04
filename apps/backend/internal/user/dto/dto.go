@@ -78,6 +78,8 @@ type UserSettingsDTO struct {
 	ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 	LastSeenDisplay                   string                                  `json:"last_seen_display"`
 	OfficeOverviewScope               string                                  `json:"office_overview_scope"`
+	OfficeOverviewRefreshSeconds      int                                     `json:"office_overview_refresh_seconds"`
+	OfficeOverviewSort                string                                  `json:"office_overview_sort"`
 	AgentTabCloseBehavior             string                                  `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                    `json:"app_status_bar_enabled"`
@@ -197,6 +199,8 @@ type UpdateUserSettingsRequest struct {
 	ChangesPanelLayout                *string                            `json:"changes_panel_layout,omitempty"`
 	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
 	OfficeOverviewScope               *string                            `json:"office_overview_scope,omitempty"`
+	OfficeOverviewRefreshSeconds      *int                               `json:"office_overview_refresh_seconds,omitempty"`
+	OfficeOverviewSort                *string                            `json:"office_overview_sort,omitempty"`
 	AgentTabCloseBehavior             *string                            `json:"agent_tab_close_behavior,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
@@ -400,6 +404,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ChangesPanelLayout:                settings.ChangesPanelLayout,
 		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		OfficeOverviewScope:               models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
+		OfficeOverviewRefreshSeconds:      models.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
+		OfficeOverviewSort:                models.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
 		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,

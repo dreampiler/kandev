@@ -49,6 +49,7 @@ export type {
   LspStatusLocation,
   LastSeenDisplay,
   OfficeOverviewScope,
+  OverviewSort,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,

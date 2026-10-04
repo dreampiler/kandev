@@ -674,6 +674,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"office_overview_scope":                    models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
+		"office_overview_refresh_seconds":          models.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
+		"office_overview_sort":                     models.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
 		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
@@ -762,6 +764,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ChangesPanelLayout:                defaultChangesPanelLayout,
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
 		OfficeOverviewScope:               models.OfficeOverviewScopeOffice,
+		OfficeOverviewRefreshSeconds:      models.OfficeOverviewRefreshSecondsDefault,
+		OfficeOverviewSort:                models.OfficeOverviewSortName,
 		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorDeleteSession,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
@@ -871,6 +875,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ChangesPanelLayout                string                                  `json:"changes_panel_layout"`
 		LastSeenDisplay                   json.RawMessage                         `json:"last_seen_display"`
 		OfficeOverviewScope               json.RawMessage                         `json:"office_overview_scope"`
+		OfficeOverviewRefreshSeconds      json.RawMessage                         `json:"office_overview_refresh_seconds"`
+		OfficeOverviewSort                json.RawMessage                         `json:"office_overview_sort"`
 		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
@@ -1071,6 +1077,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.OfficeOverviewScope = normalizeOfficeOverviewScopeStored(payload.OfficeOverviewScope)
+	settings.OfficeOverviewRefreshSeconds = normalizeOfficeOverviewRefreshSecondsStored(payload.OfficeOverviewRefreshSeconds)
+	settings.OfficeOverviewSort = normalizeOfficeOverviewSortStored(payload.OfficeOverviewSort)
 	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
@@ -1134,6 +1142,29 @@ func normalizeOfficeOverviewScopeStored(raw json.RawMessage) string {
 		return models.OfficeOverviewScopeOffice
 	}
 	return models.NormalizeOfficeOverviewScope(value)
+}
+
+// normalizeOfficeOverviewRefreshSecondsStored maps a stored JSON value to a
+// supported refresh period. A missing, non-numeric, or out-of-bounds value
+// becomes the default, so a hand-edited blob cannot disable or overwhelm the
+// poller.
+func normalizeOfficeOverviewRefreshSecondsStored(raw json.RawMessage) int {
+	var value int
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return models.OfficeOverviewRefreshSecondsDefault
+	}
+	return models.NormalizeOfficeOverviewRefreshSeconds(value)
+}
+
+// normalizeOfficeOverviewSortStored maps a stored JSON value to a supported
+// card order. A missing or unrecognized value becomes the name order, so a
+// hand-edited blob cannot leave the overview without a defined order.
+func normalizeOfficeOverviewSortStored(raw json.RawMessage) string {
+	var value string
+	if len(raw) == 0 || json.Unmarshal(raw, &value) != nil {
+		return models.OfficeOverviewSortName
+	}
+	return models.NormalizeOfficeOverviewSort(value)
 }
 
 func normalizeAgentTabCloseBehaviorStored(raw json.RawMessage) string {

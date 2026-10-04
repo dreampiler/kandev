@@ -6,10 +6,8 @@ import {
   getWorkspaceAggregate,
   type WorkspaceAggregateWire,
 } from "@/lib/api/domains/office-extended-api";
-import { normalizeActivityEntry } from "@/lib/api/domains/office-activity-normalize";
 import type { OverviewSections } from "@/lib/state/slices/office/overview-types";
-
-export const OVERVIEW_REFRESH_INTERVAL_MS = 30_000;
+import { OVERVIEW_REFRESH_SECONDS_DEFAULT } from "@/lib/settings/overview-refresh";
 
 export type WorkspaceAggregateLoadState = "loading" | "loaded" | "error";
 type InFlightRequest = { promise: Promise<void>; generation: number };
@@ -19,7 +17,7 @@ export function isPageVisible(): boolean {
   return typeof document === "undefined" || document.visibilityState !== "hidden";
 }
 
-function sectionsFrom(data: WorkspaceAggregateWire): OverviewSections {
+export function sectionsFrom(data: WorkspaceAggregateWire): OverviewSections {
   return {
     scope: data.scope === "reachable" ? "reachable" : "office",
     generated_at: data.generated_at,
@@ -27,19 +25,26 @@ function sectionsFrom(data: WorkspaceAggregateWire): OverviewSections {
     system: data.system,
     models: data.models ?? [],
     blocked_accounts: data.blocked_accounts ?? [],
+    blocked_circuits: data.blocked_circuits,
     last_24h: data.last_24h ?? [],
     needs_human: data.needs_human ?? [],
   };
 }
 
 /**
- * Loads the shared workspace overview and refreshes it every 30 seconds while
- * a caller is mounted and the page is visible. A hidden tab makes no
- * requests; becoming visible again refreshes once immediately.
+ * Loads the shared workspace overview and refreshes it on the caller's chosen
+ * period while mounted and the page is visible. A hidden tab makes no requests;
+ * becoming visible again refreshes once immediately.
+ *
+ * The returned `receivedAt` and `refreshing` describe the last accepted read,
+ * so a widget can say how fresh it is and a control can show that a refresh is
+ * running instead of guessing from the interval.
  */
-export function useWorkspaceAggregate() {
+export function useWorkspaceAggregate(refreshSeconds: number = OVERVIEW_REFRESH_SECONDS_DEFAULT) {
   const setWorkspaceAggregate = useAppStore((state) => state.setWorkspaceAggregate);
   const [loadState, setLoadState] = useState<WorkspaceAggregateLoadState>("loading");
+  const [refreshing, setRefreshing] = useState(true);
+  const [receivedAt, setReceivedAt] = useState<string | null>(null);
   const inFlightRef = useRef<InFlightRequest | null>(null);
   const requestGenerationRef = useRef(0);
 
@@ -49,14 +54,15 @@ export function useWorkspaceAggregate() {
     }
 
     const requestGeneration = ++requestGenerationRef.current;
+    setRefreshing(true);
     const request = getWorkspaceAggregate({ cache: "no-store" })
       .then((data) => {
         if (requestGeneration !== requestGenerationRef.current) return;
         setWorkspaceAggregate({
           workspaces: data.workspaces ?? [],
-          recentActivity: (data.recent_activity ?? []).map(normalizeActivityEntry),
           sections: sectionsFrom(data),
         });
+        setReceivedAt(data.generated_at ?? new Date().toISOString());
         setLoadState("loaded");
       })
       .catch(() => {
@@ -65,6 +71,7 @@ export function useWorkspaceAggregate() {
       })
       .finally(() => {
         if (inFlightRef.current?.promise === request) inFlightRef.current = null;
+        if (requestGeneration === requestGenerationRef.current) setRefreshing(false);
       });
 
     inFlightRef.current = { promise: request, generation: requestGeneration };
@@ -75,7 +82,7 @@ export function useWorkspaceAggregate() {
     void refresh();
     const interval = window.setInterval(() => {
       if (isPageVisible()) void refresh();
-    }, OVERVIEW_REFRESH_INTERVAL_MS);
+    }, refreshSeconds * 1000);
     const onVisibilityChange = () => {
       if (isPageVisible()) void refresh();
     };
@@ -85,7 +92,7 @@ export function useWorkspaceAggregate() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       requestGenerationRef.current++;
     };
-  }, [refresh]);
+  }, [refresh, refreshSeconds]);
 
-  return { loadState, refresh };
+  return { loadState, refresh, refreshing, receivedAt };
 }

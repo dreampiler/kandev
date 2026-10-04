@@ -115,6 +115,8 @@ function makeUnloadedSettings(): UserSettingsState {
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
     officeOverviewScope: "office",
+    officeOverviewRefreshSeconds: 60,
+    officeOverviewSort: "name",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,

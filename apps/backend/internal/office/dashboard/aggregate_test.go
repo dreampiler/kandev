@@ -1,7 +1,9 @@
 package dashboard_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -134,19 +136,32 @@ func TestGetWorkspacesAggregateBuildsPerWorkspaceCounts(t *testing.T) {
 	if beta.AgentCount != 0 || beta.RunningAgents != 0 {
 		t.Fatalf("ws-2 agent counts = %d total, %d running; want 0 and 0", beta.AgentCount, beta.RunningAgents)
 	}
+}
 
-	if len(resp.RecentActivity) != 2 {
-		t.Fatalf("recent activity count = %d, want 2", len(resp.RecentActivity))
+// TestGetWorkspacesAggregateOmitsRecentActivity pins that the overview reports
+// the last 24 hours on its own and no longer carries a merged activity feed.
+func TestGetWorkspacesAggregateOmitsRecentActivity(t *testing.T) {
+	deps := newTestDeps(t)
+	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{
+		{ID: "ws-1", Name: "Alpha", OfficeWorkflowID: "office-workflow"},
+	}})
+	insertAggregateActivity(t, deps, "activity-1", "ws-1", "task.created")
+
+	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
+	if err != nil {
+		t.Fatalf("GetWorkspacesAggregate: %v", err)
 	}
-	for _, entry := range resp.RecentActivity {
-		if entry.WorkspaceID == "ws-1" && (entry.ActorName != "Alpha Agent" || entry.TargetName != "t4") {
-			t.Fatalf("ws-1 activity labels = actor %q target %q, want Alpha Agent and t4", entry.ActorName, entry.TargetName)
-		}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal aggregate response: %v", err)
+	}
+	if bytes.Contains(body, []byte("recent_activity")) {
+		t.Fatalf("aggregate response still exposes recent_activity: %s", body)
 	}
 }
 
 // TestGetWorkspacesAggregateEmptyList pins that no workspaces yields an empty
-// (not nil) workspace slice and an empty activity feed.
+// (not nil) workspace slice.
 func TestGetWorkspacesAggregateEmptyList(t *testing.T) {
 	deps := newTestDeps(t)
 	deps.svc.SetWorkspaceLister(&stubWorkspaceLister{workspaces: []*taskmodels.Workspace{}})
@@ -157,9 +172,6 @@ func TestGetWorkspacesAggregateEmptyList(t *testing.T) {
 	}
 	if resp.Workspaces == nil || len(resp.Workspaces) != 0 {
 		t.Fatalf("workspaces = %#v, want non-nil empty slice", resp.Workspaces)
-	}
-	if resp.RecentActivity == nil || len(resp.RecentActivity) != 0 {
-		t.Fatalf("recent activity = %#v, want non-nil empty slice", resp.RecentActivity)
 	}
 }
 
@@ -234,9 +246,6 @@ func TestGetWorkspacesAggregateBatchesLargeWorkspaceLists(t *testing.T) {
 	}
 	if last.BlockedTasks != 1 || last.PendingApprovals != 1 {
 		t.Fatalf("last workspace counts = %+v, want one blocked task and approval", last)
-	}
-	if len(resp.RecentActivity) != 2 || resp.RecentActivity[0].ID != "new-activity" {
-		t.Fatalf("recent activity = %+v, want newest activity first across batches", resp.RecentActivity)
 	}
 }
 

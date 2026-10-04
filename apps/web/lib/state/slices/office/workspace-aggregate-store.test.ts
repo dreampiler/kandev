@@ -27,7 +27,6 @@ function makeAggregate(): WorkspaceAggregate {
         running_agents: 1,
       },
     ],
-    recentActivity: [],
   };
 }
 

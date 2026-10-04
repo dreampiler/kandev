@@ -731,6 +731,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"changesPanelLayout":                changesPanelLayout(settings.ChangesPanelLayout),
 		"lastSeenDisplay":                   lastSeenDisplay(settings.LastSeenDisplay),
 		"officeOverviewScope":               usermodels.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
+		"officeOverviewRefreshSeconds":      usermodels.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
+		"officeOverviewSort":                usermodels.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
 		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{

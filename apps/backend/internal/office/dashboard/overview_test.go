@@ -178,6 +178,48 @@ func TestOverviewMetricsAndSections(t *testing.T) {
 	}
 }
 
+// TestOverviewLast24hReportsNewTasks pins that a task a person created appears
+// with the parent task's title, and that an automation-created task stays in
+// the automation source instead of being counted twice.
+func TestOverviewLast24hReportsNewTasks(t *testing.T) {
+	deps := overviewFixture(t)
+	now := time.Now().UTC()
+	insertOverviewTask(t, deps, "t-person", "ws-office", "TODO", "t-parent", now)
+	mustExec(t, deps, `UPDATE tasks SET title = 'Person task' WHERE id = 't-person'`)
+	insertOverviewTask(t, deps, "t-auto", "ws-office", "TODO", "", now)
+	mustExec(t, deps, `UPDATE tasks SET origin = 'automation_run', title = 'Automation task' WHERE id = 't-auto'`)
+	deps.svc.SetWorkspaceLister(overviewLister())
+	deps.svc.SetOverviewReader(deps.repo)
+	deps.svc.SetOverviewScopeSource(stubScopeSource{scope: dashboard.OverviewScopeReachable})
+
+	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	created := map[string]dashboard.OverviewEvent{}
+	for _, ev := range resp.Last24h {
+		if ev.Kind == "task_created" {
+			created[ev.TaskID] = ev
+		}
+	}
+	if len(created) == 0 {
+		t.Fatal("no task_created event; a task a person created must reach the last 24 hours")
+	}
+	event, ok := created["t-person"]
+	if !ok {
+		t.Fatalf("task_created events = %+v; want t-person", created)
+	}
+	if event.Title != "Person task" || event.Detail != "title t-parent" || event.WorkspaceID != "ws-office" {
+		t.Fatalf("created event = %+v; want the task title, its parent title, and its workspace", event)
+	}
+	if _, ok := created["t-auto"]; ok {
+		t.Fatal("an automation-created task must stay in the automation source, not be counted as a new task")
+	}
+	if _, ok := created["t-hidden"]; ok {
+		t.Fatal("a workspace outside the caller's scope must not contribute created tasks")
+	}
+}
+
 func TestOverviewCacheIsPerCallerAndShort(t *testing.T) {
 	deps := overviewFixture(t)
 	deps.svc.SetWorkspaceLister(overviewLister())

@@ -452,13 +452,11 @@ export type WorkspaceAggregateEntry = {
 };
 
 /**
- * Normalized store shape for the multi-workspace overview: the workspace list,
- * a merged recent-activity feed (activity entries normalized to camelCase),
+ * Normalized store shape for the multi-workspace overview: the workspace list
  * and the overview sections as served.
  */
 export type WorkspaceAggregate = {
   workspaces: WorkspaceAggregateEntry[];
-  recentActivity: ActivityEntry[];
   sections?: OverviewSections;
 };
 

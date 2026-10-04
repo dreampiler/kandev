@@ -48,6 +48,7 @@ const (
 // Overview event kinds for the last-24-hours section.
 const (
 	overviewEventServerStarted = "server_started"
+	overviewEventTaskCreated   = "task_created"
 	overviewEventTaskCompleted = "task_completed"
 	overviewEventSessionFailed = "session_failed"
 	overviewEventAutomationRun = "automation_run"
@@ -60,7 +61,7 @@ type OverviewReason struct {
 	Detail string         `json:"detail,omitempty"`
 }
 
-// OverviewSystem is the system card row.
+// Overview system card row.
 type OverviewSystem struct {
 	StartedAt             *time.Time `json:"started_at,omitempty"`
 	ActiveTasks           int        `json:"active_tasks"`
@@ -71,8 +72,29 @@ type OverviewSystem struct {
 	UndeliverableMessages int        `json:"undeliverable_messages"`
 	NeedsHuman            int        `json:"needs_human"`
 	BlockedAccounts       int        `json:"blocked_accounts"`
-	EarliestUnblockAt     *time.Time `json:"earliest_unblock_at,omitempty"`
-	Problems              int        `json:"problems"`
+	// BlockedAccountsTotal counts provider-health blocks plus open dynamic
+	// circuits, so the client never presents a provider-health-only number as
+	// the whole picture. It is absent while the circuits source is unavailable.
+	BlockedAccountsTotal *int                `json:"blocked_accounts_total,omitempty"`
+	EarliestUnblockAt    *time.Time          `json:"earliest_unblock_at,omitempty"`
+	Problems             int                 `json:"problems"`
+	ProblemThresholds    *OverviewThresholds `json:"problem_thresholds,omitempty"`
+}
+
+// OverviewThresholds are the time limits the status rules actually applied, in
+// minutes, so the client can explain what counts as an error, a stall, or a
+// delay without restating the rules. The client phrases the codes; it never
+// invents a limit the backend did not use.
+type OverviewThresholds struct {
+	NoOutputMinutes        int `json:"no_output_minutes"`
+	StartingMinutes        int `json:"starting_minutes"`
+	NotAdvancingMinutes    int `json:"not_advancing_minutes"`
+	QueueIdleMinutes       int `json:"queue_idle_minutes"`
+	QueueBusyMinutes       int `json:"queue_busy_minutes"`
+	DwellInProgressMinutes int `json:"dwell_in_progress_minutes"`
+	DwellReviewMinutes     int `json:"dwell_review_minutes"`
+	DwellHoldMinutes       int `json:"dwell_hold_minutes"`
+	WindowHours            int `json:"window_hours"`
 }
 
 // OverviewProblemCounts splits a workspace's problem tasks by status.
@@ -122,16 +144,38 @@ type OverviewErrorKind struct {
 	Count int    `json:"count"`
 }
 
+// Overview model kinds. A dynamic profile routes one logical session through
+// ordered concrete profiles; a concrete profile is one model on its own.
+const (
+	OverviewModelKindConcrete = "concrete"
+	OverviewModelKindDynamic  = "dynamic"
+)
+
 // OverviewModel is one agent profile in the models section.
 type OverviewModel struct {
 	AgentProfileID string              `json:"agent_profile_id"`
 	AgentID        string              `json:"agent_id"`
 	AgentName      string              `json:"agent_name"`
 	Name           string              `json:"name"`
+	Kind           string              `json:"kind"`
 	Sessions24h    int                 `json:"sessions_24h"`
 	Running        int                 `json:"running"`
 	Failed24h      int                 `json:"failed_24h"`
 	Errors         []OverviewErrorKind `json:"errors"`
+}
+
+// OverviewBlockedCircuit is one open dynamic-routing resource circuit. It is
+// the dynamic counterpart of a provider-health block: the router is avoiding
+// this resource until Until, and the state is unknown rather than healthy when
+// the circuits source is unavailable.
+type OverviewBlockedCircuit struct {
+	ResourceKey string     `json:"resource_key"`
+	Scope       string     `json:"scope"`
+	ScopeValue  string     `json:"scope_value"`
+	State       string     `json:"state"`
+	Code        string     `json:"code,omitempty"`
+	Until       *time.Time `json:"until,omitempty"`
+	Strikes     int        `json:"strikes"`
 }
 
 // OverviewBlockedAccount is one provider account the router is avoiding.
@@ -157,17 +201,25 @@ type OverviewEvent struct {
 	Detail       string    `json:"detail,omitempty"`
 }
 
-// OverviewHumanItem is one thing waiting on a person.
+// OverviewHumanItem is one thing waiting on a person. Repeats of the same
+// question on the same task collapse into one item carrying Count, so a
+// question an agent re-asks after every restart is one row.
 type OverviewHumanItem struct {
-	Kind          string    `json:"kind"`
-	ID            string    `json:"id"`
-	WorkspaceID   string    `json:"workspace_id"`
-	WorkspaceName string    `json:"workspace_name"`
-	TaskID        string    `json:"task_id,omitempty"`
-	TaskTitle     string    `json:"task_title,omitempty"`
-	SessionID     string    `json:"session_id,omitempty"`
-	ApprovalType  string    `json:"approval_type,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	Kind          string `json:"kind"`
+	ID            string `json:"id"`
+	WorkspaceID   string `json:"workspace_id"`
+	WorkspaceName string `json:"workspace_name"`
+	TaskID        string `json:"task_id,omitempty"`
+	TaskTitle     string `json:"task_title,omitempty"`
+	SessionID     string `json:"session_id,omitempty"`
+	ApprovalType  string `json:"approval_type,omitempty"`
+	// Count is how many occurrences this row stands for; always at least one.
+	Count     int       `json:"count"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// questionKey is the identity of what is being asked, used only while
+	// assembling the list to merge repeats. It never reaches the wire.
+	questionKey string
 }
 
 // OverviewTaskItem is one row of a task list.

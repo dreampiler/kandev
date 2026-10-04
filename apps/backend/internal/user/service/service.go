@@ -107,6 +107,8 @@ type UpdateUserSettingsRequest struct {
 	ChangesPanelLayout                *string
 	LastSeenDisplay                   *string
 	OfficeOverviewScope               *string
+	OfficeOverviewRefreshSeconds      *int
+	OfficeOverviewSort                *string
 	AgentTabCloseBehavior             *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
@@ -441,6 +443,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyOfficeOverviewScope(settings, req.OfficeOverviewScope); err != nil {
+		return err
+	}
+	if err := applyOfficeOverviewRefreshSeconds(settings, req.OfficeOverviewRefreshSeconds); err != nil {
+		return err
+	}
+	if err := applyOfficeOverviewSort(settings, req.OfficeOverviewSort); err != nil {
 		return err
 	}
 	if err := applyAgentTabCloseBehavior(settings, req.AgentTabCloseBehavior); err != nil {
@@ -928,6 +936,40 @@ func applyOfficeOverviewScope(settings *models.UserSettings, value *string) erro
 	return nil
 }
 
+// applyOfficeOverviewSort validates and applies the overview card order enum.
+// An unrecognized value is rejected rather than silently coerced, so a caller
+// never believes it chose an order the screen will not use.
+func applyOfficeOverviewSort(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	switch v {
+	case models.OfficeOverviewSortName, models.OfficeOverviewSortRecent, models.OfficeOverviewSortProblems:
+		settings.OfficeOverviewSort = v
+		return nil
+	}
+	return errors.New("office_overview_sort must be 'name', 'recent', or 'problems'")
+}
+
+// applyOfficeOverviewRefreshSeconds validates and applies the overview
+// auto-refresh period. A value outside the supported bounds is rejected rather
+// than silently clamped, so a caller never believes it set a period the poller
+// will not use.
+func applyOfficeOverviewRefreshSeconds(settings *models.UserSettings, value *int) error {
+	if value == nil {
+		return nil
+	}
+	if *value < models.OfficeOverviewRefreshSecondsMin || *value > models.OfficeOverviewRefreshSecondsMax {
+		return fmt.Errorf(
+			"office_overview_refresh_seconds must be between %d and %d",
+			models.OfficeOverviewRefreshSecondsMin, models.OfficeOverviewRefreshSecondsMax,
+		)
+	}
+	settings.OfficeOverviewRefreshSeconds = *value
+	return nil
+}
+
 // applyLastSeenDisplay validates and applies the last-seen display enum
 // (absolute or relative).
 func applyLastSeenDisplay(settings *models.UserSettings, value *string) error {
@@ -1254,6 +1296,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"office_overview_scope":                    models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
+		"office_overview_refresh_seconds":          models.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
+		"office_overview_sort":                     models.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,

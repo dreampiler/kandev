@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
@@ -138,7 +139,9 @@ func (s *DashboardService) assembleModels(
 	errorKinds := map[string]map[string]int{}
 	card := func(profileID string) *OverviewModel {
 		if cards[profileID] == nil {
-			cards[profileID] = &OverviewModel{AgentProfileID: profileID}
+			// Concrete until the profile row names a dynamic agent; an
+			// unreadable profile is not evidence of a dynamic profile.
+			cards[profileID] = &OverviewModel{AgentProfileID: profileID, Kind: OverviewModelKindConcrete}
 			errorKinds[profileID] = map[string]int{}
 		}
 		return cards[profileID]
@@ -187,9 +190,21 @@ func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapsho
 		snap.profileNames[p.ID] = name
 		if c := cards[p.ID]; c != nil {
 			c.AgentID, c.AgentName, c.Name = p.AgentID, p.AgentName, name
+			c.Kind = modelKind(p.AgentID)
 		}
 	}
 	return nil
+}
+
+// modelKind separates a dynamic profile, which routes one logical session
+// through ordered concrete profiles, from a concrete profile that is one model
+// on its own. The agent identity is the same discriminator the profile editor
+// uses, so a profile cannot look different in two places.
+func modelKind(agentID string) string {
+	if agentID == agents.DynamicAgentID {
+		return OverviewModelKindDynamic
+	}
+	return OverviewModelKindConcrete
 }
 
 func sortedModels(cards map[string]*OverviewModel, errorKinds map[string]map[string]int) []OverviewModel {
@@ -255,7 +270,13 @@ func (s *DashboardService) assembleNeedsHuman(ctx context.Context, snap *overvie
 			ws := taskWorkspace[q.TaskID]
 			items = append(items, OverviewHumanItem{
 				Kind: "question", ID: q.PendingID, WorkspaceID: ws, WorkspaceName: snap.names[ws],
-				TaskID: q.TaskID, TaskTitle: snap.taskTitles[q.TaskID], SessionID: q.SessionID, CreatedAt: q.CreatedAt,
+				TaskID: q.TaskID, TaskTitle: snap.taskTitles[q.TaskID], SessionID: q.SessionID,
+				Count: 1, CreatedAt: q.CreatedAt,
+				// questionKey is the bundle's question identity, so the same
+				// question asked again after a task restart collapses into one
+				// row. A bundle without one keeps its own row rather than
+				// joining an unrelated question.
+				questionKey: q.QuestionID,
 			})
 		}
 	}
@@ -266,15 +287,56 @@ func (s *DashboardService) assembleNeedsHuman(ctx context.Context, snap *overvie
 	for _, a := range approvals {
 		items = append(items, OverviewHumanItem{
 			Kind: "approval", ID: a.ID, WorkspaceID: a.WorkspaceID, WorkspaceName: snap.names[a.WorkspaceID],
-			ApprovalType: a.Type, CreatedAt: a.CreatedAt,
+			ApprovalType: a.Type, Count: 1, CreatedAt: a.CreatedAt, questionKey: a.Type,
 		})
 	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.Before(items[j].CreatedAt) })
-	snap.resp.NeedsHuman = items
+	snap.resp.NeedsHuman = collapseHumanItems(items)
 	return nil
 }
 
-func assembleSystem(snap *overviewSnapshot, sessionLimit int) {
+// collapseHumanItems merges the occurrences that ask the same thing of the same
+// task into one row, keeping the newest occurrence as the one to answer and the
+// number of occurrences as its count. Occurrences without a question identity
+// stay separate rows, because merging them would merge different questions. The
+// result is oldest first, so the longest-waiting item is read first.
+func collapseHumanItems(items []OverviewHumanItem) []OverviewHumanItem {
+	type group struct {
+		key  string
+		item *OverviewHumanItem
+	}
+	byKey := map[string]*OverviewHumanItem{}
+	order := make([]group, 0, len(items))
+	for i := range items {
+		item := items[i]
+		key := item.questionKey
+		if key == "" {
+			separate := item
+			order = append(order, group{item: &separate})
+			continue
+		}
+		groupKey := item.Kind + "|" + item.WorkspaceID + "|" + item.TaskID + "|" + key
+		if existing, ok := byKey[groupKey]; ok {
+			existing.Count++
+			if item.CreatedAt.After(existing.CreatedAt) {
+				existing.ID, existing.SessionID = item.ID, item.SessionID
+				existing.CreatedAt = item.CreatedAt
+			}
+			continue
+		}
+		merged := item
+		merged.questionKey = ""
+		byKey[groupKey] = &merged
+		order = append(order, group{key: groupKey, item: &merged})
+	}
+	out := make([]OverviewHumanItem, 0, len(order))
+	for _, entry := range order {
+		out = append(out, *entry.item)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out
+}
+
+func assembleSystem(snap *overviewSnapshot, sessionLimit int, thresholds overviewThresholds) {
 	sys := &OverviewSystem{SessionLimit: sessionLimit, StartedAt: timePtr(processStartedAt())}
 	for _, entry := range snap.resp.Workspaces {
 		if m := entry.Metrics; m != nil {
@@ -286,13 +348,16 @@ func assembleSystem(snap *overviewSnapshot, sessionLimit int) {
 		}
 		sys.NeedsHuman += entry.PendingApprovals
 	}
+	// The card counts what the list shows: one entry per distinct thing to
+	// answer, not the occurrences behind it and not the raw approval total.
+	// Counting the list keeps the two from disagreeing when either is capped.
 	for _, item := range snap.resp.NeedsHuman {
 		if item.Kind == "question" {
 			sys.NeedsHuman++
 		}
 	}
 	for _, q := range snap.queues {
-		if status, _ := classifyQueue(q, snap.now, defaultOverviewThresholds); status == OverviewQueueUndeliverable {
+		if status, _ := classifyQueue(q, snap.now, thresholds); status == OverviewQueueUndeliverable {
 			sys.UndeliverableMessages += q.Count
 		}
 	}
@@ -303,24 +368,70 @@ func assembleSystem(snap *overviewSnapshot, sessionLimit int) {
 			seen[key] = true
 			sys.BlockedAccounts++
 		}
-		if acct.RetryAt != nil && acct.RetryAt.After(snap.now) &&
-			(sys.EarliestUnblockAt == nil || acct.RetryAt.Before(*sys.EarliestUnblockAt)) {
-			sys.EarliestUnblockAt = acct.RetryAt
-		}
+		earliestUnblockAt(sys, snap.now, acct.RetryAt)
 	}
+	circuits := 0
+	for _, circuit := range snap.resp.BlockedCircuits {
+		circuits++
+		earliestUnblockAt(sys, snap.now, circuit.Until)
+	}
+	if snap.circuitsAvailable {
+		total := sys.BlockedAccounts + circuits
+		sys.BlockedAccountsTotal = &total
+	}
+	sys.ProblemThresholds = overviewThresholdsWire(thresholds)
 	snap.resp.System = sys
 }
 
-// assembleEvents merges the last-24-hours sources, newest first.
+// earliestUnblockAt keeps the soonest clear instant across both block sources.
+func earliestUnblockAt(sys *OverviewSystem, now time.Time, at *time.Time) {
+	if at == nil || !at.After(now) {
+		return
+	}
+	if sys.EarliestUnblockAt == nil || at.Before(*sys.EarliestUnblockAt) {
+		sys.EarliestUnblockAt = at
+	}
+}
+
+// overviewThresholdsWire reports the limits the status rules actually applied,
+// so the client explains the same numbers the classification used.
+func overviewThresholdsWire(th overviewThresholds) *OverviewThresholds {
+	return &OverviewThresholds{
+		NoOutputMinutes:        int(th.NoOutput / time.Minute),
+		StartingMinutes:        int(th.Starting / time.Minute),
+		NotAdvancingMinutes:    int(th.NotAdvancing / time.Minute),
+		QueueIdleMinutes:       int(th.QueueIdle / time.Minute),
+		QueueBusyMinutes:       int(th.QueueBusy / time.Minute),
+		DwellInProgressMinutes: int(th.DwellInProgress / time.Minute),
+		DwellReviewMinutes:     int(th.DwellReview / time.Minute),
+		DwellHoldMinutes:       int(th.DwellHold / time.Minute),
+		WindowHours:            int(th.Window / time.Hour),
+	}
+}
+
+// assembleEvents merges the last-24-hours sources, newest first. Each kind
+// contributes up to overviewEventKindLimit rows and the merge is bounded
+// separately, so the screen can filter down to one kind before it caps what it
+// renders.
 func assembleEvents(
-	snap *overviewSnapshot, automation []*sqlite.OverviewAutomationTaskRow, since time.Time,
+	snap *overviewSnapshot,
+	automation []*sqlite.OverviewAutomationTaskRow,
+	created []*sqlite.OverviewCreatedTaskRow,
+	since time.Time,
 ) []OverviewEvent {
 	var events []OverviewEvent
 	if started := processStartedAt(); !started.IsZero() && started.After(since) {
 		events = append(events, OverviewEvent{Kind: overviewEventServerStarted, At: started})
 	}
+	events = append(events, createdTaskEvents(created)...)
+	for _, row := range automation {
+		events = append(events, OverviewEvent{
+			Kind: overviewEventAutomationRun, At: row.CreatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
+			AutomationID: row.AutomationID,
+		})
+	}
 	for i, row := range snap.completed {
-		if i >= overviewEventSourceLimit {
+		if i >= overviewEventKindLimit {
 			break
 		}
 		events = append(events, OverviewEvent{
@@ -328,15 +439,25 @@ func assembleEvents(
 		})
 	}
 	events = append(events, failedSessionEvents(snap, since)...)
-	for _, row := range automation {
-		events = append(events, OverviewEvent{
-			Kind: overviewEventAutomationRun, At: row.CreatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
-			AutomationID: row.AutomationID,
-		})
-	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })
-	if len(events) > overviewEventLimit {
-		events = events[:overviewEventLimit]
+	if len(events) > overviewEventMergeLimit {
+		events = events[:overviewEventMergeLimit]
+	}
+	return events
+}
+
+// createdTaskEvents reports tasks a person or the control plane created, with
+// the parent task's title as the supporting detail.
+func createdTaskEvents(created []*sqlite.OverviewCreatedTaskRow) []OverviewEvent {
+	events := make([]OverviewEvent, 0, min(len(created), overviewEventKindLimit))
+	for i, row := range created {
+		if i >= overviewEventKindLimit {
+			break
+		}
+		events = append(events, OverviewEvent{
+			Kind: overviewEventTaskCreated, At: row.CreatedAt, WorkspaceID: row.WorkspaceID,
+			TaskID: row.ID, Title: row.Title, Detail: row.ParentTitle,
+		})
 	}
 	return events
 }
@@ -355,8 +476,8 @@ func failedSessionEvents(snap *overviewSnapshot, since time.Time) []OverviewEven
 		}
 	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })
-	if len(events) > overviewEventSourceLimit {
-		events = events[:overviewEventSourceLimit]
+	if len(events) > overviewEventKindLimit {
+		events = events[:overviewEventKindLimit]
 	}
 	return events
 }
