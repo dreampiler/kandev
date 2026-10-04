@@ -1803,10 +1803,6 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
-	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
-		return
-	}
-
 	// Load the target step to check auto-start and plan mode flags
 	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
 	if err != nil {
@@ -1817,6 +1813,26 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		if autoStartOnCreateClaimed {
 			s.restoreAutoStartOnCreate(ctx, taskID, eventName)
 		}
+		return
+	}
+	// A deferred launch record is a task-level launch intent. A step-entry move
+	// into a step that cannot run an agent — a predecessor wait, a hold — must
+	// leave that record intact, so an execution-settings or prompt edit made
+	// while the task sits there cannot launch it, and the next agent step still
+	// consumes it.
+	//
+	// Only the step-entry move is narrowed. Dependency resolution, queue
+	// promotion and creation carry their own launch eligibility and are
+	// unchanged, and an unreadable step is not proof of an agentless step, so
+	// that case still fails open.
+	if eventName == events.TaskMoved && step != nil && !workflowmove.ShouldAutoStartAgent(step, nil) {
+		s.logger.Debug(eventName+": target step cannot run an agent; deferred launch intent retained",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", stepID))
+		s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed)
+		return
+	}
+	if s.launchDeferredTask(ctx, task, eventName, false, autoStartOnCreateClaimed) {
 		return
 	}
 	s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed)

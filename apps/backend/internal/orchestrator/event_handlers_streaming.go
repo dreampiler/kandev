@@ -2002,20 +2002,11 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		return
 	}
 
-	// Pick the best candidate: prefer RUNNING, then STARTING, then WAITING_FOR_INPUT
-	var candidate string
-	for _, sess := range sessions {
-		if sess.ID == sessionID {
-			continue
-		}
-		if sess.State == models.TaskSessionStateRunning {
-			candidate = sess.ID
-			break
-		}
-		if candidate == "" && isActiveSessionState(sess.State) {
-			candidate = sess.ID
-		}
-	}
+	// Pick the best candidate. The shared selector prefers a session compatible
+	// with the task's current workflow step and never reuses a session an earlier
+	// profile switch parked, so a surviving predecessor cannot become primary
+	// again and receive the queue.
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID)
 	if candidate != "" {
 		if err := s.SetPrimarySessionTransferringQueue(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",
