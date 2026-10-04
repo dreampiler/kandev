@@ -4,7 +4,11 @@ import { useCallback, useMemo, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { selectWorkspaceAggregate } from "@/lib/state/slices/office/selectors";
 import type { WorkspaceAggregate } from "@/lib/state/slices/office/types";
-import type { OverviewSections, OverviewSort } from "@/lib/state/slices/office/overview-types";
+import type {
+  OverviewSections,
+  OverviewSort,
+  OverviewThresholds,
+} from "@/lib/state/slices/office/overview-types";
 import { OVERVIEW_REFRESH_SECONDS_DEFAULT } from "@/lib/settings/overview-refresh";
 import { useWorkspaceAggregate } from "@/hooks/domains/office/use-workspace-aggregate";
 import { useTranslation } from "react-i18next";
@@ -121,7 +125,11 @@ function OverviewBody({
         refreshSeconds={refreshSeconds}
       />
       {sections && !loading && <OverviewNeedsHuman items={sections.needs_human ?? []} />}
-      <WorkspaceCards workspaces={ordered} refreshSeconds={refreshSeconds} />
+      <WorkspaceCards
+        workspaces={ordered}
+        refreshSeconds={refreshSeconds}
+        thresholds={sections?.system?.problem_thresholds}
+      />
       {sections && !loading && (
         <LowerSections
           sections={sections}
@@ -136,9 +144,11 @@ function OverviewBody({
 function WorkspaceCards({
   workspaces,
   refreshSeconds,
+  thresholds,
 }: {
   workspaces: WorkspaceAggregate["workspaces"];
   refreshSeconds: number;
+  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   if (workspaces.length === 0) {
@@ -151,6 +161,7 @@ function WorkspaceCards({
           key={workspace.workspace_id}
           workspace={workspace}
           refreshSeconds={refreshSeconds}
+          thresholds={thresholds}
         />
       ))}
     </div>

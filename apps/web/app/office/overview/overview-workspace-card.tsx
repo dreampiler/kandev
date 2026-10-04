@@ -16,6 +16,7 @@ import type { WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
 import type {
   OverviewParentTask,
   OverviewTaskFilter,
+  OverviewThresholds,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
 import { PROBLEM_STATUSES, reasonText, relativeTime } from "./overview-format";
@@ -85,9 +86,11 @@ function Metric({
 export function OverviewWorkspaceCard({
   workspace,
   refreshSeconds,
+  thresholds,
 }: {
   workspace: WorkspaceAggregateEntry;
   refreshSeconds: number;
+  thresholds?: OverviewThresholds;
 }) {
   const state = useWorkspaceOverview(workspace.workspace_id, refreshSeconds);
   if (state.status === "loading") {
@@ -97,7 +100,12 @@ export function OverviewWorkspaceCard({
     return <WorkspaceCardError workspace={workspace} />;
   }
   return (
-    <WorkspaceCardBody workspace={workspace} detail={state.entry} refreshSeconds={refreshSeconds} />
+    <WorkspaceCardBody
+      workspace={workspace}
+      detail={state.entry}
+      refreshSeconds={refreshSeconds}
+      thresholds={thresholds}
+    />
   );
 }
 
@@ -111,10 +119,12 @@ function WorkspaceCardBody({
   workspace,
   detail,
   refreshSeconds,
+  thresholds,
 }: {
   workspace: WorkspaceAggregateEntry;
   detail: WorkspaceAggregateEntry;
   refreshSeconds: number;
+  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   const startupPage = useAppStore((state) => state.userSettings.startupPage);
@@ -162,6 +172,7 @@ function WorkspaceCardBody({
           onFilter={show}
           onShowAll={() => setLimit(TASK_LIST_ALL_LIMIT)}
           refreshSeconds={refreshSeconds}
+          thresholds={thresholds}
         />
       )}
       {quiet && <div className="pb-3" />}
@@ -330,6 +341,7 @@ function WorkspaceDetail({
   onFilter,
   onShowAll,
   refreshSeconds,
+  thresholds,
 }: {
   id: string;
   workspaceId: string;
@@ -339,6 +351,7 @@ function WorkspaceDetail({
   onFilter: (filter: OverviewTaskFilter) => void;
   onShowAll: () => void;
   refreshSeconds: number;
+  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -365,7 +378,7 @@ function WorkspaceDetail({
           {open ? t("office:overviewCollapseDetails") : t("office:overviewExpandDetails")}
         </Button>
         <OverviewProblemBreakdown problems={problems} />
-        <OverviewProblemTooltip />
+        <OverviewProblemTooltip thresholds={thresholds} />
       </div>
       {open && (
         <div id={id} className="mt-2">
