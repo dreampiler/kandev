@@ -1,39 +1,96 @@
 package routingerr
 
 import (
+	"regexp"
+	"regexp/syntax"
 	"strings"
 	"testing"
 )
 
 // TestEveryRuleIsGateable is the guard that keeps MayClassify conservative. A
 // rule the gate cannot cover would silently stop matching once callers adopt the
-// pre-check, so every rule must contribute at least one token: derived from its
-// pattern, or declared for a custom matcher.
+// pre-check, so every rule must contribute at least one token: derived from the
+// literals its matches require, or declared for a custom matcher and for
+// patterns with a path that requires no usable literal.
 func TestEveryRuleIsGateable(t *testing.T) {
-	assertGateable := func(ruleID string, runs []string) {
+	assertGateable := func(ruleID string, tokens []string) {
 		t.Helper()
-		if len(runs) > 0 {
+		if len(tokens) > 0 {
 			return
 		}
-		if _, ok := gateTokensByRuleID[ruleID]; !ok {
-			t.Errorf("rule %q contributes no gate token: add one to gateTokensByRuleID", ruleID)
+		if len(gateTokensByRuleID[ruleID]) == 0 {
+			t.Errorf("rule %q contributes no gate token: declare one per match path in gateTokensByRuleID", ruleID)
 		}
 	}
 
 	for providerID, rules := range providerRules {
 		for _, r := range rules {
-			assertGateable(providerID+"/"+r.id, literalRuns(r.pattern.String()))
+			assertGateable(providerID+"/"+r.id, patternGateTokens(r.pattern))
 		}
 	}
 	for _, r := range providerNeutralRules {
-		assertGateable(r.id, literalRuns(r.pattern.String()))
+		assertGateable(r.id, patternGateTokens(r.pattern))
 	}
 	for _, r := range runtimeEnvironmentRules {
-		if r.pattern != nil {
-			assertGateable(r.id, literalRuns(r.pattern.String()))
-			continue
+		assertGateable(r.id, patternGateTokens(r.pattern))
+	}
+}
+
+// TestGateTokensComeFromRequiredLiterals pins the derivation itself. Harvesting
+// every literal run in a pattern is not conservative: a rule whose only long run
+// sits in an optional group or one alternation branch still matches text that
+// lacks it, so such a pattern must contribute nothing and be declared instead.
+func TestGateTokensComeFromRequiredLiterals(t *testing.T) {
+	cases := []struct {
+		name      string
+		pattern   string
+		wantGate  bool
+		wantMatch string
+	}{
+		{name: "required literal", pattern: `(?i)verylongtoken`, wantGate: true},
+		{name: "both branches required", pattern: `(?i)firstlongtoken|secondlongtoken`, wantGate: true},
+		{name: "optional tail", pattern: `(?i)verylongtoken|otherlongtoken?`, wantGate: true},
+		{name: "short alternation", pattern: `(?i)ab|verylongtoken`, wantGate: false, wantMatch: "ab"},
+		{name: "optional group", pattern: `(?i)x(?:verylongtoken)?y`, wantGate: false, wantMatch: "xy"},
+		{name: "optional repeat", pattern: `(?i)x(?:verylongtoken)*y`, wantGate: false, wantMatch: "xy"},
+		{name: "optional branch", pattern: `(?i)(?:verylongtoken|otherlongtoken)?`, wantGate: false, wantMatch: ""},
+		{name: "only short literals", pattern: `(?i)ab|cd`, wantGate: false, wantMatch: "ab"},
+		{name: "character classes only", pattern: `(?i)[0-9a-f]{8}-[0-9a-f]{4}`, wantGate: false, wantMatch: "0123abcd-4567"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := patternGateTokens(regexp.MustCompile(tc.pattern))
+			if got := len(tokens) > 0; got != tc.wantGate {
+				t.Fatalf("patternGateTokens(%q) gateable = %v, want %v (tokens %v)", tc.pattern, got, tc.wantGate, tokens)
+			}
+			if tc.wantMatch == "" {
+				return
+			}
+			if !regexp.MustCompile(tc.pattern).MatchString(tc.wantMatch) {
+				t.Fatalf("fixture %q does not match pattern %q", tc.wantMatch, tc.pattern)
+			}
+			if containsToken(tokens, tc.wantMatch) {
+				t.Fatalf("match %q carries a gate token %v, so the case proves nothing", tc.wantMatch, tokens)
+			}
+		})
+	}
+}
+
+// TestGateTokensStayOutOfOrdinaryProse guards the other half of the trade: a
+// required literal that appears in everyday text makes the gate accept
+// everything and the pre-check buys nothing. This is a ratchet on the current
+// catalogue, not a ban on a specific word.
+func TestGateTokensStayOutOfOrdinaryProse(t *testing.T) {
+	ordinary := []string{
+		"the quick brown fox jumps over the lazy dog",
+		"I refactored the parser and added tests for it.",
+		"done: 3 changes, 128 insertions",
+	}
+	for _, text := range ordinary {
+		if mayMatchText(text) {
+			t.Errorf("gate accepted ordinary text %q", text)
 		}
-		assertGateable(r.id, nil)
 	}
 }
 
@@ -41,16 +98,159 @@ func TestEveryRuleIsGateable(t *testing.T) {
 // matchers: the token must be a literal the matcher actually requires, so a
 // renamed control frame cannot leave the gate matching nothing.
 func TestDeclaredGateTokensAreReal(t *testing.T) {
-	if token, ok := gateTokensByRuleID["cursor.retriable_stream_reset.v1"]; !ok {
+	tokens, ok := gateTokensByRuleID["cursor.retriable_stream_reset.v1"]
+	if !ok {
 		t.Fatal("cursor retriable rule has no declared gate token")
-	} else if !strings.Contains(strings.ToLower(cursorRetriableStreamResetPrefix), token) {
-		t.Errorf("cursor gate token %q is not part of the required prefix %q", token, cursorRetriableStreamResetPrefix)
 	}
-	if token, ok := gateTokensByRuleID["opencode.service_failure.v1"]; !ok {
+	for _, token := range tokens {
+		if !strings.Contains(strings.ToLower(cursorRetriableStreamResetPrefix), token) {
+			t.Errorf("cursor gate token %q is not part of the required prefix %q", token, cursorRetriableStreamResetPrefix)
+		}
+	}
+	tokens, ok = gateTokensByRuleID["opencode.service_failure.v1"]
+	if !ok {
 		t.Fatal("opencode service failure rule has no declared gate token")
-	} else if !strings.Contains(token, "opencode") {
-		t.Errorf("opencode gate token %q does not cover the matched service-failure wording", token)
 	}
+	for _, token := range tokens {
+		if !strings.Contains(token, "opencode") {
+			t.Errorf("opencode gate token %q does not cover the matched service-failure wording", token)
+		}
+	}
+}
+
+// TestMayClassifyAcceptsEveryRulePath is the behavioural half of the guarantee:
+// for every path a pattern can take, text that takes it must survive the
+// pre-check. Witnesses are generated from the same syntax tree the token
+// derivation reads, so a pattern whose gate tokens stop covering one of its own
+// branches fails here.
+func TestMayClassifyAcceptsEveryRulePath(t *testing.T) {
+	for providerID, rules := range providerRules {
+		for _, r := range rules {
+			assertGateAcceptsPaths(t, providerID, r.id, r.pattern)
+		}
+	}
+	for _, r := range providerNeutralRules {
+		assertGateAcceptsPaths(t, "opencode-acp", r.id, r.pattern)
+	}
+	for _, r := range runtimeEnvironmentRules {
+		if r.pattern == nil {
+			continue
+		}
+		assertGateAcceptsPaths(t, r.providerID, r.id, r.pattern)
+	}
+}
+
+func assertGateAcceptsPaths(t *testing.T, providerID, ruleID string, pattern *regexp.Regexp) {
+	t.Helper()
+	witnesses := rulePathWitnesses(t, ruleID, pattern)
+	if len(witnesses) == 0 {
+		t.Fatalf("rule %q has no path that could be witnessed", ruleID)
+	}
+	for _, witness := range witnesses {
+		in := Input{Phase: PhasePromptSend, ProviderID: providerID, Stderr: witness}
+		if !MayClassify(in) {
+			t.Errorf("MayClassify rejected %q, which rule %q matches", witness, ruleID)
+		}
+	}
+}
+
+// rulePathWitnesses returns one text per top-level alternation path, each
+// asserted to match pattern. Nested branches take their first alternative; the
+// gate has to cover those too, and the derivation unions every branch it finds.
+func rulePathWitnesses(t *testing.T, ruleID string, pattern *regexp.Regexp) []string {
+	t.Helper()
+	re, err := syntax.Parse(pattern.String(), syntax.Perl)
+	if err != nil {
+		t.Fatalf("rule %q does not parse: %v", ruleID, err)
+	}
+	paths := []*syntax.Regexp{re}
+	if re.Op == syntax.OpAlternate {
+		paths = re.Sub
+	}
+	var witnesses []string
+	for _, path := range paths {
+		witness, ok := matchableWitness(path, pattern)
+		if !ok {
+			t.Errorf("rule %q pattern %q has no witness this generator could build", ruleID, pattern)
+			continue
+		}
+		witnesses = append(witnesses, witness)
+	}
+	return witnesses
+}
+
+// matchableWitness builds a text for one path and returns the first variant the
+// real pattern accepts.
+func matchableWitness(path *syntax.Regexp, pattern *regexp.Regexp) (string, bool) {
+	var fallback string
+	for _, fill := range []string{"", " ", "\n"} {
+		var b strings.Builder
+		writeWitness(&b, path, fill)
+		candidate := b.String()
+		if fallback == "" {
+			fallback = candidate
+		}
+		if candidate != "" && pattern.MatchString(candidate) {
+			return candidate, true
+		}
+	}
+	return fallback, fallback != "" && pattern.MatchString(fallback)
+}
+
+// writeWitness writes the shortest text a syntax tree can accept: the pattern's
+// own literals, the first printable rune of a character class, the first
+// alternative of a branch, and one instance for a repetition that may be
+// omitted. fill is what an optional or unbounded element contributes, because
+// skipping it can fuse two literals into one word and filling it with a space
+// can break a line anchor the pattern requires.
+func writeWitness(b *strings.Builder, re *syntax.Regexp, fill string) {
+	switch re.Op {
+	case syntax.OpLiteral:
+		b.WriteString(string(re.Rune))
+	case syntax.OpCharClass:
+		b.WriteString(classWitnessText(re))
+	case syntax.OpAnyChar, syntax.OpAnyCharNotNL:
+		b.WriteString("x")
+	case syntax.OpCapture, syntax.OpPlus:
+		writeWitness(b, re.Sub[0], fill)
+	case syntax.OpConcat:
+		for _, sub := range re.Sub {
+			writeWitness(b, sub, fill)
+		}
+	case syntax.OpAlternate:
+		writeWitness(b, re.Sub[0], fill)
+	case syntax.OpRepeat:
+		if re.Min >= 1 {
+			writeWitness(b, re.Sub[0], fill)
+			return
+		}
+		if re.Max != 0 {
+			b.WriteString(fill)
+		}
+	case syntax.OpStar, syntax.OpQuest:
+		b.WriteString(fill)
+	}
+}
+
+// classWitnessText picks a printable rune the character class accepts. The
+// class is stored as inclusive ranges, already complemented where the pattern
+// negates it, so scanning for the first accepted printable rune covers both.
+func classWitnessText(re *syntax.Regexp) string {
+	for r := rune(0x20); r < 0x7f; r++ {
+		if classContainsRune(re.Rune, r) {
+			return string(r)
+		}
+	}
+	return ""
+}
+
+func classContainsRune(ranges []rune, target rune) bool {
+	for i := 0; i+1 < len(ranges); i += 2 {
+		if ranges[i] <= target && target <= ranges[i+1] {
+			return true
+		}
+	}
+	return false
 }
 
 // TestMayClassifyNeverRejectsAMatchingRule is the behavioural half of the
@@ -131,4 +331,14 @@ func TestMayClassifyKeepsStructuredInputs(t *testing.T) {
 	if !MayClassify(Input{Phase: PhasePromptSend, HTTPStatus: 429}) {
 		t.Error("MayClassify rejected an HTTP-status classification")
 	}
+}
+
+func containsToken(tokens []string, text string) bool {
+	lower := strings.ToLower(text)
+	for _, token := range tokens {
+		if strings.Contains(lower, token) {
+			return true
+		}
+	}
+	return false
 }
