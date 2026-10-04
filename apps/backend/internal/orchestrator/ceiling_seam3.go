@@ -72,7 +72,7 @@ const (
 func (s *Service) admitSeam3(
 	ctx context.Context, taskID, sessionID, agentProfileID string, origin launchOrigin,
 ) (*sessionKeyedCeilingReservation, *seam3Refusal) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
+	decision := s.admitCeilingLaunch(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: "ensureSessionRunning",
 		agentProfileID: agentProfileID,
 	})
@@ -113,7 +113,7 @@ func (s *Service) admitOrDeferWorkflowStepEnsureWithBinding(
 			binding, _ = s.workflowEntryBindingForStep(ctx, taskID, step, sessionID)
 		}
 	}
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
+	decision := s.admitCeilingLaunch(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic,
 		seam: "startSessionForWorkflowStepPreConsult", agentProfileID: agentProfileID,
 	})

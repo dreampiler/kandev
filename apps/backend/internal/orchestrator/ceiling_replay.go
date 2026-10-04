@@ -152,6 +152,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	// admission so a later workflow entry cannot inherit the old destination.
 	freshTask, err := s.repo.GetTask(ctx, task.ID)
 	if err != nil || freshTask == nil {
+		s.logCeilingReplayPause(ctx, task.ID, models.CeilingDeferral{}, "task_unavailable", "task could not be reloaded")
 		return
 	}
 	task = freshTask
@@ -171,6 +172,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		// Any other read failure (most likely: a concurrent writer already
 		// cleared the record between the list and this read) is not this
 		// task's fault; leave it for the next tick to see the current state.
+		s.logCeilingReplayPause(ctx, task.ID, deferral, "record_unavailable", "record no longer carries a replayable launch")
 		return
 	}
 	// Re-bind the retry schedule to the record this pass actually read, so a
@@ -184,6 +186,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 			// A successor record won while this legacy record was being enriched.
 			// Leave the successor untouched for the next sweep; this pass must not
 			// retarget the old launch to it.
+			s.logCeilingReplayPause(ctx, task.ID, deferral, "binding_changed", "a successor won binding enrichment")
 			return
 		}
 		s.logger.Zap().Warn("could not bind deferred workflow entry for retry sweep",
@@ -211,21 +214,19 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	}
 	if !found || claim == nil {
 		// No matching record, or Send Now already owns it.
+		reason := "recipient_changed"
+		if found {
+			reason = "claimed"
+		}
+		s.logCeilingReplayPause(ctx, task.ID, deferral, reason, "deferred launch claim was not acquired")
 		return
 	}
 	deferral = claim.deferral
 	ctx = withCeilingDispatchClaim(ctx, claim)
 
 	defer claim.releaseIfHeld(ctx)
-	currentTask, currentErr := s.repo.GetTask(ctx, task.ID)
-	if currentErr != nil || currentTask == nil {
-		return
-	}
-	if disposition, detail, _ := s.validateCeilingEntry(ctx, currentTask, claim.deferral); disposition != ceilingEntryValid {
-		if disposition == ceilingEntrySuperseded {
-			s.dropCeilingDeferral(ctx, currentTask, sessionIDFromCeilingPayload(claim.deferral), claim.deferral,
-				ceilingReasonSuperseded, detail)
-		}
+	currentTask := s.validateClaimedCeilingReplay(ctx, task.ID, claim)
+	if currentTask == nil {
 		return
 	}
 
@@ -251,6 +252,7 @@ func (s *Service) settleCeilingReplay(
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed)
 	case ceilingReplayFailed:
+		s.deferredRetrySchedule.recordFailure(task.ID, ceilingDeferralIdentityKey(deferral))
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))
 	case ceilingReplayStillDeferred:

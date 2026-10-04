@@ -572,7 +572,14 @@ choice. It is a prediction for the next selection, not a promise to switch a
 running session, and it never saves settings or starts work.
 
 When a task launch waits for session capacity, Kandev keeps the selected
-destination and retries it automatically. Inspecting another session does not
+destination and retries it automatically. Eligible waiting launches receive
+available capacity before new automatic launches in the same capacity lane.
+Within the waiting queue, priority comes first, followed by position, original
+queue time, and task ID. A pending created session is retried within five minutes
+after sufficient capacity becomes available. A launch blocked by another rule or
+a non-capacity failure does not hold that free capacity indefinitely.
+
+Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,

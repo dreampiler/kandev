@@ -99,6 +99,17 @@ bounded instance capacity, so that one installation does not overload its host.
   refusals shall not change this order. Normal per-step WIP admission retains
   its existing position-first ordering.
 
+- **AC-AGENTS-SESSION-CEILING-001.12:** When sufficient capacity becomes
+  available and remains available, an eligible deferred `start_created` launch
+  shall be retried within five minutes, including periodic sweep alignment.
+  New automatic launches in the same lane shall yield available capacity to
+  eligible deferred launches in the order defined by .11. Manual override and
+  already admitted continuations shall retain their existing behavior.
+- **AC-AGENTS-SESSION-CEILING-001.13:** A retry that pauses before admission
+  shall record its task, destination, launch kind, and reason without recording
+  prompt or credential content. Ineligible entries and a replay waiting after a
+  non-capacity failure shall not reserve available capacity for themselves.
+
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 
 **Intent:** Let administrators enable and adjust the instance ceiling in Settings.

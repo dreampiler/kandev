@@ -14,7 +14,7 @@ import (
 // instead, so it never consults this schedule at all.
 const (
 	ceilingRetryBaseInterval = 2 * ceilingSweepInterval
-	ceilingRetryMaxInterval  = 5 * time.Minute
+	ceilingRetryMaxInterval  = 5*time.Minute - ceilingSweepInterval
 )
 
 // deferredRetrySchedule paces the periodic ceiling sweep. While the ceiling is
@@ -41,6 +41,7 @@ type deferredRetryEntry struct {
 	identity    string
 	refusals    int
 	nextAttempt time.Time
+	failed      bool
 }
 
 func newDeferredRetrySchedule() *deferredRetrySchedule {
@@ -69,6 +70,7 @@ func (s *deferredRetrySchedule) beginAttempt(taskID string) bool {
 		return false
 	}
 	entry.refusals++
+	entry.failed = false
 	entry.nextAttempt = now.Add(s.delay(entry.refusals))
 	return true
 }
@@ -95,8 +97,35 @@ func (s *deferredRetrySchedule) observe(taskID, identity string) {
 	if entry.identity != identity {
 		entry.identity = identity
 		entry.refusals = 0
+		entry.failed = false
 		entry.nextAttempt = s.now()
 	}
+}
+
+func (s *deferredRetrySchedule) recordFailure(taskID, identity string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[taskID]
+	if entry == nil {
+		entry = &deferredRetryEntry{}
+		s.entries[taskID] = entry
+	}
+	entry.failed = true
+	entry.identity = identity
+	entry.nextAttempt = s.now().Add(ceilingRetryBaseInterval)
+}
+
+func (s *deferredRetrySchedule) failureWaiting(taskID, identity string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[taskID]
+	return entry != nil && entry.identity == identity && entry.failed && s.now().Before(entry.nextAttempt)
 }
 
 // settle forgets a task that is no longer waiting, so the next launch it defers

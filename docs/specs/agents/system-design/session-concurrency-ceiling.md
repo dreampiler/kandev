@@ -228,7 +228,9 @@ After releasing the controller mutex, disabling or increasing capacity calls
 `signalCeilingSweep`. Keep the sweeper running when capacity is zero, including
 on startup, so existing durable deferrals can recover. Replay still checks task,
 entry, workflow, and payload ownership; capacity changes do not clear records
-directly. The 20-second sweep remains the recovery backstop. Existing historical
+directly. The 20-second sweep remains the recovery backstop. Periodic pacing is
+capped at five minutes minus one sweep interval, leaving room for tick alignment
+inside the five-minute retry bound. Existing historical
 manual-override messages remain history; they are not an effective-limit badge.
 Every applied capacity change also requests an observation/status refresh through
 the existing projection path, including a decrease. Do not let an old count imply
@@ -240,6 +242,21 @@ a conversation is not a manual override. Actual explicit execution retains this
 design's manual admission rule; workflow parking eligibility remains task-owned.
 
 ## Failure and recovery
+
+Before reserving a free unit for a new automatic launch, the launch seam supplies
+a deferred-order check to the existing admission controller. The controller runs
+that read-only check inside the same mutex as its population read and reservation
+write. It selects the first eligible deferred launch in the requesting lane using
+the sweep's priority, position, original queue time, and ID order. Session-backed
+entries use the session's stored profile for lane classification. A refused new
+launch signals the existing sweep so free capacity does not wait for pacing.
+
+The check performs no task admission locking, provider dispatch, event publication,
+or record mutation while holding the controller mutex. Final workflow-entry and
+claim validation still belongs to dispatch. Manual origins, unlimited capacity,
+and sessions that already hold admission retain their existing paths. A
+non-capacity replay failure temporarily yields priority using the existing retry
+schedule, retaining its record without blocking independent launches.
 
 Reservation ownership is session-keyed. A stale process-start callback first
 checks the persisted session execution identity; it cannot release a successor's
@@ -307,6 +324,11 @@ Admission decisions, refusal reasons, reservation expiry, replay drops, and
 manual overrides use the existing orchestrator logs and task status messages.
 The stored reason and population snapshot make a refusal diagnosable after a
 restart.
+
+Pre-admission replay pauses also report task and destination identity, launch
+kind, periodic/signal cause, and a bounded reason: task or record unavailable,
+binding changed, recipient changed, claimed, or entry unavailable. Entry failures
+retain their validation detail without logging the launch payload or prompt.
 
 Log applied capacity and its source on initialization and successful changes.
 Reuse existing observation and queue-status projection paths. Never log full
