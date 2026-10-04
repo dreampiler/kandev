@@ -39,9 +39,10 @@ behavior after an upgrade.
   binding. Only an explicitly selected dynamic profile may route among
   candidates; its durable route and recovery state shall survive restart.
 - **AC-AGENTS-DYNAMIC-ROUTING-GRADUATION-001.4:** An ambiguous or post-result
-  provider failure shall not start another provider. A persisted waiting route
-  shall expose its existing recovery action, and an invalid candidate shall
-  fail closed without changing the logical profile binding.
+  provider failure shall not start another provider, except for task-owned
+  dynamic mid-turn recovery. A persisted waiting route shall expose its existing
+  recovery action, and an invalid candidate shall fail closed without changing
+  the logical profile binding.
 - **AC-AGENTS-DYNAMIC-ROUTING-GRADUATION-001.5:** Desktop and phone users shall
   be able to create or edit a dynamic profile, select it for supported task and
   utility flows, and inspect an actionable routed failure through their

@@ -69,8 +69,16 @@ type ServiceConfig struct {
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
 	// SessionCapacity is the effective instance-wide limit for automatic
-	// session launches. Zero disables the ceiling.
-	SessionCapacity               int
+	// worker session launches. Zero disables the worker ceiling.
+	SessionCapacity int
+	// ControlSessionCapacity is the control lane's own limit, admitted in
+	// addition to SessionCapacity rather than drawn from it. Zero means no
+	// control lane.
+	ControlSessionCapacity int
+	// ControlAgentProfileIDs names the agent profiles whose sessions belong to
+	// the control lane. Every other session, including one whose profile cannot
+	// be resolved, is a worker.
+	ControlAgentProfileIDs        []string
 	ClaudeBackgroundPromptHandoff bool
 
 	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
@@ -1772,13 +1780,17 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		deferredRetrySchedule:        newDeferredRetrySchedule(),
-		sessionCeiling:               newSessionCeilingForRepo(repo, cfg.SessionCapacity, svcLogger.Zap()),
-		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
-		parkedStates:                 make(map[string]*parkedSessionState),
-		taskParkedStates:             make(map[string]*taskParkedState),
-		parkedEpoch:                  uint64(time.Now().UnixNano()),
-		parkedLoopCtx:                parkedLoopCtx,
-		parkedLoopCancel:             parkedLoopCancel,
+		sessionCeiling: newSessionCeilingForRepo(repo, SessionCeilingCapacity{
+			WorkerCeiling:     cfg.SessionCapacity,
+			ControlCeiling:    cfg.ControlSessionCapacity,
+			ControlProfileIDs: cfg.ControlAgentProfileIDs,
+		}, svcLogger.Zap()),
+		backgroundProbeConfig: LoadBackgroundProbeConfig(svcLogger),
+		parkedStates:          make(map[string]*parkedSessionState),
+		taskParkedStates:      make(map[string]*taskParkedState),
+		parkedEpoch:           uint64(time.Now().UnixNano()),
+		parkedLoopCtx:         parkedLoopCtx,
+		parkedLoopCancel:      parkedLoopCancel,
 	}
 	if registrar, ok := repo.(interface {
 		SetTaskQueuePurgePreparer(func(context.Context, string))

@@ -616,7 +616,7 @@ func opaqueMCPConnectionID(connectionID string) string {
 func (s *Server) RegisterRoutes(router gin.IRouter) {
 	router.GET("/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP routes", zap.String("sse", "/sse"), zap.String("http", "/mcp"))
 }
@@ -627,7 +627,7 @@ func (s *Server) RegisterRoutes(router gin.IRouter) {
 func (s *Server) RegisterBackendRoutes(router gin.IRouter) {
 	router.GET("/mcp/sse", gin.WrapH(s.sseServer.SSEHandler()))
 	router.POST("/mcp/message", gin.WrapH(s.sseServer.MessageHandler()))
-	router.Any("/mcp", gin.WrapH(s.httpServer))
+	router.Any("/mcp", gin.WrapH(s.streamableHTTPHandler()))
 
 	s.logger.Info("registered MCP backend routes",
 		zap.String("sse", "/mcp/sse"),
@@ -1136,6 +1136,11 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
 		{name: "child-task-ordering", enabled: kanban, register: func(s *Server) { s.registerReorderChildTasksTool() }},
+		// Its own kanban-only group, like child-task-ordering: the readback
+		// resolves a send this session made, and the automation surface composes
+		// from registerKanbanTools, so registering it there would silently widen
+		// the fixed automation catalog.
+		{name: "send-operation-readback", enabled: kanban, register: func(s *Server) { s.registerGetTaskMessageOperationTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
@@ -1349,7 +1354,7 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Returns "queued", "sent", or "started".`),
+			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question, and operation_id to name a send. Returns "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
@@ -1359,6 +1364,7 @@ func (s *Server) registerKanbanTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+			mcp.WithString("operation_id", mcp.Description("Optional caller-chosen identity naming this one logical send (letters, digits, '.', '_', ':', '-'; 1-128 chars). Reuse the SAME value when retrying after a timeout or a lost response: the retry then returns the recorded outcome instead of delivering again. A different send needs a different value; reusing one for different content is rejected with operation_id_conflict and delivers nothing.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
@@ -1613,6 +1619,25 @@ func (s *Server) registerSpawnSessionTool() {
 			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
 		),
 		s.wrapHandler("spawn_session_kandev", s.spawnSessionHandler()),
+	)
+}
+
+// registerGetTaskMessageOperationTool registers get_task_message_operation_kandev,
+// the readback half of message_task_kandev's operation identity. It exists for
+// exactly one situation: the send call timed out or lost its response and the
+// caller must know whether the message landed before deciding to send again.
+// It performs no delivery and is registered wherever message_task_kandev is.
+func (s *Server) registerGetTaskMessageOperationTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("get_task_message_operation_kandev",
+			mcp.WithDescription(`Resolve a message_task_kandev operation_id to what actually happened, without delivering anything. Use it after a send timed out or its response was lost: the answer is state "committed" (delivered - do not resend), "pending" (the first attempt may still commit - wait and read again), "failed" (definitively not delivered - retry_safe is true, so resend under a FRESH operation_id), or claimed=false (no send was ever claimed under this identity, so sending again under it is safe). Only the session that made the send can read its outcome; it never returns prompt content.`),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithDestructiveHintAnnotation(false),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString("operation_id", mcp.Required(), mcp.Description("The same operation_id passed to the message_task_kandev call whose outcome is unknown")),
+		),
+		s.wrapHandler("get_task_message_operation_kandev", s.getTaskMessageOperationHandler()),
 	)
 }
 

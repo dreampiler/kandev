@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -23,7 +24,7 @@ func TestStoreSaveLoadAndRejectsInvalidPersistedRecords(t *testing.T) {
 		t.Fatalf("save settings: %v", err)
 	}
 	settings, err = store.Load(ctx)
-	if err != nil || settings == nil || *settings != (Settings{Enabled: true, MaxSessions: 8}) {
+	if err != nil || settings == nil || !reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
 		t.Fatalf("load saved = %+v, %v", settings, err)
 	}
 
@@ -53,7 +54,7 @@ func TestStoreUpdateWithoutCompareAndSwapUsesFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated != (Settings{Enabled: true, MaxSessions: 6}) {
+	if !reflect.DeepEqual(updated, Settings{Enabled: true, MaxSessions: 6}) {
 		t.Fatalf("updated = %+v", updated)
 	}
 }
@@ -100,7 +101,7 @@ func TestStoreUpdateUsesCASAndPreservesConcurrentPartialChanges(t *testing.T) {
 	if err != nil || settings == nil {
 		t.Fatalf("load concurrent result = %+v, %v", settings, err)
 	}
-	if *settings != (Settings{Enabled: true, MaxSessions: 8}) {
+	if !reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
 		t.Fatalf("concurrent result = %+v, want both fields preserved", *settings)
 	}
 }

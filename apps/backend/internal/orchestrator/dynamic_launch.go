@@ -1677,7 +1677,7 @@ func (s *Service) relaunchDynamicTaskAfterFailureOutcomeWithBinding(
 		}
 		ctx = withCeilingEntryBinding(ctx, binding)
 	}
-	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5WithBinding(ctx, data.TaskID, origin, seam5DynamicRelaunchPayloadWithBinding(data, executionProfileID, binding), binding)
+	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5WithBinding(ctx, data.TaskID, data.AgentProfileID, origin, seam5DynamicRelaunchPayloadWithBinding(data, executionProfileID, binding), binding)
 	if err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))

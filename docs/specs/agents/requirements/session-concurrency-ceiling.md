@@ -17,12 +17,21 @@ controls admission of agent executions. Tasks own their durable deferral data.
 
 The disabled default, Settings opt-in, live application, and queue explanation
 are implemented. Delivery and verification are recorded in the
-[opt-in plan](../../../plans/session-ceiling-opt-in/plan.md).
+[opt-in plan](../../../plans/session-ceiling-opt-in/plan.md). The reserved control
+lane is delivered by the
+[control-lane plan](../../../plans/control-session-capacity/plan.md).
 
 ## Terminology
 
 - **Session ceiling:** The maximum number of sessions in `STARTING` or `RUNNING`
   state, including launches admitted in the current process.
+- **Worker lane:** Every session whose agent profile is not one of the operator's
+  configured control profiles, and every session whose profile cannot be resolved.
+- **Control lane:** Sessions whose agent profile is in the configured control
+  profile set. The control lane is admitted in addition to the worker ceiling,
+  not out of it.
+- **Control profile set:** The install-wide list of agent profile ids whose
+  sessions are counted against the control ceiling.
 - **Deferred launch:** A durable task record that contains the complete launch
   kind and payload for an automatic request that the ceiling refused.
 - **Manual origin:** A direct user action. It can use a manual override when the
@@ -125,6 +134,49 @@ bounded instance capacity, so that one installation does not overload its host.
   limits automatic starts, manual starts can exceed it, and workflow WIP is a
   separate limit. The default maximum offered after enabling shall not activate
   the ceiling before the user saves.
+
+### REQ-AGENTS-SESSION-CEILING-003: Reserve capacity for control sessions
+
+**Intent:** Give control and monitoring sessions their own bounded capacity so
+they are never starved by ordinary work, without changing the worker ceiling.
+
+**User story:** As an operator, I want monitor sessions to keep starting while
+ordinary sessions are saturated, so that supervision stays possible during heavy
+work.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-003.1:** A session's lane shall be derived from the
+  agent profile stored on the session row and from the operator's configured
+  control profile set. A launch caller, request body, workflow step, or transport
+  shall not be able to classify a session.
+- **AC-AGENTS-SESSION-CEILING-003.2:** The worker lane shall be admitted against
+  the worker ceiling and the control lane against the control ceiling, decided
+  together with both populations in one admission step. A saturated worker lane
+  shall not refuse a control launch, and a control session shall not consume
+  worker capacity.
+- **AC-AGENTS-SESSION-CEILING-003.3:** A session whose profile cannot be resolved
+  shall be counted as a worker. A control ceiling without any configured control
+  profile shall admit no additional sessions.
+- **AC-AGENTS-SESSION-CEILING-003.4:** Lowering either ceiling shall not
+  terminate, restart, or preempt a session that is already running. A refused
+  automatic launch shall be deferred exactly as a worker-lane refusal is, with a
+  lane-specific reason code, and replayed when that lane has capacity.
+- **AC-AGENTS-SESSION-CEILING-003.5:** After a restart, each lane's population
+  shall be reconstructed from persisted session rows, and a session already above
+  a lowered control ceiling shall wait rather than being terminated.
+- **AC-AGENTS-SESSION-CEILING-003.6:** The control ceiling and its profile set
+  shall be saved settings with their own environment override, resolved
+  independently of the worker ceiling and its override. Settings shall show the
+  worker ceiling, the control ceiling, the resulting total, and whether a control
+  lane exists at all.
+- **AC-AGENTS-SESSION-CEILING-003.7:** Manual override, workflow WIP limits,
+  deferral ownership, and queue ordering shall behave exactly as they do for the
+  worker lane. Adding the control lane shall not change admission of a session
+  when no control profile is configured.
+- **AC-AGENTS-SESSION-CEILING-003.8:** The admission log line shall carry the
+  lane, that lane's ceiling, and that lane's population. Labels shall be limited
+  to those values; no task, session, or agent identifier shall become a label.
 
 ## Out of scope
 

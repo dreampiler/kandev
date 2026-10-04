@@ -666,8 +666,35 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 		copyOptionalStringArg(payload, req, "delivery_mode")
 		copyOptionalStringArg(payload, req, "session_id")
 		copyOptionalStringArg(payload, req, "reply_to_question_id")
+		copyOptionalStringArg(payload, req, "operation_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// getTaskMessageOperationHandler reads one operation identity's recorded
+// outcome. It delivers nothing, so it is the safe thing to call after a
+// message_task_kandev timeout. Sender attribution is injected from the
+// server's own task/session: an operation is readable only by the session that
+// claimed it, and a caller cannot widen that by naming another task.
+func (s *Server) getTaskMessageOperationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		operationID, err := req.RequireString("operation_id")
+		if err != nil {
+			return mcp.NewToolResultError("operation_id is required"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":           s.taskID,
+			"operation_id":      operationID,
+			"sender_task_id":    s.taskID,
+			"sender_session_id": s.sessionID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskMessageOperation, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

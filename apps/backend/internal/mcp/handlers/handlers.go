@@ -354,6 +354,15 @@ type Handlers struct {
 	clarificationResolver *clarification.Resolver
 	clarificationBundles  ClarificationBundleLister
 
+	// Optional task-message operation identity store (set via
+	// SetSendOperationStore). Without it the operation_id parameter on
+	// message_task_kandev and get_task_message_operation_kandev are inert.
+	sendOperationStore SendOperationStore
+	// Optional bounded retention pass for that store (set via
+	// SetSendOperationRetention), already wrapped in maintenance admission by
+	// the wiring site.
+	sendOperationRetention func(ctx context.Context)
+
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
@@ -540,6 +549,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMessageOperation, h.handleGetTaskMessageOperation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
@@ -2818,6 +2828,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		SenderSessionID   string `json:"sender_session_id"`
 		DeliveryMode      string `json:"delivery_mode"`
 		ReplyToQuestionID string `json:"reply_to_question_id"`
+		OperationID       string `json:"operation_id"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -2929,6 +2940,34 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 	}
 
+	// Claim the caller's operation identity before the first delivery side
+	// effect. With no identity this is a no-op and the send behaves exactly as
+	// it does today. With one, a replay of an already-claimed identity returns
+	// here as a read: no second message, queue entry, turn, or interrupt. The
+	// parent-question claim above runs first and still short-circuits, so an
+	// identified reply is claimed in both places without either delivering
+	// twice.
+	claim, errResp := h.claimSendOperation(ctx, msg, sendOperationClaimRequest{
+		SenderTaskID:     req.SenderTaskID,
+		SenderSessionID:  req.SenderSessionID,
+		TargetTaskID:     req.TaskID,
+		RequestedSession: req.SessionID,
+		Prompt:           req.Prompt,
+		DeliveryMode:     req.DeliveryMode,
+		OperationID:      req.OperationID,
+	})
+	if errResp != nil {
+		return errResp, nil
+	}
+	if claim.response != nil {
+		return claim.response, nil
+	}
+	if claim.operation != nil {
+		// Provenance on the delivered artifact: an operator reading the target's
+		// transcript can tie the message back to the identity that sent it.
+		senderMeta[models.MetaKeySendOperationID] = claim.operation.OperationID
+	}
+
 	// The sender session is the causal actor for anything this dispatch does
 	// on its own behalf, including RestoreTaskMessageRollback if a later
 	// step fails — thread it onto ctx so that rollback's ledger row (if any)
@@ -2954,6 +2993,9 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 					zap.String(parentQuestionIDKey, parentReply.message.ID), zap.Error(restoreErr))
 			}
 		}
+		// A dispatch rejection is definite, so the claim settles as failed and a
+		// readback will call the send safe to retry under a fresh identity.
+		h.settleSendOperation(ctx, claim.operation, taskMessageDispatchResult{}, err)
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
 			return ws.NewError(msg.ID, msg.Action, messagequeue.QueueFullErrorCode,
@@ -2962,11 +3004,14 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+	h.settleSendOperation(ctx, claim.operation, result, nil)
+	payload := map[string]interface{}{
 		"task_id":         req.TaskID,
 		"session_id":      result.sessionID,
 		stopTaskStatusKey: result.status,
-	})
+	}
+	decorateSendOperationReceipt(payload, claim.operation, result)
+	return ws.NewResponse(msg.ID, msg.Action, payload)
 }
 
 // lookupSenderSessionName resolves the sender session's user-supplied name for
@@ -3259,10 +3304,17 @@ const (
 // entry when interrupting instead of the FIFO head — see
 // InterruptForPeerMessage's doc comment. Never serialized to the wire; the
 // MCP response only reads status/sessionID (see handleMessageTask).
+//
+// messageID is the id of the recorded user message on the immediate paths. It
+// is surfaced only as part of an identified send's receipt (see
+// decorateSendOperationReceipt), which is how a caller correlates its send with
+// the artifact the target actually received; an identity-free send's response
+// is unchanged.
 type taskMessageDispatchResult struct {
 	status        string
 	sessionID     string
 	queuedEntryID string
+	messageID     string
 }
 
 type taskMessageReviewRollback struct {
@@ -3902,7 +3954,7 @@ func (h *Handlers) startPreparedPeerTaskMessage(
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to start session: %w", err)
 	}
 	releasePeerMessageStartAdmission(admission)
-	return taskMessageDispatchResult{status: "started", sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: "started", sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 func (h *Handlers) admitPreparedPeerTaskMessage(
@@ -3960,12 +4012,12 @@ func (h *Handlers) promptPreparedTaskMessage(
 	if err != nil {
 		var accepted interface{ DetachedResumeAccepted() bool }
 		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
-			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID}, nil
+			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 		}
 		h.deleteRecordedUserMessage(ctx, recorded, ownedTurnID)
 		return taskMessageDispatchResult{}, err
 	}
-	return taskMessageDispatchResult{status: status, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: status, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 }
 
 func (h *Handlers) shouldStartTaskMessageSession(ctx context.Context, session *models.TaskSession) bool {

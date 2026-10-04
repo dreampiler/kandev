@@ -118,7 +118,7 @@ func TestAutoStartOnCreateClaimFailureSkipsLaunch(t *testing.T) {
 	requireNoError(t, err)
 	// The claim must fail closed before any goroutine or executor call. The
 	// executor field is deliberately unset, so a launch would panic this test.
-	svc.autoStartTaskForLoadedStep(ctx, task, step, "test.claim_error", false, 0, false)
+	svc.autoStartTaskForLoadedStep(ctx, task, step, "test.claim_error", false, 0, false, false)
 
 	reloaded, err := repo.GetTask(ctx, task.ID)
 	requireNoError(t, err)

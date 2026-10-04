@@ -70,10 +70,11 @@ const (
 // (AC-4e1 — the loop's retry is recovering an already-admitted launch, not
 // requesting a new one).
 func (s *Service) admitSeam3(
-	ctx context.Context, taskID, sessionID string, origin launchOrigin,
+	ctx context.Context, taskID, sessionID, agentProfileID string, origin launchOrigin,
 ) (*sessionKeyedCeilingReservation, *seam3Refusal) {
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: "ensureSessionRunning",
+		agentProfileID: agentProfileID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{
@@ -96,15 +97,15 @@ func (s *Service) admitSeam3(
 // the in-function gate) so the caller can return without ever calling
 // advanceTaskWorkflowStep.
 func (s *Service) admitOrDeferWorkflowStepEnsure(
-	ctx context.Context, taskID, sessionID, workflowStepID string,
+	ctx context.Context, taskID, sessionID, agentProfileID, workflowStepID string,
 ) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
 	return s.admitOrDeferWorkflowStepEnsureWithBinding(
-		ctx, taskID, sessionID, workflowStepID, ceilingEntryBindingFromContext(ctx),
+		ctx, taskID, sessionID, agentProfileID, workflowStepID, ceilingEntryBindingFromContext(ctx),
 	)
 }
 
 func (s *Service) admitOrDeferWorkflowStepEnsureWithBinding(
-	ctx context.Context, taskID, sessionID, workflowStepID string,
+	ctx context.Context, taskID, sessionID, agentProfileID, workflowStepID string,
 	binding *models.CeilingWorkflowEntryBinding,
 ) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
 	if binding == nil && s.workflowStepGetter != nil {
@@ -113,7 +114,8 @@ func (s *Service) admitOrDeferWorkflowStepEnsureWithBinding(
 		}
 	}
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic, seam: "startSessionForWorkflowStepPreConsult",
+		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic,
+		seam: "startSessionForWorkflowStepPreConsult", agentProfileID: agentProfileID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

@@ -82,9 +82,10 @@ func (r *Repository) CountHiddenClarificationBundles(
 ) (models.ClarificationInboxHiddenSummary, error) {
 	drv := r.ro.DriverName()
 	joinExtra, joinArgs := clarificationSidecarJoin(opts.Sidecar)
+	innerExtra, innerArgs := clarificationWorkspaceScanRestriction(opts.WorkspaceID)
 	whereExtra, whereArgs := clarificationBundleWhereClause(opts)
-	args := append(append([]interface{}{}, joinArgs...), whereArgs...)
-	query := clarificationBundleCountQuery(drv, joinExtra, whereExtra)
+	args := clarificationBundleArgs(innerArgs, joinArgs, whereArgs)
+	query := clarificationBundleCountQuery(drv, joinExtra, whereExtra, innerExtra)
 
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), args...)
 	var count int

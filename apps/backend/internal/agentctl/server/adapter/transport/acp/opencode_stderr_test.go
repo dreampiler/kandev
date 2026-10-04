@@ -390,7 +390,7 @@ func TestPromptDiagnosticSettlesOnlyMatchingSession(t *testing.T) {
 	turn := &promptTurnState{
 		rpcDone:         make(chan struct{}),
 		abortCh:         make(chan struct{}),
-		providerErrorCh: make(chan openCodeStderrDiagnostic, 2),
+		providerErrorCh: make(chan providerNoticeDiagnostic, 2),
 	}
 	var cancelCause error
 	turn.endTurn = func(err error) {
@@ -400,8 +400,8 @@ func TestPromptDiagnosticSettlesOnlyMatchingSession(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- a.waitForPromptRPCAfterUserCancel(turn, "ses-current") }()
-	turn.providerErrorCh <- openCodeStderrDiagnostic{SessionID: "ses-other"}
-	turn.providerErrorCh <- openCodeStderrDiagnostic{
+	turn.providerErrorCh <- providerNoticeDiagnostic{SessionID: "ses-other"}
+	turn.providerErrorCh <- providerNoticeDiagnostic{
 		SessionID: "ses-current",
 		ProviderError: streams.ProviderError{
 			Source:     streams.ProviderErrorSourceOpenCodeStderr,
@@ -548,9 +548,9 @@ func TestOpenCodeStderrConsumerDropsWhenPromptChannelIsBacklogged(t *testing.T) 
 	a := newTestAdapter()
 	a.agentID = opencodeAgentID
 	a.promptTurn = &promptTurnState{
-		providerErrorCh: make(chan openCodeStderrDiagnostic, 1),
+		providerErrorCh: make(chan providerNoticeDiagnostic, 1),
 	}
-	a.promptTurn.providerErrorCh <- openCodeStderrDiagnostic{}
+	a.promptTurn.providerErrorCh <- providerNoticeDiagnostic{}
 
 	line := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build error.error="provider failed"`
 	done := make(chan struct{})

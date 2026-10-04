@@ -47,14 +47,15 @@ func seam5DynamicRelaunchPayloadWithBinding(
 // reservation.releaseIfNotConsumed and for calling reservation.consume once a
 // replacement launch is actually dispatched.
 func (s *Service) admitOrDeferSeam5(
-	ctx context.Context, taskID string, origin launchOrigin, relaunchPayload map[string]interface{},
+	ctx context.Context, taskID, agentProfileID string,
+	origin launchOrigin, relaunchPayload map[string]interface{},
 ) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
-	return s.admitOrDeferSeam5WithBinding(ctx, taskID, origin, relaunchPayload, nil)
+	return s.admitOrDeferSeam5WithBinding(ctx, taskID, agentProfileID, origin, relaunchPayload, nil)
 }
 
 func (s *Service) admitOrDeferSeam5WithBinding(
-	ctx context.Context, taskID string, origin launchOrigin, relaunchPayload map[string]interface{},
-	binding *models.CeilingWorkflowEntryBinding,
+	ctx context.Context, taskID, agentProfileID string, origin launchOrigin,
+	relaunchPayload map[string]interface{}, binding *models.CeilingWorkflowEntryBinding,
 ) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
 	if binding != nil {
 		relaunchPayload = cloneCeilingPayload(relaunchPayload)
@@ -62,10 +63,11 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 	}
 	sessionID, _ := relaunchPayload[metaKeySessionID].(string)
 	decision := s.sessionCeiling.handOffOrAdmit(ctx, admissionRequest{
-		taskID:    taskID,
-		sessionID: sessionID,
-		origin:    origin,
-		seam:      "relaunchDynamicTaskAfterFailure",
+		taskID:         taskID,
+		sessionID:      sessionID,
+		origin:         origin,
+		seam:           "relaunchDynamicTaskAfterFailure",
+		agentProfileID: agentProfileID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

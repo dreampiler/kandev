@@ -296,7 +296,7 @@
   "dynamicCandidatesDescription": "Candidates run in order. The next candidate is used only when the configured error action allows it.",
   "dynamicRoutingPolicyTitle": "When Kandev switches candidates",
   "dynamicRoutingPolicySwitchable": "Switching can follow classified provider failures: authentication or subscription problems, missing credentials or configuration, quota or rate limits, unavailable models, capacity, network, and provider availability or overload.",
-  "dynamicRoutingPolicyExcluded": "Kandev does not switch for task, repository, permission, tool or runtime errors, transport loss, or ambiguous mid-turn results. Those cases stop for manual recovery to avoid repeating work.",
+  "dynamicRoutingPolicyExcluded": "A task-owned turn interrupted by a recognized quota, rate-limit, provider availability, overload or model-capacity failure continues on the next different model. Task, repository, permission, tool and runtime errors, transport loss, cancellation or user denial, unclassified results after a turn, and a chain with no eligible candidate left stop for manual recovery.",
   "dynamicRoutingPolicyRecovery": "After a switch, the failed provider is paused for 1 minute, or until its reset time when provided. Kandev then runs an exclusive health probe before using it again.",
   "dynamicPolicyWaitExplanation": "Reset waiting uses a trusted future reset time once per candidate and error class, only when it is within your maximum. After that wait, Kandev makes one new attempt before applying the retry policy.",
   "dynamicTransientErrors": "Transient errors",

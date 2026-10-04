@@ -417,11 +417,12 @@ retry count, the initial interval, reset-date waiting with a maximum wait, and
 the final **Skip candidate** or **Stop for manual recovery** outcome. Kandev
 uses a trusted future reset date at most once for a candidate and class when it
 fits the configured maximum. It then applies the retry schedule and outcome.
-Unclassified, task, repository, permission, tool, and ambiguous mid-turn
-failures stop for manual recovery by default. The optional repeated-failure
-policy below is a narrow exception for eligible, current, effect-safe
-unclassified failures. The error catalogue is versioned and can grow as
-provider signals become known; an ambiguous new signal fails closed. A future
+Unclassified, task, repository, permission, and tool failures stop for manual
+recovery by default, as does a task-owned turn whose result is ambiguous and not
+one of the recognized provider failures described below. The optional
+repeated-failure policy below is a narrow exception for eligible, current,
+effect-safe unclassified failures. The error catalogue is versioned and can grow
+as provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
 
@@ -579,7 +580,10 @@ resume, or message the session.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
-with an ambiguous result does not switch providers automatically. If no
+switches candidates automatically only for a recognized quota, rate-limit,
+provider availability, overload or model-capacity failure, and only for a
+task-owned session with observed output or tool activity; any other started
+turn with an ambiguous result does not switch providers automatically. If no
 candidate is eligible, the session waits for a recovery action. After the
 current turn settles, use **Retry current agent** or **Try next agent** in the
 session recovery surface. These actions use the current route generation, so a

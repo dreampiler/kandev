@@ -734,10 +734,14 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		}
 		event.Text = text
 		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		a.observeUsageLimitNotice(sessionID, role, text)
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
-		// output path.
+		// output path. The marker stays a per-chunk property: it tells the
+		// downstream rule which chunk is the diagnosis, and the notice check
+		// below needs the whole turn's text only to decide whether to end the
+		// turn.
 		event.ProviderDiagnosticCandidate = role == "assistant" &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event

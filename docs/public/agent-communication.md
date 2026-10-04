@@ -84,6 +84,42 @@ message_task_kandev(
 
 There is no persistent channel or shared socket between tasks. Each `message_task_kandev` call is discrete. The conversation thread is implicit; both tasks can recover context by reading back the relevant messages (see [Reading the thread](#reading-the-thread) below).
 
+### Recovering a send whose response was lost
+
+A send can fail in a way that hides its result: the call times out or the connection drops after the target accepted the prompt but before the caller saw the answer. Resending blindly risks delivering the message twice, and not resending risks losing it. `operation_id` makes that outcome readable.
+
+Pass a caller-chosen `operation_id` (letters, digits, `.`, `_`, `:`, `-`; 1-128 characters) with the send:
+
+```
+message_task_kandev(
+  task_id="<task UUID>",
+  prompt="<message text>",
+  operation_id="proposal-2024-01-15-a"
+)
+```
+
+Kandev claims that identity durably **before** the first delivery side effect and settles it once after delivery, so an interrupted caller always has a record to read. The rules:
+
+- **Retry the same `operation_id` after a timeout.** The retry does not deliver again; it returns the recorded outcome (`"sent"`, `"queued"`, or `"started"`) as a replay. Nothing is added to the target's queue and no second turn starts.
+- **Never reuse one `operation_id` for different content.** If a retry's `prompt`, `delivery_mode`, or `requested_session_id` differs from the claimed send, the call is rejected with `operation_id_conflict` and delivers nothing. The stored prompt is not echoed back. Use a fresh value for a genuinely different message.
+- **Omit `operation_id` for a fire-and-forget send.** Sends without one behave exactly as before and gain no record.
+- **Read the outcome directly** with `get_task_message_operation_kandev(task_id, operation_id)`, which delivers nothing:
+
+```
+get_task_message_operation_kandev(task_id="<task UUID>", operation_id="proposal-2024-01-15-a")
+```
+
+Its `state` says what to do next:
+
+| `state` | Meaning | Action |
+| --- | --- | --- |
+| `committed` | The message was delivered. `delivery_status` and `message_id` identify it. | Do not resend. |
+| `pending` | The first attempt may still commit. | Wait, then read again. |
+| `failed` | Definitively not delivered. `retry_safe` is true. | Resend under a **fresh** `operation_id`. |
+| `claimed: false` | No send was ever claimed under this identity. | Sending under it is safe. |
+
+Records are scoped to the `(task, session)` pair that made the send: only the sending session can resolve its own `operation_id`, and another session's identity is reported as not found. Records are retained for a bounded window (7 days), so an identity older than that reads back as unclaimed rather than as a stale failure.
+
 ## Autopilot parent questions
 
 An autopilot child does not call `ask_user_question_kandev`. If it reaches a
@@ -267,9 +303,10 @@ These tools complement cross-task communication for common coordination patterns
 
 | Tool | Use for |
 |---|---|
-| `message_task_kandev` | Send a prompt to any task by UUID |
+| `message_task_kandev` | Send a prompt to any task by UUID; pass `operation_id` to name one send so a timed-out call's outcome can be read back |
 | `get_task_conversation_kandev` | Read a task's message history (pagination, type filters); defaults to the primary session |
-| `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the two tools above |
+| `get_task_message_operation_kandev` | Resolve one `operation_id` from your own send to `committed`/`pending`/`failed` without delivering anything |
+| `list_task_sessions_kandev` | List a task's sessions to find the `session_id` for the tools above |
 | `list_related_tasks_kandev` | Discover parent / child / sibling / blocker task IDs |
 | `create_task_kandev` | Delegate work to a new subtask; returns the new task's ID |
 | `spawn_session_kandev` | Start another session on an existing task; returns `{task_id, session_id, state, agent_profile_id}`, where `agent_profile_id` is the effective profile after workflow resolution; use the `session_id` field to message the new session directly |

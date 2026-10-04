@@ -338,6 +338,71 @@ func TestCreateRecoveryStatusMessage_OpenCodeQuotaCarriesSafeMetadata(t *testing
 	}
 }
 
+func TestCreateRecoveryStatusMessage_AgentMessageQuotaCarriesSafeMetadata(t *testing.T) {
+	// A provider may state the exhausted quota as an ordinary assistant message
+	// instead of a terminal stderr line, so the recovery surface must not depend
+	// on OpenCode's stderr projection to appear.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-quota-msg", "s-quota-msg", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+	resetAt := time.Date(2026, 10, 4, 17, 19, 8, 0, time.UTC)
+	const notice = "Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 1 hour, 28 minutes."
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:    "t-quota-msg",
+		SessionID: "s-quota-msg",
+		AgentID:   "antigravity-acp",
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceAgentMessage,
+			ProviderID: "antigravity-acp",
+			ModelID:    "gemini-3-pro",
+			Message:    notice,
+			OccurredAt: time.Date(2026, 10, 4, 15, 51, 8, 0, time.UTC),
+			ResetAt:    &resetAt,
+		},
+	}, ""))
+
+	require.Len(t, mc.sessionMessages, 1)
+	meta := mc.sessionMessages[0].metadata
+	require.Equal(t, "provider_quota_limited", meta["failure_kind"])
+	require.Equal(t, "Antigravity", meta["provider_name"])
+	require.Equal(t, "gemini-3-pro", meta["model_id"])
+	require.Equal(t, resetAt.Format(time.RFC3339), meta["reset_at"])
+	require.NotEmpty(t, meta["error_output"])
+}
+
+func TestCreateRecoveryStatusMessage_AgentMessageProseKeepsGenericCard(t *testing.T) {
+	// Only a high-confidence quota notice earns the specialized surface; an
+	// agent merely describing a limit must not present itself as quota-blocked.
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-quota-prose", "s-quota-prose", "step1")
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	mc := &mockMessageCreator{}
+	svc.messageCreator = mc
+
+	require.NoError(t, svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:    "t-quota-prose",
+		SessionID: "s-quota-prose",
+		AgentID:   "antigravity-acp",
+		ProviderError: &streams.ProviderError{
+			Source:     streams.ProviderErrorSourceAgentMessage,
+			ProviderID: "antigravity-acp",
+			Message:    "The API returned 'Usage Limit Reached' last night, so I raised the timeout.",
+			OccurredAt: time.Date(2026, 10, 4, 15, 51, 8, 0, time.UTC),
+		},
+	}, ""))
+
+	require.Len(t, mc.sessionMessages, 1)
+	meta := mc.sessionMessages[0].metadata
+	require.NotEqual(t, "provider_quota_limited", meta["failure_kind"])
+}
+
 func TestCreateRecoveryStatusMessage_GenericFailureCarriesRemediationURL(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

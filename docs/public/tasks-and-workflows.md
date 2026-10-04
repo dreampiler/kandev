@@ -249,9 +249,12 @@ Kandev remembers draft or recently used repository, branch, executor, and profil
 When the selected profile is dynamic, the task keeps one logical profile and one
 session tab while Kandev chooses a concrete candidate in the configured order.
 Provider errors before a result may move execution to the next configured
-candidate. Kandev does not switch candidates after an ambiguous started turn.
-If the route has no eligible candidate, wait for the current turn to settle and
-use the session's **Retry current agent** or **Try next agent** recovery action.
+candidate. A started turn switches candidates automatically only for a recognized
+quota, rate-limit, provider availability, overload or model-capacity failure in a
+task-owned session with observed output or tool activity; any other ambiguous
+started turn keeps its current candidate. If the route has no eligible candidate,
+wait for the current turn to settle and use the session's **Retry current agent**
+or **Try next agent** recovery action.
 
 Every editable local repository row in **New Task** offers **Refresh repositories** and **Create new repository**, including populated lists and empty search results. Refresh updates the available repositories without changing your selections. It stays visible but disabled during the request.
 
@@ -721,6 +724,8 @@ Workflow WIP limits and the instance-wide session limit control different things
 
 The session limit is off by default. Manual **Start**, **Resume**, or sending a message can override it. Set a positive limit in **Settings → Preferences → Task Behavior → Runtime**. `KANDEV_MAX_CONCURRENT_SESSIONS` overrides the saved value; `0` disables the limit. Change the environment variable and restart Kandev.
 
+The same section has a second, independent **control session limit** for monitoring and control agents. Name the agent profiles that run as control agents, and their sessions are counted against that limit instead of the one above, so supervision can still start while ordinary work is saturated. With a worker limit of 8 and a control limit of 2, up to 10 sessions run at once. Leave the control profile list empty to keep a single limit. `KANDEV_MAX_CONTROL_SESSIONS` overrides only the control limit, and `0` removes the control lane. Lowering a limit never stops a session that is already running; it only defers new starts.
+
 If session capacity blocks a start, Kandev keeps the selected destination and retries automatically. See [Agents and profiles](agents-and-profiles.md) for profile compatibility and recovery.
 
 Sessions parked by workflow transitions share the task workspace. Opening one
@@ -920,7 +925,7 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 **Delete**
 
 - While deletion is pending, the task stays dimmed with a spinner in the sidebar and phone task picker. It disappears when deletion succeeds. If deletion fails and the task is still available, the row returns to its normal state.
-- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants.
+- Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
 

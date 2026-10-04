@@ -296,7 +296,7 @@
   "dynamicCandidatesDescription": "후보는 순서대로 실행됩니다. 다음 후보는 구성된 오류 동작이 허용할 때만 사용됩니다.",
   "dynamicRoutingPolicyTitle": "Kandev가 후보를 전환하는 경우",
   "dynamicRoutingPolicySwitchable": "전환은 분류된 공급자 실패를 따를 수 있습니다: 인증 또는 구독 문제, 자격 증명이나 구성 누락, 할당량 또는 요청 제한, 사용할 수 없는 모델, 용량, 네트워크, 공급자 가용성 또는 과부하.",
-  "dynamicRoutingPolicyExcluded": "Kandev는 작업, 리포지토리, 권한, 도구 또는 런타임 오류, 전송 손실, 모호한 턴 중간 결과로는 전환하지 않습니다. 이런 경우 작업 반복을 피하기 위해 수동 복구를 위해 중지합니다.",
+  "dynamicRoutingPolicyExcluded": "할당량, 요청 제한, 공급자 가용성, 과부하, 모델 용량 실패 등 인식된 공급자 실패로 작업 소유 턴이 중단되면 Kandev는 다음으로 다른 모델에서 이어서 진행합니다. 작업, 리포지토리, 권한, 도구, 런타임 오류, 전송 손실, 취소 또는 사용자 거부, 턴 이후의 분류되지 않은 결과, 그리고 사용 가능한 후보가 남지 않은 체인은 수동 복구를 위해 중지합니다.",
   "dynamicRoutingPolicyRecovery": "전환 후 실패한 공급자는 1분 동안 또는 제공된 경우 재설정 시각까지 일시 중지됩니다. Kandev는 다시 사용하기 전에 전용 상태 프로브를 실행합니다.",
   "dynamicPolicyWaitExplanation": "재설정 대기는 각 후보와 오류 클래스마다 한 번만 사용합니다. 신뢰할 수 있는 미래 재설정 시각이 최대 대기 시간 내에 있을 때만 대기합니다. 대기한 후 Kandev는 재시도 정책을 적용하기 전에 한 번 다시 시도합니다.",
   "dynamicTransientErrors": "일시적 오류",

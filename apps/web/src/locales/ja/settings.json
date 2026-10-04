@@ -648,6 +648,8 @@
   "sendTestNotification": "テスト通知を送信",
   "sendTestNotificationFor": "{{name}} のテスト通知を送信",
   "serverConfiguration": "サーバー構成",
+  "sessionControlMaximumShort": "ワーカー上限に加えて実行されます。",
+  "sessionControlProfilesShort": "コントロール上限を使うプロファイルです。",
   "sessionLimitShort": "セッション上限に達すると自動開始を待ち行列に入れます。",
   "sessionMaximumShort": "手動での開始はこの上限を超えることができます。",
   "setTheFontSizeForThe": "ターミナルのフォントサイズを設定します。既定は 13px です。",

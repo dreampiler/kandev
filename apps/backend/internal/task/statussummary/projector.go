@@ -459,7 +459,10 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		}
 	}
 	launchQueueChanged := false
-	if p.loadLaunchQueue != nil {
+	// A source that cannot change the queue keeps the last observation rather
+	// than re-reading it; only a classified source refreshes.
+	if p.loadLaunchQueue != nil &&
+		(!state.launchQueueObserved || isLaunchQueueRefreshEvent(event.Type)) {
 		nextQueue, loadErr := p.loadLaunchQueue(ctx, taskID)
 		if loadErr != nil {
 			if event.Type == events.MessageQueueStatusChanged && isMissingTaskLookupErr(loadErr) {

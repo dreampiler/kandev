@@ -3960,13 +3960,13 @@ func (s *Service) persistRecoveryStatusMessage(
 	return nil
 }
 
-// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
-// diagnostic to the specialized recovery surface. Generic prose and provider
-// diagnostics from other agents retain the existing error card.
+// applyProviderQuotaMetadata promotes a validated provider quota diagnostic to
+// the specialized recovery surface, whichever agent reported it: OpenCode's
+// terminal stderr projection, an agent's own usage-limit message, and a
+// correlated terminal ACP prompt error all name the same exhausted capacity.
+// Generic prose and non-quota provider diagnostics retain the error card.
 func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
-	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
-		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
-		!data.ProviderError.Valid() {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
 		return false
 	}
 	classified := routingerr.Classify(routingerr.Input{
@@ -3979,7 +3979,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 	}
 
 	meta["failure_kind"] = "provider_quota_limited"
-	meta["provider_name"] = "OpenCode"
+	meta["provider_name"] = quotaProviderDisplayName(data.AgentID)
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
@@ -3990,6 +3990,29 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+// quotaProviderDisplayName renders the agent that reported the quota failure.
+// The value is an allowlisted agent identity, never free provider prose.
+func quotaProviderDisplayName(agentID string) string {
+	switch agentID {
+	case "opencode-acp":
+		return "OpenCode"
+	case "antigravity-acp":
+		return "Antigravity"
+	case "claude-acp":
+		return "Claude"
+	case "codex-acp":
+		return "Codex"
+	case "cursor-acp":
+		return "Cursor"
+	case "copilot-acp":
+		return "Copilot"
+	case "grok-acp":
+		return "Grok"
+	default:
+		return ""
+	}
 }
 
 // applyRecoverableFailureDetail populates the collapsed technical-details

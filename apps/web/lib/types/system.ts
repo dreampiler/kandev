@@ -234,6 +234,13 @@ export interface MessageQueueSettingsResponse {
 export interface SessionCapacitySettingsValue {
   enabled: boolean;
   max_sessions: number;
+  /**
+   * Ceiling for the control lane, admitted in addition to `max_sessions`
+   * rather than drawn from it. Zero means no control lane.
+   */
+  control_max_sessions: number;
+  /** Agent profile ids whose sessions belong to the control lane. */
+  control_profile_ids: string[];
 }
 
 /** Partial PATCH payload: omitted fields are left unchanged server-side. */
@@ -244,8 +251,14 @@ export type SessionCapacitySettingsSource = "default" | "setting" | "environment
 export interface SessionCapacityEffectiveSettings {
   enabled: boolean;
   max_sessions: number;
+  control_max_sessions: number;
+  /** Worker ceiling plus control ceiling: the instance-wide maximum. */
+  total_max_sessions: number;
+  control_profile_ids: string[];
   source: SessionCapacitySettingsSource;
   locked: boolean;
+  /** Set when the environment alone owns the control ceiling. */
+  control_locked: boolean;
 }
 
 export interface SessionCapacitySettingsResponse {

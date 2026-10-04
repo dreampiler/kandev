@@ -648,6 +648,8 @@
   "sendTestNotification": "Send test notification",
   "sendTestNotificationFor": "Send test notification for {{name}}",
   "serverConfiguration": "Server Configuration",
+  "sessionControlMaximumShort": "Runs in addition to the worker limit.",
+  "sessionControlProfilesShort": "Profiles that use the control limit.",
   "sessionLimitShort": "Queue automatic starts when the session limit is reached.",
   "sessionMaximumShort": "Manual starts can exceed this limit.",
   "setTheFontSizeForThe": "Set the font size for the terminal. Default is 13px.",
