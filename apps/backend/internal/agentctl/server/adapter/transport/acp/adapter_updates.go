@@ -733,7 +733,16 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
-		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// Ordinary assistant text carries no provider evidence, and running the
+		// rule engine costs far more than the rest of the chunk conversion put
+		// together, so it only runs when a rule could still match. MayClassify is
+		// conservative: a false result means Classify would have returned its
+		// default, which never satisfies the high-confidence test below.
+		var classified *routingerr.Error
+		diagnostic := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text}
+		if routingerr.MayClassify(diagnostic) {
+			classified = routingerr.Classify(diagnostic)
+		}
 		a.observeUsageLimitNotice(sessionID, role, text)
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
@@ -742,7 +751,7 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 		// downstream rule which chunk is the diagnosis, and the notice check
 		// below needs the whole turn's text only to decide whether to end the
 		// turn.
-		event.ProviderDiagnosticCandidate = role == "assistant" &&
+		event.ProviderDiagnosticCandidate = role == "assistant" && classified != nil &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}

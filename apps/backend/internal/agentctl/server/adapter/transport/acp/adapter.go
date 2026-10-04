@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -360,25 +361,27 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn            context.CancelCauseFunc
-	rpcDone            chan struct{}
-	abortCh            chan struct{}
-	handoffCh          chan struct{}
-	providerErrorCh    chan providerNoticeDiagnostic
-	promptGeneration   uint64
-	evidenceMu         sync.Mutex
-	codexSystemError   bool
-	codexCapacity      bool
-	codexUsageLimit    *streams.ProviderError
-	quotaNoticeText    string
-	cursorRetriable    bool
-	cursorRetriableAt  time.Time
-	continuationTools  map[string]bool
-	continuationUnsafe bool
-	allowHandoff       bool
-	handedOff          bool
-	gateOwned          bool
-	finishing          bool
+	endTurn               context.CancelCauseFunc
+	rpcDone               chan struct{}
+	abortCh               chan struct{}
+	handoffCh             chan struct{}
+	providerErrorCh       chan providerNoticeDiagnostic
+	promptGeneration      uint64
+	evidenceMu            sync.Mutex
+	codexSystemError      bool
+	codexCapacity         bool
+	codexUsageLimit       *streams.ProviderError
+	quotaNoticeText       string
+	quotaNoticeClassified string
+	quotaNoticeClass      *routingerr.Error
+	cursorRetriable       bool
+	cursorRetriableAt     time.Time
+	continuationTools     map[string]bool
+	continuationUnsafe    bool
+	allowHandoff          bool
+	handedOff             bool
+	gateOwned             bool
+	finishing             bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -456,6 +459,30 @@ func (t *promptTurnState) appendQuotaNoticeText(text string) string {
 		}
 	}
 	return t.quotaNoticeText
+}
+
+// quotaNoticeClassification classifies this turn's quota-notice buffer once per
+// distinct buffer value. The buffer saturates at quotaNoticeBufferBytes early in
+// any real turn, so without this every later chunk of the turn re-runs the whole
+// provider rule engine over byte-identical input. The second result is false when
+// no classification is warranted, so the caller must not classify again itself.
+func (t *promptTurnState) quotaNoticeClassification(buffer, providerID string) (*routingerr.Error, bool) {
+	if t == nil || buffer == "" {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.quotaNoticeClassified == buffer {
+		return t.quotaNoticeClass, t.quotaNoticeClass != nil
+	}
+	t.quotaNoticeClassified = buffer
+	t.quotaNoticeClass = nil
+	input := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: buffer}
+	if !routingerr.MayClassify(input) {
+		return nil, false
+	}
+	t.quotaNoticeClass = routingerr.Classify(input)
+	return t.quotaNoticeClass, true
 }
 
 func (t *promptTurnState) setCursorRetriable() {
