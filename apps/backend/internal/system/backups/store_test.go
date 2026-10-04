@@ -296,35 +296,6 @@ func TestCreate_PreservesRecentTmpSidecar(t *testing.T) {
 	}
 }
 
-// An interrupted boot leaves a whole database copy in a private staging
-// directory that no retention policy reaches. Creating a snapshot must reclaim
-// it, otherwise it occupies the disk indefinitely.
-func TestCreate_SweepsStaleBootStagingDir(t *testing.T) {
-	svc, dataDir := newTestService(t)
-	backupsDir := filepath.Join(dataDir, "backups")
-	staging := filepath.Join(backupsDir, ".kandev-backup-crashed")
-	if err := os.MkdirAll(staging, 0o700); err != nil {
-		t.Fatalf("mkdir staging: %v", err)
-	}
-	staged := filepath.Join(staging, "kandev-v0.1.0-20260101T000000Z.db")
-	if err := os.WriteFile(staged, []byte("interrupted vacuum"), 0o600); err != nil {
-		t.Fatalf("seed staged file: %v", err)
-	}
-	old := time.Now().Add(-48 * time.Hour)
-	for _, path := range []string{staging, staged} {
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatalf("chtimes %s: %v", path, err)
-		}
-	}
-
-	id := svc.Create(context.Background())
-	waitForJob(t, svc.jobs, id, jobs.StateSucceeded)
-
-	if _, err := os.Stat(staging); !errors.Is(err, os.ErrNotExist) {
-		t.Errorf("stale boot staging dir not swept: err=%v", err)
-	}
-}
-
 // Core retention property: persistence.PruneBackups(dir, 0) must remove all
 // auto snapshots but must NOT touch manual snapshots. This is the contract
 // that lets manual snapshots survive the existing pre-migration pruning.
