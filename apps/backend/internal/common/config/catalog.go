@@ -171,6 +171,7 @@ var startupExclusions = []CatalogExclusion{
 	{EnvVar: "KANDEV_DEBUG_LOG_DIR", Class: "debug", Reason: "ACP debug logging directory"},
 	{EnvVar: "AGENTCTL_AUTO_APPROVE_PERMISSIONS", Class: "test", Reason: "profile-selected E2E behavior"},
 	{EnvVar: "KANDEV_MAX_CONCURRENT_SESSIONS", Class: "startup override", Reason: "instance session capacity override for the live install setting; resolved once at startup and takes precedence over the saved value"},
+	{EnvVar: "KANDEV_MAX_CONTROL_SESSIONS", Class: "startup override", Reason: "control-lane session capacity override, resolved independently of the worker ceiling; takes precedence over the saved control ceiling only, never over the configured control profiles"},
 }
 
 // ConfigurationCatalog returns a defensive copy of the stable startup

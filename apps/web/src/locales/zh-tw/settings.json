@@ -438,6 +438,8 @@
   "manageApiKeysAndCredentialsSecrets": "金鑰在靜態儲存時會加密。儲存金鑰只會儲存它，不會將其新增到工作階段環境。要使用金鑰，請將其繫結到代理程式設定檔、執行器設定檔或儲存庫環境。",
   "globalScope": "全域",
   "modelWithValue": "模型：{{model}}",
+  "sessionControlMaximumShort": "在工作者上限之外額外執行。",
+  "sessionControlProfilesShort": "使用管控上限的設定。",
   "settingsMenu": "設定選單",
   "settingsMenuAccordion": "單分支展開",
   "settingsMenuAccordionDescription": "工作區、代理程式和執行器可逐級展開到其中的內容。開啟一個分支會關閉其他分支，因此選單僅保留目前頁面所在的路徑。這是預設選項。",

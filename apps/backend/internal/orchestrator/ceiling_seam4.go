@@ -46,8 +46,9 @@ func seam4ResumePayloadWithBinding(
 // caller is responsible for deferring reservation.releaseIfNotConsumed and for
 // calling reservation.consume once the resume succeeds.
 func (s *Service) admitOrDeferSeam4(
-	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID, sessionID, agentProfileID string,
+	origin launchOrigin, startPayload map[string]interface{},
 ) (*sessionKeyedCeilingReservation, bool, error) {
-	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "resumeTaskSession",
+	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, agentProfileID, origin, "resumeTaskSession",
 		models.CeilingLaunchResume, startPayload, "the resume could not be admitted or recorded")
 }

@@ -67,13 +67,16 @@ func (r *sessionKeyedCeilingReservation) releaseIfNotConsumed() {
 // ceiling_deferred record of the given kind from the caller's own payload.
 // failureContext names the launch kind in the error log ("the resume could
 // not be admitted or recorded" vs. "the launch could not be admitted or
-// recorded") so the two seams keep their own wording.
+// recorded") so the two seams keep their own wording. agentProfileID is the
+// profile the session already carries; it is the only classification input and
+// is passed through from the caller rather than read again here.
 func (s *Service) admitOrDeferSessionKeyedLaunch(
-	ctx context.Context, taskID, sessionID string, origin launchOrigin, seam string,
+	ctx context.Context, taskID, sessionID, agentProfileID string, origin launchOrigin, seam string,
 	kind models.CeilingLaunchKind, payload map[string]interface{}, failureContext string,
 ) (*sessionKeyedCeilingReservation, bool, error) {
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
+		agentProfileID: agentProfileID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

@@ -54,15 +54,15 @@ func TestAdmittedSessionIDsMatchSQLFilter(t *testing.T) {
 				t.Fatalf("CreateTaskSession: %v", err)
 			}
 
-			got, err := repo.ListAdmittedSessionIDs(ctx)
+			got, err := repo.ListAdmittedSessionRefs(ctx)
 			if err != nil {
-				t.Fatalf("ListAdmittedSessionIDs: %v", err)
+				t.Fatalf("ListAdmittedSessionRefs: %v", err)
 			}
 
 			want := models.IsAdmittedSessionState(state)
 			found := false
-			for _, id := range got {
-				if id == sessionID {
+			for _, ref := range got {
+				if ref.ID == sessionID {
 					found = true
 				}
 			}
@@ -129,13 +129,13 @@ func TestListAdmittedSessionIDsIgnoresTaskShape(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListAdmittedSessionIDs(ctx)
+	got, err := repo.ListAdmittedSessionRefs(ctx)
 	if err != nil {
-		t.Fatalf("ListAdmittedSessionIDs: %v", err)
+		t.Fatalf("ListAdmittedSessionRefs: %v", err)
 	}
 	index := make(map[string]bool, len(got))
-	for _, id := range got {
-		index[id] = true
+	for _, ref := range got {
+		index[ref.ID] = true
 	}
 	for _, tc := range cases {
 		if !index[tc.session.ID] {

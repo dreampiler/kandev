@@ -17,7 +17,7 @@ func TestAdmitOrDeferSeam2AdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-admit", "seam2-admit-session", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-admit", "seam2-admit-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam2: %v", err)
 	}
@@ -46,11 +46,11 @@ func TestAdmitOrDeferSeam2DefersAutomaticOverCeiling(t *testing.T) {
 		}
 	}
 
-	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-first", "seam2-first-session", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-first", "seam2-first-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-second", "seam2-second-session", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
+	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-second", "seam2-second-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam2: %v", err)
 	}
@@ -84,11 +84,11 @@ func TestAdmitOrDeferSeam2AdmitsManualOverCeiling(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-first", "seam2-manual-first-session", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-first", "seam2-manual-first-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-second", "seam2-manual-second-session", launchOriginManual, map[string]interface{}{"prompt": "second"})
+	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-second", "seam2-manual-second-session", "", launchOriginManual, map[string]interface{}{"prompt": "second"})
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam2: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestAdmitOrDeferSeam2ReportsWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "startCreatedSession"})
 
-	_, _, err := svc.admitOrDeferSeam2(ctx, "missing-task", "missing-session", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+	_, _, err := svc.admitOrDeferSeam2(ctx, "missing-task", "missing-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
 	if err == nil {
 		t.Fatal("expected an error when the refusal could not be persisted")
 	}

@@ -61,6 +61,7 @@ function response(
     effectiveMaximum: number;
     source: SessionCapacitySettingsResponse["effective"]["source"];
     locked: boolean;
+    controlLocked: boolean;
   }> = {},
 ): SessionCapacitySettingsResponse {
   const enabled = overrides.enabled ?? false;
@@ -68,12 +69,21 @@ function response(
   const effectiveEnabled = overrides.effectiveEnabled ?? enabled;
   const effectiveMaximum = overrides.effectiveMaximum ?? (effectiveEnabled ? maximum : 0);
   return {
-    settings: { enabled, max_sessions: maximum },
+    settings: {
+      enabled,
+      max_sessions: maximum,
+      control_max_sessions: 2,
+      control_profile_ids: [],
+    },
     effective: {
       enabled: effectiveEnabled,
       max_sessions: effectiveMaximum,
+      control_max_sessions: 2,
+      total_max_sessions: effectiveMaximum + 2,
+      control_profile_ids: [],
       source: overrides.source ?? (enabled ? "setting" : "default"),
       locked: overrides.locked ?? false,
+      control_locked: overrides.controlLocked ?? false,
     },
   };
 }
@@ -121,7 +131,12 @@ describe("SessionCapacitySettings drafts", () => {
     const contributor = requireContributor();
     await act(async () => contributor.save(contributor.revision));
 
-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: true, max_sessions: 8 });
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      enabled: true,
+      max_sessions: 8,
+      control_max_sessions: 2,
+      control_profile_ids: [],
+    });
     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
     expect(screen.getByTestId("session-capacity-effective-value").textContent).toBe("8");
   });
@@ -157,7 +172,12 @@ describe("SessionCapacitySettings drafts", () => {
     const contributor = requireContributor();
     expect(contributor.canSave).toBe(true);
     await act(async () => contributor.save(contributor.revision));
-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: false, max_sessions: 5 });
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      enabled: false,
+      max_sessions: 5,
+      control_max_sessions: 2,
+      control_profile_ids: [],
+    });
     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
   });
 
@@ -174,7 +194,12 @@ describe("SessionCapacitySettings drafts", () => {
     const contributor = requireContributor();
     await act(async () => contributor.save(contributor.revision));
 
-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: true, max_sessions: 5 });
+    expect(updateSettingsMock).toHaveBeenCalledWith({
+      enabled: true,
+      max_sessions: 5,
+      control_max_sessions: 2,
+      control_profile_ids: [],
+    });
     await waitFor(() => {
       expect(input.getAttribute("value")).toBe("5");
       expect(saveContributor?.isDirty).toBe(false);
@@ -264,5 +289,44 @@ describe("SessionCapacitySettings access and recovery", () => {
 
     expect(screen.getByText("Failed to save session capacity settings.")).toBeTruthy();
     expect(saveContributor?.isDirty).toBe(true);
+  });
+});
+
+describe("SessionCapacitySettings control-lane lock", () => {
+  it("names the control variable when only the control lane is locked", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({ enabled: true, maximum: 8, controlLocked: true }),
+    );
+    render(<SessionCapacitySettings />);
+
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    expect(screen.getByText(/KANDEV_MAX_CONTROL_SESSIONS/)).toBeTruthy();
+    expect(screen.queryByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)).toBeNull();
+    // A control-only lock still freezes every control, so the saved control
+    // ceiling is what the read-only field shows.
+    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("value", "2");
+    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("disabled", true);
+    expect(requireContributor().canSave).toBe(false);
+  });
+
+  it("names both variables when both lanes are locked", async () => {
+    fetchSettingsMock.mockResolvedValueOnce(
+      response({
+        enabled: true,
+        maximum: 8,
+        effectiveMaximum: 9,
+        source: "environment",
+        locked: true,
+        controlLocked: true,
+      }),
+    );
+    render(<SessionCapacitySettings />);
+
+    await screen.findByLabelText(MAXIMUM_LABEL);
+    const notice = screen
+      .getByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)
+      .textContent?.replace(/\s+/g, " ");
+    expect(notice).toContain("KANDEV_MAX_CONCURRENT_SESSIONS");
+    expect(notice).toContain("KANDEV_MAX_CONTROL_SESSIONS");
   });
 });

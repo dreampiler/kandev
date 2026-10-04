@@ -61,8 +61,9 @@ func seam2StartCreatedPayload(
 // calling reservation.rekeyToSession if the on_turn_start redirect switches
 // sessions, and for calling reservation.consume once the launch succeeds.
 func (s *Service) admitOrDeferSeam2(
-	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID, sessionID, agentProfileID string,
+	origin launchOrigin, startPayload map[string]interface{},
 ) (*sessionKeyedCeilingReservation, bool, error) {
-	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "startCreatedSession",
+	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, agentProfileID, origin, "startCreatedSession",
 		models.CeilingLaunchStartCreated, startPayload, "the launch could not be admitted or recorded")
 }

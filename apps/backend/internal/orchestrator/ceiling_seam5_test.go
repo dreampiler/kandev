@@ -32,7 +32,7 @@ func TestAdmitOrDeferSeam5AdmitsUnderCeiling(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-admit", launchOriginAutomatic, seam5Payload("seam5-admit-session"))
+	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-admit", "", launchOriginAutomatic, seam5Payload("seam5-admit-session"))
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam5: %v", err)
 	}
@@ -63,11 +63,11 @@ func TestAdmitOrDeferSeam5DefersAutomaticOverCeiling(t *testing.T) {
 		}
 	}
 
-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-first", launchOriginAutomatic, seam5Payload("seam5-first-session")); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-first", "", launchOriginAutomatic, seam5Payload("seam5-first-session")); err != nil || deferred {
 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-second", launchOriginAutomatic, seam5Payload("seam5-second-session"))
+	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-second", "", launchOriginAutomatic, seam5Payload("seam5-second-session"))
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam5: %v", err)
 	}
@@ -102,11 +102,11 @@ func TestAdmitOrDeferSeam5AdmitsManualOverCeiling(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-first", launchOriginAutomatic, seam5Payload("seam5-manual-first-session")); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-first", "", launchOriginAutomatic, seam5Payload("seam5-manual-first-session")); err != nil || deferred {
 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-second", launchOriginManual, seam5Payload("seam5-manual-second-session"))
+	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-second", "", launchOriginManual, seam5Payload("seam5-manual-second-session"))
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam5: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestAdmitOrDeferSeam5ReportsWriteFailure(t *testing.T) {
 	ctx := context.Background()
 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "relaunchDynamicTaskAfterFailure"})
 
-	_, _, err := svc.admitOrDeferSeam5(ctx, "missing-task", launchOriginAutomatic, seam5Payload("missing-session"))
+	_, _, err := svc.admitOrDeferSeam5(ctx, "missing-task", "", launchOriginAutomatic, seam5Payload("missing-session"))
 	if err == nil {
 		t.Fatal("expected an error when the refusal could not be persisted")
 	}
@@ -145,12 +145,12 @@ func TestAdmitOrDeferSeam5UnsetOriginDefaultsAutomatic(t *testing.T) {
 			t.Fatalf("CreateTask(%s): %v", id, err)
 		}
 	}
-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-first", launchOriginAutomatic, seam5Payload("seam5-unset-first-session")); err != nil || deferred {
+	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-first", "", launchOriginAutomatic, seam5Payload("seam5-unset-first-session")); err != nil || deferred {
 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
 	}
 
 	// launchOrigin("") is neither "manual" nor "automatic".
-	_, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-second", launchOrigin(""), seam5Payload("seam5-unset-second-session"))
+	_, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-second", "", launchOrigin(""), seam5Payload("seam5-unset-second-session"))
 	if err != nil {
 		t.Fatalf("admitOrDeferSeam5: %v", err)
 	}

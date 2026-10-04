@@ -745,9 +745,10 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	sessionCapacityEnvironment := sessioncapacity.ReadEnvironment()
+	controlSessionCapacityEnvironment := sessioncapacity.ReadControlEnvironment()
 	orchestratorSvc, msgCreator, err := provideOrchestrator(ctx, cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
 		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.Prompts, services.GitHub, services.GitCredentials,
-		repos.SystemSettings, sessionCapacityEnvironment, repos.RequiredStores)
+		repos.SystemSettings, sessionCapacityEnvironment, controlSessionCapacityEnvironment, repos.RequiredStores)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -996,7 +997,7 @@ func startAgentInfrastructure(
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,
-		sessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
+		sessionCapacityEnvironment, controlSessionCapacityEnvironment, storageStore, func(fn func() error) { addRuntimeCleanup(fn) }, runCleanups, cancelWorkers,
 		restoreCleanups, databaseQuiesce, sshReachabilityPoller)
 }
 
@@ -1061,6 +1062,7 @@ func startGatewayAndServe(
 	repoCloner *repoclone.Cloner,
 	agentctlBinaryPath string,
 	sessionCapacityEnvironment sessioncapacity.Environment,
+	controlSessionCapacityEnvironment sessioncapacity.Environment,
 	storageStore *storagepkg.Store,
 	addCleanup func(func() error),
 	runCleanups func(),
@@ -1178,17 +1180,18 @@ func startGatewayAndServe(
 		Commit:    Commit,
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
-		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
-		DatabaseQuiesce:            databaseQuiesce,
-		RestoreQuiesce:             restoreQuiesce,
-		SystemSettings:             repos.SystemSettings,
-		RequiredStores:             repos.RequiredStores,
-		PersistenceHealth:          persistenceHealth,
-		MessageQueue:               orchestratorSvc.GetMessageQueue(),
-		MessageQueueConfig:         queueConfiguration(cfg),
-		SessionCapacity:            orchestratorSvc,
-		SessionCapacityEnvironment: sessionCapacityEnvironment,
-		TaskSessions:               repos.Task,
+		OrchestratorShutdown:              func() { _ = orchestratorSvc.Stop() },
+		DatabaseQuiesce:                   databaseQuiesce,
+		RestoreQuiesce:                    restoreQuiesce,
+		SystemSettings:                    repos.SystemSettings,
+		RequiredStores:                    repos.RequiredStores,
+		PersistenceHealth:                 persistenceHealth,
+		MessageQueue:                      orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:                queueConfiguration(cfg),
+		SessionCapacity:                   orchestratorSvc,
+		SessionCapacityEnvironment:        sessionCapacityEnvironment,
+		ControlSessionCapacityEnvironment: controlSessionCapacityEnvironment,
+		TaskSessions:                      repos.Task,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
 				message, err := services.Task.GetMessage(eventCtx, id)

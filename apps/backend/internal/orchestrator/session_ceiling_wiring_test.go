@@ -18,7 +18,7 @@ func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	lister.set("s1", "s2")
 
-	controller := newSessionCeilingForRepo(lister, 4, zap.NewNop())
+	controller := newSessionCeilingForRepo(lister, SessionCeilingCapacity{WorkerCeiling: 4}, zap.NewNop())
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}
@@ -42,12 +42,12 @@ func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
 func TestNewSessionCeilingForRepoWarnsWhenTheRepositoryCannotCount(t *testing.T) {
 	core, logs := observer.New(zapcore.WarnLevel)
 
-	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, 4, zap.New(core))
+	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, SessionCeilingCapacity{WorkerCeiling: 4}, zap.New(core))
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}
 	if controller.lister != nil {
-		t.Fatal("a repository without ListAdmittedSessionIDs must not be bound as a lister")
+		t.Fatal("a repository without ListAdmittedSessionRefs must not be bound as a lister")
 	}
 	if n := logs.FilterMessageSnippet("cannot enumerate admitted sessions").Len(); n != 1 {
 		t.Fatalf("expected exactly one WARN about the unbound repository, got %d: %v", n, logs.All())
