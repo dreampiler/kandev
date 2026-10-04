@@ -34,10 +34,28 @@ const (
 
 const providerOpenCodeGo = "opencode-go"
 
-// openCodeGoLadder is the block length for consecutive OpenCode Go limit
-// failures whose reset instant is unknown. Strikes past the ladder wait for the
-// next monthly reset, or repeat the last step when that reset is unknown.
-var openCodeGoLadder = []time.Duration{2 * time.Hour, 2 * time.Hour, 2 * time.Hour, 24 * time.Hour}
+// paidUnknownResetLadder is the block length for consecutive paid-account limit
+// failures whose reset instant is unknown: two hours three times, then a day.
+// Strikes past the ladder wait for the next monthly reset, or repeat the last
+// step when that reset is unknown.
+//
+// It applies to every paid provider, not only OpenCode Go. A paid account that
+// cannot say when its capacity returns recovers on its own clock, so a one
+// minute retry only spends the whole ladder again from the start.
+var paidUnknownResetLadder = []time.Duration{2 * time.Hour, 2 * time.Hour, 2 * time.Hour, 24 * time.Hour}
+
+// freeRateLimitLadder is the block length for consecutive free-model rate limit
+// failures. A free tier's own limits are short and repeat often, so the ladder
+// starts at the ordinary backoff and reaches a four hour ceiling rather than a
+// day: a free model that stays limited should not be written off for longer than
+// a paid one, and a success returns it to the first step.
+//
+// Concurrent-run limits arrive as the same notice as per-minute rate limits, so
+// both follow this ladder.
+var freeRateLimitLadder = []time.Duration{
+	time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute,
+	time.Hour, 2 * time.Hour, 4 * time.Hour,
+}
 
 // limitPolicy is the scope and duration rule for usage-limit failures of one
 // model.
@@ -70,12 +88,16 @@ func IsFreeModel(modelID string) bool {
 
 func policyForModel(modelID string) limitPolicy {
 	if IsFreeModel(modelID) {
-		return limitPolicy{modelScoped: true}
+		return limitPolicy{modelScoped: true, ladder: freeRateLimitLadder}
 	}
+	// OpenCode Go meters and reports its limit per model, so its suspension
+	// stays model scoped while its durations are the paid ladder.
 	if ProviderOf(modelID) == providerOpenCodeGo {
-		return limitPolicy{modelScoped: true, ladder: openCodeGoLadder, untilMonthlyReset: true}
+		return limitPolicy{modelScoped: true, ladder: paidUnknownResetLadder, untilMonthlyReset: true}
 	}
-	return limitPolicy{}
+	// Every other paid provider meters the account, so the suspension reaches
+	// the whole credential and follows the same ladder.
+	return limitPolicy{ladder: paidUnknownResetLadder, untilMonthlyReset: true}
 }
 
 // ModelScoped reports whether usage-limit failures of this model suspend only
@@ -106,8 +128,15 @@ func WithLimitCalendar(calendar LimitCalendar) EngineOption {
 }
 
 // suspensionTarget returns the circuit key a failure pauses for the candidate.
+// An exhausted capacity limit follows the model's metering: a provider that
+// meters each model separately pauses that model, while one that meters the
+// account pauses the whole credential. The latter matters when several profiles
+// share one API key — a limit reached through one of them is spent for all of
+// them, so pausing only the model that reported it would let each sibling
+// profile spend the same exhausted quota in turn.
 func suspensionTarget(candidate Candidate, code routingerr.Code) string {
-	if isUsageLimitCode(code) && candidate.ModelKey != "" {
+	if isUsageLimitCode(code) && candidate.ModelKey != "" &&
+		policyForModel(candidate.ModelID).modelScoped {
 		return candidate.ModelKey
 	}
 	return candidate.BindingKey

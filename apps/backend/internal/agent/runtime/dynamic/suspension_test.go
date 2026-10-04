@@ -96,6 +96,145 @@ func TestOpenCodeGoLadderEscalatesToMonthlyReset(t *testing.T) {
 	}
 }
 
+func TestFreeModelRateLimitLadderEscalatesAndReturnsToOneMinute(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	free := Candidate{
+		ID: "free", Enabled: true, ModelID: "openrouter/qwen/qwen3-coder:free",
+		BindingKey: ResourceKey(ScopeCredential, "account"),
+		ModelKey:   ResourceKey(ScopeModel, "account/openrouter/qwen/qwen3-coder:free"),
+	}
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{free}}
+
+	steps := []time.Duration{
+		time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute,
+		time.Hour, 2 * time.Hour, 4 * time.Hour,
+	}
+	for index, step := range steps {
+		engine.RecordResourceFailure(context.Background(), profile, "free", quotaFailure())
+		got := engine.Circuits().Inspect(free.ModelKey, now)
+		if !got.Until.Equal(now.Add(step)) || got.Strikes != index+1 {
+			t.Fatalf("strike %d: %#v, want until +%s", index+1, got, step)
+		}
+		now = got.Until.Add(time.Minute)
+	}
+	// Past the ladder the ceiling holds: a free model stays at four hours rather
+	// than being written off until its monthly reset.
+	for range 2 {
+		engine.RecordResourceFailure(context.Background(), profile, "free", quotaFailure())
+		if got := engine.Circuits().Inspect(free.ModelKey, now); !got.Until.Equal(now.Add(4 * time.Hour)) {
+			t.Fatalf("past-ladder until = %s, want the four hour ceiling", got.Until)
+		}
+		now = engine.Circuits().Inspect(free.ModelKey, now).Until.Add(time.Minute)
+	}
+
+	// Real output clears the strike history, so the free model returns to the
+	// first step instead of resuming at the ceiling.
+	engine.RecordResourceSuccess(free)
+	if got := engine.SuspensionFor(free, now); got.State != ResourceAvailable {
+		t.Fatalf("suspension after output = %#v, want available", got)
+	}
+	engine.RecordResourceFailure(context.Background(), profile, "free", quotaFailure())
+	if got := engine.Circuits().Inspect(free.ModelKey, now); !got.Until.Equal(now.Add(time.Minute)) {
+		t.Fatalf("first strike after output until = %s, want +1m", got.Until)
+	}
+}
+
+func TestPaidProviderLadderAppliesBeyondOpenCodeGo(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	monthly := now.Add(20 * 24 * time.Hour)
+	engine := NewEngine(
+		WithClock(func() time.Time { return now }),
+		WithLimitCalendar(fakeLimitCalendar{monthly: monthly}),
+	)
+	candidate := Candidate{
+		ID: "paid", Enabled: true, ModelID: "llmgateway/claude-sonnet",
+		BindingKey: ResourceKey(ScopeCredential, "account"),
+		ModelKey:   ResourceKey(ScopeModel, "account/llmgateway/claude-sonnet"),
+	}
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{candidate}}
+
+	// The account is metered, so the block reaches the credential rather than the
+	// single model.
+	engine.RecordResourceFailure(context.Background(), profile, "paid", quotaFailure())
+	if got := engine.SuspensionFor(candidate, now); got.State != ResourceWaiting || got.Scope != SuspensionScopeCredential {
+		t.Fatalf("paid suspension = %#v, want waiting credential scope", got)
+	}
+
+	steps := []time.Duration{2 * time.Hour, 2 * time.Hour, 2 * time.Hour, 24 * time.Hour}
+	for index, step := range steps {
+		engine.RecordResourceFailure(context.Background(), profile, "paid", quotaFailure())
+		got := engine.Circuits().Inspect(candidate.BindingKey, now)
+		if !got.Until.Equal(now.Add(step)) || got.Strikes != index+1 {
+			t.Fatalf("strike %d: %#v, want until +%s", index+1, got, step)
+		}
+		now = got.Until.Add(time.Minute)
+	}
+	engine.RecordResourceFailure(context.Background(), profile, "paid", quotaFailure())
+	if got := engine.Circuits().Inspect(candidate.BindingKey, now); !got.Until.Equal(monthly) {
+		t.Fatalf("fifth strike until = %s, want monthly reset %s", got.Until, monthly)
+	}
+}
+
+func TestPaidLadderRepeatsItsLastStepWithoutAKnownMonthlyReset(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	candidate := Candidate{
+		ID: "paid", Enabled: true, ModelID: "modal/llama-3",
+		BindingKey: ResourceKey(ScopeCredential, "account"),
+		ModelKey:   ResourceKey(ScopeModel, "account/modal/llama-3"),
+	}
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{candidate}}
+
+	// Strikes past the ladder repeat the last step, because a provider whose
+	// monthly reset nobody has observed cannot be waited on any further.
+	var failedAt, last time.Time
+	for range 6 {
+		failedAt = now
+		engine.RecordResourceFailure(context.Background(), profile, "paid", quotaFailure())
+		last = engine.Circuits().Inspect(candidate.BindingKey, now).Until
+		now = last.Add(time.Minute)
+	}
+	if !last.Equal(failedAt.Add(24 * time.Hour)) {
+		t.Fatalf("unknown monthly reset until = %s, want the last step repeated", last)
+	}
+}
+
+func TestSameAccountProfilesShareOneSuspension(t *testing.T) {
+	// Two profiles on one API key are one account: their limits and their strikes
+	// must be shared, or a limit reached through one profile leaves its sibling
+	// free to burn the same exhausted quota.
+	now := time.Unix(1_000_000, 0)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	shared := ResourceKey(ScopeCredential, "account")
+	first := Candidate{
+		ID: "first", Enabled: true, ModelID: "llmgateway/claude-sonnet",
+		BindingKey: shared, ModelKey: ResourceKey(ScopeModel, "account/first"),
+	}
+	second := Candidate{
+		ID: "second", Enabled: true, ModelID: "llmgateway/claude-opus",
+		BindingKey: shared, ModelKey: ResourceKey(ScopeModel, "account/second"),
+	}
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{first, second}}
+
+	engine.RecordResourceFailure(context.Background(), profile, "first", quotaFailure())
+	if got := engine.SuspensionFor(second, now); got.State != ResourceWaiting {
+		t.Fatalf("sibling profile suspension = %#v, want waiting", got)
+	}
+	if got := engine.SuspensionFor(first, now); got.Scope != SuspensionScopeCredential {
+		t.Fatalf("suspension scope = %q, want credential", got.Scope)
+	}
+
+	// A second failure through the other profile adds a strike rather than
+	// restarting the ladder.
+	now = engine.Circuits().Inspect(shared, now).Until.Add(time.Minute)
+	engine.RecordResourceFailure(context.Background(), profile, "second", quotaFailure())
+	got := engine.Circuits().Inspect(shared, now)
+	if got.Strikes != 2 {
+		t.Fatalf("strikes = %d, want 2 for one shared account", got.Strikes)
+	}
+}
+
 func TestRepeatFailureInRunningBlockCountsOnce(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	engine := NewEngine(WithClock(func() time.Time { return now }))
