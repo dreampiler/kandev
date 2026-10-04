@@ -1,10 +1,10 @@
 import { useCallback, useRef, useState } from "react";
-import * as api from "@/lib/api/domains/tool-payload-retention-api";
+import * as api from "@/lib/api/domains/archived-data-retention-api";
 import type {
-  ToolPayloadAge,
-  ToolPayloadPolicyUpdate,
-  ToolPayloadRetentionStatus,
-} from "@/lib/types/tool-payload-retention";
+  ArchivedDataPolicy,
+  ArchivedDataPolicyUpdate,
+  ArchivedDataRetentionStatus,
+} from "@/lib/types/archived-data-retention";
 import {
   loadRetentionStatus,
   newRetentionLifetime,
@@ -16,8 +16,8 @@ import {
   useRetentionStatusPolling,
 } from "./use-retention-lifecycle";
 
-export function useToolPayloadRetention() {
-  const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
+export function useArchivedDataRetention() {
+  const [status, setStatus] = useState<ArchivedDataRetentionStatus | null>(null);
   const [acceptedId, setAcceptedId] = useState<string | null>(null);
   const acceptedOperation = useRef<{ id: string; kind: "analysis" | "cleanup" } | null>(null);
   const sinks = useRetentionActionSinks();
@@ -26,7 +26,7 @@ export function useToolPayloadRetention() {
     () =>
       loadRetentionStatus(
         owner.current,
-        api.fetchToolPayloadRetention,
+        api.fetchArchivedDataRetention,
         (next) => {
           setStatus(next);
           const accepted = acceptedOperation.current;
@@ -51,7 +51,7 @@ export function useToolPayloadRetention() {
   const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
   useRetentionStatusPolling(reload, active, preparing);
   const perform = useRetentionMutation(owner, sinks.setPending, sinks);
-  const acceptStatus = useCallback((next: ToolPayloadRetentionStatus) => {
+  const acceptStatus = useCallback((next: ArchivedDataRetentionStatus) => {
     acceptedOperation.current = null;
     setStatus(next);
     setAcceptedId(null);
@@ -64,14 +64,14 @@ export function useToolPayloadRetention() {
     [],
   );
   const save = useCallback(
-    (policy: ToolPayloadPolicyUpdate) =>
-      perform(() => api.saveToolPayloadRetention(policy), acceptStatus),
+    (policy: ArchivedDataPolicyUpdate) =>
+      perform(() => api.saveArchivedDataRetention(policy), acceptStatus),
     [perform, acceptStatus],
   );
   const analyze = useCallback(
-    (age: ToolPayloadAge) =>
+    (policy: ArchivedDataPolicy) =>
       perform(
-        () => api.analyzeToolPayloadRetention(age),
+        () => api.analyzeArchivedDataRetention(policy),
         (result) => acceptOperation(result, "analysis"),
       ),
     [perform, acceptOperation],
@@ -79,13 +79,13 @@ export function useToolPayloadRetention() {
   const run = useCallback(
     (revision: number) =>
       perform(
-        () => api.runToolPayloadRetention(revision),
+        () => api.runArchivedDataRetention(revision),
         (result) => acceptOperation(result, "cleanup"),
       ),
     [perform, acceptOperation],
   );
   const cancel = useCallback(
-    (id: string) => perform(() => api.cancelToolPayloadRetention(id), acceptStatus),
+    (id: string) => perform(() => api.cancelArchivedDataRetention(id), acceptStatus),
     [perform, acceptStatus],
   );
   return {
