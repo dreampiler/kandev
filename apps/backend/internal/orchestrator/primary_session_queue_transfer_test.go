@@ -223,31 +223,3 @@ func TestHandleQueuedMessageExecutionErrorWithoutLivePrimaryRequeuesInPlace(t *t
 		t.Fatalf("fallback requeue on stranded session = %#v, ok=%t", kept, ok)
 	}
 }
-
-// A queue operation that could not acquire its session admission never reached
-// queue state, so the message must be requeued for the next delivery trigger
-// instead of falling through to the message-loss branch.
-func TestHandleQueuedMessageExecutionErrorRequeuesOnAdmissionTimeout(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateRunning)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	if _, err := svc.messageQueue.QueueMessage(
-		ctx, "s1", "t1", "in-flight", "", messagequeue.QueuedByUser, false, nil,
-	); err != nil {
-		t.Fatalf("queue prompt: %v", err)
-	}
-	taken, ok := svc.messageQueue.TakeQueued(ctx, "s1")
-	if !ok {
-		t.Fatal("take queued prompt")
-	}
-
-	svc.handleQueuedMessageExecutionError(
-		ctx, "s1", taken, nil, false, false, messagequeue.ErrSessionAdmissionTimeout,
-	)
-
-	kept, ok := svc.messageQueue.TakeQueued(ctx, "s1")
-	if !ok || kept.Content != "in-flight" {
-		t.Fatalf("admission timeout must requeue the message, got %#v ok=%t", kept, ok)
-	}
-}

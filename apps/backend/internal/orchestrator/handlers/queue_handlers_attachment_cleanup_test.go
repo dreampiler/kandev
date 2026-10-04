@@ -615,7 +615,6 @@ type controlledCleanupClaimer struct {
 	lastSession atomic.Value
 	lastUser    atomic.Value
 	claimErr    error
-	releaseErr  error
 }
 
 func (c *controlledCleanupClaimer) ClaimMessageAttachments(context.Context, string, string, []v1.MessageAttachment) error {
@@ -627,9 +626,6 @@ func (c *controlledCleanupClaimer) ReleaseMessageAttachments(ctx context.Context
 	identity, ok := authn.IdentityFromContext(ctx)
 	if !ok || identity.UserID == "" {
 		return errors.New("missing attachment authorization")
-	}
-	if c.releaseErr != nil {
-		return c.releaseErr
 	}
 	if c.failures.Load() > 0 {
 		c.failures.Add(-1)
