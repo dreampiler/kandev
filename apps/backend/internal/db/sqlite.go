@@ -9,11 +9,27 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 )
 
 const (
 	defaultBusyTimeout = 5 * time.Second
+
+	// sqliteWriterDriverName registers a writer-only driver whose every
+	// connection applies the writer pragmas that have no DSN parameter. It
+	// stays a separate driver name because sqlx is told the dialect name
+	// separately (sqlx.NewDb) while database/sql keys its driver registry by
+	// this name.
+	sqliteWriterDriverName = "sqlite3_kandev_writer"
+
+	// journalSizeLimitSQL caps the WAL file size that survives a WAL reset.
+	// A checkpoint alone rewrites the WAL in place without shrinking it, so
+	// without this bound the file stays at its high-water mark for the life of
+	// the database. The limit is a reset-time size bound, not a per-write
+	// budget: the WAL still grows freely up to it between resets. 67108864 bytes
+	// is 64 MiB, which leaves room for a write burst over the ~4 MiB default
+	// autocheckpoint while bounding a single file.
+	journalSizeLimitSQL = "PRAGMA journal_size_limit = 67108864"
 
 	// defaultSQLiteReaderConns is the number of concurrent read connections.
 	// SQLite WAL mode allows many readers alongside a single writer. The
@@ -28,6 +44,20 @@ const (
 	// sqliteReaderConnsEnv overrides defaultSQLiteReaderConns at startup.
 	sqliteReaderConnsEnv = "KANDEV_SQLITE_READER_CONNS"
 )
+
+// applyWriterPragmas runs on every writer connection. journal_size_limit is
+// per-connection state and a pooled connection can be replaced at any time, so
+// it is set here rather than once per database handle.
+func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
+	_, err := conn.Exec(journalSizeLimitSQL, nil)
+	return err
+}
+
+func init() {
+	sql.Register(sqliteWriterDriverName, &sqlite3.SQLiteDriver{
+		ConnectHook: applyWriterPragmas,
+	})
+}
 
 // sqliteReaderConns resolves the read pool size. A missing, non-numeric, or
 // non-positive override keeps the default; larger values are capped.
@@ -67,7 +97,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
-	db, err := sql.Open("sqlite3", dsn)
+	db, err := sql.Open(sqliteWriterDriverName, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
