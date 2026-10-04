@@ -29,7 +29,11 @@ import {
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
 import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
-import { interruptionRecoveryKey, retryNoticeVisible } from "./interruption-recovery-feedback";
+import {
+  interruptionRecoveryKey,
+  retainedTurnRecoveryKey,
+  retryNoticeVisible,
+} from "./interruption-recovery-feedback";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -217,12 +221,22 @@ function SettledActionMessage({
   recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
   if (metadata?.retrying) {
     return retryNoticeVisible(sessionState, metadata) ? (
       <TransientRetryNotice metadata={metadata} taskId={taskId} />
     ) : null;
   }
-  if (isSessionActive(sessionState) && metadata?.recovery_actions !== true) return null;
+  if (
+    isSessionActive(sessionState) &&
+    metadata?.recovery_actions !== true &&
+    !isRetainedTurnFailure
+  ) {
+    return null;
+  }
 
   return (
     <SettledFailureMessage
@@ -260,7 +274,7 @@ function SettledFailureMessage({
       ? t(interruptionRecoveryKey(metadata), { count: metadata.attempts_started })
       : readableFailureSummary(message);
   const needsDetails = safeMessage === null;
-  const renderedMetadata = recoveryActionsVisible ? metadata : withoutRecoveryActions(metadata);
+  const renderedMetadata = settledFailureMetadata(metadata, recoveryActionsVisible);
 
   const specialRecovery = renderSpecialRecovery({
     metadata: renderedMetadata,
@@ -286,6 +300,7 @@ function SettledFailureMessage({
           <div className={cn("text-xs wrap-anywhere", textClass)}>
             {needsDetails ? t("task:anErrorOccurred") : safeMessage}
           </div>
+          <RetainedTurnRecoveryFeedback metadata={metadata} />
           {renderSettledActionButtons({
             actions: renderedMetadata?.actions,
             taskId,
@@ -300,6 +315,28 @@ function SettledFailureMessage({
         </div>
       </div>
     </div>
+  );
+}
+
+function settledFailureMetadata(metadata: ActionMeta | undefined, recoveryActionsVisible: boolean) {
+  const isRetainedTurnFailure =
+    metadata?.variant === "error" &&
+    metadata.failure_scope === "turn" &&
+    metadata.runtime_retained === true;
+  if (isRetainedTurnFailure || !recoveryActionsVisible) {
+    return withoutRecoveryActions(metadata);
+  }
+  return metadata;
+}
+
+function RetainedTurnRecoveryFeedback({ metadata }: { metadata: ActionMeta | undefined }) {
+  const { t } = useTranslation();
+  const key = retainedTurnRecoveryKey(metadata ?? {});
+  if (!key) return null;
+  return (
+    <p className="mt-1 text-xs text-muted-foreground" data-testid="retained-turn-recovery-feedback">
+      {t(key, { count: metadata?.attempts_started })}
+    </p>
   );
 }
 

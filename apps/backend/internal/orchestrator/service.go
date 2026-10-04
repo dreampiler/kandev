@@ -1906,6 +1906,7 @@ func NewService(
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentTurnFailed:      s.handleAgentTurnFailed,
 		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,

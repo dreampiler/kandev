@@ -9120,6 +9120,10 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 // task to REVIEW for non-transient errors, and completes the in-flight turn.
 // Returns the (possibly remapped) error for the caller to surface.
 func (s *Service) handlePromptError(ctx context.Context, taskID, sessionID string, previousSessionState models.TaskSessionState, err error) error {
+	var retainedFailure *lifecycle.RetainedPromptFailureError
+	if errors.As(err, &retainedFailure) {
+		return err
+	}
 	if isTransientPromptError(err) && s.isSessionResetInProgress(sessionID) {
 		s.logger.Warn("prompt deferred while session reset is in progress; retry expected",
 			zap.String("task_id", taskID),
@@ -10537,10 +10541,28 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	if err := s.finishCancelledAgentTurn(ctx, sessionID, prepared); err != nil {
 		return err
 	}
+	s.acknowledgeRetainedPromptFailure(prepared.identity)
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+func (s *Service) acknowledgeRetainedPromptFailure(identity cancellationIdentity) {
+	if identity.executionID == "" || identity.promptGeneration == 0 {
+		return
+	}
+	acknowledger, ok := s.agentManager.(interface {
+		AcknowledgeRetainedPromptFailure(string, uint64) bool
+	})
+	if !ok {
+		return
+	}
+	if !acknowledger.AcknowledgeRetainedPromptFailure(identity.executionID, identity.promptGeneration) {
+		s.logger.Debug("cancelled prompt no longer owns retained failure settlement",
+			zap.String("execution_id", identity.executionID),
+			zap.Uint64("prompt_generation", identity.promptGeneration))
+	}
 }
 
 // reconcileJoinedExplicitCancellation applies the user-facing part of an

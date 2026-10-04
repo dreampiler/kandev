@@ -36,7 +36,12 @@ func (s *Service) continuationCancellationOwnsTurn(ctx context.Context, sessionI
 	entry.mu.Lock()
 	executionID, generation := entry.acceptedExecution, entry.acceptedGeneration
 	restoredID := entry.restoredExecution
+	started := entry.started
+	retained := entry.retainedRuntime
 	entry.mu.Unlock()
+	if retained != nil {
+		return s.retainedContinuationCancellationOwnsTurn(ctx, sessionID, executionID, generation, started)
+	}
 	if executionID == "" {
 		if restoredID == "" {
 			return true
@@ -53,10 +58,46 @@ func (s *Service) continuationCancellationOwnsTurn(ctx context.Context, sessionI
 	return evidence.executionID == executionID && evidence.promptGeneration == generation
 }
 
+func (s *Service) retainedContinuationCancellationOwnsTurn(
+	ctx context.Context,
+	sessionID, executionID string,
+	generation uint64,
+	started int,
+) bool {
+	if executionID == "" || generation == 0 || started == 0 {
+		return false
+	}
+	liveID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || liveID != executionID {
+		return false
+	}
+	generationReader, ok := s.agentManager.(interface {
+		GetPromptGenerationForSession(context.Context, string) (uint64, error)
+	})
+	if !ok {
+		return false
+	}
+	liveGeneration, err := generationReader.GetPromptGenerationForSession(ctx, sessionID)
+	if err != nil || liveGeneration != generation {
+		return false
+	}
+	evidence, ok := s.promptAttemptForSession(sessionID)
+	if !ok {
+		return false
+	}
+	evidence.mu.Lock()
+	defer evidence.mu.Unlock()
+	return evidence.executionID == executionID && evidence.promptGeneration == generation
+}
+
 func (s *Service) cancelContinuationRetry(ctx context.Context, taskID, sessionID string, entry *transientRetryEntry) bool {
 	ctx = context.WithValue(ctx, continuationCancelContextKey{}, entry)
 	if err := s.CancelAgent(ctx, sessionID); err != nil {
 		return false
+	}
+	if entry.retainedRuntime != nil {
+		s.finishRetainedRetryWithoutDispatch(context.WithoutCancel(ctx), taskID, sessionID, entry, "cancelled")
+		return true
 	}
 	s.finishContinuationManual(context.WithoutCancel(ctx), taskID, sessionID, "", entry, "cancelled")
 	return true
