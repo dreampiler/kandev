@@ -452,8 +452,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 					launchProfileID = resolved.ExecutionProfileID
 					if routeClaimed {
 						claimedRouteGeneration = resolved.Generation
-						applyResolvedExecution(launchSession, resolved)
-						if updateErr := s.repo.UpdateTaskSession(bgCtx, launchSession); updateErr != nil {
+						if updateErr := s.persistResolvedExecution(bgCtx, launchSession, resolved); updateErr != nil {
 							s.logger.Warn("failed to persist dynamic route for prepared session",
 								zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(updateErr))
 							_ = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, updateErr, launchSession)
@@ -2272,8 +2271,7 @@ func (s *Service) resolveDynamicLaunchExecution(
 		}
 		return resolved.ExecutionProfileID, nil
 	}
-	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := s.persistResolvedExecution(ctx, session, resolved); err != nil {
 		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
 	}
 	return resolved.ExecutionProfileID, nil

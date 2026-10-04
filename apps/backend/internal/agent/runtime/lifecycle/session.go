@@ -878,6 +878,12 @@ func (sm *SessionManager) applyExplicitSessionMode(ctx context.Context, executio
 	if mode == "" {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if sm.startupModeUnavailable(execution, sessionID, mode) {
+		return nil
+	}
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	defer releaseClient()
 	if client == nil {
