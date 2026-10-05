@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { getWorkspaceAggregateRunning } from "@/lib/api/domains/office-overview-api";
 import { useOverviewList } from "@/hooks/domains/office/use-overview-list";
 import type { OverviewRunningKind, OverviewSystem } from "@/lib/state/slices/office/overview-types";
-import { durationSince, occurredTime } from "./overview-format";
+import { durationSince, occurredTime, relativeTime } from "./overview-format";
 import { OverviewQueueTable, OverviewSessionTable, OverviewTaskTable } from "./overview-tables";
 import { OverviewStatusDot } from "./overview-status-legend";
 import { statusTextClass, type OverviewStatusTone } from "./overview-status-colors";
@@ -99,6 +99,18 @@ function StatCard({
       <div className={className}>{body}</div>
     </Card>
   );
+}
+
+/**
+ * The blocked-model sub line with the relative reading of the clear instant on
+ * hover. It is a node rather than a bare string for that hover alone: the line
+ * reports a fixed instant, and the card is the only place an operator can ask
+ * how far off it is.
+ */
+function blockedSubNode(t: TFunction, system: OverviewSystem, loading: boolean) {
+  const text = blockedSub(t, system, loading);
+  if (!system.earliest_unblock_at || text === undefined) return text;
+  return <span title={relativeTime(system.earliest_unblock_at)}>{text}</span>;
 }
 
 /**
@@ -211,7 +223,7 @@ export function OverviewSystemCards({
           tone={blocked > 0 ? "error" : null}
           title={t("office:overviewBlockedAccounts")}
           value={blocked}
-          sub={blockedSub(t, values, loading)}
+          sub={blockedSubNode(t, values, loading)}
           href={`#${MODELS_ANCHOR}`}
         />
       </div>
