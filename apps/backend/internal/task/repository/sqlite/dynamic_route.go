@@ -430,6 +430,55 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 	return state, nil
 }
 
+// ListRouteStatesForSessions returns the durable route state of every requested
+// session that has one, keyed by session ID. A caller that needs one row per
+// session reads them in a single query instead of one query per session, and a
+// session without a route row is simply absent from the result.
+func (r *Repository) ListRouteStatesForSessions(
+	ctx context.Context,
+	sessionIDs []string,
+) (map[string]dynamicruntime.RouteState, error) {
+	states := make(map[string]dynamicruntime.RouteState, len(sessionIDs))
+	persistent := make([]string, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		if sessionID == "" || isTransientRouteSession(sessionID) {
+			continue
+		}
+		persistent = append(persistent, sessionID)
+	}
+	for _, chunk := range chunkIDs(persistent, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+			SELECT session_id, logical_profile_id, execution_profile_id,
+			route_generation, profile_version, state, continuation_json, policy_state_json, updated_at
+			FROM dynamic_route_states WHERE session_id IN (`+placeholders+`)
+		`), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var state dynamicruntime.RouteState
+			if err := rows.Scan(
+				&state.SessionID, &state.LogicalProfileID, &state.ExecutionProfileID,
+				&state.Generation, &state.ProfileVersion, &state.Status,
+				&state.ContinuationJSON, &state.PolicyStateJSON, &state.UpdatedAt,
+			); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			states[state.SessionID] = state
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return states, nil
+}
+
 // ListPendingRouteStates returns only states whose durable policy deadline can
 // be reconciled automatically. States marked retrying are intentionally not
 // returned after restart because dispatch may already have crossed the
