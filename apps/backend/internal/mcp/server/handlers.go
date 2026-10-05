@@ -51,7 +51,7 @@ const (
 
 func moveTaskEntryOptionsToolOption() mcp.ToolOption {
 	return mcp.WithObject("entry_options",
-		mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change."),
+		mcp.Description("One-shot overrides applied only when the task enters the target step; they never change durable step configuration and require an actual workflow step change. Rejected when the target step does not start an agent."),
 		mcp.Properties(map[string]any{
 			"reset_context": map[string]any{
 				typeKey:        "boolean",

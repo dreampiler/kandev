@@ -1220,6 +1220,10 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	}))
 	require.NoError(t, wfRepo.CreateStep(ctx, &workflowmodels.WorkflowStep{
 		ID: "dst-step3", WorkflowID: "wf-defer3", Name: "Dest", Position: 1, CreatedAt: now, UpdatedAt: now,
+		// The target must start an agent to receive one-shot entry options.
+		Events: workflowmodels.StepEvents{
+			OnEnter: []workflowmodels.OnEnterAction{{Type: workflowmodels.OnEnterAutoStartAgent}},
+		},
 	}))
 
 	queue := &pendingMoveRecordingQueuer{}
@@ -1254,13 +1258,16 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Empty(t, queue.calls)
 }
 
-func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
+func TestMoveTaskErrorMessage_SurfacesReasonForClassifiedErrors(t *testing.T) {
+	// Classified errors carry the real reason so an agent can correct the call
+	// in one step, while a service error that embeds an internal identifier (a
+	// WIP-limit step ID) still maps to a plain phrase instead of leaking it.
 	assert.Equal(t,
-		"Move task conflicts with the current task or workflow state",
+		"Move task conflicts with the current task or workflow state: the target workflow step's WIP limit is exceeded",
 		moveTaskErrorMessage(fmt.Errorf("WIP limit exceeded for workflow step secret-step")),
 	)
 	assert.Equal(t,
-		"Invalid move_task request",
+		"workflow_step_id is required",
 		moveTaskErrorMessage(fmt.Errorf("workflow_step_id is required")),
 	)
 	assert.Equal(t,
