@@ -63,6 +63,7 @@ const ACCOUNT_KIND_KEYS: Record<string, string> = {
   anthropic_profile: "overviewAccountAnthropicProfile",
   google_antigravity: "overviewAccountAntigravity",
   proxy: "overviewAccountProxy",
+  unknown: "overviewAccountUnknown",
 };
 
 /** The i18n key naming an account kind. An unrecognized kind reads as unknown. */
@@ -192,7 +193,7 @@ function accountUsage(
     usage.stale ||= row.stale === true;
     collectWindows(usage.windows, seen, row.windows);
     usage.internal ??= internalWindows(row);
-    usage.limitHitCount = (usage.limitHitCount ?? 0) + (row.limit_hits?.count ?? 0);
+    usage.limitHitCount = accountLimitHits(usage.limitHitCount, row.limit_hits?.count);
   }
   usage.pending = !reported;
   return usage;
@@ -217,10 +218,40 @@ function internalWindows(row: AgentProfileUsage) {
   return (row.internal?.windows ?? []).map((entry) => ({ label: entry.label, turns: entry.turns }));
 }
 
+/**
+ * Recorded limit hits are an account total the backend copies onto every profile
+ * of that account, so adding the models' rows would count one hit once per model.
+ * One account's value is used instead.
+ */
+function accountLimitHits(
+  current: number | undefined,
+  reported: number | undefined,
+): number | undefined {
+  if (reported === undefined) return current;
+  return Math.max(current ?? 0, reported);
+}
+
 /** A whole-credential block reads as the account; named subjects read as models. */
 function blockState(accountWide: boolean, hasSubjects: boolean): OverviewAccountBlock["state"] {
   if (accountWide) return "account";
   return hasSubjects ? "models" : "clear";
+}
+
+/**
+ * Whether an instant is the earlier of two. A circuit's clear instant is UTC
+ * while a provider window keeps its own offset, so the two are compared as
+ * instants: a lexical comparison would read "20:00Z" as earlier than
+ * "09:00+09:00" when the offset makes it later. An instant that cannot be parsed
+ * never displaces a known one.
+ */
+function earlierInstant(candidate?: string, current?: string): boolean {
+  if (!candidate) return false;
+  if (!current) return true;
+  const candidateMs = Date.parse(candidate);
+  const currentMs = Date.parse(current);
+  if (Number.isNaN(candidateMs)) return false;
+  if (Number.isNaN(currentMs)) return true;
+  return candidateMs < currentMs;
 }
 
 /**
@@ -238,7 +269,7 @@ function accountBlock(
   let accountWide = false;
   let until: string | undefined;
   const noteUntil = (value?: string) => {
-    if (value && (!until || value < until)) until = value;
+    if (earlierInstant(value, until)) until = value;
   };
   for (const model of models) {
     for (const circuit of blockingByProfile.get(model.agent_profile_id) ?? []) {
