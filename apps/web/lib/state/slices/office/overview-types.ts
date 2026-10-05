@@ -150,11 +150,19 @@ export type OverviewPullRequest = {
 };
 
 export type OverviewStepMove = {
+  /** The step the task left to arrive here; absent when the move had no source. */
+  from_step_name?: string;
   step_name?: string;
   at: string;
   actor?: string;
   trigger?: string;
   stopped?: boolean;
+  /** How many movements of the same pair of steps this one line stands for. */
+  repeat?: number;
+  /** Arriving at a step this run had already left: work sent back. */
+  sent_back?: boolean;
+  /** Arriving from a step that starts nothing: finished or held work opened again. */
+  reopened?: boolean;
 };
 
 export type OverviewFollowupSession = {
@@ -212,6 +220,14 @@ export type OverviewEvent = {
   from?: string;
   to?: string;
   moves?: OverviewStepMove[];
+  /** Every committed transition in the run, counted before moves were folded. */
+  move_total?: number;
+  /** Moves that returned the task to a step this run had already left. */
+  sent_back?: number;
+  /** Moves that opened finished or held work again. */
+  reopened?: number;
+  /** The run ended parked on a step that starts nothing. */
+  held?: boolean;
   failure?: OverviewFailure;
 };
 

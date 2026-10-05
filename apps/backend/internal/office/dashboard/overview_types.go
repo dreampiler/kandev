@@ -261,6 +261,18 @@ type OverviewEvent struct {
 	// Moves is a run of consecutive workflow-step changes for one task,
 	// oldest first. Empty for every kind but a step move.
 	Moves []OverviewStepMove `json:"moves,omitempty"`
+	// MoveTotal counts every committed transition in the run before repeated and
+	// detouring steps were folded out of Moves, so the summary a reader sees
+	// accounts for the whole run rather than for what survived the fold.
+	MoveTotal int `json:"move_total,omitempty"`
+	// SentBack and Reopened count the moves worth noticing, and Held reports
+	// that the run ended parked on a step that starts nothing. They are read
+	// from the ledger's own rows here rather than by the client, because what
+	// counts as going backwards depends on steps this run already passed
+	// through.
+	SentBack int  `json:"sent_back,omitempty"`
+	Reopened int  `json:"reopened,omitempty"`
+	Held     bool `json:"held,omitempty"`
 	// Failure is what happened after a session failed, read on this same pass
 	// so it advances whenever the screen does. Absent when the failure is the
 	// newest thing known about the task.
@@ -279,13 +291,28 @@ type OverviewPullRequest struct {
 // arriving here starts nothing by itself, read from the step's own
 // configuration rather than from its name.
 type OverviewStepMove struct {
-	StepName string    `json:"step_name,omitempty"`
-	At       time.Time `json:"at"`
+	// FromStepName is the step the task left to arrive here, empty when the move
+	// had no recorded source or the source row is gone. The two names are
+	// reported separately because a move reads as a change of place, and a step
+	// name sitting beside the actor is read as a phrase instead.
+	FromStepName string    `json:"from_step_name,omitempty"`
+	StepName     string    `json:"step_name,omitempty"`
+	At           time.Time `json:"at"`
 	// Actor is what kind of thing moved the task, and Trigger is why, both as
 	// the codes the ledger records. The client phrases them.
 	Actor   string `json:"actor,omitempty"`
 	Trigger string `json:"trigger,omitempty"`
 	Stopped bool   `json:"stopped,omitempty"`
+	// Repeat counts the movements of the same pair of steps that collapsed into
+	// this one line, so a run that went back and forth reads as one entry with a
+	// count rather than as the same move repeated.
+	Repeat int `json:"repeat,omitempty"`
+	// SentBack marks arriving at a step the task had already left earlier in
+	// this same run, and Reopened marks arriving from a step that starts
+	// nothing on entry, so a move out of finished or held work is not read as
+	// ordinary progress. Reopened wins when both would apply.
+	SentBack bool `json:"sent_back,omitempty"`
+	Reopened bool `json:"reopened,omitempty"`
 }
 
 // OverviewFailure is what a failed session was followed by, read fresh on every

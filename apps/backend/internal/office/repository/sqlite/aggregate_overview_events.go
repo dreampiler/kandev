@@ -248,17 +248,24 @@ func (r *Repository) ListOverviewDecisions(
 // its name, so whether arriving starts work is read from the same evidence
 // every other consumer of that question reads.
 type OverviewStepTransitionRow struct {
-	TaskID        string `db:"task_id"`
-	WorkspaceID   string `db:"workspace_id"`
-	Title         string `db:"title"`
-	StepID        string `db:"step_id"`
-	StepName      string `db:"step_name"`
-	StepEvents    string `db:"step_events"`
-	PullFromStep  string `db:"pull_from_step_id"`
-	Trigger       string `db:"trigger"`
-	ActorKind     string `db:"actor_kind"`
-	OccurredAtRaw string `db:"occurred_at"`
-	OccurredAt    time.Time
+	TaskID       string `db:"task_id"`
+	WorkspaceID  string `db:"workspace_id"`
+	Title        string `db:"title"`
+	StepID       string `db:"step_id"`
+	StepName     string `db:"step_name"`
+	StepEvents   string `db:"step_events"`
+	PullFromStep string `db:"pull_from_step_id"`
+	// FromStepID and the fields after it describe the step the task left, joined
+	// the same way as the destination so a reader can say where a move came
+	// from and can tell a departure from a finished step without a second query.
+	FromStepID       string `db:"from_step_id"`
+	FromStepName     string `db:"from_step_name"`
+	FromStepEvents   string `db:"from_step_events"`
+	FromPullFromStep string `db:"from_pull_from_step_id"`
+	Trigger          string `db:"trigger"`
+	ActorKind        string `db:"actor_kind"`
+	OccurredAtRaw    string `db:"occurred_at"`
+	OccurredAt       time.Time
 }
 
 // RunsOnEntry reports whether arriving at this row's step starts work by
@@ -279,6 +286,23 @@ func (r *OverviewStepTransitionRow) RunsOnEntry() bool {
 	}.RunsOnEntry()
 }
 
+// RunsOnEntryFrom reports the same for the step this row left, read through the
+// same decision. A move out of a step that starts nothing is how a caller
+// recognises a finished or held step being reopened, so the evidence is the
+// step's configuration rather than a name.
+func (r *OverviewStepTransitionRow) RunsOnEntryFrom() bool {
+	var events wfmodels.StepEvents
+	if r.FromStepEvents != "" {
+		if err := json.Unmarshal([]byte(r.FromStepEvents), &events); err != nil {
+			events = wfmodels.StepEvents{}
+		}
+	}
+	return wfmodels.StepAutomation{
+		OnEnter:        events.OnEnter,
+		PullFromStepID: r.FromPullFromStep,
+	}.RunsOnEntry()
+}
+
 // ListOverviewStepTransitions returns the step changes since `since` for the
 // supplied workspaces, up to limit, ordered by task and time so a caller can
 // group a task's run of moves without a second sort. Task creation is left out
@@ -293,12 +317,17 @@ func (r *Repository) ListOverviewStepTransitions(
 		       COALESCE(ws.name, '') AS step_name,
 		       COALESCE(ws.events, '') AS step_events,
 		       COALESCE(ws.pull_from_step_id, '') AS pull_from_step_id,
+		       COALESCE(src.id, '') AS from_step_id,
+		       COALESCE(src.name, '') AS from_step_name,
+		       COALESCE(src.events, '') AS from_step_events,
+		       COALESCE(src.pull_from_step_id, '') AS from_pull_from_step_id,
 		       COALESCE(tr.trigger, '') AS trigger,
 		       COALESCE(tr.actor_kind, '') AS actor_kind,
 		       CAST(tr.occurred_at AS TEXT) AS occurred_at
 		FROM task_step_transitions tr
 		JOIN tasks t ON t.id = tr.task_id
 		LEFT JOIN workflow_steps ws ON ws.id = tr.to_workflow_step_id
+		LEFT JOIN workflow_steps src ON src.id = tr.from_workflow_step_id
 		WHERE t.workspace_id IN (%s)
 		  AND COALESCE(tr.trigger, '') <> 'task_created'
 		  AND tr.occurred_at >= ?
