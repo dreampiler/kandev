@@ -52,6 +52,8 @@ The existing POST task move endpoint adds an optional entry_options object. The 
 
 The legacy MCP prompt argument remains accepted for compatibility. A non-empty legacy prompt is copied to entry_options.instructions only when the nested field is empty; providing both values is a validation error. Responses include the normalized entry_options when supplied and identify immediate versus deferred acceptance with disposition. A deferred MCP response returns the authoritative source task until turn-end applies the move.
 
+`move_task_kandev` rejects a prompt or entry_options when the target step is a manual step that does not start work on entry (no auto_start_agent, queue_run, queue_run_for_each_participant, run_code_review, or pull source), for example Waiting, Blocked, Hold, or Done. An agent caller cannot rely on a parked or terminal step to consume a one-shot hand-off, so the move must omit options and record the instruction in the task description or plan. The HTTP and WebSocket move surfaces keep the session-or-auto-start rule above.
+
 The task.moved event includes move_id when a direct move carries options; it never exposes instructions or option values. Deferred moves include the complete typed value in PendingMove. No new task or workflow endpoint is introduced.
 
 ## Precedence and state machine
@@ -104,7 +106,9 @@ The existing task move authorization and MCP session authorization remain unchan
 - **GIVEN** a deferred move is persisted and the backend restarts, **WHEN** the source session becomes ready, **THEN** the target and all override fields are restored and applied once.
 - **GIVEN** the task has no session and the target step auto-starts, **WHEN** a human move includes instructions, **THEN** the first session and prompt include those instructions once.
 - **GIVEN** the task has no session and the target step does not auto-start, **WHEN** a move includes an agent-facing override, **THEN** the request is rejected without changing the task.
-- **GIVEN** an existing target session is waiting on a step without auto-start, **WHEN** a move includes a custom prompt, **THEN** the prompt is queued for that session's next input and is not duplicated by on_enter.
+- **GIVEN** an existing target session is waiting on a step without auto-start, **WHEN** an HTTP or WebSocket move includes a custom prompt, **THEN** the prompt is queued for that session's next input and is not duplicated by on_enter.
+- **GIVEN** the target step is a manual step that does not start work on entry (for example Done), **WHEN** an agent calls move_task_kandev with a prompt or entry_options, **THEN** the request is rejected with a validation error that names the missing agent recipient and no task change occurs.
+- **GIVEN** the target step starts a run on entry (queue_run, queue_run_for_each_participant, or run_code_review) without auto_start_agent, **WHEN** an agent calls move_task_kandev with a prompt or entry_options, **THEN** the options are accepted rather than rejected as a manual step.
 - **GIVEN** the target step normally resets context, **WHEN** reset_context is omitted, **THEN** the normal reset still happens; the override does not disable workflow policy.
 - **GIVEN** a user opens a stepper target on desktop, **WHEN** they choose options, **THEN** one anchored form-capable action surface can set reset, skip step prompt, and instructions before submitting the move.
 - **GIVEN** a user taps a target on a touch device, **WHEN** they open options, **THEN** the existing Drawer or Sheet exposes the same controls without requiring hover or horizontal scrolling.

@@ -291,6 +291,7 @@ Kandev normalizes the object, omits empty optional strings, and validates the de
 - `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
 - Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
 - The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
+- A prompt or `entry_options` is rejected when the destination is a manual step that does not start work on entry, for example Waiting, Blocked, Hold, or Done. Move without options and record the instruction in the task description or plan instead. A step that starts a run on entry (`queue_run`, `queue_run_for_each_participant`, `run_code_review`) is not manual and accepts the options.
 - Pull-request draft and review status are not generic move options.
 
 **No secrets or large dumps.** Messages are coordination, not a code-delivery channel. Do not send credentials, private keys, or large file contents through cross-task messages. Reference files by path; share access via the repository, not the message.
