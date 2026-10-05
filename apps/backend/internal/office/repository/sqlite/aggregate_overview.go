@@ -73,13 +73,18 @@ type OverviewQueueRow struct {
 	Oldest       time.Time
 }
 
-// OverviewCompletedRow is a task completed inside the look-back window.
+// OverviewCompletedRow is a task that entered a completing step inside the
+// look-back window. CompletedAt is that entry, not the task's last write, so a
+// task archived after it finished stays outside the window. ArchivedAt is the
+// archive time, empty for a task still on the board.
 type OverviewCompletedRow struct {
-	ID           string `db:"id"`
-	WorkspaceID  string `db:"workspace_id"`
-	Title        string `db:"title"`
-	UpdatedAtRaw string `db:"updated_at"`
-	UpdatedAt    time.Time
+	ID             string         `db:"id"`
+	WorkspaceID    string         `db:"workspace_id"`
+	Title          string         `db:"title"`
+	CompletedAtRaw string         `db:"completed_at"`
+	ArchivedAtRaw  sql.NullString `db:"archived_at"`
+	CompletedAt    time.Time
+	ArchivedAt     time.Time
 }
 
 // OverviewProfileSessionRow is a session started inside the look-back window,
@@ -328,34 +333,51 @@ func (r *Repository) FirstQueuedMessageBySession(ctx context.Context, sessionIDs
 	return out, nil
 }
 
-// ListOverviewCompleted returns the total number of tasks completed since
-// `since` per workspace plus the newest `limit` of them.
+// ListOverviewCompleted returns the total number of tasks per workspace that
+// entered a completing step since `since`, plus the newest `limit` of them.
+// The completion instant comes from the task's own step transition into a step
+// configured to complete its task, so archiving or editing a task that finished
+// earlier cannot pull it back into the window. The transitions are narrowed by
+// occurred_at through idx_task_step_transitions_occurred before the completing
+// steps are joined.
 func (r *Repository) ListOverviewCompleted(
 	ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 ) (map[string]int, []*OverviewCompletedRow, error) {
 	counts := make(map[string]int, len(workspaceIDs))
 	var recent []*OverviewCompletedRow
 	for _, batch := range workspaceIDBatches(workspaceIDs) {
-		placeholders, args := placeholdersFor(batch)
-		args = append(args, since)
+		placeholders, batchArgs := placeholdersFor(batch)
+		args := append([]interface{}{since}, batchArgs...)
 		var rows []*OverviewCompletedRow
 		query := `
-			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title, CAST(t.updated_at AS TEXT) AS updated_at
+			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title,
+			       CAST(completed.completed_at AS TEXT) AS completed_at,
+			       CAST(t.archived_at AS TEXT) AS archived_at
 			FROM tasks t
+			JOIN (
+				SELECT tr.task_id AS task_id, MAX(tr.occurred_at) AS completed_at
+				FROM task_step_transitions tr
+				JOIN workflow_steps ws ON ws.id = tr.to_workflow_step_id
+				WHERE ws.complete_task_on_enter = 1 AND tr.occurred_at >= ?
+				GROUP BY tr.task_id
+			) completed ON completed.task_id = t.id
 			WHERE t.workspace_id IN (` + strings.Join(placeholders, ",") + `)
 			  AND t.is_ephemeral = 0` + andNotAutomationOrigin + `
-			  AND t.state = 'COMPLETED' AND t.updated_at >= ?
+			  AND t.state = 'COMPLETED'
 		`
 		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
 			return nil, nil, err
 		}
 		for _, row := range rows {
-			row.UpdatedAt = parseSqliteTime(row.UpdatedAtRaw)
+			row.CompletedAt = parseSqliteTime(row.CompletedAtRaw)
+			if row.ArchivedAtRaw.Valid {
+				row.ArchivedAt = parseSqliteTime(row.ArchivedAtRaw.String)
+			}
 			counts[row.WorkspaceID]++
 		}
 		recent = append(recent, rows...)
 	}
-	sortByTimeDesc(recent, func(row *OverviewCompletedRow) time.Time { return row.UpdatedAt })
+	sortByTimeDesc(recent, func(row *OverviewCompletedRow) time.Time { return row.CompletedAt })
 	if limit > 0 && len(recent) > limit {
 		recent = recent[:limit]
 	}

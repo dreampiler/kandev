@@ -73,6 +73,7 @@ const workspace: WorkspaceAggregateEntry = {
     open_tasks: 3,
     waiting_tasks: 0,
     blocked_tasks: 0,
+    blocked_by_tasks: 0,
     problems: { error: 0, stalled: 1, delayed: 0 },
     top_warning: {
       task_id: "task-warn",
@@ -217,8 +218,11 @@ describe("overview project card destinations", () => {
     expect(within(taskList).getAllByTestId("overview-task-row")).toHaveLength(1);
     expect(hrefOf(within(row).getByText("Row task"))).toBe("/t/task-row");
 
+    // The completed filter is also a chip, so this figure's own name now matches
+    // more than one control in the card. The tile is the first of them.
+    const card = screen.getByTestId("overview-workspace-card");
     await act(async () => {
-      fireEvent.click(screen.getByText("Completed (24 h)"));
+      fireEvent.click(within(card).getAllByText("Completed (24 h)")[0]);
     });
     expect(getWorkspaceAggregateTasks).toHaveBeenLastCalledWith("ws-1", "completed", 50, {
       cache: "no-store",

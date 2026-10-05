@@ -58,7 +58,10 @@ func overviewFixture(t *testing.T) *testDeps {
 		id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT NOT NULL, position INTEGER NOT NULL,
 		content TEXT NOT NULL DEFAULT '', queued_at TIMESTAMP NOT NULL, queued_by TEXT NOT NULL DEFAULT '')`)
 	mustExec(t, deps, `CREATE TABLE IF NOT EXISTS task_step_transitions (
-		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL)`)
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, to_workflow_step_id TEXT, occurred_at TIMESTAMP NOT NULL)`)
+	mustExec(t, deps, `INSERT INTO workflow_steps (id, workflow_id, name, position, complete_task_on_enter, created_at, updated_at)
+		VALUES ('step-done', 'wf', 'Done', 1, 1, ?, ?), ('step-work', 'wf', 'Work', 0, 0, ?, ?)`,
+		time.Now().UTC(), time.Now().UTC(), time.Now().UTC(), time.Now().UTC())
 
 	now := time.Now().UTC()
 	insertOverviewTask(t, deps, "t-parent", "ws-office", "IN_PROGRESS", "", now)
@@ -66,6 +69,7 @@ func overviewFixture(t *testing.T) *testDeps {
 	insertOverviewTask(t, deps, "t-done", "ws-office", "COMPLETED", "", now)
 	insertOverviewTask(t, deps, "t-fail", "ws-kanban", "IN_PROGRESS", "", now.Add(-time.Hour))
 	insertOverviewTask(t, deps, "t-hidden", "ws-hidden", "IN_PROGRESS", "", now)
+	insertCompletionStepTransition(t, deps, "tr-done", "t-done", "step-done", now.Add(-30*time.Minute))
 	mustExec(t, deps, `INSERT INTO agents (id, name, created_at, updated_at) VALUES ('agent-a', 'claude-code', ?, ?)`, now, now)
 	mustExec(t, deps, `INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, created_at, updated_at)
 		VALUES ('p1', 'agent-a', 'fast', 'Agent A', ?, ?)`, now, now)
@@ -97,6 +101,14 @@ func insertOverviewSession(t *testing.T, deps *testDeps, id, taskID, state, errM
 	t.Helper()
 	mustExec(t, deps, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, error_message, started_at, updated_at)
 		VALUES (?, ?, 'p1', ?, ?, ?, ?)`, id, taskID, state, errMsg, started, started)
+}
+
+// insertCompletionStepTransition records the entry into a workflow step, which
+// is the instant the 24-hour completed window counts.
+func insertCompletionStepTransition(t *testing.T, deps *testDeps, id, taskID, stepID string, at time.Time) {
+	t.Helper()
+	mustExec(t, deps, `INSERT INTO task_step_transitions (id, task_id, to_workflow_step_id, occurred_at)
+		VALUES (?, ?, ?, ?)`, id, taskID, stepID, at)
 }
 
 func overviewLister() *stubWorkspaceLister {

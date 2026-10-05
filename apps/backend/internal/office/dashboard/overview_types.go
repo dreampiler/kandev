@@ -137,19 +137,25 @@ type OverviewWarning struct {
 
 // OverviewWorkspaceMetrics are the six project-card metrics plus problems.
 type OverviewWorkspaceMetrics struct {
-	Status               string                `json:"status"`
-	ActiveTasks          int                   `json:"active_tasks"`
-	RunningSessions      int                   `json:"running_sessions"`
-	WaitingInputSessions int                   `json:"waiting_input_sessions"`
-	LastOutputAt         *time.Time            `json:"last_output_at,omitempty"`
-	LastOutputTaskID     string                `json:"last_output_task_id,omitempty"`
-	QueuedMessages       int                   `json:"queued_messages"`
-	Completed24h         int                   `json:"completed_24h"`
-	OpenTasks            int                   `json:"open_tasks"`
-	WaitingTasks         int                   `json:"waiting_tasks"`
-	BlockedTasks         int                   `json:"blocked_tasks"`
-	Problems             OverviewProblemCounts `json:"problems"`
-	TopWarning           *OverviewWarning      `json:"top_warning,omitempty"`
+	Status               string     `json:"status"`
+	ActiveTasks          int        `json:"active_tasks"`
+	RunningSessions      int        `json:"running_sessions"`
+	WaitingInputSessions int        `json:"waiting_input_sessions"`
+	LastOutputAt         *time.Time `json:"last_output_at,omitempty"`
+	LastOutputTaskID     string     `json:"last_output_task_id,omitempty"`
+	QueuedMessages       int        `json:"queued_messages"`
+	Completed24h         int        `json:"completed_24h"`
+	OpenTasks            int        `json:"open_tasks"`
+	WaitingTasks         int        `json:"waiting_tasks"`
+	BlockedTasks         int        `json:"blocked_tasks"`
+	// BlockedByTasks is the open tasks waiting on an unfinished predecessor.
+	// It is its own figure rather than part of WaitingTasks because a task held
+	// on a hold step, a task waiting for a predecessor, and a task waiting on a
+	// person are three different reasons a task is not moving, and the card
+	// shows all three.
+	BlockedByTasks int                   `json:"blocked_by_tasks"`
+	Problems       OverviewProblemCounts `json:"problems"`
+	TopWarning     *OverviewWarning      `json:"top_warning,omitempty"`
 }
 
 // OverviewParentTask is an open task that groups child tasks.
@@ -419,7 +425,15 @@ type OverviewTaskItem struct {
 	Failures24h    int             `json:"failures_24h"`
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
 	StepEnteredAt  time.Time       `json:"step_entered_at"`
-	QueuedMessages int             `json:"queued_messages"`
+	// CompletedAt is the instant the task entered a completing step. Only a
+	// completed row carries it, and it is what the window counts rather than
+	// the task's last write.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// Archived reports that the task has left the board. A completed list is
+	// mostly archived rows, so without this the reader cannot tell why a task
+	// they just saw finish is not on any board.
+	Archived       bool `json:"archived,omitempty"`
+	QueuedMessages int  `json:"queued_messages"`
 	// Failure is what followed this row's failed session, so a task that is in
 	// trouble reports what became of the failure on its own row rather than only
 	// in the events list. It is the same value the failed-session event carries.

@@ -115,9 +115,14 @@ export function WorkspaceMetrics({
       <Metric
         label={t("office:overviewOpenTasks")}
         value={metrics.open_tasks}
+        // The three figures partition the open tasks: a task is on hold, or
+        // waiting on a predecessor, or neither. "Other" carries the tasks in
+        // progress along with the ones waiting on a person, so it is not worded
+        // as if none of them were moving.
         sub={t("office:overviewOpenBreakdown", {
-          waiting: metrics.waiting_tasks,
           hold: metrics.blocked_tasks,
+          blocked: metrics.blocked_by_tasks,
+          other: metrics.open_tasks - metrics.blocked_tasks - metrics.blocked_by_tasks,
         })}
         onClick={() => onFilter("all")}
         active={filter === "all"}

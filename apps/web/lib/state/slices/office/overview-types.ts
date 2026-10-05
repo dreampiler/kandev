@@ -83,6 +83,7 @@ export type OverviewWorkspaceMetrics = {
   open_tasks: number;
   waiting_tasks: number;
   blocked_tasks: number;
+  blocked_by_tasks: number;
   problems: { error: number; stalled: number; delayed: number };
   top_warning?: {
     task_id: string;
@@ -283,6 +284,17 @@ export type OverviewTaskItem = {
   failures_24h: number;
   last_output_at?: string;
   step_entered_at: string;
+  /**
+   * When the task entered a completing step. Only a completed row carries it,
+   * and it is what the 24-hour figure counts rather than the task's last write.
+   */
+  completed_at?: string;
+  /**
+   * The task has left the board. A completed list is mostly archived rows, so
+   * this is what explains why a task the reader just watched finish is not on
+   * any board.
+   */
+  archived?: boolean;
   queued_messages: number;
   /**
    * What followed this row's failed session. Present only for a row that has one,
