@@ -1137,5 +1137,6 @@
   "overviewRefreshSeconds_one": "每{{seconds}}秒",
   "overviewRefreshSeconds_other": "每{{seconds}}秒",
   "overviewUsageStaleObserved": "最后已知值，读取于 {{relative}}",
-  "overviewUsageObserved": "代理运行时观测到，{{relative}}"
+  "overviewUsageObserved": "代理运行时观测到，{{relative}}",
+  "overviewUsageMeasuredCall": "通过最小调用测量，{{relative}}"
 }

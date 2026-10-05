@@ -1137,5 +1137,6 @@
   "overviewReasonWaitingPrereq_other": "Waiting on {{count}} prerequisite tasks",
   "overviewReasonSessionEnded": "The receiving session has ended",
   "overviewUsageStaleObserved": "Last-known value, read {{relative}}",
-  "overviewUsageObserved": "Observed while the agent ran, {{relative}}"
+  "overviewUsageObserved": "Observed while the agent ran, {{relative}}",
+  "overviewUsageMeasuredCall": "Measured via minimal invocation, {{relative}}"
 }

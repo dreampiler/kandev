@@ -86,8 +86,14 @@ func (c *ClaudeUsageClient) CredentialsPath() string {
 
 // HasSubscriptionCredentials reports whether the credentials file exists and
 // carries an OAuth (subscription) token.
+// ResolveAccessToken resolves the bearer token using the client's credential precedence.
+func (c *ClaudeUsageClient) ResolveAccessToken(ctx context.Context) (string, error) {
+	token, _, err := c.accessToken(ctx)
+	return token, err
+}
+
 func (c *ClaudeUsageClient) HasSubscriptionCredentials() bool {
-	if c.staticToken != "" {
+	if c.staticToken != "" || c.tokenResolver != nil {
 		return true
 	}
 	creds, err := c.readCredentials()

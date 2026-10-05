@@ -508,5 +508,6 @@
   "profileUsageInternal": "此账户记录的轮次：5 小时 {{h5}}，24 小时 {{day}}，7 天 {{week}}",
   "profileUsageLimitHits": "30 天内达到上限：{{hits}} 次。达到时的中位数：24 小时 {{turns}} 轮，最近 {{relative}}",
   "profileUsageStaleObserved": "最后已知值，读取于 {{relative}}",
-  "profileUsageObserved": "代理运行时观测到，{{relative}}"
+  "profileUsageObserved": "代理运行时观测到，{{relative}}",
+  "profileUsageMeasuredCall": "通过最小调用测量，{{relative}}"
 }

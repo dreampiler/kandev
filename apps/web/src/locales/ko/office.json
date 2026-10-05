@@ -1137,5 +1137,6 @@
   "overviewRefreshSeconds_one": "{{seconds}}초마다",
   "overviewRefreshSeconds_other": "{{seconds}}초마다",
   "overviewUsageStaleObserved": "마지막 확인 값 ({{relative}} 조회)",
-  "overviewUsageObserved": "에이전트 실행 중 관측됨, {{relative}}"
+  "overviewUsageObserved": "에이전트 실행 중 관측됨, {{relative}}",
+  "overviewUsageMeasuredCall": "최소 호출로 측정됨, {{relative}}"
 }

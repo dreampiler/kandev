@@ -24,12 +24,17 @@ func MergeObserved(
 		// The provider did not answer. The observation stands on its own: its own
 		// provider, its own windows, and the instant it was taken as the fetch
 		// time, flagged stale so a client states it is not a live read.
+		source := reading.Source
+		if source == "" {
+			source = defaultObservedSource
+		}
 		return &ProviderUsage{
-			Provider:  reading.Provider,
-			Windows:   reading.Windows,
-			FetchedAt: reading.ObservedAt,
-			Stale:     true,
-			Observed:  true,
+			Provider:       reading.Provider,
+			Windows:        reading.Windows,
+			FetchedAt:      reading.ObservedAt,
+			Stale:          true,
+			Observed:       true,
+			ObservedSource: source,
 		}, true
 	}
 	return mergeObservedWindows(api, reading), true
@@ -70,6 +75,13 @@ func mergeObservedWindows(api *ProviderUsage, reading ObservedReading) *Provider
 	for _, k := range pendingKeys {
 		merged.Windows = append(merged.Windows, pending[k])
 		merged.Observed = true
+	}
+	if merged.Observed {
+		if reading.Source != "" {
+			merged.ObservedSource = reading.Source
+		} else {
+			merged.ObservedSource = defaultObservedSource
+		}
 	}
 	return &merged
 }

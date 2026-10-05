@@ -93,9 +93,10 @@ export function AgentProfileUsageView({
 function ObservedUsageSource({ usage, now }: { usage: AgentProfileUsage; now: number }) {
   const { t } = useTranslation();
   if (!usage.observed || !usage.fetched_at) return null;
+  const isMeasuredCall = usage.source === "measured_call";
   return (
     <span data-testid="agent-profile-usage-observed">
-      {t("agents:profileUsageObserved", {
+      {t(isMeasuredCall ? "agents:profileUsageMeasuredCall" : "agents:profileUsageObserved", {
         relative: formatRelativeTime(usage.fetched_at, now),
       })}
     </span>

@@ -135,6 +135,10 @@ type ProviderUsage struct {
 	// utilization rather than from the provider's usage API. It names where the
 	// value was seen; it is not a claim that the API was queried successfully.
 	Observed bool `json:"observed,omitempty"`
+
+	// ObservedSource indicates whether the observation came from an active agent stream
+	// ("agent_stream") or a minimal measured probe call ("measured_call").
+	ObservedSource string `json:"observed_source,omitempty"`
 }
 
 // ProviderUsageClient fetches live utilization from a provider API.
