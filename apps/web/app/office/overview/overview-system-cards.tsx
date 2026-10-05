@@ -338,10 +338,13 @@ function OverviewRunningPanel({
 export function OverviewListBody({
   state,
   empty,
+  emptyLabel,
   children,
 }: {
   state: "idle" | "loading" | "loaded" | "error";
   empty: boolean;
+  /** What an empty list of this kind means; the default reading is "nothing wrong". */
+  emptyLabel?: string;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -360,7 +363,11 @@ export function OverviewListBody({
     );
   }
   if (empty) {
-    return <div className="px-4 py-6 text-sm text-muted-foreground">{t("office:allClear")}</div>;
+    return (
+      <div className="px-4 py-6 text-sm text-muted-foreground">
+        {emptyLabel ?? t("office:allClear")}
+      </div>
+    );
   }
   return <div className="overflow-x-auto">{children}</div>;
 }

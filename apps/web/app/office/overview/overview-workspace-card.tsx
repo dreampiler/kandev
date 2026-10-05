@@ -19,7 +19,7 @@ import type {
   OverviewThresholds,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
-import { PROBLEM_STATUSES, reasonText } from "./overview-format";
+import { reasonText } from "./overview-format";
 import { WorkspaceMetrics } from "./overview-metrics";
 import { OverviewListBody } from "./overview-system-cards";
 import { OverviewTaskTable } from "./overview-tables";
@@ -323,9 +323,12 @@ function ParentsAndWarning({
 }
 
 /**
- * The card's detail area: the problem counts, then the full problem list, then
- * the task list the metric chips drive. One disclosure opens all of it, so the
- * control that expands the list sits directly above the list it expands.
+ * The card's detail area: the problem counts, then the filter chips, then the
+ * one list those chips select. One disclosure opens all of it, so the control
+ * that expands the list sits directly above the list it expands, and a task
+ * appears once no matter which chip is pressed. The problems filter reads every
+ * problem, so the expanded list is the whole problem set rather than a preview
+ * of it.
  */
 function WorkspaceDetail({
   id,
@@ -352,7 +355,6 @@ function WorkspaceDetail({
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const problems = metrics.problems;
-  const total = problems.error + problems.stalled + problems.delayed;
 
   return (
     <div className="mt-2 border-t border-border bg-tile px-4 pb-3">
@@ -378,19 +380,14 @@ function WorkspaceDetail({
       </div>
       {open && (
         <div id={id} className="mt-2">
-          <WorkspaceProblemList
-            workspaceId={workspaceId}
-            total={total}
-            refreshSeconds={refreshSeconds}
-          />
-          <div className="mt-3 flex flex-wrap gap-1" role="group">
+          <div className="flex flex-wrap gap-1" role="group">
             {FILTER_CHIPS.map((chip) => (
               <Button
                 key={chip.filter}
                 size="sm"
-                variant={filter === chip.filter ? "default" : "outline"}
+                variant={(filter ?? "problems") === chip.filter ? "default" : "outline"}
                 className="h-7 cursor-pointer"
-                aria-pressed={filter === chip.filter}
+                aria-pressed={(filter ?? "problems") === chip.filter}
                 onClick={() => onFilter(chip.filter)}
               >
                 {t(chip.labelKey)}
@@ -400,7 +397,7 @@ function WorkspaceDetail({
           <WorkspaceTaskList
             workspaceId={workspaceId}
             filter={filter ?? "problems"}
-            limit={limit}
+            limit={(filter ?? "problems") === "problems" ? TASK_LIST_ALL_LIMIT : limit}
             onShowAll={onShowAll}
             refreshSeconds={refreshSeconds}
           />
@@ -411,65 +408,10 @@ function WorkspaceDetail({
 }
 
 /**
- * Every problem of one workspace, not a preview. The counts come from the same
- * classification the badges use, so the list and the numbers agree.
+ * The one list the filter chips select. The problems filter is read in full, so
+ * the "n of m" line and its show-all control stay off it; every other filter is
+ * read at the card's limit until the operator asks for the rest.
  */
-function WorkspaceProblemList({
-  workspaceId,
-  total,
-  refreshSeconds,
-}: {
-  workspaceId: string;
-  total: number;
-  refreshSeconds: number;
-}) {
-  const list = useOverviewList(
-    `problems:${workspaceId}`,
-    () =>
-      getWorkspaceAggregateTasks(workspaceId, "problems", TASK_LIST_ALL_LIMIT, {
-        cache: "no-store",
-      }),
-    refreshSeconds,
-  );
-  if (total === 0) {
-    return (
-      <div className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">
-        <ProblemListBody state={list.loadState} />
-      </div>
-    );
-  }
-  return (
-    <div className="rounded-md border border-border" data-testid="overview-workspace-problems">
-      <OverviewListBody state={list.loadState} empty={(list.data?.total ?? 0) === 0}>
-        <OverviewTaskTable rows={(list.data?.tasks ?? []).filter(isProblemRow)} />
-      </OverviewListBody>
-    </div>
-  );
-}
-
-function ProblemListBody({ state }: { state: "idle" | "loading" | "loaded" | "error" }) {
-  const { t } = useTranslation();
-  if (state === "loading" || state === "idle") {
-    return (
-      <span role="status" className="text-muted-foreground">
-        {t("office:overviewAnalyzing")}
-      </span>
-    );
-  }
-  if (state === "error") {
-    return (
-      <span role="alert" className="text-destructive">
-        {t("office:failedToLoad")}
-      </span>
-    );
-  }
-  return t("office:overviewNoProblems");
-}
-
-function isProblemRow(row: { status?: string }): boolean {
-  return row.status !== undefined && PROBLEM_STATUSES.has(row.status as never);
-}
-
 function WorkspaceTaskList({
   workspaceId,
   filter,
@@ -493,7 +435,11 @@ function WorkspaceTaskList({
   const shown = list.data?.tasks?.length ?? 0;
   return (
     <div className="mt-2" data-testid="overview-workspace-task-list">
-      <OverviewListBody state={list.loadState} empty={total === 0}>
+      <OverviewListBody
+        state={list.loadState}
+        empty={total === 0}
+        emptyLabel={filter === "problems" ? t("office:overviewNoProblems") : undefined}
+      >
         <OverviewTaskTable rows={list.data?.tasks ?? []} />
         {total > shown && (
           <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
