@@ -8,9 +8,15 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { getWorkspaceAggregateRunning } from "@/lib/api/domains/office-overview-api";
 import { useOverviewList } from "@/hooks/domains/office/use-overview-list";
-import type { OverviewRunningKind, OverviewSystem } from "@/lib/state/slices/office/overview-types";
+import type {
+  OverviewRunningKind,
+  OverviewSystem,
+  OverviewThresholds,
+} from "@/lib/state/slices/office/overview-types";
 import { durationSince, relativeTime } from "./overview-format";
 import { OverviewQueueTable, OverviewSessionTable, OverviewTaskTable } from "./overview-tables";
+import { OverviewStatusDot } from "./overview-status-legend";
+import { statusTextClass, type OverviewStatusTone } from "./overview-status-colors";
 
 const RUNNING_LIST_LIMIT = 100;
 export const NEEDS_HUMAN_ANCHOR = "overview-needs-human";
@@ -31,6 +37,7 @@ function StatCard({
   onToggle,
   href,
   testId,
+  tone,
 }: {
   title: string;
   value: ReactNode;
@@ -40,12 +47,16 @@ function StatCard({
   onToggle?: () => void;
   href?: string;
   testId: string;
+  /** The state this card's number reports, or null when it reports nothing. */
+  tone?: OverviewStatusTone | null;
 }) {
   const { t } = useTranslation();
   const body = (
     <>
       <div className="text-xs text-muted-foreground">{title}</div>
-      <div className="text-2xl font-semibold tabular-nums">
+      <div
+        className={`flex items-baseline justify-center gap-2 text-2xl font-semibold tabular-nums ${tone ? statusTextClass(tone) : ""}`}
+      >
         {loading ? (
           <span
             className="text-base font-normal text-muted-foreground"
@@ -54,10 +65,17 @@ function StatCard({
             {t("office:overviewAnalyzing")}
           </span>
         ) : (
-          value
+          <>
+            {tone && <OverviewStatusDot tone={tone} />}
+            {value}
+          </>
         )}
       </div>
-      <div className="min-h-4 text-xs text-muted-foreground">{loading ? null : sub}</div>
+      <div
+        className={`min-h-4 text-xs ${tone && !loading ? statusTextClass(tone) : "text-muted-foreground"}`}
+      >
+        {loading ? null : sub}
+      </div>
     </>
   );
   const className =
@@ -98,6 +116,16 @@ function blockedSub(t: TFunction, system: OverviewSystem, loading: boolean): str
   }
   if (!system.earliest_unblock_at) return undefined;
   return t("office:overviewClearsAt", { time: relativeTime(system.earliest_unblock_at) });
+}
+
+/**
+ * The queue card's state: undeliverable messages are an error, anything merely
+ * waiting is a delay, and an empty queue has nothing to report.
+ */
+function queueTone(queued: number, undeliverable: number): OverviewStatusTone | null {
+  if (undeliverable > 0) return "error";
+  if (queued > 0) return "delayed";
+  return null;
 }
 
 /** The six system cards; three of them open the cross-workspace lists. */
@@ -142,6 +170,7 @@ export function OverviewSystemCards({
         <StatCard
           testId="overview-card-running-tasks"
           loading={loading}
+          tone={values.problems > 0 ? "delayed" : "running"}
           title={t("office:overviewRunningTasks")}
           value={values.active_tasks}
           sub={
@@ -155,6 +184,7 @@ export function OverviewSystemCards({
         <StatCard
           testId="overview-card-running-sessions"
           loading={loading}
+          tone={values.running_sessions > 0 ? "running" : null}
           title={t("office:overviewRunningSessions")}
           value={`${values.running_sessions}${limit}`}
           sub={t("office:overviewWaitingInput", { count: values.waiting_input_sessions })}
@@ -164,6 +194,7 @@ export function OverviewSystemCards({
         <StatCard
           testId="overview-card-queue"
           loading={loading}
+          tone={queueTone(values.queued_messages, values.undeliverable_messages)}
           title={t("chat:queuedMessages")}
           value={values.queued_messages}
           sub={t("office:overviewUndeliverableCount", { count: values.undeliverable_messages })}
@@ -173,6 +204,7 @@ export function OverviewSystemCards({
         <StatCard
           testId="overview-card-needs-human"
           loading={loading}
+          tone={values.needs_human > 0 ? "delayed" : null}
           title={t("needsYouInbox:tabLabel")}
           value={values.needs_human}
           href={`#${NEEDS_HUMAN_ANCHOR}`}
@@ -180,6 +212,7 @@ export function OverviewSystemCards({
         <StatCard
           testId="overview-card-blocked-accounts"
           loading={loading}
+          tone={blocked > 0 ? "error" : null}
           title={t("office:overviewBlockedAccounts")}
           value={blocked}
           sub={blockedSub(t, values, loading)}
@@ -187,7 +220,12 @@ export function OverviewSystemCards({
         />
       </div>
       {open && (
-        <OverviewRunningPanel kind={open} onKind={setOpen} refreshSeconds={refreshSeconds} />
+        <OverviewRunningPanel
+          kind={open}
+          onKind={setOpen}
+          refreshSeconds={refreshSeconds}
+          thresholds={values.problem_thresholds}
+        />
       )}
     </section>
   );
@@ -197,10 +235,12 @@ function OverviewRunningPanel({
   kind,
   onKind,
   refreshSeconds,
+  thresholds,
 }: {
   kind: OverviewRunningKind;
   onKind: (kind: OverviewRunningKind | null) => void;
   refreshSeconds: number;
+  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   const list = useOverviewList(
@@ -224,7 +264,7 @@ function OverviewRunningPanel({
         </Button>
       </div>
       <OverviewListBody state={list.loadState} empty={(data?.total ?? 0) === 0}>
-        {data?.tasks && <OverviewTaskTable rows={data.tasks} showProject />}
+        {data?.tasks && <OverviewTaskTable rows={data.tasks} showProject thresholds={thresholds} />}
         {data?.sessions && <OverviewSessionTable rows={data.sessions} />}
         {data?.queue && <OverviewQueueTable rows={data.queue} />}
         {data && data.total > RUNNING_LIST_LIMIT && (

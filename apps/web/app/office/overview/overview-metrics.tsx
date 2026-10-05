@@ -1,0 +1,117 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import Link from "@/components/routing/app-link";
+import { linkToTask } from "@/lib/links";
+import type {
+  OverviewTaskFilter,
+  OverviewWorkspaceMetrics,
+} from "@/lib/state/slices/office/overview-types";
+import { relativeTime } from "./overview-format";
+
+/**
+ * One metric of the project card. It sits on its own tile so the card reads as
+ * a set of figures rather than a wall of numbers; the tile the filter has
+ * selected is lifted off the tile color so the current filter is visible
+ * without reading the pressed state of the chip.
+ */
+function Metric({
+  label,
+  value,
+  sub,
+  onClick,
+  href,
+  active,
+}: {
+  label: string;
+  value: ReactNode;
+  sub?: ReactNode;
+  onClick?: () => void;
+  href?: string;
+  active?: boolean;
+}) {
+  const surface = active
+    ? "border-border bg-muted"
+    : "border-tile-border bg-tile hover:bg-muted/60";
+  const body = (
+    <>
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      <div className="min-h-3 text-[11px] text-muted-foreground">{sub}</div>
+    </>
+  );
+  const className = `block rounded-md border p-2 text-center transition-colors cursor-pointer ${surface}`;
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {body}
+      </Link>
+    );
+  }
+  if (onClick) {
+    return (
+      <button type="button" className={className} onClick={onClick}>
+        {body}
+      </button>
+    );
+  }
+  return <div className={`rounded-md border p-2 text-center ${surface}`}>{body}</div>;
+}
+
+/** The project's six figures, each one a tile and each one a filter. */
+export function WorkspaceMetrics({
+  metrics,
+  filter,
+  onFilter,
+}: {
+  metrics: OverviewWorkspaceMetrics;
+  filter: OverviewTaskFilter | null;
+  onFilter: (filter: OverviewTaskFilter) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid grid-cols-2 gap-1 px-2 pt-2 sm:grid-cols-3 lg:grid-cols-6">
+      <Metric
+        label={t("office:overviewActiveTasks")}
+        value={metrics.active_tasks}
+        onClick={() => onFilter("active")}
+        active={filter === "active"}
+      />
+      <Metric
+        label={t("office:overviewRunningSessions")}
+        value={metrics.running_sessions}
+        sub={t("office:overviewWaitingInput", { count: metrics.waiting_input_sessions })}
+        onClick={() => onFilter("sessions")}
+        active={filter === "sessions"}
+      />
+      <Metric
+        label={t("office:overviewLastOutput")}
+        value={metrics.last_output_at ? relativeTime(metrics.last_output_at) : "-"}
+        href={metrics.last_output_task_id ? linkToTask(metrics.last_output_task_id) : undefined}
+      />
+      <Metric
+        label={t("chat:queuedMessages")}
+        value={metrics.queued_messages}
+        onClick={() => onFilter("queued")}
+        active={filter === "queued"}
+      />
+      <Metric
+        label={t("office:overviewCompleted24h")}
+        value={metrics.completed_24h}
+        onClick={() => onFilter("completed")}
+        active={filter === "completed"}
+      />
+      <Metric
+        label={t("office:overviewOpenTasks")}
+        value={metrics.open_tasks}
+        sub={t("office:overviewOpenBreakdown", {
+          waiting: metrics.waiting_tasks,
+          hold: metrics.blocked_tasks,
+        })}
+        onClick={() => onFilter("all")}
+        active={filter === "all"}
+      />
+    </div>
+  );
+}

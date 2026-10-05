@@ -6,7 +6,9 @@ import type {
   OverviewQueueStatus,
   OverviewReason,
   OverviewStatus,
+  OverviewThresholds,
 } from "@/lib/state/slices/office/overview-types";
+import { statusBadgeClass, statusTextClass, statusToneName } from "./overview-status-colors";
 
 // Catalog keys, not copy. The record keys are wire codes from the overview
 // API; every sentence is phrased here so the server never sends prose.
@@ -170,21 +172,37 @@ export function reasonText(t: TFunction, reason: OverviewReason | undefined): st
 
 /** Status color classes shared by badges and status dots. */
 export function statusTone(status: OverviewStatus | OverviewQueueStatus | undefined): string {
-  switch (status) {
-    case "error":
-    case "undeliverable":
-      return "bg-destructive/10 text-destructive border-destructive/30";
-    case "stalled":
-      return "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400";
-    case "delayed":
-      return "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400";
-    case "running":
-      return "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400";
-    case "blocked":
-      return "bg-violet-500/10 text-violet-700 border-violet-500/30 dark:text-violet-300";
-    default:
-      return "bg-muted text-muted-foreground border-border";
-  }
+  return statusBadgeClass(statusToneName(status));
+}
+
+/**
+ * The color for a row's time in its current step. The limit is the one the
+ * backend applied on this read for that row's state, so the color cannot drift
+ * from the rule that classified it, and a read that reported no limits leaves
+ * the column uncolored rather than inventing one.
+ */
+export function stepDwellTone(
+  status: OverviewStatus | undefined,
+  thresholds: OverviewThresholds | undefined,
+  enteredAt: string | undefined,
+  now: number = Date.now(),
+): string {
+  const limit = dwellLimitMinutes(status, thresholds);
+  if (limit === undefined || !enteredAt) return "";
+  const at = new Date(enteredAt).getTime();
+  if (Number.isNaN(at)) return "";
+  if ((now - at) / 60_000 <= limit) return "";
+  return statusTextClass("delayed");
+}
+
+function dwellLimitMinutes(
+  status: OverviewStatus | undefined,
+  thresholds: OverviewThresholds | undefined,
+): number | undefined {
+  if (!thresholds) return undefined;
+  if (status === "waiting") return thresholds.dwell_review_minutes;
+  if (status === "blocked") return thresholds.dwell_hold_minutes;
+  return thresholds.dwell_in_progress_minutes;
 }
 
 /** Short display form of an id for table rows. */

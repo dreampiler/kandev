@@ -43,7 +43,8 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 
 import { OverviewWorkspaceCard } from "./overview-workspace-card";
 import { OverviewSystemCards } from "./overview-system-cards";
-import { OverviewLast24h, OverviewModels, OverviewNeedsHuman } from "./overview-sections";
+import { OverviewLast24h, OverviewNeedsHuman } from "./overview-sections";
+import { OverviewModels } from "./overview-models";
 
 const createdAt = "2026-10-03T00:00:00Z";
 
