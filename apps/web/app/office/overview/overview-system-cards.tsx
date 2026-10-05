@@ -159,10 +159,18 @@ function laneCount(t: TFunction, used: number, limit: number): string {
  * lane rather than of a sum. A control lane that is not configured has no tile
  * at all, since a zero over zero is not a capacity.
  *
- * A reading that did not arrive leaves the lanes absent altogether, and the
- * scope's own running count is shown with no denominator rather than with a
- * measured zero. Both lane tiles open the same session list, so the tiles differ
- * only in what they report.
+ * A reading that did not arrive leaves the lanes absent altogether, and then one
+ * scope-wide tile carries the scope's own running count and the scope's own
+ * waiting-input count, both of which are scope readings there.
+ *
+ * With lanes present, neither tile carries the waiting-input count. The waiting
+ * count is a single scope-wide reading, so putting it on one lane's tile would
+ * present the instance total as that lane's own number. A per-lane count needs a
+ * per-lane reading from the server, and until it exists the lane tiles report
+ * only what is measured per lane: the population and its limit.
+ *
+ * Both lane tiles open the same session list, so the tiles differ only in what
+ * they report.
  */
 function sessionLaneCards(
   t: TFunction,
@@ -198,7 +206,6 @@ function sessionLaneCards(
         tone={general > 0 ? "running" : null}
         title={t("office:overviewSessionLaneTitleGeneral")}
         value={laneCount(t, general, lanes.general_limit)}
-        sub={t("office:overviewWaitingInput", { count: values.waiting_input_sessions })}
         {...sessionProps}
       />
       {control !== undefined && (
