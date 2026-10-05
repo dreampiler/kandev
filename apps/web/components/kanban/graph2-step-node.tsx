@@ -45,7 +45,7 @@ const NODE_CLASS =
 
 /**
  * A completed step: every step keeps its own labelled pill, matching the
- * Kanban card's step run. Muted rather than green ??the run's only color
+ * Kanban card's step run. Muted rather than green — the run's only color
  * signal is the current step's accent border and the row's amber
  * needs-attention edge; a third hue on every past step competed with both.
  */

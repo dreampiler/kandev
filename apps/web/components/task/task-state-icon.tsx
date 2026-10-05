@@ -37,7 +37,7 @@ export type TaskStateIconProps = {
   interrupted?: boolean;
   /**
    * True when the task is waiting on the operator to notice, not on the
-   * operator to act ??a settled session with a positively-sampled background
+   * operator to act — a settled session with a positively-sampled background
    * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
    * Outranked by pending-input (permission/clarification) and by an active
    * foregroundActivity (AC-34).

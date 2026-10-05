@@ -222,7 +222,7 @@ export async function moveTaskAcrossSwimlaneSteps({
       position: nextPosition,
     });
     // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
-    // via the task.moved event ??orchestrator processOnEnter()
+    // via the task.moved event → orchestrator processOnEnter()
   } catch (error) {
     const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
     if (currentSnapshot) {
