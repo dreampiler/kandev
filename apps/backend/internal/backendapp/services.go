@@ -224,7 +224,7 @@ func initCoreTaskServices(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
-	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, log, cfg.Limits.OpenRouterFreeDailyRequests, repos.Secrets)
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, log, cfg.Limits.OpenRouterFreeDailyRequests, repos.Secrets, repos.SystemSettings)
 	dynamicResolver, dynamicBindingResolver, err := initDynamicRuntimeResolver(ctx, repos, cfg, log, usageAdapter)
 	if err != nil {
 		return nil, err

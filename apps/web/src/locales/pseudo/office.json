@@ -1116,5 +1116,6 @@
   "overviewReasonWaitingPrereq_one": "Ŵàĩţĩńĝ ōń {{count}} ƥŕēŕēqũĩśĩţē ţàśķ",
   "overviewReasonWaitingPrereq_other": "Ŵàĩţĩńĝ ōń {{count}} ƥŕēŕēqũĩśĩţē ţàśķś",
   "overviewReasonSessionEnded": "Ţĥē ŕēćēĩvĩńĝ śēśśĩōń ĥàś ēńďēď",
-  "overviewUsageStaleObserved": "Ĺàśţ-ķńōŵń vàĺũē, ŕēàď {{relative}}"
+  "overviewUsageStaleObserved": "Ĺàśţ-ķńōŵń vàĺũē, ŕēàď {{relative}}",
+  "overviewUsageObserved": "Ōƀśēŕvēď ŵĥĩĺē ţĥē àĝēńţ ŕàń, {{relative}}"
 }

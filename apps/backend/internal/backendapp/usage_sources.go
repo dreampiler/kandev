@@ -24,6 +24,10 @@ const (
 	usageSourceProviderAPI = "provider_api"
 	usageSourceProxy       = "proxy"
 	usageSourceNone        = "none"
+	// usageSourceAgentStream names a reading taken from the utilization a
+	// running agent reported about itself, because the provider's own usage API
+	// did not answer.
+	usageSourceAgentStream = "agent_stream"
 )
 
 // usageBinding is the account reader for one concrete profile: which client

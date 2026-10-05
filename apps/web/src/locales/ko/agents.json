@@ -507,5 +507,6 @@
   "dynamicTierModeRoundRobin": "돌아가며 (순환)",
   "profileUsageInternal": "이 계정의 기록된 턴: 5시간 {{h5}}, 24시간 {{day}}, 7일 {{week}}",
   "profileUsageLimitHits": "30일간 한도 도달: {{hits}}회. 도달 시점 중앙값: 24시간 {{turns}}턴, 마지막 {{relative}}",
-  "profileUsageStaleObserved": "마지막 확인 값 ({{relative}} 조회)"
+  "profileUsageStaleObserved": "마지막 확인 값 ({{relative}} 조회)",
+  "profileUsageObserved": "에이전트 실행 중 관측됨, {{relative}}"
 }

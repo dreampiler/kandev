@@ -177,7 +177,7 @@ func (a *Adapter) handleACPUpdate(
 
 	suppressed := a.dialect.suppresses(n)
 	handled := suppressed
-	var event, leadingEvent *AgentEvent
+	var event, leadingEvent, rateLimitEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
 		if a.observesResponseAttemptReset(promptGeneration, event) {
@@ -211,6 +211,13 @@ func (a *Adapter) handleACPUpdate(
 			handled = true
 		}
 		if n.Update.UsageUpdate != nil {
+			// The window observation is read here, beside the origin meta, so it
+			// survives a usage update whose Size is zero and that convertUsageUpdate
+			// therefore drops.
+			rateLimitEvent = claudeRateLimitEvent(
+				sessionID,
+				claudeRateLimitWindow(n.Update.UsageUpdate.Meta, time.Now().UTC()),
+			)
 			lifecycleEvent := usageLifecycleEvent(
 				sessionID,
 				n.Update.UsageUpdate.Meta,
@@ -258,6 +265,14 @@ func (a *Adapter) handleACPUpdate(
 				zap.String("session_id", sessionID),
 				zap.String("update_json", string(updateJSON)))
 		}
+	}
+	// Sent after the turn's own events so an observation never delays or
+	// reorders the foreground-idle or background-complete event.
+	if rateLimitEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, rateLimitEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			rateLimitEvent.Type, rawData, rateLimitEvent)
+		a.sendUpdate(*rateLimitEvent)
 	}
 
 	if !isLoading {

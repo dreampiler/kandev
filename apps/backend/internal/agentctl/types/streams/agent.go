@@ -1,5 +1,7 @@
 package streams
 
+import "time"
+
 // AgentEvent type constants define the types of events streamed from the agent.
 const (
 	// EventTypeMessageChunk indicates streaming text content from the agent.
@@ -143,6 +145,44 @@ const (
 	SessionStatusResumed = "resumed"
 	SessionStatusNew     = "new"
 )
+
+// Rate limit window kinds reported on a RateLimitWindow.
+const (
+	RateLimitWindowFiveHour     = "five_hour"
+	RateLimitWindowSevenDay     = "seven_day"
+	RateLimitWindowSevenDayOpus = "seven_day_opus"
+	// RateLimitWindowSevenDaySonnet is a per-model weekly window. The provider
+	// names the model only for display, so it is not an identity.
+	RateLimitWindowSevenDaySonnet = "seven_day_sonnet"
+	// RateLimitWindowOverage reports account overage state, not a subscription
+	// window fraction.
+	RateLimitWindowOverage = "overage"
+	// RateLimitWindowSevenDayOverageIncluded is the weekly window while an
+	// overage allowance is included.
+	RateLimitWindowSevenDayOverageIncluded = "seven_day_overage_included"
+)
+
+// Rate limit statuses reported on a RateLimitWindow.
+const (
+	RateLimitStatusAllowed        = "allowed"
+	RateLimitStatusAllowedWarning = "allowed_warning"
+	RateLimitStatusRejected       = "rejected"
+)
+
+// RateLimitWindow is one subscription rate-limit window the agent reported
+// while running. Utilization is the fraction of the window the provider has
+// consumed (0–1), not a percentage. Overage marks an observation taken while the
+// account was billing overage, where Utilization does not describe the
+// subscription window and must not be read as its remaining fraction.
+type RateLimitWindow struct {
+	Provider    string    `json:"provider"`
+	WindowType  string    `json:"window_type"`
+	Utilization float64   `json:"utilization"`
+	ResetsAt    time.Time `json:"resets_at,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	Overage     bool      `json:"overage,omitempty"`
+	ObservedAt  time.Time `json:"observed_at"`
+}
 
 // AgentEvent is the message type streamed from the agent process.
 // This represents agent-agnostic events. ACP session updates are normalized
@@ -377,6 +417,11 @@ type AgentEvent struct {
 
 	// RateLimitMessage contains a human-readable rate limit message from the API.
 	RateLimitMessage string `json:"rate_limit_message,omitempty"`
+
+	// RateLimitWindow carries one subscription window the agent reported while
+	// running. It is set only on a "rate_limit" event whose payload carried a
+	// provider window observation.
+	RateLimitWindow *RateLimitWindow `json:"rate_limit_window,omitempty"`
 
 	// LastMessageUUID is the UUID of the last committed message, used for --resume-session-at.
 	LastMessageUUID string `json:"last_message_uuid,omitempty"`

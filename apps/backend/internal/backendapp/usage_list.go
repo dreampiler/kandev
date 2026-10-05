@@ -94,6 +94,7 @@ func profileUsageDTO(profileID string, usage profileUsage) dto.AgentProfileUsage
 	}
 	entry.Provider, entry.Plan = usage.Usage.Provider, usage.Usage.Plan
 	entry.Stale = usage.Usage.Stale
+	entry.Observed = usage.Usage.Observed
 	if !usage.Usage.FetchedAt.IsZero() {
 		fetchedAt := usage.Usage.FetchedAt
 		entry.FetchedAt = &fetchedAt

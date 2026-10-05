@@ -277,6 +277,11 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
           })}
         </div>
       )}
+      {usage.observed && usage.fetched_at && (
+        <div className="text-muted-foreground" data-testid="overview-model-usage-observed">
+          {t("office:overviewUsageObserved", { relative: relativeTime(usage.fetched_at) })}
+        </div>
+      )}
     </div>
   );
 }

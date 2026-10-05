@@ -1116,5 +1116,6 @@
   "overviewRefreshLabel": "自動同步週期",
   "overviewRefreshSeconds_one": "每{{seconds}}秒",
   "overviewRefreshSeconds_other": "每{{seconds}}秒",
-  "overviewUsageStaleObserved": "最後已知值，讀取於 {{relative}}"
+  "overviewUsageStaleObserved": "最後已知值，讀取於 {{relative}}",
+  "overviewUsageObserved": "代理執行時觀測到，{{relative}}"
 }

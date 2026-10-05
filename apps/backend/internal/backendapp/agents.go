@@ -36,6 +36,7 @@ func provideLifecycleManager(
 	managedRuntimeSelections managedruntime.SelectionReader,
 	mcpIdentityScoper lifecycle.MCPIdentityScoper,
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
+	providerWindowObserver lifecycle.ProviderWindowObserver,
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
@@ -192,6 +193,13 @@ func provideLifecycleManager(
 	// but the reader still lets future Wave-B/C consumers light up.
 	lifecycleMgr.SetAgentProfileReader(agentSettingsRepo)
 	lifecycleMgr.SetManagedRuntimeSelectionStore(managedRuntimeSelections)
+	// Record the subscription window a running agent reports about its own
+	// account, so usage keeps a value for accounts whose provider usage API
+	// cannot answer. Installed before Start so a recovered execution's first
+	// report is already recorded.
+	if providerWindowObserver != nil {
+		lifecycleMgr.SetProviderWindowObserver(providerWindowObserver)
+	}
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
