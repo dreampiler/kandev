@@ -36,7 +36,11 @@ type AgentToolInvocationContext struct {
 // revision changes only when the effective tool set changes; generation is
 // stable for the lifetime of the Service instance.
 func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
-	tools, err := buildAgentToolDefinitions(s.registry.List())
+	records, err := s.configuredAgentToolRecords()
+	if err != nil {
+		return plugintools.Snapshot{}, err
+	}
+	tools, err := buildAgentToolDefinitions(records)
 	if err != nil {
 		return plugintools.Snapshot{}, err
 	}
@@ -56,6 +60,63 @@ func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
 		s.agentToolSnapshotReady = true
 	}
 	return plugintools.Normalize(s.agentToolSnapshot), nil
+}
+
+// configuredAgentToolRecords returns the active plugin records whose declared
+// required config is satisfied. A plugin that declares required config fields
+// but has none set cannot serve its agent tools, so it contributes nothing
+// until the operator configures it; saving config republishes the catalog.
+func (s *Service) configuredAgentToolRecords() ([]*store.Record, error) {
+	records := s.registry.List()
+	configured := make([]*store.Record, 0, len(records))
+	for _, record := range records {
+		if record.Status != StatusActive {
+			continue
+		}
+		ok, err := s.requiredConfigSatisfied(record)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			configured = append(configured, record)
+		}
+	}
+	return configured, nil
+}
+
+// requiredConfigSatisfied reports whether every field the manifest lists in
+// config_schema.required holds a set value. A missing config file, or a
+// required field that is absent or zero, leaves the plugin unconfigured. A
+// record with no required fields is always configured, so plugins that need no
+// operator input keep contributing tools.
+func (s *Service) requiredConfigSatisfied(record *store.Record) (bool, error) {
+	required := requiredConfigFields(record.ConfigSchema)
+	if len(required) == 0 {
+		return true, nil
+	}
+	config, err := s.store.GetConfig(record.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return false, err
+	}
+	for _, field := range required {
+		if value, present := config[field]; !present || isZeroConfigValue(value) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// requiredConfigFields extracts the string entries of a config_schema's
+// "required" list, ignoring malformed entries (mirroring validateConfigSchema).
+func requiredConfigFields(schema map[string]any) []string {
+	required, _ := schema["required"].([]any)
+	fields := make([]string, 0, len(required))
+	for _, raw := range required {
+		if name, ok := raw.(string); ok {
+			fields = append(fields, name)
+		}
+	}
+	return fields
 }
 
 func buildAgentToolDefinitions(records []*store.Record) ([]plugintools.Definition, error) {

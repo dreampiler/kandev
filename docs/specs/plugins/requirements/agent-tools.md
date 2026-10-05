@@ -27,6 +27,7 @@ Plugin authors can extend Kandev's UI and data behavior, but task agents cannot 
 - **AC-PLUGINS-AGENT-TOOLS-001.6:** Installing, upgrading, enabling, disabling, degrading, recovering, or uninstalling a plugin recomputes the authoritative plugin-tool catalog.
 - **AC-PLUGINS-AGENT-TOOLS-001.7:** Running MCP servers replace their effective tool registry atomically. A changed registry emits one `notifications/tools/list_changed` notification; the agent process, task session, and MCP server do not restart.
 - **AC-PLUGINS-AGENT-TOOLS-001.8:** A client that does not honor `tools/list_changed` sees the new catalog after its next MCP reconnect or task-session restart. Kandev does not terminate a healthy agent process solely to force discovery refresh.
+- **AC-PLUGINS-AGENT-TOOLS-001.9:** A plugin that declares required `config_schema` fields contributes no agent tools while any required field is unset. Saving the plugin's config recomputes the catalog, so its tools appear once it is configured.
 
 ## Migrated source detail
 
@@ -49,8 +50,11 @@ Implementation plan: [Plugin-Contributed Agent Tools](../../../plans/plugin-agen
   description, input JSON Schema, optional output JSON Schema, supported task
   surfaces, and optional MCP annotations. Legacy remote HTTP plugins cannot
   declare agent tools because they do not implement the managed gRPC runtime.
-- Only active plugins contribute tools. Registered, disabled, errored, and
-  uninstalled plugins contribute none.
+- Only active, configured plugins contribute tools. Registered, disabled,
+  errored, and uninstalled plugins contribute none. A plugin that declares
+  required `config_schema` fields contributes none until every required field is
+  set, so an unconfigured connector does not advertise tools that would only
+  fail on invocation.
 - Plugin tools are exposed through the existing task-aware Kandev MCP server.
   Plugins do not run or register a second MCP server.
 - Kandev derives a readable provider-safe MCP name as
