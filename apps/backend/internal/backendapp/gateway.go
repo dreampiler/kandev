@@ -11,6 +11,7 @@ import (
 	agentcontroller "github.com/kandev/kandev/internal/agent/controller"
 	agenthandlers "github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/registry"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -532,10 +533,11 @@ func taskStatusRuntimeProviders(
 }
 
 // loadTaskQuotaWait projects the task's live limit wait from the durable route
-// rows of its sessions. The primary session is read first because it is the one
-// whose turn the task is presenting; the remaining sessions follow in the order
-// the repository lists them, so a task with more than one parked session shows
-// a stable one rather than whichever row the query happened to return.
+// rows of its sessions, read in one query. The primary session is consulted
+// first because it is the one whose turn the task is presenting; the remaining
+// sessions follow in the order the repository lists them, so a task with more
+// than one parked session shows a stable one rather than whichever row the query
+// happened to return.
 func loadTaskQuotaWait(
 	ctx context.Context,
 	taskRepo *sqliterepo.Repository,
@@ -545,27 +547,49 @@ func loadTaskQuotaWait(
 	if err != nil {
 		return nil, err
 	}
-	ordered := make([]*models.TaskSession, 0, len(sessions))
+	sessionIDs := make([]string, 0, len(sessions))
+	primaryID := ""
 	for _, session := range sessions {
 		if session == nil || session.ID == "" {
 			continue
 		}
+		sessionIDs = append(sessionIDs, session.ID)
 		if session.IsPrimary {
-			ordered = append([]*models.TaskSession{session}, ordered...)
+			primaryID = session.ID
+		}
+	}
+	if len(sessionIDs) == 0 {
+		return nil, nil
+	}
+	routeStates, err := taskRepo.ListRouteStatesForSessions(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	if primaryID != "" {
+		if wait := statussummary.QuotaWaitSummaryFromRouteState(routeStateOf(routeStates, primaryID)); wait != nil {
+			return wait, nil
+		}
+	}
+	for _, sessionID := range sessionIDs {
+		if sessionID == primaryID {
 			continue
 		}
-		ordered = append(ordered, session)
-	}
-	for _, session := range ordered {
-		routeState, loadErr := taskRepo.LoadRouteState(ctx, session.ID)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		if wait := statussummary.QuotaWaitSummaryFromRouteState(routeState); wait != nil {
+		if wait := statussummary.QuotaWaitSummaryFromRouteState(routeStateOf(routeStates, sessionID)); wait != nil {
 			return wait, nil
 		}
 	}
 	return nil, nil
+}
+
+func routeStateOf(
+	states map[string]dynamicruntime.RouteState,
+	sessionID string,
+) *dynamicruntime.RouteState {
+	state, ok := states[sessionID]
+	if !ok {
+		return nil
+	}
+	return &state
 }
 
 func loadTaskSessionObservations(

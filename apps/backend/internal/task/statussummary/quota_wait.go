@@ -11,17 +11,26 @@ import (
 // bounded task-list projection, or nil when the session is not parked on a
 // provider limit.
 //
-// Only a deadline-backed wait qualifies: a route that is waiting without a
-// deadline has no instant to lift at, and a route waiting for any reason other
-// than an exhausted quota belongs to the routing-owned presentation rather than
-// to a limit wait. The policy body, the failure rule and the provider payload
-// behind the decision stay in the routing tables.
+// A limit wait is a route that recorded an exhausted quota and was told to try
+// again at a known instant, so the projection needs both: the classified quota
+// code and the deadline that instant comes from. A route waiting for any other
+// reason keeps its routing-owned presentation. The policy body, the classifier
+// rule and the provider payload behind the decision stay in the routing tables.
+//
+// A route parked because every candidate is suspended is deliberately not a
+// limit wait: that state records a deadline but no cause, so calling it a usage
+// limit would be a guess. It only becomes a limit wait when routing starts
+// attributing the suspension, and this projection follows that attribution
+// rather than inventing one.
 func QuotaWaitSummaryFromRouteState(state *dynamicruntime.RouteState) *QuotaWaitSummary {
 	if state == nil || state.SessionID == "" {
 		return nil
 	}
-	policy, ok := quotaWaitPolicy(state)
-	if !ok {
+	if !isDeadlineBackedWait(state.Status) {
+		return nil
+	}
+	var policy dynamicruntime.PolicyState
+	if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policy); err != nil {
 		return nil
 	}
 	if policy.FailureCode != routingerr.CodeQuotaLimited || policy.Deadline == nil {
@@ -38,39 +47,9 @@ func QuotaWaitSummaryFromRouteState(state *dynamicruntime.RouteState) *QuotaWait
 	}
 }
 
-// quotaWaitPolicy reports whether the durable status is one a fresh selection
-// is retried from automatically, and returns its policy snapshot. A waiting
-// route qualifies only while it waits for suspended resources, because only
-// that wait carries the deadline the projection reports.
-func quotaWaitPolicy(state *dynamicruntime.RouteState) (dynamicruntime.PolicyState, bool) {
-	var policy dynamicruntime.PolicyState
-	switch state.Status {
-	case "retry_wait", "waiting_for_reset":
-	case "waiting":
-		if !policyHasResourceWait(state.PolicyStateJSON) {
-			return policy, false
-		}
-	default:
-		return policy, false
-	}
-	if err := json.Unmarshal([]byte(state.PolicyStateJSON), &policy); err != nil {
-		return policy, false
-	}
-	if policy.ResourceWait && policy.Deadline == nil {
-		return policy, false
-	}
-	return policy, true
-}
-
-// policyHasResourceWait reads the wait marker without trusting the rest of the
-// document, so a policy body this build cannot parse still answers whether the
-// route is a resource wait.
-func policyHasResourceWait(policyStateJSON string) bool {
-	var probe struct {
-		ResourceWait bool `json:"resource_wait"`
-	}
-	if err := json.Unmarshal([]byte(policyStateJSON), &probe); err != nil {
-		return false
-	}
-	return probe.ResourceWait
+// isDeadlineBackedWait names the durable statuses a fresh selection is retried
+// from automatically. They are the only ones that carry a deadline the
+// projection can report.
+func isDeadlineBackedWait(status string) bool {
+	return status == "retry_wait" || status == "waiting_for_reset"
 }
