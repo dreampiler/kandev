@@ -169,9 +169,10 @@ type OverviewModel struct {
 // router is avoiding this resource until Until, and the state is unknown rather
 // than healthy when the circuits source is unavailable.
 //
-// A circuit that already recovered is reported too, because its retained strike
-// history is why the durable source still lists it. Blocking separates the two,
-// so the current-block list and the blocked count never carry a cleared resource.
+// A circuit that already recovered, or whose suspension window has passed, is
+// reported too, because its retained strike history is why the durable source
+// still lists it. Blocking separates the two, so the current-block list and the
+// blocked count never carry a resource that is no longer blocked.
 type OverviewBlockedCircuit struct {
 	ResourceKey string     `json:"resource_key"`
 	Scope       string     `json:"scope"`
@@ -180,8 +181,11 @@ type OverviewBlockedCircuit struct {
 	Code        string     `json:"code,omitempty"`
 	Until       *time.Time `json:"until,omitempty"`
 	Strikes     int        `json:"strikes"`
-	// Blocking is true while the router is still avoiding this resource. A
-	// half-open circuit holds a probe lease, so it is not selectable either.
+	// Blocking is true while this resource is still unavailable at the instant
+	// the snapshot was taken: a suspension whose Until is still ahead, or one
+	// with no clear instant. An expired suspension is false even when the
+	// durable state still reads open, because no selection has yet claimed its
+	// probe and the block window itself is over.
 	Blocking bool `json:"blocking"`
 	// ProfileID is the agent profile this circuit was recorded for, when the
 	// circuit key names one. It is empty for a binding fingerprint that no
