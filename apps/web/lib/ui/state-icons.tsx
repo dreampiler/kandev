@@ -17,13 +17,26 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
+import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { cn } from "@/lib/utils";
+import {
+  WaitingReasonTaskIcon,
+  waitReasonClass,
+  waitReasonGlyph,
+  type TaskWaitReason,
+} from "@/lib/ui/waiting-reason";
 
 type IconConfig = {
   Icon: ComponentType<{ className?: string }>;
   className: string;
   animated?: boolean;
+  /**
+   * Set when the config stands for a wait reason (lib/ui/waiting-reason)
+   * rather than a state. The renderer routes it through the shared
+   * tooltip-carrying component instead of drawing a bare glyph.
+   */
+  waitReason?: TaskWaitReason | null;
 };
 
 const STYLE_MUTED = "text-muted-foreground";
@@ -52,11 +65,11 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   STARTING: { Icon: IconLoader2, className: STYLE_LOADING, animated: true },
   // (a) generating: the foreground agent is actively producing output. This is
   // the established "session is running" indicator and is deliberately left
-  // unchanged — the fine-grained busy signal only ADDS a distinct
+  // unchanged ??the fine-grained busy signal only ADDS a distinct
   // background-work indicator (below); it does not restyle foreground running.
   RUNNING: { Icon: IconCircleFilled, className: "text-emerald-500" },
   // Office sessions: agent process torn down, conversation paused. Use the
-  // pause icon — visually distinct from RUNNING and from terminal states.
+  // pause icon ??visually distinct from RUNNING and from terminal states.
   IDLE: { Icon: IconPlayerPause, className: STYLE_MUTED },
   WAITING_FOR_INPUT: { Icon: IconMessageQuestion, className: STYLE_WARNING },
   COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
@@ -65,8 +78,8 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 };
 
 // (b) background-running: the foreground turn has yielded to spawned background
-// work (ADR-0049). A spinner — the operator can see the
-// agent is not done — visually separate from the static "generating" dot (a) by
+// work (ADR-0049). A spinner ??the operator can see the
+// agent is not done ??visually separate from the static "generating" dot (a) by
 // its motion AND shape, and from the done checkmark (c) by its motion AND shape,
 // so the three read apart even in a grayscale/desaturated scan (not hue alone,
 // not by color alone. The spinner (work in motion) reads as "something is
@@ -83,7 +96,7 @@ const SESSION_BACKGROUND_ICON: IconConfig = {
   animated: true,
 };
 
-// The task-level generating affordance — the established running spinner
+// The task-level generating affordance ??the established running spinner
 // (IconLoader2, smooth arc). Rendered when the task-level MOST-ACTIVE-WINS
 // aggregate is "generating"; kept identical to the existing card spinner so the
 // generating look is unchanged.
@@ -95,7 +108,7 @@ const TASK_GENERATING_ICON: IconConfig = {
 
 // The task-level background-running affordance:
 // spawned background work is running while the foreground turns are idle. It is a
-// violet segmented spinner (IconLoader) — distinct from the generating spinner
+// violet segmented spinner (IconLoader) ??distinct from the generating spinner
 // (IconLoader2, a blue smooth arc) by BOTH shape AND hue, and from the done check
 // (IconCheck, green) by shape, motion, AND hue. The compact scanning surfaces
 // (board card, task-list row, graph/swimlane node) are dense, so the extra hue
@@ -127,7 +140,7 @@ const TASK_INTERRUPTED_ICON: IconConfig = {
 // The task-level auto-start-failed affordance: a workflow step's
 // auto_start_agent on_enter action ran but could not launch a run (kanban
 // StartTask error, or an Office task with no queue adapter wired / no
-// resolvable agent). A triangle — same error hue as the interrupted circle,
+// resolvable agent). A triangle ??same error hue as the interrupted circle,
 // but a distinct shape so the two failure causes never read as one marker.
 const TASK_AUTO_START_FAILED_ICON: IconConfig = {
   Icon: IconAlertTriangle,
@@ -138,7 +151,7 @@ const TASK_AUTO_START_FAILED_ICON: IconConfig = {
 // docs/specs/disambiguate-waiting/spec.md). getTaskStateIcon special-cases
 // this sentinel to render the shared, tooltip-carrying BackgroundWorkTaskIcon
 // component instead of a bare icon, mirroring TASK_INTERRUPTED_ICON's own
-// special case below — the Icon/className fields are never read once
+// special case below ??the Icon/className fields are never read once
 // special-cased, but IconConfig requires them.
 const TASK_PARKED_ICON: IconConfig = {
   Icon: IconCircleDashed,
@@ -148,7 +161,7 @@ const TASK_PARKED_ICON: IconConfig = {
 // The task-level workspace-orphaned affordance: this task inherits an
 // archived parent's workspace, so it can no longer materialize or start. A
 // muted slashed-folder glyph, distinct in both hue and shape from the two
-// STYLE_ERROR red markers above — this reads as "cannot run" rather than
+// STYLE_ERROR red markers above ??this reads as "cannot run" rather than
 // "run failed".
 const TASK_WORKSPACE_ORPHANED_ICON: IconConfig = {
   Icon: IconFolderOff,
@@ -171,15 +184,15 @@ export function isWaitingForInputState(state?: TaskState): boolean {
 
 export function shouldUseQuestionTaskIcon(
   state?: TaskState,
-  hasPendingClarification = false,
+  hasPendingClarification: boolean | undefined = false,
 ): boolean {
-  return isWaitingForInputState(state) || hasPendingClarification;
+  return isWaitingForInputState(state) || (hasPendingClarification ?? false);
 }
 
 // Session states where the agent is actively running work. Anything outside
 // this set (CREATED, WAITING_FOR_INPUT, IDLE, COMPLETED, FAILED, CANCELLED) is
 // not-yet-started, paused, or terminal and must not drive the spinner on its
-// own — even when the task is still in the IN_PROGRESS workflow column.
+// own ??even when the task is still in the IN_PROGRESS workflow column.
 const ACTIVE_SESSION_STATES: ReadonlySet<string> = new Set<TaskSessionState>([
   "STARTING",
   "RUNNING",
@@ -270,7 +283,7 @@ export function AutoStartFailedTaskIcon({ className }: { className?: string }) {
 
 /**
  * Shared violet-spinner affordance for a task/session parked on background
- * work (spec: docs/specs/disambiguate-waiting/spec.md) — the operator's
+ * work (spec: docs/specs/disambiguate-waiting/spec.md) ??the operator's
  * turn ended but a positively-sampled background process is still live.
  * Promoted from task-item.tsx (was private there) unchanged, so every
  * surface that renders it presents the same icon, tooltip, and accessible
@@ -328,9 +341,9 @@ export function WorkspaceOrphanedTaskIcon({ className }: { className?: string })
 
 /**
  * Returns true when the kanban card should show the spinning loader. The task
- * workflow state and the primary session's runtime state are decoupled — the
+ * workflow state and the primary session's runtime state are decoupled ??the
  * workflow can keep a task in `IN_PROGRESS` after the agent has finished, or
- * move it to `REVIEW` while the current primary session is still running — so
+ * move it to `REVIEW` while the current primary session is still running ??so
  * an explicit primary session state takes precedence.
  *
  * When no primary session is attached yet (task just created / scheduling),
@@ -344,7 +357,7 @@ export function WorkspaceOrphanedTaskIcon({ className }: { className?: string })
  *
  * Exception: `TODO` is the queued/not-started column. Any active session
  * state reported there is stale (task moved back from IN_PROGRESS, session
- * still alive) or transient, and the spinner would mislead — suppress it.
+ * still alive) or transient, and the spinner would mislead ??suppress it.
  */
 export function shouldShowTaskRunningSpinner(
   taskState?: TaskState,
@@ -359,8 +372,10 @@ export function shouldShowTaskRunningSpinner(
   return taskState === "IN_PROGRESS" || taskState === "SCHEDULING";
 }
 
-export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boolean {
-  return hasPendingPermission;
+export function shouldUsePermissionTaskIcon(
+  hasPendingPermission: boolean | undefined = false,
+): boolean {
+  return hasPendingPermission ?? false;
 }
 
 export function isTaskInFlight(foregroundActivity?: ForegroundActivity | null): boolean {
@@ -377,7 +392,7 @@ type TaskStateIconOptions = {
   autoStartFailed?: boolean;
   /**
    * True when the task is waiting on the operator to notice, not on the
-   * operator to act — a settled session with a positively-sampled background
+   * operator to act ??a settled session with a positively-sampled background
    * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
    * Outranked by pending-input (permission/clarification) and by an active
    * foregroundActivity.
@@ -386,6 +401,16 @@ type TaskStateIconOptions = {
   /** True when this task inherits an archived parent's workspace and can no
    *  longer materialize or start. */
   workspaceOrphaned?: boolean;
+  /**
+   * Why the task is waiting rather than working, resolved by
+   * `resolveWaitReason`. Outranked by pending-input and live activity (an
+   * active task is working, not waiting) and by the restart/auto-start/orphan
+   * markers (an anomaly outranks a wait), and outranks the coarse task state,
+   * which is exactly the ambiguity it exists to remove.
+   */
+  waitReason?: TaskWaitReason | null;
+  /** The launch-queue projection behind a `session_ceiling` wait, used for the tooltip's occupancy line. */
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
 };
 
 // Interrupted (startup reconciliation marker), auto-start-failed (on_enter
@@ -453,6 +478,7 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     autoStartFailed = false,
     parkedOnBackgroundWork = false,
     workspaceOrphaned = false,
+    waitReason,
   } = options;
   const pendingOrActive = getPendingOrActiveTaskIcon(state, {
     hasPendingClarification,
@@ -468,6 +494,15 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     workspaceOrphaned,
   );
   if (markerOverride) return markerOverride;
+  // A wait reason outranks the coarse state: REVIEW plus a queued admission is
+  // not a finished turn, and IN_PROGRESS plus a WIP overflow is not progress.
+  if (waitReason) {
+    return {
+      Icon: waitReasonGlyph(waitReason),
+      className: waitReasonClass(waitReason),
+      waitReason,
+    };
+  }
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
@@ -490,6 +525,17 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
+  // A wait reason carries its own glyph, tone, accessible label and one-line
+  // reason, so it renders through the shared component rather than a bare icon.
+  if (config.waitReason) {
+    return (
+      <WaitingReasonTaskIcon
+        reason={config.waitReason}
+        launchQueue={options.launchQueue}
+        className={cn("h-4 w-4 w-auto", className)}
+      />
+    );
+  }
   // The interrupted, auto-start-failed, parked, and workspace-orphaned
   // affordances all carry their own tooltip and accessible label, so they
   // must render through their shared component rather than a bare icon.
@@ -514,15 +560,14 @@ type SessionStateIconOptions = {
   hasPendingPermission?: boolean;
   /**
    * True when the session is waiting on the operator to notice, not on the
-   * operator to act — a settled session with a positively-sampled background
+   * operator to act ??a settled session with a positively-sampled background
    * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
    * Outranked by pending-input and any live foregroundActivity.
    */
   parkedOnBackgroundWork?: boolean;
 };
 
-// Pending-input and any live/parked activity signal, in precedence order —
-// mirrors getPendingOrActiveTaskIcon's structure for the task-level resolver.
+// Pending-input and any live/parked activity signal, in precedence order ??// mirrors getPendingOrActiveTaskIcon's structure for the task-level resolver.
 function getPendingOrActiveSessionIcon(
   canRequestInput: boolean,
   options: SessionStateIconOptions,
@@ -541,7 +586,7 @@ function getPendingOrActiveSessionIcon(
   if (foregroundActivity === "background") return SESSION_BACKGROUND_ICON;
   // Parked-on-background-work (AC-51): a settled session whose only remaining
   // life is a positively-sampled background process reads identically to a
-  // live foregroundActivity=background session — pending-input above still
+  // live foregroundActivity=background session ??pending-input above still
   // outranks it.
   if (parkedOnBackgroundWork) return SESSION_BACKGROUND_ICON;
   return undefined;

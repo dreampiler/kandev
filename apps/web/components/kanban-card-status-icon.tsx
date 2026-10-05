@@ -4,17 +4,20 @@ import {
   shouldUsePermissionTaskIcon,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import type { Task } from "@/components/kanban-card";
 
 // Status markers that mask the launch spinner and gate the "resting" no-affordance
 // case. Bundled together so renderTaskStatusIcon's own branching stays under the
-// complexity limit — see the helpers below for what each flag means for masking.
+// complexity limit ??see the helpers below for what each flag means for masking.
 type StatusMaskFlags = {
   needsMe: boolean;
   showInterrupted: boolean;
   showAutoStartFailed: boolean;
   parkedOnBackgroundWork: boolean;
   showWorkspaceOrphaned: boolean;
+  /** A task waiting for a slot or an answer still has something to show. */
+  waitReason: boolean;
 };
 
 function hasNoStatusAffordance(
@@ -29,19 +32,20 @@ function hasNoStatusAffordance(
     !flags.showInterrupted &&
     !flags.showAutoStartFailed &&
     !flags.parkedOnBackgroundWork &&
-    !flags.showWorkspaceOrphaned
+    !flags.showWorkspaceOrphaned &&
+    !flags.waitReason
   );
 }
 
 // A "needs me" prompt (pending clarification / permission) must not be masked
-// by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
+// by the launch-spinner short-circuit ??a mid-turn prompt can coincide with a
 // coarse running state. Live foreground activity still wins, handled inside
 // getTaskStateIcon. A failed auto-start or an orphaned workspace must not be
 // masked either: startTask sets the task to SCHEDULING before the launch, so
 // a session-less SCHEDULING/IN_PROGRESS task (whether from a launch failure
 // or a vanished parent workspace) reads as showRunningSpinner=true, the exact
 // shape both markers exist to surface. The parked affordance (AC-58) is
-// likewise never masked by the generic spinner — it renders through
+// likewise never masked by the generic spinner ??it renders through
 // getTaskStateIcon below.
 function resolveForegroundActivity(
   task: Task,
@@ -62,9 +66,9 @@ function resolveForegroundActivity(
  * Resolves the card status icon, or null when the actions cluster shows none
  * (a resting done/todo task). The backend task-level MOST-ACTIVE-WINS
  * aggregate takes precedence: a background-running task shows the distinct
- * background affordance — even when its primary session has finished and
+ * background affordance ??even when its primary session has finished and
  * only a secondary session is still working, so it reads as working, not
- * done — while any generating session keeps the spinner. When the aggregate
+ * done ??while any generating session keeps the spinner. When the aggregate
  * is absent it falls back to the primary-session-driven spinner (covers
  * STARTING/SCHEDULING before a session reads RUNNING) or the pending-input
  * question icon.
@@ -75,6 +79,12 @@ export function renderTaskStatusIcon(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ) {
+  const waitReason = resolveWaitReason({
+    primarySessionState: task.primarySessionState,
+    wipAdmitted: task.wipAdmitted,
+    queuedForStepId: task.queuedForStepId,
+    launchQueue: task.statusSummary?.launch_queue,
+  });
   const flags: StatusMaskFlags = {
     needsMe:
       shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
@@ -83,6 +93,7 @@ export function renderTaskStatusIcon(
     showAutoStartFailed: !!task.autoStartFailed,
     parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
     showWorkspaceOrphaned: !!task.workspaceOrphaned,
+    waitReason: waitReason !== null,
   };
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
@@ -96,6 +107,8 @@ export function renderTaskStatusIcon(
     autoStartFailed: flags.showAutoStartFailed,
     parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
     workspaceOrphaned: flags.showWorkspaceOrphaned,
+    waitReason,
+    launchQueue: task.statusSummary?.launch_queue,
   });
 }
 

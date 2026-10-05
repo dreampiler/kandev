@@ -16,6 +16,7 @@ import {
 import { cn } from "@kandev/ui/lib/utils";
 import { Badge } from "@kandev/ui/badge";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import { needsAction } from "@/lib/utils/needs-action";
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -89,6 +90,13 @@ function DraggableTaskChip({
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission: pendingInput.permission,
     interrupted: task.interrupted,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
   });
 
   return (
@@ -127,6 +135,13 @@ function TaskChipPreview({ task }: { task: Task }) {
     foregroundActivity: task.foregroundActivity,
     hasPendingPermission: pendingInput.permission,
     interrupted: task.interrupted,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
   });
   return (
     <div
@@ -203,7 +218,7 @@ export async function moveTaskAcrossSwimlaneSteps({
       position: nextPosition,
     });
     // Backend handles on_enter actions (auto_start_agent, plan_mode, etc.)
-    // via the task.moved event → orchestrator processOnEnter()
+    // via the task.moved event ??orchestrator processOnEnter()
   } catch (error) {
     const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
     if (currentSnapshot) {
