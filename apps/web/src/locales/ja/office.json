@@ -1137,5 +1137,6 @@
   "overviewRefreshSeconds_one": "{{seconds}}秒ごと",
   "overviewRefreshSeconds_other": "{{seconds}}秒ごと",
   "overviewUsageStaleObserved": "最後に確認された値 ({{relative}}に取得)",
-  "overviewUsageObserved": "エージェント実行中に観測、{{relative}}"
+  "overviewUsageObserved": "エージェント実行中に観測、{{relative}}",
+  "overviewUsageMeasuredCall": "最小呼び出しで測定、{{relative}}"
 }

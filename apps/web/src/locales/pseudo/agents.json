@@ -508,5 +508,6 @@
   "profileUsageInternal": "Ŕēćōŕďēď ţũŕńś ōń ţĥĩś àććōũńţ: 5ĥ {{h5}}, 24ĥ {{day}}, 7ď {{week}}",
   "profileUsageLimitHits": "Ĺĩḿĩţ ĥĩţś ĩń 30 ďàŷś: {{hits}}. Ḿēďĩàń àţ à ĥĩţ: {{turns}} ţũŕńś ĩń 24ĥ, ĺàśţ {{relative}}",
   "profileUsageStaleObserved": "Ĺàśţ-ķńōŵń vàĺũē, ŕēàď {{relative}}",
-  "profileUsageObserved": "Ōƀśēŕvēď ŵĥĩĺē ţĥē àĝēńţ ŕàń, {{relative}}"
+  "profileUsageObserved": "Ōƀśēŕvēď ŵĥĩĺē ţĥē àĝēńţ ŕàń, {{relative}}",
+  "profileUsageMeasuredCall": "Ḿēàśũŕēď vĩà ḿĩńĩḿàĺ ĩńvōćàţĩōń, {{relative}}"
 }

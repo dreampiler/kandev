@@ -52,10 +52,12 @@ export type AgentProfileUsage = {
   fetched_at?: string;
   stale?: boolean;
   /**
-   * The value came from what a running agent reported about its own account,
-   * because the provider's usage API did not answer. It travels with
-   * `source: "agent_stream"`, so the reading's origin and age are stated rather
-   * than presented as a live provider reading.
+   * The value came from what was observed on the account rather than from a
+   * provider usage API read, because that read did not answer. It travels with
+   * `source: "agent_stream"` for an observation a running agent reported about
+   * its own account, or `source: "measured_call"` for one obtained by a minimal
+   * probe invocation, so the reading's origin and age are stated rather than
+   * presented as a live provider reading.
    */
   observed?: boolean;
   windows: AgentProfileUsageWindow[];

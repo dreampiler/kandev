@@ -84,10 +84,20 @@ func (c *ClaudeUsageClient) CredentialsPath() string {
 	return c.credentialsPath
 }
 
-// HasSubscriptionCredentials reports whether the credentials file exists and
-// carries an OAuth (subscription) token.
+// ResolveAccessToken resolves the OAuth bearer token through the client's own
+// credential precedence, so a caller that needs a token for a separate request
+// (the measured probe) authenticates as the same account the usage API read
+// would.
+func (c *ClaudeUsageClient) ResolveAccessToken(ctx context.Context) (string, error) {
+	token, _, err := c.accessToken(ctx)
+	return token, err
+}
+
+// HasSubscriptionCredentials reports whether this client can authenticate as a
+// subscription account. A static or per-read token counts without being read,
+// because the resolver owns the credential and this method cannot ask it.
 func (c *ClaudeUsageClient) HasSubscriptionCredentials() bool {
-	if c.staticToken != "" {
+	if c.staticToken != "" || c.tokenResolver != nil {
 		return true
 	}
 	creds, err := c.readCredentials()

@@ -1137,5 +1137,6 @@
   "overviewRefreshSeconds_one": "a cada {{seconds}} segundo",
   "overviewRefreshSeconds_other": "a cada {{seconds}} segundos",
   "overviewUsageStaleObserved": "Último valor conhecido, lido {{relative}}",
-  "overviewUsageObserved": "Observado durante a execução do agente, {{relative}}"
+  "overviewUsageObserved": "Observado durante a execução do agente, {{relative}}",
+  "overviewUsageMeasuredCall": "Medido através de invocação mínima, {{relative}}"
 }

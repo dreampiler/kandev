@@ -16,7 +16,10 @@ const observedMaxAge = 24 * time.Hour
 // account part is the cache key the usage cache already uses to group profiles
 // on one account, so no credential path is written and no second identity is
 // derived for the same account.
-const observedPersistencePrefix = "usage.observed.v1."
+const (
+	observedPersistencePrefix = "usage.observed.v1."
+	defaultObservedSource     = "agent_stream"
+)
 
 // ObservedWindow is one subscription window an agent reported while running.
 // Utilization is the fraction of the window the provider has consumed (0–1), not
@@ -29,6 +32,7 @@ type ObservedWindow struct {
 	Status      string    `json:"status,omitempty"`
 	Overage     bool      `json:"overage,omitempty"`
 	ObservedAt  time.Time `json:"observed_at"`
+	Source      string    `json:"source,omitempty"`
 }
 
 // ObservedReading is the usable observation for one account: the windows that
@@ -37,6 +41,7 @@ type ObservedReading struct {
 	Provider   string
 	Windows    []UtilizationWindow
 	ObservedAt time.Time
+	Source     string
 }
 
 // ObservedPersistence stores one account's observation between processes. It is
@@ -52,6 +57,7 @@ type observedAccount struct {
 	windows    map[string]ObservedWindow
 	provider   string
 	observedAt time.Time
+	source     string
 }
 
 // ObservedStore holds the windows agents reported for accounts whose provider
@@ -97,12 +103,16 @@ func (s *ObservedStore) Record(accountKey string, window ObservedWindow) error {
 		!window.ObservedAt.After(existing.ObservedAt) {
 		return nil
 	}
+	if window.Source == "" {
+		window.Source = defaultObservedSource
+	}
 	account.windows[window.WindowType] = window
 	if window.Provider != "" {
 		account.provider = window.Provider
 	}
 	if window.ObservedAt.After(account.observedAt) {
 		account.observedAt = window.ObservedAt
+		account.source = window.Source
 	}
 	return s.persist(accountKey, account)
 }
@@ -119,7 +129,11 @@ func (s *ObservedStore) Latest(accountKey string) (ObservedReading, bool) {
 	defer s.mu.Unlock()
 	account := s.account(accountKey)
 	now := s.timeNow()
-	reading := ObservedReading{Provider: account.provider, ObservedAt: account.observedAt}
+	source := account.source
+	if source == "" {
+		source = defaultObservedSource
+	}
+	reading := ObservedReading{Provider: account.provider, ObservedAt: account.observedAt, Source: source}
 	keys := make([]string, 0, len(account.windows))
 	for k := range account.windows {
 		keys = append(keys, k)
@@ -134,6 +148,9 @@ func (s *ObservedStore) Latest(accountKey string) (ObservedReading, bool) {
 		reading.Windows = append(reading.Windows, served)
 		if window.ObservedAt.After(reading.ObservedAt) {
 			reading.ObservedAt = window.ObservedAt
+			if window.Source != "" {
+				reading.Source = window.Source
+			}
 		}
 	}
 	if len(reading.Windows) == 0 {
@@ -170,6 +187,7 @@ func (s *ObservedStore) account(accountKey string) *observedAccount {
 		}
 	}
 	account.provider = stored.Provider
+	account.source = stored.Source
 	if stored.ObservedAt.After(account.observedAt) {
 		account.observedAt = stored.ObservedAt
 	}
@@ -182,7 +200,7 @@ func (s *ObservedStore) persist(accountKey string, account *observedAccount) err
 	if s.persistence == nil {
 		return nil
 	}
-	snapshot := observedSnapshot{Provider: account.provider, ObservedAt: account.observedAt}
+	snapshot := observedSnapshot{Provider: account.provider, ObservedAt: account.observedAt, Source: account.source}
 	for _, window := range account.windows {
 		snapshot.Windows = append(snapshot.Windows, window)
 	}
@@ -198,6 +216,7 @@ type observedSnapshot struct {
 	Provider   string           `json:"provider,omitempty"`
 	Windows    []ObservedWindow `json:"windows"`
 	ObservedAt time.Time        `json:"observed_at"`
+	Source     string           `json:"source,omitempty"`
 }
 
 func (s *ObservedStore) timeNow() time.Time {
