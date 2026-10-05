@@ -1075,6 +1075,7 @@
   "overviewFailureRoutedNoReason": "no reason recorded",
   "overviewFailureTaskState": "task is now {{state}}",
   "overviewFailureNoAction": "No action taken, {{duration}} since the failure",
+  "overviewDecisionAnswered": "Answered {{time}}",
   "overviewEventAllKinds": "All",
   "overviewModels": "Models and usage",
   "overviewAnalyzing": "Analyzing...",

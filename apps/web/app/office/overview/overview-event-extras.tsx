@@ -6,7 +6,12 @@ import type {
   OverviewFailure,
   OverviewStepMove,
 } from "@/lib/state/slices/office/overview-types";
-import { durationFromMinutes, occurredTime, sessionStateLabel } from "./overview-format";
+import {
+  durationFromMinutes,
+  occurredTime,
+  sessionStateLabel,
+  taskStateLabel,
+} from "./overview-format";
 import { statusTextClass } from "./overview-status-colors";
 
 // The second line under an event row: what a run of step moves went through, or
@@ -102,7 +107,9 @@ function FailureLine({ failure }: { failure: OverviewFailure }) {
     );
   }
   if (failure.task_state) {
-    parts.push(t("office:overviewFailureTaskState", { state: failure.task_state }));
+    parts.push(
+      t("office:overviewFailureTaskState", { state: taskStateLabel(t, failure.task_state) }),
+    );
   }
   if (failure.has_no_action) {
     return (
@@ -127,13 +134,43 @@ function FailureLine({ failure }: { failure: OverviewFailure }) {
   );
 }
 
-/** The supporting line an event row carries, or nothing when it carries none. */
+/**
+ * The supporting line an event row carries, or nothing when it carries none.
+ *
+ * The server sends these facts as fields rather than prose so the client can
+ * phrase them, which means every field it fills has to be read here: a value
+ * that arrives and is never rendered is a requirement that quietly does not
+ * reach the screen.
+ */
 export function OverviewEventExtras({ event }: { event: OverviewEvent }) {
-  if (event.moves && event.moves.length > 0) {
-    return <StepMoveLine moves={event.moves} from={event.from} to={event.to} />;
-  }
-  if (event.failure) {
-    return <FailureLine failure={event.failure} />;
-  }
-  return null;
+  const { t } = useTranslation();
+  return (
+    <>
+      {event.version && <EventField>{event.version}</EventField>}
+      {event.clears_at && (
+        <EventField>
+          {t("office:overviewClearsAt", { time: occurredTime(event.clears_at) })}
+        </EventField>
+      )}
+      {event.pull_request && (
+        <EventField>
+          {event.pull_request.owner}/{event.pull_request.repo}#{event.pull_request.number}
+        </EventField>
+      )}
+      {event.decided_at && (
+        <EventField>
+          {t("office:overviewDecisionAnswered", { time: occurredTime(event.decided_at) })}
+        </EventField>
+      )}
+      {event.moves && event.moves.length > 0 && (
+        <StepMoveLine moves={event.moves} from={event.from} to={event.to} />
+      )}
+      {event.failure && <FailureLine failure={event.failure} />}
+    </>
+  );
+}
+
+/** One supporting fact on its own line under the row's title. */
+function EventField({ children }: { children: React.ReactNode }) {
+  return <span className="mt-0.5 block truncate text-xs text-muted-foreground">{children}</span>;
 }

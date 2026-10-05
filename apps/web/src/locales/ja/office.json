@@ -1075,6 +1075,7 @@
   "overviewFailureRoutedNoReason": "理由の記録なし",
   "overviewFailureTaskState": "タスクは現在 {{state}}",
   "overviewFailureNoAction": " 조치なし · 失敗から {{duration}}",
+  "overviewDecisionAnswered": "{{time}} に回答済み",
   "overviewEventAllKinds": "すべて",
   "overviewModels": "モデルと使用状況",
   "overviewSessions24h": "セッション (24 時間)",

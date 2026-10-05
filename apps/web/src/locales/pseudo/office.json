@@ -1075,6 +1075,7 @@
   "overviewFailureRoutedNoReason": "ńō ŕēàśōń ŕēćōŕďēď",
   "overviewFailureTaskState": "ţàśķ ĩś ńōŵ {{state}}",
   "overviewFailureNoAction": "Ńō àćţĩōń ţàķēń, {{duration}} śĩńćē ţĥē ƒàĩĺũŕē",
+  "overviewDecisionAnswered": "Àńśŵēŕēď {{time}}",
   "overviewEventAllKinds": "Àĺĺ",
   "overviewModels": "Ḿōďēĺś àńď ũśàĝē",
   "overviewAnalyzing": "Àńàĺŷźĩńĝ...",

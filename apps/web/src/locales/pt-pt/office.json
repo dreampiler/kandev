@@ -1075,6 +1075,7 @@
   "overviewFailureRoutedNoReason": "sem motivo registado",
   "overviewFailureTaskState": "a tarefa está agora {{state}}",
   "overviewFailureNoAction": "Sem ação, {{duration}} após a falha",
+  "overviewDecisionAnswered": "Respondida em {{time}}",
   "overviewEventAllKinds": "Todas",
   "overviewModels": "Modelos e utilização",
   "overviewSessions24h": "Sessões (24 h)",

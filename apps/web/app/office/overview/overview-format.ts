@@ -116,6 +116,33 @@ export function sessionStateLabel(t: TFunction, state: string | undefined): stri
   return key ? t(key) : state;
 }
 
+/**
+ * Task states, phrased by the shared `common:taskState*` catalog the board and
+ * the task lists already use, so a task state reads the same in a failure
+ * follow-up as it does everywhere else. A state this catalog does not name keeps
+ * its own code rather than being given invented wording: an unrecognised state is
+ * reported as the code it is.
+ */
+const TASK_STATE_LABEL_KEYS: Record<string, string> = {
+  TODO: "common:taskStateTodo",
+  CREATED: "common:taskStateCreated",
+  SCHEDULING: "common:taskStateScheduling",
+  IN_PROGRESS: "common:taskStateInProgress",
+  REVIEW: "common:taskStateReview",
+  WAITING_FOR_INPUT: "common:taskStateWaitingForInput",
+  BLOCKED: "common:taskStateBlocked",
+  COMPLETED: "common:taskStateCompleted",
+  FAILED: "common:taskStateFailed",
+  CANCELLED: "common:taskStateCancelled",
+  NOT_STARTED: "common:taskStateNotStarted",
+};
+
+export function taskStateLabel(t: TFunction, state: string | undefined): string {
+  if (!state) return "";
+  const key = TASK_STATE_LABEL_KEYS[state.toUpperCase()];
+  return key ? t(key) : state;
+}
+
 export function senderLabel(t: TFunction, sender: OverviewQueueItem["sender"]): string {
   return t(SENDER_LABEL_KEYS[sender] ?? "common:unknown");
 }
@@ -146,25 +173,32 @@ export function relativeTime(iso: string | undefined, now: number = Date.now()):
  * `MM-DD HH:mm` for anything earlier.
  *
  * A relative reading ("3 minutes ago") is only correct at the instant it was
- * written, so a list left open keeps restating it or needs a ticker to stay
+ * written, so a list left open either restates it or needs a ticker to stay
  * truthful. The instant a thing happened does not move, so it is shown as the
  * clock time it was, with the relative reading kept for hover where a reader
  * asks "how long ago is that?". Durations are a different question and keep
  * using `durationSince`.
+ *
+ * The clock cycle and the date order are pinned rather than left to the locale.
+ * A locale's own default gives "11:01 PM", and its date order gives "10/04" in
+ * one locale and "04/10" in another, which is not the reading this column
+ * promises. The 24-hour cycle comes from `Intl` so the digits stay locale-aware,
+ * and the month-day order is written here because no option asks `Intl` for it.
  */
 export function occurredTime(iso: string | undefined, now: number = Date.now()): string {
   if (!iso) return "";
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "";
+  const today = new Date(now);
   const sameDay =
-    at.getFullYear() === new Date(now).getFullYear() &&
-    at.getMonth() === new Date(now).getMonth() &&
-    at.getDate() === new Date(now).getDate();
-  return formatTime(at, {
-    hour: "2-digit",
-    minute: "2-digit",
-    ...(sameDay ? {} : { month: "2-digit", day: "2-digit" }),
-  });
+    at.getFullYear() === today.getFullYear() &&
+    at.getMonth() === today.getMonth() &&
+    at.getDate() === today.getDate();
+  const clock = formatTime(at, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  if (sameDay) return clock;
+  const month = String(at.getMonth() + 1).padStart(2, "0");
+  const day = String(at.getDate()).padStart(2, "0");
+  return `${month}-${day} ${clock}`;
 }
 
 function numberValue(reason: OverviewReason, name: string): number {

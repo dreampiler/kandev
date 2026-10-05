@@ -1075,6 +1075,7 @@
   "overviewFailureRoutedNoReason": "没有记录原因",
   "overviewFailureTaskState": "任务现在为 {{state}}",
   "overviewFailureNoAction": "未处理 · 失败后 {{duration}}",
+  "overviewDecisionAnswered": "已于 {{time}} 回答",
   "overviewEventAllKinds": "全部",
   "overviewModels": "模型与用量",
   "overviewSessions24h": "会话（24 小时）",
