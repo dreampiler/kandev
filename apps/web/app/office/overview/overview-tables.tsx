@@ -24,6 +24,7 @@ import {
 } from "./overview-format";
 import { OverviewStatusDot } from "./overview-status-legend";
 import { statusTextClass, statusToneName } from "./overview-status-colors";
+import { FailureLine } from "./overview-event-extras";
 
 /**
  * A status in a table cell: the dot, then the state in words and in its color.
@@ -166,6 +167,7 @@ export function OverviewTaskTable({
             </TableCell>
             <TableCell>
               <OverviewReasonCell reason={row.reason} status={row.status} />
+              {row.failure && <FailureLine failure={row.failure} />}
             </TableCell>
           </TableRow>
         ))}
@@ -215,6 +217,7 @@ export function OverviewSessionTable({ rows }: { rows: OverviewSessionItem[] }) 
             </TableCell>
             <TableCell>
               <OverviewReasonCell reason={row.reason} status={row.status} />
+              {row.failure && <FailureLine failure={row.failure} />}
             </TableCell>
           </TableRow>
         ))}

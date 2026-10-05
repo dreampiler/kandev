@@ -235,6 +235,12 @@ export type OverviewTaskItem = {
   last_output_at?: string;
   step_entered_at: string;
   queued_messages: number;
+  /**
+   * What followed this row's failed session. Present only for a row that has one,
+   * so a task row answers "and what happened to it?" where the operator is
+   * already looking rather than only in the events list.
+   */
+  failure?: OverviewFailure;
 };
 
 export type OverviewSessionItem = {
@@ -250,6 +256,8 @@ export type OverviewSessionItem = {
   reason?: OverviewReason;
   started_at: string;
   last_output_at?: string;
+  /** What followed this session's failure; absent for a live session. */
+  failure?: OverviewFailure;
 };
 
 export type OverviewQueueItem = {

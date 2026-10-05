@@ -354,6 +354,10 @@ type OverviewTaskItem struct {
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
 	StepEnteredAt  time.Time       `json:"step_entered_at"`
 	QueuedMessages int             `json:"queued_messages"`
+	// Failure is what followed this row's failed session, so a task that is in
+	// trouble reports what became of the failure on its own row rather than only
+	// in the events list. It is the same value the failed-session event carries.
+	Failure *OverviewFailure `json:"failure,omitempty"`
 }
 
 // OverviewSessionItem is one row of the running-sessions list.
@@ -370,6 +374,9 @@ type OverviewSessionItem struct {
 	Reason         *OverviewReason `json:"reason,omitempty"`
 	StartedAt      time.Time       `json:"started_at"`
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
+	// Failure reports what followed this session's failure. A row for a live
+	// session has none: there is no failure to follow up on yet.
+	Failure *OverviewFailure `json:"failure,omitempty"`
 }
 
 // OverviewQueueItem is one receiving session in the queued-messages list.

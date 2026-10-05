@@ -84,7 +84,7 @@ const STEP_ACTOR_KEYS: Record<string, string> = {
  * because silence here is the finding, not an absence of one. An execution actor
  * is shown only when the records name one.
  */
-function FailureLine({ failure }: { failure: OverviewFailure }) {
+export function FailureLine({ failure }: { failure: OverviewFailure }) {
   const { t } = useTranslation();
   const parts: string[] = [];
   const next = failure.next_session;

@@ -8,6 +8,8 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
 // Overview list filters for the per-workspace task list.
@@ -174,7 +176,43 @@ func taskItem(snap *overviewSnapshot, t *overviewTask) OverviewTaskItem {
 		item.AgentProfileID = t.shown.AgentProfileID
 		item.ModelName = snap.profileNames[t.shown.AgentProfileID]
 	}
+	item.Failure = taskFailure(snap, t)
 	return item
+}
+
+// taskFailure reports what followed the newest failed session of a task, so the
+// row an operator is already looking at answers "and what happened to it?" in
+// place rather than only in the events list. A task with no failed session
+// carries none: there is no failure to follow up on.
+func taskFailure(snap *overviewSnapshot, t *overviewTask) *OverviewFailure {
+	var newest *sqlite.OverviewFailureFollowupRow
+	for _, sess := range t.sessions {
+		if sess.State != sessionStateFailed {
+			continue
+		}
+		row := snap.followups[sess.ID]
+		if row == nil {
+			continue
+		}
+		if newest == nil || row.FailedAt.After(newest.FailedAt) {
+			newest = row
+		}
+	}
+	if newest == nil {
+		return nil
+	}
+	return failureFor(newest, snap.now, snap.profileNames)
+}
+
+// sessionFailure reports what followed one session's failure. A row for a live
+// session carries none, because a session that has not failed has nothing to
+// follow up on.
+func sessionFailure(snap *overviewSnapshot, sessionID string) *OverviewFailure {
+	row := snap.followups[sessionID]
+	if row == nil {
+		return nil
+	}
+	return failureFor(row, snap.now, snap.profileNames)
 }
 
 func completedTaskItems(snap *overviewSnapshot, workspaceID string) []OverviewTaskItem {
@@ -205,6 +243,7 @@ func sessionItems(snap *overviewSnapshot) []OverviewSessionItem {
 			WorkspaceID: ws, WorkspaceName: snap.names[ws], AgentProfileID: sess.AgentProfileID,
 			ModelName: snap.profileNames[sess.AgentProfileID], SessionState: sess.State, Status: status, Reason: why,
 			StartedAt: sess.StartedAt, LastOutputAt: timePtr(snap.lastOutput[sess.ID]),
+			Failure: sessionFailure(snap, sess.ID),
 		})
 	}
 	sort.SliceStable(items, func(i, j int) bool {
