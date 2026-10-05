@@ -1,7 +1,9 @@
 package db
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -45,8 +47,21 @@ const (
 	sqliteReaderConnsEnv = "KANDEV_SQLITE_READER_CONNS"
 )
 
-// applyWriterPragmas (sqlite_writer_pragmas_cgo.go / _nocgo.go) runs on every
-// writer connection.
+// applyWriterPragmas runs on every writer connection. journal_size_limit is
+// per-connection state and a pooled connection can be replaced at any time, so
+// it is set here rather than once per database handle. It goes through the
+// standard driver.ExecerContext interface so the same code compiles with and
+// without cgo: the non-cgo go-sqlite3 mock connection does not implement it
+// (and its driver cannot open SQLite), so the pragma is skipped there.
+func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
+	execer, ok := any(conn).(driver.ExecerContext)
+	if !ok {
+		return nil
+	}
+	_, err := execer.ExecContext(context.Background(), journalSizeLimitSQL, nil)
+	return err
+}
+
 func init() {
 	sql.Register(sqliteWriterDriverName, &sqlite3.SQLiteDriver{
 		ConnectHook: applyWriterPragmas,
