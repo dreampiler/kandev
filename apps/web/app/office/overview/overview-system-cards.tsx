@@ -137,64 +137,84 @@ function queueTone(queued: number, undeliverable: number): OverviewStatusTone | 
 }
 
 /**
- * The running-session value: each lane against the limit that lane is actually
- * admitted under, read from the settings-backed capacity rather than from a
- * constant captured at start. An install with a general limit and a control
- * lane therefore reads as two numbers of their own instead of one total over a
- * limit that belongs to neither.
+ * One lane's population against the limit that lane is actually admitted under,
+ * read from the settings-backed capacity rather than from a constant captured
+ * at start. A limit of zero means the lane is unlimited (general) or not
+ * configured (control), so it has no denominator to show and reads as its
+ * count alone.
  *
- * A limit of zero means the general lane is unlimited and the control lane is
- * not configured, so that lane shows its count alone. A reading that did not
- * arrive leaves the whole block absent, and the scope's own running count is
- * shown with no denominator rather than a measured zero.
+ * The two lanes are separate numbers rather than one string because they are
+ * separate limits: a saturated general lane says nothing about whether the
+ * control lane has room, so each lane's tile carries only its own reading.
  */
-function runningSessionsValue(t: TFunction, system: OverviewSystem): string {
-  const lanes = system.session_lanes;
-  if (!lanes || lanes.general_running_sessions === undefined)
-    return String(system.running_sessions);
-  const generalUsed = lanes.general_running_sessions;
-  const parts = [
-    lanes.general_limit > 0
-      ? t("office:overviewSessionLaneGeneral", { used: generalUsed, limit: lanes.general_limit })
-      : t("office:overviewSessionLaneGeneralUnlimited", { used: generalUsed }),
-  ];
-  if (lanes.control_limit > 0 && lanes.control_running_sessions !== undefined) {
-    parts.push(
-      t("office:overviewSessionLaneControl", {
-        used: lanes.control_running_sessions,
-        limit: lanes.control_limit,
-      }),
-    );
-  }
-  return parts.join(LANE_SEPARATOR);
+function laneCount(t: TFunction, used: number, limit: number): string {
+  return limit > 0
+    ? t("office:overviewSessionLaneCount", { used, limit })
+    : t("office:overviewSessionLaneCountUnlimited", { used });
 }
-
-// The separator between two lane readings is punctuation rather than copy, so
-// it is not a translated string: both sides of it are already localized.
-const LANE_SEPARATOR = " · ";
 
 /**
- * The running-session value with the combined capacity on hover. The lanes are
- * what admission enforces, so the sum is only offered as the reading behind
- * them, never as a second number competing with them. An unlimited lane leaves
- * the combined capacity unstated, because there is no combined limit to state.
+ * The session cards: one tile per admission lane, because the lanes are admitted
+ * against limits of their own and a reader asking "is there room?" asks it of a
+ * lane rather than of a sum. A control lane that is not configured has no tile
+ * at all, since a zero over zero is not a capacity.
+ *
+ * A reading that did not arrive leaves the lanes absent altogether, and the
+ * scope's own running count is shown with no denominator rather than with a
+ * measured zero. Both lane tiles open the same session list, so the tiles differ
+ * only in what they report.
  */
-function runningSessionsNode(t: TFunction, system: OverviewSystem): ReactNode {
-  const text = runningSessionsValue(t, system);
-  const lanes = system.session_lanes;
-  if (!lanes || lanes.general_running_sessions === undefined) return text;
-  const used = lanes.general_running_sessions + (lanes.control_running_sessions ?? 0);
-  const limited = lanes.general_limit > 0 && lanes.control_limit > 0;
-  const title = limited
-    ? t("office:overviewSessionLanesTotal", {
-        used,
-        limit: lanes.general_limit + lanes.control_limit,
-      })
-    : t("office:overviewSessionLanesTotalUnlimited", { used });
-  return <span title={title}>{text}</span>;
+function sessionLaneCards(
+  t: TFunction,
+  values: OverviewSystem,
+  loading: boolean,
+  open: OverviewRunningKind | null,
+  toggle: (kind: OverviewRunningKind) => void,
+): ReactNode {
+  const lanes = values.session_lanes;
+  const sessionProps = {
+    loading,
+    expanded: open === "sessions",
+    onToggle: () => toggle("sessions"),
+  };
+  if (!lanes || lanes.general_running_sessions === undefined) {
+    return (
+      <StatCard
+        testId="overview-card-running-sessions"
+        tone={values.running_sessions > 0 ? "running" : null}
+        title={t("office:overviewRunningSessions")}
+        value={values.running_sessions}
+        sub={t("office:overviewWaitingInput", { count: values.waiting_input_sessions })}
+        {...sessionProps}
+      />
+    );
+  }
+  const general = lanes.general_running_sessions;
+  const control = lanes.control_limit > 0 ? lanes.control_running_sessions : undefined;
+  return (
+    <>
+      <StatCard
+        testId="overview-card-running-sessions"
+        tone={general > 0 ? "running" : null}
+        title={t("office:overviewSessionLaneTitleGeneral")}
+        value={laneCount(t, general, lanes.general_limit)}
+        sub={t("office:overviewWaitingInput", { count: values.waiting_input_sessions })}
+        {...sessionProps}
+      />
+      {control !== undefined && (
+        <StatCard
+          testId="overview-card-control-sessions"
+          tone={control > 0 ? "running" : null}
+          title={t("office:overviewSessionLaneTitleControl")}
+          value={laneCount(t, control, lanes.control_limit)}
+          {...sessionProps}
+        />
+      )}
+    </>
+  );
 }
 
-/** The six system cards; three of them open the cross-workspace lists. */
+/** The system cards; four of them open the cross-workspace lists. */
 export function OverviewSystemCards({
   system,
   loading,
@@ -223,7 +243,7 @@ export function OverviewSystemCards({
   const blocked = values.blocked_accounts_total ?? values.blocked_accounts;
   return (
     <section className="space-y-3">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-7">
         <StatCard
           testId="overview-card-system"
           loading={loading}
@@ -245,16 +265,7 @@ export function OverviewSystemCards({
           expanded={open === "tasks"}
           onToggle={() => toggle("tasks")}
         />
-        <StatCard
-          testId="overview-card-running-sessions"
-          loading={loading}
-          tone={values.running_sessions > 0 ? "running" : null}
-          title={t("office:overviewRunningSessions")}
-          value={runningSessionsNode(t, values)}
-          sub={t("office:overviewWaitingInput", { count: values.waiting_input_sessions })}
-          expanded={open === "sessions"}
-          onToggle={() => toggle("sessions")}
-        />
+        {sessionLaneCards(t, values, loading, open, toggle)}
         <StatCard
           testId="overview-card-queue"
           loading={loading}
