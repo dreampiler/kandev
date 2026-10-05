@@ -23,6 +23,8 @@ import {
   isCurrentBlock,
   occurredTime,
   relativeTime,
+  usageUnavailableReason,
+  usageWindowLabel,
 } from "./overview-format";
 import { statusTextClass } from "./overview-status-colors";
 import { MODELS_ANCHOR } from "./overview-system-cards";
@@ -261,7 +263,9 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
         className="mt-1 text-xs text-muted-foreground"
         data-testid="overview-model-usage-unavailable"
       >
-        {t("office:overviewUsageUnavailable", { reason: usage.reason ?? usage.state })}
+        {t("office:overviewUsageUnavailable", {
+          reason: usageUnavailableReason(t, usage.reason ?? usage.state),
+        })}
       </div>
     );
   }
@@ -271,7 +275,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
     <div className="mt-1 space-y-0.5 text-xs" data-testid="overview-model-usage">
       {windows.map((window) => (
         <div key={`${window.label}:${window.reset_at ?? ""}`} className="flex flex-wrap gap-x-2">
-          <span>{window.label}</span>
+          <span>{usageWindowLabel(t, window.label)}</span>
           <span className="tabular-nums">{Math.round(window.utilization_pct)}%</span>
           {window.limit_reached && (
             <span className={statusTextClass("error")}>

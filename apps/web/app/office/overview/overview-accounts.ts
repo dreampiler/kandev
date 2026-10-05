@@ -6,7 +6,7 @@ import type {
   OverviewBlockedCircuit,
   OverviewModel,
 } from "@/lib/state/slices/office/overview-types";
-import { isCurrentBlock } from "./overview-format";
+import { internalUsageWindowKey, isCurrentBlock } from "./overview-format";
 
 /**
  * Provider accounts for the models section. One account is one credential a set
@@ -38,7 +38,7 @@ export type OverviewAccountUsage = {
   /** True when the reading is a last-known value rather than a live one. */
   stale: boolean;
   /** Kandev's own recorded account usage over trailing windows. */
-  internal?: { label: string; turns: number }[];
+  internal?: { label: string; windowKey?: string; turns: number }[];
   /** How many limit hits were recorded for the account. */
   limitHitCount?: number;
 };
@@ -215,7 +215,11 @@ function collectWindows(
 
 /** Kandev's own recorded usage for the account, which every reading carries. */
 function internalWindows(row: AgentProfileUsage) {
-  return (row.internal?.windows ?? []).map((entry) => ({ label: entry.label, turns: entry.turns }));
+  return (row.internal?.windows ?? []).map((entry) => ({
+    label: entry.label,
+    windowKey: internalUsageWindowKey(entry.label),
+    turns: entry.turns,
+  }));
 }
 
 /**

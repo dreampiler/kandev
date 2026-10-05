@@ -40,6 +40,22 @@ const EVENT_LABEL_KEYS: Record<OverviewEvent["kind"], string> = {
  */
 const EVENT_DISPLAY_LIMIT = 50;
 
+// Catalog keys for the approval kinds, not copy. A kind the catalog does not
+// name keeps its own code, so a new kind reads as its code rather than as
+// another kind's name.
+const APPROVAL_TYPE_KEYS: Record<string, string> = {
+  hire_agent: "office:overviewApprovalTypeHireAgent",
+  budget_increase: "office:overviewApprovalTypeBudgetIncrease",
+  board_approval: "office:overviewApprovalTypeBoardApproval",
+  task_review: "office:overviewApprovalTypeTaskReview",
+  skill_creation: "office:overviewApprovalTypeSkillCreation",
+};
+
+function approvalTypeLabel(t: (key: string) => string, approvalType: string | undefined): string {
+  const key = approvalType ? APPROVAL_TYPE_KEYS[approvalType] : undefined;
+  return key ? t(key) : (approvalType ?? t("office:overviewApprovalTypeUnknown"));
+}
+
 function humanHref(item: OverviewHumanItem): string {
   if (item.kind === "question" && item.task_id) {
     return linkToTask(item.task_id, item.session_id ? { sessionId: item.session_id } : undefined);
@@ -93,7 +109,9 @@ export function OverviewNeedsHuman({ items }: { items: OverviewHumanItem[] }) {
               </Badge>
               <span className="text-xs text-muted-foreground">{item.workspace_name}</span>
               <span className="min-w-0 flex-1 truncate text-attention-foreground">
-                {item.kind === "question" ? item.task_title : item.approval_type}
+                {item.kind === "question"
+                  ? item.task_title
+                  : approvalTypeLabel(t, item.approval_type)}
               </span>
               {item.count > 1 && (
                 <Badge variant="outline" data-testid="overview-human-repeat">

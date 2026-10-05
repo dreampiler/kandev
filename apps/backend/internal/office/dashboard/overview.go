@@ -101,6 +101,29 @@ type OverviewScopeSource interface {
 	OfficeOverviewScope(ctx context.Context) (string, error)
 }
 
+// SessionCapacityReading is one bounded reading of the instance's session
+// admission: how many sessions each lane holds and the limit that lane is
+// admitted against.
+type SessionCapacityReading struct {
+	// GeneralUsed is the general lane's population and ControlUsed the control
+	// lane's, so the two report the split rather than one total the reader has
+	// to unpick. A population that could not be read reports Known=false while
+	// still carrying the limits the controller enforces.
+	GeneralUsed     int
+	GeneralLimit    int
+	ControlUsed     int
+	ControlLimit    int
+	ControlEnabled  bool
+	PopulationKnown bool
+}
+
+// SessionCapacityReader reads the live session admission state. It is read on
+// every overview pass rather than recorded at start, so a limit changed in
+// Settings reaches the next refresh without a restart.
+type SessionCapacityReader interface {
+	CurrentSessionCapacity(ctx context.Context) (SessionCapacityReading, error)
+}
+
 // SetOverviewReader wires the overview read surface. Without it the aggregate
 // keeps its original Office-only counts and the list routes respond 503.
 func (s *DashboardService) SetOverviewReader(r OverviewReader) { s.overviewReader = r }
@@ -114,9 +137,27 @@ func (s *DashboardService) SetAnswerableQuestionLister(l AnswerableQuestionListe
 // overview uses the Office scope.
 func (s *DashboardService) SetOverviewScopeSource(src OverviewScopeSource) { s.scopeSource = src }
 
-// SetOverviewSessionLimit records the instance session limit shown next to
-// the running-session count.
-func (s *DashboardService) SetOverviewSessionLimit(limit int) { s.overviewSessionLimit = limit }
+// SetSessionCapacityReader wires the live session-admission reading. Without it
+// the overview reports no capacity at all, so an unwired service never presents
+// an absent reading as a measured zero.
+func (s *DashboardService) SetSessionCapacityReader(r SessionCapacityReader) {
+	s.capacityReader = r
+}
+
+// readSessionCapacity returns the current admission reading. An unwired or
+// failing reader yields an unknown reading: the limits are left unreported
+// rather than guessed, because a stale or invented limit is the defect this
+// reading exists to remove.
+func (s *DashboardService) readSessionCapacity(ctx context.Context) (SessionCapacityReading, bool) {
+	if s.capacityReader == nil {
+		return SessionCapacityReading{}, false
+	}
+	reading, err := s.capacityReader.CurrentSessionCapacity(ctx)
+	if err != nil {
+		return SessionCapacityReading{}, false
+	}
+	return reading, true
+}
 
 // SetBuildInfo records the running binary's version for the overview's
 // server-start row. It is a setter rather than a constructor argument so the
@@ -284,7 +325,8 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 		return err
 	}
 	extra := s.readExtraEvents(ctx, snap, ids, since)
-	assembleSystem(snap, s.overviewSessionLimit, th)
+	capacity, capacityKnown := s.readSessionCapacity(ctx)
+	assembleSystem(snap, capacity, capacityKnown, th)
 	snap.resp.Last24h = assembleEvents(snap, automation, created, extra, since)
 	return nil
 }

@@ -3,6 +3,7 @@
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { routeReasonKey } from "@/components/task/chat/dynamic-route-recovery";
 import type {
   OverviewEvent,
   OverviewFailure,
@@ -244,10 +245,15 @@ export function FailureLine({ failure }: { failure: OverviewFailure }) {
     );
   }
   if (failure.route_attempts && failure.route_attempts > 0) {
+    // A reason the routing catalog names is stated in the active locale; one it
+    // does not name stays as the code, which is the diagnostic it was.
+    const reasonKey = routeReasonKey(failure.route_reason);
     parts.push(
       t("office:overviewFailureRouted", {
         count: failure.route_attempts,
-        reason: failure.route_reason || t("office:overviewFailureRoutedNoReason"),
+        reason: reasonKey
+          ? t(`task:${reasonKey}`)
+          : failure.route_reason || t("office:overviewFailureRoutedNoReason"),
       }),
     );
   }

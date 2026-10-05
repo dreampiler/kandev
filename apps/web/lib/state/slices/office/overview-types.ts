@@ -31,7 +31,14 @@ export type OverviewSystem = {
   active_tasks: number;
   running_sessions: number;
   waiting_input_sessions: number;
-  session_limit: number;
+  /**
+   * The configured session limits and the population each lane holds. Absent
+   * means the reading did not arrive, which is not a reading of zero: the card
+   * then shows the scope's own running count with no denominator. A limit of
+   * zero means the general lane is unlimited, or the control lane is not
+   * configured.
+   */
+  session_lanes?: OverviewSessionLanes;
   queued_messages: number;
   undeliverable_messages: number;
   needs_human: number;
@@ -43,6 +50,14 @@ export type OverviewSystem = {
   problems: number;
   /** The limits the status rules applied, so the UI explains the same rules. */
   problem_thresholds?: OverviewThresholds;
+};
+
+export type OverviewSessionLanes = {
+  general_limit: number;
+  control_limit: number;
+  /** Absent together with the control count when the population was unread. */
+  general_running_sessions?: number;
+  control_running_sessions?: number;
 };
 
 export type OverviewThresholds = {

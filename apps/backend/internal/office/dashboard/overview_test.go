@@ -20,6 +20,16 @@ type stubScopeSource struct{ scope string }
 
 func (s stubScopeSource) OfficeOverviewScope(context.Context) (string, error) { return s.scope, nil }
 
+// stubCapacityReader returns one fixed admission reading, the shape the
+// orchestrator's ceiling observation is adapted into.
+type stubCapacityReader struct {
+	reading dashboard.SessionCapacityReading
+}
+
+func (s stubCapacityReader) CurrentSessionCapacity(context.Context) (dashboard.SessionCapacityReading, error) {
+	return s.reading, nil
+}
+
 // countingOverviewReader counts snapshot builds and can hold them open so a
 // test can pile concurrent callers onto one build.
 type countingOverviewReader struct {
@@ -131,7 +141,14 @@ func TestOverviewMetricsAndSections(t *testing.T) {
 	deps.svc.SetWorkspaceLister(overviewLister())
 	deps.svc.SetOverviewReader(deps.repo)
 	deps.svc.SetOverviewScopeSource(stubScopeSource{scope: dashboard.OverviewScopeReachable})
-	deps.svc.SetOverviewSessionLimit(8)
+	deps.svc.SetSessionCapacityReader(stubCapacityReader{reading: dashboard.SessionCapacityReading{
+		GeneralUsed:     1,
+		GeneralLimit:    10,
+		ControlUsed:     2,
+		ControlLimit:    4,
+		ControlEnabled:  true,
+		PopulationKnown: true,
+	}})
 
 	resp, err := deps.svc.GetWorkspacesAggregate(context.Background())
 	if err != nil {
@@ -159,8 +176,14 @@ func TestOverviewMetricsAndSections(t *testing.T) {
 		t.Fatal("is_office must follow the Office workflow id")
 	}
 	sys := resp.System
-	if sys == nil || sys.RunningSessions != 1 || sys.SessionLimit != 8 || sys.UndeliverableMessages != 1 || sys.Problems != 2 {
+	if sys == nil || sys.RunningSessions != 1 || sys.UndeliverableMessages != 1 || sys.Problems != 2 {
 		t.Fatalf("system = %+v", sys)
+	}
+	lanes := sys.SessionLanes
+	if lanes == nil || lanes.GeneralLimit != 10 || lanes.ControlLimit != 4 ||
+		lanes.GeneralRunningSessions == nil || *lanes.GeneralRunningSessions != 1 ||
+		lanes.ControlRunningSessions == nil || *lanes.ControlRunningSessions != 2 {
+		t.Fatalf("session lanes = %+v; want the configured 10/4 limits with the 1/2 lane split", lanes)
 	}
 	if len(resp.Models) != 1 || resp.Models[0].AgentName != "claude-code" || resp.Models[0].Failed24h != 1 ||
 		len(resp.Models[0].Errors) != 1 {

@@ -9,7 +9,13 @@ import type {
 } from "./overview-accounts";
 import { accountKindKey } from "./overview-accounts";
 import type { OverviewModel } from "@/lib/state/slices/office/overview-types";
-import { occurredTime, relativeTime } from "./overview-format";
+import {
+  internalUsageEntry,
+  occurredTime,
+  relativeTime,
+  usageUnavailableReason,
+  usageWindowLabel,
+} from "./overview-format";
 import { statusTextClass } from "./overview-status-colors";
 
 /**
@@ -76,7 +82,9 @@ function AccountUsageLine({ usage }: { usage: OverviewAccountUsage }) {
   if (usage.unavailableReason) {
     return (
       <div className="text-muted-foreground" data-testid="overview-account-usage-unavailable">
-        {t("office:overviewUsageUnavailable", { reason: usage.unavailableReason })}
+        {t("office:overviewUsageUnavailable", {
+          reason: usageUnavailableReason(t, usage.unavailableReason),
+        })}
       </div>
     );
   }
@@ -91,7 +99,7 @@ function AccountUsageLine({ usage }: { usage: OverviewAccountUsage }) {
     <div className="space-y-0.5" data-testid="overview-account-usage">
       {usage.windows.map((window) => (
         <div key={`${window.label}:${window.reset_at ?? ""}`} className="flex flex-wrap gap-x-2">
-          <span>{window.label}</span>
+          <span>{usageWindowLabel(t, window.label)}</span>
           <span className="tabular-nums">{Math.round(window.utilization_pct)}%</span>
           {window.limit_reached ? (
             <span className={statusTextClass("error")}>
@@ -116,7 +124,7 @@ function AccountUsageLine({ usage }: { usage: OverviewAccountUsage }) {
       {usage.internal && usage.internal.length > 0 ? (
         <div className="text-muted-foreground" data-testid="overview-account-internal">
           {t("office:overviewAccountInternalUsage", {
-            windows: usage.internal.map((entry) => `${entry.label} ${entry.turns}`).join(" · "),
+            windows: usage.internal.map((entry) => internalUsageEntry(t, entry)).join(" · "),
           })}
         </div>
       ) : null}

@@ -363,8 +363,8 @@ func collapseHumanItems(items []OverviewHumanItem) []OverviewHumanItem {
 	return out
 }
 
-func assembleSystem(snap *overviewSnapshot, sessionLimit int, thresholds overviewThresholds) {
-	sys := &OverviewSystem{SessionLimit: sessionLimit, StartedAt: timePtr(processStartedAt())}
+func assembleSystem(snap *overviewSnapshot, capacity SessionCapacityReading, capacityKnown bool, thresholds overviewThresholds) {
+	sys := &OverviewSystem{StartedAt: timePtr(processStartedAt())}
 	for _, entry := range snap.resp.Workspaces {
 		if m := entry.Metrics; m != nil {
 			sys.ActiveTasks += m.ActiveTasks
@@ -413,7 +413,28 @@ func assembleSystem(snap *overviewSnapshot, sessionLimit int, thresholds overvie
 		sys.BlockedAccountsTotal = &total
 	}
 	sys.ProblemThresholds = overviewThresholdsWire(thresholds)
+	assembleSessionCapacity(sys, capacity, capacityKnown)
 	snap.resp.System = sys
+}
+
+// assembleSessionCapacity reports the running-session card's denominators from
+// the admission reading taken on this pass. A reading that did not arrive leaves
+// the capacities absent, so the client shows the scope's own running count
+// without a limit rather than a denominator nothing measured.
+func assembleSessionCapacity(sys *OverviewSystem, capacity SessionCapacityReading, known bool) {
+	if !known {
+		return
+	}
+	lanes := &OverviewSessionLanes{
+		GeneralLimit: capacity.GeneralLimit,
+		ControlLimit: capacity.ControlLimit,
+	}
+	if capacity.PopulationKnown {
+		general, control := capacity.GeneralUsed, capacity.ControlUsed
+		lanes.GeneralRunningSessions = &general
+		lanes.ControlRunningSessions = &control
+	}
+	sys.SessionLanes = lanes
 }
 
 // earliestUnblockAt keeps the soonest clear instant across both block sources.
