@@ -74,7 +74,7 @@ No schema migration, no HTTP or WebSocket contract change, no frontend change.
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.4` | `stall_terminal_test.go`: the advisory branch still fires and does not publish the terminal classification |
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.5` | `event_handlers_stall_prolonged_test.go`: no step transition or completion signal is applied |
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.7` | `stall_terminal_test.go`: a never-started prompt is not reclassified |
-| `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.8` | Implementation only, no direct test: `stallThreshold()` returns the longer allowance for an executing tool and `promptStallSnapshot` admits `lastToolProgressAt`. No repository test populates `openTools`, so this branch is unexercised |
+| `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.8` | Implementation only, no direct test: `stallThreshold()` (`tool_progress.go:10-19`) returns the longer allowance for an executing tool. No repository test populates `openTools`, so that branch is not directly exercised |
 
 ## Work orders
 
@@ -93,13 +93,14 @@ reservation accounting that releases on settlement, and AC-001.7 by the
 never-started exclusion the lifecycle applies before publishing.
 
 `AC-001.8` is satisfied by implementation rather than by a test.
-`AgentExecution.stallThreshold()` (`tool_progress.go`) returns the
-forty-five-minute allowance while an open top-level tool is executing, and
-`promptStallSnapshot` advances the inactivity clock to `lastToolProgressAt`
-when tool progress is observed. No repository test populates `openTools`,
-`lastToolProgressAt`, or `applyToolProgress`, so neither the longer allowance
-nor the progress refresh is exercised by any test. Closing that gap needs a
-standing test, which is an owner decision rather than part of this plan.
+`AgentExecution.stallThreshold()` (`tool_progress.go:10-19`) returns the
+forty-five-minute allowance while an open top-level tool is executing and the
+fifteen-minute one otherwise; `applyToolProgress` (`tool_progress.go:71-110`)
+updates `lastToolProgressAt` and the activity epoch on observed CPU or status
+change, and `promptStallSnapshot` (`tool_progress.go:112-122`) admits
+`lastToolProgressAt` when measuring inactivity. No repository test populates
+`openTools`, so the longer allowance is not directly exercised. Closing that gap
+needs a standing test, which is an owner decision rather than part of this plan.
 
 ## Risks
 
