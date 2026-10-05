@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -62,7 +63,13 @@ func TestSetPrimarySessionTransferringQueueMovesQueueToNewPrimary(t *testing.T) 
 	if err := repo.SetSessionPrimary(ctx, "s1"); err != nil {
 		t.Fatalf("make s1 primary: %v", err)
 	}
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             make(chan struct{}),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	if _, err := svc.messageQueue.QueueMessage(
 		ctx, "s1", "t1", "queued prompt", "", messagequeue.QueuedByUser, false, nil,
 	); err != nil {
@@ -73,9 +80,19 @@ func TestSetPrimarySessionTransferringQueueMovesQueueToNewPrimary(t *testing.T) 
 		t.Fatalf("SetPrimarySessionTransferringQueue: %v", err)
 	}
 
-	moved, ok := svc.messageQueue.TakeQueued(ctx, "s2")
-	if !ok || moved.Content != "queued prompt" {
-		t.Fatalf("queue on new primary = %#v, ok=%t; want the queued prompt", moved, ok)
+	// Promotion hands the queue to the new primary and delivers it there. The
+	// demoted primary is no longer a trigger for this task, so a head that only
+	// moved would have no future event to drain it.
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("queue moved to the new primary without being delivered there")
+	}
+	agentMgr.mu.Lock()
+	delivered := len(agentMgr.capturedPrompts) > 0 && agentMgr.capturedPrompts[0] == "queued prompt"
+	agentMgr.mu.Unlock()
+	if !delivered {
+		t.Fatalf("delivered prompts = %+v, want the queued prompt", agentMgr.capturedPrompts)
 	}
 	if _, ok := svc.messageQueue.TakeQueued(ctx, "s1"); ok {
 		t.Fatal("queue remained on the demoted primary")

@@ -394,6 +394,36 @@ func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
 	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)
 }
 
+// drainQueuedAfterWaitingTransition makes a session settling into
+// WAITING_FOR_INPUT the queue's own delivery trigger. Waiting is the only state
+// a queued prompt can be delivered in, so a message that lands after the last
+// drain and before this transition has no future trigger of its own and stays
+// parked until an unrelated event happens to drain the queue.
+//
+// Every dispatch decision still belongs to the ordinary guarded drain: an
+// in-flight dispatch is not raced here but handed the retry through the
+// existing pending marker, and the take itself probes the session guard rather
+// than waiting for it, because the handler that drove the transition commonly
+// still holds that guard.
+func (s *Service) drainQueuedAfterWaitingTransition(ctx context.Context, taskID, sessionID string) {
+	if s.messageQueue == nil || sessionID == "" {
+		return
+	}
+	if s.isQueuedDispatchInFlight(sessionID) {
+		s.markQueuedDispatchDrainPending(sessionID)
+		return
+	}
+	if s.messageQueue.GetStatus(ctx, sessionID).Count == 0 {
+		return
+	}
+	if s.drainQueuedMessageForPromptableSessionUncontended(ctx, taskID, sessionID) == queueDrainTaskAdmissionReadFailed {
+		// The admission read failed rather than the drain being declined, so no
+		// dispatch will consume the head later. Retry on the next settle
+		// instead of leaving the message parked behind a transient read error.
+		s.markQueuedDispatchDrainPending(sessionID)
+	}
+}
+
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim
 // helpers. Ownership has already moved to the accepted map, so they must not
 // clear the accepted marker while the agent turn is still running.
