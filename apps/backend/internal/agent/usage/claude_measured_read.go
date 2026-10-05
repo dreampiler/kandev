@@ -29,6 +29,8 @@ type ClaudeStreamMessage struct {
 type ClaudeRateLimitEvent struct {
 	Status         string                                `json:"status"`
 	RateLimitType  string                                `json:"rateLimitType,omitempty"`
+	IsUsingOverage bool                                  `json:"isUsingOverage,omitempty"`
+	OverageStatus  string                                `json:"overageStatus,omitempty"`
 	UnifiedWindows map[string]ClaudeUnifiedWindowPayload `json:"unifiedWindows,omitempty"`
 }
 
@@ -36,7 +38,27 @@ type ClaudeRateLimitEvent struct {
 type ClaudeUnifiedWindowPayload struct {
 	Utilization float64 `json:"utilization"`
 	ResetsAt    int64   `json:"resetsAt"` // Unix timestamp in seconds
-	Status      string  `json:"status"`
+	Status      string  `json:"status,omitempty"`
+}
+
+// knownClaudeRateLimitStatus copies a documented status verbatim and drops
+// anything else, so an unrecognized value is not read as an exhausted window.
+func knownClaudeRateLimitStatus(raw string) string {
+	switch raw {
+	case "allowed", "allowed_warning", "rejected":
+		return raw
+	default:
+		return ""
+	}
+}
+
+// utilizationFraction accepts only the 0–1 range the provider uses for this
+// field. A value outside it is a different shape, not a fraction to rescale.
+func utilizationFraction(value float64) (float64, bool) {
+	if value < 0 || value > 1 {
+		return 0, false
+	}
+	return value, true
 }
 
 // ParseClaudeStreamRateLimits scans lines of stream-json output from the Claude CLI
@@ -59,21 +81,34 @@ func ParseClaudeStreamRateLimits(scanner *bufio.Scanner, now time.Time) []Observ
 		}
 		info := msg.RateLimitInfo
 		if len(info.UnifiedWindows) > 0 {
+			// Overage is account state, not a window fraction: while it holds the
+			// windows are not served as remaining subscription quota, which is how
+			// the agent-stream path already treats the same flag.
+			overage := info.IsUsingOverage
 			for winType, payload := range info.UnifiedWindows {
 				if seen[winType] {
+					continue
+				}
+				utilization, ok := utilizationFraction(payload.Utilization)
+				if !ok {
 					continue
 				}
 				seen[winType] = true
 				var resetsAt time.Time
 				if payload.ResetsAt > 0 {
-					resetsAt = time.Unix(payload.ResetsAt, 0)
+					resetsAt = time.Unix(payload.ResetsAt, 0).UTC()
+				}
+				status := knownClaudeRateLimitStatus(payload.Status)
+				if status == "" {
+					status = knownClaudeRateLimitStatus(info.Status)
 				}
 				collected = append(collected, ObservedWindow{
 					Provider:    claudeProvider,
 					WindowType:  winType,
-					Utilization: payload.Utilization,
+					Utilization: utilization,
 					ResetsAt:    resetsAt,
-					Status:      payload.Status,
+					Status:      status,
+					Overage:     overage,
 					ObservedAt:  now,
 					Source:      UsageSourceMeasuredCall,
 				})

@@ -282,7 +282,7 @@ func (a *usageProviderAdapter) fetch(
 	usage, err := a.svc.GetUsage(ctx, profileID)
 	if err != nil && ctx.Err() == nil {
 		a.logFailure(profileID, binding, err)
-		a.maybeTriggerClaudeMeasuredRead(profileID, binding)
+		a.maybeTriggerClaudeMeasuredRead(profileID, binding, reading, observed)
 	}
 	merged, _ := agentusage.MergeObserved(usage, err, reading, observed)
 	return merged, err
@@ -386,8 +386,23 @@ func (p settingsObservedPersistence) Save(key string, value []byte) error {
 	return p.store.Save(context.Background(), key, value)
 }
 
-func (a *usageProviderAdapter) maybeTriggerClaudeMeasuredRead(profileID string, binding usageBinding) {
+// maybeTriggerClaudeMeasuredRead spends one cheap probe call to obtain the
+// subscription windows the failed provider read could not. It runs only when the
+// account has no observation newer than the cooldown: an account whose agents are
+// reporting their own windows already has a reading, so a probe there would buy
+// nothing and would relabel a live observation as a measured one. The cooldown map
+// is process-local, so this store check is also what stops a restart from probing
+// an account that a running agent keeps fresh.
+func (a *usageProviderAdapter) maybeTriggerClaudeMeasuredRead(
+	profileID string,
+	binding usageBinding,
+	reading agentusage.ObservedReading,
+	observed bool,
+) {
 	if a.observed == nil || a.claudeMeasuredReader == nil || a.probeTracker == nil {
+		return
+	}
+	if observed && time.Since(reading.ObservedAt) < claudeMeasuredCooldown {
 		return
 	}
 	claudeClient, ok := binding.client.(*agentusage.ClaudeUsageClient)
@@ -398,32 +413,41 @@ func (a *usageProviderAdapter) maybeTriggerClaudeMeasuredRead(profileID string, 
 		return
 	}
 
-	go func() {
-		defer a.probeTracker.release(binding.cacheKey)
+	go a.runClaudeMeasuredRead(profileID, binding, claudeClient)
+}
 
-		bgCtx, cancel := context.WithTimeout(context.Background(), agentusage.ClaudeMeasuredReadTimeout)
-		defer cancel()
+// runClaudeMeasuredRead performs one probe off the request path and stores the
+// windows it observed. A failure costs nothing but the attempt itself, which the
+// cooldown already accounts for.
+func (a *usageProviderAdapter) runClaudeMeasuredRead(
+	profileID string,
+	binding usageBinding,
+	claudeClient *agentusage.ClaudeUsageClient,
+) {
+	defer a.probeTracker.release(binding.cacheKey)
 
-		token, err := claudeClient.ResolveAccessToken(bgCtx)
-		if err != nil || strings.TrimSpace(token) == "" {
-			return
+	bgCtx, cancel := context.WithTimeout(context.Background(), agentusage.ClaudeMeasuredReadTimeout)
+	defer cancel()
+
+	token, err := claudeClient.ResolveAccessToken(bgCtx)
+	if err != nil || strings.TrimSpace(token) == "" {
+		return
+	}
+
+	windows, err := a.claudeMeasuredReader(bgCtx, token)
+	if err != nil || len(windows) == 0 {
+		if a.log != nil {
+			a.log.Warn("usage.claude_measured_read_failed",
+				zap.String("account", binding.accountKind()),
+				zap.Error(err),
+			)
 		}
+		return
+	}
 
-		windows, err := a.claudeMeasuredReader(bgCtx, token)
-		if err != nil || len(windows) == 0 {
-			if a.log != nil {
-				a.log.Warn("usage.claude_measured_read_failed",
-					zap.String("account", binding.accountKind()),
-					zap.Error(err),
-				)
-			}
-			return
+	for _, w := range windows {
+		if err := a.observed.Record(binding.cacheKey, w); err != nil {
+			a.logPersistFailure(profileID, binding, err)
 		}
-
-		for _, w := range windows {
-			if err := a.observed.Record(binding.cacheKey, w); err != nil {
-				a.logPersistFailure(profileID, binding, err)
-			}
-		}
-	}()
+	}
 }
