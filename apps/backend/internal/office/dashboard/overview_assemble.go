@@ -61,6 +61,11 @@ func addTaskMetrics(m *OverviewWorkspaceMetrics, t *overviewTask, lastOutput map
 		m.WaitingTasks++
 	case t.isActive():
 		m.ActiveTasks++
+	default:
+		// The remaining open tasks are the ones waiting on a person or between
+		// turns. Counting them as active work is what made this screen and the
+		// board disagree about the same task.
+		m.WaitingTasks++
 	}
 	switch t.status {
 	case OverviewStatusError:

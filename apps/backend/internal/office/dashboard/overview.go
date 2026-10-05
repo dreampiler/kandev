@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"expvar"
 	"sort"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // Office overview scopes (the user setting office_overview_scope).
@@ -256,7 +258,7 @@ func (s *DashboardService) loadOverviewTasks(
 	taskIDs := make([]string, 0, len(rows))
 	snap.taskTitles = make(map[string]string, len(rows))
 	for _, row := range rows {
-		t := &overviewTask{row: row}
+		t := &overviewTask{row: row, automation: stepAutomation(row)}
 		byID[row.ID] = t
 		snap.tasks = append(snap.tasks, t)
 		taskIDs = append(taskIDs, row.ID)
@@ -287,7 +289,22 @@ func (s *DashboardService) loadOverviewTasks(
 	for _, t := range snap.tasks {
 		t.classify(snap.now, th, snap.lastOutput)
 	}
+	applyChildStatus(snap.tasks)
 	return nil
+}
+
+// stepAutomation reads the step's own configuration from the row the open-task
+// query already joined. A step whose events cannot be read is treated as one
+// that starts nothing by itself, which reports the task as waiting for a person
+// rather than inventing progress.
+func stepAutomation(row *sqlite.OverviewTaskRow) wfmodels.StepAutomation {
+	var events wfmodels.StepEvents
+	if row.StepEventsRaw != "" {
+		if err := json.Unmarshal([]byte(row.StepEventsRaw), &events); err != nil {
+			events = wfmodels.StepEvents{}
+		}
+	}
+	return wfmodels.StepAutomation{OnEnter: events.OnEnter, PullFromStepID: row.StepPullFromStepID}
 }
 
 // groupOverviewSessions attaches sessions to their tasks, records the running

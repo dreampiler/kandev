@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // overviewThresholds holds every time limit the overview status rules use, in
@@ -101,14 +102,40 @@ type overviewTask struct {
 	queued      int
 	oldestQueue time.Time
 	failures24h int
-	status      string
-	reason      *OverviewReason
+	// automation is the step's own configuration: whether arriving at the
+	// current step starts work by itself. It decides whether a task parked here
+	// is being driven or is waiting for a person.
+	automation wfmodels.StepAutomation
+	status     string
+	reason     *OverviewReason
 }
 
-// isActive reports whether the task counts as "in progress": an active task
-// state with no unfinished blocker.
+// isActive reports whether the task counts as work in progress right now: an
+// active task state with no unfinished blocker, on a step that starts something
+// by itself, with a live turn and nothing owed to a person. A task waiting on a
+// person, between turns, or coordinating open children is none of those, and
+// counts as neither in progress nor a problem.
 func (t *overviewTask) isActive() bool {
-	return isActiveTaskState(t.row.State) && t.row.OpenBlockers == 0
+	return isActiveTaskState(t.row.State) && t.row.OpenBlockers == 0 &&
+		!t.awaitingStep() && !t.awaitingPerson() && !t.turnEnded()
+}
+
+// turnEnded reports that the task already ran in this step and that run is over:
+// nothing is executing now and the session that ran here started after the task
+// entered the step. An idle session is over, not working. The task is between
+// turns rather than inside one, so it is neither in progress nor delayed for
+// waiting.
+func (t *overviewTask) turnEnded() bool {
+	return t.runningSession() == nil && t.latest != nil &&
+		t.latest.StartedAt.After(t.row.StepEnteredAt)
+}
+
+// awaitingStep reports that the task sits on a bound step that starts nothing
+// by itself and has nothing running, so its next move is a person's. A task
+// with no workflow step has no step property to read and keeps the plain
+// task-state answer.
+func (t *overviewTask) awaitingStep() bool {
+	return t.row.StepID != "" && !t.automation.RunsOnEntry() && t.runningSession() == nil
 }
 
 func (t *overviewTask) isHold() bool {
@@ -194,6 +221,16 @@ func (t *overviewTask) runningSession() *sqlite.OverviewSessionRow {
 	return nil
 }
 
+// errorEligible reports whether a recent failure is the task's own current
+// condition rather than something it is waiting past: an active task state, no
+// unfinished blocker, nothing owed to a person, and a step that runs by itself.
+// Between turns and open children are not part of this test, because a task
+// that has run and stopped is exactly where a fresh failure is still an error.
+func (t *overviewTask) errorEligible() bool {
+	return isActiveTaskState(t.row.State) && t.row.OpenBlockers == 0 &&
+		!t.awaitingStep() && !t.awaitingPerson()
+}
+
 func (t *overviewTask) classifyError(lastOutput map[string]time.Time) bool {
 	if t.row.State == taskStateFailed {
 		t.status, t.reason = OverviewStatusError, reason(reasonTaskFailed, nil)
@@ -212,12 +249,50 @@ func (t *overviewTask) classifyError(lastOutput map[string]time.Time) bool {
 		t.shown = latest
 		return true
 	}
-	if t.failures24h > 0 && t.runningSession() == nil && t.isActive() {
+	if t.failures24h > 0 && t.runningSession() == nil && t.errorEligible() &&
+		t.failedWithoutProgressSince(lastOutput) {
 		t.status = OverviewStatusError
 		t.reason = reason(reasonRecentFailures, map[string]any{"count": t.failures24h})
 		return true
 	}
 	return false
+}
+
+// awaitingPerson reports that the task is waiting on a decision or an answer,
+// so a failure from earlier is not its current condition.
+func (t *overviewTask) awaitingPerson() bool {
+	return t.row.State == taskStateWaitingForInput || t.hasSessionIn(sessionStateWaitingForInput)
+}
+
+// failedWithoutProgressSince reports that the newest thing that happened to the
+// task is a failure: no session completed after it, no agent produced output
+// after it, and the task has not entered a later step since. A failure the task
+// has moved past is history, not its current condition, so it is not an error.
+func (t *overviewTask) failedWithoutProgressSince(lastOutput map[string]time.Time) bool {
+	failedAt := t.newestFailureAt()
+	if failedAt.IsZero() {
+		return false
+	}
+	for _, s := range t.sessions {
+		if s.State == sessionStateCompleted && s.UpdatedAt.After(failedAt) {
+			return false
+		}
+		if lastOutput[s.ID].After(failedAt) {
+			return false
+		}
+	}
+	return !t.row.StepEnteredAt.After(failedAt)
+}
+
+// newestFailureAt is the update time of the most recently failed session.
+func (t *overviewTask) newestFailureAt() time.Time {
+	var at time.Time
+	for _, s := range t.sessions {
+		if s.State == sessionStateFailed && s.UpdatedAt.After(at) {
+			at = s.UpdatedAt
+		}
+	}
+	return at
 }
 
 func (t *overviewTask) classifyStalled(now time.Time, th overviewThresholds, lastOutput map[string]time.Time) bool {
@@ -300,16 +375,34 @@ func (t *overviewTask) queueDelay(now time.Time, th overviewThresholds) *Overvie
 	return nil
 }
 
+// dwellLimit is how long the task may stay in its current step before that is
+// a delay. A task waiting on a person is not delayed for waiting, and a parent
+// with open children is read through them instead of its own clock, so neither
+// limit below applies to them. Review and hold keep their own limits: those
+// steps exist to be finished, not to be waited in.
 func dwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 	switch {
 	case t.isHold():
 		return th.DwellHold
-	case t.row.State == stateInProgress:
-		return th.DwellInProgress
 	case t.row.State == stateInReview:
 		return th.DwellReview
+	case t.row.State == stateInProgress:
+		return inProgressDwellLimit(t, th)
 	}
 	return 0
+}
+
+// inProgressDwellLimit is the limit for a working step. Time spent in one
+// means something different depending on who owes the next move: a step that
+// starts nothing by itself waits for a person, a task waiting for an answer
+// waits for a person, and a parent with open children is read through them. A
+// task whose turn in this step already ended is between turns, not inside one.
+func inProgressDwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
+	switch {
+	case t.awaitingStep(), t.awaitingPerson(), t.turnEnded(), t.row.OpenChildCount > 0:
+		return 0
+	}
+	return th.DwellInProgress
 }
 
 func (t *overviewTask) classifySteady() {

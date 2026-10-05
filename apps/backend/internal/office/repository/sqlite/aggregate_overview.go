@@ -19,23 +19,28 @@ import (
 // the declared column type on MAX()/subquery results.
 
 // OverviewTaskRow is one open (not completed, not cancelled) task with the
-// step-entry time and the number of unfinished blocker tasks.
+// step-entry time and the number of unfinished blocker tasks. The step's own
+// automation travels with it, so a reader can tell a step that starts work by
+// itself from one that waits for a person without a second query.
 type OverviewTaskRow struct {
-	ID             string `db:"id"`
-	WorkspaceID    string `db:"workspace_id"`
-	Title          string `db:"title"`
-	State          string `db:"state"`
-	ParentID       string `db:"parent_id"`
-	StepName       string `db:"step_name"`
-	CreatedAtRaw   string `db:"created_at"`
-	UpdatedAtRaw   string `db:"updated_at"`
-	StepEnteredRaw string `db:"step_entered_at"`
-	OpenBlockers   int    `db:"open_blockers"`
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	StepEnteredAt  time.Time
-	ChildCount     int
-	OpenChildCount int
+	ID                 string `db:"id"`
+	WorkspaceID        string `db:"workspace_id"`
+	Title              string `db:"title"`
+	State              string `db:"state"`
+	ParentID           string `db:"parent_id"`
+	StepName           string `db:"step_name"`
+	StepID             string `db:"step_id"`
+	StepEventsRaw      string `db:"step_events"`
+	StepPullFromStepID string `db:"pull_from_step_id"`
+	CreatedAtRaw       string `db:"created_at"`
+	UpdatedAtRaw       string `db:"updated_at"`
+	StepEnteredRaw     string `db:"step_entered_at"`
+	OpenBlockers       int    `db:"open_blockers"`
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	StepEnteredAt      time.Time
+	ChildCount         int
+	OpenChildCount     int
 }
 
 // OverviewSessionRow is one task session of an open task. ErrorMessage is
@@ -130,7 +135,8 @@ type OverviewAutomationTaskRow struct {
 
 // ListOverviewOpenTasks returns the open tasks of the supplied workspaces with
 // the time they entered their current step (latest task_step_transitions row,
-// via its (task_id, occurred_at) index) and their unfinished-blocker count.
+// via its (task_id, occurred_at) index), their unfinished-blocker count, and
+// the automation of the step they sit on.
 // Child counts are folded in from the same set, so no parent_id index is used.
 func (r *Repository) ListOverviewOpenTasks(ctx context.Context, workspaceIDs []string) ([]*OverviewTaskRow, error) {
 	var out []*OverviewTaskRow
@@ -140,6 +146,9 @@ func (r *Repository) ListOverviewOpenTasks(ctx context.Context, workspaceIDs []s
 		query := `
 			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title, COALESCE(t.state, '') AS state,
 			       COALESCE(t.parent_id, '') AS parent_id, COALESCE(ws.name, '') AS step_name,
+			       COALESCE(ws.id, '') AS step_id,
+			       COALESCE(ws.events, '') AS step_events,
+			       COALESCE(ws.pull_from_step_id, '') AS pull_from_step_id,
 			       CAST(t.created_at AS TEXT) AS created_at, CAST(t.updated_at AS TEXT) AS updated_at,
 			       COALESCE(CAST((SELECT tr.occurred_at FROM task_step_transitions tr
 			                      WHERE tr.task_id = t.id ORDER BY tr.occurred_at DESC LIMIT 1) AS TEXT), '') AS step_entered_at,
