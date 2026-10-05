@@ -371,6 +371,9 @@ func provideGateway(
 				}
 				return statussummary.CompletionGateSummaryFromSnapshot(gate), nil
 			},
+			LoadQuotaWait: func(ctx context.Context, taskID string) (*statussummary.QuotaWaitSummary, error) {
+				return loadTaskQuotaWait(ctx, taskRepo, taskID)
+			},
 			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
 				task, err := taskRepo.GetTask(ctx, taskID)
 				if err != nil {
@@ -526,6 +529,43 @@ func taskStatusRuntimeProviders(
 		return orchestratorSvc, nil
 	}
 	return orchestratorSvc, queue.CountPendingByTask
+}
+
+// loadTaskQuotaWait projects the task's live limit wait from the durable route
+// rows of its sessions. The primary session is read first because it is the one
+// whose turn the task is presenting; the remaining sessions follow in the order
+// the repository lists them, so a task with more than one parked session shows
+// a stable one rather than whichever row the query happened to return.
+func loadTaskQuotaWait(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) (*statussummary.QuotaWaitSummary, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	ordered := make([]*models.TaskSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		if session.IsPrimary {
+			ordered = append([]*models.TaskSession{session}, ordered...)
+			continue
+		}
+		ordered = append(ordered, session)
+	}
+	for _, session := range ordered {
+		routeState, loadErr := taskRepo.LoadRouteState(ctx, session.ID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if wait := statussummary.QuotaWaitSummaryFromRouteState(routeState); wait != nil {
+			return wait, nil
+		}
+	}
+	return nil, nil
 }
 
 func loadTaskSessionObservations(

@@ -17,7 +17,10 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
 import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { cn } from "@/lib/utils";
 import {
@@ -411,6 +414,8 @@ type TaskStateIconOptions = {
   waitReason?: TaskWaitReason | null;
   /** The launch-queue projection behind a `session_ceiling` wait, used for the tooltip's occupancy line. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  /** The limit-wait projection behind a `quota` wait, used for the tooltip's lift time. */
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
 };
 
 // Interrupted (startup reconciliation marker), auto-start-failed (on_enter
@@ -532,6 +537,7 @@ export function getTaskStateIcon(
       <WaitingReasonTaskIcon
         reason={config.waitReason}
         launchQueue={options.launchQueue}
+        quotaWait={options.quotaWait}
         className={cn("h-4 w-4 w-auto", className)}
       />
     );

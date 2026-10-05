@@ -95,8 +95,10 @@ function DraggableTaskChip({
       wipAdmitted: task.wipAdmitted,
       queuedForStepId: task.queuedForStepId,
       launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
     }),
     launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
 
   return (
@@ -140,8 +142,10 @@ function TaskChipPreview({ task }: { task: Task }) {
       wipAdmitted: task.wipAdmitted,
       queuedForStepId: task.queuedForStepId,
       launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
     }),
     launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
   return (
     <div

@@ -84,6 +84,7 @@ export function renderTaskStatusIcon(
     wipAdmitted: task.wipAdmitted,
     queuedForStepId: task.queuedForStepId,
     launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
   const flags: StatusMaskFlags = {
     needsMe:
@@ -109,6 +110,7 @@ export function renderTaskStatusIcon(
     workspaceOrphaned: flags.showWorkspaceOrphaned,
     waitReason,
     launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
 }
 

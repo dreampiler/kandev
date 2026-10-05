@@ -81,6 +81,10 @@ type LaunchQueueLoader func(context.Context, string) (*LaunchQueueSummary, error
 // CompletionGateLoader reads the bounded current completion state for one task.
 type CompletionGateLoader func(context.Context, string) (*CompletionGateSummary, error)
 
+// QuotaWaitLoader reads the task's live limit wait. The loader returns nil when
+// no session of the task is parked on a provider limit.
+type QuotaWaitLoader func(context.Context, string) (*QuotaWaitSummary, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -106,6 +110,10 @@ type ProjectorConfig struct {
 	LoadPullRequests        PullRequestLoader
 	LoadLaunchQueue         LaunchQueueLoader
 	LoadCompletionGate      CompletionGateLoader
+	// LoadQuotaWait projects a session parked on a provider limit. It is
+	// refreshed on session lifecycle events, which is when a routing decision
+	// can install or clear such a wait; nil disables the projection.
+	LoadQuotaWait QuotaWaitLoader
 	// CountQueuedPrompts returns the number of prompts currently en-queued for
 	// a task across all of its sessions (pending semantics identical to
 	// message.queue.get). Wired from the messagequeue service at the
@@ -139,6 +147,7 @@ type Projector struct {
 	loadPullRequests        PullRequestLoader
 	loadLaunchQueue         LaunchQueueLoader
 	loadCompletionGate      CompletionGateLoader
+	loadQuotaWait           QuotaWaitLoader
 	countQueuedPrompts      func(context.Context, string) (int, error)
 	logger                  *logger.Logger
 	now                     func() time.Time
@@ -186,6 +195,8 @@ type projectionState struct {
 	launchQueueObserved    bool
 	completionGate         *CompletionGateSummary
 	completionGateObserved bool
+	quotaWait              *QuotaWaitSummary
+	quotaWaitObserved      bool
 }
 
 type sessionObservation struct {
@@ -250,6 +261,7 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		loadPullRequests:        cfg.LoadPullRequests,
 		loadLaunchQueue:         cfg.LoadLaunchQueue,
 		loadCompletionGate:      cfg.LoadCompletionGate,
+		loadQuotaWait:           cfg.LoadQuotaWait,
 		countQueuedPrompts:      cfg.CountQueuedPrompts,
 		logger:                  log.WithFields(zap.String("component", "task-status-summary-projector")),
 		now:                     now,
@@ -488,6 +500,17 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		state.completionGate = cloneCompletionGate(nextGate)
 		state.completionGateObserved = true
 	}
+	quotaWaitChanged := false
+	if p.loadQuotaWait != nil &&
+		(!state.quotaWaitObserved || isQuotaWaitRefreshEvent(event.Type)) {
+		nextWait, loadErr := p.loadQuotaWait(ctx, taskID)
+		if loadErr != nil {
+			return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, loadErr)
+		}
+		quotaWaitChanged = !state.quotaWaitObserved || !equalQuotaWait(state.quotaWait, nextWait)
+		state.quotaWait = cloneQuotaWait(nextWait)
+		state.quotaWaitObserved = true
+	}
 
 	if event.Type == events.MessageQueueStatusChanged {
 		activityChanged := applyTaskActivityEventLocked(state, event.Type, data)
@@ -499,7 +522,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 				return refreshErr
 			}
 		}
-		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged || completionGateChanged, event.Type, data)
+		return p.applyQueueStatusEvent(ctx, state, taskID, pendingChanged || activityChanged || taskErrorChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged, event.Type, data)
 	}
 
 	refreshPending := p.loadPendingActions != nil &&
@@ -509,11 +532,11 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 		if refreshErr != nil {
 			return refreshErr
 		}
-		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+		changed := p.applySourceEventLocked(state, event.Type, data) || pendingChanged || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged
 		return p.persistPendingRefreshLocked(ctx, taskID, state, changed, event.Type, data)
 	}
 
-	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged
+	changed := p.applySourceEventLocked(state, event.Type, data) || taskErrorChanged || pullRequestChanged || launchQueueChanged || completionGateChanged || quotaWaitChanged
 	if !changed {
 		return nil
 	}

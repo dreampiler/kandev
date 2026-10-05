@@ -1,19 +1,24 @@
 import type { ComponentType } from "react";
-import { IconClockHour4, IconHourglass, IconMessageQuestion } from "@tabler/icons-react";
+import { IconClockHour4, IconGauge, IconHourglass, IconMessageQuestion } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/i18n/formats";
 import type { Task, TaskSessionState } from "@/lib/types/http";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
 
 /**
- * Why a task is not doing work, when the reason is an admission or answer wait
- * rather than a workflow state. The workflow state alone cannot express these:
- * a task waiting for a step slot, a task waiting for a session slot and a task
- * whose session is waiting for an answer all land in the same REVIEW bucket,
- * so they used to render the one green "turn finished" icon.
+ * Why a task is not doing work, when the reason is an admission, an answer or a
+ * limit wait rather than a workflow state. The workflow state alone cannot
+ * express these: a task waiting for a step slot, a task waiting for a session
+ * slot, a task whose session is waiting for an answer and a task whose model is
+ * rate-limited all land in the same REVIEW bucket, so they used to render the
+ * one green "turn finished" icon.
  */
-export type TaskWaitReason = "wip_queue" | "session_ceiling" | "awaiting_answer";
+export type TaskWaitReason = "wip_queue" | "session_ceiling" | "awaiting_answer" | "quota";
 
 /** The admission facts every task-shaped surface already carries. */
 export type WaitReasonTaskLike = {
@@ -21,23 +26,26 @@ export type WaitReasonTaskLike = {
   wipAdmitted?: boolean | null;
   queuedForStepId?: string | null;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
 };
 
 const WAITING_FOR_INPUT: TaskSessionState = "WAITING_FOR_INPUT";
 
 /**
  * The one place that decides which wait a task is in. Precedence is fixed:
- * an answered-wait session outranks an admission wait (the session already
- * holds capacity, so the slot is not what it is waiting for), and an admission
- * wait outranks a WIP overflow (a session-capacity deferral is the harder
- * wait — it survives across turns, while a WIP slot frees as soon as a
- * neighbour finishes).
+ * a provider limit outranks everything, because no answer and no slot frees it
+ * and only the clock does; an answered-wait session outranks an admission wait
+ * (the session already holds capacity, so the slot is not what it is waiting
+ * for), and an admission wait outranks a WIP overflow (a session-capacity
+ * deferral is the harder wait — it survives across turns, while a WIP slot
+ * frees as soon as a neighbour finishes).
  *
  * Pending clarification and permission are deliberately NOT inputs: those own
  * their own icons upstream, so a task that is prompting for input keeps the
  * prompt affordance instead of being re-labelled as a plain answer wait.
  */
 export function resolveWaitReason(task: WaitReasonTaskLike): TaskWaitReason | null {
+  if (task.quotaWait) return "quota";
   if (task.primarySessionState === WAITING_FOR_INPUT) return "awaiting_answer";
   if (task.launchQueue) return "session_ceiling";
   if (task.wipAdmitted !== true && task.queuedForStepId) return "wip_queue";
@@ -56,6 +64,7 @@ export function resolveApiTaskWaitReason(
     wipAdmitted: task.wip_admitted,
     queuedForStepId: task.queued_for_step_id,
     launchQueue: task.status_summary?.launch_queue,
+    quotaWait: task.status_summary?.quota_wait,
   });
 }
 
@@ -63,6 +72,7 @@ const WAIT_REASON_ICON: Record<TaskWaitReason, ComponentType<{ className?: strin
   wip_queue: IconHourglass,
   session_ceiling: IconClockHour4,
   awaiting_answer: IconMessageQuestion,
+  quota: IconGauge,
 };
 
 // Colors come from the shared status tone vocabulary (the same tokens the
@@ -73,18 +83,21 @@ const WAIT_REASON_CLASS: Record<TaskWaitReason, string> = {
   wip_queue: "text-status-info focus-visible:ring-status-info",
   session_ceiling: "text-status-delayed focus-visible:ring-status-delayed",
   awaiting_answer: "text-status-stalled focus-visible:ring-status-stalled",
+  quota: "text-status-hold focus-visible:ring-status-hold",
 };
 
 const WAIT_REASON_LABEL_KEY: Record<TaskWaitReason, string> = {
   wip_queue: "task:waitingReasonWipQueue",
   session_ceiling: "task:waitingReasonSessionCapacity",
   awaiting_answer: "task:waitingReasonAwaitingAnswer",
+  quota: "task:waitingReasonQuota",
 };
 
 const WAIT_REASON_HELP_KEY: Record<TaskWaitReason, string> = {
   wip_queue: "task:waitingReasonWipQueueHelp",
   session_ceiling: "task:waitingReasonSessionCapacityHelp",
   awaiting_answer: "task:waitingReasonAwaitingAnswerHelp",
+  quota: "task:waitingReasonQuotaHelp",
 };
 
 export function waitReasonLabelKey(reason: TaskWaitReason): string {
@@ -101,21 +114,36 @@ export function waitReasonClass(reason: TaskWaitReason): string {
 
 type WaitReasonTooltipCopy = { label: string; help: string };
 
+/**
+ * The one line a wait explains itself with. A capacity wait names the occupancy
+ * it is queued behind and a limit wait names the instant the limit lifts,
+ * because those are the two facts a reader cannot get from the icon alone. Both
+ * come from measured values; nothing here formats an absent value into a guess.
+ */
 function useWaitReasonCopy(
   reason: TaskWaitReason,
   launchQueue: TaskStatusSummaryLaunchQueue | null | undefined,
+  quotaWait: TaskStatusSummaryQuotaWait | null | undefined,
 ): WaitReasonTooltipCopy {
   const { t } = useTranslation();
   const label = t(WAIT_REASON_LABEL_KEY[reason]);
   const capacity = launchQueue?.capacity;
-  const help =
-    reason === "session_ceiling" && capacity
-      ? t("task:waitingReasonSessionCapacityOccupancy", {
-          inUse: capacity.in_use,
-          limit: capacity.limit,
-        })
-      : t(WAIT_REASON_HELP_KEY[reason]);
-  return { label, help };
+  if (reason === "session_ceiling" && capacity) {
+    return {
+      label,
+      help: t("task:waitingReasonSessionCapacityOccupancy", {
+        inUse: capacity.in_use,
+        limit: capacity.limit,
+      }),
+    };
+  }
+  if (reason === "quota" && quotaWait) {
+    const deadline = new Date(quotaWait.deadline);
+    if (!Number.isNaN(deadline.getTime())) {
+      return { label, help: t("task:waitingReasonQuotaClearsAt", { time: formatTime(deadline) }) };
+    }
+  }
+  return { label, help: t(WAIT_REASON_HELP_KEY[reason]) };
 }
 
 /**
@@ -127,13 +155,15 @@ function useWaitReasonCopy(
 export function WaitingReasonTaskIcon({
   reason,
   launchQueue,
+  quotaWait,
   className,
 }: {
   reason: TaskWaitReason;
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
   className?: string;
 }) {
-  const { label, help } = useWaitReasonCopy(reason, launchQueue);
+  const { label, help } = useWaitReasonCopy(reason, launchQueue, quotaWait);
   const Icon = WAIT_REASON_ICON[reason];
   return (
     <Tooltip>

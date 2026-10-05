@@ -54,6 +54,7 @@ function PrimaryTaskLine({
         // it all three read as the finished-turn icon.
         waitReason: resolveApiTaskWaitReason(task),
         launchQueue: task.status_summary?.launch_queue,
+        quotaWait: task.status_summary?.quota_wait,
       })}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}

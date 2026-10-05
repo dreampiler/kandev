@@ -10,7 +10,10 @@ import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
-import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
 import {
   InterruptedTaskIcon,
   isTerminalInterruptedState,
@@ -44,6 +47,8 @@ export type TaskStateIconProps = {
   waitReason?: TaskWaitReason | null;
   /** The launch-queue projection behind a `session_ceiling` wait, for its tooltip. */
   launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  /** The limit-wait projection behind a `quota` wait, for its tooltip. */
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
   /** True while an accepted archive or delete request is still in flight. */
   isPendingRemoval?: boolean;
   accessibleLabel?: string;
@@ -244,6 +249,7 @@ function TaskStateIconContent({
   parkedOnBackgroundWork,
   waitReason,
   launchQueue,
+  quotaWait,
   accessibleLabel,
   showBackgroundTooltip = false,
 }: TaskStateIconProps) {
@@ -261,7 +267,9 @@ function TaskStateIconContent({
   // REVIEW plus a queued admission is not a finished turn, and IN_PROGRESS
   // plus a WIP overflow is not progress.
   if (waitReason) {
-    return <WaitingReasonTaskIcon reason={waitReason} launchQueue={launchQueue} />;
+    return (
+      <WaitingReasonTaskIcon reason={waitReason} launchQueue={launchQueue} quotaWait={quotaWait} />
+    );
   }
   if (computeIsPreparing(state, sessionState)) {
     return withAccessibleLabel(

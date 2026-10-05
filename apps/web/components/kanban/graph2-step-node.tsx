@@ -152,6 +152,33 @@ function MoveButton({
   );
 }
 
+/**
+ * The node's status icon, with the same wait-reason resolution every other task
+ * surface uses so a parked task reads identically in the graph and in the list.
+ */
+function renderStepNodeStatusIcon(
+  task: Graph2StepNodeProps["task"],
+  pendingInput: ReturnType<typeof useTaskPendingInput>,
+) {
+  return getTaskStateIcon(task.state, "h-3 w-3", {
+    hasPendingClarification: pendingInput.clarification,
+    foregroundActivity: task.foregroundActivity,
+    hasPendingPermission: pendingInput.permission,
+    interrupted: task.interrupted,
+    autoStartFailed: task.autoStartFailed,
+    workspaceOrphaned: task.workspaceOrphaned,
+    waitReason: resolveWaitReason({
+      primarySessionState: task.primarySessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
+  });
+}
+
 function Graph2StepNodeContent({
   step,
   task,
@@ -218,23 +245,7 @@ function Graph2StepNodeContent({
         )}
       >
         <div className="flex items-center gap-1.5 w-full">
-          <div className="shrink-0">
-            {getTaskStateIcon(task.state, "h-3 w-3", {
-              hasPendingClarification: pendingInput.clarification,
-              foregroundActivity: task.foregroundActivity,
-              hasPendingPermission: pendingInput.permission,
-              interrupted: task.interrupted,
-              autoStartFailed: task.autoStartFailed,
-              workspaceOrphaned: task.workspaceOrphaned,
-              waitReason: resolveWaitReason({
-                primarySessionState: task.primarySessionState,
-                wipAdmitted: task.wipAdmitted,
-                queuedForStepId: task.queuedForStepId,
-                launchQueue: task.statusSummary?.launch_queue,
-              }),
-              launchQueue: task.statusSummary?.launch_queue,
-            })}
-          </div>
+          <div className="shrink-0">{renderStepNodeStatusIcon(task, pendingInput)}</div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
         </div>
       </button>
