@@ -333,7 +333,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, true, payload["accepted"])
 	assert.Equal(t, "step-1", payload["step_id"])
-	// signaled_at is part of the documented response contract ??pin its
+	// signaled_at is part of the documented response contract - pin its
 	// presence + RFC3339Nano shape so a future refactor can't silently
 	// drop or rename the field.
 	signaledAt, ok := payload["signaled_at"].(string)
@@ -352,7 +352,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "tests next", bag.Handoff)
 
 	// Bus event published with the public payload shape (no handoff/blockers
-	// on the wire ??those live in the bag only).
+	// on the wire - those live in the bag only).
 	require.Len(t, bus.events, 1, "expected one bus publish")
 	assert.Equal(t, events.WorkflowStepCompletionSignaled, bus.events[0].Type)
 	data, ok := bus.events[0].Data.(map[string]interface{})
@@ -370,7 +370,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 
 // TestHandleStepComplete_DedupRunningNoRepublish covers the
 // `already_signaled` short-circuit while the session is still RUNNING. The
-// inline turn-end path will pick up the bag ??no re-publish is needed and
+// inline turn-end path will pick up the bag - no re-publish is needed and
 // none should fire (avoids a spurious second event for the subscriber).
 func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	ctx := context.Background()
@@ -415,7 +415,7 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 // AC-001.13: a rejected duplicate call must not mutate the already-persisted
 // bag, even when the second call's handoff/blockers differ from the first's.
 // Only the first accepted call's content may ever reach the single-slot carry
-// token or the audit metadata ??a duplicate silently replacing it would let a
+// token or the audit metadata - a duplicate silently replacing it would let a
 // second, unvetted call clobber content already committed to the transition.
 func TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers(t *testing.T) {
 	ctx := context.Background()

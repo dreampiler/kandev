@@ -2,7 +2,7 @@ package handlers
 
 // TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal is
 // Slice B of the ISSUE-5 fix: accepted:true only means the signal was
-// durably recorded, not that it will move the task ??a step whose
+// durably recorded, not that it will move the task - a step whose
 // AutoAdvanceRequiresSignal is false never reads the bag at turn end, so an
 // agent can get accepted:true and still see nothing advance. The response
 // additively carries `advances` (and, when false, a `note` explaining why)
