@@ -196,58 +196,121 @@ func stepMoveEvents(rows []*sqlite.OverviewStepTransitionRow) []OverviewEvent {
 
 // stepMoveEvent builds the one row that stands for a task's run of moves.
 func stepMoveEvent(group []*sqlite.OverviewStepTransitionRow) OverviewEvent {
-	moves := foldStepMoves(group)
+	moves, sentBack, reopened := foldStepMoves(group)
 	first := group[0]
 	last := group[len(group)-1]
 	return OverviewEvent{
 		Kind: overviewEventStepMove, At: last.OccurredAt, WorkspaceID: first.WorkspaceID,
 		TaskID: first.TaskID, Title: first.Title,
 		From: timePtr(first.OccurredAt), To: timePtr(last.OccurredAt),
-		Moves: moves,
+		Moves: moves, MoveTotal: len(group),
+		SentBack: sentBack, Reopened: reopened,
+		Held: len(moves) > 0 && moves[len(moves)-1].Stopped,
 	}
 }
 
 // foldStepMoves collapses the movement a reader would act on into one entry per
-// step the task actually settled in.
+// step the task actually settled in, and reports how many moves were sent back
+// and how many opened finished work again.
 //
-// Two shapes are folded, both because the task did not stay where the moves say
-// it went. A move back to the step it just left changes nothing, so it merges
-// into that step and advances its instant. A step the task entered and left
-// again without settling — leaving A for B and returning straight to A — is a
-// detour, so the detouring entry is dropped and the step it returned to carries
-// the later instant. What survives is the path the task really took, which is
-// what "Plan then back to Implement" and "Implement, Plan, Implement" both mean.
-func foldStepMoves(group []*sqlite.OverviewStepTransitionRow) []OverviewStepMove {
-	moves := make([]OverviewStepMove, 0, len(group))
+// Two shapes are folded, both because repeating them on the row tells a reader
+// nothing a count does not. A move back to the step it just left changes nothing,
+// so it merges into that step and advances its instant. A step the task entered
+// and left again without settling — leaving A for B and returning straight to A
+// — is a detour, so the detouring entry is dropped and the step it returned to
+// carries the later instant. What survives is the path the task really took,
+// which is what "Plan then back to Implement" and "Implement, Plan, Implement"
+// both mean. A folded move is not lost: it is counted on the entry that absorbed
+// it, so an entry can stand for several movements between the same two steps.
+//
+// Classification is read per recorded row, not per surviving entry, because the
+// movements worth noticing are usually the ones the fold absorbs: Review ->
+// Implement is exactly the detour case, and it is a send-back.
+func foldStepMoves(group []*sqlite.OverviewStepTransitionRow) (moves []OverviewStepMove, sentBack, reopened int) {
+	moves = make([]OverviewStepMove, 0, len(group))
 	// stepIDs tracks the same steps in the same order, because a fold decides on
 	// which step a move landed and the wire move itself names only the label.
 	stepIDs := make([]string, 0, len(group))
 	for _, row := range group {
 		stepID := row.StepID
+		sent, reopenedNow := classifyRow(row, len(moves), stepIDs)
+		if sent {
+			sentBack++
+		}
+		if reopenedNow {
+			reopened++
+		}
 		switch {
 		case len(moves) > 0 && stepID != "" && stepID == lastString(stepIDs):
 			// Back to the step just left: same step, later instant.
-			moves[len(moves)-1].At = row.OccurredAt
+			absorb(&moves[len(moves)-1], row, sent, reopenedNow)
 		case len(moves) > 1 && stepID != "" && stepID == secondLastString(stepIDs):
 			// Entered a step and came straight back out: the entry it made is
 			// the detour, so drop it and settle the earlier step here.
 			moves = moves[:len(moves)-1]
 			stepIDs = stepIDs[:len(stepIDs)-1]
-			moves[len(moves)-1].At = row.OccurredAt
+			absorb(&moves[len(moves)-1], row, sent, reopenedNow)
 		default:
-			moves = append(moves, OverviewStepMove{
-				StepName: row.StepName, At: row.OccurredAt,
-				Actor: row.ActorKind, Trigger: row.Trigger,
-				// Stopped marks that arriving at this step starts nothing by
-				// itself. It is read from the step's own configuration, so a
-				// workflow that names its steps differently still answers
-				// correctly.
-				Stopped: !row.RunsOnEntry(),
-			})
+			moves = append(moves, newStepMove(row, sent, reopenedNow))
 			stepIDs = append(stepIDs, stepID)
 		}
 	}
-	return moves
+	return moves, sentBack, reopened
+}
+
+// absorb folds one recorded move into the entry that already describes where the
+// task settled, counting it and keeping whatever it revealed.
+func absorb(move *OverviewStepMove, row *sqlite.OverviewStepTransitionRow, sentBack, reopened bool) {
+	move.At = row.OccurredAt
+	move.Repeat++
+	move.SentBack = move.SentBack || sentBack
+	move.Reopened = move.Reopened || reopened
+	if row.ActorKind != "" {
+		move.Actor = row.ActorKind
+	}
+	if row.Trigger != "" {
+		move.Trigger = row.Trigger
+	}
+}
+
+// classifyRow reads what one recorded move was, from the ledger alone: arriving
+// at a step this run had already entered is work being sent back, and arriving
+// from a step that starts nothing on entry is finished or held work being opened
+// again. Reopened wins when both hold, because a task moved out of a finished
+// step is not being sent back to anything. A move whose source or destination
+// identity the ledger does not record settles nothing.
+func classifyRow(
+	row *sqlite.OverviewStepTransitionRow, settled int, stepIDs []string,
+) (sentBack, reopened bool) {
+	if row.FromStepID == "" {
+		return false, false
+	}
+	if !row.RunsOnEntryFrom() {
+		return false, true
+	}
+	return row.StepID != "" && visitedEarlier(row.StepID, settled, stepIDs), false
+}
+
+// newStepMove builds one surviving entry. Stopped marks that arriving at this
+// step starts nothing by itself, read from the step's own configuration, so a
+// workflow that names its steps differently still answers correctly.
+func newStepMove(row *sqlite.OverviewStepTransitionRow, sentBack, reopened bool) OverviewStepMove {
+	return OverviewStepMove{
+		FromStepName: row.FromStepName, StepName: row.StepName, At: row.OccurredAt,
+		Actor: row.ActorKind, Trigger: row.Trigger,
+		Stopped: !row.RunsOnEntry(), SentBack: sentBack, Reopened: reopened, Repeat: 1,
+	}
+}
+
+// visitedEarlier reports that a step appears among the entries already settled,
+// which means the task had been there in this run and is being returned to.
+func visitedEarlier(stepID string, settled int, stepIDs []string) bool {
+	for _, seen := range stepIDs[:settled] {
+		if seen == stepID {
+			return true
+		}
+	}
+	return false
 }
 
 // lastString and secondLastString read the tail of the step-id list without the

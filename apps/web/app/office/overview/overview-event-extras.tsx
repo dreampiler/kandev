@@ -1,5 +1,7 @@
 "use client";
 
+import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   OverviewEvent,
@@ -21,50 +23,188 @@ import { statusTextClass } from "./overview-status-colors";
 // they read as smaller supporting text rather than as another event.
 
 /**
- * A task's run of step changes as one path: the steps it settled in, oldest
- * first, with the span they covered. A step that starts nothing by itself is
- * marked stopped, read from the step's own configuration on the server rather
- * than from its name, so the marker means the same thing in any workflow.
+ * A task's run of step changes as one summary and a list behind it.
+ *
+ * The summary answers what a reader asks first: how often the task moved, how
+ * often work was sent back, how often finished work was opened again, whether it
+ * is parked, and where it stands now. The path itself is a disclosure rather
+ * than a line of its own, because a run of dozens of steps on one row reads as
+ * noise and buries the two movements worth acting on.
  */
-function StepMoveLine({
-  moves,
-  from,
-  to,
-}: {
-  moves: OverviewStepMove[];
-  from?: string;
-  to?: string;
-}) {
+function StepMoveLine({ event }: { event: OverviewEvent }) {
   const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const moves = event.moves ?? [];
+  if (moves.length === 0) return null;
+  const current = moves[moves.length - 1];
+  const total = event.move_total ?? moves.length;
   const span =
-    from && to && from !== to
-      ? `${occurredTime(from)}-${occurredTime(to)}`
-      : occurredTime(to ?? from);
+    event.from && event.to && event.from !== event.to
+      ? `${occurredTime(event.from)}-${occurredTime(event.to)}`
+      : occurredTime(event.to ?? event.from);
+  const figures: SummaryFigure[] = [
+    { label: t("office:overviewStepMoveTotal", { count: total }), testId: "total" },
+  ];
+  if (event.sent_back) {
+    figures.push({
+      label: t("office:overviewStepMoveSentBack", { count: event.sent_back }),
+      tone: "error",
+      testId: "sent-back",
+    });
+  }
+  if (event.reopened) {
+    figures.push({
+      label: t("office:overviewStepMoveReopened", { count: event.reopened }),
+      tone: "hold",
+      testId: "reopened",
+    });
+  }
+  if (event.held) {
+    figures.push({ label: t("office:overviewStepMoveHeld"), tone: "hold", testId: "held" });
+  }
   return (
-    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
-      <span data-testid="overview-step-move-path">
-        {moves.map((move, index) => (
-          <span key={`${move.at}-${index}`}>
-            {index > 0 && <span aria-hidden="true">{" → "}</span>}
-            <span className={move.stopped ? statusTextClass("hold") : undefined}>
-              {move.step_name || t("office:overviewStepUnnamed")}
+    <span className="mt-0.5 block text-xs text-muted-foreground">
+      <span
+        className="flex flex-wrap items-center gap-x-1.5"
+        data-testid="overview-step-move-summary"
+      >
+        <span className="font-medium text-foreground">{stepName(t, current)}</span>
+        {figures.map((figure, index) => (
+          <span key={figure.testId} className="flex items-center gap-x-1.5">
+            {index > 0 && <span aria-hidden="true">{" · "}</span>}
+            <span
+              className={figure.tone ? statusTextClass(figure.tone) : undefined}
+              data-testid={`overview-step-move-${figure.testId}`}
+            >
+              {figure.label}
             </span>
-            {move.stopped && (
-              <span className="ml-1" data-testid="overview-step-move-stopped">
-                {t("office:overviewEventStepStopped")}
-              </span>
-            )}
-            {move.actor && (
-              <span className="ml-1 text-muted-foreground/80">
-                {t(STEP_ACTOR_KEYS[move.actor] ?? "office:overviewEventActorUnknown")}
-              </span>
-            )}
           </span>
         ))}
+        {span && (
+          <span className="flex items-center gap-x-1.5">
+            <span aria-hidden="true">{" · "}</span>
+            <span className="tabular-nums">{span}</span>
+          </span>
+        )}
+        <StepMoveToggle open={open} listId={listId} onToggle={() => setOpen((value) => !value)} />
       </span>
-      {span && <span className="tabular-nums">{span}</span>}
+      {open && (
+        <span id={listId} className="mt-1 block" data-testid="overview-step-move-path">
+          {moves.map((move, index) => (
+            <StepMoveRow key={`${move.at}-${index}`} move={move} />
+          ))}
+        </span>
+      )}
     </span>
   );
+}
+
+/**
+ * One figure of the summary. A tone is applied only to a figure that reports
+ * something to act on, so the two movements worth noticing stand out and the
+ * rest of the line stays quiet.
+ */
+type SummaryFigure = {
+  label: string;
+  tone?: "error" | "hold";
+  testId: string;
+};
+
+/**
+ * The disclosure control. The event row is a link to the task, so this is a
+ * focusable span rather than a button: a button nested in a link is neither, and
+ * activating it would navigate away from the row being read. Enter and Space
+ * behave as they do on a button, and the click is kept from reaching the link.
+ */
+function StepMoveToggle({
+  open,
+  listId,
+  onToggle,
+}: {
+  open: boolean;
+  listId: string;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      aria-expanded={open}
+      aria-controls={listId}
+      className="cursor-pointer text-xs text-muted-foreground hover:underline"
+      data-testid="overview-step-move-toggle"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        event.stopPropagation();
+        onToggle();
+      }}
+    >
+      {open ? (
+        <IconChevronUp className="mr-1 inline h-3 w-3" aria-hidden="true" />
+      ) : (
+        <IconChevronDown className="mr-1 inline h-3 w-3" aria-hidden="true" />
+      )}
+      {open ? t("office:overviewCollapseDetails") : t("office:overviewExpandDetails")}
+    </span>
+  );
+}
+
+/**
+ * One movement: when it happened, the step it left and the step it arrived at,
+ * and who moved it. The two step names are kept apart by the arrow rather than
+ * set next to each other, because a step name beside its actor reads as one
+ * phrase. A movement the fold absorbed repeats as a count.
+ */
+function StepMoveRow({ move }: { move: OverviewStepMove }) {
+  const { t } = useTranslation();
+  return (
+    <span className="mt-0.5 flex flex-wrap items-center gap-x-1.5">
+      <span className="tabular-nums">{occurredTime(move.at)}</span>
+      {move.from_step_name && <span>{move.from_step_name}</span>}
+      {move.from_step_name && <span aria-hidden="true">{" → "}</span>}
+      <span className={move.stopped ? statusTextClass("hold") : undefined}>
+        {stepName(t, move)}
+      </span>
+      {move.stopped && (
+        <span className="text-muted-foreground/80" data-testid="overview-step-move-stopped">
+          {t("office:overviewEventStepStopped")}
+        </span>
+      )}
+      {move.reopened && (
+        <span className={statusTextClass("hold")} data-testid="overview-step-move-row-reopened">
+          {t("office:overviewStepMoveReopenedOne")}
+        </span>
+      )}
+      {move.sent_back && (
+        <span className={statusTextClass("error")} data-testid="overview-step-move-row-sent-back">
+          {t("office:overviewStepMoveSentBackOne")}
+        </span>
+      )}
+      {move.actor && (
+        <span className="text-muted-foreground/80">
+          {t(STEP_ACTOR_KEYS[move.actor] ?? "office:overviewEventActorUnknown")}
+        </span>
+      )}
+      {move.repeat && move.repeat > 1 && (
+        <span className="tabular-nums" data-testid="overview-step-move-repeat">
+          {t("office:overviewStepMoveRepeat", { times: move.repeat })}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** A step's name, or the screen's wording for a step the ledger cannot name. */
+function stepName(t: (key: string) => string, move: OverviewStepMove): string {
+  return move.step_name || t("office:overviewStepUnnamed");
 }
 
 // The ledger's actor kinds, phrased as who moved a task. An actor the screen has
@@ -166,9 +306,7 @@ export function OverviewEventExtras({ event }: { event: OverviewEvent }) {
           {t("office:overviewDecisionAnswered", { time: occurredTime(event.decided_at) })}
         </EventField>
       )}
-      {event.moves && event.moves.length > 0 && (
-        <StepMoveLine moves={event.moves} from={event.from} to={event.to} />
-      )}
+      {event.moves && event.moves.length > 0 && <StepMoveLine event={event} />}
       {event.failure && <FailureLine failure={event.failure} />}
     </>
   );
