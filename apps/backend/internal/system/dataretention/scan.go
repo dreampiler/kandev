@@ -430,8 +430,14 @@ func finishCleanupJob(p *progress) {
 	p.Job = ""
 }
 
+// finishMessageTask retires the current task. The task cursor only advances
+// when a task was actually open: assigning an empty Task back onto TaskAfter
+// would rewind the cursor onto an already-skipped task, so a scan would re-select
+// it forever and never reach the cleanup-job phase.
 func finishMessageTask(p *progress) {
-	p.TaskAfter = p.Task
+	if p.Task != "" {
+		p.TaskAfter = p.Task
+	}
 	p.Task = ""
 	p.Session = ""
 	p.SessionAfter = ""

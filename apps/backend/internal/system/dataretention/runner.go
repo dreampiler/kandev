@@ -69,14 +69,24 @@ func (s *Service) prepareFirstBatch(ctx context.Context, r record) (bool, error)
 	op := *r.Operation
 	op.Skipped = maps.Clone(op.Skipped)
 	r.Operation = &op
-	ids, err := s.scanBatch(ctx, s.pool.Reader(), &r, false)
-	if err != nil {
+	if _, err := s.scanBatch(ctx, s.pool.Reader(), &r, false); err != nil {
 		return false, err
 	}
-	if len(ids) == 0 {
+	if !hasEligibleWork(&r) {
 		return true, s.storeScanProgress(ctx, r)
 	}
 	return false, s.checkReceipt(ctx, r)
+}
+
+// hasEligibleWork reports whether the dry run found a candidate in either
+// target. The gate cannot depend on changed message identity, because a batch
+// whose only work is a finished cleanup job still needs its receipt verified
+// before that job's snapshot is rewritten.
+func hasEligibleWork(r *record) bool {
+	if r.Operation == nil {
+		return false
+	}
+	return r.Operation.Messages.Eligible > 0 || r.Operation.CleanupJobs.Eligible > 0
 }
 
 func (s *Service) checkReceipt(ctx context.Context, r record) error {
