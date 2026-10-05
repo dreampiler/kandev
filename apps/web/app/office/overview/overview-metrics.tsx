@@ -8,7 +8,7 @@ import type {
   OverviewTaskFilter,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
-import { relativeTime } from "./overview-format";
+import { occurredTime, relativeTime } from "./overview-format";
 
 /**
  * One metric of the project card. It sits on its own tile so the card reads as
@@ -20,6 +20,7 @@ function Metric({
   label,
   value,
   sub,
+  title,
   onClick,
   href,
   active,
@@ -27,6 +28,12 @@ function Metric({
   label: string;
   value: ReactNode;
   sub?: ReactNode;
+  /**
+   * The reading behind the value, for hover. A metric shows the fixed instant a
+   * thing happened and carries the relative reading here, so an operator can ask
+   * "how long ago?" without the number on the tile having to restate itself.
+   */
+  title?: string;
   onClick?: () => void;
   href?: string;
   active?: boolean;
@@ -37,7 +44,9 @@ function Metric({
   const body = (
     <>
       <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
+      <div className="text-lg font-semibold tabular-nums" title={title}>
+        {value}
+      </div>
       <div className="min-h-3 text-[11px] text-muted-foreground">{sub}</div>
     </>
   );
@@ -87,7 +96,8 @@ export function WorkspaceMetrics({
       />
       <Metric
         label={t("office:overviewLastOutput")}
-        value={metrics.last_output_at ? relativeTime(metrics.last_output_at) : "-"}
+        value={metrics.last_output_at ? occurredTime(metrics.last_output_at) : "-"}
+        title={metrics.last_output_at ? relativeTime(metrics.last_output_at) : undefined}
         href={metrics.last_output_task_id ? linkToTask(metrics.last_output_task_id) : undefined}
       />
       <Metric

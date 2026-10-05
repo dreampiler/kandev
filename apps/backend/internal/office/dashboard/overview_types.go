@@ -45,13 +45,20 @@ const (
 	reasonSessionEnded       = "session_ended"
 )
 
-// Overview event kinds for the last-24-hours section.
+// Overview event kinds for the last-24-hours section. Every kind here is one
+// the kind chips can filter on; the web client owns the label for each code.
 const (
-	overviewEventServerStarted = "server_started"
-	overviewEventTaskCreated   = "task_created"
-	overviewEventTaskCompleted = "task_completed"
-	overviewEventSessionFailed = "session_failed"
-	overviewEventAutomationRun = "automation_run"
+	overviewEventServerStarted  = "server_started"
+	overviewEventTaskCreated    = "task_created"
+	overviewEventTaskCompleted  = "task_completed"
+	overviewEventSessionFailed  = "session_failed"
+	overviewEventAutomationRun  = "automation_run"
+	overviewEventModelBlocked   = "model_blocked"
+	overviewEventModelUnblocked = "model_unblocked"
+	overviewEventPRMerged       = "pr_merged"
+	overviewEventAutomationFail = "automation_failed"
+	overviewEventOwnerDecision  = "owner_decision"
+	overviewEventStepMove       = "step_move"
 )
 
 // OverviewReason is a machine-readable explanation of a status.
@@ -218,6 +225,98 @@ type OverviewEvent struct {
 	SessionID    string    `json:"session_id,omitempty"`
 	Title        string    `json:"title,omitempty"`
 	Detail       string    `json:"detail,omitempty"`
+	// Version is the running build reported on a server-start row. It is the
+	// version the binary injected at link time, never one derived here, so a
+	// build that reports nothing shows no version rather than a guess.
+	Version string `json:"version,omitempty"`
+	// ClearsAt is when a block is expected to lift. A resource that never
+	// named a clear time leaves it absent.
+	ClearsAt *time.Time `json:"clears_at,omitempty"`
+	// PullRequest identifies a merged change request: repository and number,
+	// kept as fields so the client never parses them out of prose.
+	PullRequest *OverviewPullRequest `json:"pull_request,omitempty"`
+	// DecidedAt is when a person answered an owner decision. Absent while the
+	// question is still open, which is the state the needs-a-person list
+	// already reports separately.
+	DecidedAt *time.Time `json:"decided_at,omitempty"`
+	// From and To bound a task's run of moves: when the run began and when it
+	// settled. The moves carry their own instants, so these two are the span a
+	// reader compares rather than something derived twice.
+	From *time.Time `json:"from,omitempty"`
+	To   *time.Time `json:"to,omitempty"`
+	// Moves is a run of consecutive workflow-step changes for one task,
+	// oldest first. Empty for every kind but a step move.
+	Moves []OverviewStepMove `json:"moves,omitempty"`
+	// Failure is what happened after a session failed, read on this same pass
+	// so it advances whenever the screen does. Absent when the failure is the
+	// newest thing known about the task.
+	Failure *OverviewFailure `json:"failure,omitempty"`
+}
+
+// OverviewPullRequest names a merged change request.
+type OverviewPullRequest struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+}
+
+// OverviewStepMove is one step change inside a task's run of moves. StepName
+// is empty for a step whose row is gone or unnamed, and Stopped reports that
+// arriving here starts nothing by itself, read from the step's own
+// configuration rather than from its name.
+type OverviewStepMove struct {
+	StepName string    `json:"step_name,omitempty"`
+	At       time.Time `json:"at"`
+	// Actor is what kind of thing moved the task, and Trigger is why, both as
+	// the codes the ledger records. The client phrases them.
+	Actor   string `json:"actor,omitempty"`
+	Trigger string `json:"trigger,omitempty"`
+	Stopped bool   `json:"stopped,omitempty"`
+}
+
+// OverviewFailure is what a failed session was followed by, read fresh on every
+// overview pass. It carries codes and values rather than sentences: the client
+// composes the line, so the same facts read in the viewer's language and stay
+// honest about what is not known.
+//
+// The three follow-ups are independent — a task can have a later session, a
+// routing fallback, and no terminal state at once — so each is reported on its
+// own. HasNoAction is the server's own verdict that none of the three found
+// anything, which is what the screen highlights rather than leaving an
+// uneventful row to be read as healthy.
+type OverviewFailure struct {
+	// FailedAgoMinutes is how long the failure has stood as of this read, so
+	// the number moves with the screen instead of only when a failure changes.
+	FailedAgoMinutes int `json:"failed_ago_minutes"`
+	// HasNoAction reports that no later session, no routing fallback, and no
+	// terminal task state were found after the failure.
+	HasNoAction bool `json:"has_no_action"`
+
+	// NextSession is the first session of the same task started after the
+	// failure. LaterSessions counts every session after it, so a task that
+	// churned through several is not reported as a single retry.
+	NextSession *OverviewFollowupSession `json:"next_session,omitempty"`
+	// RouteReason is the routing reason the failed session's replacement
+	// recorded, and RouteAttempts how many candidates dynamic routing tried
+	// for that session.
+	RouteReason   string `json:"route_reason,omitempty"`
+	RouteAttempts int    `json:"route_attempts,omitempty"`
+	// TaskState is the task's state as of this read. A task still open simply
+	// reports its open state; the client distinguishes terminal from not.
+	TaskState string `json:"task_state,omitempty"`
+}
+
+// OverviewFollowupSession is the session that ran after a failure, and what
+// became of it. LaterSessions counts every session started after this one on the
+// same task, so a task that churned through several is not reported as a single
+// retry.
+type OverviewFollowupSession struct {
+	SessionID         string    `json:"session_id"`
+	ModelName         string    `json:"model_name,omitempty"`
+	State             string    `json:"state"`
+	StartedAt         time.Time `json:"started_at"`
+	StartedAgoMinutes int       `json:"started_ago_minutes"`
+	LaterSessions     int       `json:"later_sessions,omitempty"`
 }
 
 // OverviewHumanItem is one thing waiting on a person. Repeats of the same
@@ -259,6 +358,10 @@ type OverviewTaskItem struct {
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
 	StepEnteredAt  time.Time       `json:"step_entered_at"`
 	QueuedMessages int             `json:"queued_messages"`
+	// Failure is what followed this row's failed session, so a task that is in
+	// trouble reports what became of the failure on its own row rather than only
+	// in the events list. It is the same value the failed-session event carries.
+	Failure *OverviewFailure `json:"failure,omitempty"`
 }
 
 // OverviewSessionItem is one row of the running-sessions list.
@@ -275,6 +378,9 @@ type OverviewSessionItem struct {
 	Reason         *OverviewReason `json:"reason,omitempty"`
 	StartedAt      time.Time       `json:"started_at"`
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
+	// Failure reports what followed this session's failure. A row for a live
+	// session has none: there is no failure to follow up on yet.
+	Failure *OverviewFailure `json:"failure,omitempty"`
 }
 
 // OverviewQueueItem is one receiving session in the queued-messages list.

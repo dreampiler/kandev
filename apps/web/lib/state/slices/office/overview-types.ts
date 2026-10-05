@@ -135,7 +135,52 @@ export type OverviewEventKind =
   | "task_created"
   | "task_completed"
   | "session_failed"
-  | "automation_run";
+  | "automation_run"
+  | "model_blocked"
+  | "model_unblocked"
+  | "pr_merged"
+  | "automation_failed"
+  | "owner_decision"
+  | "step_move";
+
+export type OverviewPullRequest = {
+  owner: string;
+  repo: string;
+  number: number;
+};
+
+export type OverviewStepMove = {
+  step_name?: string;
+  at: string;
+  actor?: string;
+  trigger?: string;
+  stopped?: boolean;
+};
+
+export type OverviewFollowupSession = {
+  session_id: string;
+  model_name?: string;
+  state: string;
+  started_at: string;
+  started_ago_minutes: number;
+  later_sessions?: number;
+};
+
+/**
+ * What a failed session was followed by, read on the same pass that reported the
+ * failure so the line advances whenever the screen refreshes. `has_no_action`
+ * is the server's own verdict that no later session, no routing fallback, and no
+ * terminal task state exist, which is what the screen highlights rather than
+ * leaving an uneventful row to read as healthy.
+ */
+export type OverviewFailure = {
+  failed_ago_minutes: number;
+  has_no_action: boolean;
+  next_session?: OverviewFollowupSession;
+  route_reason?: string;
+  route_attempts?: number;
+  task_state?: string;
+};
 
 export type OverviewEvent = {
   kind: OverviewEventKind;
@@ -146,6 +191,17 @@ export type OverviewEvent = {
   session_id?: string;
   title?: string;
   detail?: string;
+  /** The running build on a server-start row; absent when nothing reported one. */
+  version?: string;
+  /** When a block is expected to lift; absent when no clear time is known. */
+  clears_at?: string;
+  pull_request?: OverviewPullRequest;
+  /** When a person answered; absent while the question is still open. */
+  decided_at?: string;
+  from?: string;
+  to?: string;
+  moves?: OverviewStepMove[];
+  failure?: OverviewFailure;
 };
 
 export type OverviewHumanItem = {
@@ -179,6 +235,12 @@ export type OverviewTaskItem = {
   last_output_at?: string;
   step_entered_at: string;
   queued_messages: number;
+  /**
+   * What followed this row's failed session. Present only for a row that has one,
+   * so a task row answers "and what happened to it?" where the operator is
+   * already looking rather than only in the events list.
+   */
+  failure?: OverviewFailure;
 };
 
 export type OverviewSessionItem = {
@@ -194,6 +256,8 @@ export type OverviewSessionItem = {
   reason?: OverviewReason;
   started_at: string;
   last_output_at?: string;
+  /** What followed this session's failure; absent for a live session. */
+  failure?: OverviewFailure;
 };
 
 export type OverviewQueueItem = {

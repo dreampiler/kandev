@@ -2814,6 +2814,10 @@ func buildOfficeDashboardService(
 	cfgWriter *configloader.FileWriter,
 ) *officedashboard.DashboardService {
 	dashboardSvc := officedashboard.NewDashboardService(repo, log, activity, agentSvc, costSvc)
+	// The overview's server-start row reports the running build, read from the
+	// same package-level value setBuildInfo stamps from the ldflags, so the row
+	// cannot name a version this binary does not have.
+	dashboardSvc.SetBuildInfo(Version)
 	dashboardSvc.SetProjectBudgetEvaluator(costSvc)
 	dashboardSvc.SetGovernanceStore(repo)
 	dashboardSvc.SetSkillLister(skillSvc)

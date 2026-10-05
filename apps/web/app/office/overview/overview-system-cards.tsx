@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 import { getWorkspaceAggregateRunning } from "@/lib/api/domains/office-overview-api";
 import { useOverviewList } from "@/hooks/domains/office/use-overview-list";
 import type { OverviewRunningKind, OverviewSystem } from "@/lib/state/slices/office/overview-types";
-import { durationSince, relativeTime } from "./overview-format";
+import { durationSince, occurredTime } from "./overview-format";
 import { OverviewQueueTable, OverviewSessionTable, OverviewTaskTable } from "./overview-tables";
 import { OverviewStatusDot } from "./overview-status-legend";
 import { statusTextClass, type OverviewStatusTone } from "./overview-status-colors";
@@ -111,7 +111,7 @@ function blockedSub(t: TFunction, system: OverviewSystem, loading: boolean): str
     return loading ? undefined : t("office:overviewBlockedUnknown");
   }
   if (!system.earliest_unblock_at) return undefined;
-  return t("office:overviewClearsAt", { time: relativeTime(system.earliest_unblock_at) });
+  return t("office:overviewClearsAt", { time: occurredTime(system.earliest_unblock_at) });
 }
 
 /**

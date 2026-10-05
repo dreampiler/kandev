@@ -109,6 +109,14 @@ const EVENT_KIND_TONES: Record<OverviewEventKind, OverviewStatusTone> = {
   task_completed: "running",
   session_failed: "error",
   automation_run: "info",
+  // A block is trouble and its clearing is the resolution, so the pair reads as
+  // the failure and its recovery rather than as two neutral facts.
+  model_blocked: "stalled",
+  model_unblocked: "running",
+  pr_merged: "running",
+  automation_failed: "error",
+  owner_decision: "hold",
+  step_move: "info",
 };
 
 /** The states the overview classifies, in the order the legend reads. */
