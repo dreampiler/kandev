@@ -273,10 +273,15 @@ type taskQueuePromotionPublisher interface {
 }
 
 // WorkflowMeta is the subset of workflow fields needed at step entry
-// (agent profile default + optional workflow-level prompt).
+// (agent profile default + optional workflow-level prompt) plus the workflow's
+// last-modified time.
 type WorkflowMeta struct {
 	AgentProfileID string
 	Prompt         string
+	// PromptUpdatedAt is the workflow row's updated_at. Every workflow write
+	// moves it, so it says the definition may have changed; it does not say the
+	// prompt did.
+	PromptUpdatedAt time.Time
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -1485,6 +1490,16 @@ type Service struct {
 	// transient-failure retry can re-drive the same turn without the caller's
 	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
 	lastTurnPrompt sync.Map
+
+	// workflowInstructionsDelivered records the workflow-level common
+	// instructions block each session has already been given, so a session
+	// receives it once instead of on every step it moves through.
+	// key: sessionID, value: workflowInstructionsDelivery. Replaced when the
+	// workflow prompt changes; cleared on context reset (which restarts the
+	// conversation in place and so counts as a new session) and on session
+	// deletion. A backend restart forgets it, which costs at most one repeat
+	// delivery per live session.
+	workflowInstructionsDelivered sync.Map
 
 	// dynamicAttemptEvidence is keyed by logical session and stores the current
 	// concrete or dynamic prompt attempt. It is replaced for every attempt, and

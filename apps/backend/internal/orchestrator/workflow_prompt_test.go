@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -641,7 +642,10 @@ func TestGetWorkflowMeta_CachesPerWorkflowID(t *testing.T) {
 	stepGetter := newMockStepGetter()
 	stepGetter.workflowAgentProfileID = "profile-wf"
 	stepGetter.workflowPrompts["wf-a"] = "Rule A"
-	stepGetter.workflowPrompts["wf-b"] = "Rule B"
+	// The common-instructions block is delivered once per session and a changed
+	// workflow prompt is delivered again, so the two workflows must not render
+	// blocks of equal length for this session to receive both.
+	stepGetter.workflowPrompts["wf-b"] = "Rule B, for the other workflow"
 	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
 
 	ctx := withWorkflowMetaCache(context.Background())
@@ -736,7 +740,10 @@ func TestGetWorkflowMeta_ConcurrentReadersSinglePopulate(t *testing.T) {
 				errs <- "bad profile: " + got
 				return
 			}
-			prompt := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", "session-1", false)
+			// One session per reader: the block is a per-session delivery, so
+			// sharing a session across the storm would make every reader but
+			// the first legitimately receive an empty block.
+			prompt := svc.buildWorkflowPrompt(ctx, "base", step, "task-1", fmt.Sprintf("session-%d", i), false)
 			if !strings.Contains(prompt, "Keep CI green.") {
 				errs <- "missing prompt: " + prompt
 			}
