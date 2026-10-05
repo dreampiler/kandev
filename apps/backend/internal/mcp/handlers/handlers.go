@@ -2758,8 +2758,9 @@ func (h *Handlers) handleDuplicateStepComplete(
 }
 
 // resolveStepCompleteTarget loads the session + task the signal applies to
-// and runs the up-front validation (ownership, terminal-state guard,
-// workflow-step presence). Returns a populated session+task pair on success,
+// and runs the up-front validation (task ownership, terminal-state guard,
+// workflow-step presence, and that the caller is the session currently
+// driving that step). Returns a populated session+task pair on success,
 // or a ready-to-send WS error envelope (and its marshal error if any) on
 // any failed precondition.
 func (h *Handlers) resolveStepCompleteTarget(
@@ -2813,6 +2814,15 @@ func (h *Handlers) resolveStepCompleteTarget(
 	}
 	if task.WorkflowStepID == "" {
 		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
+		return nil, nil, errMsg, mErr
+	}
+	if ownership := h.resolveCurrentStepSessionOwnership(ctx, session, task); !ownership.Owned {
+		message := fmt.Sprintf(
+			"this session is not the current step's session (current step: %s)", ownership.StepName)
+		if ownership.Reason != "" {
+			message += ". " + ownership.Reason
+		}
+		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, message, nil)
 		return nil, nil, errMsg, mErr
 	}
 	return session, task, nil, nil

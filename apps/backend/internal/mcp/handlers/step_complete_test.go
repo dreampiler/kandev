@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -86,7 +87,11 @@ func seedStepCompleteTarget(t *testing.T, repo *sqliterepo.Repository, taskID, s
 		UpdatedAt:      now,
 	}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID:        sessionID,
+		ID: sessionID,
+		// Production parity: the session a task starts with is its primary
+		// session, which is what designates it as the session currently
+		// driving the task's workflow step.
+		IsPrimary: true,
 		TaskID:    taskID,
 		State:     state,
 		StartedAt: now,
@@ -94,13 +99,41 @@ func seedStepCompleteTarget(t *testing.T, repo *sqliterepo.Repository, taskID, s
 	}))
 }
 
-func newStepCompleteHandler(t *testing.T, taskSvc *service.Service, repo *sqliterepo.Repository, bus *mcpRecordingEventBus) *Handlers {
+// newStepCompleteHandler wires the workflow controller handleStepComplete needs
+// to resolve the task's current step, and creates a step row for each stepID
+// given. A stepID with no row is refused instead of being guessed at, so a test
+// that expects the call to succeed must seed every step the call can land on.
+func newStepCompleteHandler(
+	t *testing.T,
+	taskSvc *service.Service,
+	repo *sqliterepo.Repository,
+	bus *mcpRecordingEventBus,
+	stepIDs ...string,
+) *Handlers {
 	t.Helper()
+	ctrl, wfRepo := newTestWorkflowController(t)
+	for _, stepID := range stepIDs {
+		// The task-side workflow row backs the step's default profile lookup;
+		// an absent workflow is an unreadable step, which the handler refuses.
+		require.NoError(t, repo.CreateWorkflow(context.Background(), &models.Workflow{
+			ID:          "wf-" + stepID,
+			WorkspaceID: "ws-step-complete",
+			Name:        "Workflow " + stepID,
+			CreatedAt:   time.Now().UTC(),
+			UpdatedAt:   time.Now().UTC(),
+		}))
+		require.NoError(t, wfRepo.CreateStep(context.Background(), &workflowmodels.WorkflowStep{
+			ID:         stepID,
+			WorkflowID: "wf-" + stepID,
+			Name:       stepID,
+		}))
+	}
 	return &Handlers{
-		taskSvc:     taskSvc,
-		sessionRepo: repo,
-		eventBus:    bus,
-		logger:      testLogger(t).WithFields(),
+		taskSvc:      taskSvc,
+		sessionRepo:  repo,
+		eventBus:     bus,
+		workflowCtrl: ctrl,
+		logger:       testLogger(t).WithFields(),
 	}
 }
 
@@ -184,7 +217,7 @@ func TestHandleStepComplete_SessionDoesNotBelongToTask(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-owner", "session-owner", "step-1", models.TaskSessionStateRunning)
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-OTHER",
@@ -212,7 +245,7 @@ func TestHandleStepComplete_TerminalSessionRejected(t *testing.T) {
 			svc, repo := newTestTaskService(t)
 			seedStepCompleteTarget(t, repo, "task-term", "session-term", "step-1", state)
 			bus := &mcpRecordingEventBus{}
-			h := newStepCompleteHandler(t, svc, repo, bus)
+			h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 			msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 				"task_id":    "task-term",
@@ -254,7 +287,7 @@ func TestHandleStepComplete_RejectsSignalFromMovedTurn(t *testing.T) {
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-work")
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-moved",
 		"session_id": "session-moved",
@@ -280,7 +313,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	seedStepCompleteTarget(t, repo, "task-first", "session-first", "step-1", models.TaskSessionStateRunning)
 	seedAgentProfileSnapshot(t, repo, "session-first", "claude-first-call")
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	const counterKey = "source=agent;agent_type=claude-first-call"
 	before := readSignalReceivedCounterExact(t, counterKey)
@@ -300,7 +333,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, true, payload["accepted"])
 	assert.Equal(t, "step-1", payload["step_id"])
-	// signaled_at is part of the documented response contract — pin its
+	// signaled_at is part of the documented response contract - pin its
 	// presence + RFC3339Nano shape so a future refactor can't silently
 	// drop or rename the field.
 	signaledAt, ok := payload["signaled_at"].(string)
@@ -319,7 +352,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 	assert.Equal(t, "tests next", bag.Handoff)
 
 	// Bus event published with the public payload shape (no handoff/blockers
-	// on the wire — those live in the bag only).
+	// on the wire - those live in the bag only).
 	require.Len(t, bus.events, 1, "expected one bus publish")
 	assert.Equal(t, events.WorkflowStepCompletionSignaled, bus.events[0].Type)
 	data, ok := bus.events[0].Data.(map[string]interface{})
@@ -337,7 +370,7 @@ func TestHandleStepComplete_FirstCallAccepted(t *testing.T) {
 
 // TestHandleStepComplete_DedupRunningNoRepublish covers the
 // `already_signaled` short-circuit while the session is still RUNNING. The
-// inline turn-end path will pick up the bag — no re-publish is needed and
+// inline turn-end path will pick up the bag - no re-publish is needed and
 // none should fire (avoids a spurious second event for the subscriber).
 func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	ctx := context.Background()
@@ -352,7 +385,7 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	}))
 	seedAgentProfileSnapshot(t, repo, "session-dup", "claude-dup-call")
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	const counterKey = "source=agent;agent_type=claude-dup-call"
 	before := readSignalReceivedCounterExact(t, counterKey)
@@ -382,7 +415,7 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 // AC-001.13: a rejected duplicate call must not mutate the already-persisted
 // bag, even when the second call's handoff/blockers differ from the first's.
 // Only the first accepted call's content may ever reach the single-slot carry
-// token or the audit metadata — a duplicate silently replacing it would let a
+// token or the audit metadata - a duplicate silently replacing it would let a
 // second, unvetted call clobber content already committed to the transition.
 func TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers(t *testing.T) {
 	ctx := context.Background()
@@ -398,7 +431,7 @@ func TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers(t *te
 	}))
 	seedAgentProfileSnapshot(t, repo, "session-dup-overwrite", "claude-dup-overwrite")
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-dup-overwrite",
@@ -442,7 +475,7 @@ func TestHandleStepComplete_DedupWaitingRepublishes(t *testing.T) {
 		SignaledAt: time.Now().UTC(),
 	}))
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-retry",
@@ -480,12 +513,9 @@ func TestHandleStepComplete_ConcurrentCallsClaimOneSignal(t *testing.T) {
 		release:    release,
 	}
 	eventBus := &concurrentStepCompleteEventBus{}
-	h := &Handlers{
-		taskSvc:     svc,
-		sessionRepo: gatedRepo,
-		eventBus:    eventBus,
-		logger:      testLogger(t).WithFields(),
-	}
+	h := newStepCompleteHandler(t, svc, repo, &mcpRecordingEventBus{}, "step-1")
+	h.sessionRepo = gatedRepo
+	h.eventBus = eventBus
 
 	const counterKey = "source=agent;agent_type=claude-concurrent"
 	before := readSignalReceivedCounterExact(t, counterKey)

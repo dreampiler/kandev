@@ -2,7 +2,7 @@ package handlers
 
 // TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal is
 // Slice B of the ISSUE-5 fix: accepted:true only means the signal was
-// durably recorded, not that it will move the task — a step whose
+// durably recorded, not that it will move the task - a step whose
 // AutoAdvanceRequiresSignal is false never reads the bag at turn end, so an
 // agent can get accepted:true and still see nothing advance. The response
 // additively carries `advances` (and, when false, a `note` explaining why)
@@ -17,6 +17,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
@@ -79,6 +80,10 @@ func TestHandleStepComplete_AdvancesFieldReflectsAutoAdvanceRequiresSignal(t *te
 
 			seedStepCompleteTarget(t, taskRepo, "task-advances", "session-advances", "step-advances", models.TaskSessionStateRunning)
 			seedAgentProfileSnapshot(t, taskRepo, "session-advances", "claude-advances")
+			require.NoError(t, taskRepo.CreateWorkflow(ctx, &models.Workflow{
+				ID: "wf-advances", WorkspaceID: "ws-step-complete", Name: "Workflow Advances",
+				CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+			}))
 			require.NoError(t, wfRepo.CreateStep(ctx, &wfmodels.WorkflowStep{
 				ID:                        "step-advances",
 				WorkflowID:                "wf-advances",
@@ -161,6 +166,10 @@ func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *te
 
 			seedStepCompleteTarget(t, taskRepo, "task-no-move", "session-no-move", "step-no-move", models.TaskSessionStateRunning)
 			seedAgentProfileSnapshot(t, taskRepo, "session-no-move", "claude-no-move")
+			require.NoError(t, taskRepo.CreateWorkflow(ctx, &models.Workflow{
+				ID: "wf-no-move", WorkspaceID: "ws-step-complete", Name: "Workflow No Move",
+				CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+			}))
 			require.NoError(t, wfRepo.CreateStep(ctx, &wfmodels.WorkflowStep{
 				ID:                        "step-no-move",
 				WorkflowID:                "wf-no-move",
@@ -202,8 +211,10 @@ func TestHandleStepComplete_SignalGatedStepWithoutMoveActionDoesNotAdvance(t *te
 
 // TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure pins the
 // never-guess rule: when the step lookup itself fails (here, the step row
-// simply does not exist in the workflow store), the response must not
-// carry an `advances` key at all, rather than defaulting to true or false.
+// simply does not exist in the workflow store), the call is refused before any
+// signal is recorded, so the response carries neither `accepted` nor an
+// `advances` value. Ownership of the current step cannot be established from an
+// unreadable step, and a completion signal moves the task.
 func TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure(t *testing.T) {
 	taskSvc, taskRepo := newTestTaskService(t)
 	ctrl, _ := newTestWorkflowController(t)
@@ -211,10 +222,11 @@ func TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure(t *testing.T) {
 
 	seedStepCompleteTarget(t, taskRepo, "task-no-step", "session-no-step", "step-missing", models.TaskSessionStateRunning)
 	seedAgentProfileSnapshot(t, taskRepo, "session-no-step", "claude-no-step")
+	recorder := &mcpRecordingEventBus{}
 	// Deliberately no wfRepo.CreateStep call: "step-missing" does not exist
 	// in the workflow store the controller reads from.
 
-	h := newStepCompleteHandler(t, taskSvc, taskRepo, &mcpRecordingEventBus{})
+	h := newStepCompleteHandler(t, taskSvc, taskRepo, recorder)
 	h.workflowCtrl = ctrl
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
@@ -225,10 +237,17 @@ func TestHandleStepComplete_AdvancesFieldOmittedOnLookupFailure(t *testing.T) {
 	resp, err := h.handleStepComplete(ctx, msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var payload map[string]interface{}
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
-	assert.Equal(t, true, payload["accepted"])
+	assert.NotContains(t, payload, "accepted", "a failed step lookup must not report an accepted signal")
 	assert.NotContains(t, payload, "advances", "a failed step lookup must never guess an advances value")
 	assert.NotContains(t, payload, "note")
+
+	session, err := taskRepo.GetTaskSession(ctx, "session-no-step")
+	require.NoError(t, err)
+	_, hasSignal := models.LoadPendingStepSignal(session.Metadata)
+	assert.False(t, hasSignal, "a refused call must not record a signal")
+	assert.Empty(t, recorder.events, "a refused call must not publish a completion event")
 }

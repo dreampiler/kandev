@@ -21,7 +21,7 @@ func TestHandleStepComplete_TruncatesOversizedHandoff(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-trunc", "session-trunc", "step-1", models.TaskSessionStateRunning)
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	oversized := strings.Repeat("h", stepCompletionSignalFieldLimitBytes+500)
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
@@ -57,7 +57,7 @@ func TestHandleStepComplete_WhitespacePaddedHandoffTrimsBeforeMeasuring(t *testi
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-trim-first", "session-trim-first", "step-1", models.TaskSessionStateRunning)
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	atLimit := strings.Repeat("h", stepCompletionSignalFieldLimitBytes)
 	padded := strings.Repeat(" ", 500) + atLimit + strings.Repeat("\n", 500)
@@ -90,7 +90,7 @@ func TestHandleStepComplete_TruncatesBothFieldsInOrder(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-trunc2", "session-trunc2", "step-1", models.TaskSessionStateRunning)
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	oversized := strings.Repeat("x", stepCompletionSignalFieldLimitBytes+1)
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
@@ -115,7 +115,7 @@ func TestHandleStepComplete_NoTruncationOmitsFields(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedStepCompleteTarget(t, repo, "task-notrunc", "session-notrunc", "step-1", models.TaskSessionStateRunning)
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-notrunc",
@@ -149,7 +149,7 @@ func TestHandleStepComplete_DuplicateReportsNoTruncation(t *testing.T) {
 		SignaledAt: time.Now().UTC(),
 	}))
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-1")
 
 	oversized := strings.Repeat("y", stepCompletionSignalFieldLimitBytes+1)
 	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{

@@ -39,7 +39,7 @@ func TestHandleStepComplete_StaleTurnRecoveryGuidance(t *testing.T) {
 			require.NoError(t, repo.UpdateTask(ctx, task))
 
 			bus := &mcpRecordingEventBus{}
-			h := newStepCompleteHandler(t, svc, repo, bus)
+			h := newStepCompleteHandler(t, svc, repo, bus, "step-work")
 			msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 				"task_id":    "task-stale-recovery",
 				"session_id": "session-stale-recovery",
@@ -87,7 +87,7 @@ func TestHandleStepComplete_FreshTurnAfterStepChange(t *testing.T) {
 	require.NoError(t, repo.UpdateTask(ctx, task))
 
 	bus := &mcpRecordingEventBus{}
-	h := newStepCompleteHandler(t, svc, repo, bus)
+	h := newStepCompleteHandler(t, svc, repo, bus, "step-work")
 	staleMsg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
 		"task_id":    "task-fresh-recovery",
 		"session_id": "session-fresh-recovery",
