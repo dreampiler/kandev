@@ -44,15 +44,17 @@ func ValidateEntryOptions(options *EntryOptions, change MoveChange) error {
 	return nil
 }
 
-// ValidateEntryTarget rejects agent-facing entry options when the target step
-// does not start an agent to receive them. A step without an auto_start_agent
-// on_enter action (for example Waiting, Blocked, Hold, or Done) cannot deliver a
-// one-shot hand-off, so accepting the options would silently drop them. A nil
-// step is treated as unknown and does not reject, so the move path reports its
-// own canonical not-found error instead.
+// ValidateEntryTarget rejects agent-facing entry options when the target step is
+// a manual step: it does not start work on entry, so a one-shot hand-off has no
+// recipient and accepting the options would silently drop them. It reuses
+// models.StepRunsOnEntry, the single repository answer for whether entering a
+// step starts work (auto_start_agent, queue_run, queue_run_for_each_participant,
+// run_code_review, or a pull source), instead of re-deriving a narrower set. A
+// nil step is treated as unknown and does not reject, so the move path reports
+// its own canonical not-found error instead.
 func ValidateEntryTarget(step *models.WorkflowStep) error {
-	if step == nil || step.HasOnEnterAction(models.OnEnterAutoStartAgent) {
+	if step == nil || models.StepRunsOnEntry(step) {
 		return nil
 	}
-	return ErrEntryTargetIsAgentless
+	return ErrEntryTargetIsManual
 }

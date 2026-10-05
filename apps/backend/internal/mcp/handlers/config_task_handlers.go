@@ -340,7 +340,7 @@ func moveChange(fromStepID, toStepID string) workflowmove.MoveChange {
 }
 
 // validateEntryTargetStep reports whether the target step can receive one-shot
-// entry options. Agent-less steps (no auto_start_agent on_enter action) cannot,
+// entry options. A manual step (one that does not start work on entry) cannot,
 // so the caller is told to move without options. A missing workflow controller
 // or an unreadable step fails open, letting the normal move path report its own
 // canonical not-found or validation error.
@@ -350,6 +350,8 @@ func (h *Handlers) validateEntryTargetStep(ctx context.Context, stepID string) e
 	}
 	resp, err := h.workflowCtrl.GetStep(ctx, stepID)
 	if err != nil || resp == nil || resp.Step == nil {
+		h.logger.Debug("move_task: could not read target step for entry-target check",
+			zap.String("workflow_step_id", stepID), zap.Error(err))
 		return nil
 	}
 	return workflowmove.ValidateEntryTarget(resp.Step)
@@ -413,7 +415,7 @@ func classifyMoveTaskError(err error) string {
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
 		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) ||
-		errors.Is(err, workflowmove.ErrEntryTargetIsAgentless) {
+		errors.Is(err, workflowmove.ErrEntryTargetIsManual) {
 		return ws.ErrorCodeValidation
 	}
 	msg := strings.ToLower(err.Error())
@@ -433,8 +435,10 @@ func classifyMoveTaskError(err error) string {
 }
 
 // moveTaskErrorMessage returns the agent-facing text for a failed move. It
-// keeps the real reason so a caller can correct the call in one step, while
-// never echoing arbitrary internal values (step IDs, paths).
+// keeps the real reason so a caller can correct the call in one step. A known
+// service error that embeds an internal identifier (for example a WIP-limit
+// step ID) is mapped to a plain phrase; any other classified error passes its
+// own message through unchanged.
 func moveTaskErrorMessage(err error) string {
 	switch classifyMoveTaskError(err) {
 	case ws.ErrorCodeConflict:
@@ -459,7 +463,7 @@ func moveTaskErrorReason(err error) string {
 		workflowmove.ErrEntryOptionsRequireStepChange,
 		workflowmove.ErrEntryOptionsUnsupported,
 		workflowmove.ErrEntryTargetUnavailable,
-		workflowmove.ErrEntryTargetIsAgentless,
+		workflowmove.ErrEntryTargetIsManual,
 	} {
 		if errors.Is(err, sentinel) {
 			return sentinel.Error()
