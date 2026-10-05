@@ -137,19 +137,25 @@ type OverviewWarning struct {
 
 // OverviewWorkspaceMetrics are the six project-card metrics plus problems.
 type OverviewWorkspaceMetrics struct {
-	Status               string                `json:"status"`
-	ActiveTasks          int                   `json:"active_tasks"`
-	RunningSessions      int                   `json:"running_sessions"`
-	WaitingInputSessions int                   `json:"waiting_input_sessions"`
-	LastOutputAt         *time.Time            `json:"last_output_at,omitempty"`
-	LastOutputTaskID     string                `json:"last_output_task_id,omitempty"`
-	QueuedMessages       int                   `json:"queued_messages"`
-	Completed24h         int                   `json:"completed_24h"`
-	OpenTasks            int                   `json:"open_tasks"`
-	WaitingTasks         int                   `json:"waiting_tasks"`
-	BlockedTasks         int                   `json:"blocked_tasks"`
-	Problems             OverviewProblemCounts `json:"problems"`
-	TopWarning           *OverviewWarning      `json:"top_warning,omitempty"`
+	Status               string     `json:"status"`
+	ActiveTasks          int        `json:"active_tasks"`
+	RunningSessions      int        `json:"running_sessions"`
+	WaitingInputSessions int        `json:"waiting_input_sessions"`
+	LastOutputAt         *time.Time `json:"last_output_at,omitempty"`
+	LastOutputTaskID     string     `json:"last_output_task_id,omitempty"`
+	QueuedMessages       int        `json:"queued_messages"`
+	Completed24h         int        `json:"completed_24h"`
+	OpenTasks            int        `json:"open_tasks"`
+	WaitingTasks         int        `json:"waiting_tasks"`
+	BlockedTasks         int        `json:"blocked_tasks"`
+	// BlockedByTasks is the open tasks waiting on an unfinished predecessor.
+	// It is its own figure rather than part of WaitingTasks because a task held
+	// on a hold step, a task waiting for a predecessor, and a task waiting on a
+	// person are three different reasons a task is not moving, and the card
+	// shows all three.
+	BlockedByTasks int                   `json:"blocked_by_tasks"`
+	Problems       OverviewProblemCounts `json:"problems"`
+	TopWarning     *OverviewWarning      `json:"top_warning,omitempty"`
 }
 
 // OverviewParentTask is an open task that groups child tasks.

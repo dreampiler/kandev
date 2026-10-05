@@ -1071,7 +1071,7 @@
   "overviewCompleted24h": "24시간 완료",
   "overviewCompletedAt": "완료 시각",
   "overviewOpenTasks": "열린 작업",
-  "overviewOpenBreakdown": "선행 대기 {{waiting}} · 보류 {{hold}}",
+  "overviewOpenBreakdown": "보류 {{hold}} · 선행 대기 {{blocked}} · 나머지 {{other}}",
   "overviewFilterProblems": "문제 먼저",
   "overviewShowAll": "전체 보기",
   "overviewShowingOf": "전체 {{total}}건 중 {{shown}}건",

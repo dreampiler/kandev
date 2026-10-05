@@ -139,6 +139,33 @@ func (t *overviewTask) isHold() bool {
 	return t.row.State == stateBlocked || t.row.OpenBlockers > 0
 }
 
+// holdStepNames are the step names a workflow uses for the step a task is held
+// on. No workflow_steps column marks a hold step: stage_type has no hold value
+// and no boolean does either, so the stored name is the only signal that a
+// workflow has one. The names are workflow data an author typed, not UI copy, so
+// they are read the same whatever language the screen is in. A workflow that
+// names its hold step something else reports fewer holds, never more.
+var holdStepNames = map[string]bool{
+	"보류":      true,
+	"보류중":     true,
+	"hold":    true,
+	"on hold": true,
+	"blocked": true,
+	"paused":  true,
+}
+
+// onHoldStep reports that the task sits on a step its workflow calls a hold.
+func (t *overviewTask) onHoldStep() bool {
+	return holdStepNames[strings.ToLower(strings.TrimSpace(t.row.StepName))]
+}
+
+// isOnHold reports that this task is being held rather than running: either its
+// state says so, or it is parked on the workflow's hold step. A task that is on
+// hold is not waiting on a predecessor, so the hold reading comes first.
+func (t *overviewTask) isOnHold() bool {
+	return t.row.State == stateBlocked || t.onHoldStep()
+}
+
 func minutesSince(now, at time.Time) int {
 	if at.IsZero() || now.Before(at) {
 		return 0

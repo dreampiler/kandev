@@ -83,6 +83,7 @@ export type OverviewWorkspaceMetrics = {
   open_tasks: number;
   waiting_tasks: number;
   blocked_tasks: number;
+  blocked_by_tasks: number;
   problems: { error: number; stalled: number; delayed: number };
   top_warning?: {
     task_id: string;

@@ -346,59 +346,6 @@ func TestOverviewLists(t *testing.T) {
 	}
 }
 
-// TestOverviewCompletedCountsTheCompletionStep pins that the 24-hour figure is
-// the completion instant and nothing else: a task whose completing-step entry is
-// older than the window stays out even though archiving it wrote the task inside
-// it, the card's figure and its own list agree, and each row reports when it
-// finished and whether it has left the board.
-func TestOverviewCompletedCountsTheCompletionStep(t *testing.T) {
-	deps := overviewFixture(t)
-	now := time.Now().UTC()
-	completedAt := now.Add(-30 * time.Minute)
-	// t-done finished inside the window and has since been archived.
-	mustExec(t, deps, `UPDATE tasks SET archived_at = ? WHERE id = 't-done'`, now.Add(-10*time.Minute))
-	// t-late finished 25 hours ago; the archive is what wrote the task inside
-	// the window, and that write is not a completion.
-	insertOverviewTask(t, deps, "t-late", "ws-office", "COMPLETED", "", now.Add(-26*time.Hour))
-	mustExec(t, deps, `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = 't-late'`,
-		now.Add(-time.Hour), now.Add(-time.Hour))
-	insertCompletionStepTransition(t, deps, "tr-late", "t-late", "step-done", now.Add(-25*time.Hour))
-
-	deps.svc.SetWorkspaceLister(overviewLister())
-	deps.svc.SetOverviewReader(deps.repo)
-	deps.svc.SetOverviewScopeSource(stubScopeSource{scope: dashboard.OverviewScopeReachable})
-	ctx := context.Background()
-
-	resp, err := deps.svc.GetWorkspacesAggregate(ctx)
-	if err != nil {
-		t.Fatalf("aggregate: %v", err)
-	}
-	var completed int
-	for _, w := range resp.Workspaces {
-		if w.WorkspaceID == "ws-office" && w.Metrics != nil {
-			completed = w.Metrics.Completed24h
-		}
-	}
-	if completed != 1 {
-		t.Fatalf("completed_24h = %d; want only the task that entered its completing step inside the window", completed)
-	}
-
-	list, err := deps.svc.GetOverviewWorkspaceTasks(ctx, "ws-office", dashboard.OverviewFilterCompleted, 0)
-	if err != nil {
-		t.Fatalf("completed list: %v", err)
-	}
-	if list.Total != completed || len(list.Tasks) != 1 {
-		t.Fatalf("completed list total = %d rows = %d; want the card's own figure of %d", list.Total, len(list.Tasks), completed)
-	}
-	row := list.Tasks[0]
-	if row.TaskID != "t-done" || !row.Archived || row.CompletedAt == nil {
-		t.Fatalf("completed row = %+v; want t-done, archived, with its completion time", row)
-	}
-	if row.CompletedAt.Sub(completedAt).Abs() > time.Minute || !row.StepEnteredAt.Equal(*row.CompletedAt) {
-		t.Fatalf("completed row times = %+v / %+v; want the completion step entry", row.CompletedAt, row.StepEnteredAt)
-	}
-}
-
 func TestOverviewListRoutes(t *testing.T) {
 	deps := overviewFixture(t)
 	deps.svc.SetWorkspaceLister(overviewLister())

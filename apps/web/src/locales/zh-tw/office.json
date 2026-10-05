@@ -1071,7 +1071,7 @@
   "overviewCompleted24h": "已完成（24 小時）",
   "overviewCompletedAt": "完成時間",
   "overviewOpenTasks": "未完成的任務",
-  "overviewOpenBreakdown": "等待前置 {{waiting}} · 擱置 {{hold}}",
+  "overviewOpenBreakdown": "擱置 {{hold}} · 等待前置 {{blocked}} · 其他 {{other}}",
   "overviewFilterProblems": "問題優先",
   "overviewShowAll": "顯示全部",
   "overviewShowingOf": "共 {{total}} 條，顯示 {{shown}} 條",

@@ -55,10 +55,10 @@ func assembleWorkspaceMetrics(snap *overviewSnapshot, completed24h, childCounts 
 func addTaskMetrics(m *OverviewWorkspaceMetrics, t *overviewTask, lastOutput map[string]time.Time) {
 	m.OpenTasks++
 	switch {
-	case t.row.State == stateBlocked:
+	case t.isOnHold():
 		m.BlockedTasks++
 	case t.row.OpenBlockers > 0:
-		m.WaitingTasks++
+		m.BlockedByTasks++
 	case t.isActive():
 		m.ActiveTasks++
 	default:

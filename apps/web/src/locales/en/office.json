@@ -1071,7 +1071,7 @@
   "overviewCompleted24h": "Completed (24 h)",
   "overviewCompletedAt": "Completed at",
   "overviewOpenTasks": "Open tasks",
-  "overviewOpenBreakdown": "{{waiting}} waiting · {{hold}} on hold",
+  "overviewOpenBreakdown": "{{hold}} on hold · {{blocked}} waiting on a predecessor · {{other}} other",
   "overviewFilterProblems": "Problems first",
   "overviewShowAll": "Show all",
   "overviewShowingOf": "{{shown}} of {{total}}",

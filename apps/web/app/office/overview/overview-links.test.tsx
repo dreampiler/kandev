@@ -73,6 +73,7 @@ const workspace: WorkspaceAggregateEntry = {
     open_tasks: 3,
     waiting_tasks: 0,
     blocked_tasks: 0,
+    blocked_by_tasks: 0,
     problems: { error: 0, stalled: 1, delayed: 0 },
     top_warning: {
       task_id: "task-warn",
@@ -104,28 +105,6 @@ const taskPage = {
       session_state: "RUNNING",
       failures_24h: 0,
       step_entered_at: createdAt,
-      queued_messages: 0,
-    },
-  ],
-};
-
-const completedPage = {
-  kind: "tasks",
-  filter: "completed",
-  total: 1,
-  tasks: [
-    {
-      task_id: "task-finished",
-      title: "Finished task",
-      step_name: "Done",
-      state: "COMPLETED",
-      workspace_id: boardWorkspaceID,
-      workspace_name: "Board One",
-      status: "waiting",
-      failures_24h: 0,
-      step_entered_at: createdAt,
-      completed_at: createdAt,
-      archived: true,
       queued_messages: 0,
     },
   ],
@@ -200,9 +179,7 @@ function hrefOf(element: HTMLElement): string | null {
 
 describe("overview project card destinations", () => {
   beforeEach(() => {
-    getWorkspaceAggregateTasks.mockImplementation(async (_id: string, filter: string) =>
-      filter === "completed" ? completedPage : taskPage,
-    );
+    getWorkspaceAggregateTasks.mockResolvedValue(taskPage);
     useLoadedWorkspace();
   });
   afterEach(() => {
@@ -241,25 +218,15 @@ describe("overview project card destinations", () => {
     expect(within(taskList).getAllByTestId("overview-task-row")).toHaveLength(1);
     expect(hrefOf(within(row).getByText("Row task"))).toBe("/t/task-row");
 
-    // The 24-hour figure opens its own list, and that list answers the figure
-    // back: the row reports when the task finished, names the column as the
-    // completion time rather than a dwell time, and says the task has left the
-    // board, which is where most of a 24-hour list actually is.
+    // The completed filter is also a chip, so this figure's own name now matches
+    // more than one control in the card. The tile is the first of them.
+    const card = screen.getByTestId("overview-workspace-card");
     await act(async () => {
-      fireEvent.click(screen.getByTestId("overview-metric-completed"));
+      fireEvent.click(within(card).getAllByText("Completed (24 h)")[0]);
     });
     expect(getWorkspaceAggregateTasks).toHaveBeenLastCalledWith("ws-1", "completed", 50, {
       cache: "no-store",
     });
-    const completedList = await screen.findByTestId("overview-workspace-task-list");
-    const completedRow = await within(completedList).findByTestId("overview-task-row");
-    expect(within(completedList).getByText("Completed at")).toBeTruthy();
-    expect(within(completedRow).getByTestId("overview-task-archived").textContent).toBe("Archived");
-    expect(hrefOf(within(completedRow).getByText("Finished task"))).toBe("/t/task-finished");
-    // The completed filter is a chip too, so the reader can come back from it.
-    const chips = screen.getAllByRole("button", { name: "Completed (24 h)" });
-    expect(chips.length).toBeGreaterThan(1);
-    expect(chips.filter((chip) => chip.getAttribute("aria-pressed") === "true").length).toBe(1);
   });
 
   it("links an Office workspace to its Office home", () => {

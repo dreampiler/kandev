@@ -1071,7 +1071,7 @@
   "overviewCompleted24h": "Concluídas (24 h)",
   "overviewCompletedAt": "Concluída em",
   "overviewOpenTasks": "Tarefas abertas",
-  "overviewOpenBreakdown": "{{waiting}} à espera · {{hold}} em pausa",
+  "overviewOpenBreakdown": "{{hold}} em pausa · {{blocked}} à espera de precedente · {{other}} outros",
   "overviewFilterProblems": "Problemas primeiro",
   "overviewShowAll": "Mostrar tudo",
   "overviewShowingOf": "{{shown}} de {{total}}",
