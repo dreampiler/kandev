@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type {
   AgentProfileUsage,
   AgentProfileUsageWindow,
@@ -6,7 +7,7 @@ import type {
   OverviewBlockedCircuit,
   OverviewModel,
 } from "@/lib/state/slices/office/overview-types";
-import { internalUsageWindowKey, isCurrentBlock } from "./overview-format";
+import { internalUsageWindowKey, isCurrentBlock, usageWindowLabel } from "./overview-format";
 
 /**
  * Provider accounts for the models section. One account is one credential a set
@@ -43,13 +44,23 @@ export type OverviewAccountUsage = {
   limitHitCount?: number;
 };
 
+/**
+ * What is blocked, as the data named it. A usage window is a period the provider
+ * describes in its own words, so it is read through the same window rule the
+ * account's usage line already uses. A model, a profile or a resource the data
+ * could not identify is a name rather than copy, and is reported as it arrived.
+ */
+export type OverviewBlockSubject =
+  | { kind: "window"; label: string }
+  | { kind: "named"; value: string };
+
 /** Whether an account is blocked right now, and until when. */
 export type OverviewAccountBlock = {
   state: "clear" | "account" | "models";
   /** The earliest instant the block is expected to clear. */
   until?: string;
   /** What is blocked, named for a reader: window labels and model titles. */
-  subjects: string[];
+  subjects: OverviewBlockSubject[];
 };
 
 const ACCOUNT_KIND_KEYS: Record<string, string> = {
@@ -259,6 +270,29 @@ function earlierInstant(candidate?: string, current?: string): boolean {
 }
 
 /**
+ * One blocked subject as a reader sees it. Only a usage window is read: the
+ * window rule is the single rule every window on this screen is phrased by, so a
+ * blocked window reads the same way as the same window in the usage line. A name
+ * stays as it arrived.
+ */
+export function blockSubjectText(t: TFunction, subject: OverviewBlockSubject): string {
+  return subject.kind === "window" ? usageWindowLabel(t, subject.label) : subject.value;
+}
+
+/** Subjects deduplicated by the text they show, first mention kept. */
+function dedupeSubjects(subjects: OverviewBlockSubject[]): OverviewBlockSubject[] {
+  const seen = new Set<string>();
+  const unique: OverviewBlockSubject[] = [];
+  for (const subject of subjects) {
+    const key = subject.kind === "window" ? subject.label : subject.value;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(subject);
+  }
+  return unique;
+}
+
+/**
  * Whether the account is blocked now, and what is blocked. A circuit covering a
  * whole credential, or a provider window reported exhausted without naming a
  * model, blocks the account; a circuit or window that names one model blocks
@@ -269,7 +303,7 @@ function accountBlock(
   byProfile: ReadonlyMap<string, AgentProfileUsage>,
   blockingByProfile: Map<string, OverviewBlockedCircuit[]>,
 ): OverviewAccountBlock {
-  const subjects: string[] = [];
+  const subjects: OverviewBlockSubject[] = [];
   let accountWide = false;
   let until: string | undefined;
   const noteUntil = (value?: string) => {
@@ -278,16 +312,19 @@ function accountBlock(
   for (const model of models) {
     for (const circuit of blockingByProfile.get(model.agent_profile_id) ?? []) {
       accountWide ||= circuit.scope === "credential";
-      subjects.push(circuit.model_name || circuit.profile_name || circuit.scope_value);
+      subjects.push({
+        kind: "named",
+        value: circuit.model_name || circuit.profile_name || circuit.scope_value,
+      });
       noteUntil(circuit.until);
     }
     for (const window of byProfile.get(model.agent_profile_id)?.windows ?? []) {
       if (!window.limit_reached) continue;
-      subjects.push(window.label);
+      subjects.push({ kind: "window", label: window.label });
       noteUntil(window.reset_at);
     }
   }
-  const named = [...new Set(subjects.filter(Boolean))];
+  const named = dedupeSubjects(subjects);
   const state = blockState(accountWide, named.length > 0);
   return { state, until, subjects: named };
 }

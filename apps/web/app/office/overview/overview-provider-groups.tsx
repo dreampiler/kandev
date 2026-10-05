@@ -7,7 +7,7 @@ import type {
   OverviewAccountGroup,
   OverviewAccountUsage,
 } from "./overview-accounts";
-import { accountKindKey } from "./overview-accounts";
+import { accountKindKey, blockSubjectText } from "./overview-accounts";
 import type { OverviewModel } from "@/lib/state/slices/office/overview-types";
 import {
   internalUsageEntry,
@@ -164,7 +164,9 @@ function AccountBlockLine({ block }: { block: OverviewAccountBlock }) {
           ? t("office:overviewAccountBlocked")
           : t("office:overviewAccountModelsBlocked")}
       </span>
-      <span className="text-muted-foreground">{block.subjects.join(" · ")}</span>
+      <span className="text-muted-foreground">
+        {block.subjects.map((subject) => blockSubjectText(t, subject)).join(" · ")}
+      </span>
       {until}
     </div>
   );
