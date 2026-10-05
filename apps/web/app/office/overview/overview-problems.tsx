@@ -53,11 +53,10 @@ export function OverviewProblemTooltip({ thresholds }: { thresholds?: OverviewTh
         <p className="font-medium">{t("office:overviewProblemCriteria")}</p>
         {thresholds ? (
           <>
-            <p>
-              {t("office:overviewCriteriaError", {
-                duration: durationFromMinutes(thresholds.window_hours * 60),
-              })}
-            </p>
+            {/* The 24-hour window is the same fixed window the other overview
+                copy names, so it is stated in the catalog's own wording rather
+                than restated here as a compact duration. */}
+            <p>{t("office:overviewCriteriaError")}</p>
             <p>
               {t("office:overviewCriteriaStalled", {
                 duration: durationFromMinutes(thresholds.no_output_minutes),

@@ -150,7 +150,12 @@ const system = {
   active_tasks: 1,
   running_sessions: 1,
   waiting_input_sessions: 0,
-  session_limit: 8,
+  session_lanes: {
+    general_limit: 10,
+    control_limit: 4,
+    general_running_sessions: 1,
+    control_running_sessions: 0,
+  },
   queued_messages: 2,
   undeliverable_messages: 2,
   needs_human: 1,

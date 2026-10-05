@@ -18,6 +18,16 @@ const ROUTE_REASON_KEYS: Record<string, string> = {
   quota_limited: "dynamicRouteReasonQuotaLimited",
 };
 
+/**
+ * The reading key for a routing reason code, or undefined when the catalog does
+ * not name this code. A surface that meets an unnamed code keeps showing the
+ * code itself, which is a truthful diagnostic, rather than borrowing another
+ * reason's name for it.
+ */
+export function routeReasonKey(reason: string | undefined): string | undefined {
+  return reason ? ROUTE_REASON_KEYS[reason] : undefined;
+}
+
 type RouteAction = "retry" | "try_next" | "skip" | "cancel_wait" | "stop";
 type RouteActionResult = {
   execution_profile_id?: string;
@@ -89,7 +99,7 @@ function DynamicRouteRecoverySummary({ session }: { session: TaskSession }) {
     session.route_state === "waiting" ||
     session.route_state === "waiting_for_reset" ||
     session.route_state === "retry_wait";
-  const reasonKey = ROUTE_REASON_KEYS[session.route_reason ?? ""];
+  const reasonKey = routeReasonKey(session.route_reason);
   const deadline = session.route_deadline ? new Date(session.route_deadline) : null;
   const deadlineText =
     deadline && !Number.isNaN(deadline.getTime())

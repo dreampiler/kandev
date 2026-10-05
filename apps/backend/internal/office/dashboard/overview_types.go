@@ -70,15 +70,21 @@ type OverviewReason struct {
 
 // Overview system card row.
 type OverviewSystem struct {
-	StartedAt             *time.Time `json:"started_at,omitempty"`
-	ActiveTasks           int        `json:"active_tasks"`
-	RunningSessions       int        `json:"running_sessions"`
-	WaitingInputSessions  int        `json:"waiting_input_sessions"`
-	SessionLimit          int        `json:"session_limit"`
-	QueuedMessages        int        `json:"queued_messages"`
-	UndeliverableMessages int        `json:"undeliverable_messages"`
-	NeedsHuman            int        `json:"needs_human"`
-	BlockedAccounts       int        `json:"blocked_accounts"`
+	StartedAt            *time.Time `json:"started_at,omitempty"`
+	ActiveTasks          int        `json:"active_tasks"`
+	RunningSessions      int        `json:"running_sessions"`
+	WaitingInputSessions int        `json:"waiting_input_sessions"`
+	// SessionLanes carries the configured session limits and the population each
+	// lane holds, read from the admission controller on this pass. It is absent
+	// when that reading did not arrive, which is different from a reading of
+	// zero: the client then shows the scope's own running count with no
+	// denominator instead of a limit nothing measured. A limit of zero means the
+	// lane is unlimited (general) or not configured (control).
+	SessionLanes          *OverviewSessionLanes `json:"session_lanes,omitempty"`
+	QueuedMessages        int                   `json:"queued_messages"`
+	UndeliverableMessages int                   `json:"undeliverable_messages"`
+	NeedsHuman            int                   `json:"needs_human"`
+	BlockedAccounts       int                   `json:"blocked_accounts"`
 	// BlockedAccountsTotal counts provider-health blocks plus open dynamic
 	// circuits, so the client never presents a provider-health-only number as
 	// the whole picture. It is absent while the circuits source is unavailable.
@@ -86,6 +92,17 @@ type OverviewSystem struct {
 	EarliestUnblockAt    *time.Time          `json:"earliest_unblock_at,omitempty"`
 	Problems             int                 `json:"problems"`
 	ProblemThresholds    *OverviewThresholds `json:"problem_thresholds,omitempty"`
+}
+
+// OverviewSessionLanes is the instance's session admission state: the general
+// lane and the control lane, each with the limit it is admitted against and the
+// population it holds. The two populations are absent together when the count
+// could not be read, so the limits still show while nothing claims a count.
+type OverviewSessionLanes struct {
+	GeneralLimit           int  `json:"general_limit"`
+	ControlLimit           int  `json:"control_limit"`
+	GeneralRunningSessions *int `json:"general_running_sessions,omitempty"`
+	ControlRunningSessions *int `json:"control_running_sessions,omitempty"`
 }
 
 // OverviewThresholds are the time limits the status rules actually applied, in

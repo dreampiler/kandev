@@ -9,6 +9,7 @@ import {
   useAgentProfileUsage,
   useAgentProfileUsageList,
 } from "@/hooks/domains/settings/use-agent-profile-usage";
+import { profileUsageFailureReasonKey } from "@/components/settings/agents/agent-profile-usage";
 import type {
   OverviewBlockedAccount,
   OverviewBlockedCircuit,
@@ -20,6 +21,7 @@ import {
   circuitReason,
   circuitScope,
   circuitTitle,
+  durationFromMinutes,
   isCurrentBlock,
   occurredTime,
   relativeTime,
@@ -239,6 +241,51 @@ function ModelCard({ model }: { model: OverviewModel }) {
   );
 }
 
+const USAGE_STATE_KEYS: Record<string, string> = {
+  unavailable: "office:overviewUsageStateUnavailable",
+  no_usage_api: "office:overviewUsageStateNoUsageApi",
+  unsupported: "office:overviewUsageStateUnsupported",
+};
+
+// Providers name a usage window by its own length ("5-hour", "7-day",
+// "30-day"), optionally scoped to one model ("7-day (Sonnet)"). The length is
+// read rather than the word, so the same window reads in the active locale
+// instead of as the provider's English label. A name that is not a length
+// ("opaque", a provider's own wording) is left verbatim.
+const WINDOW_LABEL = /^(\d+)-(hour|day|week|month)s?(?:\s*\((.+)\))?$/;
+const WINDOW_UNIT_MINUTES: Record<string, number> = {
+  hour: 60,
+  day: 24 * 60,
+  week: 7 * 24 * 60,
+  month: 30 * 24 * 60,
+};
+
+/** One usage window's name in the active locale, or the provider's own wording. */
+export function usageWindowLabel(label: string): string {
+  const match = WINDOW_LABEL.exec(label.trim());
+  if (!match) return label;
+  const unit = WINDOW_UNIT_MINUTES[match[2]];
+  if (unit === undefined) return label;
+  const length = durationFromMinutes(Number(match[1]) * unit);
+  // A scoped window keeps the model name the provider gave it: that is a
+  // product name, not copy this catalog translates.
+  return match[3] ? `${length} (${match[3]})` : length;
+}
+
+/**
+ * Why a profile's usage could not be read, in the active locale. A code this
+ * catalog does not name stays as the code inside an explicit unknown reading,
+ * because an untranslated diagnostic is truthful where a borrowed name would
+ * claim something the provider never said.
+ */
+function usageUnavailableReason(t: TFunction, usage: AgentProfileUsage): string {
+  const reasonKey = profileUsageFailureReasonKey(usage.reason);
+  if (reasonKey) return t(reasonKey);
+  const stateKey = USAGE_STATE_KEYS[usage.state];
+  if (stateKey) return t(stateKey);
+  return t("office:overviewUsageStateUnknown", { code: usage.reason ?? usage.state });
+}
+
 /**
  * A concrete profile's provider usage. An absent or unusable read is reported
  * as such; it is never shown as zero usage or as nothing wrong.
@@ -261,7 +308,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
         className="mt-1 text-xs text-muted-foreground"
         data-testid="overview-model-usage-unavailable"
       >
-        {t("office:overviewUsageUnavailable", { reason: usage.reason ?? usage.state })}
+        {t("office:overviewUsageUnavailable", { reason: usageUnavailableReason(t, usage) })}
       </div>
     );
   }
@@ -271,7 +318,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
     <div className="mt-1 space-y-0.5 text-xs" data-testid="overview-model-usage">
       {windows.map((window) => (
         <div key={`${window.label}:${window.reset_at ?? ""}`} className="flex flex-wrap gap-x-2">
-          <span>{window.label}</span>
+          <span>{usageWindowLabel(window.label)}</span>
           <span className="tabular-nums">{Math.round(window.utilization_pct)}%</span>
           {window.limit_reached && (
             <span className={statusTextClass("error")}>

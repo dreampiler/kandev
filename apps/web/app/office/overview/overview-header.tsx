@@ -76,7 +76,7 @@ function useOverviewSettingSaver(
       const state = store.getState();
       state.setUserSettings(mapUserSettingsResponse(response, state.userSettings));
     } catch {
-      toast.error(t("office:failedToLoad"));
+      toast.error(t("office:failedToSaveSettings"));
     } finally {
       setSaving(false);
     }

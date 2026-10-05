@@ -23,8 +23,18 @@ const SCOPE_KEYS: Record<string, string> = {
   premium_models: "agents:profileUsageScopePremium",
 };
 
+/**
+ * The reading key for a provider-usage failure code, or undefined when the code
+ * is not one this catalog names. Callers that have a code the catalog does not
+ * know decide for themselves what an unnamed code means; this function only
+ * reports whether there is a name for it.
+ */
+export function profileUsageFailureReasonKey(reason: string | undefined): string | undefined {
+  return reason ? FAILURE_REASON_KEYS[reason] : undefined;
+}
+
 function failureReasonKey(reason: string | undefined): string {
-  return FAILURE_REASON_KEYS[reason ?? ""] ?? "agents:profileUsageReasonReadFailed";
+  return profileUsageFailureReasonKey(reason) ?? "agents:profileUsageReasonReadFailed";
 }
 
 /**

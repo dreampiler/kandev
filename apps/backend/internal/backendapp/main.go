@@ -1664,7 +1664,7 @@ func constructOfficeServices(
 	if services.OfficeSvcs != nil {
 		wireOfficeOverview(
 			services.OfficeSvcs.Dashboard, repos.Office, repos.Task, services.User,
-			services.UsageAdapter, cfg.Office.MaxConcurrentInstance,
+			services.UsageAdapter, orchestratorSvc,
 		)
 	}
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
