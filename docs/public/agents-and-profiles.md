@@ -1,6 +1,6 @@
 ---
 title: "Agents and Profiles"
-description: "Install agent CLIs and create profiles for models, modes, flags, secrets, permissions, passthrough, and MCP."
+description: "Install agent CLIs, create profiles, manage runtime updates, and configure models, modes, flags, secrets, permissions, passthrough, and MCP."
 ---
 
 # Agents and Profiles
@@ -164,10 +164,37 @@ ACP runtime selection does not replace the passthrough command.
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update Oh My Pi on the Kandev host
+
+On an installed `omp` card, select the update icon under **Settings > Agents**.
+Review the installed version, the **Stable latest (reference)** version, and
+the `omp update` command, then choose **Update runtime** or **Repair runtime**.
+Kandev runs OMP's own updater as the Kandev service user on the host, streams
+its output, and refreshes ACP capabilities only after a successful probe.
+Active sessions are not restarted.
+
+OMP detects whether its installation is managed by Homebrew, mise, Bun, npm,
+or a standalone binary and updates through that method. A Nix-managed
+installation cannot be updated by this action. OMP follows its already
+configured stable or canary channel; Kandev does not choose a channel or pass
+a version to `omp update`. The stable latest shown in Settings is a
+comparison reference, **not a promised install target**: the installed
+version reported by OMP after updating may differ. There is no version
+picker, Kandev pin, or rollback for OMP.
+
+The update affects only the host installation, not task containers or remote
+executors. If OMP's updater or the follow-up ACP probe fails, Settings reports
+the error and retains the previous capability catalogue; Kandev cannot
+restore an executable that OMP already changed. When metadata is unavailable,
+the update icon remains available, but a preview must resolve the stable
+reference before the update can start.
+
 ### Update a managed agent runtime
 
 The update icon is available on managed Claude, Codex, OpenCode, Copilot,
-Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It prepares the runtime on the Kandev host.
+Gemini, Pi, and Muse agent cards when Kandev owns their managed runtime. It
+prepares their pinned npm runtime on the Kandev host. OMP uses the separate
+self-update flow above.
 
 Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
@@ -269,6 +296,19 @@ unrelated npm data and does not target the stale execution tree. If the
 specialized retry cannot resolve the runtime, check that the Kandev service
 uses the expected npm installation and configured registry. Run `npm config get registry` as the Kandev service user to inspect the registry used by that process. Then use the runtime update controls to select and prepare another trusted stable version.
 
+### Refresh profile models after a runtime update
+
+Manage runtime versions in **Settings > Agents > Agent runtime updates**.
+Profile pages focus on model selection and launch settings.
+
+After a managed runtime update succeeds, an open profile refreshes its model
+catalog with the current draft settings. The selected model stays unchanged.
+Unsaved launch settings remain unsaved. A failed update keeps the previous catalog.
+
+After you edit launch settings, choose **Refresh models** to check the current draft.
+The provider returns the model catalog. Discovery success does not confirm
+catalog completeness or account access to every model.
+
 ### Quiet tool calls
 
 A tool can perform useful work without sending new agent messages. While a tool
@@ -291,11 +331,15 @@ workflow step. These timeouts are not configurable.
 
 Kandev checks enabled, available agent runtimes in the background, including
 native CLIs with a verified release source. Open **Settings > Agents** to review
-runtime versions and update policies. Notifications name the affected runtime
-and link directly to its row in
-**Settings > Agents > Agent runtime updates**. The existing update-available
-notification preferences apply; repeated notices for the same runtime and version
-are suppressed across reloads.
+runtime versions and update policies. A notice for one runtime names it and links
+directly to its row in **Settings > Agents > Agent runtime updates**. The existing
+update-available notification preferences apply; repeated notices for the same
+runtime and version are suppressed across reloads.
+
+At startup or after reconnect, available runtime updates discovered within the
+same 30-second window appear in one summary. **Review updates** opens the expanded
+runtime section. A notice for one runtime keeps its name and direct link. Update
+success, failure, and interruption notices remain individual and immediate.
 
 The **Agent runtime updates** section is at the bottom of **Settings > Agents**,
 after your installed agents, and starts collapsed. Expand it to manage runtime
@@ -352,24 +396,24 @@ An **ACP** agent is driven over the Agent Client Protocol instead, so it does ge
 
 Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Profile_**. The page shows the resolved command preview and only the settings supported by that agent.
 
-| Setting                      | Runtime behavior                                                                                                                                                 |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name                         | Label shown in workflow, session, and automation selectors.                                                                                                      |
-| Model                        | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                             |
-| Require exact model          | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values. |
-| Fallback settings            | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning. |
-| Mode                         | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. If the advertised catalog excludes the requested mode, startup retains the provider default and logs a warning. Supported explicit modes must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
-| Configuration options        | Dynamic ACP values requested with `session/set_config_option`.                                                                                                   |
-| CLI flags                    | Enabled entries are tokenized and appended to the ACP launch command.                                                                                            |
-| Command prefix               | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                             |
-| Environment                  | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                |
-| Provider                     | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                 |
-| CLI passthrough              | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                               |
-| Enabled                      | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                         |
-| Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
-| MCP servers                  | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                          |
-| Share local Cursor MCP credentials | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory. |
-| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision. |
+| Setting                                | Runtime behavior                                                                                                                                                                                                                                                                                                                                   |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                                   | Label shown in workflow, session, and automation selectors.                                                                                                                                                                                                                                                                                        |
+| Model                                  | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that.                                                                                                                                                                                                               |
+| Require exact model                    | Per-profile opt-in. When enabled, Kandev stops before inference unless the executor advertises and accepts the saved model. It disables fallback controls without erasing their saved values.                                                                                                                                                      |
+| Fallback settings                      | Compatible profiles can use an advertised explicit fallback or automatic provider-default continuation. If the saved model is absent and exactly one bracketed variation is advertised, Kandev can use that variation with a warning.                                                                                                              |
+| Mode                                   | Requested through the installed agent's advertised ACP session control before the first prompt. Kandev prefers its mode config option and supports legacy `session/set_mode`. If the advertised catalog excludes the requested mode, startup retains the provider default and logs a warning. Supported explicit modes must be confirmed by the agent or startup holds the prompt. Applying a mode does not write Claude settings or redirect its configuration directory. |
+| Configuration options                  | Dynamic ACP values requested with `session/set_config_option`.                                                                                                                                                                                                                                                                                     |
+| CLI flags                              | Enabled entries are tokenized and appended to the ACP launch command.                                                                                                                                                                                                                                                                              |
+| Command prefix                         | Optional ACP-only launcher argv prepended to the command, for example `greywall --`.                                                                                                                                                                                                                                                               |
+| Environment                            | Literal values or references to Kandev secrets, resolved when the process starts.                                                                                                                                                                                                                                                                  |
+| Provider                               | Native uses the agent default. OpenAI-compatible sends ACP requests to the configured HTTP(S) router and can use a Kandev global API-key secret.                                                                                                                                                                                                   |
+| CLI passthrough                        | Uses the CLI's native terminal interface instead of a structured ACP conversation.                                                                                                                                                                                                                                                                 |
+| Enabled                                | Keeps the profile available to existing sessions and settings while hiding it from new task, session, handoff, and Quick Chat selectors.                                                                                                                                                                                                           |
+| Auto-approve all permissions           | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default.                                                                                                                                                                                   |
+| MCP servers                            | Adds profile-specific external MCP servers when the agent supports MCP.                                                                                                                                                                                                                                                                            |
+| Share local Cursor MCP credentials     | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. It applies only to local executions that share the backend home directory.                                                                                                                                                                                                |
+| Import local Cursor plugin MCP servers | Enabled by default for Cursor ACP and Cursor-strategy terminal profiles. Imports supported local plugin and user MCP definitions into task worktrees. On supported macOS installations, enabled marketplace plugins are discovered from Cursor’s account service and matched to their exact cached revision.                                       |
 
 Agents can inspect and update declared profile settings through the compact
 `search_settings_kandev`, `describe_setting_kandev`, `get_settings_kandev`,
@@ -412,11 +456,6 @@ stays selected in the task and utility binding, while each launch uses one
 concrete candidate behind the scenes. Candidates must be enabled, launchable
 profiles. Dynamic profiles and rich Office profiles cannot be candidates.
 
-Switching candidates uses the new candidate's model and mode defaults. Saved
-provider settings and user overrides from the previous candidate are cleared.
-Retrying the same candidate preserves those settings, including a model you
-selected in the session.
-
 Use the **Dynamic agents** card at the top of **Settings > Agents** to create
 and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
 selected for new work, when dynamic routing is disabled. A new profile starts
@@ -435,55 +474,13 @@ retry count, the initial interval, reset-date waiting with a maximum wait, and
 the final **Skip candidate** or **Stop for manual recovery** outcome. Kandev
 uses a trusted future reset date at most once for a candidate and class when it
 fits the configured maximum. It then applies the retry schedule and outcome.
-Unclassified, task, repository, permission, and tool failures stop for manual
-recovery by default, as does a task-owned turn whose result is ambiguous and not
-one of the recognized provider failures described below. The optional
-repeated-failure policy below is a narrow exception for eligible, current,
-effect-safe unclassified failures. The error catalogue is versioned and can grow
-as provider signals become known; an ambiguous new signal fails closed. A future
+Unclassified, task, repository, permission, tool, and ambiguous mid-turn
+failures stop for manual recovery by default. The optional repeated-failure
+policy below is a narrow exception for eligible, current, effect-safe
+unclassified failures. The error catalogue is versioned and can grow as
+provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
-
-For task-owned dynamic sessions, a recognized quota, rate-limit, provider
-availability, overload or model-capacity failure after output or tool activity
-automatically switches to the next eligible different model. This skips the
-failed model's retry/reset waits and equivalent OpenCode gateway routes.
-The new execution continues in the same conversation and first inspects the
-work folder, Git state, existing PR and task plan. Authentication, payment,
-unclassified failures and exhausted candidates require manual recovery.
-
-#### Provider usage limits
-
-When a candidate hits a usage limit, Kandev pauses the resource that ran out
-and uses it again after the reset:
-
-- OpenCode Go and free models pause only the model that hit its limit, so
-  sibling models and free models stay available. A model counts as free when the
-  profile's model cost is set to free, when its model ID marks it free, or when
-  the provider's published price list prices it at zero. The price list is only
-  consulted for a row that sets no model cost, and a provider that lists nothing
-  about a model leaves that model on the paid policy.
-- A paid-model limit without a reset time pauses the model for OpenCode Go and
-  the whole account for every other paid provider: 2 hours, up to three times,
-  then 24 hours, then until the next monthly reset. The count starts over once
-  the model produces output again.
-- A free-model limit without a reset time pauses that model for 1 minute, then
-  5, 15 and 30 minutes, then 1, 2 and 4 hours. The count starts over once the
-  model produces output again.
-- A reset reported by the provider, either in the error or in its usage data,
-  is used instead.
-- A limit reported after the attempt already produced output still pauses the
-  model. An eligible interrupted task continues on the next different model.
-- When every candidate is paused, the session waits and Kandev retries it at the
-  earliest reset, including after a restart. An exhausted interrupted chain
-  stays in manual recovery.
-
-The **Provider limits** card in **Settings > Agents**, also shown on the page of
-a profile whose model has a provider prefix, sets a provider's monthly reset
-when the provider does not report one, and can block every paid model of a
-provider until a time you saw on its console. The current-choice preview shows
-whether a paused candidate is still waiting, being retried, or expired and
-retried on the next selection.
 
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a
@@ -532,80 +529,8 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
-#### Group candidates into tiers
-
-Each candidate row has an `=` control between its up and down arrows. Turn it on
-to join that row with the row above it. Joined rows form one tier, shown as a
-numbered group, and only the tier's first row carries its selection settings.
-The first row's `=` control is disabled because it has no row above it.
-
-A tier selects among its own rows and never reaches into another tier:
-
-| Selection | Behavior |
-| --- | --- |
-| **Ordered** | Uses the row order as written. This is the default. |
-| **Lowest usage pace** | Prefers the row with the lowest ratio of used allowance to elapsed window. |
-| **Lowest cost** | Prefers **Free**, then **Subscription**, then **Metered**. |
-
-Tiers are always tried in list order. There is no profile-wide selection mode.
-
-Each row also has a **When the candidate fails** setting for its tier:
-
-- **Next candidate in this tier** tries the tier's remaining rows using its
-  selection rule, then advances to later tiers.
-- **Next tier** skips the rest of the tier and advances directly.
-
-Reordering, joining, splitting, and removing keep model settings with their
-concrete candidate. Joining a row uses the tier above it; splitting copies the
-tier settings to both new heads so neither loses them. Moving a row across a tier
-boundary clears the affected joins rather than silently joining two rows that
-were never related. Tier numbers close up, and an empty group never survives.
-
-#### Describe each candidate's cost and usage
-
-**Model settings** on a row configure cost class, usage source, manual windows,
-and a reserved share. They belong to that candidate alone, unlike tier settings.
-
-- **Usage source: Automatic** reads that candidate's own account usage for
-  Claude and Codex. A binding the provider does not support stays unknown; it is
-  never replaced with another account's usage.
-- **Usage source: Manual limits** sums the usage Kandev recorded for that
-  candidate inside windows you define: 5 hours, a day, a week, or a calendar
-  month, measured in money or tokens, with a reset anchor and timezone. A monthly
-  plan resets on the calendar month, not a fixed 30 days.
-- **No usage source** leaves usage unknown. Under **Lowest usage pace** an
-  unknown row sorts after known ones; under **Lowest cost** its cost class still
-  decides.
-
-The recorded total is a lower bound: it covers what Kandev observed, which is not
-necessarily the provider's own remaining quota.
-
-**Reserved share (%)** defaults to `0`, so nothing is held back until you set it.
-A positive share stops Kandev choosing that candidate once recorded usage
-reaches the remainder, leaving that capacity for you. It is shown separately
-from observed usage and never changes how pace is calculated. It needs a usage
-source to be observable, so it is unavailable until you select one.
-
-The profile-level **Keep the chosen model while work runs** switch is on by
-default. With it on, usage changes and newly available capacity do not move
-running work to a different model; Kandev compares candidates again at a new
-session or at an eligible failure. The preference is stored per profile and
-travels with save, reload, and duplication.
-
-**Would choose now** shows which candidate a new selection would pick right now,
-with its tier, reason, and the usage, elapsed, and pace figures behind the
-choice. It is a prediction for the next selection, not a promise to switch a
-running session, and it never saves settings or starts work.
-
 When a task launch waits for session capacity, Kandev keeps the selected
-destination and retries it automatically. Eligible waiting launches receive
-available capacity before new automatic launches in the same capacity lane.
-Within the waiting queue, priority comes first, followed by position, original
-queue time, and task ID. A pending created session is retried within five minutes
-after sufficient capacity becomes available. A launch blocked by another rule or
-a non-capacity failure does not hold that free capacity indefinitely.
-
-Inspecting another session does not
+destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
@@ -613,10 +538,7 @@ resume, or message the session.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn
-switches candidates automatically only for a recognized quota, rate-limit,
-provider availability, overload or model-capacity failure, and only for a
-task-owned session with observed output or tool activity; any other started
-turn with an ambiguous result does not switch providers automatically. If no
+with an ambiguous result does not switch providers automatically. If no
 candidate is eligible, the session waits for a recovery action. After the
 current turn settles, use **Retry current agent** or **Try next agent** in the
 session recovery surface. These actions use the current route generation, so a
