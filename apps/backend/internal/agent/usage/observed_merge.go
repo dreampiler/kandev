@@ -38,20 +38,20 @@ func MergeObserved(
 // fetched from the API earlier.
 func mergeObservedWindows(api *ProviderUsage, reading ObservedReading) *ProviderUsage {
 	merged := *api
-	pending := make(map[int64]UtilizationWindow, len(reading.Windows))
+	pending := make(map[string]UtilizationWindow, len(reading.Windows))
 	for _, window := range reading.Windows {
-		pending[window.DurationSeconds] = window
+		pending[window.Label] = window
 	}
 	merged.Windows = make([]UtilizationWindow, 0, len(api.Windows)+len(pending))
 	for _, window := range api.Windows {
-		observed, served := pending[window.DurationSeconds]
+		observed, served := pending[window.Label]
 		if !served {
 			merged.Windows = append(merged.Windows, window)
 			continue
 		}
 		// Both sides reported this window, so exactly one value is served: the
 		// observation when it is newer, the provider's own otherwise.
-		delete(pending, window.DurationSeconds)
+		delete(pending, window.Label)
 		if !observationSupersedes(reading.ObservedAt, api.FetchedAt) {
 			merged.Windows = append(merged.Windows, window)
 			continue

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"encoding/json"
+	"sort"
 	"sync"
 	"time"
 )
@@ -119,7 +120,13 @@ func (s *ObservedStore) Latest(accountKey string) (ObservedReading, bool) {
 	account := s.account(accountKey)
 	now := s.timeNow()
 	reading := ObservedReading{Provider: account.provider, ObservedAt: account.observedAt}
-	for _, window := range account.windows {
+	keys := make([]string, 0, len(account.windows))
+	for k := range account.windows {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		window := account.windows[k]
 		served, ok := servedObservedWindow(window, now)
 		if !ok {
 			continue
@@ -245,8 +252,10 @@ func observedWindowShape(windowType string) (string, time.Duration, bool, bool) 
 		return claudeLabel5Hour, 5 * time.Hour, false, true
 	case "seven_day", "seven_day_overage_included":
 		return claudeLabel7Day, 7 * 24 * time.Hour, false, true
-	case "seven_day_opus", "seven_day_sonnet":
-		return claudeLabel7Day, 7 * 24 * time.Hour, true, true
+	case "seven_day_opus":
+		return "7-day (Opus)", 7 * 24 * time.Hour, true, true
+	case "seven_day_sonnet":
+		return "7-day (Sonnet)", 7 * 24 * time.Hour, true, true
 	default:
 		return "", 0, false, false
 	}
