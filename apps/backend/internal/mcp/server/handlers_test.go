@@ -1052,9 +1052,11 @@ func TestGetTaskConversation_ForwardsToBackend(t *testing.T) {
 	assert.Equal(t, []string{"message", "tool_call"}, payload["message_types"])
 }
 
+// An omitted task_id resolves to the bound task, so the error only exists
+// when there is no bound task to resolve it from.
 func TestGetTaskConversation_MissingTaskID_ReturnsError(t *testing.T) {
 	backend := &testBackend{}
-	s := newTaskModeServer(t, backend, "task-current")
+	s := newTaskModeServer(t, backend, "")
 
 	result := callTool(t, s, "get_task_conversation_kandev", map[string]interface{}{})
 

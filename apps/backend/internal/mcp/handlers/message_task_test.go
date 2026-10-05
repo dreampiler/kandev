@@ -2154,10 +2154,13 @@ func TestHandleMessageTask_NoPrimarySession_Rejects(t *testing.T) {
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeNotFound)
 
-	// The task exists but has no session — must report "no active session", not
-	// the generic "task not found" from the task-existence check.
+	// The task exists but has no session — must report the missing session, not
+	// the generic "task not found" from the task-existence check, and must say
+	// that nothing was queued so the caller spawns instead of resending.
 	payload := string(resp.Payload)
-	assert.Contains(t, payload, "no active session")
+	assert.Contains(t, payload, "has no session")
+	assert.Contains(t, payload, "queued nothing")
+	assert.Contains(t, payload, "spawn_session_kandev")
 	assert.NotContains(t, payload, "task not found")
 }
 

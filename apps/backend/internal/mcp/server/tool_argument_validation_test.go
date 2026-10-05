@@ -238,7 +238,7 @@ func TestToolArgumentValidation(t *testing.T) {
 		backend := &testBackend{}
 		s := newTaskModeServer(t, backend, "task-current")
 
-		result := callTool(t, s, "list_workflows_kandev", map[string]interface{}{})
+		result := callTool(t, s, "create_task_kandev", map[string]interface{}{})
 
 		assert.True(t, result.IsError)
 		assert.Empty(t, backend.lastAction)

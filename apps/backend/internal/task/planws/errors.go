@@ -49,7 +49,7 @@ func safePlanErrorResponse(msg *ws.Message, err error) (*ws.Message, bool, error
 	case service.PlanErrorVersionRequired, service.PlanErrorTruncationRejected,
 		service.PlanErrorAppendTruncationFlag,
 		service.PlanErrorContentRequired, service.PlanErrorEditTextRequired, service.PlanErrorEditNotFound,
-		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired, service.PlanErrorReadOffsetOutOfRange:
+		service.PlanErrorEditAmbiguous, service.PlanErrorRevisionVersionRequired:
 		code = ws.ErrorCodeValidation
 	case service.PlanErrorVersionConflict, service.PlanErrorRevisionChanged:
 		code = ws.ErrorCodeConflict
@@ -161,7 +161,7 @@ func contentTooLargeResponse(msg *ws.Message, err error) (*ws.Message, bool, err
 			"limit":         sizeErr.Limit,
 			"submitted":     sizeErr.Submitted,
 			"write_applied": false,
-			"next_action":   "Reduce the submitted content below the limit and submit it again.",
+			"next_action":   "Rewrite a shorter document and submit it as a replacement with create_task_plan_kandev (mode replace); appending cannot succeed because the limit applies to the stored document.",
 		})
 	return out, true, mapErr
 }

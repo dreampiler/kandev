@@ -44,8 +44,11 @@ The tasks system owns the contract because it owns plan content and edit version
   and bytes, whether more text remains, and the next offset when applicable.
   These values shall describe the same committed content snapshot.
 - **AC-TASKS-PLAN-READ-001.5:** Offset equal to the total character count shall
-  return an empty final range. Offset beyond that count shall be rejected with
-  a correction to an in-range offset. Without an expected version, an absent
+  return an empty final range. Offset beyond that count shall also return an
+  empty range with the real total characters and bytes, shall not substitute a
+  different range or return unrequested trailing content, and shall mark the
+  response so a caller can tell it from the empty final range. Without an
+  expected version, an absent
   plan shall retain the existing no-plan response; with an expected version,
   absence shall be a conflict. A storage failure shall remain distinct from absence.
 - **AC-TASKS-PLAN-READ-001.6:** Partial reads shall work on historical oversized

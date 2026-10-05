@@ -59,7 +59,8 @@ func TestListTaskSessions_ToolSchemaIsTaskIDOnly(t *testing.T) {
 	require.True(t, ok, "schema must declare properties")
 	require.Len(t, properties, 1, "callers must not be able to set current_session_id")
 	assert.Contains(t, properties, "task_id")
-	assert.Equal(t, []interface{}{"task_id"}, parsed["required"])
+	// task_id is optional: an omitted value resolves to the bound task.
+	assert.Empty(t, parsed["required"])
 
 	assert.Contains(t, tool.Tool.Description, "get_task_conversation_kandev")
 	assert.Contains(t, tool.Tool.Description, "message_task_kandev")
@@ -98,8 +99,10 @@ func TestListTaskSessions_RejectsCallerSuppliedCurrentSession(t *testing.T) {
 	assert.Empty(t, backend.lastAction, "a rejected call must not reach the backend")
 }
 
+// An omitted task_id resolves to the bound task, so the error only exists
+// when there is no bound task to resolve it from.
 func TestListTaskSessions_MissingTaskID_ReturnsError(t *testing.T) {
-	s := newTaskModeServer(t, &testBackend{}, "task-current")
+	s := newTaskModeServer(t, &testBackend{}, "")
 
 	result := callTool(t, s, "list_task_sessions_kandev", map[string]interface{}{})
 

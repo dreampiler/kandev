@@ -16,8 +16,6 @@ func TestPlanPartialReadErrors(t *testing.T) {
 		code string
 	}{
 		{"shape", &contract.PlanReadValidationError{Message: "invalid offset"}, ws.ErrorCodeValidation},
-		{"range", &service.PlanSafetyError{Code: service.PlanErrorReadOffsetOutOfRange,
-			Message: "out of range", NextAction: "restart"}, ws.ErrorCodeValidation},
 		{"version", &service.PlanSafetyError{Code: service.PlanErrorVersionConflict,
 			Message: "changed", NextAction: "reconcile", CurrentVersion: "v2"}, ws.ErrorCodeConflict},
 	} {

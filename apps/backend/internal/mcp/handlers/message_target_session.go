@@ -105,8 +105,15 @@ func (h *Handlers) resolveMessageTargetSession(
 	if completed != nil {
 		return completed, true, nil
 	}
+	// Queuing is a property of a session that already exists and is busy, so it
+	// cannot cover a task with no session at all: this call queued nothing and
+	// the message is lost unless it is delivered to a session. Saying so is the
+	// difference between one informative failure and a retry that queues
+	// nowhere.
 	return nil, false, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-		"target task exists but has no active session — use spawn_session_kandev to start one")
+		"target task exists but has no session, so this call delivered nothing and queued nothing. "+
+			"Call spawn_session_kandev with this same prompt to start a session that receives it; "+
+			"list_task_sessions_kandev reports whether a session exists before you send")
 }
 
 // newestLiveSession returns the most recently started session on the task that

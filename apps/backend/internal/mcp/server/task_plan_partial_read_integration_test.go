@@ -107,9 +107,17 @@ func TestPlanPartialReadMCPPaginationConflicts(t *testing.T) {
 	eof := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"offset": utf8.RuneCountInString(content)})
 	require.Empty(t, planContentFromRead(t, eof))
 	require.Equal(t, false, partialReadMetadata(t, eof)["has_more"])
+	// An offset past the end is a stale cursor, not a bad request: the read
+	// returns an empty fragment with the real total length and flags it.
 	overrun := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"offset": 100})
-	require.True(t, overrun.IsError)
-	require.Contains(t, allText(t, overrun), "plan_read_offset_out_of_range")
+	require.False(t, overrun.IsError)
+	require.Empty(t, planContentFromRead(t, overrun),
+		"a past-the-end offset must not return text the caller did not ask for")
+	overrunMetadata := partialReadMetadata(t, overrun)
+	require.Equal(t, true, overrunMetadata["offset_beyond_content"])
+	require.Equal(t, false, overrunMetadata["has_more"])
+	require.Nil(t, overrunMetadata["next_offset"])
+	require.Equal(t, float64(utf8.RuneCountInString(content)), overrunMetadata["total_characters"])
 	for _, change := range []string{"content", "title", "delete", "recreate"} {
 		t.Run(change, func(t *testing.T) {
 			read := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"limit": 1})

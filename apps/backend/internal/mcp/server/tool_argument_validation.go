@@ -299,13 +299,20 @@ func validationInstancePath(tokens []string) string {
 	return path.String()
 }
 
+// normalizeToolArguments runs before schema validation, so it is the only
+// place a recognized spelling variant can be folded into the canonical
+// argument name the schema declares.
 func normalizeToolArguments(toolName string, arguments any) (any, error) {
-	if toolName != "create_task_kandev" {
-		return arguments, nil
-	}
 	args, ok := arguments.(map[string]any)
 	if !ok {
 		return arguments, nil
+	}
+	args, err := applyToolArgumentAliases(toolName, args)
+	if err != nil {
+		return nil, err
+	}
+	if toolName != "create_task_kandev" {
+		return args, nil
 	}
 	_, hasPrompt := args["prompt"]
 	description, hasDescription := args["description"]
