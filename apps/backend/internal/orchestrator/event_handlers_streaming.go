@@ -2577,7 +2577,7 @@ func (s *Service) setSessionWaitingForInputWithHook(
 			// Fall back to legacy behavior — still attempt the task-state
 			// write so a transient lookup failure doesn't drop a needed
 			// REVIEW transition.
-			s.updateTaskSessionStateWithHook(
+			_, settledIntoWaiting := s.updateTaskSessionStateWithHook(
 				ctx,
 				taskID,
 				sessionID,
@@ -2586,13 +2586,16 @@ func (s *Service) setSessionWaitingForInputWithHook(
 				false,
 				onChanged,
 			)
+			if settledIntoWaiting {
+				s.drainQueuedAfterWaitingTransition(ctx, taskID, sessionID)
+			}
 			s.writeTaskReviewState(ctx, taskID, sessionID)
 			return
 		}
 	}
 
 	wasAlreadyWaiting := session.State == models.TaskSessionStateWaitingForInput
-	if updatedSession, _ := s.updateTaskSessionStateWithHook(
+	updatedSession, settledIntoWaiting := s.updateTaskSessionStateWithHook(
 		ctx,
 		taskID,
 		sessionID,
@@ -2601,10 +2604,26 @@ func (s *Service) setSessionWaitingForInputWithHook(
 		false,
 		onChanged,
 		session,
-	); updatedSession != nil {
+	)
+	if updatedSession != nil {
 		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
 			*preloadedSession[0] = *updatedSession
 		}
+	}
+
+	// Settling into WAITING_FOR_INPUT is the moment a queued prompt becomes
+	// deliverable, and this is the single funnel every waiting transition passes
+	// through, so the transition itself has to be the delivery trigger: a
+	// message that lands after the last drain would otherwise have no future
+	// trigger of its own.
+	//
+	// Only a real transition fires it. A session that was already waiting is
+	// being re-asserted by a caller that owns its own delivery — a workflow step
+	// entry drains through drainQueuedMessageForPromptableSessionWithHandoff so
+	// the message carries its handoff token, and a plain drain here would take
+	// that row first and drop the handoff.
+	if settledIntoWaiting {
+		s.drainQueuedAfterWaitingTransition(ctx, taskID, sessionID)
 	}
 
 	if wasAlreadyWaiting {

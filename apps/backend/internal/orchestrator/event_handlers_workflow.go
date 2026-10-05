@@ -3870,6 +3870,10 @@ func (s *Service) transferWorkflowProfileSwitchQueue(ctx context.Context, fromSe
 	if err := s.transferQueuedSessionState(ctx, from.TaskID, fromSessionID, toSessionID); err != nil {
 		return fmt.Errorf("transfer queue to new workflow session: %w", err)
 	}
+	// No drain here: the step entry that drives this switch delivers the
+	// transferred head through drainQueuedMessageForPromptableSessionWithHandoff,
+	// which carries the handoff metadata this queue row is waiting for. A plain
+	// drain would take that row first and drop the handoff.
 	return nil
 }
 
@@ -5565,6 +5569,39 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	return s.drainQueuedMessageForPromptableSessionUnderGuard(ctx, taskID, sessionID, identity)
+}
+
+// drainQueuedMessageForPromptableSessionUncontended is the same guarded
+// take-and-dispatch for a caller that may already hold sessionID's guard: it
+// probes the guard instead of waiting for it. The queue trigger that runs right
+// after a session settles into WAITING_FOR_INPUT needs that, because the
+// handler which drove the transition frequently still holds the guard across its
+// own turn settlement, and a blocking acquisition there would wait on itself.
+// A contended guard already belongs to a take-decision that delivers,
+// supersedes, or retries on its own.
+func (s *Service) drainQueuedMessageForPromptableSessionUncontended(
+	ctx context.Context,
+	taskID, sessionID string,
+) queueDrainOutcome {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	if !lock.TryLock() {
+		return queueDrainSkipped
+	}
+	defer lock.Unlock()
+	return s.drainQueuedMessageForPromptableSessionUnderGuard(ctx, taskID, sessionID, nil)
+}
+
+// drainQueuedMessageForPromptableSessionUnderGuard holds sessionID's guard for
+// every take decision it makes: cancel ownership, a reloaded promptable state,
+// the captured queue incarnation, a live clarification, and workflow admission
+// are all re-checked here rather than trusted from the caller's earlier check.
+func (s *Service) drainQueuedMessageForPromptableSessionUnderGuard(
+	ctx context.Context,
+	taskID, sessionID string,
+	identity *messagequeue.QueueSessionIdentity,
+) queueDrainOutcome {
 	if s.isCancelInFlight(sessionID) {
 		return queueDrainSkipped
 	}

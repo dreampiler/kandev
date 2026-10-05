@@ -5686,6 +5686,7 @@ func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessio
 		return err
 	}
 	if previousPrimaryID == "" || previousPrimaryID == sessionID {
+		s.drainQueuedAfterWaitingTransition(ctx, session.TaskID, sessionID)
 		return nil
 	}
 	if err := s.transferQueuedSessionState(ctx, session.TaskID, previousPrimaryID, sessionID); err != nil {
@@ -5697,7 +5698,11 @@ func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessio
 			zap.String("old_primary", previousPrimaryID),
 			zap.String("new_primary", sessionID),
 			zap.Error(err))
+		return nil
 	}
+	// The transferred queue belongs to the new primary now, and nothing else
+	// will deliver it: the demoted primary is no longer a trigger for this task.
+	s.drainQueuedAfterWaitingTransition(ctx, session.TaskID, sessionID)
 	return nil
 }
 

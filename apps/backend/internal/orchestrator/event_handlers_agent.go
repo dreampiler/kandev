@@ -635,7 +635,49 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	}
 	lock.Unlock()
 	guardLocked = false
+	s.adoptStrandedQueueForBootedSession(ctx, data.TaskID, data.SessionID)
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
+}
+
+// adoptStrandedQueueForBootedSession moves a queue that a finished session of
+// the same task still owns onto the session that just booted, and lets the
+// caller's ordinary drain deliver its head.
+//
+// A queue row is purged with its session row, so the rows that survive are the
+// ones whose session finished while messages were still queued. Two existing
+// recoveries do not cover them: recoverStrandedQueueToPrimary only runs when a
+// dispatch attempt already observed ErrSessionRuntimeUnavailable, and the
+// accepted-successor recovery only runs once a promptable primary with a live
+// agent already exists. A task that had no live session at all — the shape that
+// leaves messages parked in front of it indefinitely — has neither, so the rows
+// are adopted here, when the task's next session actually boots.
+func (s *Service) adoptStrandedQueueForBootedSession(ctx context.Context, taskID, sessionID string) {
+	if s.messageQueue == nil || taskID == "" || sessionID == "" {
+		return
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list task sessions while adopting stranded queue",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	for _, source := range sessions {
+		if source == nil || source.ID == sessionID || !isTerminalSessionState(source.State) {
+			continue
+		}
+		if s.messageQueue.GetStatus(ctx, source.ID).Count == 0 {
+			continue
+		}
+		if err := s.transferQueuedSessionState(ctx, taskID, source.ID, sessionID); err != nil {
+			s.logger.Warn("failed to adopt stranded queue from finished session",
+				zap.String("task_id", taskID),
+				zap.String("source_session_id", source.ID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
 }
 
 func (s *Service) persistProviderRestoredResumeNotice(
