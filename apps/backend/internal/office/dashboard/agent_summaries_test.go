@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS task_sessions (
 	agent_execution_id TEXT NOT NULL DEFAULT '',
 	agent_profile_id TEXT,
 	state TEXT NOT NULL DEFAULT 'CREATED',
+	is_primary INTEGER DEFAULT 0,
 	started_at TIMESTAMP NOT NULL,
 	completed_at TIMESTAMP,
 	updated_at TIMESTAMP NOT NULL

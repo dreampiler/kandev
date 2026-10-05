@@ -196,6 +196,7 @@ func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
 		agent_execution_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		state TEXT NOT NULL DEFAULT 'CREATED',
+		is_primary INTEGER DEFAULT 0,
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		updated_at TIMESTAMP

@@ -1136,7 +1136,7 @@
   "overviewCriteriaError": "错误：任务或会话失败、会话报错后一直没有输出，或最近 24 小时内有失败而当前没有运行中的任务",
   "overviewCriteriaStalled": "停滞：运行中的会话 {{duration}} 没有输出",
   "overviewCriteriaDelayed": "延迟：启动状态已 {{starting}}、会话结束后 {{scheduling}} 未进入下一步，或排队消息在空闲会话后等待 {{queueIdle}}、在运行中的会话后等待 {{queueBusy}}",
-  "overviewCriteriaDwell": "停留：进行中 {{running}}、审查中 {{review}}、暂停中 {{hold}}",
+  "overviewCriteriaDwell": "停留：进行中 {{running}}、审查中 {{review}}",
   "overviewExpandDetails": "展开明细列表",
   "overviewCollapseDetails": "收起明细列表",
   "overviewDynamicProfiles": "Dynamic 配置文件",

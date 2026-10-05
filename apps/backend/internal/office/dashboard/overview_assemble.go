@@ -274,38 +274,57 @@ func (s *DashboardService) assembleBlockedAccounts(ctx context.Context, snap *ov
 	return nil
 }
 
-// assembleNeedsHuman lists answerable questions on live sessions and pending
-// approvals.
-func (s *DashboardService) assembleNeedsHuman(ctx context.Context, snap *overviewSnapshot, ids []string) error {
-	var items []OverviewHumanItem
-	taskWorkspace := map[string]string{}
+// loadAnswerableQuestions reads the answerable question bundles of this pass's
+// live sessions once and records which tasks owe an answer, so classification can
+// treat a task waiting on the owner as waiting rather than as delayed and the
+// needs-human list renders from the same read instead of asking again.
+func (s *DashboardService) loadAnswerableQuestions(ctx context.Context, snap *overviewSnapshot) error {
 	var liveIDs []string
 	for _, t := range snap.tasks {
-		taskWorkspace[t.row.ID] = t.row.WorkspaceID
 		for _, sess := range t.sessions {
 			if isLiveSessionState(sess.State) {
 				liveIDs = append(liveIDs, sess.ID)
 			}
 		}
 	}
-	if s.questionLister != nil && len(liveIDs) > 0 {
-		questions, err := s.questionLister.ListAnswerableClarificationsForSessions(ctx, liveIDs)
-		if err != nil {
-			return err
-		}
-		for _, q := range questions {
-			ws := taskWorkspace[q.TaskID]
-			items = append(items, OverviewHumanItem{
-				Kind: "question", ID: q.PendingID, WorkspaceID: ws, WorkspaceName: snap.names[ws],
-				TaskID: q.TaskID, TaskTitle: snap.taskTitles[q.TaskID], SessionID: q.SessionID,
-				Count: 1, CreatedAt: q.CreatedAt,
-				// questionKey is the bundle's question identity, so the same
-				// question asked again after a task restart collapses into one
-				// row. A bundle without one keeps its own row rather than
-				// joining an unrelated question.
-				questionKey: q.QuestionID,
-			})
-		}
+	if s.questionLister == nil || len(liveIDs) == 0 {
+		return nil
+	}
+	questions, err := s.questionLister.ListAnswerableClarificationsForSessions(ctx, liveIDs)
+	if err != nil {
+		return err
+	}
+	snap.questions = questions
+	owning := make(map[string]bool, len(questions))
+	for _, q := range questions {
+		owning[q.TaskID] = true
+	}
+	for _, t := range snap.tasks {
+		t.awaitingOwner = owning[t.row.ID]
+	}
+	return nil
+}
+
+// assembleNeedsHuman lists answerable questions on live sessions and pending
+// approvals.
+func (s *DashboardService) assembleNeedsHuman(ctx context.Context, snap *overviewSnapshot, ids []string) error {
+	var items []OverviewHumanItem
+	taskWorkspace := map[string]string{}
+	for _, t := range snap.tasks {
+		taskWorkspace[t.row.ID] = t.row.WorkspaceID
+	}
+	for _, q := range snap.questions {
+		ws := taskWorkspace[q.TaskID]
+		items = append(items, OverviewHumanItem{
+			Kind: "question", ID: q.PendingID, WorkspaceID: ws, WorkspaceName: snap.names[ws],
+			TaskID: q.TaskID, TaskTitle: snap.taskTitles[q.TaskID], SessionID: q.SessionID,
+			Count: 1, CreatedAt: q.CreatedAt,
+			// questionKey is the bundle's question identity, so the same
+			// question asked again after a task restart collapses into one
+			// row. A bundle without one keeps its own row rather than
+			// joining an unrelated question.
+			questionKey: q.QuestionID,
+		})
 	}
 	approvals, err := s.overviewReader.ListOverviewPendingApprovals(ctx, ids, overviewPendingApprovalLimit)
 	if err != nil {
@@ -458,7 +477,6 @@ func overviewThresholdsWire(th overviewThresholds) *OverviewThresholds {
 		QueueBusyMinutes:       int(th.QueueBusy / time.Minute),
 		DwellInProgressMinutes: int(th.DwellInProgress / time.Minute),
 		DwellReviewMinutes:     int(th.DwellReview / time.Minute),
-		DwellHoldMinutes:       int(th.DwellHold / time.Minute),
 		WindowHours:            int(th.Window / time.Hour),
 	}
 }

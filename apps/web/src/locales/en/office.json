@@ -1117,7 +1117,7 @@
   "overviewCriteriaError": "Error: a failed task or session, a session error with no output since, or a failure in the last 24 h with nothing running now",
   "overviewCriteriaStalled": "Stalled: a running session with no output for {{duration}}",
   "overviewCriteriaDelayed": "Delayed: starting for {{starting}}, a finished session not moved on for {{scheduling}}, or queued messages waiting {{queueIdle}} behind an idle session and {{queueBusy}} behind a running one",
-  "overviewCriteriaDwell": "Dwell: in progress for {{running}}, in review for {{review}}, on hold for {{hold}}",
+  "overviewCriteriaDwell": "Dwell: in progress for {{running}}, in review for {{review}}",
   "overviewExpandDetails": "Show details",
   "overviewCollapseDetails": "Hide details",
   "overviewDynamicProfiles": "Dynamic profiles",

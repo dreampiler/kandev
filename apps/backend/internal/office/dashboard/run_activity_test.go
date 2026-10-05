@@ -38,9 +38,10 @@ func createTaskSessionsTable(t *testing.T, deps *testDeps) {
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
 			agent_execution_id TEXT NOT NULL DEFAULT '',
-			agent_profile_id TEXT NOT NULL DEFAULT '',
-			state TEXT NOT NULL DEFAULT 'CREATED',
-			started_at TIMESTAMP NOT NULL,
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT 'CREATED',
+		is_primary INTEGER DEFAULT 0,
+		started_at TIMESTAMP NOT NULL,
 			completed_at TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL
 		)

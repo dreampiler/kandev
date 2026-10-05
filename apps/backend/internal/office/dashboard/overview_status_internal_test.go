@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -16,6 +17,12 @@ func TestOverviewTaskClassification(t *testing.T) {
 			ID: id, TaskID: "task", State: state, StartedAt: started, UpdatedAt: started, ErrorMessage: errMsg,
 		}
 	}
+	// primary marks the session the task itself runs on, as opposed to an
+	// auxiliary session it ran alongside.
+	primary := func(s *sqlite.OverviewSessionRow) *sqlite.OverviewSessionRow {
+		s.IsPrimary = true
+		return s
+	}
 	cases := []struct {
 		name       string
 		state      string
@@ -25,18 +32,82 @@ func TestOverviewTaskClassification(t *testing.T) {
 		output     map[string]time.Time
 		queued     int
 		oldest     time.Duration
+		owner      bool
 		wantStatus string
 		wantReason string
 	}{
 		{
-			name: "latest session failed", state: stateInProgress, entered: time.Minute,
-			sessions:   []*sqlite.OverviewSessionRow{session("s1", sessionStateFailed, ago(5*time.Minute), "AI_APICallError: Rate limit exceeded\nstack")},
+			name: "latest session failed", state: stateInProgress, entered: 30 * time.Minute,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateFailed, ago(5*time.Minute), "AI_APICallError: Rate limit exceeded\nstack"))},
 			wantStatus: OverviewStatusError, wantReason: reasonSessionFailed,
 		},
 		{
-			name: "error message with no later output", state: stateInProgress, entered: time.Minute,
-			sessions:   []*sqlite.OverviewSessionRow{session("s1", sessionStateWaitingForInput, ago(5*time.Minute), "boom")},
+			name: "error message with no later output", state: stateInProgress, entered: 30 * time.Minute,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateWaitingForInput, ago(5*time.Minute), "boom"))},
 			wantStatus: OverviewStatusError, wantReason: reasonSessionError,
+		},
+		{
+			name: "primary running while a newer auxiliary session failed", state: stateInProgress, entered: 10 * time.Minute,
+			sessions: []*sqlite.OverviewSessionRow{
+				primary(session("s1", sessionStateRunning, ago(40*time.Minute), "")),
+				session("s2", sessionStateFailed, ago(5*time.Minute), "agent produced no output since start"),
+			},
+			output:     map[string]time.Time{"s1": ago(2 * time.Minute)},
+			wantStatus: OverviewStatusRunning, wantReason: reasonWorking,
+		},
+		{
+			name: "stopped on purpose while a prerequisite is open", state: stateInProgress, blockers: 1, entered: 30 * time.Minute,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateCancelled, ago(3*time.Hour), "stopped by parent task via MCP"))},
+			wantStatus: OverviewStatusWaiting, wantReason: reasonWaitingPrereq,
+		},
+		{
+			name: "stopped on purpose without a prerequisite", state: stateInProgress, entered: 30 * time.Minute,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateCancelled, ago(3*time.Hour), "stopped via API"))},
+			wantStatus: OverviewStatusWaiting, wantReason: reasonSessionEnded,
+		},
+		{
+			name: "failure from before the current step", state: stateInProgress, entered: 30 * time.Minute,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateFailed, ago(2*time.Hour), "AI_APICallError: Rate limit exceeded"))},
+			wantStatus: OverviewStatusWaiting, wantReason: reasonSessionEnded,
+		},
+		{
+			name: "blocked past a day", state: stateBlocked, entered: 25 * time.Hour,
+			wantStatus: OverviewStatusBlocked, wantReason: reasonOnHold,
+		},
+		{
+			name: "waiting on a prerequisite past a day", state: stateInProgress, blockers: 1, entered: 30 * time.Hour,
+			wantStatus: OverviewStatusWaiting, wantReason: reasonWaitingPrereq,
+		},
+		{
+			name: "working step past the dwell limit", state: stateInProgress, entered: 3 * time.Hour,
+			wantStatus: OverviewStatusDelayed, wantReason: reasonStepDwell,
+		},
+		{
+			name: "scheduling past the not-advancing limit", state: taskStateScheduling, entered: 21 * time.Hour,
+			wantStatus: OverviewStatusDelayed, wantReason: reasonNotAdvancing,
+		},
+		{
+			name: "unanswered owner question past the dwell limit", state: stateInProgress, entered: 3 * time.Hour,
+			sessions:   []*sqlite.OverviewSessionRow{primary(session("s1", sessionStateIdle, ago(3*time.Hour), ""))},
+			owner:      true,
+			wantStatus: OverviewStatusWaiting, wantReason: reasonIdle,
+		},
+		{
+			name: "a deliberate stop does not hide a genuine recent failure", state: stateInProgress, entered: 3 * time.Hour,
+			sessions: []*sqlite.OverviewSessionRow{
+				primary(session("s1", sessionStateCancelled, ago(3*time.Hour), "stopped via API")),
+				session("s2", sessionStateFailed, ago(2*time.Hour), "AI_APICallError: Rate limit exceeded"),
+			},
+			wantStatus: OverviewStatusError, wantReason: reasonRecentFailures,
+		},
+		{
+			name: "an unanswered owner question keeps a recent failure off the error list", state: stateInProgress, entered: 3 * time.Hour,
+			sessions: []*sqlite.OverviewSessionRow{
+				primary(session("s1", sessionStateCancelled, ago(2*time.Hour), "stopped via API")),
+				session("s2", sessionStateFailed, ago(time.Hour), "AI_APICallError: Rate limit exceeded"),
+			},
+			owner:      true,
+			wantStatus: OverviewStatusWaiting, wantReason: reasonSessionEnded,
 		},
 		{
 			name: "running without output", state: stateInProgress, entered: time.Hour,
@@ -85,8 +156,9 @@ func TestOverviewTaskClassification(t *testing.T) {
 					ID: "task", State: tc.state, OpenBlockers: tc.blockers, StepName: "Build",
 					StepEnteredAt: now.Add(-tc.entered), UpdatedAt: now.Add(-tc.entered),
 				},
-				sessions: tc.sessions,
-				queued:   tc.queued,
+				sessions:      tc.sessions,
+				queued:        tc.queued,
+				awaitingOwner: tc.owner,
 			}
 			if tc.queued > 0 {
 				task.oldestQueue = now.Add(-tc.oldest)
@@ -100,6 +172,106 @@ func TestOverviewTaskClassification(t *testing.T) {
 				t.Fatalf("status = %q reason = %+v; want %q / %q", task.status, task.reason, tc.wantStatus, tc.wantReason)
 			}
 		})
+	}
+}
+
+// fakeQuestionLister answers with fixed bundles and records the sessions it was
+// asked about, so a test can prove the overview asks once and classifies from
+// that answer.
+type fakeQuestionLister struct {
+	bundles []taskmodels.ClarificationBundleSummary
+	asked   [][]string
+}
+
+func (f *fakeQuestionLister) ListAnswerableClarificationsForSessions(
+	_ context.Context, sessionIDs []string,
+) ([]taskmodels.ClarificationBundleSummary, error) {
+	f.asked = append(f.asked, sessionIDs)
+	return f.bundles, nil
+}
+
+// TestOverviewBaselineIsTheTaskOwnSession pins the mechanism behind the verdict
+// rather than only its outcome: the session the verdict is read from is the
+// task's own, so a failed auxiliary session started after it cannot become the
+// task's condition.
+func TestOverviewBaselineIsTheTaskOwnSession(t *testing.T) {
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	task := &overviewTask{
+		row: &sqlite.OverviewTaskRow{
+			ID: "task", State: stateInProgress, StepName: "Reconcile",
+			StepEnteredAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-10 * time.Minute),
+		},
+		sessions: []*sqlite.OverviewSessionRow{
+			{ID: "primary", TaskID: "task", State: sessionStateRunning, IsPrimary: true, StartedAt: now.Add(-40 * time.Minute), UpdatedAt: now.Add(-40 * time.Minute)},
+			{ID: "aux", TaskID: "task", State: sessionStateFailed, StartedAt: now.Add(-5 * time.Minute), UpdatedAt: now.Add(-5 * time.Minute), ErrorMessage: "agent produced no output since start"},
+		},
+	}
+	task.classify(now, defaultOverviewThresholds, map[string]time.Time{"primary": now.Add(-2 * time.Minute)})
+	if task.baseline == nil || task.baseline.ID != "primary" {
+		t.Fatalf("baseline = %+v; want the task's own session", task.baseline)
+	}
+	if task.status != OverviewStatusRunning {
+		t.Fatalf("status = %q reason = %+v; want running", task.status, task.reason)
+	}
+}
+
+// approvalsOnlyReader answers the pending-approval read and nothing else, so a
+// test can render the needs-human list without standing up the whole overview.
+type approvalsOnlyReader struct {
+	OverviewReader
+}
+
+func (approvalsOnlyReader) ListOverviewPendingApprovals(
+	_ context.Context, _ []string, _ int,
+) ([]*sqlite.OverviewApprovalRow, error) {
+	return nil, nil
+}
+
+// TestOverviewAnswerableQuestionsFeedClassification pins that one read of the
+// answerable questions both exempts the task from a delay verdict and fills the
+// needs-human list, so a task waiting on the owner stops counting as a problem
+// without losing its place in the list of things to answer.
+func TestOverviewAnswerableQuestionsFeedClassification(t *testing.T) {
+	now := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
+	lister := &fakeQuestionLister{bundles: []taskmodels.ClarificationBundleSummary{{
+		PendingID: "p1", QuestionID: "q1", TaskID: "task", SessionID: "s1", CreatedAt: now.Add(-time.Hour),
+	}}}
+	svc := &DashboardService{}
+	svc.SetOverviewReader(approvalsOnlyReader{})
+	svc.SetAnswerableQuestionLister(lister)
+	snap := &overviewSnapshot{
+		resp: &WorkspaceAggregateResponse{},
+		now:  now,
+		tasks: []*overviewTask{{
+			row: &sqlite.OverviewTaskRow{
+				ID: "task", WorkspaceID: "ws", Title: "Build", State: stateInProgress, StepName: "Build",
+				StepEnteredAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour),
+			},
+			sessions: []*sqlite.OverviewSessionRow{{
+				ID: "s1", TaskID: "task", State: sessionStateIdle, IsPrimary: true,
+				StartedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour),
+			}},
+		}},
+	}
+	if err := svc.loadAnswerableQuestions(context.Background(), snap); err != nil {
+		t.Fatalf("loadAnswerableQuestions: %v", err)
+	}
+	task := snap.tasks[0]
+	task.classify(now, defaultOverviewThresholds, map[string]time.Time{})
+	if task.status == OverviewStatusDelayed {
+		t.Fatalf("a task waiting on the owner must not read as delayed, got %q", task.status)
+	}
+	if !task.awaitingOwner {
+		t.Fatal("the task owning the question must be recorded as awaiting its owner")
+	}
+	if err := svc.assembleNeedsHuman(context.Background(), snap, []string{"ws"}); err != nil {
+		t.Fatalf("assembleNeedsHuman: %v", err)
+	}
+	if len(snap.resp.NeedsHuman) != 1 || snap.resp.NeedsHuman[0].TaskID != "task" {
+		t.Fatalf("needs human = %+v; want the owner's question", snap.resp.NeedsHuman)
+	}
+	if len(lister.asked) != 1 {
+		t.Fatalf("the questions were read %d times; the overview reads them once per pass", len(lister.asked))
 	}
 }
 

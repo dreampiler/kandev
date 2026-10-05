@@ -44,7 +44,9 @@ type OverviewTaskRow struct {
 }
 
 // OverviewSessionRow is one task session of an open task. ErrorMessage is
-// capped in SQL so a large provider dump never leaves the database.
+// capped in SQL so a large provider dump never leaves the database. IsPrimary
+// marks the task's own session, so a reader can tell it from an auxiliary
+// session the task ran alongside.
 type OverviewSessionRow struct {
 	ID             string `db:"id"`
 	TaskID         string `db:"task_id"`
@@ -53,6 +55,7 @@ type OverviewSessionRow struct {
 	ErrorMessage   string `db:"error_message"`
 	StartedAtRaw   string `db:"started_at"`
 	UpdatedAtRaw   string `db:"updated_at"`
+	IsPrimary      bool   `db:"is_primary"`
 	StartedAt      time.Time
 	UpdatedAt      time.Time
 }
@@ -217,7 +220,8 @@ func (r *Repository) ListOverviewSessionsForTasks(ctx context.Context, taskIDs [
 		query := `
 			SELECT s.id, s.task_id, s.state, COALESCE(s.agent_profile_id, '') AS agent_profile_id,
 			       SUBSTR(COALESCE(s.error_message, ''), 1, 300) AS error_message,
-			       CAST(s.started_at AS TEXT) AS started_at, COALESCE(CAST(s.updated_at AS TEXT), '') AS updated_at
+			       CAST(s.started_at AS TEXT) AS started_at, COALESCE(CAST(s.updated_at AS TEXT), '') AS updated_at,
+			       COALESCE(s.is_primary, 0) AS is_primary
 			FROM task_sessions s
 			WHERE s.task_id IN (` + strings.Join(placeholders, ",") + `)
 		`

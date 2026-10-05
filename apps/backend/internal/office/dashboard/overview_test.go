@@ -64,7 +64,7 @@ func overviewFixture(t *testing.T) *testDeps {
 	insertOverviewTask(t, deps, "t-parent", "ws-office", "IN_PROGRESS", "", now)
 	insertOverviewTask(t, deps, "t-run", "ws-office", "IN_PROGRESS", "t-parent", now)
 	insertOverviewTask(t, deps, "t-done", "ws-office", "COMPLETED", "", now)
-	insertOverviewTask(t, deps, "t-fail", "ws-kanban", "IN_PROGRESS", "", now)
+	insertOverviewTask(t, deps, "t-fail", "ws-kanban", "IN_PROGRESS", "", now.Add(-time.Hour))
 	insertOverviewTask(t, deps, "t-hidden", "ws-hidden", "IN_PROGRESS", "", now)
 	mustExec(t, deps, `INSERT INTO agents (id, name, created_at, updated_at) VALUES ('agent-a', 'claude-code', ?, ?)`, now, now)
 	mustExec(t, deps, `INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, created_at, updated_at)

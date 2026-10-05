@@ -19,7 +19,6 @@ type overviewThresholds struct {
 	// Delayed: time in the current step by task state.
 	DwellInProgress time.Duration
 	DwellReview     time.Duration
-	DwellHold       time.Duration
 	// Delayed: SCHEDULING (session ended, task not moved on) for this long.
 	NotAdvancing time.Duration
 	// Delayed: a STARTING session for this long.
@@ -36,7 +35,6 @@ var defaultOverviewThresholds = overviewThresholds{
 	NoOutput:        15 * time.Minute,
 	DwellInProgress: 120 * time.Minute,
 	DwellReview:     60 * time.Minute,
-	DwellHold:       24 * time.Hour,
 	NotAdvancing:    15 * time.Minute,
 	Starting:        15 * time.Minute,
 	QueueIdle:       10 * time.Minute,
@@ -94,14 +92,23 @@ func isActiveTaskState(state string) bool {
 
 // overviewTask is one classified open task.
 type overviewTask struct {
-	row         *sqlite.OverviewTaskRow
-	sessions    []*sqlite.OverviewSessionRow // newest first
-	latest      *sqlite.OverviewSessionRow
-	shown       *sqlite.OverviewSessionRow // the session the row links to
-	lastOutput  time.Time
-	queued      int
-	oldestQueue time.Time
-	failures24h int
+	row      *sqlite.OverviewTaskRow
+	sessions []*sqlite.OverviewSessionRow // newest first
+	// baseline is the session the task's own verdict is read from: its primary
+	// session when it has one, otherwise a live session, otherwise the newest.
+	// latest stays the newest session for the consumers that mean "most recent",
+	// such as the row's linked session and the failure look-back.
+	latest   *sqlite.OverviewSessionRow
+	baseline *sqlite.OverviewSessionRow
+	shown    *sqlite.OverviewSessionRow // the session the row links to
+	// awaitingOwner records that a question of this task's is waiting to be
+	// answered, so its dwell belongs to the person who owes the answer rather
+	// than to the task.
+	awaitingOwner bool
+	lastOutput    time.Time
+	queued        int
+	oldestQueue   time.Time
+	failures24h   int
 	// automation is the step's own configuration: whether arriving at the
 	// current step starts work by itself. It decides whether a task parked here
 	// is being driven or is waiting for a person.
@@ -187,6 +194,7 @@ func (t *overviewTask) prepare(now time.Time, th overviewThresholds, lastOutput 
 	if len(t.sessions) > 0 {
 		t.latest = t.sessions[0]
 	}
+	t.baseline = t.pickBaseline()
 	t.shown = t.latest
 	for _, s := range t.sessions {
 		if s.State == sessionStateFailed && !s.StartedAt.Before(now.Add(-th.Window)) {
@@ -199,6 +207,25 @@ func (t *overviewTask) prepare(now time.Time, th overviewThresholds, lastOutput 
 	if live := t.runningSession(); live != nil {
 		t.shown = live
 	}
+}
+
+// pickBaseline is the session whose condition answers for the task: the task's
+// own primary session first, because an auxiliary session the task ran alongside
+// is not the task's state, then a live session, and the newest when the task has
+// neither. Reading the newest alone lets a failed auxiliary session started
+// moments ago speak for a task whose primary session is still running.
+func (t *overviewTask) pickBaseline() *sqlite.OverviewSessionRow {
+	for _, s := range t.sessions {
+		if s.IsPrimary {
+			return s
+		}
+	}
+	for _, s := range t.sessions {
+		if isLiveSessionState(s.State) {
+			return s
+		}
+	}
+	return t.latest
 }
 
 // runningSession is the newest RUNNING or STARTING session, if any.
@@ -218,7 +245,33 @@ func (t *overviewTask) runningSession() *sqlite.OverviewSessionRow {
 // that has run and stopped is exactly where a fresh failure is still an error.
 func (t *overviewTask) errorEligible() bool {
 	return isActiveTaskState(t.row.State) && t.row.OpenBlockers == 0 &&
-		!t.awaitingStep() && !t.awaitingPerson()
+		!t.awaitingStep() && !t.awaitingPerson() && !t.awaitingOwner
+}
+
+// currentSession is the session a failure verdict is read from, or nil when
+// nothing about it describes the task right now. A session stopped on purpose
+// carries the stop reason as its error message, and a session the task has moved
+// past describes a step it has left; neither is a current fault. A task with a
+// turn running has already answered whatever the baseline session last did.
+func (t *overviewTask) currentSession() *sqlite.OverviewSessionRow {
+	s := t.baseline
+	switch {
+	case s == nil, s.State == sessionStateCancelled:
+		return nil
+	case !isLiveSessionState(s.State) && t.afterCurrentStep(s):
+		return nil
+	case s.ErrorMessage != "" && t.runningSession() != nil:
+		return nil
+	}
+	return s
+}
+
+// afterCurrentStep reports that the task entered its current step after this
+// session ended, so the session describes a step the task has already moved
+// past. A task whose step entry is unknown cannot have moved on, and the session
+// still counts.
+func (t *overviewTask) afterCurrentStep(s *sqlite.OverviewSessionRow) bool {
+	return !t.row.StepEnteredAt.IsZero() && t.row.StepEnteredAt.After(s.UpdatedAt)
 }
 
 func (t *overviewTask) classifyError(lastOutput map[string]time.Time) bool {
@@ -226,17 +279,17 @@ func (t *overviewTask) classifyError(lastOutput map[string]time.Time) bool {
 		t.status, t.reason = OverviewStatusError, reason(reasonTaskFailed, nil)
 		return true
 	}
-	latest := t.latest
-	if latest != nil && latest.State == sessionStateFailed {
+	current := t.currentSession()
+	if current != nil && current.State == sessionStateFailed {
 		t.status, t.reason = OverviewStatusError, reason(reasonSessionFailed, nil)
-		t.reason.Detail = errorFirstLine(latest.ErrorMessage)
-		t.shown = latest
+		t.reason.Detail = errorFirstLine(current.ErrorMessage)
+		t.shown = current
 		return true
 	}
-	if latest != nil && latest.ErrorMessage != "" && !lastOutput[latest.ID].After(latest.UpdatedAt) {
+	if current != nil && current.ErrorMessage != "" && !lastOutput[current.ID].After(current.UpdatedAt) {
 		t.status, t.reason = OverviewStatusError, reason(reasonSessionError, nil)
-		t.reason.Detail = errorFirstLine(latest.ErrorMessage)
-		t.shown = latest
+		t.reason.Detail = errorFirstLine(current.ErrorMessage)
+		t.shown = current
 		return true
 	}
 	if t.failures24h > 0 && t.runningSession() == nil && t.errorEligible() &&
@@ -259,30 +312,33 @@ func (t *overviewTask) awaitingPerson() bool {
 // after it, and the task has not entered a later step since. A failure the task
 // has moved past is history, not its current condition, so it is not an error.
 func (t *overviewTask) failedWithoutProgressSince(lastOutput map[string]time.Time) bool {
-	failedAt := t.newestFailureAt()
-	if failedAt.IsZero() {
+	failed := t.newestFailure()
+	if failed == nil {
 		return false
 	}
 	for _, s := range t.sessions {
-		if s.State == sessionStateCompleted && s.UpdatedAt.After(failedAt) {
+		if s.State == sessionStateCompleted && s.UpdatedAt.After(failed.UpdatedAt) {
 			return false
 		}
-		if lastOutput[s.ID].After(failedAt) {
+		if lastOutput[s.ID].After(failed.UpdatedAt) {
 			return false
 		}
 	}
-	return !t.row.StepEnteredAt.After(failedAt)
+	return !t.afterCurrentStep(failed)
 }
 
-// newestFailureAt is the update time of the most recently failed session.
-func (t *overviewTask) newestFailureAt() time.Time {
-	var at time.Time
+// newestFailure is the most recently failed session, or nil when none failed.
+func (t *overviewTask) newestFailure() *sqlite.OverviewSessionRow {
+	var newest *sqlite.OverviewSessionRow
 	for _, s := range t.sessions {
-		if s.State == sessionStateFailed && s.UpdatedAt.After(at) {
-			at = s.UpdatedAt
+		if s.State != sessionStateFailed {
+			continue
+		}
+		if newest == nil || s.UpdatedAt.After(newest.UpdatedAt) {
+			newest = s
 		}
 	}
-	return at
+	return newest
 }
 
 func (t *overviewTask) classifyStalled(now time.Time, th overviewThresholds, lastOutput map[string]time.Time) bool {
@@ -366,14 +422,17 @@ func (t *overviewTask) queueDelay(now time.Time, th overviewThresholds) *Overvie
 }
 
 // dwellLimit is how long the task may stay in its current step before that is
-// a delay. A task waiting on a person is not delayed for waiting, and a parent
-// with open children is read through them instead of its own clock, so neither
-// limit below applies to them. Review and hold keep their own limits: those
-// steps exist to be finished, not to be waited in.
+// a delay. Only a step that exists to be finished carries a limit: review, and a
+// working step that owes its next move to nobody. A task on hold, a task waiting
+// on a prerequisite, and a task waiting on a person have nowhere to be late —
+// their own clock says nothing about whether they need a hand, so they take no
+// limit and are read by classifySteady instead. A step that does start work by
+// itself keeps the limit even when its last turn ended, because that is how a
+// step that stopped advancing becomes visible.
 func dwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 	switch {
 	case t.isHold():
-		return th.DwellHold
+		return 0
 	case t.row.State == stateInReview:
 		return th.DwellReview
 	case t.row.State == stateInProgress:
@@ -385,18 +444,27 @@ func dwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 // inProgressDwellLimit is the limit for a working step. Time spent in one
 // means something different depending on who owes the next move: a step that
 // starts nothing by itself waits for a person, a task waiting for an answer
-// waits for a person, and a parent with open children is read through them. A
-// step that does start work by itself keeps the limit even when its last turn
-// ended, because that is how a step that stopped advancing becomes visible.
+// waits for a person, a task whose question is unanswered waits for that
+// answer, and a parent with open children is read through them.
 func inProgressDwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 	switch {
-	case t.awaitingStep(), t.awaitingPerson(), t.row.OpenChildCount > 0:
+	case t.awaitingStep(), t.awaitingPerson(), t.awaitingOwner, t.row.OpenChildCount > 0:
 		return 0
 	}
 	return th.DwellInProgress
 }
 
+// steadySession is the session a resting verdict reads: the task's own session,
+// falling back to its newest so a task the baseline cannot name still has one.
+func (t *overviewTask) steadySession() *sqlite.OverviewSessionRow {
+	if t.baseline != nil {
+		return t.baseline
+	}
+	return t.latest
+}
+
 func (t *overviewTask) classifySteady() {
+	steady := t.steadySession()
 	switch {
 	case t.row.State == stateBlocked:
 		t.status, t.reason = OverviewStatusBlocked, reason(reasonOnHold, nil)
@@ -407,9 +475,9 @@ func (t *overviewTask) classifySteady() {
 		t.status, t.reason = OverviewStatusRunning, reason(reasonWorking, nil)
 	case t.hasSessionIn(sessionStateWaitingForInput) || t.row.State == taskStateWaitingForInput:
 		t.status, t.reason = OverviewStatusWaiting, reason(reasonWaitingInput, nil)
-	case t.latest == nil:
+	case steady == nil:
 		t.status, t.reason = OverviewStatusWaiting, reason(reasonNotStarted, nil)
-	case isTerminalSessionState(t.latest.State):
+	case isTerminalSessionState(steady.State):
 		t.status, t.reason = OverviewStatusWaiting, reason(reasonSessionEnded, nil)
 	default:
 		t.status, t.reason = OverviewStatusWaiting, reason(reasonIdle, nil)

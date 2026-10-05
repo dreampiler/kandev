@@ -74,7 +74,6 @@ export function OverviewProblemTooltip({ thresholds }: { thresholds?: OverviewTh
               {t("office:overviewCriteriaDwell", {
                 running: durationFromMinutes(thresholds.dwell_in_progress_minutes),
                 review: durationFromMinutes(thresholds.dwell_review_minutes),
-                hold: durationFromMinutes(thresholds.dwell_hold_minutes),
               })}
             </p>
           </>
