@@ -204,9 +204,10 @@ func (r *Repository) LoadSessionModelCatalog(
 // instead of once per session.
 //
 // The inline snapshot is kept whenever the catalog cannot be shared: an
-// uncomposable identity, an empty catalog, or a failed store. A caller must
-// never lose the provider's model list because sharing did not work, and the
-// resolved read path treats an inline row exactly as it treated one before.
+// uncomposable identity, an empty catalog, a store failure, or a revision another
+// writer claimed first. A caller must never lose the provider's model list
+// because sharing did not work, and the resolved read path treats an inline row
+// exactly as it treated one before.
 func (r *Repository) shareSessionModelCatalog(
 	ctx context.Context,
 	sessionID string,
@@ -233,8 +234,12 @@ func (r *Repository) shareSessionModelCatalog(
 	// copy; stripping here would mutate the caller's slice and take this
 	// session's selection with it.
 	_, catalog := models.SplitSessionModelCatalog(snapshot, nil)
-	ref, stored, err := r.StoreSessionModelCatalog(ctx, key, catalog)
-	if err != nil || !stored {
+	ref, _, err := r.StoreSessionModelCatalog(ctx, key, catalog)
+	// A non-empty key means a stored revision holds this exact catalog, whether
+	// this call appended it or reused the current one; only a conflict or an
+	// error leaves the reference empty, and that is the one case that must keep
+	// the catalog inline.
+	if err != nil || ref.Key == "" {
 		return value, nil
 	}
 	slim, _ := models.SplitSessionModelCatalog(snapshot, &ref)
