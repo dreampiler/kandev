@@ -16,6 +16,7 @@ import {
   circuitScope,
   circuitTitle,
   isCurrentBlock,
+  occurredTime,
   relativeTime,
 } from "./overview-format";
 import { statusTextClass } from "./overview-status-colors";
@@ -176,9 +177,10 @@ function BlockedCircuitCard({ circuit }: { circuit: OverviewBlockedCircuit }) {
       </div>
       <div
         className={`mt-1 text-xs ${blocking ? statusTextClass("error") : "text-muted-foreground"}`}
+        title={circuit.until ? relativeTime(circuit.until) : undefined}
       >
         {circuit.until
-          ? t("office:overviewClearsAt", { time: relativeTime(circuit.until) })
+          ? t("office:overviewClearsAt", { time: occurredTime(circuit.until) })
           : t("office:overviewBlockedNoClearTime")}
       </div>
     </div>
@@ -265,7 +267,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
           )}
           {window.reset_at && (
             <span className="text-muted-foreground">
-              {t("office:overviewUsageResets", { time: relativeTime(window.reset_at) })}
+              {t("office:overviewUsageResets", { time: occurredTime(window.reset_at) })}
             </span>
           )}
         </div>
@@ -284,7 +286,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
 function blockedAccountState(t: TFunction, account: OverviewBlockedAccount): string {
   if (account.state === "user_action_required") return t("office:needsAction");
   if (account.retry_at) {
-    return t("office:overviewClearsAt", { time: relativeTime(account.retry_at) });
+    return t("office:overviewClearsAt", { time: occurredTime(account.retry_at) });
   }
   return t("office:overviewBlockedAccounts");
 }

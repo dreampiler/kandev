@@ -13,6 +13,7 @@ import type {
 } from "@/lib/state/slices/office/overview-types";
 import {
   durationSince,
+  occurredTime,
   queueStatusLabel,
   reasonText,
   relativeTime,
@@ -154,8 +155,11 @@ export function OverviewTaskTable({
                 )}
               </div>
             </TableCell>
-            <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
-              {relativeTime(row.last_output_at)}
+            <TableCell
+              className="whitespace-nowrap text-right text-xs tabular-nums"
+              title={relativeTime(row.last_output_at)}
+            >
+              {occurredTime(row.last_output_at)}
             </TableCell>
             <TableCell
               className={`whitespace-nowrap text-right text-xs tabular-nums ${stepDwellTone(row)}`}
@@ -212,8 +216,11 @@ export function OverviewSessionTable({ rows }: { rows: OverviewSessionItem[] }) 
             <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
               {durationSince(row.started_at)}
             </TableCell>
-            <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
-              {relativeTime(row.last_output_at)}
+            <TableCell
+              className="whitespace-nowrap text-right text-xs tabular-nums"
+              title={relativeTime(row.last_output_at)}
+            >
+              {occurredTime(row.last_output_at)}
             </TableCell>
             <TableCell>
               <OverviewReasonCell reason={row.reason} status={row.status} />
@@ -258,8 +265,11 @@ export function OverviewQueueTable({ rows }: { rows: OverviewQueueItem[] }) {
               />
             </TableCell>
             <TableCell className="text-right text-xs tabular-nums">{row.count}</TableCell>
-            <TableCell className="whitespace-nowrap text-right text-xs tabular-nums">
-              {relativeTime(row.oldest_at)}
+            <TableCell
+              className="whitespace-nowrap text-right text-xs tabular-nums"
+              title={relativeTime(row.oldest_at)}
+            >
+              {occurredTime(row.oldest_at)}
             </TableCell>
             <TableCell className="text-xs">{senderLabel(t, row.sender)}</TableCell>
             <TableCell className="text-xs">{sessionStateLabel(t, row.session_state)}</TableCell>

@@ -16,7 +16,7 @@ import type { OverviewScope, OverviewSort } from "@/lib/state/slices/office/over
 import { OVERVIEW_SORT_OPTIONS } from "@/lib/state/slices/office/overview-types";
 import type { UserSettingsResponse } from "@/lib/types/http";
 import { createQueuedUserSettingsSyncWithResponse } from "@/lib/user-settings-sync";
-import { relativeTime } from "./overview-format";
+import { occurredTime, relativeTime } from "./overview-format";
 
 /** Queued sync that persists the overview scope preference. */
 const syncOverviewScope = createQueuedUserSettingsSyncWithResponse<OverviewScope>((scope) => ({
@@ -265,9 +265,13 @@ function SyncControl({
   const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
-      <span className="text-xs text-muted-foreground" data-testid="overview-last-sync">
+      <span
+        className="text-xs text-muted-foreground"
+        title={receivedAt ? relativeTime(receivedAt) : undefined}
+        data-testid="overview-last-sync"
+      >
         {receivedAt
-          ? t("office:overviewLastSync", { time: relativeTime(receivedAt) })
+          ? t("office:overviewLastSync", { time: occurredTime(receivedAt) })
           : t("office:overviewNeverSynced")}
       </span>
       <Button
