@@ -452,7 +452,7 @@ func assembleEvents(
 		})
 	}
 	if extra != nil {
-		events = append(events, extraEvents(extra)...)
+		events = append(events, extraEvents(extra, snap.profileNames)...)
 	}
 	for i, row := range snap.completed {
 		if i >= overviewEventKindLimit {
@@ -471,10 +471,12 @@ func assembleEvents(
 }
 
 // extraEvents renders the additional last-24-hours sources into events, keeping
-// the per-kind bound each one carries.
-func extraEvents(extra *overviewExtraEvents) []OverviewEvent {
+// the per-kind bound each one carries. The profile names are the ones this pass
+// already resolved, so a model block names its subject the way the
+// blocked-circuits card does.
+func extraEvents(extra *overviewExtraEvents, profileNames map[string]string) []OverviewEvent {
 	var events []OverviewEvent
-	events = append(events, modelBlockEvents(extra.blocks)...)
+	events = append(events, modelBlockEvents(extra.blocks, profileNames)...)
 	events = append(events, mergedPREvents(extra.mergedPRs)...)
 	events = append(events, automationFailureEvents(extra.automationFailures)...)
 	events = append(events, decisionEvents(extra.decisions)...)

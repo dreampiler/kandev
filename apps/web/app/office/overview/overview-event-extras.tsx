@@ -7,7 +7,9 @@ import type {
   OverviewStepMove,
 } from "@/lib/state/slices/office/overview-types";
 import {
+  blockFacts,
   durationFromMinutes,
+  modelBlockSubject,
   occurredTime,
   sessionStateLabel,
   taskStateLabel,
@@ -144,9 +146,11 @@ export function FailureLine({ failure }: { failure: OverviewFailure }) {
  */
 export function OverviewEventExtras({ event }: { event: OverviewEvent }) {
   const { t } = useTranslation();
+  const block = modelBlockSubject(event) ? blockFacts(t, event.scope, event.reason) : "";
   return (
     <>
       {event.version && <EventField>{event.version}</EventField>}
+      {block && <EventField>{block}</EventField>}
       {event.clears_at && (
         <EventField>
           {t("office:overviewClearsAt", { time: occurredTime(event.clears_at) })}

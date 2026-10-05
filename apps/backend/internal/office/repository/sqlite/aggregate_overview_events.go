@@ -20,6 +20,14 @@ import (
 // circuit that has already closed is reported as cleared at its own clear time
 // rather than at some remembered moment this screen would have to invent.
 
+// The two tables a model block can come from. Source says which one, because
+// only a circuit's subject can be resolved into a profile and a model: a
+// provider limit is already named by the provider it carries.
+const (
+	modelBlockSourceCircuit  = "circuit"
+	modelBlockSourceProvider = "provider"
+)
+
 // OverviewModelBlockRow is one model account or provider limit that was blocked
 // or that lifted inside the window. Resource names the subject as the circuit
 // key or the provider id: the fingerprint inside a key is not something a
@@ -27,6 +35,9 @@ import (
 // and the provider is carried by name for a limit.
 type OverviewModelBlockRow struct {
 	Resource string `db:"resource"`
+	// Source is the table the row came from, so a caller can tell a circuit key
+	// from a provider id instead of inferring it from the subject's shape.
+	Source string `db:"source"`
 	// BlockedAt is when the block was last written; ClearedAt is when the
 	// block is expected to lift. ClearedAt is absent for a resource that never
 	// named a clear time, and none is supplied here.
@@ -40,6 +51,13 @@ type OverviewModelBlockRow struct {
 	Code    string `db:"code"`
 }
 
+// IsCircuit reports that the row describes a resource circuit rather than a
+// provider limit. Only a circuit carries a key that can be resolved into a
+// profile and a model, so this is what decides whether the subject is nameable.
+func (r *OverviewModelBlockRow) IsCircuit() bool {
+	return r.Source == modelBlockSourceCircuit
+}
+
 // ListOverviewModelBlocks returns the model blocks written since `since` or
 // that lifted since `since`, newest first, up to limit. Only circuits and
 // provider limits that actually carry a block are read: a healthy resource is
@@ -49,16 +67,18 @@ func (r *Repository) ListOverviewModelBlocks(
 ) ([]*OverviewModelBlockRow, error) {
 	var rows []*OverviewModelBlockRow
 	query := `
-		SELECT resource, CAST(blocked_at AS TEXT) AS blocked_at,
+		SELECT resource, source, CAST(blocked_at AS TEXT) AS blocked_at,
 		       CAST(cleared_at AS TEXT) AS cleared_at, cleared, code
 		FROM (
-			SELECT resource_key AS resource, updated_at AS blocked_at, until_at AS cleared_at,
+			SELECT resource_key AS resource, '` + modelBlockSourceCircuit + `' AS source,
+			       updated_at AS blocked_at, until_at AS cleared_at,
 			       CASE WHEN until_at IS NOT NULL AND until_at <= ? THEN 1 ELSE 0 END AS cleared,
 			       code
 			FROM dynamic_resource_circuits
 			WHERE state <> 'closed' OR strikes > 0
 			UNION ALL
-			SELECT provider AS resource, updated_at AS blocked_at, block_until AS cleared_at,
+			SELECT provider AS resource, '` + modelBlockSourceProvider + `' AS source,
+			       updated_at AS blocked_at, block_until AS cleared_at,
 			       CASE WHEN block_until <= ? THEN 1 ELSE 0 END AS cleared,
 			       '' AS code
 			FROM dynamic_provider_limits

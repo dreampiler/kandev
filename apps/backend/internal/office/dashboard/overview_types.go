@@ -232,6 +232,20 @@ type OverviewEvent struct {
 	// ClearsAt is when a block is expected to lift. A resource that never
 	// named a clear time leaves it absent.
 	ClearsAt *time.Time `json:"clears_at,omitempty"`
+	// A model block's subject, carried as the same fields the blocked-circuits
+	// card carries so one naming rule phrases both. Scope is the circuit's scope
+	// ("profile", "credential", or "model"), ScopeValue its fingerprint, and the
+	// profile and model the row resolved to. All are absent for a provider
+	// limit, which is already named by the provider it carries.
+	Scope       string `json:"scope,omitempty"`
+	ScopeValue  string `json:"scope_value,omitempty"`
+	ProfileID   string `json:"profile_id,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
+	ModelName   string `json:"model_name,omitempty"`
+	// Reason is the circuit's classification code. The client phrases it with
+	// the same vocabulary the blocked-circuits card uses, so the code itself is
+	// never the only thing on the row.
+	Reason string `json:"reason,omitempty"`
 	// PullRequest identifies a merged change request: repository and number,
 	// kept as fields so the client never parses them out of prose.
 	PullRequest *OverviewPullRequest `json:"pull_request,omitempty"`

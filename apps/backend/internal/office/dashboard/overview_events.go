@@ -53,11 +53,42 @@ func (s *DashboardService) loadProfileNames(
 	return nil
 }
 
+// nameBlockSubjects resolves the agent profiles the circuit rows name, so a
+// block event reports the same subject the blocked-circuits card does instead
+// of the key only. A read that fails, or a profile that no longer resolves,
+// leaves that event's subject unnamed, which the client reports as
+// unidentifiable rather than falling back to the raw key.
+func (s *DashboardService) nameBlockSubjects(
+	ctx context.Context, snap *overviewSnapshot, rows []*sqlite.OverviewModelBlockRow,
+) {
+	missing := make([]string, 0, len(rows))
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if row == nil || !row.IsCircuit() {
+			continue
+		}
+		id := circuitIdentityOf(row.Resource).profileID
+		if id == "" || seen[id] || snap.profileNames[id] != "" {
+			continue
+		}
+		seen[id] = true
+		missing = append(missing, id)
+	}
+	_ = s.loadProfileNames(ctx, snap, missing)
+}
+
 // modelBlockEvents reports a model account or provider limit being blocked, and
 // the same resource lifting again. A resource that has already lifted by this
 // read is reported as unblocked at its own clear time rather than as still
 // blocking: the row is the only record of when, so nothing here guesses.
-func modelBlockEvents(rows []*sqlite.OverviewModelBlockRow) []OverviewEvent {
+//
+// A circuit row travels as the fields the blocked-circuits card carries, so one
+// naming rule phrases both: the client reads a profile name, a model, and a
+// reason code rather than a key. A provider limit keeps the provider id as its
+// title, because that id is the provider's own name.
+func modelBlockEvents(
+	rows []*sqlite.OverviewModelBlockRow, profileNames map[string]string,
+) []OverviewEvent {
 	events := make([]OverviewEvent, 0, len(rows))
 	for i, row := range rows {
 		if i >= overviewEventKindLimit {
@@ -71,10 +102,21 @@ func modelBlockEvents(rows []*sqlite.OverviewModelBlockRow) []OverviewEvent {
 				at = row.ClearedAt
 			}
 		}
-		events = append(events, OverviewEvent{
-			Kind: kind, At: at, Title: row.Resource,
-			Detail: row.Code, ClearsAt: timePtr(row.ClearedAt),
-		})
+		event := OverviewEvent{
+			Kind: kind, At: at, ClearsAt: timePtr(row.ClearedAt), Reason: row.Code,
+		}
+		if row.IsCircuit() {
+			scope, scopeValue := splitCircuitKey(row.Resource)
+			identity := circuitIdentityOf(row.Resource)
+			event.Scope = scope
+			event.ScopeValue = scopeValue
+			event.ProfileID = identity.profileID
+			event.ProfileName = profileNames[identity.profileID]
+			event.ModelName = identity.modelName
+		} else {
+			event.Title = row.Resource
+		}
+		events = append(events, event)
 	}
 	return events
 }
