@@ -109,4 +109,9 @@ None.
 Done in fork `main` by PR #26, squash `d6c189026e`: `event_types.go` (+6),
 `events.go` (+9/-…), `session.go` (+35/-…), and the new
 `stall_terminal_test.go` (261 lines) covering AC-001.1, AC-001.3, and AC-001.4.
-`stall_escalation_test.go` covers the executing-tool allowance.
+
+AC-001.8, the executing-tool allowance, is implemented in `tool_progress.go`
+rather than covered here: `stallThreshold()` selects the longer allowance for
+an executing tool, and `stall_escalation_test.go` exercises the threshold
+branch without any open tool. No test populates `openTools`, so the
+forty-five-minute branch itself remains unexercised.

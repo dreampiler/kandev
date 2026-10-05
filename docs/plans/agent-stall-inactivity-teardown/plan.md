@@ -74,7 +74,7 @@ No schema migration, no HTTP or WebSocket contract change, no frontend change.
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.4` | `stall_terminal_test.go`: the advisory branch still fires and does not publish the terminal classification |
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.5` | `event_handlers_stall_prolonged_test.go`: no step transition or completion signal is applied |
 | `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.7` | `stall_terminal_test.go`: a never-started prompt is not reclassified |
-| `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.8` | `stall_escalation_test.go`: an executing tool keeps the longer allowance and progress refreshes it |
+| `AC-AGENTS-PROLONGED-STALL-TEARDOWN-001.8` | Implementation only, no direct test: `stallThreshold()` returns the longer allowance for an executing tool and `promptStallSnapshot` admits `lastToolProgressAt`. No repository test populates `openTools`, so this branch is unexercised |
 
 ## Work orders
 
@@ -89,8 +89,17 @@ files, `session.go`, `event_handlers_stall.go`, and the two new regression files
 `stall_terminal_test.go` and `event_handlers_stall_prolonged_test.go`. The
 lifecycle tests cite AC-001.1, AC-001.3, and AC-001.4; the orchestrator tests cite
 AC-001.2 and AC-001.5. `AC-001.6` is satisfied by the unchanged ceiling
-reservation accounting that releases on settlement, and AC-001.7/AC-001.8 by the
-never-started exclusion and `stall_escalation_test.go`.
+reservation accounting that releases on settlement, and AC-001.7 by the
+never-started exclusion the lifecycle applies before publishing.
+
+`AC-001.8` is satisfied by implementation rather than by a test.
+`AgentExecution.stallThreshold()` (`tool_progress.go`) returns the
+forty-five-minute allowance while an open top-level tool is executing, and
+`promptStallSnapshot` advances the inactivity clock to `lastToolProgressAt`
+when tool progress is observed. No repository test populates `openTools`,
+`lastToolProgressAt`, or `applyToolProgress`, so neither the longer allowance
+nor the progress refresh is exercised by any test. Closing that gap needs a
+standing test, which is an owner decision rather than part of this plan.
 
 ## Risks
 
