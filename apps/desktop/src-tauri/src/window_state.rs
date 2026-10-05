@@ -57,6 +57,21 @@ pub fn visible_restore(saved: WindowBounds, monitors: &[MonitorBounds]) -> Windo
     }
 }
 
+/// Tauri applies `set_size` to the client area, while the saved bounds record the
+/// whole frame. Restoring one with the other grows the window by the frame on every
+/// restart, so the frame is removed before the saved size is applied.
+pub fn client_size(
+    saved_width: u32,
+    saved_height: u32,
+    frame_width: u32,
+    frame_height: u32,
+) -> (u32, u32) {
+    (
+        saved_width.saturating_sub(frame_width).max(1),
+        saved_height.saturating_sub(frame_height).max(1),
+    )
+}
+
 fn intersects(window: WindowBounds, monitor: MonitorBounds) -> bool {
     let window_right = window.x.saturating_add(window.width as i32);
     let window_bottom = window.y.saturating_add(window.height as i32);
@@ -132,8 +147,11 @@ impl WindowStateStore {
             })
             .collect::<Vec<_>>();
         let restored = visible_restore(saved, &monitors);
+        let (frame_width, frame_height) = frame_size(window);
+        let (client_width, client_height) =
+            client_size(restored.width, restored.height, frame_width, frame_height);
         window
-            .set_size(PhysicalSize::new(restored.width, restored.height))
+            .set_size(PhysicalSize::new(client_width, client_height))
             .map_err(|err| err.to_string())?;
         window
             .set_position(PhysicalPosition::new(restored.x, restored.y))
@@ -214,6 +232,17 @@ impl WindowStateStore {
             Some(bounds)
         };
         Ok(bounds)
+    }
+}
+
+#[cfg(feature = "desktop-runtime")]
+fn frame_size(window: &WebviewWindow) -> (u32, u32) {
+    match (window.outer_size(), window.inner_size()) {
+        (Ok(outer), Ok(inner)) => (
+            outer.width.saturating_sub(inner.width),
+            outer.height.saturating_sub(inner.height),
+        ),
+        _ => (0, 0),
     }
 }
 
