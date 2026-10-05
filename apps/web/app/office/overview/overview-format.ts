@@ -376,6 +376,33 @@ export function usageUnavailableReason(t: TFunction, code: string | undefined): 
 const USAGE_WINDOW_LENGTH = /^(\d+)-(hour|day|week|month)s?\b/;
 const USAGE_WINDOW_CURRENT = /^current$/i;
 const USAGE_WINDOW_MONTHLY = /^monthly$/i;
+
+// Kandev's own recorded turns arrive as backend labels ("5h", "day", "week")
+// rather than as a duration, so they are read here rather than in whichever card
+// happens to show them. "day" reads as 24 hours and "week" as 7 days, which is
+// the wording the settings surface already gives the same three windows.
+const INTERNAL_USAGE_WINDOW_KEYS: Record<string, string> = {
+  "5h": "office:overviewUsageInternal5h",
+  day: "office:overviewUsageInternalDay",
+  week: "office:overviewUsageInternalWeek",
+};
+
+/**
+ * The reading key for a recorded-window label, or undefined when this catalog
+ * does not name it. A label the backend adds later keeps its own text rather
+ * than being folded into a window this catalog already names.
+ */
+export function internalUsageWindowKey(label: string): string | undefined {
+  return INTERNAL_USAGE_WINDOW_KEYS[label];
+}
+
+/** One recorded window with its turn count, in the active locale. */
+export function internalUsageEntry(
+  t: TFunction,
+  entry: { label: string; windowKey?: string; turns: number },
+): string {
+  return `${entry.windowKey ? t(entry.windowKey) : entry.label} ${entry.turns}`;
+}
 const USAGE_WINDOW_UNIT_MINUTES: Record<string, number> = {
   hour: 60,
   day: 24 * 60,

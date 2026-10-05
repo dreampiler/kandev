@@ -10,6 +10,7 @@ import type {
 import { accountKindKey } from "./overview-accounts";
 import type { OverviewModel } from "@/lib/state/slices/office/overview-types";
 import {
+  internalUsageEntry,
   occurredTime,
   relativeTime,
   usageUnavailableReason,
@@ -123,7 +124,7 @@ function AccountUsageLine({ usage }: { usage: OverviewAccountUsage }) {
       {usage.internal && usage.internal.length > 0 ? (
         <div className="text-muted-foreground" data-testid="overview-account-internal">
           {t("office:overviewAccountInternalUsage", {
-            windows: usage.internal.map((entry) => `${entry.label} ${entry.turns}`).join(" · "),
+            windows: usage.internal.map((entry) => internalUsageEntry(t, entry)).join(" · "),
           })}
         </div>
       ) : null}
