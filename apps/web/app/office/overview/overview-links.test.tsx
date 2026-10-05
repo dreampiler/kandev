@@ -205,13 +205,16 @@ describe("overview project card destinations", () => {
     const collapse = screen.getByTestId("overview-workspace-expand");
     expect(collapse.getAttribute("aria-expanded")).toBe("true");
     expect(collapse.textContent).toContain("Hide details");
-    // The problem list is read in full, and the task list is not read until a
-    // filter chip asks for it.
+    // The disclosure opens one list, and the default filter reads every problem
+    // rather than a preview of them.
+    expect(getWorkspaceAggregateTasks).toHaveBeenCalledTimes(1);
     expect(getWorkspaceAggregateTasks).toHaveBeenCalledWith("ws-1", "problems", 500, {
       cache: "no-store",
     });
     const taskList = await screen.findByTestId("overview-workspace-task-list");
+    expect(screen.queryByTestId("overview-workspace-problems")).toBeNull();
     const row = await within(taskList).findByTestId("overview-task-row");
+    expect(within(taskList).getAllByTestId("overview-task-row")).toHaveLength(1);
     expect(hrefOf(within(row).getByText("Row task"))).toBe("/t/task-row");
 
     await act(async () => {
