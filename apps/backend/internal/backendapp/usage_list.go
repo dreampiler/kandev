@@ -84,7 +84,8 @@ func profileUsageDTO(profileID string, usage profileUsage) dto.AgentProfileUsage
 	entry := dto.AgentProfileUsageDTO{
 		ProfileID: profileID, State: usage.State, Source: usage.Source,
 		ModelClass: string(usage.ModelClass), Status: usage.Status,
-		Windows: []dto.AgentProfileUsageWindowDTO{},
+		Observed: usage.Observed,
+		Windows:  []dto.AgentProfileUsageWindowDTO{},
 	}
 	if usage.Reason != "" {
 		entry.Reason = string(usage.Reason)

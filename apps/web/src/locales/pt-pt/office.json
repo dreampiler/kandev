@@ -1136,5 +1136,6 @@
   "overviewRefreshLabel": "Intervalo de sincronização automática",
   "overviewRefreshSeconds_one": "a cada {{seconds}} segundo",
   "overviewRefreshSeconds_other": "a cada {{seconds}} segundos",
-  "overviewUsageStaleObserved": "Último valor conhecido, lido {{relative}}"
+  "overviewUsageStaleObserved": "Último valor conhecido, lido {{relative}}",
+  "overviewUsageObserved": "Observado durante a execução do agente, {{relative}}"
 }

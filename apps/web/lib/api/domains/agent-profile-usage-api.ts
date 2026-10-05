@@ -51,6 +51,13 @@ export type AgentProfileUsage = {
   model_class?: string;
   fetched_at?: string;
   stale?: boolean;
+  /**
+   * The value came from what a running agent reported about its own account,
+   * because the provider's usage API did not answer. It travels with
+   * `source: "agent_stream"`, so the reading's origin and age are stated rather
+   * than presented as a live provider reading.
+   */
+  observed?: boolean;
   windows: AgentProfileUsageWindow[];
   recorded?: AgentProfileRecordedUsage;
   internal?: AgentProfileInternalUsage;

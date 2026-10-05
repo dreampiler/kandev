@@ -1136,5 +1136,6 @@
   "overviewRefreshLabel": "自動同期間隔",
   "overviewRefreshSeconds_one": "{{seconds}}秒ごと",
   "overviewRefreshSeconds_other": "{{seconds}}秒ごと",
-  "overviewUsageStaleObserved": "最後に確認された値 ({{relative}}に取得)"
+  "overviewUsageStaleObserved": "最後に確認された値 ({{relative}}に取得)",
+  "overviewUsageObserved": "エージェント実行中に観測、{{relative}}"
 }

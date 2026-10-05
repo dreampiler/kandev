@@ -130,6 +130,11 @@ type ProviderUsage struct {
 	Windows   []UtilizationWindow `json:"windows"`
 	FetchedAt time.Time           `json:"fetched_at"`
 	Stale     bool                `json:"stale,omitempty"`
+
+	// Observed marks a window that came from a running agent reporting its own
+	// utilization rather than from the provider's usage API. It names where the
+	// value was seen; it is not a claim that the API was queried successfully.
+	Observed bool `json:"observed,omitempty"`
 }
 
 // ProviderUsageClient fetches live utilization from a provider API.

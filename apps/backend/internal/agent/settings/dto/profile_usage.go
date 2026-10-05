@@ -6,17 +6,21 @@ import "time"
 // agents settings list. State is ok, unavailable, unsupported or no_usage_api;
 // Reason is a bounded failure code and never a provider response body.
 type AgentProfileUsageDTO struct {
-	ProfileID  string                       `json:"profile_id"`
-	State      string                       `json:"state"`
-	Reason     string                       `json:"reason,omitempty"`
-	Status     int                          `json:"status,omitempty"`
-	Source     string                       `json:"source,omitempty"`
-	Provider   string                       `json:"provider,omitempty"`
-	Plan       string                       `json:"plan,omitempty"`
-	ModelClass string                       `json:"model_class,omitempty"`
-	FetchedAt  *time.Time                   `json:"fetched_at,omitempty"`
-	Stale      bool                         `json:"stale,omitempty"`
-	Windows    []AgentProfileUsageWindowDTO `json:"windows"`
+	ProfileID  string     `json:"profile_id"`
+	State      string     `json:"state"`
+	Reason     string     `json:"reason,omitempty"`
+	Status     int        `json:"status,omitempty"`
+	Source     string     `json:"source,omitempty"`
+	Provider   string     `json:"provider,omitempty"`
+	Plan       string     `json:"plan,omitempty"`
+	ModelClass string     `json:"model_class,omitempty"`
+	FetchedAt  *time.Time `json:"fetched_at,omitempty"`
+	Stale      bool       `json:"stale,omitempty"`
+	// Observed marks a value taken from what a running agent reported about its
+	// own account, so a client can name that source rather than presenting it as
+	// a provider API reading. It travels with Source: "agent_stream".
+	Observed bool                         `json:"observed,omitempty"`
+	Windows  []AgentProfileUsageWindowDTO `json:"windows"`
 	// Recorded is the account's usage Kandev itself recorded in the current UTC
 	// day. It is reported for accounts whose provider publishes no usage API,
 	// and is a lower bound rather than the provider's own count.

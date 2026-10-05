@@ -1211,6 +1211,12 @@ func (m *Manager) handleAgentEventWithoutPublication(execution *AgentExecution, 
 	case "context_window":
 		m.handleContextWindowEvent(execution, *event)
 		return true
+	case streams.EventTypeRateLimit:
+		if event.RateLimitWindow == nil {
+			return false
+		}
+		m.handleRateLimitWindowEvent(execution, *event)
+		return true
 	case "available_commands":
 		m.handleAvailableCommandsEvent(execution, *event)
 		return true

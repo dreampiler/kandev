@@ -641,6 +641,7 @@ func startAgentInfrastructure(
 		services.ManagedRuntimeSelections,
 		mcpScopeResolver.Scope,
 		mcpScopeResolver.ScopePrincipal,
+		services.UsageAdapter,
 		recoveryDeadlineStart,
 		inheritedRecordScope,
 		services.Task,

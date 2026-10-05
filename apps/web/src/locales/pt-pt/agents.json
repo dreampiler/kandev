@@ -507,5 +507,6 @@
   "dynamicTierModeRoundRobin": "Rotativo",
   "profileUsageInternal": "Turnos registados nesta conta: 5 h {{h5}}, 24 h {{day}}, 7 d {{week}}",
   "profileUsageLimitHits": "Limites atingidos em 30 dias: {{hits}}. Mediana ao atingir: {{turns}} turnos em 24 h, último {{relative}}",
-  "profileUsageStaleObserved": "Último valor conhecido, lido {{relative}}"
+  "profileUsageStaleObserved": "Último valor conhecido, lido {{relative}}",
+  "profileUsageObserved": "Observado durante a execução do agente, {{relative}}"
 }

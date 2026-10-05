@@ -265,6 +265,10 @@ type Manager struct {
 	// SkillDeployer hook. Nil → skill deploy is skipped.
 	agentProfileReader AgentProfileReader
 
+	// providerWindowObserver records the subscription window a running agent
+	// reported about its own account. Nil → a reported window is dropped.
+	providerWindowObserver ProviderWindowObserver
+
 	// reachabilityReader resolves an ssh executor's stored reachability
 	// record for the launch-time session.launch.warning producer. Nil →
 	// no warning is ever published (feature not wired). See

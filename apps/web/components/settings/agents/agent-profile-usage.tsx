@@ -78,8 +78,27 @@ export function AgentProfileUsageView({
           })}
         </span>
       ) : null}
+      <ObservedUsageSource usage={usage} now={now} />
       <InternalUsage usage={usage} now={now} />
     </div>
+  );
+}
+
+/**
+ * Where a substituted reading came from, and how old it is. A window observed on
+ * a running agent's own rate-limit stream is a real reading, so it is named
+ * rather than left to look like a live provider reading; the stale wording above
+ * says the value is not current but not what produced it.
+ */
+function ObservedUsageSource({ usage, now }: { usage: AgentProfileUsage; now: number }) {
+  const { t } = useTranslation();
+  if (!usage.observed || !usage.fetched_at) return null;
+  return (
+    <span data-testid="agent-profile-usage-observed">
+      {t("agents:profileUsageObserved", {
+        relative: formatRelativeTime(usage.fetched_at, now),
+      })}
+    </span>
   );
 }
 
