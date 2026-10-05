@@ -372,6 +372,10 @@ func initDynamicRuntimeResolver(
 	)
 	dynamicResolver.SetCredentialBindingResolver(dynamicBindingResolver)
 	dynamicResolver.SetProviderLimitReader(repos.Task)
+	// A free model suspends on its own ladder instead of the paid account's, so a
+	// candidate whose route declares no cost class is classified from the price
+	// list its own provider publishes.
+	dynamicResolver.SetFreeModelReader(newProviderPriceCatalog(cfg.ResolvedHomeDir(), log))
 	// The executor lives on the task session, so this is what lets a selection
 	// tell a host execution from a container, SSH or Kubernetes one. Without it
 	// every candidate would read the backend host's provider account, which is a

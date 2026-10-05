@@ -14,10 +14,23 @@ type ProviderLimitReader interface {
 	ListProviderLimits(ctx context.Context) ([]dynamic.ProviderLimit, error)
 }
 
+// FreeModelReader reports what a model's own provider publishes about its
+// price. The second result is false when the provider says nothing, which is
+// not evidence that the model is paid: a reader that cannot answer must leave
+// the candidate on its existing classification.
+type FreeModelReader interface {
+	IsFreeModel(ctx context.Context, modelID string) (free bool, known bool)
+}
+
 // SetProviderLimitReader wires the operator-entered provider blocks into
 // candidate resolution.
 func (r *ProfileExecutionResolver) SetProviderLimitReader(reader ProviderLimitReader) {
 	r.providerLimits = reader
+}
+
+// SetFreeModelReader wires the provider price lists into candidate resolution.
+func (r *ProfileExecutionResolver) SetFreeModelReader(reader FreeModelReader) {
+	r.freeModels = reader
 }
 
 // SetResourceWaitObserver forwards the engine's resource-wait notification.
@@ -50,6 +63,7 @@ func (r *ProfileExecutionResolver) providerLimitMap(ctx context.Context) map[str
 // its provider meters models separately, and the operator block covering its
 // provider.
 func (r *ProfileExecutionResolver) applyResourceLimits(ctx context.Context, candidates []dynamic.Candidate) {
+	r.markCatalogFreeModels(ctx, candidates)
 	limits := r.providerLimitMap(ctx)
 	now := time.Now()
 	for index := range candidates {
@@ -64,6 +78,41 @@ func (r *ProfileExecutionResolver) applyResourceLimits(ctx context.Context, cand
 			if until, blocked := limit.BlockedUntilCandidate(*candidate, now); blocked {
 				candidate.SuspendedUntil = until
 			}
+		}
+	}
+}
+
+// markCatalogFreeModels records, on each candidate, that its model's own
+// provider publishes the model at zero. It runs before the circuit keys are
+// derived because that derivation asks whether the model is free, and it
+// covers both candidate sources: the routes of a dynamic profile and the
+// concrete profile a failure or status query names.
+//
+// A candidate whose route already declares a cost class is not asked about. The
+// configured class is the operator's own statement, and one authoritative
+// answer must not be overridden by a provider list that lags or disagrees.
+// A model the provider does not list, and a reader that cannot answer, both
+// leave CatalogFree false, so the model keeps the paid policy.
+func (r *ProfileExecutionResolver) markCatalogFreeModels(ctx context.Context, candidates []dynamic.Candidate) {
+	if r.freeModels == nil {
+		return
+	}
+	answered := make(map[string]bool, len(candidates))
+	for index := range candidates {
+		candidate := &candidates[index]
+		if !candidate.Enabled || candidate.ModelID == "" || candidate.Selection.Model.Cost != "" {
+			continue
+		}
+		free, cached := answered[candidate.ModelID]
+		if !cached {
+			var known bool
+			free, known = r.freeModels.IsFreeModel(ctx, candidate.ModelID)
+			if known {
+				answered[candidate.ModelID] = free
+			}
+		}
+		if free {
+			candidate.CatalogFree = true
 		}
 	}
 }

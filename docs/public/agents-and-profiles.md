@@ -459,7 +459,10 @@ and uses it again after the reset:
 
 - OpenCode Go and free models pause only the model that hit its limit, so
   sibling models and free models stay available. A model counts as free when the
-  profile's model cost is set to free, or when its model ID marks it free.
+  profile's model cost is set to free, when its model ID marks it free, or when
+  the provider's published price list prices it at zero. The price list is only
+  consulted for a row that sets no model cost, and a provider that lists nothing
+  about a model leaves that model on the paid policy.
 - A paid-model limit without a reset time pauses the model for OpenCode Go and
   the whole account for every other paid provider: 2 hours, up to three times,
   then 24 hours, then until the next monthly reset. The count starts over once

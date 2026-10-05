@@ -191,12 +191,23 @@ models) suspend only that model; OpenCode Go blocks without a known reset use
 count. A fully consumed observed usage window or an operator-entered provider
 block supplies a known end. Free models are never covered by a provider block.
 
-A model is free when its route declares the cost class `free` or when its model
-ID carries a free marker. Both are model-scoped with the free ladder (1m, 5m,
+A model is free when its route declares the cost class `free`, when its model
+ID carries a free marker, or when the price list its own provider publishes
+prices it at zero. A free model is model-scoped with the free ladder (1m, 5m,
 15m, 30m, 1h, 2h, 4h), never the monthly reset, while every other paid model
-stays on the paid ladder above. The cost class is the configured statement about
-the model, so it names a free model whose ID has no free marker; the ID marker
-keeps a row without a stored class free.
+stays on the paid ladder above. The three sources are ranked by decreasing
+authority: the cost class is the operator's configured statement and settles the
+question, the provider price list names a free model the operator declared
+nothing about, and the ID marker keeps a legacy row free without either.
+
+The provider price list is a derived answer, never a configured one. It is only
+consulted for a provider whose models carry no free marker and cannot be told
+apart from paid ones otherwise, and only for a candidate whose route declares no
+cost class. A provider that publishes nothing about a model, an unreadable price
+list, and a lookup that cannot complete are all the same answer: not free, so
+the model keeps the paid policy. An absent statement is never read as a paid
+statement either, and it never changes the configured cost class, so it cannot
+reorder a tier.
 
 Cost order is free, subscription, metered, then unknown
 legacy classification; row order breaks ties within a class. This reflects

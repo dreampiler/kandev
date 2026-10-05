@@ -47,9 +47,12 @@ type Client struct {
 	once         sync.Once
 	refreshGroup singleflight.Group
 
-	mu       sync.RWMutex
-	index    map[string]shared.ModelPricing
-	info     map[string]ModelInfo
+	mu    sync.RWMutex
+	index map[string]shared.ModelPricing
+	info  map[string]ModelInfo
+	// free answers "does the provider price this model at zero" without
+	// reordering pricing. It is rebuilt whenever catalogGen moves.
+	free     *freeIndex
 	loadedAt time.Time
 	// catalogGen increments on every catalogue install (warmFromDisk or
 	// refreshPhysical). CatalogVersion()'s RFC3339 string only has
