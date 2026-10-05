@@ -264,6 +264,34 @@ func (a *Adapter) waitForPromptRPCAfterCancel(turn *promptTurnState) error {
 	}
 }
 
+// settlePromptTurnAfterNotice ends a prompt turn for a provider failure notice
+// the agent stated as an ordinary assistant message.
+//
+// A Codex usage-limit notice is evidence, not the failure signal: that provider
+// settles session/prompt itself with the generic JSON-RPC error the notice
+// explains, and ending the turn on the notice would cancel that RPC and discard
+// the error the caller must keep unwrap-able. For Codex the notice is therefore
+// recorded on the turn and the RPC keeps the bounded cancel window to settle on
+// its own, after which the notice ends the turn as the only failure signal.
+// Every other provider states the notice and never settles the RPC, so the
+// notice ends the turn immediately; the notification queue is drained first so
+// the diagnostic chunk cannot be overtaken by the terminal failure event.
+func (a *Adapter) settlePromptTurnAfterNotice(turn *promptTurnState, diagnostic providerNoticeDiagnostic) error {
+	if a.agentID == codexAgentID {
+		select {
+		case <-turn.rpcDone:
+			return nil
+		case <-time.After(a.promptCancelTimeout()):
+		}
+	}
+	providerErr := &providerPromptError{ProviderError: diagnostic.ProviderError}
+	if turn.endTurn != nil {
+		turn.endTurn(providerErr)
+	}
+	a.syncNotifQueue()
+	return providerErr
+}
+
 // waitForPromptRPCAfterUserCancel blocks until the in-flight session/prompt RPC
 // finishes or a correlated OpenCode provider diagnostic settles it. If the user
 // cancels while this RPC is running, it waits briefly for the agent to stop;
@@ -280,16 +308,7 @@ func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, session
 			if sessionID == "" || diagnostic.SessionID != sessionID {
 				continue
 			}
-			providerErr := &providerPromptError{ProviderError: diagnostic.ProviderError}
-			if turn.endTurn != nil {
-				turn.endTurn(providerErr)
-			}
-			select {
-			case <-turn.rpcDone:
-				return providerErr
-			case <-time.After(a.promptCancelTimeout()):
-				return providerErr
-			}
+			return a.settlePromptTurnAfterNotice(turn, diagnostic)
 		case <-turn.abortCh:
 			select {
 			case <-turn.rpcDone:
