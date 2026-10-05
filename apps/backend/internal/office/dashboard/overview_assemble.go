@@ -435,11 +435,14 @@ func assembleEvents(
 	snap *overviewSnapshot,
 	automation []*sqlite.OverviewAutomationTaskRow,
 	created []*sqlite.OverviewCreatedTaskRow,
+	extra *overviewExtraEvents,
 	since time.Time,
 ) []OverviewEvent {
 	var events []OverviewEvent
 	if started := processStartedAt(); !started.IsZero() && started.After(since) {
-		events = append(events, OverviewEvent{Kind: overviewEventServerStarted, At: started})
+		events = append(events, OverviewEvent{
+			Kind: overviewEventServerStarted, At: started, Version: snap.buildVersion,
+		})
 	}
 	events = append(events, createdTaskEvents(created)...)
 	for _, row := range automation {
@@ -447,6 +450,9 @@ func assembleEvents(
 			Kind: overviewEventAutomationRun, At: row.CreatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
 			AutomationID: row.AutomationID,
 		})
+	}
+	if extra != nil {
+		events = append(events, extraEvents(extra)...)
 	}
 	for i, row := range snap.completed {
 		if i >= overviewEventKindLimit {
@@ -457,11 +463,22 @@ func assembleEvents(
 		})
 	}
 	events = append(events, failedSessionEvents(snap, since)...)
-	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })
+	sortEventsNewest(events)
 	if len(events) > overviewEventMergeLimit {
 		events = events[:overviewEventMergeLimit]
 	}
 	return events
+}
+
+// extraEvents renders the additional last-24-hours sources into events, keeping
+// the per-kind bound each one carries.
+func extraEvents(extra *overviewExtraEvents) []OverviewEvent {
+	var events []OverviewEvent
+	events = append(events, modelBlockEvents(extra.blocks)...)
+	events = append(events, mergedPREvents(extra.mergedPRs)...)
+	events = append(events, automationFailureEvents(extra.automationFailures)...)
+	events = append(events, decisionEvents(extra.decisions)...)
+	return append(events, stepMoveEvents(extra.stepMoves)...)
 }
 
 // createdTaskEvents reports tasks a person or the control plane created, with
@@ -487,10 +504,17 @@ func failedSessionEvents(snap *overviewSnapshot, since time.Time) []OverviewEven
 			if sess.State != sessionStateFailed || sess.UpdatedAt.Before(since) {
 				continue
 			}
-			events = append(events, OverviewEvent{
+			event := OverviewEvent{
 				Kind: overviewEventSessionFailed, At: sess.UpdatedAt, WorkspaceID: t.row.WorkspaceID,
 				TaskID: t.row.ID, SessionID: sess.ID, Title: t.row.Title, Detail: errorFirstLine(sess.ErrorMessage),
-			})
+			}
+			// The follow-up is read on this same pass, so the line describing
+			// what happened after the failure advances whenever the screen does
+			// rather than staying as it was when the failure first appeared.
+			if followup := snap.followups[sess.ID]; followup != nil {
+				event.Failure = failureFor(followup, snap.now, snap.profileNames)
+			}
+			events = append(events, event)
 		}
 	}
 	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })

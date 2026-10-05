@@ -35,6 +35,12 @@ const (
 	overviewParentLimit     = 5
 )
 
+// overviewEventMoveLimit bounds the step-move rows one pass groups into task
+// runs. A run is folded from its task's rows, so this bounds how much movement a
+// single pass reconstructs rather than how many runs reach the list; the run
+// count stays far below it because rows are grouped, not listed.
+const overviewEventMoveLimit = 2000
+
 // OverviewReader is the read-only persistence surface behind the overview.
 // Implemented by the Office sqlite repository.
 type OverviewReader interface {
@@ -59,6 +65,26 @@ type OverviewReader interface {
 	ListOverviewCreatedTasks(
 		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 	) ([]*sqlite.OverviewCreatedTaskRow, error)
+
+	// The last-24-hours sources no earlier query answered.
+	ListOverviewModelBlocks(
+		ctx context.Context, since, now time.Time, limit int,
+	) ([]*sqlite.OverviewModelBlockRow, error)
+	ListOverviewMergedPRs(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewMergedPRRow, error)
+	ListOverviewAutomationFailures(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewAutomationFailureRow, error)
+	ListOverviewDecisions(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewDecisionRow, error)
+	ListOverviewStepTransitions(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewStepTransitionRow, error)
+	ListOverviewFailureFollowups(
+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+	) ([]*sqlite.OverviewFailureFollowupRow, error)
 }
 
 // AnswerableQuestionLister lists answerable clarification bundles of the
@@ -92,6 +118,12 @@ func (s *DashboardService) SetOverviewScopeSource(src OverviewScopeSource) { s.s
 // the running-session count.
 func (s *DashboardService) SetOverviewSessionLimit(limit int) { s.overviewSessionLimit = limit }
 
+// SetBuildInfo records the running binary's version for the overview's
+// server-start row. It is a setter rather than a constructor argument so the
+// dashboard keeps one composition signature, and an unwired service reports no
+// version rather than a placeholder one.
+func (s *DashboardService) SetBuildInfo(version string) { s.buildVersion = version }
+
 // overviewSnapshot is one computed overview, shared by the summary response
 // and the list routes for the cache lifetime.
 type overviewSnapshot struct {
@@ -113,6 +145,13 @@ type overviewSnapshot struct {
 	// circuitsAvailable records whether the dynamic-circuit source answered.
 	// Absent means unknown, never "no circuits".
 	circuitsAvailable bool
+
+	// followups maps a failed session id to what followed it, read on this same
+	// pass so the reported recovery advances whenever the screen does.
+	followups map[string]*sqlite.OverviewFailureFollowupRow
+	// buildVersion is the running binary's version for this pass, empty when
+	// nothing wired one.
+	buildVersion string
 }
 
 // overviewScope resolves the caller's scope, falling back to Office.
@@ -190,7 +229,7 @@ func (s *DashboardService) buildOverviewSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	snap := &overviewSnapshot{resp: resp, now: started.UTC(), names: map[string]string{}}
+	snap := &overviewSnapshot{resp: resp, now: started.UTC(), names: map[string]string{}, buildVersion: s.buildVersion}
 	for _, w := range ordered {
 		snap.names[w.ID] = w.Name
 	}
@@ -240,9 +279,79 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 	if err != nil {
 		return err
 	}
+	extra := s.readExtraEvents(ctx, snap, ids, since)
 	assembleSystem(snap, s.overviewSessionLimit, th)
-	snap.resp.Last24h = assembleEvents(snap, automation, created, since)
+	snap.resp.Last24h = assembleEvents(snap, automation, created, extra, since)
 	return nil
+}
+
+// readExtraEvents reads the last-24-hours sources the original event merge does
+// not cover, plus the failure follow-ups the failed rows carry. Model blocks are
+// instance-wide rather than workspace-scoped, so they are read once per pass
+// and every event they produce is install-wide by nature.
+//
+// Each source is read independently and a source that cannot answer contributes
+// no events rather than failing the read, which is how the blocked-circuits
+// source already behaves: these tables are owned by the task, automation, and
+// code-host schemas rather than by this one, so an install whose schema predates
+// one of them would otherwise lose the whole overview over a supplementary
+// section. A missing source omits its kind; it never reports that kind as empty.
+func (s *DashboardService) readExtraEvents(
+	ctx context.Context, snap *overviewSnapshot, ids []string, since time.Time,
+) *overviewExtraEvents {
+	out := &overviewExtraEvents{}
+	out.blocks = readOptionalEventSource(func() ([]*sqlite.OverviewModelBlockRow, error) {
+		return s.overviewReader.ListOverviewModelBlocks(ctx, since, snap.now, overviewEventKindLimit)
+	})
+	out.mergedPRs = readOptionalEventSource(func() ([]*sqlite.OverviewMergedPRRow, error) {
+		return s.overviewReader.ListOverviewMergedPRs(ctx, ids, since, overviewEventKindLimit)
+	})
+	out.automationFailures = readOptionalEventSource(func() ([]*sqlite.OverviewAutomationFailureRow, error) {
+		return s.overviewReader.ListOverviewAutomationFailures(ctx, ids, since, overviewEventKindLimit)
+	})
+	out.decisions = readOptionalEventSource(func() ([]*sqlite.OverviewDecisionRow, error) {
+		return s.overviewReader.ListOverviewDecisions(ctx, ids, since, overviewEventKindLimit)
+	})
+	out.stepMoves = readOptionalEventSource(func() ([]*sqlite.OverviewStepTransitionRow, error) {
+		return s.overviewReader.ListOverviewStepTransitions(ctx, ids, since, overviewEventMoveLimit)
+	})
+	s.indexFailureFollowups(ctx, snap, readOptionalEventSource(func() ([]*sqlite.OverviewFailureFollowupRow, error) {
+		return s.overviewReader.ListOverviewFailureFollowups(ctx, ids, since, overviewEventKindLimit)
+	}))
+	return out
+}
+
+// readOptionalEventSource runs one supplementary read and yields nothing when it
+// fails, so one unavailable source cannot take the overview down with it.
+func readOptionalEventSource[T any](read func() ([]*T, error)) []*T {
+	rows, err := read()
+	if err != nil {
+		return nil
+	}
+	return rows
+}
+
+// indexFailureFollowups records what followed each failed session and names the
+// profiles the follow-up sessions ran on, so a failed row can report the model
+// that took over without a second lookup per row. A profile that no longer
+// resolves leaves its session unnamed rather than failing the read.
+func (s *DashboardService) indexFailureFollowups(
+	ctx context.Context, snap *overviewSnapshot, rows []*sqlite.OverviewFailureFollowupRow,
+) {
+	if len(rows) == 0 {
+		return
+	}
+	snap.followups = make(map[string]*sqlite.OverviewFailureFollowupRow, len(rows))
+	profileIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		snap.followups[row.SessionID] = row
+		if row.NextProfileID != "" {
+			profileIDs = append(profileIDs, row.NextProfileID)
+		}
+	}
+	// A profile read that fails leaves the model unnamed, which the client
+	// reports as unknown rather than dropping the follow-up it belongs to.
+	_ = s.loadProfileNames(ctx, snap, profileIDs)
 }
 
 // loadOverviewTasks reads the open tasks, their sessions, last outputs and

@@ -1,5 +1,5 @@
 import type { TFunction } from "i18next";
-import { formatCompactDuration, formatRelativeTime } from "@/lib/i18n/formats";
+import { formatCompactDuration, formatRelativeTime, formatTime } from "@/lib/i18n/formats";
 import type {
   OverviewBlockedCircuit,
   OverviewQueueItem,
@@ -139,6 +139,32 @@ export function durationSince(iso: string | undefined, now: number = Date.now())
 export function relativeTime(iso: string | undefined, now: number = Date.now()): string {
   if (!iso) return "";
   return formatRelativeTime(iso, now);
+}
+
+/**
+ * When something happened, as a fixed clock reading: today's `HH:mm`, and
+ * `MM-DD HH:mm` for anything earlier.
+ *
+ * A relative reading ("3 minutes ago") is only correct at the instant it was
+ * written, so a list left open keeps restating it or needs a ticker to stay
+ * truthful. The instant a thing happened does not move, so it is shown as the
+ * clock time it was, with the relative reading kept for hover where a reader
+ * asks "how long ago is that?". Durations are a different question and keep
+ * using `durationSince`.
+ */
+export function occurredTime(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const sameDay =
+    at.getFullYear() === new Date(now).getFullYear() &&
+    at.getMonth() === new Date(now).getMonth() &&
+    at.getDate() === new Date(now).getDate();
+  return formatTime(at, {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(sameDay ? {} : { month: "2-digit", day: "2-digit" }),
+  });
 }
 
 function numberValue(reason: OverviewReason, name: string): number {

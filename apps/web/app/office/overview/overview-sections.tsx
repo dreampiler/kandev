@@ -12,7 +12,8 @@ import type {
   OverviewEventKind,
   OverviewHumanItem,
 } from "@/lib/state/slices/office/overview-types";
-import { relativeTime } from "./overview-format";
+import { occurredTime, relativeTime } from "./overview-format";
+import { OverviewEventExtras } from "./overview-event-extras";
 import { eventToneName, statusBadgeClass } from "./overview-status-colors";
 import { SectionCard, SectionCardEmpty } from "./overview-section-card";
 import { NEEDS_HUMAN_ANCHOR } from "./overview-system-cards";
@@ -24,6 +25,12 @@ const EVENT_LABEL_KEYS: Record<OverviewEvent["kind"], string> = {
   task_completed: "common:taskStateCompleted",
   session_failed: "common:sessionStateFailed",
   automation_run: "common:automation",
+  model_blocked: "office:overviewEventModelBlocked",
+  model_unblocked: "office:overviewEventModelUnblocked",
+  pr_merged: "office:overviewEventPRMerged",
+  automation_failed: "office:overviewEventAutomationFailed",
+  owner_decision: "office:overviewEventOwnerDecision",
+  step_move: "office:overviewEventStepMove",
 };
 
 /**
@@ -93,8 +100,12 @@ export function OverviewNeedsHuman({ items }: { items: OverviewHumanItem[] }) {
                   {t("office:overviewRepeatedCount", { count: item.count })}
                 </Badge>
               )}
-              <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                {relativeTime(item.created_at)}
+              <span
+                className="whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+                title={relativeTime(item.created_at)}
+                data-testid="overview-human-time"
+              >
+                {occurredTime(item.created_at)}
               </span>
             </Link>
           ))}
@@ -156,27 +167,34 @@ export function OverviewLast24h({
             const tone = eventToneName(event.kind);
             const content = (
               <>
-                <span className="w-20 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                  {relativeTime(event.at)}
+                <span
+                  className="w-20 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+                  title={relativeTime(event.at)}
+                  data-testid="overview-event-time"
+                >
+                  {occurredTime(event.at)}
                 </span>
                 <Badge variant="outline" className={`shrink-0 ${statusBadgeClass(tone)}`}>
                   {t(EVENT_LABEL_KEYS[event.kind] ?? "common:unknown")}
                 </Badge>
-                <span className="min-w-0 flex-1 truncate">
-                  {event.workspace_id && (
-                    <span className="mr-1.5 text-xs text-muted-foreground">
-                      {workspaceNames[event.workspace_id]}
-                    </span>
-                  )}
-                  {event.title}
-                  {event.detail && (
-                    <span
-                      className="ml-1.5 max-w-[40%] truncate font-mono text-[11px] text-muted-foreground"
-                      title={event.detail}
-                    >
-                      {event.detail}
-                    </span>
-                  )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">
+                    {event.workspace_id && (
+                      <span className="mr-1.5 text-xs text-muted-foreground">
+                        {workspaceNames[event.workspace_id]}
+                      </span>
+                    )}
+                    {event.title}
+                    {event.detail && (
+                      <span
+                        className="ml-1.5 max-w-[40%] truncate font-mono text-[11px] text-muted-foreground"
+                        title={event.detail}
+                      >
+                        {event.detail}
+                      </span>
+                    )}
+                  </span>
+                  <OverviewEventExtras event={event} />
                 </span>
               </>
             );

@@ -449,6 +449,7 @@ type DashboardService struct {
 	circuitLister         DynamicCircuitLister            // optional; nil reports dynamic blocks as unknown rather than absent
 	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
 	overviewSessionLimit  int                             // instance session limit shown on the overview
+	buildVersion          string                          // running binary version shown on the overview's server-start row
 	overview              *overviewCache                  // lazily created by overviewCacheOrInit
 	overviewOnce          sync.Once
 }
