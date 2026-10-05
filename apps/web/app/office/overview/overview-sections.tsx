@@ -187,7 +187,7 @@ export function OverviewLast24h({
             const content = (
               <>
                 <span
-                  className="w-28 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground"
+                  className="shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground"
                   title={relativeTime(event.at)}
                   data-testid="overview-event-time"
                 >
