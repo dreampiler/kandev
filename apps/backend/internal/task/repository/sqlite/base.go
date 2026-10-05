@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Repository provides SQLite-based task storage operations.
@@ -34,6 +35,14 @@ type Repository struct {
 	// bulk move) needs this held across the whole sequence — see
 	// LockStepArrivalsForBatch.
 	stepArrivalLocks sync.Map
+	// sessionModelCatalogs caches provider model catalogs shared by task
+	// sessions. Entries are immutable once written, so a miss only costs one
+	// indexed read. Guarded because session scans run on many goroutines.
+	sessionModelCatalogsMu sync.RWMutex
+	sessionModelCatalogs   map[string]models.SessionModelCatalog
+	// sessionModelCatalogLocks serializes revision assignment per catalog key
+	// in this process; the database transaction serializes it across processes.
+	sessionModelCatalogLocks sync.Map
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
