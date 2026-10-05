@@ -249,7 +249,12 @@ that read-only check inside the same mutex as its population read and reservatio
 write. It selects the first eligible deferred launch in the requesting lane using
 the sweep's priority, position, original queue time, and ID order. Session-backed
 entries use the session's stored profile for lane classification. A refused new
-launch signals the existing sweep so free capacity does not wait for pacing.
+launch signals the existing sweep so free capacity does not wait for pacing. The
+check never ranks a launch ahead of the exact record that launch is already
+dispatching: a request holding that record's durable dispatch claim, or naming the
+same task and destination session the record carries, is not made to yield to
+itself, because a seam that admits before its session exists has no session
+identity to compare and would otherwise refuse its own replay on every sweep.
 
 The check performs no task admission locking, provider dispatch, event publication,
 or record mutation while holding the controller mutex. Final workflow-entry and

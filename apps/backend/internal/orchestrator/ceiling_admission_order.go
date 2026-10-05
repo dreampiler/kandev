@@ -54,9 +54,30 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 			s.sessionCeiling.reservations[destination] != nil {
 			continue
 		}
-		return task.ID != req.taskID || sessionIDFromCeilingPayload(deferral) != req.sessionID
+		return !s.ceilingRequestOwnsDeferredRecord(ctx, req, task.ID, deferral)
 	}
 	return false
+}
+
+// ceilingRequestOwnsDeferredRecord reports whether the deferred record the
+// deferred-order check just selected is the very launch this request is
+// already dispatching, so it must not be ranked ahead of itself. Two forms
+// count as the same launch: a request already holding the durable dispatch
+// claim for that exact record (the sweep and Send Now both claim before they
+// dispatch, and seam 1 has no session id to compare), and a request naming
+// the same task and the same destination session the record carries. A request
+// that finds an older, different record on its own task holds no claim and
+// therefore still yields, as does a same-task launch naming another session.
+func (s *Service) ceilingRequestOwnsDeferredRecord(
+	ctx context.Context, req admissionRequest, taskID string, deferral models.CeilingDeferral,
+) bool {
+	if claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim); claim != nil &&
+		claim.taskID == taskID {
+		if equivalent, err := sameCeilingDeferralIdentity(claim.deferral, deferral); err == nil && equivalent {
+			return true
+		}
+	}
+	return taskID == req.taskID && sessionIDFromCeilingPayload(deferral) == req.sessionID
 }
 
 func (s *Service) ceilingAdmissionCandidate(ctx context.Context, task *models.Task) (models.CeilingDeferral, bool) {
