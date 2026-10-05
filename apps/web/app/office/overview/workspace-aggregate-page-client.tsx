@@ -14,7 +14,9 @@ import { useWorkspaceAggregate } from "@/hooks/domains/office/use-workspace-aggr
 import { useTranslation } from "react-i18next";
 import { OverviewHeader } from "./overview-header";
 import { OverviewSystemCards } from "./overview-system-cards";
-import { OverviewLast24h, OverviewModels, OverviewNeedsHuman } from "./overview-sections";
+import { OverviewLast24h, OverviewNeedsHuman } from "./overview-sections";
+import { OverviewModels } from "./overview-models";
+import { OverviewStatusLegend } from "./overview-status-legend";
 import { OverviewWorkspaceCard } from "./overview-workspace-card";
 
 /**
@@ -125,6 +127,7 @@ function OverviewBody({
         refreshSeconds={refreshSeconds}
       />
       {sections && !loading && <OverviewNeedsHuman items={sections.needs_human ?? []} />}
+      <OverviewStatusLegend />
       <WorkspaceCards
         workspaces={ordered}
         refreshSeconds={refreshSeconds}

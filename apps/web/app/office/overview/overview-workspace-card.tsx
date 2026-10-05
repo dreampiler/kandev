@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import Link from "@/components/routing/app-link";
 import { Card } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -19,10 +19,13 @@ import type {
   OverviewThresholds,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
-import { PROBLEM_STATUSES, reasonText, relativeTime } from "./overview-format";
+import { PROBLEM_STATUSES, reasonText } from "./overview-format";
+import { WorkspaceMetrics } from "./overview-metrics";
 import { OverviewListBody } from "./overview-system-cards";
-import { OverviewStatusBadge, OverviewTaskTable } from "./overview-tables";
+import { OverviewTaskTable } from "./overview-tables";
 import { OverviewProblemBreakdown, OverviewProblemTooltip } from "./overview-problems";
+import { OverviewStatusName } from "./overview-status-legend";
+import { statusTextClass, type OverviewStatusTone } from "./overview-status-colors";
 
 const TASK_LIST_LIMIT = 50;
 const TASK_LIST_ALL_LIMIT = 500;
@@ -34,48 +37,6 @@ const FILTER_CHIPS: { filter: OverviewTaskFilter; labelKey: string }[] = [
   { filter: "hold", labelKey: "office:projectStatusOnHold" },
   { filter: "all", labelKey: "office:all" },
 ];
-
-function Metric({
-  label,
-  value,
-  sub,
-  onClick,
-  href,
-  active,
-}: {
-  label: string;
-  value: ReactNode;
-  sub?: ReactNode;
-  onClick?: () => void;
-  href?: string;
-  active?: boolean;
-}) {
-  const body = (
-    <>
-      <div className="text-[11px] text-muted-foreground">{label}</div>
-      <div className="text-lg font-semibold tabular-nums">{value}</div>
-      <div className="min-h-3 text-[11px] text-muted-foreground">{sub}</div>
-    </>
-  );
-  const className = `block rounded-md p-2 text-center transition-colors hover:bg-muted/60 cursor-pointer ${
-    active ? "bg-muted" : ""
-  }`;
-  if (href) {
-    return (
-      <Link href={href} className={className}>
-        {body}
-      </Link>
-    );
-  }
-  if (onClick) {
-    return (
-      <button type="button" className={className} onClick={onClick}>
-        {body}
-      </button>
-    );
-  }
-  return <div className="p-2 text-center">{body}</div>;
-}
 
 /**
  * One workspace card. Its own overview read drives the metrics and the problem
@@ -142,6 +103,7 @@ function WorkspaceCardBody({
     setLimit(TASK_LIST_LIMIT);
   };
   const quiet = !metrics || (metrics.open_tasks === 0 && metrics.running_sessions === 0);
+  const active = !quiet && Boolean(metrics);
   const listId = `overview-tasks-${workspace.workspace_id}`;
 
   return (
@@ -157,16 +119,23 @@ function WorkspaceCardBody({
         <span className="text-[11px] text-muted-foreground">
           {t(workspace.is_office ? "sidebar:office" : "sidebar:kanban")}
         </span>
-        {metrics && !quiet && <OverviewStatusBadge status={metrics.status} />}
-        {quiet && <span className="text-xs text-muted-foreground">{t("office:allClear")}</span>}
+        {active ? (
+          <>
+            <OverviewStatusName status={metrics.status} className="text-xs" />
+            <span className="text-[11px]">
+              <ProblemToneLine problems={metrics.problems} />
+            </span>
+          </>
+        ) : (
+          <span className="text-xs text-muted-foreground">{t("office:allClear")}</span>
+        )}
       </div>
-      {metrics && !quiet && <WorkspaceMetrics metrics={metrics} filter={filter} onFilter={show} />}
-      {metrics && !quiet && <ParentsAndWarning metrics={metrics} parents={parents} />}
-      {metrics && !quiet && (
-        <WorkspaceDetail
-          id={listId}
-          workspaceId={workspace.workspace_id}
+      {active && metrics && (
+        <WorkspaceActiveBody
+          workspace={workspace}
           metrics={metrics}
+          parents={parents}
+          listId={listId}
           filter={filter}
           limit={limit}
           onFilter={show}
@@ -177,6 +146,53 @@ function WorkspaceCardBody({
       )}
       {quiet && <div className="pb-3" />}
     </Card>
+  );
+}
+
+/**
+ * Everything a project card shows once it is known to have work: the metric
+ * tiles, the parent and warning lines, and the one disclosure that opens the
+ * lists. A card with nothing open stops at its name.
+ */
+function WorkspaceActiveBody({
+  workspace,
+  metrics,
+  parents,
+  listId,
+  filter,
+  limit,
+  onFilter,
+  onShowAll,
+  refreshSeconds,
+  thresholds,
+}: {
+  workspace: WorkspaceAggregateEntry;
+  metrics: OverviewWorkspaceMetrics;
+  parents: OverviewParentTask[];
+  listId: string;
+  filter: OverviewTaskFilter | null;
+  limit: number;
+  onFilter: (filter: OverviewTaskFilter) => void;
+  onShowAll: () => void;
+  refreshSeconds: number;
+  thresholds?: OverviewThresholds;
+}) {
+  return (
+    <>
+      <WorkspaceMetrics metrics={metrics} filter={filter} onFilter={onFilter} />
+      <ParentsAndWarning metrics={metrics} parents={parents} />
+      <WorkspaceDetail
+        id={listId}
+        workspaceId={workspace.workspace_id}
+        metrics={metrics}
+        filter={filter}
+        limit={limit}
+        onFilter={onFilter}
+        onShowAll={onShowAll}
+        refreshSeconds={refreshSeconds}
+        thresholds={thresholds}
+      />
+    </>
   );
 }
 
@@ -226,61 +242,38 @@ function WorkspaceCardSkeleton({ name }: { name: string }) {
   );
 }
 
-function WorkspaceMetrics({
-  metrics,
-  filter,
-  onFilter,
-}: {
-  metrics: OverviewWorkspaceMetrics;
-  filter: OverviewTaskFilter | null;
-  onFilter: (filter: OverviewTaskFilter) => void;
-}) {
+/** The worst state actually present, which is the one the count wears. */
+function worstProblemTone(
+  problems: OverviewWorkspaceMetrics["problems"],
+): OverviewStatusTone | null {
+  if (problems.error > 0) return "error";
+  if (problems.stalled > 0) return "stalled";
+  if (problems.delayed > 0) return "delayed";
+  return null;
+}
+
+/**
+ * The project name line's problem count, wearing the color of the worst state
+ * actually present. A project with no problems shows nothing here rather than
+ * a zero, because the expanded breakdown below already says so.
+ */
+function ProblemToneLine({ problems }: { problems: OverviewWorkspaceMetrics["problems"] }) {
   const { t } = useTranslation();
+  const tone = worstProblemTone(problems);
+  if (!tone) return null;
+  const total = problems.error + problems.stalled + problems.delayed;
   return (
-    <div className="grid grid-cols-2 gap-1 px-2 pt-2 sm:grid-cols-3 lg:grid-cols-6">
-      <Metric
-        label={t("office:overviewActiveTasks")}
-        value={metrics.active_tasks}
-        onClick={() => onFilter("active")}
-        active={filter === "active"}
-      />
-      <Metric
-        label={t("office:overviewRunningSessions")}
-        value={metrics.running_sessions}
-        sub={t("office:overviewWaitingInput", { count: metrics.waiting_input_sessions })}
-        onClick={() => onFilter("sessions")}
-        active={filter === "sessions"}
-      />
-      <Metric
-        label={t("office:overviewLastOutput")}
-        value={metrics.last_output_at ? relativeTime(metrics.last_output_at) : "-"}
-        href={metrics.last_output_task_id ? linkToTask(metrics.last_output_task_id) : undefined}
-      />
-      <Metric
-        label={t("chat:queuedMessages")}
-        value={metrics.queued_messages}
-        onClick={() => onFilter("queued")}
-        active={filter === "queued"}
-      />
-      <Metric
-        label={t("office:overviewCompleted24h")}
-        value={metrics.completed_24h}
-        onClick={() => onFilter("completed")}
-        active={filter === "completed"}
-      />
-      <Metric
-        label={t("office:overviewOpenTasks")}
-        value={metrics.open_tasks}
-        sub={t("office:overviewOpenBreakdown", {
-          waiting: metrics.waiting_tasks,
-          hold: metrics.blocked_tasks,
-        })}
-        onClick={() => onFilter("all")}
-        active={filter === "all"}
-      />
-    </div>
+    <span className={statusTextClass(tone)}>
+      {t("office:overviewProblemCount", { count: total })}
+    </span>
   );
 }
+
+/**
+ * The parent tasks and the one warning worth surfacing. Each line wears the
+ * color of its own state, so a parent task that is on hold does not read like
+ * one that is running.
+ */
 
 function ParentsAndWarning({
   metrics,
@@ -293,36 +286,38 @@ function ParentsAndWarning({
   const warning = metrics.top_warning;
   if (!warning && parents.length === 0) return null;
   return (
-    <div className="space-y-1 px-4 pt-2">
-      {parents.map((parent) => (
-        <Link
-          key={parent.task_id}
-          href={linkToTask(parent.task_id)}
-          className="flex items-center gap-2 text-xs hover:underline"
-          data-testid="overview-parent-task"
-        >
-          <OverviewStatusBadge status={parent.status} />
-          <span className="truncate font-medium">{parent.title}</span>
-          <span className="text-muted-foreground">
-            {t("office:overviewSubtasksOpen", {
-              open: parent.open_children,
-              total: parent.children,
-            })}
-          </span>
-        </Link>
-      ))}
-      {warning && (
-        <Link
-          href={linkToTask(warning.task_id)}
-          className="flex items-center gap-2 text-xs text-destructive hover:underline"
-          data-testid="overview-warning"
-        >
-          <OverviewStatusBadge status={warning.status} />
-          <span className="truncate">
-            {warning.task_title} · {reasonText(t, warning.reason)}
-          </span>
-        </Link>
-      )}
+    <div className="px-4 pt-2">
+      <div className="space-y-1 rounded-md border border-tile-border bg-tile p-2">
+        {parents.map((parent) => (
+          <Link
+            key={parent.task_id}
+            href={linkToTask(parent.task_id)}
+            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-xs hover:underline"
+            data-testid="overview-parent-task"
+          >
+            <OverviewStatusName status={parent.status} />
+            <span className="truncate font-medium">{parent.title}</span>
+            <span className="text-muted-foreground">
+              {t("office:overviewSubtasksOpen", {
+                open: parent.open_children,
+                total: parent.children,
+              })}
+            </span>
+          </Link>
+        ))}
+        {warning && (
+          <Link
+            href={linkToTask(warning.task_id)}
+            className="flex items-center gap-2 rounded-md border border-status-error/30 bg-status-error/5 px-1 py-0.5 text-xs hover:underline"
+            data-testid="overview-warning"
+          >
+            <OverviewStatusName status={warning.status} />
+            <span className={statusTextClass("error")}>
+              {warning.task_title} · {reasonText(t, warning.reason)}
+            </span>
+          </Link>
+        )}
+      </div>
     </div>
   );
 }
@@ -351,6 +346,7 @@ function WorkspaceDetail({
   onFilter: (filter: OverviewTaskFilter) => void;
   onShowAll: () => void;
   refreshSeconds: number;
+  /** The limits the backend applied on this read, shown by the criteria tooltip. */
   thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
@@ -359,7 +355,7 @@ function WorkspaceDetail({
   const total = problems.error + problems.stalled + problems.delayed;
 
   return (
-    <div className="mt-2 border-t border-border px-4 pb-3">
+    <div className="mt-2 border-t border-border bg-tile px-4 pb-3">
       <div className="flex flex-wrap items-center gap-2 pt-3">
         <Button
           variant="outline"

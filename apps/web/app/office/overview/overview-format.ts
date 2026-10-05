@@ -7,6 +7,7 @@ import type {
   OverviewReason,
   OverviewStatus,
 } from "@/lib/state/slices/office/overview-types";
+import { statusBadgeClass, statusTextClass, statusToneName } from "./overview-status-colors";
 
 // Catalog keys, not copy. The record keys are wire codes from the overview
 // API; every sentence is phrased here so the server never sends prose.
@@ -170,21 +171,23 @@ export function reasonText(t: TFunction, reason: OverviewReason | undefined): st
 
 /** Status color classes shared by badges and status dots. */
 export function statusTone(status: OverviewStatus | OverviewQueueStatus | undefined): string {
-  switch (status) {
-    case "error":
-    case "undeliverable":
-      return "bg-destructive/10 text-destructive border-destructive/30";
-    case "stalled":
-      return "bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400";
-    case "delayed":
-      return "bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400";
-    case "running":
-      return "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400";
-    case "blocked":
-      return "bg-violet-500/10 text-violet-700 border-violet-500/30 dark:text-violet-300";
-    default:
-      return "bg-muted text-muted-foreground border-border";
-  }
+  return statusBadgeClass(statusToneName(status));
+}
+
+/**
+ * The color for a row's time in its current step.
+ *
+ * The row is colored when the backend itself classified it as delayed *because*
+ * of step dwell. That pairing is the backend's own verdict rather than this
+ * screen re-deriving the rule: `status` and the task's `state` are independent,
+ * so choosing a limit from one of them and comparing it here disagreed with the
+ * server on ordinary rows. Reading the reason the server attached to the status
+ * keeps the two in agreement by construction, and a row the server did not
+ * classify this way is simply left uncolored.
+ */
+export function stepDwellTone(row: { status?: OverviewStatus; reason?: OverviewReason }): string {
+  if (row.status !== "delayed" || row.reason?.code !== "step_dwell") return "";
+  return statusTextClass("delayed");
 }
 
 /** Short display form of an id for table rows. */
