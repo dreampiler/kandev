@@ -6,7 +6,6 @@ import type {
   OverviewQueueStatus,
   OverviewReason,
   OverviewStatus,
-  OverviewThresholds,
 } from "@/lib/state/slices/office/overview-types";
 import { statusBadgeClass, statusTextClass, statusToneName } from "./overview-status-colors";
 
@@ -176,33 +175,19 @@ export function statusTone(status: OverviewStatus | OverviewQueueStatus | undefi
 }
 
 /**
- * The color for a row's time in its current step. The limit is the one the
- * backend applied on this read for that row's state, so the color cannot drift
- * from the rule that classified it, and a read that reported no limits leaves
- * the column uncolored rather than inventing one.
+ * The color for a row's time in its current step.
+ *
+ * The row is colored when the backend itself classified it as delayed *because*
+ * of step dwell. That pairing is the backend's own verdict rather than this
+ * screen re-deriving the rule: `status` and the task's `state` are independent,
+ * so choosing a limit from one of them and comparing it here disagreed with the
+ * server on ordinary rows. Reading the reason the server attached to the status
+ * keeps the two in agreement by construction, and a row the server did not
+ * classify this way is simply left uncolored.
  */
-export function stepDwellTone(
-  status: OverviewStatus | undefined,
-  thresholds: OverviewThresholds | undefined,
-  enteredAt: string | undefined,
-  now: number = Date.now(),
-): string {
-  const limit = dwellLimitMinutes(status, thresholds);
-  if (limit === undefined || !enteredAt) return "";
-  const at = new Date(enteredAt).getTime();
-  if (Number.isNaN(at)) return "";
-  if ((now - at) / 60_000 <= limit) return "";
+export function stepDwellTone(row: { status?: OverviewStatus; reason?: OverviewReason }): string {
+  if (row.status !== "delayed" || row.reason?.code !== "step_dwell") return "";
   return statusTextClass("delayed");
-}
-
-function dwellLimitMinutes(
-  status: OverviewStatus | undefined,
-  thresholds: OverviewThresholds | undefined,
-): number | undefined {
-  if (!thresholds) return undefined;
-  if (status === "waiting") return thresholds.dwell_review_minutes;
-  if (status === "blocked") return thresholds.dwell_hold_minutes;
-  return thresholds.dwell_in_progress_minutes;
 }
 
 /** Short display form of an id for table rows. */

@@ -50,6 +50,26 @@
   --color-remote-foreground: var(--remote-foreground);
   --color-archived: var(--archived);
   --color-archived-foreground: var(--archived-foreground);
+  --color-status-error: var(--status-error);
+  --color-status-error-text: var(--status-error-text);
+  --color-status-stalled: var(--status-stalled);
+  --color-status-stalled-text: var(--status-stalled-text);
+  --color-status-delayed: var(--status-delayed);
+  --color-status-delayed-text: var(--status-delayed-text);
+  --color-status-running: var(--status-running);
+  --color-status-running-text: var(--status-running-text);
+  --color-status-idle: var(--status-idle);
+  --color-status-idle-text: var(--status-idle-text);
+  --color-status-hold: var(--status-hold);
+  --color-status-hold-text: var(--status-hold-text);
+  --color-status-info: var(--status-info);
+  --color-status-info-text: var(--status-info-text);
+  --color-tile: var(--tile);
+  --color-tile-border: var(--tile-border);
+  --color-attention-surface: var(--attention-surface);
+  --color-attention-border: var(--attention-border);
+  --color-attention-title: var(--attention-title);
+  --color-attention-foreground: var(--attention-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -112,6 +132,31 @@
   --remote-foreground: oklch(0.982 0.01 185);
   --archived: oklch(0.556 0 0);
   --archived-foreground: oklch(0.985 0 0);
+  /* Status colors. Each one has two values because a status dot and body text
+     carry different contrast duties: `-text` clears 4.5:1 on the light
+     surfaces, the plain value clears 3:1 so a dot stays visible. */
+  --status-error: oklch(0.58 0.18 27);
+  --status-error-text: oklch(0.52 0.19 27);
+  --status-stalled: oklch(0.6 0.14 50);
+  --status-stalled-text: oklch(0.5 0.13 45);
+  --status-delayed: oklch(0.6 0.13 80);
+  --status-delayed-text: oklch(0.52 0.12 75);
+  --status-running: oklch(0.58 0.13 152);
+  --status-running-text: oklch(0.5 0.12 152);
+  --status-idle: oklch(0.58 0 0);
+  --status-idle-text: oklch(0.5 0 0);
+  --status-hold: oklch(0.58 0.16 300);
+  --status-hold-text: oklch(0.5 0.16 300);
+  --status-info: oklch(0.58 0.14 248);
+  --status-info-text: oklch(0.5 0.12 250);
+  /* A sub-item surface, one step off the card it sits on. */
+  --tile: oklch(0.975 0 0);
+  --tile-border: oklch(0.922 0 0);
+  /* The section that waits on a person: a warm surface, not another card. */
+  --attention-surface: oklch(0.955 0.012 85);
+  --attention-border: oklch(0.8 0.06 85);
+  --attention-title: oklch(0.45 0.09 80);
+  --attention-foreground: oklch(0.3 0.02 80);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -172,6 +217,26 @@
   --remote-foreground: oklch(0.16 0.025 185);
   --archived: oklch(0.708 0 0);
   --archived-foreground: oklch(0.145 0 0);
+  --status-error: oklch(0.7 0.16 27);
+  --status-error-text: oklch(0.72 0.16 27);
+  --status-stalled: oklch(0.74 0.13 50);
+  --status-stalled-text: oklch(0.74 0.13 50);
+  --status-delayed: oklch(0.78 0.12 80);
+  --status-delayed-text: oklch(0.76 0.12 80);
+  --status-running: oklch(0.72 0.14 152);
+  --status-running-text: oklch(0.74 0.12 152);
+  --status-idle: oklch(0.56 0 0);
+  --status-idle-text: oklch(0.72 0 0);
+  --status-hold: oklch(0.72 0.13 300);
+  --status-hold-text: oklch(0.74 0.12 300);
+  --status-info: oklch(0.72 0.12 248);
+  --status-info-text: oklch(0.74 0.11 245);
+  --tile: oklch(0.155 0 0);
+  --tile-border: oklch(1 0 0 / 10%);
+  --attention-surface: oklch(0.2 0.014 85);
+  --attention-border: oklch(0.35 0.05 85);
+  --attention-title: oklch(0.85 0.09 85);
+  --attention-foreground: oklch(0.93 0.02 85);
   --border: #2a2a2a;
   --input: #2a2a2a;
   --ring: #555555;

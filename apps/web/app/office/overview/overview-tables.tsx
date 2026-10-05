@@ -10,7 +10,6 @@ import type {
   OverviewSessionItem,
   OverviewStatus,
   OverviewTaskItem,
-  OverviewThresholds,
 } from "@/lib/state/slices/office/overview-types";
 import {
   durationSince,
@@ -114,12 +113,9 @@ function TaskTitleCell({
 export function OverviewTaskTable({
   rows,
   showProject,
-  thresholds,
 }: {
   rows: OverviewTaskItem[];
   showProject?: boolean;
-  /** The limits this read applied, so time-in-step is colored by its own rule. */
-  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   return (
@@ -161,11 +157,7 @@ export function OverviewTaskTable({
               {relativeTime(row.last_output_at)}
             </TableCell>
             <TableCell
-              className={`whitespace-nowrap text-right text-xs tabular-nums ${stepDwellTone(
-                row.status,
-                thresholds,
-                row.step_entered_at,
-              )}`}
+              className={`whitespace-nowrap text-right text-xs tabular-nums ${stepDwellTone(row)}`}
             >
               {durationSince(row.step_entered_at)}
             </TableCell>

@@ -346,6 +346,7 @@ function WorkspaceDetail({
   onFilter: (filter: OverviewTaskFilter) => void;
   onShowAll: () => void;
   refreshSeconds: number;
+  /** The limits the backend applied on this read, shown by the criteria tooltip. */
   thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
@@ -381,7 +382,6 @@ function WorkspaceDetail({
             workspaceId={workspaceId}
             total={total}
             refreshSeconds={refreshSeconds}
-            thresholds={thresholds}
           />
           <div className="mt-3 flex flex-wrap gap-1" role="group">
             {FILTER_CHIPS.map((chip) => (
@@ -403,7 +403,6 @@ function WorkspaceDetail({
             limit={limit}
             onShowAll={onShowAll}
             refreshSeconds={refreshSeconds}
-            thresholds={thresholds}
           />
         </div>
       )}
@@ -419,12 +418,10 @@ function WorkspaceProblemList({
   workspaceId,
   total,
   refreshSeconds,
-  thresholds,
 }: {
   workspaceId: string;
   total: number;
   refreshSeconds: number;
-  thresholds?: OverviewThresholds;
 }) {
   const list = useOverviewList(
     `problems:${workspaceId}`,
@@ -444,10 +441,7 @@ function WorkspaceProblemList({
   return (
     <div className="rounded-md border border-border" data-testid="overview-workspace-problems">
       <OverviewListBody state={list.loadState} empty={(list.data?.total ?? 0) === 0}>
-        <OverviewTaskTable
-          rows={(list.data?.tasks ?? []).filter(isProblemRow)}
-          thresholds={thresholds}
-        />
+        <OverviewTaskTable rows={(list.data?.tasks ?? []).filter(isProblemRow)} />
       </OverviewListBody>
     </div>
   );
@@ -482,14 +476,12 @@ function WorkspaceTaskList({
   limit,
   onShowAll,
   refreshSeconds,
-  thresholds,
 }: {
   workspaceId: string;
   filter: OverviewTaskFilter;
   limit: number;
   onShowAll: () => void;
   refreshSeconds: number;
-  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   const list = useOverviewList(
@@ -502,7 +494,7 @@ function WorkspaceTaskList({
   return (
     <div className="mt-2" data-testid="overview-workspace-task-list">
       <OverviewListBody state={list.loadState} empty={total === 0}>
-        <OverviewTaskTable rows={list.data?.tasks ?? []} thresholds={thresholds} />
+        <OverviewTaskTable rows={list.data?.tasks ?? []} />
         {total > shown && (
           <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
             {t("office:overviewShowingOf", { shown, total })}

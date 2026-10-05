@@ -8,11 +8,7 @@ import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { getWorkspaceAggregateRunning } from "@/lib/api/domains/office-overview-api";
 import { useOverviewList } from "@/hooks/domains/office/use-overview-list";
-import type {
-  OverviewRunningKind,
-  OverviewSystem,
-  OverviewThresholds,
-} from "@/lib/state/slices/office/overview-types";
+import type { OverviewRunningKind, OverviewSystem } from "@/lib/state/slices/office/overview-types";
 import { durationSince, relativeTime } from "./overview-format";
 import { OverviewQueueTable, OverviewSessionTable, OverviewTaskTable } from "./overview-tables";
 import { OverviewStatusDot } from "./overview-status-legend";
@@ -220,12 +216,7 @@ export function OverviewSystemCards({
         />
       </div>
       {open && (
-        <OverviewRunningPanel
-          kind={open}
-          onKind={setOpen}
-          refreshSeconds={refreshSeconds}
-          thresholds={values.problem_thresholds}
-        />
+        <OverviewRunningPanel kind={open} onKind={setOpen} refreshSeconds={refreshSeconds} />
       )}
     </section>
   );
@@ -235,12 +226,10 @@ function OverviewRunningPanel({
   kind,
   onKind,
   refreshSeconds,
-  thresholds,
 }: {
   kind: OverviewRunningKind;
   onKind: (kind: OverviewRunningKind | null) => void;
   refreshSeconds: number;
-  thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
   const list = useOverviewList(
@@ -264,7 +253,7 @@ function OverviewRunningPanel({
         </Button>
       </div>
       <OverviewListBody state={list.loadState} empty={(data?.total ?? 0) === 0}>
-        {data?.tasks && <OverviewTaskTable rows={data.tasks} showProject thresholds={thresholds} />}
+        {data?.tasks && <OverviewTaskTable rows={data.tasks} showProject />}
         {data?.sessions && <OverviewSessionTable rows={data.sessions} />}
         {data?.queue && <OverviewQueueTable rows={data.queue} />}
         {data && data.total > RUNNING_LIST_LIMIT && (
