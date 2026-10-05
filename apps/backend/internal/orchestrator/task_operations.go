@@ -2937,10 +2937,13 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	preserveDirectPrompt bool,
 	promptReferencesPrepared bool,
 ) (string, string) {
-	_ = sessionID
 	var parts []string
 
-	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" {
+	// The common-instructions block is a per-session delivery, not a per-step
+	// one: a session that already carries this exact block keeps it across the
+	// steps it moves through instead of accumulating a copy per step.
+	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" &&
+		s.pendingWorkflowInstructionsForSession(sessionID, block) {
 		parts = append(parts, block)
 	}
 
@@ -3726,6 +3729,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	}
 
 	if err := s.ensureSessionRunningWithBinding(ctx, sessionID, session, launchOriginAutomatic, entryBinding); err != nil {
+		s.clearWorkflowInstructionsDelivered(sessionID)
 		return err
 	}
 	preConsultRes.consume()
@@ -3768,6 +3772,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		ceilingEntryBinding:    entryBinding,
 	})
 	if err != nil {
+		s.clearWorkflowInstructionsDelivered(sessionID)
 		return fmt.Errorf("failed to prompt session: %w", err)
 	}
 
@@ -5326,6 +5331,7 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// The row is gone, so retire the detached-launch attestation and parked
 	// projection before any later session event can reuse this ID.
 	s.clearParkedProjectionOnSessionDeleted(ctx, taskID, sessionID)
+	s.clearWorkflowInstructionsDelivered(sessionID)
 
 	// Drop the in-memory git snapshot throttle entries for an environment only
 	// after its session has been removed. The cache is environment-scoped, so a
@@ -6427,6 +6433,8 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if options.internalContinuation {
 		effectivePrompt = prompt
 	}
+	effectivePrompt, instructionsDelivery, instructionsPending :=
+		s.workflowInstructionsForPrompt(resumePromptCtx, taskID, sessionID, effectivePrompt, options.internalContinuation)
 	if options.fallbackUsesEffectivePrompt {
 		options.fallbackLaunchPrompt = effectivePrompt
 		options.fallbackRetryPrompt = effectivePrompt
@@ -6463,6 +6471,17 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 			s.lastTurnPrompt.Delete(sessionID)
 		}
 	}()
+
+	// Record the common-instructions block only once this turn is accepted, so a
+	// turn the provider refuses leaves the session eligible to receive it on a
+	// later message instead of silently never receiving it.
+	if instructionsPending {
+		defer func() {
+			if promptAccepted.Load() {
+				s.workflowInstructionsDelivered.Store(sessionID, instructionsDelivery)
+			}
+		}()
+	}
 
 	// Cache the replay identity and acquire the model-switch guard before switching.
 	modelSwitchGuard, err := s.prepareModelSwitchGuard(

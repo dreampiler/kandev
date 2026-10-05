@@ -4627,6 +4627,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 			// that prompt once; the destination's automatic prompt must not
 			// create a competing passthrough turn.
 			s.drainQueuedMessageForPromptableSessionWithHandoff(ctx, taskID, sessionID, step.ID, handoffOnce)
+			s.clearWorkflowInstructionsDelivered(sessionID)
 			return
 		}
 		// Started passthrough path: write prompt directly to PTY stdin.
@@ -4654,6 +4655,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			s.clearWorkflowInstructionsDelivered(sessionID)
 		}
 
 	case hasAutoStart:
@@ -4677,6 +4679,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 				zap.Error(err))
 			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
 			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+			s.clearWorkflowInstructionsDelivered(sessionID)
 		}
 
 	default:
@@ -4744,6 +4747,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 							zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 						s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 						s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+						s.clearWorkflowInstructionsDelivered(replacement.ID)
 					}
 					return
 				}
@@ -4788,6 +4792,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 								zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 							s.setSessionWaitingForInput(asyncCtx, taskID, replacement.ID, replacement)
 							s.publishSessionWaitingEvent(asyncCtx, taskID, replacement.ID, stepID, replacement)
+							s.clearWorkflowInstructionsDelivered(replacement.ID)
 						}
 						return
 					}
@@ -4797,6 +4802,7 @@ func (s *Service) launchAfterOnEnterDispatch(
 						zap.Error(err))
 					s.setSessionWaitingForInput(asyncCtx, taskID, sessionID, fresh)
 					s.publishSessionWaitingEvent(asyncCtx, taskID, sessionID, stepID, fresh)
+					s.clearWorkflowInstructionsDelivered(sessionID)
 					s.drainQueuedMessageForPromptableSessionWithHandoff(asyncCtx, taskID, sessionID, stepID, handoffOnce)
 				}
 			}()
@@ -4865,6 +4871,7 @@ func (s *Service) replaceTerminalizedAutoStartSession(
 			zap.String("task_id", taskID), zap.String("session_id", replacement.ID), zap.Error(replacementErr))
 		s.setSessionWaitingForInput(ctx, taskID, replacement.ID, replacement)
 		s.publishSessionWaitingEvent(ctx, taskID, replacement.ID, step.ID, replacement)
+		s.clearWorkflowInstructionsDelivered(replacement.ID)
 	}
 }
 
@@ -6956,6 +6963,9 @@ func (s *Service) resetAgentContextWithError(
 
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
 	defer releaseLifecycleLock()
+	// The new ACP conversation starts from nothing, so this session is owed the
+	// workflow common instructions again even though its ID is unchanged.
+	s.clearWorkflowInstructionsDelivered(sessionID)
 	resetGuard := s.lockCancelInFlightGuard(sessionID)
 	s.setSessionResetInProgress(sessionID, true)
 	defer func() {
