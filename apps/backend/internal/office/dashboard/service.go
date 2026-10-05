@@ -447,6 +447,7 @@ type DashboardService struct {
 	overviewReader        OverviewReader                  // optional; nil keeps the aggregate to its original counts
 	questionLister        AnswerableQuestionLister        // optional; nil omits answerable questions from the overview
 	circuitLister         DynamicCircuitLister            // optional; nil reports dynamic blocks as unknown rather than absent
+	accountLister         ProfileAccountLister            // optional; nil leaves models without a provider account
 	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
 	overviewSessionLimit  int                             // instance session limit shown on the overview
 	buildVersion          string                          // running binary version shown on the overview's server-start row

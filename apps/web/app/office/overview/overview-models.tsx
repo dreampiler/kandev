@@ -5,12 +5,17 @@ import { useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import type { AgentProfileUsage } from "@/lib/api/domains/agent-profile-usage-api";
-import { useAgentProfileUsage } from "@/hooks/domains/settings/use-agent-profile-usage";
+import {
+  useAgentProfileUsage,
+  useAgentProfileUsageList,
+} from "@/hooks/domains/settings/use-agent-profile-usage";
 import type {
   OverviewBlockedAccount,
   OverviewBlockedCircuit,
   OverviewModel,
 } from "@/lib/state/slices/office/overview-types";
+import { groupModelsByAccount } from "./overview-accounts";
+import { ProviderAccountGroup } from "./overview-provider-groups";
 import {
   circuitReason,
   circuitScope,
@@ -32,6 +37,10 @@ function profileHref(model: OverviewModel): string | undefined {
  * Agent profiles with session counts, error kinds, and usage, split so a
  * dynamic profile (which routes through ordered concrete profiles) is never
  * read as one model, plus every account or resource the router is avoiding.
+ *
+ * Concrete models are grouped by the provider account they run on, because
+ * usage windows, block state and reset times belong to that account rather than
+ * to any one model. Every model card is still there inside its group.
  */
 export function OverviewModels({
   models,
@@ -45,12 +54,9 @@ export function OverviewModels({
   circuitsKnown: boolean;
 }) {
   const { t } = useTranslation();
+  const { byProfile } = useAgentProfileUsageList();
   const dynamic = models.filter((model) => model.kind === "dynamic");
-  const concrete = models.filter((model) => model.kind !== "dynamic");
-  const groups: { key: string; title: string; cards: OverviewModel[] }[] = [
-    { key: "dynamic", title: t("office:overviewDynamicProfiles"), cards: dynamic },
-    { key: "concrete", title: t("office:overviewConcreteModels"), cards: concrete },
-  ];
+  const accounts = groupModelsByAccount(models, byProfile, circuits);
   const nothingBlocked = blocked.length === 0 && circuits.length === 0 && circuitsKnown;
   return (
     <SectionCard id={MODELS_ANCHOR} title={t("office:overviewModels")}>
@@ -58,18 +64,25 @@ export function OverviewModels({
         <SectionCardEmpty />
       ) : (
         <div className="space-y-3 p-3">
-          {groups.map((group) =>
-            group.cards.length === 0 ? null : (
-              <div key={group.key} className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">{group.title}</h3>
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {group.cards.map((model) => (
-                    <ModelCard key={model.agent_profile_id} model={model} />
-                  ))}
-                </div>
+          {dynamic.length > 0 ? (
+            <div className="space-y-2">
+              <h3 className="text-xs font-medium text-muted-foreground">
+                {t("office:overviewDynamicProfiles")}
+              </h3>
+              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {dynamic.map((model) => (
+                  <ModelCard key={model.agent_profile_id} model={model} />
+                ))}
               </div>
-            ),
-          )}
+            </div>
+          ) : null}
+          {accounts.map((group) => (
+            <ProviderAccountGroup
+              key={group.accountId || "unknown"}
+              group={group}
+              renderModel={(model) => <ModelCard key={model.agent_profile_id} model={model} />}
+            />
+          ))}
           <div className="space-y-2">
             <h3 className="text-xs font-medium text-muted-foreground">
               {t("office:overviewBlockedModels")}

@@ -130,11 +130,11 @@ func (r *usageBindingResolver) Resolve(
 }
 
 // claudeProcessEnvAccount groups profiles that inherit the Kandev process token.
-const claudeProcessEnvAccount = "anthropic:process-env"
+const claudeProcessEnvAccount = accountPrefixAnthropic + ":process-env"
 
 // claudeProfileSecretAccountPrefix groups profiles whose Claude OAuth token is
 // one secret-store reference, so they share a single cached read.
-const claudeProfileSecretAccountPrefix = "anthropic:profile-secret:"
+const claudeProfileSecretAccountPrefix = accountPrefixAnthropic + ":" + claudeProfileSecretTail
 
 // errClaudeTokenUnavailable replaces every secret-store failure on this path.
 // A store error names the secret it could not reveal, and the account key must
@@ -156,7 +156,7 @@ func (r *usageBindingResolver) claudeBinding(profile *settingsmodels.AgentProfil
 	if token := profileEnvLiteral(profile, agentusage.ClaudeOAuthTokenEnv); token != "" {
 		binding.client = agentusage.NewClaudeUsageClientWithOAuthToken(token)
 		binding.cacheKey = agentusage.CacheKey("anthropic", "profile-env:"+profile.ID)
-		binding.accountKey = "anthropic:profile-env:" + profile.ID
+		binding.accountKey = accountPrefixAnthropic + ":" + claudeProfileEnvTail + profile.ID
 		return binding
 	}
 	if token := strings.TrimSpace(r.getenv(agentusage.ClaudeOAuthTokenEnv)); token != "" {
@@ -168,7 +168,7 @@ func (r *usageBindingResolver) claudeBinding(profile *settingsmodels.AgentProfil
 	credPath := filepath.Join(r.home, ".claude", ".credentials.json")
 	binding.client = agentusage.NewClaudeUsageClientWithPath(credPath)
 	binding.cacheKey = agentusage.CacheKey("anthropic", credPath)
-	binding.accountKey = "anthropic:" + credPath
+	binding.accountKey = accountPrefixAnthropic + ":" + credPath
 	return binding
 }
 
@@ -240,6 +240,101 @@ func (r *usageBindingResolver) openCodeBinding(model string) (usageBinding, bool
 	default:
 		return usageBinding{}, false
 	}
+}
+
+// Account key prefixes. They name the credential family an account belongs to,
+// and double as the account id whenever one family has exactly one account.
+const (
+	accountPrefixOpenCodeZen    = "opencode-zen"
+	accountPrefixOpenCodeGo     = "opencode-go"
+	accountPrefixOpenCodeGoFree = "opencode-go-free"
+	accountPrefixOpenRouter     = "openrouter"
+	accountPrefixLLMGateway     = "llmgateway"
+	accountPrefixOpenAI         = "openai"
+	accountPrefixAntigravity    = "google-antigravity"
+	accountPrefixAnthropic      = "anthropic"
+	accountPrefixProxy          = "proxy"
+)
+
+// Account identity kinds. They are the closed set a client may translate, so a
+// client never parses an account key itself.
+const (
+	accountKindUnknown          = "unknown"
+	accountKindOpenCodeZen      = "opencode_zen"
+	accountKindOpenCodeGo       = "opencode_go"
+	accountKindOpenCodeGoFree   = "opencode_go_free"
+	accountKindOpenRouter       = "openrouter"
+	accountKindLLMGateway       = "llmgateway"
+	accountKindOpenAI           = "openai"
+	accountKindAnthropic        = "anthropic"
+	accountKindAnthropicProfile = "anthropic_profile"
+	accountKindAntigravity      = "google_antigravity"
+	accountKindProxy            = "proxy"
+)
+
+// accountIdentity is the client-safe name of one provider account. An account
+// key names the credential file or secret behind the account, so only this
+// derived identity may leave the backend.
+type accountIdentity struct {
+	// ID groups the profiles of one account and is stable across reads.
+	ID string
+	// Kind names the provider family so a client can label the account in the
+	// viewer's language.
+	Kind string
+}
+
+// accountIdentityFor names an account key without exposing the credential it
+// points at. Keys that share one credential family but name different
+// credentials, such as two Claude profiles with their own OAuth tokens, keep
+// separate ids; keys that name the same credential share one id. An
+// unrecognized or empty key is reported as unknown rather than guessed at.
+func accountIdentityFor(accountKey string) accountIdentity {
+	prefix, rest, _ := strings.Cut(accountKey, ":")
+	switch prefix {
+	case accountPrefixOpenCodeZen:
+		return accountIdentity{ID: accountPrefixOpenCodeZen, Kind: accountKindOpenCodeZen}
+	case accountPrefixOpenCodeGo:
+		return accountIdentity{ID: accountPrefixOpenCodeGo, Kind: accountKindOpenCodeGo}
+	case accountPrefixOpenCodeGoFree:
+		return accountIdentity{ID: accountPrefixOpenCodeGoFree, Kind: accountKindOpenCodeGoFree}
+	case accountPrefixOpenRouter:
+		return accountIdentity{ID: accountPrefixOpenRouter, Kind: accountKindOpenRouter}
+	case accountPrefixLLMGateway:
+		return accountIdentity{ID: accountPrefixLLMGateway, Kind: accountKindLLMGateway}
+	case accountPrefixOpenAI:
+		return accountIdentity{ID: accountPrefixOpenAI, Kind: accountKindOpenAI}
+	case accountPrefixAntigravity:
+		return accountIdentity{ID: accountPrefixAntigravity, Kind: accountKindAntigravity}
+	case accountPrefixAnthropic:
+		return anthropicAccountIdentity(rest)
+	case accountPrefixProxy:
+		return accountIdentity{ID: accountPrefixProxy, Kind: accountKindProxy}
+	}
+	return accountIdentity{Kind: accountKindUnknown}
+}
+
+// The tails that make one Claude profile the account of its own, appended to
+// the Anthropic account prefix.
+const (
+	claudeProfileEnvTail    = "profile-env:"
+	claudeProfileSecretTail = "profile-secret:"
+)
+
+// anthropicAccountIdentity separates the Claude accounts of one install. The
+// shared credentials file and the process environment are one account; a token
+// carried or referenced by a single profile is that profile's own account.
+func anthropicAccountIdentity(rest string) accountIdentity {
+	shared := accountIdentity{ID: accountPrefixAnthropic, Kind: accountKindAnthropic}
+	if rest == "" {
+		return shared
+	}
+	if id, found := strings.CutPrefix(rest, claudeProfileEnvTail); found && id != "" {
+		return accountIdentity{ID: "anthropic-profile:" + id, Kind: accountKindAnthropicProfile}
+	}
+	if id, found := strings.CutPrefix(rest, claudeProfileSecretTail); found && id != "" {
+		return accountIdentity{ID: "anthropic-secret:" + id, Kind: accountKindAnthropicProfile}
+	}
+	return shared
 }
 
 // profileEnvLiteral returns a literal profile environment value. An entry that

@@ -19,8 +19,16 @@ type AgentProfileUsageDTO struct {
 	// Observed marks a value taken from what a running agent reported about its
 	// own account, so a client can name that source rather than presenting it as
 	// a provider API reading. It travels with Source: "agent_stream".
-	Observed bool                         `json:"observed,omitempty"`
-	Windows  []AgentProfileUsageWindowDTO `json:"windows"`
+	Observed bool `json:"observed,omitempty"`
+	// AccountID groups the profiles of one provider account and AccountKind
+	// names its provider family, so a client can group and label models by the
+	// account they run on. Both are derived from the credential binding rather
+	// than from a reading, so they stay present when the provider's own usage
+	// API did not answer. The account key itself names a credential file and
+	// never leaves the backend.
+	AccountID   string                       `json:"account_id,omitempty"`
+	AccountKind string                       `json:"account_kind,omitempty"`
+	Windows     []AgentProfileUsageWindowDTO `json:"windows"`
 	// Recorded is the account's usage Kandev itself recorded in the current UTC
 	// day. It is reported for accounts whose provider publishes no usage API,
 	// and is a lower bound rather than the provider's own count.

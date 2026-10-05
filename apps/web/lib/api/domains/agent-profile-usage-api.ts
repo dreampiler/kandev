@@ -60,6 +60,15 @@ export type AgentProfileUsage = {
    * presented as a live provider reading.
    */
   observed?: boolean;
+  /**
+   * The provider account this profile authenticates with, and the provider
+   * family it belongs to. Both are derived from the credential binding rather
+   * than from a reading, so they are present even when the provider's usage API
+   * did not answer. `account_kind` is the closed set a client translates;
+   * `unknown` means the account is not identifiable.
+   */
+  account_id?: string;
+  account_kind?: string;
   windows: AgentProfileUsageWindow[];
   recorded?: AgentProfileRecordedUsage;
   internal?: AgentProfileInternalUsage;

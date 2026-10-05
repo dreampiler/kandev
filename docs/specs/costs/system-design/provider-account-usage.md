@@ -74,6 +74,61 @@ text never includes a body.
 - **OpenCode Zen:** no usage API. The binding groups the account so the
   settings list can show recorded usage for the current UTC day.
 
+## Client-safe account identity
+
+An account key names the credential behind the account: a credential file path,
+or a profile and secret reference. That key stays inside the backend.
+`accountIdentityFor` derives the two fields a client may see, and an
+unrecognized key is reported as `unknown` rather than guessed at.
+
+| Account key prefix | `account_id` | `account_kind` |
+| --- | --- | --- |
+| `opencode-zen` | `opencode-zen` | `opencode_zen` |
+| `opencode-go` | `opencode-go` | `opencode_go` |
+| `opencode-go-free` | `opencode-go-free` | `opencode_go_free` |
+| `openrouter` | `openrouter` | `openrouter` |
+| `llmgateway` | `llmgateway` | `llmgateway` |
+| `openai` | `openai` | `openai` |
+| `google-antigravity` | `google-antigravity` | `google_antigravity` |
+| `anthropic` (credentials file, process env) | `anthropic` | `anthropic` |
+| `anthropic:profile-env:<profileID>` | `anthropic-profile:<profileID>` | `anthropic_profile` |
+| `anthropic:profile-secret:<secretID>` | `anthropic-secret:<secretID>` | `anthropic_profile` |
+| `proxy` | `proxy` | `proxy` |
+| anything else | absent | `unknown` |
+
+Two Claude profiles with different tokens are therefore two accounts, and two
+profiles referencing one secret are one account. `account_id` and
+`account_kind` are derived from the binding, not from a reading, so they stay
+present when the provider's own usage API did not answer.
+
+## Overview account grouping
+
+The overview's models section groups concrete profiles by `account_id`, which
+`DashboardService.SetProfileAccountLister` reads from the same minute-old account
+index the account-scoped counting uses. The id travels on the aggregate
+(`OverviewModel.AccountID`) rather than on the usage list, so the section does not
+re-group when a usage read is slow or fails. A nil or failing lister leaves every
+model without an account and the section falls back to grouping by kind.
+
+A dynamic profile is a routing document rather than an account and carries no
+account id.
+
+The client derives the rest from data it already has:
+
+- **Usage** is the union of the windows its models reported. The backend filters
+  windows per model, so the union is what limits the account as a whole. A model
+  whose read failed contributes its reason rather than a zero.
+- **Blocked state** comes from circuits that name one of the account's profiles
+  (`isCurrentBlock`) and from windows the provider reports exhausted. A circuit
+  covering a whole credential reads as the account; one that names a single model
+  reads as that model. A circuit whose key names no profile is not charged to any
+  account and stays in the overview's blocked list.
+- **Reset time** is each window's own `reset_at`. An account whose provider
+  publishes no reset instant says so instead of showing a zero.
+
+The models themselves stay reachable: each account is a collapsed disclosure
+holding the unchanged model cards.
+
 ## Window scope
 
 `UtilizationWindow.Scope` names the model class a window limits, and
@@ -109,7 +164,9 @@ remains a known zero as before.
 It lists live concrete profiles, reads each distinct account once concurrently
 and then answers every profile from the cache. States are `ok`, `unavailable`
 with `reason` and `status`, `unsupported` and `no_usage_api` with `recorded`
-turn and token totals for the account since midnight UTC. The route is
+turn and token totals for the account since midnight UTC. Every row also carries
+the account's `account_id` and `account_kind` (see
+[Client-safe account identity](#client-safe-account-identity)). The route is
 read-only and is not behind the settings mutation interlock.
 
 ## Internal accumulation

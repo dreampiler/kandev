@@ -54,6 +54,28 @@ func (a *usageProviderAdapter) AccountProfileIDs(ctx context.Context, profileID 
 	return append(append([]string(nil), ids...), profileID), nil
 }
 
+// ListProfileAccountIDs names the provider account of every live concrete
+// profile, for a caller that groups profiles by account. It reads the same
+// minute-old index the account-scoped counting uses, and returns no credential
+// path: the value is the derived account id.
+func (a *usageProviderAdapter) ListProfileAccountIDs(ctx context.Context) (map[string]string, error) {
+	accounts, err := a.accountGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]string, len(accounts))
+	for accountKey, profileIDs := range accounts {
+		identity := accountIdentityFor(accountKey)
+		if identity.ID == "" {
+			continue
+		}
+		for _, profileID := range profileIDs {
+			ids[profileID] = identity.ID
+		}
+	}
+	return ids, nil
+}
+
 func (a *usageProviderAdapter) accountGroups(ctx context.Context) (map[string][]string, error) {
 	a.accounts.mu.Lock()
 	defer a.accounts.mu.Unlock()
