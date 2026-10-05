@@ -1,5 +1,6 @@
 import type { TFunction } from "i18next";
 import { formatCompactDuration, formatRelativeTime, formatTime } from "@/lib/i18n/formats";
+import { profileUsageFailureReasonKey } from "@/components/settings/agents/agent-profile-usage";
 import type {
   OverviewBlockedCircuit,
   OverviewEvent,
@@ -338,4 +339,91 @@ export function modelBlockSubject(event: OverviewEvent): CircuitSubject | undefi
  */
 export function blockFacts(t: TFunction, scope?: string, code?: string): string {
   return [circuitScope(t, scope ?? ""), circuitReason(t, code)].filter(Boolean).join(" · ");
+}
+
+// Provider usage is phrased by one rule, read here so the account card and the
+// model card cannot drift apart on the same reading.
+
+// A usage read that did not succeed reports one of two things: why the provider
+// refused (agents:profileUsageReason*) or what shape the reading was in
+// (office:overviewUsageState*). The two code sets do not overlap.
+const USAGE_STATE_KEYS: Record<string, string> = {
+  unavailable: "office:overviewUsageStateUnavailable",
+  no_usage_api: "office:overviewUsageStateNoUsageApi",
+  unsupported: "office:overviewUsageStateUnsupported",
+};
+
+/**
+ * Why a profile's usage could not be read, in the active locale. A code this
+ * catalog does not name stays as the code inside an explicit unknown reading:
+ * an untranslated diagnostic is truthful where a borrowed name would claim
+ * something the provider never said.
+ */
+export function usageUnavailableReason(t: TFunction, code: string | undefined): string {
+  const reasonKey = profileUsageFailureReasonKey(code);
+  if (reasonKey) return t(reasonKey);
+  const stateKey = code ? USAGE_STATE_KEYS[code] : undefined;
+  if (stateKey) return t(stateKey);
+  return t("office:overviewUsageStateUnknown", { code: code ?? "" });
+}
+
+// Providers name a usage window by its own length ("5-hour", "7-day", "30-day",
+// "monthly"), then narrow it with a qualifier that can be a plan ("premium"), a
+// scope ("Sonnet", "Fable", "Opus", "(pool)"), or a note ("(overage included)").
+// The length and the qualifiers this catalog names are read; a product or
+// account name is left exactly as the provider wrote it, because those are names
+// rather than copy. A name this rule does not recognize stays verbatim.
+const USAGE_WINDOW_LENGTH = /^(\d+)-(hour|day|week|month)s?\b/;
+const USAGE_WINDOW_CURRENT = /^current$/i;
+const USAGE_WINDOW_MONTHLY = /^monthly$/i;
+const USAGE_WINDOW_UNIT_MINUTES: Record<string, number> = {
+  hour: 60,
+  day: 24 * 60,
+  week: 7 * 24 * 60,
+  month: 30 * 24 * 60,
+};
+
+// The multi-word qualifier is read before the single words inside it, and every
+// pattern is bounded by word edges so a product name that merely contains a
+// qualifier is left alone.
+const USAGE_WINDOW_QUALIFIERS: { pattern: RegExp; key: string }[] = [
+  { pattern: /\boverage included\b/i, key: "office:overviewUsageWindowOverageIncluded" },
+  { pattern: /\bpremium\b/i, key: "office:overviewUsageWindowPremium" },
+  { pattern: /\bpool\b/i, key: "office:overviewUsageWindowPool" },
+  { pattern: /\bmodel\b/i, key: "office:overviewUsageWindowModel" },
+];
+
+/**
+ * One usage window's name in the active locale, or the provider's own wording.
+ * The window's length becomes a locale duration, so the same window reads the
+ * same way as the elapsed times elsewhere on the overview; a length this rule
+ * does not recognize leaves the whole label alone rather than half-translating
+ * it.
+ */
+export function usageWindowLabel(t: TFunction, label: string): string {
+  const trimmed = label.trim();
+  if (USAGE_WINDOW_CURRENT.test(trimmed)) return t("office:overviewUsageWindowCurrent");
+  const match = USAGE_WINDOW_LENGTH.exec(trimmed);
+  let reading: string;
+  let rest: string;
+  if (match) {
+    const unit = USAGE_WINDOW_UNIT_MINUTES[match[2]];
+    if (unit === undefined) return label;
+    reading = durationFromMinutes(Number(match[1]) * unit);
+    rest = trimmed.slice(match[0].length).trim();
+  } else if (USAGE_WINDOW_MONTHLY.test(trimmed)) {
+    reading = durationFromMinutes(USAGE_WINDOW_UNIT_MINUTES.month);
+    rest = "";
+  } else {
+    return label;
+  }
+  for (const { pattern, key } of USAGE_WINDOW_QUALIFIERS) {
+    if (!pattern.test(rest)) continue;
+    rest = rest.replace(pattern, t(key));
+  }
+  // The qualifier's own parentheses are dropped along with the name's, so one
+  // pair wraps the whole narrowing: "7-day Sonnet (pool)" reads as
+  // "7d (Sonnet 풀)" rather than nesting a second pair inside the first.
+  const narrowed = rest.replace(/[()]/g, " ").replace(/\s+/g, " ").trim();
+  return narrowed ? `${reading} (${narrowed})` : reading;
 }
