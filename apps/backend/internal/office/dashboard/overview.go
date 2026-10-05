@@ -303,6 +303,7 @@ func (s *DashboardService) readExtraEvents(
 	out.blocks = readOptionalEventSource(func() ([]*sqlite.OverviewModelBlockRow, error) {
 		return s.overviewReader.ListOverviewModelBlocks(ctx, since, snap.now, overviewEventKindLimit)
 	})
+	s.nameBlockSubjects(ctx, snap, out.blocks)
 	out.mergedPRs = readOptionalEventSource(func() ([]*sqlite.OverviewMergedPRRow, error) {
 		return s.overviewReader.ListOverviewMergedPRs(ctx, ids, since, overviewEventKindLimit)
 	})

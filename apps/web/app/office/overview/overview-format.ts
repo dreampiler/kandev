@@ -2,6 +2,7 @@ import type { TFunction } from "i18next";
 import { formatCompactDuration, formatRelativeTime, formatTime } from "@/lib/i18n/formats";
 import type {
   OverviewBlockedCircuit,
+  OverviewEvent,
   OverviewQueueItem,
   OverviewQueueStatus,
   OverviewReason,
@@ -256,16 +257,30 @@ export function shortId(id: string): string {
 }
 
 /**
+ * The identity a blocked resource can name about itself. Both the
+ * blocked-circuits card and a model-block event in the last-24-hours list carry
+ * exactly these fields, so one rule phrases both and a circuit can never be
+ * reported one way in one place and another way in the other.
+ */
+export type CircuitSubject = {
+  resource_key?: string;
+  scope_value?: string;
+  profile_id?: string;
+  profile_name?: string;
+  model_name?: string;
+};
+
+/**
  * The identifier an unnamed circuit is reported by. The scope prefix names the
  * kind of resource, not which one, so it is dropped: a fingerprint's first
  * characters identify the resource, and the constant scope word does not.
  */
-function circuitFallbackId(circuit: OverviewBlockedCircuit): string {
+function circuitFallbackId(circuit: CircuitSubject): string {
   if (circuit.profile_id) return circuit.profile_id;
-  const value = circuit.scope_value || circuit.resource_key;
+  const value = circuit.scope_value || circuit.resource_key || "";
   const binding = value.includes("|") ? value.slice(0, value.lastIndexOf("|")) : value;
   const withoutScope = binding.includes(":") ? binding.slice(binding.indexOf(":") + 1) : binding;
-  return withoutScope || circuit.resource_key;
+  return withoutScope || circuit.resource_key || "";
 }
 
 /**
@@ -274,7 +289,7 @@ function circuitFallbackId(circuit: OverviewBlockedCircuit): string {
  * model it did name, and reports the profile as unidentifiable with a short id,
  * because the raw key is a fingerprint the operator cannot read.
  */
-export function circuitTitle(t: TFunction, circuit: OverviewBlockedCircuit): string {
+export function circuitTitle(t: TFunction, circuit: CircuitSubject): string {
   if (!circuit.profile_name) {
     const unknown = t("office:overviewCircuitUnknownName", {
       id: shortId(circuitFallbackId(circuit)),
@@ -297,4 +312,30 @@ export function circuitReason(t: TFunction, code: string | undefined): string {
 export function circuitScope(t: TFunction, scope: string): string {
   const key = CIRCUIT_SCOPE_KEYS[scope];
   return key ? t(key) : "";
+}
+
+/**
+ * A model-block event's subject, or undefined when the row names no circuit. A
+ * provider limit is already named by the provider it carries, so its title is
+ * read as sent; a circuit carries the same fields the blocked-circuits card
+ * does and is phrased by the same rule.
+ */
+export function modelBlockSubject(event: OverviewEvent): CircuitSubject | undefined {
+  const isBlock = event.kind === "model_blocked" || event.kind === "model_unblocked";
+  if (!isBlock || !event.scope) return undefined;
+  return {
+    scope_value: event.scope_value,
+    profile_id: event.profile_id,
+    profile_name: event.profile_name,
+    model_name: event.model_name,
+  };
+}
+
+/**
+ * What a block covers and why it was blocked, in the blocked-circuits card's
+ * wording. Empty when the row named neither, which is the case for a provider
+ * limit: it has no scope and its own name already says what it is.
+ */
+export function blockFacts(t: TFunction, scope?: string, code?: string): string {
+  return [circuitScope(t, scope ?? ""), circuitReason(t, code)].filter(Boolean).join(" · ");
 }

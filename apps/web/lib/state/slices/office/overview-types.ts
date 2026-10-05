@@ -195,6 +195,17 @@ export type OverviewEvent = {
   version?: string;
   /** When a block is expected to lift; absent when no clear time is known. */
   clears_at?: string;
+  /**
+   * A model block's subject, as the blocked-circuits card carries it. Absent for
+   * a provider limit, which is already named by the provider it carries, and
+   * `reason` carries the circuit's classification code for the client to phrase.
+   */
+  scope?: string;
+  scope_value?: string;
+  profile_id?: string;
+  profile_name?: string;
+  model_name?: string;
+  reason?: string;
   pull_request?: OverviewPullRequest;
   /** When a person answered; absent while the question is still open. */
   decided_at?: string;

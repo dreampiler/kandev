@@ -12,7 +12,7 @@ import type {
   OverviewEventKind,
   OverviewHumanItem,
 } from "@/lib/state/slices/office/overview-types";
-import { occurredTime, relativeTime } from "./overview-format";
+import { circuitTitle, modelBlockSubject, occurredTime, relativeTime } from "./overview-format";
 import { OverviewEventExtras } from "./overview-event-extras";
 import { eventToneName, statusBadgeClass } from "./overview-status-colors";
 import { SectionCard, SectionCardEmpty } from "./overview-section-card";
@@ -165,6 +165,7 @@ export function OverviewLast24h({
           {visible.map((event, index) => {
             const href = eventHref(event);
             const tone = eventToneName(event.kind);
+            const subject = modelBlockSubject(event);
             const content = (
               <>
                 <span
@@ -184,7 +185,7 @@ export function OverviewLast24h({
                         {workspaceNames[event.workspace_id]}
                       </span>
                     )}
-                    {event.title}
+                    {subject ? circuitTitle(t, subject) : event.title}
                     {event.detail && (
                       <span
                         className="ml-1.5 max-w-[40%] truncate font-mono text-[11px] text-muted-foreground"
