@@ -70,7 +70,8 @@ controls or expose a new public API.
 - [Agent stall recovery](agent-stall-recovery.md) owns the inactivity clock
   and existing classifications.
 - [Prolonged stall teardown](agent-stall-inactivity-teardown.md) owns the
-  fifteen-minute terminal consequence and is not reimplemented here.
+  terminal consequence of crossing the escalation threshold and is not
+  reimplemented here.
 - [Queued post-dispatch recovery](../../tasks/requirements/queued-post-dispatch-recovery.md)
   owns follow-up queue progress after an interrupted turn.
 
