@@ -113,21 +113,11 @@ type overviewTask struct {
 // isActive reports whether the task counts as work in progress right now: an
 // active task state with no unfinished blocker, on a step that starts something
 // by itself, with a live turn and nothing owed to a person. A task waiting on a
-// person, between turns, or coordinating open children is none of those, and
-// counts as neither in progress nor a problem.
+// person or coordinating open children is none of those, and counts as neither
+// in progress nor a problem.
 func (t *overviewTask) isActive() bool {
 	return isActiveTaskState(t.row.State) && t.row.OpenBlockers == 0 &&
-		!t.awaitingStep() && !t.awaitingPerson() && !t.turnEnded()
-}
-
-// turnEnded reports that the task already ran in this step and that run is over:
-// nothing is executing now and the session that ran here started after the task
-// entered the step. An idle session is over, not working. The task is between
-// turns rather than inside one, so it is neither in progress nor delayed for
-// waiting.
-func (t *overviewTask) turnEnded() bool {
-	return t.runningSession() == nil && t.latest != nil &&
-		t.latest.StartedAt.After(t.row.StepEnteredAt)
+		!t.awaitingStep() && !t.awaitingPerson()
 }
 
 // awaitingStep reports that the task sits on a bound step that starts nothing
@@ -396,10 +386,11 @@ func dwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 // means something different depending on who owes the next move: a step that
 // starts nothing by itself waits for a person, a task waiting for an answer
 // waits for a person, and a parent with open children is read through them. A
-// task whose turn in this step already ended is between turns, not inside one.
+// step that does start work by itself keeps the limit even when its last turn
+// ended, because that is how a step that stopped advancing becomes visible.
 func inProgressDwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 	switch {
-	case t.awaitingStep(), t.awaitingPerson(), t.turnEnded(), t.row.OpenChildCount > 0:
+	case t.awaitingStep(), t.awaitingPerson(), t.row.OpenChildCount > 0:
 		return 0
 	}
 	return th.DwellInProgress
