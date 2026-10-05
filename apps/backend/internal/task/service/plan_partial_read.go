@@ -2,16 +2,11 @@ package service
 
 import (
 	"context"
-	"errors"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/task/contract"
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-const PlanErrorReadOffsetOutOfRange = "plan_read_offset_out_of_range"
-
-var ErrPlanReadOffsetOutOfRange = errors.New("plan read offset exceeds content length")
 
 type PlanReadRange struct {
 	Partial            bool   `json:"partial"`
@@ -24,8 +19,9 @@ type PlanReadRange struct {
 	HasMore            bool   `json:"has_more"`
 	NextOffset         *int64 `json:"next_offset"`
 	// OffsetBeyondContent reports that the requested offset was past the end of
-	// the content and the read served the final window instead. Without it a
-	// caller cannot tell a clamped read from one it asked for.
+	// the content, so the range is empty while the totals still describe the
+	// whole plan. Without it a caller cannot tell this from a read that asked
+	// for the empty final range.
 	OffsetBeyondContent bool `json:"offset_beyond_content"`
 }
 
@@ -88,16 +84,12 @@ func projectPlanRange(content string, options contract.PlanReadOptions) (string,
 		limit = *options.Limit
 	}
 	total := int64(utf8.RuneCountInString(content))
+	// An offset past the end is a stale cursor, not a malformed request: the
+	// plan is readable, and returning text the caller did not ask for would
+	// make it splice the wrong region. The range is empty and the totals
+	// still describe the whole plan.
 	beyond := offset > total
-	if beyond {
-		// An offset past the end is a stale cursor, not a malformed request:
-		// the plan is readable and the caller only needs the tail. Serving the
-		// final window keeps the read one call instead of a failure plus a
-		// retry, and the empty slice an out-of-range offset would produce is
-		// exactly the string a caller would misread as "the plan is empty".
-		offset = max(total-limit, 0)
-	}
-	count := min(limit, total-offset)
+	count := max(min(limit, total-offset), 0)
 	fragment := planCharacterSlice(content, offset, count)
 	page := &PlanReadRange{
 		Partial: true, TotalCharacters: total, TotalContentBytes: len(content),

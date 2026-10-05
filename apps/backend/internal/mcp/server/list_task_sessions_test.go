@@ -60,9 +60,7 @@ func TestListTaskSessions_ToolSchemaIsTaskIDOnly(t *testing.T) {
 	require.Len(t, properties, 1, "callers must not be able to set current_session_id")
 	assert.Contains(t, properties, "task_id")
 	// task_id is optional: an omitted value resolves to the bound task.
-	if required, ok := parsed["required"].([]interface{}); ok {
-		assert.NotContains(t, required, "task_id")
-	}
+	assert.Empty(t, parsed["required"])
 
 	assert.Contains(t, tool.Tool.Description, "get_task_conversation_kandev")
 	assert.Contains(t, tool.Tool.Description, "message_task_kandev")

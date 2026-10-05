@@ -76,11 +76,17 @@ func TestPlanPartialReadRangesAndNoMutation(t *testing.T) {
 		})
 	}
 	// An offset past the end is a stale cursor, not a bad request: the read
-	// clamps to the final window and flags the clamp.
+	// returns an empty range with the real totals instead of text the caller
+	// did not ask for, and flags the past-the-end offset.
 	beyond, err := svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{Offset: planReadPointer(int64(13))})
 	require.NoError(t, err)
-	require.Equal(t, content, beyond.Plan.Content)
+	require.Empty(t, beyond.Plan.Content)
 	require.True(t, beyond.Range.OffsetBeyondContent)
+	require.Equal(t, int64(13), beyond.Range.Offset)
+	require.Equal(t, int64(0), beyond.Range.ReturnedCharacters)
+	require.Equal(t, int64(12), beyond.Range.TotalCharacters)
+	require.Equal(t, len(content), beyond.Range.TotalContentBytes)
+	require.Equal(t, 0, beyond.Range.ContentBytes)
 	require.False(t, beyond.Range.HasMore)
 	require.Nil(t, beyond.Range.NextOffset)
 	stale, err := svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{ExpectedVersion: planReadPointer("old")})

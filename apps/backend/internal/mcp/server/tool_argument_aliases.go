@@ -36,10 +36,12 @@ var toolArgumentAliases = map[string]map[string]string{
 	},
 	"create_task_plan_kandev": {
 		"expectedVersion": "expected_version",
+		"allowTruncation": "allow_truncation",
 		"taskId":          mcpKeyTaskID,
 	},
 	"update_task_plan_kandev": {
 		"expectedVersion": "expected_version",
+		"allowTruncation": "allow_truncation",
 		"taskId":          mcpKeyTaskID,
 	},
 	"get_task_plan_kandev": {

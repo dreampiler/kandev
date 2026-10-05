@@ -100,9 +100,11 @@ no version is supplied. With `expected_version`, a missing HEAD is a version
 conflict: a pinned page must not silently become a different read sequence.
 Use existing `PlanSafetyError` and `plan_version_conflict` for mismatches.
 Extend `planws.GetError` to preserve its typed details. Unauthorized callers
-must still reveal no version or counts. Invalid state-dependent offsets return
-`plan_read_offset_out_of_range` and a correction; no plan content is included.
-Invalid request fields return validation errors and never become full reads.
+must still reveal no version or counts. An offset past the end of the content is a
+state-dependent condition, not a malformed request: the read projects an empty
+range that still reports the real totals and flags `offset_beyond_content`, so
+no plan content is invented and the caller is not charged a retry. Invalid
+request fields return validation errors and never become full reads.
 
 ## Range projection
 
@@ -113,7 +115,9 @@ whitespace, or combining sequences. A code point boundary can split a visual
 grapheme; returned text is an exact substring suitable for literal matching.
 Use comparisons/subtraction to avoid overflowing `offset + limit`.
 
-An offset beyond the total is rejected; equality returns an empty final page.
+An offset beyond the total returns an empty range with the real totals and
+`offset_beyond_content` set, never a different range; equality returns an empty
+final page.
 Historical oversized heads remain readable because this operation applies only
 the response range limit, not the new-write storage limit. Repository reads may
 still load the full row into backend memory. The goal is agent token and
