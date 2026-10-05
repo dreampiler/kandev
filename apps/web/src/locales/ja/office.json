@@ -1137,7 +1137,7 @@
   "overviewCriteriaError": "エラー: タスクまたはセッションの失敗、エラー後に出力が止まったセッション、または直近 24時間に失敗があり現在実行中のものがない場合",
   "overviewCriteriaStalled": "停止: 実行中のセッションが {{duration}} 出力していない場合",
   "overviewCriteriaDelayed": "遅延: {{starting}} 開始中のまま、またはセッション終了後に {{scheduling}} 次のステップへ進んでいない、または待ちメッセージが休止中のセッションで {{queueIdle}}、実行中のセッションで {{queueBusy}} 待機している場合",
-  "overviewCriteriaDwell": "滞留: 進行 {{running}}、レビュー {{review}}、保留 {{hold}}",
+  "overviewCriteriaDwell": "滞留: 進行 {{running}}、レビュー {{review}}",
   "overviewExpandDetails": "詳細一覧を開く",
   "overviewCollapseDetails": "詳細一覧を閉じる",
   "overviewDynamicProfiles": "Dynamic プロファイル",

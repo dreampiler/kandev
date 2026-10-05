@@ -1137,7 +1137,7 @@
   "overviewCriteriaError": "錯誤：任務或工作階段失敗、工作階段報錯後一直沒有輸出，或最近 24 小時內有失敗而目前沒有執行中的任務",
   "overviewCriteriaStalled": "停滯：執行中的工作階段 {{duration}} 沒有輸出",
   "overviewCriteriaDelayed": "延遲：啟動狀態已 {{starting}}、工作階段結束後 {{scheduling}} 未進入下一步，或排隊訊息在空閒工作階段後等待 {{queueIdle}}、在執行中的工作階段後等待 {{queueBusy}}",
-  "overviewCriteriaDwell": "停留：進行中 {{running}}、審查中 {{review}}、暫停中 {{hold}}",
+  "overviewCriteriaDwell": "停留：進行中 {{running}}、審查中 {{review}}",
   "overviewExpandDetails": "展開明細清單",
   "overviewCollapseDetails": "收起明細清單",
   "overviewDynamicProfiles": "Dynamic 設定檔",

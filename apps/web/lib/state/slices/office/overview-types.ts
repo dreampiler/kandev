@@ -68,7 +68,6 @@ export type OverviewThresholds = {
   queue_busy_minutes: number;
   dwell_in_progress_minutes: number;
   dwell_review_minutes: number;
-  dwell_hold_minutes: number;
   window_hours: number;
 };
 

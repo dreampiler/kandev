@@ -1137,7 +1137,7 @@
   "overviewCriteriaError": "오류: 작업 또는 세션 실패, 오류 이후 출력이 없는 세션, 또는 최근 24시간 동안 실패가 있었으나 지금 실행 중인 것이 없는 경우",
   "overviewCriteriaStalled": "멈춤: 실행 중인 세션이 {{duration}} 동안 출력하지 않은 경우",
   "overviewCriteriaDelayed": "지연: {{starting}} 동안 시작 상태이거나, 세션이 끝난 뒤 {{scheduling}} 동안 다음 단계로 넘어가지 않거나, 대기 메시지가 쉬는 세션에서 {{queueIdle}}, 도는 세션에서 {{queueBusy}} 기다리는 경우",
-  "overviewCriteriaDwell": "체류: 진행 {{running}}, 검토 {{review}}, 보류 {{hold}}",
+  "overviewCriteriaDwell": "체류: 진행 {{running}}, 검토 {{review}}",
   "overviewExpandDetails": "세부 목록 펼치기",
   "overviewCollapseDetails": "세부 목록 접기",
   "overviewDynamicProfiles": "동적 프로필",

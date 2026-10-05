@@ -117,7 +117,6 @@ type OverviewThresholds struct {
 	QueueBusyMinutes       int `json:"queue_busy_minutes"`
 	DwellInProgressMinutes int `json:"dwell_in_progress_minutes"`
 	DwellReviewMinutes     int `json:"dwell_review_minutes"`
-	DwellHoldMinutes       int `json:"dwell_hold_minutes"`
 	WindowHours            int `json:"window_hours"`
 }
 

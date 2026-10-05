@@ -194,6 +194,10 @@ type overviewSnapshot struct {
 	// followups maps a failed session id to what followed it, read on this same
 	// pass so the reported recovery advances whenever the screen does.
 	followups map[string]*sqlite.OverviewFailureFollowupRow
+	// questions are the answerable bundles of this pass's live sessions, read
+	// before classification so a task waiting on the owner is classified from
+	// the same read the needs-human list renders.
+	questions []taskmodels.ClarificationBundleSummary
 	// buildVersion is the running binary's version for this pass, empty when
 	// nothing wired one.
 	buildVersion string
@@ -441,6 +445,9 @@ func (s *DashboardService) loadOverviewTasks(
 		if _, ok := snap.taskTitles[q.TaskID]; !ok {
 			snap.taskTitles[q.TaskID] = q.TaskTitle
 		}
+	}
+	if err := s.loadAnswerableQuestions(ctx, snap); err != nil {
+		return err
 	}
 	for _, t := range snap.tasks {
 		t.classify(snap.now, th, snap.lastOutput)

@@ -1118,7 +1118,7 @@
   "overviewCriteriaError": "Ēŕŕōŕ: à ƒàĩĺēď ţàśķ ōŕ śēśśĩōń, à śēśśĩōń ēŕŕōŕ ŵĩţĥ ńō ōũţƥũţ śĩńćē, ōŕ à ƒàĩĺũŕē ĩń ţĥē ĺàśţ 24 ĥ ŵĩţĥ ńōţĥĩńĝ ŕũńńĩńĝ ńōŵ",
   "overviewCriteriaStalled": "Śţàĺĺēď: à ŕũńńĩńĝ śēśśĩōń ŵĩţĥ ńō ōũţƥũţ ƒōŕ {{duration}}",
   "overviewCriteriaDelayed": "Ďēĺàŷēď: śţàŕţĩńĝ ƒōŕ {{starting}}, à ƒĩńĩśĥēď śēśśĩōń ńōţ ḿōvēď ōń ƒōŕ {{scheduling}}, ōŕ qũēũēď ḿēśśàĝēś ŵàĩţĩńĝ {{queueIdle}} ƀēĥĩńď àń ĩďĺē śēśśĩōń àńď {{queueBusy}} ƀēĥĩńď à ŕũńńĩńĝ ōńē",
-  "overviewCriteriaDwell": "Ďŵēĺĺ: ĩń ƥŕōĝŕēśś ƒōŕ {{running}}, ĩń ŕēvĩēŵ ƒōŕ {{review}}, ōń ĥōĺď ƒōŕ {{hold}}",
+  "overviewCriteriaDwell": "Ďŵēĺĺ: ĩń ƥŕōĝŕēśś ƒōŕ {{running}}, ĩń ŕēvĩēŵ ƒōŕ {{review}}",
   "overviewExpandDetails": "Śĥōŵ ďēţàĩĺś",
   "overviewCollapseDetails": "Ĥĩďē ďēţàĩĺś",
   "overviewDynamicProfiles": "Ďŷńàḿĩć ƥŕōƒĩĺēś",

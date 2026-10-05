@@ -1137,7 +1137,7 @@
   "overviewCriteriaError": "Erro: uma tarefa ou sessão falhou, uma sessão com erro sem saída desde então, ou uma falha nas últimas 24 h sem nada em execução agora",
   "overviewCriteriaStalled": "Parado: uma sessão em execução sem saída há {{duration}}",
   "overviewCriteriaDelayed": "Atrasado: a iniciar há {{starting}}, uma sessão terminada que não avançou há {{scheduling}}, ou mensagens em espera {{queueIdle}} atrás de uma sessão inativa e {{queueBusy}} atrás de uma sessão a decorrer",
-  "overviewCriteriaDwell": "Permanência: em progresso {{running}}, em revisão {{review}}, em espera {{hold}}",
+  "overviewCriteriaDwell": "Permanência: em progresso {{running}}, em revisão {{review}}",
   "overviewExpandDetails": "Mostrar lista de detalhes",
   "overviewCollapseDetails": "Ocultar lista de detalhes",
   "overviewDynamicProfiles": "Perfis dinâmicos",
