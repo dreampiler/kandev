@@ -8,6 +8,13 @@ import type {
 
 const BASE = "/api/v1/office";
 
+/**
+ * Asks a workspace list for every match instead of a page. The backend reads it
+ * as an intent, so the problems list and "show all" are not cut at a fixed
+ * ceiling; any finite limit stays clamped server-side.
+ */
+export const OVERVIEW_LIST_ALL = -1;
+
 /** One workspace's overview task list for a filter (fetched only when expanded). */
 export function getWorkspaceAggregateTasks(
   workspaceId: string,

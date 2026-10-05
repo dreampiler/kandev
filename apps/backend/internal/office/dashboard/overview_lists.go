@@ -36,6 +36,12 @@ const (
 	overviewListMaxLimit            = 500
 )
 
+// OverviewListAll asks for every match instead of a page. It is a read intent,
+// not a bigger ceiling: the response is bounded by the workspace's own matches
+// for the filter, while every caller-supplied finite limit stays clamped at
+// overviewListMaxLimit.
+const OverviewListAll = -1
+
 var (
 	// ErrOverviewWorkspaceNotFound is returned when a list names a workspace
 	// outside the caller's current overview.
@@ -79,8 +85,17 @@ func (s *DashboardService) GetOverviewWorkspaceTasks(
 	total := len(items)
 	return &OverviewListResponse{
 		Kind: OverviewKindTasks, Filter: filter, Total: total,
-		Tasks: clip(items, listLimit(limit, overviewTaskListDefaultLimit)),
+		Tasks: clipWorkspaceTaskItems(items, limit),
 	}, nil
+}
+
+// clipWorkspaceTaskItems returns every match for an all read, and otherwise the
+// page a bounded read asked for.
+func clipWorkspaceTaskItems(items []OverviewTaskItem, limit int) []OverviewTaskItem {
+	if limit == OverviewListAll {
+		return items
+	}
+	return clip(items, listLimit(limit, overviewTaskListDefaultLimit))
 }
 
 // GetOverviewRunning returns the cross-workspace running tasks, running
