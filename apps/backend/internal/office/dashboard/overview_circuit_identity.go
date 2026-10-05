@@ -1,6 +1,9 @@
 package dashboard
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Circuit display identity. A circuit key is "<scope>:<fingerprint>" (see
 // dynamic.ResourceKey), and the fingerprints carry the concrete identity the
@@ -68,7 +71,18 @@ func profileIDFromBinding(fingerprint string) string {
 	return ""
 }
 
-// circuitBlocking reports whether a circuit state still keeps the router off
-// this resource. It mirrors the registry's own availability rule: only a closed
-// circuit is free, and a half-open one is waiting on a probe lease.
-func circuitBlocking(state string) bool { return state != "closed" }
+// circuitBlocking reports whether a circuit still blocks its resource at now.
+//
+// The registry closes a circuit only when a selection claims its probe lease or
+// a run produces real output, so a suspension the router will not retry for a
+// long time stays open in the durable source after its own window has passed.
+// Availability, not the stored state, is therefore the test: a closed circuit
+// is free, a suspension still inside its window blocks, and an expired one is
+// reported for its strike history rather than as a current block. A circuit with
+// no clear instant has no window to expire and keeps blocking.
+func circuitBlocking(state string, until, now time.Time) bool {
+	if state == "closed" {
+		return false
+	}
+	return until.IsZero() || until.After(now)
+}

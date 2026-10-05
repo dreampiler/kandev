@@ -65,7 +65,7 @@ func (s *DashboardService) assembleDynamicCircuits(ctx context.Context, snap *ov
 		snap.resp.BlockedCircuits = append(snap.resp.BlockedCircuits, OverviewBlockedCircuit{
 			ResourceKey: circuit.Key, Scope: scope, ScopeValue: value,
 			State: circuit.State, Code: circuit.Code, Strikes: circuit.Strikes,
-			Until: timePtr(circuit.Until), Blocking: circuitBlocking(circuit.State),
+			Until: timePtr(circuit.Until), Blocking: circuitBlocking(circuit.State, circuit.Until, snap.now),
 			ProfileID: identity.profileID, ModelName: identity.modelName,
 		})
 	}
