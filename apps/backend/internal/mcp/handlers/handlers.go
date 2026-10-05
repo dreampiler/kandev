@@ -715,18 +715,65 @@ func unmarshalStringField(payload json.RawMessage, fieldName string) (string, er
 	return m[fieldName], nil
 }
 
+// resolveListScope returns the identifier a list action should use when the
+// caller omitted it, falling back to the calling task's own scope.
+//
+// An agent that already runs inside a task holds neither its workspace_id nor
+// its workflow_id, so omitting one was a frequent first-call failure that cost
+// a round trip to recover. The fallback is the caller's own task scope, so it
+// never widens a read — it names the board the caller is already on. It applies
+// only when the request carries caller_task_id, which the MCP server sends for
+// exactly the tools whose scope argument is optional; every other caller keeps
+// the required-argument rejection.
+func (h *Handlers) resolveListScope(ctx context.Context, msg *ws.Message, fieldName string) (string, *ws.Message) {
+	value, err := unmarshalStringField(msg.Payload, fieldName)
+	if err != nil {
+		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
+	}
+	if value != "" {
+		return value, nil
+	}
+	callerTaskID, callerErr := unmarshalStringField(msg.Payload, "caller_task_id")
+	if callerErr != nil || callerTaskID == "" {
+		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldName+" is required")
+	}
+	task, taskErr := h.taskSvc.GetTask(ctx, callerTaskID)
+	if taskErr != nil || task == nil {
+		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+			fieldName+" is required and could not be resolved from the calling task "+
+				callerTaskID+"; call list_workspaces_kandev (or list_workflows_kandev) and pass the ID explicitly.")
+	}
+	value = taskWorkspaceOrWorkflowID(task, fieldName)
+	if value == "" {
+		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			fieldName+" is required: the calling task "+callerTaskID+" has no "+fieldName+
+				". Pass it explicitly — call list_workspaces_kandev or list_workflows_kandev to discover it.")
+	}
+	return value, nil
+}
+
+// taskWorkspaceOrWorkflowID projects the one scope field a list action keys on
+// from the calling task.
+func taskWorkspaceOrWorkflowID(task *models.Task, fieldName string) string {
+	switch fieldName {
+	case "workspace_id":
+		return task.WorkspaceID
+	case "workflow_id":
+		return task.WorkflowID
+	default:
+		return ""
+	}
+}
+
 // handleListByField is a generic handler for listing resources identified by a single string field.
 func (h *Handlers) handleListByField(
 	ctx context.Context, msg *ws.Message,
 	fieldName, logErrMsg, clientErrMsg string,
 	fn func(context.Context, string) (any, error),
 ) (*ws.Message, error) {
-	value, err := unmarshalStringField(msg.Payload, fieldName)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-	if value == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldName+" is required", nil)
+	value, scopeErr := h.resolveListScope(ctx, msg, fieldName)
+	if scopeErr != nil {
+		return scopeErr, nil
 	}
 	resp, err := fn(ctx, value)
 	if err != nil {
@@ -3151,7 +3198,10 @@ func (h *Handlers) resolveConversationSession(ctx context.Context, msg *ws.Messa
 		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to list task sessions")
 	}
 	if len(sessions) == 0 {
-		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task has no session")
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+			"task has no session yet — nothing has been recorded for it, so there is no conversation to read. "+
+				"This task was created with start_agent=false or has not been started yet; use spawn_session_kandev "+
+				"to start a session on it, or list_task_sessions_kandev to check again once it has run")
 	}
 	return sessions[0], nil
 }

@@ -32,7 +32,7 @@ type PlanContentTooLargeError struct {
 
 func (e *PlanContentTooLargeError) Error() string {
 	return fmt.Sprintf(
-		"plan content is %d bytes, exceeding the %d-byte limit; nothing was stored and the task's existing plan is unchanged. Shorten the document you are holding before writing again — do not resubmit this content unchanged, and do not reconstruct the plan from memory.",
+		"plan content is %d bytes, exceeding the %d-byte limit; nothing was stored and the task's existing plan is unchanged. Shorten the document you are holding, then write it back as a replacement with create_task_plan_kandev (mode replace): appending cannot succeed either, because the limit applies to the stored document, not to the fragment. Do not resubmit this content unchanged, and do not reconstruct the plan from memory.",
 		e.Submitted, e.Limit,
 	)
 }

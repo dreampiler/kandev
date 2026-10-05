@@ -75,8 +75,14 @@ func TestPlanPartialReadRangesAndNoMutation(t *testing.T) {
 			require.Equal(t, len(tc.content), result.Range.ContentBytes)
 		})
 	}
-	_, err = svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{Offset: planReadPointer(int64(13))})
-	require.ErrorIs(t, err, ErrPlanReadOffsetOutOfRange)
+	// An offset past the end is a stale cursor, not a bad request: the read
+	// clamps to the final window and flags the clamp.
+	beyond, err := svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{Offset: planReadPointer(int64(13))})
+	require.NoError(t, err)
+	require.Equal(t, content, beyond.Plan.Content)
+	require.True(t, beyond.Range.OffsetBeyondContent)
+	require.False(t, beyond.Range.HasMore)
+	require.Nil(t, beyond.Range.NextOffset)
 	stale, err := svc.GetPlanRead(ctx, taskID, contract.PlanReadOptions{ExpectedVersion: planReadPointer("old")})
 	require.ErrorIs(t, err, ErrPlanVersionConflict)
 	require.Nil(t, stale)

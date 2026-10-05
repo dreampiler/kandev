@@ -1273,22 +1273,22 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace."),
-			mcp.WithString("workspace_id", mcp.Required(), mcp.Description("The workspace ID")),
+			mcp.WithDescription("List all workflows in a workspace. Omit workspace_id to list the workflows of the current task's own workspace."),
+			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Optional: defaults to the current task's workspace. Use list_workspaces_kandev to pick another one.")),
 		),
 		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+			mcp.WithDescription("List all workflow steps in a workflow. Omit workflow_id to list the steps of the current task's own workflow."),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
 		),
 		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
 			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
-			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
 		),
 		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
 	)
@@ -1364,7 +1364,7 @@ func (s *Server) registerKanbanTools() {
 				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 			),
 			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
-			mcp.WithString("operation_id", mcp.Description("Optional caller-chosen identity naming this one logical send (letters, digits, '.', '_', ':', '-'; 1-128 chars). Reuse the SAME value when retrying after a timeout or a lost response: the retry then returns the recorded outcome instead of delivering again. A different send needs a different value; reusing one for different content is rejected with operation_id_conflict and delivers nothing.")),
+			mcp.WithString("operation_id", mcp.Description("Optional caller-chosen identity naming this one logical send (letters, digits, '.', '_', ':', '-'; 1-128 chars). Reuse the SAME value when retrying after a timeout or a lost response: the retry then returns the recorded outcome instead of delivering again. A request timeout (MCP -32001) is the client-side limit, not a delivery failure, and the backend may still complete the send; resolve the same value with get_task_message_operation_kandev instead of resending under a new one. A different send needs a different value; reusing one for different content is rejected with operation_id_conflict and delivers nothing.")),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
@@ -1383,7 +1383,7 @@ func (s *Server) registerKanbanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",
 			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
+			mcp.WithString("task_id", mcp.Description("The task ID. Optional: defaults to the current task.")),
 			mcp.WithString("session_id", mcp.Description("Optional session ID (must belong to task_id)")),
 			mcp.WithNumber("limit", mcp.Description("Optional page size (defaults to backend setting, max backend-capped)")),
 			mcp.WithString("before", mcp.Description("Optional cursor message ID to fetch messages before this ID")),
@@ -1655,7 +1655,7 @@ func (s *Server) registerListTaskSessionsTool() {
 			mcp.WithDestructiveHintAnnotation(false),
 			mcp.WithIdempotentHintAnnotation(true),
 			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The task ID whose sessions to list")),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("The task ID whose sessions to list. Optional: defaults to the current task.")),
 		),
 		s.wrapHandler("list_task_sessions_kandev", s.listTaskSessionsHandler()),
 	)
@@ -1974,7 +1974,7 @@ func (s *Server) registerPlanTools() {
 			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The full plan content in markdown format. This replaces existing content after expected_version is checked. Capped at 262,144 bytes (256 KiB) of UTF-8 content; a write over that limit is rejected and stores nothing.")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
-			mcp.WithString("expected_version", mcp.Description("Required when replacing an existing plan. Use the version returned by get_task_plan_kandev or a prior successful write.")),
+			mcp.WithString("expected_version", mcp.Description("Required when replacing an existing plan. Use the version returned by get_task_plan_kandev or a prior successful write; if you omit it, the rejection reports current_version so the retry needs no extra read. expectedVersion is accepted as a spelling.")),
 			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction. Requires a matching expected_version; the previous snapshot remains in a new revision.")),
 			// Declared (not just rejected in the handler) so the server's
 			// generic MCP argument-schema validator - which rejects any
@@ -1989,7 +1989,7 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task, including user edits and its version. task_id selects your current task by default or another task within your reach (same workspace / task tree); an outside task is rejected, never silently redirected to your own. Omit offset and limit to read the whole plan; supply either for a bounded exact fragment. Ranges count Unicode code points, not bytes. Partial reads return total length, has_more, and next_offset; continue with that offset and expected_version to avoid mixing versions. A fragment is not a replacement document: use edit_task_plan_kandev for local changes or update_task_plan_kandev with mode=\"append\" for additions."),
+			mcp.WithDescription("Get the current plan for a task, including user edits and its version. task_id selects your current task by default or another task within your reach (same workspace / task tree); an outside task is rejected, never silently redirected to your own. Omit offset and limit to read the whole plan; supply either for a bounded exact fragment. Ranges count Unicode code points, not bytes. Partial reads return total length, has_more, and next_offset; continue with that offset and expected_version to avoid mixing versions. A fragment is not a replacement document: use edit_task_plan_kandev for local changes or update_task_plan_kandev with mode=\"append\" for additions. An offset past the end of the content is not an error: the read is clamped to the final window and offset_beyond_content=true marks it."),
 			mcp.WithString("task_id", mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
 			mcp.WithInteger("offset", mcp.Min(0), mcp.Max(float64(taskcontract.MaxPlanReadOffset)), mcp.Description("Optional zero-based Unicode character offset. Supplying offset or limit enables partial reading. Defaults to 0 only in partial mode.")),
 			mcp.WithInteger("limit", mcp.Min(1), mcp.Max(taskcontract.MaxPlanReadCharacters), mcp.Description("Optional maximum characters to return: 1 through 8192. Defaults to 4096 only when a range argument is supplied; omit both range arguments for a full read.")),
@@ -2012,7 +2012,7 @@ func (s *Server) registerPlanTools() {
 			// enforced by PlanService.UpdatePlan, after authorization.
 			mcp.WithString("content", mcp.Description(`In mode="replace" (default): the full plan content in markdown format. expected_version is checked before this document replaces the existing plan. In mode="append": only the fragment to add — do not include the existing plan; the server composes it onto the stored content for you. Capped at 262,144 bytes (256 KiB) of UTF-8 content measured after composition; a write over that limit is rejected and stores nothing.`)),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
-			mcp.WithString("expected_version", mcp.Description("Required for replace mode. Use the version returned by get_task_plan_kandev or a prior successful write. Optional for append mode.")),
+			mcp.WithString("expected_version", mcp.Description("Required for replace mode. Use the version returned by get_task_plan_kandev or a prior successful write; if you omit it, the rejection reports current_version so the retry needs no extra read. Optional for append mode. expectedVersion is accepted as a spelling.")),
 			mcp.WithBoolean("allow_truncation", mcp.Description("Acknowledge an intentional large reduction in replace mode. Requires a matching expected_version; the previous snapshot remains in a new revision.")),
 			// Deliberately no mcp.Enum here: the server's generic MCP
 			// argument-schema validator enforces a declared enum strictly
@@ -2033,7 +2033,7 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("edit_task_plan_kandev",
-			mcp.WithDescription("Apply one exact text edit to a task plan. Provide the current expected_version, a non-empty old_text that occurs exactly once, and new_text. The edit preserves all surrounding bytes, including line endings; use an empty new_text to delete the match. Ambiguous or stale edits are rejected without a write. For a new section, use update_task_plan_kandev with mode=\"append\"."),
+			mcp.WithDescription("Apply one exact text edit to a task plan. Provide the current expected_version, a non-empty old_text that occurs exactly once, and new_text. The edit preserves all surrounding bytes, including line endings; use an empty new_text to delete the match. Ambiguous or stale edits are rejected without a write; the rejection reports current_version so the retry does not need another read first. old_string, oldString, oldText, and new_string are accepted spellings of old_text and new_text, and expectedVersion of expected_version. For a new section, use update_task_plan_kandev with mode=\"append\"."),
 			mcp.WithString("task_id", mcp.Description("The task ID whose plan to edit. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("expected_version", mcp.Required(), mcp.Description("The version returned by get_task_plan_kandev or a prior successful plan write.")),
 			mcp.WithString("old_text", mcp.Required(), mcp.Description("The exact non-empty text to replace. It must occur exactly once, including overlapping matches.")),

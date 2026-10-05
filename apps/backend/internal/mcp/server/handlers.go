@@ -101,13 +101,28 @@ func (s *Server) getDiagnosticBundleHandler() server.ToolHandlerFunc {
 	}
 }
 
+// listScopePayload builds the backend payload for a list tool whose scope
+// argument is optional. An agent running inside a task holds neither its
+// workspace_id nor its workflow_id, so an omitted scope is resolved from the
+// calling task's own scope on the backend rather than rejected as a missing
+// required argument. Returns a ready-to-render error message when neither an
+// explicit value nor a calling task is available.
+func (s *Server) listScopePayload(req mcp.CallToolRequest, field string) (map[string]string, string) {
+	if value := req.GetString(field, ""); value != "" {
+		return map[string]string{field: value}, ""
+	}
+	if s.taskID == "" {
+		return nil, field + " is required (there is no current task to resolve it from)"
+	}
+	return map[string]string{"caller_task_id": s.taskID}, ""
+}
+
 func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		workspaceID, err := req.RequireString("workspace_id")
-		if err != nil {
-			return mcp.NewToolResultError("workspace_id is required"), nil
+		payload, missing := s.listScopePayload(req, "workspace_id")
+		if missing != "" {
+			return mcp.NewToolResultError(missing), nil
 		}
-		payload := map[string]string{"workspace_id": workspaceID}
 		// Backend returns {workflows: [...], total: N}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflows, payload, &result); err != nil {
@@ -137,11 +152,10 @@ func (s *Server) listRepositoriesHandler() server.ToolHandlerFunc {
 
 func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		workflowID, err := req.RequireString("workflow_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_id is required"), nil
+		payload, missing := s.listScopePayload(req, "workflow_id")
+		if missing != "" {
+			return mcp.NewToolResultError(missing), nil
 		}
-		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {workflow_steps: [...], total: N}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListWorkflowSteps, payload, &result); err != nil {
@@ -154,11 +168,10 @@ func (s *Server) listWorkflowStepsHandler() server.ToolHandlerFunc {
 
 func (s *Server) listTasksHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		workflowID, err := req.RequireString("workflow_id")
-		if err != nil {
-			return mcp.NewToolResultError("workflow_id is required"), nil
+		payload, missing := s.listScopePayload(req, "workflow_id")
+		if missing != "" {
+			return mcp.NewToolResultError(missing), nil
 		}
-		payload := map[string]string{"workflow_id": workflowID}
 		// Backend returns {tasks: [...], total: N}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPListTasks, payload, &result); err != nil {
@@ -777,9 +790,9 @@ func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
 
 func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString("task_id")
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+			return mcp.NewToolResultError("task_id is required (no current task context)"), nil
 		}
 		payload := buildTaskConversationPayload(req, taskID)
 
@@ -794,9 +807,9 @@ func (s *Server) getTaskConversationHandler() server.ToolHandlerFunc {
 
 func (s *Server) listTaskSessionsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := req.RequireString(mcpKeyTaskID)
+		taskID, err := s.resolveTaskID(req)
 		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
+			return mcp.NewToolResultError("task_id is required (no current task context)"), nil
 		}
 		// current_session_id comes from the session this MCP server is bound
 		// to, never from the caller, so "is_current" cannot be spoofed.

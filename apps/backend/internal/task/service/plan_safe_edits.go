@@ -137,11 +137,17 @@ func (s *PlanService) guardAgentAppend(req CreatePlanRequest, head *models.TaskP
 
 func (s *PlanService) requireCurrentVersion(req CreatePlanRequest, head *models.TaskPlan) error {
 	if req.ExpectedVersion == "" {
-		return newPlanSafetyError(
+		err := newPlanSafetyError(
 			PlanErrorVersionRequired, ErrPlanVersionRequired, req.TaskID,
 			"Plan was not changed because expected_version is required for an existing plan.",
-			"Read the current plan with get_task_plan_kandev and retry with its version.",
+			"Retry with the current_version reported here, after reading the plan to apply your change to the current content.",
 		)
+		// The head is already read and locked, so the version that satisfies
+		// this rejection is already in hand. Reporting it turns the required
+		// read-and-retry round trip into a retry against a known value; the
+		// caller still has to read the content it means to replace.
+		err.CurrentVersion = head.WriteVersion
+		return err
 	}
 	if req.ExpectedVersion != head.WriteVersion {
 		return s.versionConflictError(req.TaskID, head.WriteVersion)

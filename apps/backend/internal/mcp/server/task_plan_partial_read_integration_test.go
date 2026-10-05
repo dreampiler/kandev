@@ -107,9 +107,14 @@ func TestPlanPartialReadMCPPaginationConflicts(t *testing.T) {
 	eof := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"offset": utf8.RuneCountInString(content)})
 	require.Empty(t, planContentFromRead(t, eof))
 	require.Equal(t, false, partialReadMetadata(t, eof)["has_more"])
+	// An offset past the end is a stale cursor, not a bad request: the read
+	// clamps to the final window and flags it.
 	overrun := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"offset": 100})
-	require.True(t, overrun.IsError)
-	require.Contains(t, allText(t, overrun), "plan_read_offset_out_of_range")
+	require.False(t, overrun.IsError)
+	require.Equal(t, content, planContentFromRead(t, overrun),
+		"clamping to the final window of a document shorter than the limit reads it whole")
+	require.Equal(t, true, partialReadMetadata(t, overrun)["offset_beyond_content"])
+	require.Equal(t, false, partialReadMetadata(t, overrun)["has_more"])
 	for _, change := range []string{"content", "title", "delete", "recreate"} {
 		t.Run(change, func(t *testing.T) {
 			read := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{"limit": 1})

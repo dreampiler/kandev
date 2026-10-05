@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/task/contract"
@@ -24,6 +23,10 @@ type PlanReadRange struct {
 	ContentBytes       int    `json:"content_bytes"`
 	HasMore            bool   `json:"has_more"`
 	NextOffset         *int64 `json:"next_offset"`
+	// OffsetBeyondContent reports that the requested offset was past the end of
+	// the content and the read served the final window instead. Without it a
+	// caller cannot tell a clamped read from one it asked for.
+	OffsetBeyondContent bool `json:"offset_beyond_content"`
 }
 
 type PlanReadResult struct {
@@ -59,10 +62,7 @@ func (s *PlanService) GetPlanRead(ctx context.Context, taskID string, options co
 	if options.Offset == nil && options.Limit == nil {
 		return result, nil
 	}
-	content, page, err := projectPlanRange(taskID, head.Content, options)
-	if err != nil {
-		return nil, err
-	}
+	content, page := projectPlanRange(head.Content, options)
 	projected := *head
 	projected.Content = content
 	result.Plan, result.Range = &projected, page
@@ -79,7 +79,7 @@ func planReadVersionConflict(taskID string, head *models.TaskPlan) error {
 	return err
 }
 
-func projectPlanRange(taskID, content string, options contract.PlanReadOptions) (string, *PlanReadRange, error) {
+func projectPlanRange(content string, options contract.PlanReadOptions) (string, *PlanReadRange) {
 	offset, limit := int64(0), int64(contract.DefaultPlanReadCharacters)
 	if options.Offset != nil {
 		offset = *options.Offset
@@ -88,23 +88,27 @@ func projectPlanRange(taskID, content string, options contract.PlanReadOptions) 
 		limit = *options.Limit
 	}
 	total := int64(utf8.RuneCountInString(content))
-	if offset > total {
-		return "", nil, newPlanSafetyError(PlanErrorReadOffsetOutOfRange, ErrPlanReadOffsetOutOfRange, taskID,
-			"Plan was not read because offset exceeds the content length.",
-			fmt.Sprintf("Use an offset between 0 and %d, or restart the read at offset 0.", total))
+	beyond := offset > total
+	if beyond {
+		// An offset past the end is a stale cursor, not a malformed request:
+		// the plan is readable and the caller only needs the tail. Serving the
+		// final window keeps the read one call instead of a failure plus a
+		// retry, and the empty slice an out-of-range offset would produce is
+		// exactly the string a caller would misread as "the plan is empty".
+		offset = max(total-limit, 0)
 	}
 	count := min(limit, total-offset)
 	fragment := planCharacterSlice(content, offset, count)
 	page := &PlanReadRange{
 		Partial: true, TotalCharacters: total, TotalContentBytes: len(content),
 		Offset: offset, Limit: limit, ReturnedCharacters: count, ContentBytes: len(fragment),
-		HasMore: offset+count < total,
+		HasMore: offset+count < total, OffsetBeyondContent: beyond,
 	}
 	if page.HasMore {
 		next := offset + count
 		page.NextOffset = &next
 	}
-	return fragment, page, nil
+	return fragment, page
 }
 
 func planCharacterSlice(content string, offset, count int64) string {

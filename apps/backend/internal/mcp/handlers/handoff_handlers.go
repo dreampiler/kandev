@@ -59,8 +59,23 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 		// mapHandoffError for the same code mapping the document handlers use.
 		if !errors.Is(err, service.ErrAccessDenied) {
 			h.logger.Error("list related tasks", zap.Error(err))
+			return mapHandoffError(msg, err)
 		}
-		return mapHandoffError(msg, err)
+		// The denial itself is correct, but "document access denied" leaves a
+		// caller that passed a stale or wrong task_id with no way to recover
+		// except guessing again. Name the caller's own task (always readable,
+		// so re-calling with it is a real action rather than advice) and the
+		// relations that are allowed.
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+			"access denied: "+req.TaskID+" is not related to "+caller+
+				" under the readable relations (self, ancestor, descendant, sibling with a shared parent, blocker), "+
+				"or it lives in a different workspace. Call list_related_tasks_kandev with task_id "+caller+
+				" (or \"self\") to reach the relations you are entitled to see from "+caller+".",
+			map[string]interface{}{
+				"reason":         "related_tasks_access_denied",
+				"caller_task_id": caller,
+				"target_task_id": req.TaskID,
+			})
 	}
 	h.enrichRelatedTasksWithPRs(ctx, related)
 	return ws.NewResponse(msg.ID, msg.Action, related)
