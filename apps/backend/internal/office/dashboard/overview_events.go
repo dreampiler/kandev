@@ -225,20 +225,29 @@ func stepMoveEvent(group []*sqlite.OverviewStepTransitionRow) OverviewEvent {
 //
 // Classification is read per recorded row, not per surviving entry, because the
 // movements worth noticing are usually the ones the fold absorbs: Review ->
-// Implement is exactly the detour case, and it is a send-back.
+// Implement is exactly the detour case, and it is a send-back. For the same
+// reason the set of steps this run has entered is kept apart from the folded
+// entries: a fold drops the steps a run only passed through, and a step it
+// dropped is still a step the task had been in.
 func foldStepMoves(group []*sqlite.OverviewStepTransitionRow) (moves []OverviewStepMove, sentBack, reopened int) {
 	moves = make([]OverviewStepMove, 0, len(group))
-	// stepIDs tracks the same steps in the same order, because a fold decides on
+	// stepIDs tracks the surviving entries in order, because a fold decides on
 	// which step a move landed and the wire move itself names only the label.
 	stepIDs := make([]string, 0, len(group))
+	// visited is every step this run entered, recorded as each row is read and
+	// never rewritten by a fold.
+	visited := make(map[string]bool, len(group))
 	for _, row := range group {
 		stepID := row.StepID
-		sent, reopenedNow := classifyRow(row, len(moves), stepIDs)
+		sent, reopenedNow := classifyRow(row, visited)
 		if sent {
 			sentBack++
 		}
 		if reopenedNow {
 			reopened++
+		}
+		if stepID != "" {
+			visited[stepID] = true
 		}
 		switch {
 		case len(moves) > 0 && stepID != "" && stepID == lastString(stepIDs):
@@ -279,8 +288,12 @@ func absorb(move *OverviewStepMove, row *sqlite.OverviewStepTransitionRow, sentB
 // again. Reopened wins when both hold, because a task moved out of a finished
 // step is not being sent back to anything. A move whose source or destination
 // identity the ledger does not record settles nothing.
+//
+// visited is every step the run entered before this row, which is not the same
+// as the steps that survived the fold: a fold drops a step a run only passed
+// through, and returning to such a step is still a return.
 func classifyRow(
-	row *sqlite.OverviewStepTransitionRow, settled int, stepIDs []string,
+	row *sqlite.OverviewStepTransitionRow, visited map[string]bool,
 ) (sentBack, reopened bool) {
 	if row.FromStepID == "" {
 		return false, false
@@ -288,7 +301,7 @@ func classifyRow(
 	if !row.RunsOnEntryFrom() {
 		return false, true
 	}
-	return row.StepID != "" && visitedEarlier(row.StepID, settled, stepIDs), false
+	return row.StepID != "" && visited[row.StepID], false
 }
 
 // newStepMove builds one surviving entry. Stopped marks that arriving at this
@@ -300,17 +313,6 @@ func newStepMove(row *sqlite.OverviewStepTransitionRow, sentBack, reopened bool)
 		Actor: row.ActorKind, Trigger: row.Trigger,
 		Stopped: !row.RunsOnEntry(), SentBack: sentBack, Reopened: reopened, Repeat: 1,
 	}
-}
-
-// visitedEarlier reports that a step appears among the entries already settled,
-// which means the task had been there in this run and is being returned to.
-func visitedEarlier(stepID string, settled int, stepIDs []string) bool {
-	for _, seen := range stepIDs[:settled] {
-		if seen == stepID {
-			return true
-		}
-	}
-	return false
 }
 
 // lastString and secondLastString read the tail of the step-id list without the

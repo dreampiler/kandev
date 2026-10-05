@@ -116,6 +116,9 @@ type SummaryFigure = {
  * focusable span rather than a button: a button nested in a link is neither, and
  * activating it would navigate away from the row being read. Enter and Space
  * behave as they do on a button, and the click is kept from reaching the link.
+ * Its hit area is the phone minimum and the desktop text density, like the
+ * sibling disclosure on the workspace card, because opening the chain is one of
+ * the ways a reader uses this screen.
  */
 function StepMoveToggle({
   open,
@@ -133,7 +136,7 @@ function StepMoveToggle({
       tabIndex={0}
       aria-expanded={open}
       aria-controls={listId}
-      className="cursor-pointer text-xs text-muted-foreground hover:underline"
+      className="inline-flex min-h-11 cursor-pointer items-center text-xs text-muted-foreground hover:underline sm:min-h-0"
       data-testid="overview-step-move-toggle"
       onClick={(event) => {
         event.preventDefault();
