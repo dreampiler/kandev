@@ -59,7 +59,8 @@ with the history I give up.
   days. Invalid input shall save nothing.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-001.3:** Eligibility shall use the
   archived timestamp for transcripts and the completion timestamp for cleanup
-  jobs. A row exactly at the cutoff remains protected.
+  jobs. The window includes its boundary, so a row exactly at the cutoff is in
+  scope for the pass.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-001.4:** An administrator shall be able
   to analyze an unsaved policy while cleanup remains disabled. Opening the page
   shall not start an analysis, backup, or cleanup.

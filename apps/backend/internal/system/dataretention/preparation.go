@@ -110,19 +110,35 @@ func limitPreparationDetail(message string) string {
 	return message[:preparationDetailLimit]
 }
 
-// recoverPreparation fails a preparation whose worker is gone. An unbacked
-// approval is never left standing, so a restart cannot arm a deletion silently.
+// recoverPreparation fails a preparation whose worker is gone. Ticks are
+// serialized, so a record still marked running when reconcile observes it is one
+// whose backup worker did not survive; the same operation identity on both sides
+// means nothing else took the preparation over. An unbacked approval is never
+// left standing, so a restart cannot arm a deletion silently.
 func (s *Service) recoverPreparation(ctx context.Context, observed record) error {
 	_, err := s.change(ctx, func(r *record, _ *sqlx.Tx) error {
 		if r.Policy.Revision != observed.Policy.Revision || r.Preparation.State != stateRunning {
 			return nil
 		}
-		if observed.Operation == nil || r.Operation == nil || r.Operation.ID != observed.Operation.ID {
+		observedID := ""
+		if observed.Operation != nil {
+			observedID = observed.Operation.ID
+		}
+		if observedID == currentID(r) {
 			s.failPreparation(r)
 		}
 		return nil
 	})
 	return err
+}
+
+// currentID identifies the operation the durable record still carries, so a
+// missing one compares as empty rather than being read as a mismatch.
+func currentID(r *record) string {
+	if r.Operation == nil {
+		return ""
+	}
+	return r.Operation.ID
 }
 
 func (s *Service) failPreparation(r *record) {

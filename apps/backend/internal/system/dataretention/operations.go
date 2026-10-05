@@ -91,7 +91,11 @@ func (s *Service) Cancel(ctx context.Context, id string) (Status, error) {
 			return nil
 		}
 		if r.Operation.Kind == choiceBackup {
+			// Cancelling a backup invalidates the revision and clears the
+			// preparation, so a late completion cannot arm a deletion.
 			r.Policy.Enabled = false
+			r.Preparation = Preparation{State: stateNone}
+			r.PreparationDetail = ""
 			r.ApprovedRevision = 0
 			r.Receipt = ""
 			r.NextDueAt = nil

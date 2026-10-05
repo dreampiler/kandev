@@ -70,7 +70,7 @@ restore, reset, or compaction owns the writer.
 `Policy` carries `Enabled`, `ArchivedAge`, `CleanupAge`, and `Revision`. Both
 ages are whole days in `1..3650`. Defaults are 30 and 7 days with `Enabled`
 false. `Cutoff` returns `now - days` in UTC and is inclusive, so a row exactly at
-the boundary is retained.
+the boundary is in scope for the pass.
 
 `Revision` makes a stale concurrent save a conflict rather than an overwrite.
 `ApprovedRevision` is the gate: a deletion batch re-checks
