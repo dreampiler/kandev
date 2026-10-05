@@ -266,7 +266,7 @@ function ModelUsageLine({ usage }: { usage?: AgentProfileUsage }) {
             </span>
           )}
           {window.reset_at && (
-            <span className="text-muted-foreground">
+            <span className="text-muted-foreground" title={relativeTime(window.reset_at)}>
               {t("office:overviewUsageResets", { time: occurredTime(window.reset_at) })}
             </span>
           )}
@@ -310,7 +310,10 @@ function BlockedAccountCard({ account }: { account: OverviewBlockedAccount }) {
         {account.provider_id}
         {account.scope_value ? ` · ${account.scope_value}` : ""}
       </Link>
-      <div className={`mt-1 text-xs ${statusTextClass("error")}`}>
+      <div
+        className={`mt-1 text-xs ${statusTextClass("error")}`}
+        title={account.retry_at ? relativeTime(account.retry_at) : undefined}
+      >
         {blockedAccountState(t, account)}
         {account.error_code ? ` · ${account.error_code}` : ""}
       </div>
