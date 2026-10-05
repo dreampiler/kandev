@@ -88,12 +88,15 @@ function TaskTitleCell({
   title,
   sessionId,
   secondary,
+  archived,
 }: {
   taskId: string;
   title: string;
   sessionId?: string;
   secondary?: string;
+  archived?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="min-w-0">
       <Link
@@ -104,6 +107,11 @@ function TaskTitleCell({
         {title}
       </Link>
       <div className="truncate text-[11px] text-muted-foreground">
+        {archived && (
+          <span className="mr-1" data-testid="overview-task-archived">
+            {t("office:projectStatusArchived")}
+          </span>
+        )}
         {secondary ? `${secondary} · ` : ""}
         <span className="font-mono">{shortId(taskId)}</span>
       </div>
@@ -111,13 +119,23 @@ function TaskTitleCell({
   );
 }
 
-/** The task table used by project cards and the running-tasks tab. */
+/**
+ * The task table used by project cards and the running-tasks tab.
+ *
+ * The last time column is a dwell time for an open task, because the question
+ * there is how long the task has been sitting where it is. A completed row
+ * answers a different question, so it names the column itself and shows the
+ * clock time the task finished: the reader came from a figure that counts
+ * completions, and the row has to give back the same instant.
+ */
 export function OverviewTaskTable({
   rows,
   showProject,
+  timeColumnLabelKey = "office:overviewTimeInStep",
 }: {
   rows: OverviewTaskItem[];
   showProject?: boolean;
+  timeColumnLabelKey?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -129,7 +147,7 @@ export function OverviewTaskTable({
           <TableHead>{t("common:task")}</TableHead>
           <TableHead>{t("office:session")}</TableHead>
           <TableHead className="text-right">{t("office:overviewLastOutput")}</TableHead>
-          <TableHead className="text-right">{t("office:overviewTimeInStep")}</TableHead>
+          <TableHead className="text-right">{t(timeColumnLabelKey)}</TableHead>
           <TableHead className="text-right">{t("task:queued")}</TableHead>
           <TableHead>{t("office:reason")}</TableHead>
         </TableRow>
@@ -142,7 +160,12 @@ export function OverviewTaskTable({
             </TableCell>
             {showProject && <TableCell className="text-xs">{row.workspace_name}</TableCell>}
             <TableCell className="max-w-[20rem]">
-              <TaskTitleCell taskId={row.task_id} title={row.title} secondary={row.step_name} />
+              <TaskTitleCell
+                taskId={row.task_id}
+                title={row.title}
+                secondary={row.step_name}
+                archived={row.archived}
+              />
             </TableCell>
             <TableCell className="text-xs">
               <div className="truncate">{row.model_name}</div>
@@ -163,8 +186,11 @@ export function OverviewTaskTable({
             </TableCell>
             <TableCell
               className={`whitespace-nowrap text-right text-xs tabular-nums ${stepDwellTone(row)}`}
+              title={row.completed_at ? relativeTime(row.completed_at) : undefined}
             >
-              {durationSince(row.step_entered_at)}
+              {row.completed_at
+                ? occurredTime(row.completed_at)
+                : durationSince(row.step_entered_at)}
             </TableCell>
             <TableCell className="text-right text-xs tabular-nums">
               {row.queued_messages || ""}

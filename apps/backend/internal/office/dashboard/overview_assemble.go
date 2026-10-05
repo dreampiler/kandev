@@ -513,7 +513,7 @@ func assembleEvents(
 			break
 		}
 		events = append(events, OverviewEvent{
-			Kind: overviewEventTaskCompleted, At: row.UpdatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
+			Kind: overviewEventTaskCompleted, At: row.CompletedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
 		})
 	}
 	events = append(events, failedSessionEvents(snap, since)...)

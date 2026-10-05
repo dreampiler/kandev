@@ -109,6 +109,28 @@ const taskPage = {
   ],
 };
 
+const completedPage = {
+  kind: "tasks",
+  filter: "completed",
+  total: 1,
+  tasks: [
+    {
+      task_id: "task-finished",
+      title: "Finished task",
+      step_name: "Done",
+      state: "COMPLETED",
+      workspace_id: boardWorkspaceID,
+      workspace_name: "Board One",
+      status: "waiting",
+      failures_24h: 0,
+      step_entered_at: createdAt,
+      completed_at: createdAt,
+      archived: true,
+      queued_messages: 0,
+    },
+  ],
+};
+
 const sessionsPage = {
   kind: "sessions",
   total: 1,
@@ -178,7 +200,9 @@ function hrefOf(element: HTMLElement): string | null {
 
 describe("overview project card destinations", () => {
   beforeEach(() => {
-    getWorkspaceAggregateTasks.mockResolvedValue(taskPage);
+    getWorkspaceAggregateTasks.mockImplementation(async (_id: string, filter: string) =>
+      filter === "completed" ? completedPage : taskPage,
+    );
     useLoadedWorkspace();
   });
   afterEach(() => {
@@ -217,12 +241,25 @@ describe("overview project card destinations", () => {
     expect(within(taskList).getAllByTestId("overview-task-row")).toHaveLength(1);
     expect(hrefOf(within(row).getByText("Row task"))).toBe("/t/task-row");
 
+    // The 24-hour figure opens its own list, and that list answers the figure
+    // back: the row reports when the task finished, names the column as the
+    // completion time rather than a dwell time, and says the task has left the
+    // board, which is where most of a 24-hour list actually is.
     await act(async () => {
-      fireEvent.click(screen.getByText("Completed (24 h)"));
+      fireEvent.click(screen.getByTestId("overview-metric-completed"));
     });
     expect(getWorkspaceAggregateTasks).toHaveBeenLastCalledWith("ws-1", "completed", 50, {
       cache: "no-store",
     });
+    const completedList = await screen.findByTestId("overview-workspace-task-list");
+    const completedRow = await within(completedList).findByTestId("overview-task-row");
+    expect(within(completedList).getByText("Completed at")).toBeTruthy();
+    expect(within(completedRow).getByTestId("overview-task-archived").textContent).toBe("Archived");
+    expect(hrefOf(within(completedRow).getByText("Finished task"))).toBe("/t/task-finished");
+    // The completed filter is a chip too, so the reader can come back from it.
+    const chips = screen.getAllByRole("button", { name: "Completed (24 h)" });
+    expect(chips.length).toBeGreaterThan(1);
+    expect(chips.filter((chip) => chip.getAttribute("aria-pressed") === "true").length).toBe(1);
   });
 
   it("links an Office workspace to its Office home", () => {

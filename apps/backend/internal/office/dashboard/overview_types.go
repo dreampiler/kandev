@@ -419,7 +419,15 @@ type OverviewTaskItem struct {
 	Failures24h    int             `json:"failures_24h"`
 	LastOutputAt   *time.Time      `json:"last_output_at,omitempty"`
 	StepEnteredAt  time.Time       `json:"step_entered_at"`
-	QueuedMessages int             `json:"queued_messages"`
+	// CompletedAt is the instant the task entered a completing step. Only a
+	// completed row carries it, and it is what the window counts rather than
+	// the task's last write.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	// Archived reports that the task has left the board. A completed list is
+	// mostly archived rows, so without this the reader cannot tell why a task
+	// they just saw finish is not on any board.
+	Archived       bool `json:"archived,omitempty"`
+	QueuedMessages int  `json:"queued_messages"`
 	// Failure is what followed this row's failed session, so a task that is in
 	// trouble reports what became of the failure on its own row rather than only
 	// in the events list. It is the same value the failed-session event carries.

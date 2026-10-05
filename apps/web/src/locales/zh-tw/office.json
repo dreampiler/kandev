@@ -1069,6 +1069,7 @@
   "overviewSender": "傳送方",
   "overviewActiveTasks": "進行中的任務",
   "overviewCompleted24h": "已完成（24 小時）",
+  "overviewCompletedAt": "完成時間",
   "overviewOpenTasks": "未完成的任務",
   "overviewOpenBreakdown": "等待前置 {{waiting}} · 擱置 {{hold}}",
   "overviewFilterProblems": "問題優先",

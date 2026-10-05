@@ -24,6 +24,7 @@ function Metric({
   onClick,
   href,
   active,
+  testId,
 }: {
   label: string;
   value: ReactNode;
@@ -37,6 +38,7 @@ function Metric({
   onClick?: () => void;
   href?: string;
   active?: boolean;
+  testId?: string;
 }) {
   const surface = active
     ? "border-border bg-muted"
@@ -53,19 +55,23 @@ function Metric({
   const className = `block rounded-md border p-2 text-center transition-colors cursor-pointer ${surface}`;
   if (href) {
     return (
-      <Link href={href} className={className}>
+      <Link href={href} className={className} data-testid={testId}>
         {body}
       </Link>
     );
   }
   if (onClick) {
     return (
-      <button type="button" className={className} onClick={onClick}>
+      <button type="button" className={className} onClick={onClick} data-testid={testId}>
         {body}
       </button>
     );
   }
-  return <div className={`rounded-md border p-2 text-center ${surface}`}>{body}</div>;
+  return (
+    <div className={`rounded-md border p-2 text-center ${surface}`} data-testid={testId}>
+      {body}
+    </div>
+  );
 }
 
 /** The project's six figures, each one a tile and each one a filter. */
@@ -111,6 +117,7 @@ export function WorkspaceMetrics({
         value={metrics.completed_24h}
         onClick={() => onFilter("completed")}
         active={filter === "completed"}
+        testId="overview-metric-completed"
       />
       <Metric
         label={t("office:overviewOpenTasks")}

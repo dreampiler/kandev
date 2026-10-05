@@ -1069,6 +1069,7 @@
   "overviewSender": "送信元",
   "overviewActiveTasks": "進行中のタスク",
   "overviewCompleted24h": "完了 (24 時間)",
+  "overviewCompletedAt": "完了時刻",
   "overviewOpenTasks": "未完了のタスク",
   "overviewOpenBreakdown": "前提待ち {{waiting}} · 保留 {{hold}}",
   "overviewFilterProblems": "問題を先に",

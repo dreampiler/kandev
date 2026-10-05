@@ -1069,6 +1069,7 @@
   "overviewSender": "De",
   "overviewActiveTasks": "Tarefas em curso",
   "overviewCompleted24h": "Concluídas (24 h)",
+  "overviewCompletedAt": "Concluída em",
   "overviewOpenTasks": "Tarefas abertas",
   "overviewOpenBreakdown": "{{waiting}} à espera · {{hold}} em pausa",
   "overviewFilterProblems": "Problemas primeiro",

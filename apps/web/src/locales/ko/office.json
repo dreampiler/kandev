@@ -1069,6 +1069,7 @@
   "overviewSender": "보낸 쪽",
   "overviewActiveTasks": "동작 중 작업",
   "overviewCompleted24h": "24시간 완료",
+  "overviewCompletedAt": "완료 시각",
   "overviewOpenTasks": "열린 작업",
   "overviewOpenBreakdown": "선행 대기 {{waiting}} · 보류 {{hold}}",
   "overviewFilterProblems": "문제 먼저",

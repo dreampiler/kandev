@@ -30,10 +30,13 @@ import { statusTextClass, type OverviewStatusTone } from "./overview-status-colo
 const TASK_LIST_LIMIT = 50;
 const TASK_LIST_ALL_LIMIT = 500;
 
-// Catalog keys for the filter chips, not copy.
+// Catalog keys for the filter chips, not copy. The completed chip is here
+// because the 24-hour tile opens the completed list: without a chip the reader
+// lands in that list with no way back and no sign of which filter is selected.
 const FILTER_CHIPS: { filter: OverviewTaskFilter; labelKey: string }[] = [
   { filter: "problems", labelKey: "office:overviewFilterProblems" },
   { filter: "active", labelKey: "common:taskStateInProgress" },
+  { filter: "completed", labelKey: "office:overviewCompleted24h" },
   { filter: "hold", labelKey: "office:projectStatusOnHold" },
   { filter: "all", labelKey: "office:all" },
 ];
@@ -440,7 +443,12 @@ function WorkspaceTaskList({
         empty={total === 0}
         emptyLabel={filter === "problems" ? t("office:overviewNoProblems") : undefined}
       >
-        <OverviewTaskTable rows={list.data?.tasks ?? []} />
+        <OverviewTaskTable
+          rows={list.data?.tasks ?? []}
+          timeColumnLabelKey={
+            filter === "completed" ? "office:overviewCompletedAt" : "office:overviewTimeInStep"
+          }
+        />
         {total > shown && (
           <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
             {t("office:overviewShowingOf", { shown, total })}

@@ -223,7 +223,8 @@ func completedTaskItems(snap *overviewSnapshot, workspaceID string) []OverviewTa
 		}
 		items = append(items, OverviewTaskItem{
 			TaskID: row.ID, Title: row.Title, State: stateCompleted, WorkspaceID: row.WorkspaceID,
-			WorkspaceName: snap.names[row.WorkspaceID], StepEnteredAt: row.UpdatedAt,
+			WorkspaceName: snap.names[row.WorkspaceID], StepEnteredAt: row.CompletedAt,
+			CompletedAt: &row.CompletedAt, Archived: !row.ArchivedAt.IsZero(),
 		})
 	}
 	return items

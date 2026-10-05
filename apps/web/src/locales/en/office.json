@@ -1069,6 +1069,7 @@
   "overviewSender": "From",
   "overviewActiveTasks": "Tasks in progress",
   "overviewCompleted24h": "Completed (24 h)",
+  "overviewCompletedAt": "Completed at",
   "overviewOpenTasks": "Open tasks",
   "overviewOpenBreakdown": "{{waiting}} waiting · {{hold}} on hold",
   "overviewFilterProblems": "Problems first",
