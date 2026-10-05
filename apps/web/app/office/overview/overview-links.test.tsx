@@ -26,6 +26,7 @@ vi.mock("@/hooks/domains/office/use-workspace-overview", () => ({
 }));
 vi.mock("@/hooks/domains/settings/use-agent-profile-usage", () => ({
   useAgentProfileUsage: () => undefined,
+  useAgentProfileUsageList: () => ({ byProfile: new Map(), loaded: false }),
 }));
 vi.mock("@kandev/ui/tooltip", () => ({
   TooltipProvider: ({ children }: { children: React.ReactNode }) => children,
@@ -307,7 +308,7 @@ describe("overview list and section destinations", () => {
     expect(hrefOf(needsYou)).toBe("#overview-needs-human");
   });
 
-  it("links people items, events and models to their screens", () => {
+  it("links people items, events and models to their screens", async () => {
     render(
       <>
         <OverviewNeedsHuman items={humanItems} />
@@ -323,6 +324,10 @@ describe("overview list and section destinations", () => {
     expect(within(items[1]).queryByTestId("overview-human-repeat")).toBeNull();
     expect(hrefOf(screen.getByText("Open inbox"))).toBe("/needs-you-inbox");
     expect(screen.getByTestId(eventRowTestId).getAttribute("href")).toBe(failedSessionHref);
+    // A model card sits inside its provider account, so the account opens first.
+    await act(async () => {
+      fireEvent.click(within(screen.getByTestId("overview-account")).getByRole("button"));
+    });
     expect(hrefOf(screen.getByText("Fast"))).toBe(fastProfileHref);
   });
 });

@@ -16,6 +16,7 @@ func wireOfficeOverview(
 	officeRepo *officesqlite.Repository,
 	taskRepo *tasksqlite.Repository,
 	userSvc *userservice.Service,
+	usage *usageProviderAdapter,
 	sessionLimit int,
 ) {
 	if dashboard == nil {
@@ -27,6 +28,9 @@ func wireOfficeOverview(
 	if taskRepo != nil {
 		dashboard.SetAnswerableQuestionLister(taskRepo)
 		dashboard.SetDynamicCircuitLister(taskRepo)
+	}
+	if usage != nil {
+		dashboard.SetProfileAccountLister(usage)
 	}
 	if userSvc != nil {
 		dashboard.SetOverviewScopeSource(userSvc)

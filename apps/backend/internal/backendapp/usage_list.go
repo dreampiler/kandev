@@ -44,7 +44,9 @@ func (l *profileUsageLister) ListProfileUsage(ctx context.Context) ([]dto.AgentP
 	result := make([]dto.AgentProfileUsageDTO, 0, len(profiles))
 	for _, bound := range profiles {
 		usage := l.usage.usageForProfile(ctx, bound.profile, bound.agentType)
+		identity := accountIdentityFor(bound.binding.accountKey)
 		entry := profileUsageDTO(bound.profile.ID, usage)
+		entry.AccountID, entry.AccountKind = identity.ID, identity.Kind
 		key := bound.binding.accountKey
 		if usage.State == profileUsageNoUsageAPI {
 			if _, done := recorded[key]; !done {

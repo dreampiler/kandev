@@ -160,15 +160,20 @@ const (
 
 // OverviewModel is one agent profile in the models section.
 type OverviewModel struct {
-	AgentProfileID string              `json:"agent_profile_id"`
-	AgentID        string              `json:"agent_id"`
-	AgentName      string              `json:"agent_name"`
-	Name           string              `json:"name"`
-	Kind           string              `json:"kind"`
-	Sessions24h    int                 `json:"sessions_24h"`
-	Running        int                 `json:"running"`
-	Failed24h      int                 `json:"failed_24h"`
-	Errors         []OverviewErrorKind `json:"errors"`
+	AgentProfileID string `json:"agent_profile_id"`
+	AgentID        string `json:"agent_id"`
+	AgentName      string `json:"agent_name"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	// AccountID is the provider account this profile authenticates with, so a
+	// client can group the models of one account. It is empty when the account
+	// is not identifiable, and for a dynamic profile, which routes through
+	// concrete profiles rather than being an account of its own.
+	AccountID   string              `json:"account_id,omitempty"`
+	Sessions24h int                 `json:"sessions_24h"`
+	Running     int                 `json:"running"`
+	Failed24h   int                 `json:"failed_24h"`
+	Errors      []OverviewErrorKind `json:"errors"`
 }
 
 // OverviewBlockedCircuit is one dynamic-routing resource circuit that is not

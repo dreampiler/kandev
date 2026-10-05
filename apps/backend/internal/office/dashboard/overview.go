@@ -136,7 +136,11 @@ type overviewSnapshot struct {
 	completed    []*sqlite.OverviewCompletedRow
 	lastOutput   map[string]time.Time
 	profileNames map[string]string
-	taskTitles   map[string]string
+	// accountIDs maps an agent profile to the provider account it authenticates
+	// with, so the models section can group by account. Absent leaves every
+	// model without an account rather than inventing one.
+	accountIDs map[string]string
+	taskTitles map[string]string
 
 	firstLinesOnce sync.Once
 	firstLines     map[string]string

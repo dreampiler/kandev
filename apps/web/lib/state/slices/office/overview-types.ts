@@ -94,6 +94,14 @@ export type OverviewModel = {
   agent_name: string;
   name: string;
   kind: OverviewModelKind;
+  /**
+   * The provider account this model authenticates with, so models of one
+   * account can be shown together. Absent when the account is not identifiable,
+   * and for a dynamic profile, which routes through concrete profiles. A
+   * payload from a server without the field groups models by kind alone, which
+   * is how this section behaved before the field existed.
+   */
+  account_id?: string;
   sessions_24h: number;
   running: number;
   failed_24h: number;

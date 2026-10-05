@@ -172,8 +172,23 @@ func (s *DashboardService) assembleModels(
 	if err := s.nameModels(ctx, snap, cards); err != nil {
 		return err
 	}
+	s.accountIDsByProfile(ctx, snap)
+	nameModelAccounts(cards, snap.accountIDs)
 	snap.resp.Models = sortedModels(cards, errorKinds)
 	return s.assembleBlockedAccounts(ctx, snap, ids)
+}
+
+// nameModelAccounts attaches the provider account of every model card, so a
+// client can group the cards by the account they run on instead of scattering
+// one account's models across the list. A dynamic profile routes through other
+// profiles and is not itself an account, so it keeps no account.
+func nameModelAccounts(cards map[string]*OverviewModel, accountIDs map[string]string) {
+	for _, c := range cards {
+		if c.Kind == OverviewModelKindDynamic {
+			continue
+		}
+		c.AccountID = accountIDs[c.AgentProfileID]
+	}
 }
 
 func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapshot, cards map[string]*OverviewModel) error {

@@ -70,6 +70,16 @@ export function resetAgentProfileUsageForTests() {
 
 /** Returns one profile's usage, or undefined until the shared list has it. */
 export function useAgentProfileUsage(profileId: string): AgentProfileUsage | undefined {
+  const current = useAgentProfileUsageList();
+  return current.byProfile.get(profileId);
+}
+
+/**
+ * The whole shared list, for a view that groups profiles by account and
+ * therefore needs every row's account at once. It is the same request the
+ * per-row accessor makes, not a second one.
+ */
+export function useAgentProfileUsageList(): UsageSnapshot {
   const current = useSyncExternalStore(
     subscribe,
     () => snapshot,
@@ -80,5 +90,5 @@ export function useAgentProfileUsage(profileId: string): AgentProfileUsage | und
     const timer = window.setInterval(() => void refreshAgentProfileUsage(), REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, []);
-  return current.byProfile.get(profileId);
+  return current;
 }

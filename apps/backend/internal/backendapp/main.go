@@ -1662,7 +1662,10 @@ func constructOfficeServices(
 		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
 	)
 	if services.OfficeSvcs != nil {
-		wireOfficeOverview(services.OfficeSvcs.Dashboard, repos.Office, repos.Task, services.User, cfg.Office.MaxConcurrentInstance)
+		wireOfficeOverview(
+			services.OfficeSvcs.Dashboard, repos.Office, repos.Task, services.User,
+			services.UsageAdapter, cfg.Office.MaxConcurrentInstance,
+		)
 	}
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 
