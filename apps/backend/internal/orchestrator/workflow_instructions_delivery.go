@@ -9,12 +9,30 @@ import (
 )
 
 // workflowInstructionsDelivery records which common-instructions block a
-// session has already been given. blockLength is the byte length of the block
-// as it was composed; comparing it against the block a later prompt would carry
-// is how a changed workflow prompt is told apart from an unchanged one.
+// session already holds, so a session receives the block once instead of on
+// every step it moves through. Nothing about the block's content is stored,
+// compared, digested, or signed.
 type workflowInstructionsDelivery struct {
-	blockLength int
-	deliveredAt time.Time
+	blockLength       int
+	workflowUpdatedAt time.Time
+	deliveredAt       time.Time
+}
+
+// alreadyHolds reports whether the session still has the block a later prompt
+// would carry. Both recorded signals must match: the length, so a rewritten
+// prompt of a different size is seen as changed, and the workflow's
+// last-modified time, so a rewrite that happens to keep the same size is seen
+// as changed too. An equal timestamp never excuses a different length.
+func (d workflowInstructionsDelivery) alreadyHolds(block string, workflowUpdatedAt time.Time) bool {
+	return d.blockLength == len(block) && d.workflowUpdatedAt.Equal(workflowUpdatedAt)
+}
+
+func newWorkflowInstructionsDelivery(block string, workflowUpdatedAt time.Time) workflowInstructionsDelivery {
+	return workflowInstructionsDelivery{
+		blockLength:       len(block),
+		workflowUpdatedAt: workflowUpdatedAt,
+		deliveredAt:       time.Now(),
+	}
 }
 
 func (s *Service) workflowInstructionsDeliveredFor(sessionID string) (workflowInstructionsDelivery, bool) {
@@ -27,36 +45,6 @@ func (s *Service) workflowInstructionsDeliveredFor(sessionID string) (workflowIn
 	}
 	delivery, ok := value.(workflowInstructionsDelivery)
 	return delivery, ok
-}
-
-// recordWorkflowInstructionsDelivered marks block as delivered to sessionID.
-// Callers record only once the prompt carrying it has been accepted for
-// dispatch, so a refused or failed turn leaves the session eligible again.
-func (s *Service) recordWorkflowInstructionsDelivered(sessionID, block string) {
-	if sessionID == "" || block == "" {
-		return
-	}
-	s.workflowInstructionsDelivered.Store(sessionID, workflowInstructionsDelivery{
-		blockLength: len(block),
-		deliveredAt: time.Now(),
-	})
-}
-
-// pendingWorkflowInstructionsForSession reports whether block should still be
-// delivered to sessionID, and records it as delivered when it should. Callers
-// on the step-entry and launch paths compose their prompt and dispatch it
-// immediately, so the record is written at composition; the dispatch failure
-// paths that leave the session alive clear it again.
-func (s *Service) pendingWorkflowInstructionsForSession(sessionID, block string) bool {
-	if sessionID == "" {
-		return true
-	}
-	if delivered, ok := s.workflowInstructionsDeliveredFor(sessionID); ok &&
-		delivered.blockLength == len(block) {
-		return false
-	}
-	s.recordWorkflowInstructionsDelivered(sessionID, block)
-	return true
 }
 
 // clearWorkflowInstructionsDelivered forgets a session's delivery record. A
@@ -98,38 +86,53 @@ func (s *Service) appendWorkflowInstructionsIfPending(
 	if strings.Contains(prompt, workflowInstructionsEnd) {
 		return prompt, workflowInstructionsDelivery{}, false
 	}
-	block := s.workflowInstructionsBlockForTask(ctx, taskID)
+	block, workflowUpdatedAt := s.workflowInstructionsForTask(ctx, taskID)
 	if block == "" {
 		return prompt, workflowInstructionsDelivery{}, false
 	}
 	if delivered, ok := s.workflowInstructionsDeliveredFor(sessionID); ok &&
-		delivered.blockLength == len(block) {
+		delivered.alreadyHolds(block, workflowUpdatedAt) {
 		return prompt, workflowInstructionsDelivery{}, false
 	}
-	return block + "\n\n" + prompt, workflowInstructionsDelivery{
-		blockLength: len(block),
-		deliveredAt: time.Now(),
-	}, true
+	delivery := newWorkflowInstructionsDelivery(block, workflowUpdatedAt)
+	return block + "\n\n" + prompt, delivery, true
 }
 
-// workflowInstructionsBlockForTask returns the task workflow's
-// common-instructions block, or "" when the task is not on a workflow step or
-// the workflow has no prompt. It is the message-path counterpart of the
-// step-entry composition in buildWorkflowPromptWithTrustedContextOptions, which
-// already holds the step.
+// pendingWorkflowInstructionsForSession reports whether the session still needs
+// this block, and records it as delivered when it does. Callers on the step-entry
+// and launch paths compose their prompt and dispatch it immediately, so the
+// record is written at composition; the dispatch failure paths that leave the
+// session alive clear it again.
+func (s *Service) pendingWorkflowInstructionsForSession(sessionID, block string, workflowUpdatedAt time.Time) bool {
+	if sessionID == "" {
+		return true
+	}
+	if delivered, ok := s.workflowInstructionsDeliveredFor(sessionID); ok &&
+		delivered.alreadyHolds(block, workflowUpdatedAt) {
+		return false
+	}
+	s.workflowInstructionsDelivered.Store(sessionID, newWorkflowInstructionsDelivery(block, workflowUpdatedAt))
+	return true
+}
+
+// workflowInstructionsForTask returns the task workflow's common-instructions
+// block with the workflow's last-modified time, or an empty block when the task
+// is not on a workflow step or the workflow has no prompt. It is the
+// message-path counterpart of the step-entry composition in
+// buildWorkflowPromptWithTrustedContextOptions, which already holds the step.
 //
 // The step is reconstructed from the task row rather than loaded: only its ID
 // and workflow ID are needed to render the block, and the message path must not
 // spend a workflow-step lookup that stale-dispatch handling has explicitly
 // forbidden.
-func (s *Service) workflowInstructionsBlockForTask(ctx context.Context, taskID string) string {
+func (s *Service) workflowInstructionsForTask(ctx context.Context, taskID string) (string, time.Time) {
 	if s.workflowStepGetter == nil || s.repo == nil || taskID == "" {
-		return ""
+		return "", time.Time{}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || task.WorkflowStepID == "" || task.WorkflowID == "" {
-		return ""
+		return "", time.Time{}
 	}
 	step := &wfmodels.WorkflowStep{ID: task.WorkflowStepID, WorkflowID: task.WorkflowID}
-	return s.workflowInstructionsBlock(ctx, step, taskID)
+	return s.workflowInstructionsBlockWithRevision(ctx, step, taskID)
 }

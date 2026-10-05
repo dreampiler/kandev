@@ -750,8 +750,9 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowMeta(ctx context.Cont
 		return orchestrator.WorkflowMeta{}, err
 	}
 	return orchestrator.WorkflowMeta{
-		AgentProfileID: meta.AgentProfileID,
-		Prompt:         meta.Prompt,
+		AgentProfileID:  meta.AgentProfileID,
+		Prompt:          meta.Prompt,
+		PromptUpdatedAt: meta.PromptUpdatedAt,
 	}, nil
 }
 

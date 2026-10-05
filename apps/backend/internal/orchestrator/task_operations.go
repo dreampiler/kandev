@@ -875,6 +875,16 @@ func (s *Service) startCreatedSession(
 		}
 	}
 	planModeActive := planMode
+	// Composing the prompt records the workflow common instructions as
+	// delivered, which assumes the launch below hands that prompt to the agent.
+	// Every exit between here and the launch leaves the session alive without it,
+	// so the record must not outlive a failed launch.
+	launchDeliveredPrompt := false
+	defer func() {
+		if !launchDeliveredPrompt {
+			s.clearWorkflowInstructionsDelivered(sessionID)
+		}
+	}()
 	if !options.promptAlreadyComposed {
 		var generatedPromptReferenceContext string
 		if options.preserveDirectPrompt {
@@ -1013,6 +1023,7 @@ func (s *Service) startCreatedSession(
 	// Note: we do NOT set session state here — the executor sets it to STARTING,
 	// and event handlers (handleAgentReady) transition it to WAITING_FOR_INPUT.
 	s.postLaunchCreated(ctx, taskID, sessionID, effectivePrompt, skipMessageRecord, planModeActive, autoStart, attachments)
+	launchDeliveredPrompt = true
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
@@ -1800,6 +1811,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	isPassthrough = launchSession.IsPassthrough
 
 	skipStepPrompt := opts.EntryOptions != nil && opts.EntryOptions.SkipStepPrompt
+	// Composing the prompt records the workflow common instructions as
+	// delivered, which assumes the launch below hands that prompt to the agent.
+	// Every exit between here and the launch leaves the session alive without it,
+	// so the record must not outlive a failed launch.
+	launchDeliveredPrompt := false
+	defer func() {
+		if !launchDeliveredPrompt {
+			s.clearWorkflowInstructionsDelivered(sessionID)
+		}
+	}()
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
 		planMode, task.IsEphemeral, isPassthrough, skipStepPrompt,
@@ -1921,6 +1942,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
+	launchDeliveredPrompt = true
 	execution.TurnID = initialTurnID
 	s.clearTaskLaunchErrorIfStamp(ctx, taskID, launchErrorStamp)
 
@@ -2942,8 +2964,8 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	// The common-instructions block is a per-session delivery, not a per-step
 	// one: a session that already carries this exact block keeps it across the
 	// steps it moves through instead of accumulating a copy per step.
-	if block := s.workflowInstructionsBlock(ctx, step, taskID); block != "" &&
-		s.pendingWorkflowInstructionsForSession(sessionID, block) {
+	if block, workflowUpdatedAt := s.workflowInstructionsBlockWithRevision(ctx, step, taskID); block != "" &&
+		s.pendingWorkflowInstructionsForSession(sessionID, block, workflowUpdatedAt) {
 		parts = append(parts, block)
 	}
 
@@ -3006,8 +3028,18 @@ func stepPromptBodyWithOptions(step *wfmodels.WorkflowStep, taskID, basePrompt s
 // section when the step's workflow has a non-empty prompt. Empty/whitespace
 // prompts and missing getters/workflows omit the section entirely.
 func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) string {
+	block, _ := s.workflowInstructionsBlockWithRevision(ctx, step, taskID)
+	return block
+}
+
+// workflowInstructionsBlockWithRevision is workflowInstructionsBlock plus the
+// workflow's last-modified time, which a per-session delivery record carries so
+// an unchanged workflow can be recognised without comparing the block.
+func (s *Service) workflowInstructionsBlockWithRevision(
+	ctx context.Context, step *wfmodels.WorkflowStep, taskID string,
+) (string, time.Time) {
 	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
-		return ""
+		return "", time.Time{}
 	}
 	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 	if err != nil {
@@ -3016,26 +3048,26 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 				zap.String("workflow_id", step.WorkflowID),
 				zap.Error(err))
 		}
-		return ""
+		return "", time.Time{}
 	}
 	prompt := strings.TrimSpace(meta.Prompt)
 	if prompt == "" {
-		return ""
+		return "", meta.PromptUpdatedAt
 	}
 	interpolated := sysprompt.InterpolatePlaceholders(prompt, taskID)
 	interpolated = s.interpolateStepEntryNumberIfPresent(ctx, interpolated, taskID, step.ID)
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return ""
+		return "", meta.PromptUpdatedAt
 	}
 	// Drop any accidental end-marker text from user content so chat split
 	// cannot cut the block early (frontend also prefers the final marker).
 	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return ""
+		return "", meta.PromptUpdatedAt
 	}
-	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd, meta.PromptUpdatedAt
 }
 
 // stepEntryNumberToken is the exact literal REQ-TWS-001 substitutes in

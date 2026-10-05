@@ -273,10 +273,15 @@ type taskQueuePromotionPublisher interface {
 }
 
 // WorkflowMeta is the subset of workflow fields needed at step entry
-// (agent profile default + optional workflow-level prompt).
+// (agent profile default + optional workflow-level prompt) plus the workflow's
+// last-modified time.
 type WorkflowMeta struct {
 	AgentProfileID string
 	Prompt         string
+	// PromptUpdatedAt is the workflow row's updated_at. Every workflow write
+	// moves it, so it says the definition may have changed; it does not say the
+	// prompt did.
+	PromptUpdatedAt time.Time
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.

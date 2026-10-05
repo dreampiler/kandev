@@ -296,10 +296,15 @@ func (s *Service) GetNextStepByPosition(ctx context.Context, workflowID string, 
 }
 
 // WorkflowMeta is the subset of workflow fields needed at step entry
-// (agent profile default + optional workflow-level prompt).
+// (agent profile default + optional workflow-level prompt) plus the workflow's
+// last-modified time.
 type WorkflowMeta struct {
 	AgentProfileID string
 	Prompt         string
+	// PromptUpdatedAt is the workflow row's updated_at. Every workflow write
+	// moves it, so it says the definition may have changed; it does not say the
+	// prompt did.
+	PromptUpdatedAt time.Time
 }
 
 // GetWorkflowMeta returns agent profile id and prompt for a workflow in one
@@ -311,8 +316,9 @@ func (s *Service) GetWorkflowMeta(ctx context.Context, workflowID string) (Workf
 		return WorkflowMeta{}, err
 	}
 	return WorkflowMeta{
-		AgentProfileID: wf.AgentProfileID,
-		Prompt:         wf.Prompt,
+		AgentProfileID:  wf.AgentProfileID,
+		Prompt:          wf.Prompt,
+		PromptUpdatedAt: wf.UpdatedAt,
 	}, nil
 }
 
