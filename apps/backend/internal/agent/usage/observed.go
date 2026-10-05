@@ -250,8 +250,10 @@ func observedWindowShape(windowType string) (string, time.Duration, bool, bool) 
 	switch windowType {
 	case "five_hour":
 		return claudeLabel5Hour, 5 * time.Hour, false, true
-	case "seven_day", "seven_day_overage_included":
+	case "seven_day":
 		return claudeLabel7Day, 7 * 24 * time.Hour, false, true
+	case "seven_day_overage_included":
+		return "7-day (overage included)", 7 * 24 * time.Hour, false, true
 	case "seven_day_opus":
 		return "7-day (Opus)", 7 * 24 * time.Hour, true, true
 	case "seven_day_sonnet":

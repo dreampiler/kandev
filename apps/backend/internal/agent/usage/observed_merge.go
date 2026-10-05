@@ -1,6 +1,9 @@
 package usage
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 // MergeObserved folds windows an agent reported into a provider reading.
 //
@@ -59,8 +62,13 @@ func mergeObservedWindows(api *ProviderUsage, reading ObservedReading) *Provider
 		merged.Observed = true
 		merged.Windows = append(merged.Windows, observed)
 	}
-	for _, window := range pending {
-		merged.Windows = append(merged.Windows, window)
+	pendingKeys := make([]string, 0, len(pending))
+	for k := range pending {
+		pendingKeys = append(pendingKeys, k)
+	}
+	sort.Strings(pendingKeys)
+	for _, k := range pendingKeys {
+		merged.Windows = append(merged.Windows, pending[k])
 		merged.Observed = true
 	}
 	return &merged
