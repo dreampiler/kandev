@@ -67,6 +67,15 @@ type Candidate struct {
 	Rules           map[string]Action
 	Policies        routingpolicy.Document
 	Selection       Selection
+	// CatalogFree records that the model's own provider prices it at zero. It is
+	// derived evidence rather than configuration, so it names a free model whose
+	// ID carries no free marker and whose route declares no cost class, without
+	// touching Selection.Model.Cost: a provider-list answer must never reorder a
+	// tier. Only the free-model policy reads it.
+	//
+	// It stays false when the provider says nothing about the model. An absent
+	// statement is not a statement that the model is paid.
+	CatalogFree bool
 }
 
 type Profile struct {

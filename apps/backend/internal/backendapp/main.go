@@ -1621,7 +1621,7 @@ func constructOfficeServices(
 	// SetPricingLookup/SetModelInfoLookup below stay gated - the Office
 	// service and orchestrator model-info surface those Office features
 	// widen only apply when the feature is on.
-	modelsdevCachePath := filepath.Join(cfg.ResolvedHomeDir(), "cache", "models-dev.json")
+	modelsdevCachePath := modelPricingCachePath(cfg.ResolvedHomeDir())
 	pricingLookup := officemodelsdev.New(officemodelsdev.Config{
 		CachePath: modelsdevCachePath,
 	}, log)

@@ -53,6 +53,7 @@ type ProfileExecutionResolver struct {
 	bindingResolver  *dynamic.CredentialBindingResolver
 	sessionExecutors SessionExecutorResolver
 	providerLimits   ProviderLimitReader
+	freeModels       FreeModelReader
 	enabled          atomic.Bool
 }
 

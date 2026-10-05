@@ -104,12 +104,19 @@ func policyForModel(modelID string) limitPolicy {
 // the model rather than the whole account.
 func ModelScoped(modelID string) bool { return policyForModel(modelID).modelScoped }
 
-// freeCandidate reports whether a candidate runs a free model. The route's own
-// cost class is the configured statement about the model, and it is what names a
-// free model whose ID carries no free marker; the ID's own marker keeps a
-// legacy row free without a stored class.
+// freeCandidate reports whether a candidate runs a free model. Three sources
+// answer it, in the order their authority decreases. The route's own cost class
+// is what an operator configured, so a stored free class is settled. The
+// provider's published price list names a free model whose ID carries no marker
+// and whose route declares no class. The ID's own marker keeps a legacy row
+// free without either of the other two.
+//
+// A provider that publishes nothing about the model leaves CatalogFree false,
+// which is the same state as any other unclassified candidate: the model keeps
+// the paid policy rather than being promoted to free on absent evidence.
 func freeCandidate(candidate Candidate) bool {
-	return candidate.Selection.Model.Cost == CostFree || IsFreeModel(candidate.ModelID)
+	return candidate.Selection.Model.Cost == CostFree || candidate.CatalogFree ||
+		IsFreeModel(candidate.ModelID)
 }
 
 // ModelScopedCandidate reports whether usage-limit failures of this candidate
