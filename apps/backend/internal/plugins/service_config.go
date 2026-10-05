@@ -61,6 +61,10 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	// path), so a client disconnect right after the commit cannot cancel it
 	// and orphan the now-unreferenced vault entries.
 	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
+	// The committed config can change whether the plugin's agent tools are
+	// exposed (required fields now set), so recompute the catalog even when the
+	// restart below is skipped or fails.
+	s.notifyAgentToolCatalogChanged()
 	return s.restartForConfigChange(rec)
 }
 

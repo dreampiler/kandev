@@ -106,6 +106,41 @@ func TestAgentToolCatalogUsesConservativeAnnotationDefaults(t *testing.T) {
 	require.True(t, tool.OpenWorldHint)
 }
 
+func TestAgentToolCatalogHidesUnconfiguredRequiredConfigPlugin(t *testing.T) {
+	svc, fsStore, _ := newTestService(t)
+	record := &store.Record{
+		Manifest: manifest.Manifest{
+			ID: "kandev-plugin-forgejo",
+			ConfigSchema: map[string]any{
+				"type":     "object",
+				"required": []any{"base_url", "api_token"},
+			},
+			AgentTools: []manifest.AgentTool{{
+				Name:        "pr",
+				Description: "This task's pull request.",
+				Surfaces:    []string{manifest.AgentToolSurfaceKanban},
+				InputSchema: map[string]any{"type": "object"},
+			}},
+		},
+		Status: store.StatusActive,
+	}
+	svc.registry.Add(record)
+	require.NoError(t, fsStore.Save(record))
+
+	snapshot, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Empty(t, snapshot.Tools, "unconfigured plugin must contribute no agent tools")
+
+	require.NoError(t, fsStore.SetConfig(record.ID, map[string]any{
+		"base_url":  "https://codeberg.org",
+		"api_token": "vault:plugin:kandev-plugin-forgejo:config:api_token",
+	}))
+	snapshot, err = svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Len(t, snapshot.Tools, 1)
+	require.Equal(t, plugintools.ExposedName(record.ID, "pr"), snapshot.Tools[0].ExposedName)
+}
+
 func TestInvokeAgentToolLogsOnlyBoundMetadata(t *testing.T) {
 	core, observed := observer.New(zap.InfoLevel)
 	log, err := logger.NewFromZap(zap.New(core))
