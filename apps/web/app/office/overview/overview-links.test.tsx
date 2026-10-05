@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { OVERVIEW_LIST_ALL } from "@/lib/api/domains/office-overview-api";
 import type { WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
 
 const boardWorkspaceID = "ws-1";
@@ -17,6 +18,7 @@ vi.mock("@/lib/api/domains/office-overview-api", () => ({
   getWorkspaceAggregateTasks,
   getWorkspaceAggregateRunning,
   getWorkspaceOverview,
+  OVERVIEW_LIST_ALL: -1,
 }));
 vi.mock("@/hooks/domains/office/use-workspace-overview", () => ({
   useWorkspaceOverview: (workspaceId: string) => {
@@ -209,7 +211,7 @@ describe("overview project card destinations", () => {
     // The disclosure opens one list, and the default filter reads every problem
     // rather than a preview of them.
     expect(getWorkspaceAggregateTasks).toHaveBeenCalledTimes(1);
-    expect(getWorkspaceAggregateTasks).toHaveBeenCalledWith("ws-1", "problems", 500, {
+    expect(getWorkspaceAggregateTasks).toHaveBeenCalledWith("ws-1", "problems", OVERVIEW_LIST_ALL, {
       cache: "no-store",
     });
     const taskList = await screen.findByTestId("overview-workspace-task-list");

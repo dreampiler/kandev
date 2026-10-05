@@ -7,7 +7,10 @@ import { Button } from "@kandev/ui/button";
 import { IconChevronDown, IconChevronUp } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
-import { getWorkspaceAggregateTasks } from "@/lib/api/domains/office-overview-api";
+import {
+  getWorkspaceAggregateTasks,
+  OVERVIEW_LIST_ALL,
+} from "@/lib/api/domains/office-overview-api";
 import { useOverviewList } from "@/hooks/domains/office/use-overview-list";
 import { useWorkspaceOverview } from "@/hooks/domains/office/use-workspace-overview";
 import { linkToTask } from "@/lib/links";
@@ -28,7 +31,6 @@ import { OverviewStatusName } from "./overview-status-legend";
 import { statusTextClass, type OverviewStatusTone } from "./overview-status-colors";
 
 const TASK_LIST_LIMIT = 50;
-const TASK_LIST_ALL_LIMIT = 500;
 
 // Catalog keys for the filter chips, not copy. The completed chip is here
 // because the 24-hour tile opens the completed list: without a chip the reader
@@ -142,7 +144,7 @@ function WorkspaceCardBody({
           filter={filter}
           limit={limit}
           onFilter={show}
-          onShowAll={() => setLimit(TASK_LIST_ALL_LIMIT)}
+          onShowAll={() => setLimit(OVERVIEW_LIST_ALL)}
           refreshSeconds={refreshSeconds}
           thresholds={thresholds}
         />
@@ -400,7 +402,7 @@ function WorkspaceDetail({
           <WorkspaceTaskList
             workspaceId={workspaceId}
             filter={filter ?? "problems"}
-            limit={(filter ?? "problems") === "problems" ? TASK_LIST_ALL_LIMIT : limit}
+            limit={(filter ?? "problems") === "problems" ? OVERVIEW_LIST_ALL : limit}
             onShowAll={onShowAll}
             refreshSeconds={refreshSeconds}
           />
@@ -452,7 +454,7 @@ function WorkspaceTaskList({
         {total > shown && (
           <div className="flex items-center gap-2 px-4 py-2 text-xs text-muted-foreground">
             {t("office:overviewShowingOf", { shown, total })}
-            {limit < TASK_LIST_ALL_LIMIT && (
+            {limit !== OVERVIEW_LIST_ALL && (
               <Button
                 variant="link"
                 size="sm"
