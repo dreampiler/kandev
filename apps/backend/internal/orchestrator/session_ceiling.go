@@ -40,6 +40,13 @@ const (
 	ceilingFieldClass           = "class"
 	ceilingFieldClassCeiling    = "class_ceiling"
 	ceilingFieldClassPopulation = "class_population"
+	// The precedence fields name the queued launch a new automatic launch
+	// yielded to, plus the closed state that made it rank first. They appear
+	// only on a deferred-precedence refusal.
+	ceilingFieldPrecedesTask    = "precedes_task"
+	ceilingFieldPrecedesSession = "precedes_session"
+	ceilingFieldPrecedesKind    = "precedes_kind"
+	ceilingFieldPrecedesState   = "precedes_state"
 )
 
 // Reason codes carried verbatim by the admission log line and the card surface.
@@ -63,7 +70,31 @@ const (
 	// ceilingReasonSurfaceWriteFailed is AC-49g: the deferral itself persisted
 	// successfully, but the card note describing it could not be written.
 	ceilingReasonSurfaceWriteFailed = "ceiling_surface_write_failed"
+	// ceilingReasonDeferredPrecedes is a refusal that had free capacity: the
+	// lane was not saturated, and the slot was reserved for a launch that was
+	// already queued. It is distinct from ceiling/ceiling_control so an
+	// operator reading a card or a log line can tell a full instance from a
+	// queue ordering decision.
+	ceilingReasonDeferredPrecedes = "ceiling_deferred_precedes"
 )
+
+// deferredPrecedenceState is the closed set describing why a queued launch
+// ranked ahead of a new automatic one. A queued launch that is already being
+// dispatched claims no priority and is not selected at all.
+const (
+	deferredPrecedesEligible        = "eligible"
+	deferredPrecedesListUnavailable = "list_unavailable"
+)
+
+// deferredPrecedence is the read-only answer a launch seam supplies when the
+// admission controller asks whether a queued launch outranks this request.
+type deferredPrecedence struct {
+	precedes  bool
+	taskID    string
+	sessionID string
+	kind      models.CeilingLaunchKind
+	state     string
+}
 
 // ceilingClass is the admission lane a session is counted against. The lane is
 // derived from durable data (the session's stored agent profile) by this
@@ -110,7 +141,7 @@ type admissionRequest struct {
 	// agentProfileID is the profile this launch resolved for itself. It is the
 	// only classification input; an empty value is read as worker.
 	agentProfileID  string
-	yieldToDeferred func(context.Context, ceilingClass) bool
+	yieldToDeferred func(context.Context, ceilingClass) deferredPrecedence
 }
 
 // admissionDecision is the controller's answer.
@@ -126,6 +157,12 @@ type admissionDecision struct {
 	class           ceilingClass
 	classPopulation int
 	classCeiling    int
+	// The precedence fields describe the queued launch this request yielded
+	// to. They are set only for ceilingReasonDeferredPrecedes.
+	precedesTaskID    string
+	precedesSessionID string
+	precedesKind      models.CeilingLaunchKind
+	precedesState     string
 }
 
 // SessionCeilingObservation is a point-in-time view of the admission
@@ -492,10 +529,22 @@ func (c *sessionCeilingController) decideLocked(
 		classCeiling:    classCeiling,
 		classPopulation: classPopulation,
 	}
+	// A free slot in the requesting lane is offered to the queued launches
+	// ahead of this request before it is consumed. That ordering is what the
+	// precedence answer decides, and it is reported separately from a refusal
+	// the saturated lane actually caused.
+	var precedence deferredPrecedence
+	yieldChecked := origin != launchOriginManual && classPopulation < classCeiling && req.yieldToDeferred != nil
+	if yieldChecked {
+		precedence = req.yieldToDeferred(ctx, class)
+	}
 	switch {
-	case origin != launchOriginManual && classPopulation < classCeiling &&
-		req.yieldToDeferred != nil && req.yieldToDeferred(ctx, class):
-		decision.reasonCode = refusedReasonFor(class)
+	case yieldChecked && precedence.precedes:
+		decision.reasonCode = ceilingReasonDeferredPrecedes
+		decision.precedesTaskID = precedence.taskID
+		decision.precedesSessionID = precedence.sessionID
+		decision.precedesKind = precedence.kind
+		decision.precedesState = precedence.state
 	case classCeiling == unlimitedSessionCeiling || classPopulation < classCeiling:
 		decision.admitted = true
 		decision.reservationKey = c.reserveLocked(req.sessionID, class)
@@ -598,6 +647,13 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 	}
 	if decision.reasonCode != "" {
 		fields = append(fields, zap.String(ceilingFieldReasonCode, decision.reasonCode))
+	}
+	if decision.precedesTaskID != "" {
+		fields = append(fields,
+			zap.String(ceilingFieldPrecedesTask, decision.precedesTaskID),
+			zap.String(ceilingFieldPrecedesSession, decision.precedesSessionID),
+			zap.String(ceilingFieldPrecedesKind, string(decision.precedesKind)),
+			zap.String(ceilingFieldPrecedesState, decision.precedesState))
 	}
 	c.logger.Info("session ceiling admission decision", fields...)
 }

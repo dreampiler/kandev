@@ -22,6 +22,25 @@ const deferredLaunchCASRetryBudget = 3
 // launch because no replay record was created for it.
 var ErrCeilingLaunchConflict = errors.New("a different ceiling launch is already deferred for this task")
 
+// ceilingDeferralSharesDestination reports whether a stored record and an
+// incoming refusal are the same queued launch addressed to the same session.
+//
+// Identity is the launch kind plus the session the record dispatches to, not the
+// payload: a re-derived payload differs from the stored one whenever the caller
+// recomposes a prompt or the workflow-entry binding is enriched after the first
+// write, and that difference does not make it a second launch. Two records whose
+// kind differs, or that name different sessions, are different launches and keep
+// the conflict disposition. A record with no resolvable destination is excluded:
+// without a session identity there is nothing to compare, so AC-001.4's
+// first-payload-wins conflict stands.
+func ceilingDeferralSharesDestination(stored, incoming models.CeilingDeferral) bool {
+	if stored.Kind != incoming.Kind {
+		return false
+	}
+	storedSession := sessionIDFromCeilingPayload(stored)
+	return storedSession != "" && storedSession == sessionIDFromCeilingPayload(incoming)
+}
+
 // publishTaskUpdatedByID reloads taskID and publishes it. The ceiling
 // deferral CAS helpers (GetTaskDeferredLaunch/SetTaskDeferredLaunchIfUnchanged)
 // write tasks.metadata directly and do not publish on their own, so a caller
@@ -56,10 +75,11 @@ func (s *Service) deferCeilingRefusal(
 	// paths, so they run after the durable record is released.
 	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	var (
-		result    error
-		reconcile bool
-		surface   bool
-		publish   bool
+		result     error
+		reconcile  bool
+		surface    bool
+		publish    bool
+		reevaluate bool
 	)
 	func() {
 		defer release()
@@ -93,6 +113,19 @@ func (s *Service) deferCeilingRefusal(
 					return
 				}
 				if !equivalent {
+					if ceilingDeferralSharesDestination(existingCeiling, deferral) {
+						// The same queued launch, re-derived by a later request or by
+						// a replay: the stored payload and queue time stay authoritative
+						// and this refusal asks for that record to be re-evaluated now
+						// instead of ending the caller as a conflict it cannot act on.
+						reconcile = true
+						reevaluate = true
+						s.logger.Zap().Info("ceiling refusal re-evaluating the pending deferral for the same destination",
+							zap.String("task_id", taskID),
+							zap.String("kind", string(existingCeiling.Kind)),
+							zap.String("destination_session_id", sessionIDFromCeilingPayload(existingCeiling)))
+						return
+					}
 					// A different launch: retain the one already stored and report
 					// the collision rather than losing either payload silently.
 					s.logger.Zap().Warn("ceiling refusal superseded by an earlier pending deferral for the same task",
@@ -159,6 +192,12 @@ func (s *Service) deferCeilingRefusal(
 	}
 	if reconcile {
 		s.reconcileQueuedTaskState(ctx, taskID)
+	}
+	if reevaluate {
+		// A signal-driven sweep pass retries every queued launch without waiting
+		// for the periodic backoff, so an operator or a monitor re-requesting the
+		// launch moves it within one pass instead of one backoff interval.
+		s.signalCeilingSweep()
 	}
 	if surface {
 		s.attemptCeilingSurfaceWrite(ctx, taskID)
