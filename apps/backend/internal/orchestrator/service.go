@@ -3496,6 +3496,11 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 	s.lifecycleSweepMu.Unlock()
 	go func() {
 		defer s.lifecycleSweepWorkers.Done()
+		// Recover SCHEDULING orphans before the durable-token sweep: a task a
+		// token still owns is skipped by the orphan pass, while a token the
+		// sweep clears would otherwise leave the task looking orphaned until its
+		// detached launch created a session.
+		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
 	}()
