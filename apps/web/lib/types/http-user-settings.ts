@@ -9,6 +9,7 @@ export type OfficeOverviewScope = "office" | "reachable";
 import type { OverviewSort } from "@/lib/state/slices/office/overview-types";
 
 export type { OverviewSort };
+export type MessageTimeDisplay = "relative" | "absolute_short" | "absolute_long";
 
 export type SavedLayout = {
   id: string;
@@ -250,6 +251,7 @@ export type UserSettings = {
   office_overview_scope?: OfficeOverviewScope;
   office_overview_refresh_seconds?: number;
   office_overview_sort?: OverviewSort;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;
@@ -344,6 +346,7 @@ export type UserSettingsUpdatePayload = {
   office_overview_scope?: OfficeOverviewScope;
   office_overview_refresh_seconds?: number;
   office_overview_sort?: OverviewSort;
+  message_time_display?: MessageTimeDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
   sidebar_hover_enabled?: boolean;

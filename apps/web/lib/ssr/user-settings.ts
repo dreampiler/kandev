@@ -29,6 +29,7 @@ import type {
   LspStatusLocation,
   LastSeenDisplay,
   OfficeOverviewScope,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http-user-settings";
@@ -111,6 +112,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     officeOverviewScope: "office",
     officeOverviewRefreshSeconds: OVERVIEW_REFRESH_SECONDS_DEFAULT,
     officeOverviewSort: "name",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
     sidebarHoverEnabled: true,
@@ -165,6 +167,11 @@ export function parseOfficeOverviewSort(value: string | undefined): OverviewSort
 /** Parses the overview last-seen display format, defaulting to "absolute". */
 export function parseLastSeenDisplay(value: string | undefined): LastSeenDisplay {
   return value === "relative" ? "relative" : "absolute";
+}
+
+/** Parses the transcript message-time display, defaulting to relative. */
+export function parseMessageTimeDisplay(value: string | undefined): MessageTimeDisplay {
+  return value === "absolute_short" || value === "absolute_long" ? value : "relative";
 }
 
 export function parseAgentTabCloseBehavior(
@@ -368,6 +375,11 @@ function buildAppearanceFields(s: UserSettingsData, current: UserSettingsState) 
       s.office_overview_sort,
       current.officeOverviewSort,
       parseOfficeOverviewSort,
+    ),
+    messageTimeDisplay: mapDefined(
+      s.message_time_display,
+      current.messageTimeDisplay,
+      parseMessageTimeDisplay,
     ),
   };
 }

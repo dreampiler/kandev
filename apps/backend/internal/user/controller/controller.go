@@ -148,6 +148,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		OfficeOverviewScope:               req.OfficeOverviewScope,
 		OfficeOverviewRefreshSeconds:      req.OfficeOverviewRefreshSeconds,
 		OfficeOverviewSort:                req.OfficeOverviewSort,
+		MessageTimeDisplay:                req.MessageTimeDisplay,
 		AgentTabCloseBehavior:             req.AgentTabCloseBehavior,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,

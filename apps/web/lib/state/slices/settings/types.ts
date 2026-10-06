@@ -16,6 +16,7 @@ import type {
   LastSeenDisplay,
   OfficeOverviewScope,
   OverviewSort,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -471,6 +472,7 @@ export type UserSettingsState = {
   officeOverviewScope: OfficeOverviewScope;
   officeOverviewRefreshSeconds: number;
   officeOverviewSort: OverviewSort;
+  messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
   sidebarHoverEnabled: boolean;

@@ -80,6 +80,7 @@ type UserSettingsDTO struct {
 	OfficeOverviewScope               string                                  `json:"office_overview_scope"`
 	OfficeOverviewRefreshSeconds      int                                     `json:"office_overview_refresh_seconds"`
 	OfficeOverviewSort                string                                  `json:"office_overview_sort"`
+	MessageTimeDisplay                string                                  `json:"message_time_display"`
 	AgentTabCloseBehavior             string                                  `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                    `json:"app_status_bar_enabled"`
@@ -201,6 +202,7 @@ type UpdateUserSettingsRequest struct {
 	OfficeOverviewScope               *string                            `json:"office_overview_scope,omitempty"`
 	OfficeOverviewRefreshSeconds      *int                               `json:"office_overview_refresh_seconds,omitempty"`
 	OfficeOverviewSort                *string                            `json:"office_overview_sort,omitempty"`
+	MessageTimeDisplay                *string                            `json:"message_time_display,omitempty"`
 	AgentTabCloseBehavior             *string                            `json:"agent_tab_close_behavior,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
@@ -406,6 +408,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		OfficeOverviewScope:               models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		OfficeOverviewRefreshSeconds:      models.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
 		OfficeOverviewSort:                models.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
+		MessageTimeDisplay:                models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
