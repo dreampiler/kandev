@@ -181,6 +181,10 @@ func newAgentEventPayloadWithTurnIDAndEvidence(
 			snapshot := *evidence.ContinuationSafety
 			payload.ContinuationSafety = &snapshot
 		}
+		if evidence.CapacityContinuation != nil {
+			snapshot := *evidence.CapacityContinuation
+			payload.CapacityContinuation = &snapshot
+		}
 		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
 		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
 	}

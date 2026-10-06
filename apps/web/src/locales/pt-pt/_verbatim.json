@@ -1,5 +1,6 @@
 {
   "agents:agentProtocolTerminal": "\"Terminal\" is the ordinary Portuguese word for the surface; translating it would change nothing.",
+  "coordinator:executorLabel": "\"Executor\" is the ordinary Portuguese word for this technical role; translating it would change nothing.",
   "common:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
   "agents:dynamicWindowUnitTokens": "\"Tokens\" is the established Portuguese computing term for model tokens.",
   "kanban:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
