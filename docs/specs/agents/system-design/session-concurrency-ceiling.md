@@ -248,8 +248,10 @@ a deferred-order check to the existing admission controller. The controller runs
 that read-only check inside the same mutex as its population read and reservation
 write. It selects the first eligible deferred launch in the requesting lane using
 the sweep's priority, position, original queue time, and ID order. Session-backed
-entries use the session's stored profile for lane classification. A refused new
-launch signals the existing sweep so free capacity does not wait for pacing. The
+entries use the session's stored profile for lane classification. A launch that
+leaves the admitted population, or an applied capacity change, signals the
+existing sweep so free capacity does not wait for pacing; a refusal is not
+itself an admission-input change and does not schedule another pass. The
 check never ranks a launch ahead of the exact record that launch is already
 dispatching: a request holding that record's durable dispatch claim, or naming the
 same task and destination session the record carries, is not made to yield to
@@ -271,15 +273,19 @@ to together with the closed state that made it rank first (`eligible`, or
 closed). The card note for that reason says an earlier queued launch takes the
 free slot, because a population reading would misdescribe it. A record a
 dispatcher already holds a valid, unexpired claim for is excluded from the
-ranking: it is dispatching now and takes a slot itself, so leaving it ranked
-would hold every later automatic and queued launch out of a free slot until its
-lease expired. Expired claims are ordinary stale claims and rank normally.
+ranking for every other launch: it is dispatching now and takes a slot itself,
+so leaving it ranked would hold every later automatic and queued launch out of a
+free slot until its lease expired. The launch that owns that claim is the head
+of the queue it is dispatching and is never ranked behind a record ordered after
+it, including when its own record was already cleared between the claim and the
+admission. Expired claims are ordinary stale claims and rank normally.
 
 A later request that addresses the same queued launch — the same task, launch
 kind, and destination session — is not a second launch. The stored record's
-payload and original queue time stay authoritative, and the refusal signals the
-sweep so the pending record is retried in the next pass instead of ending the
-caller as a conflict it cannot act on. A request whose kind or destination
+payload and original queue time stay authoritative, and an external such request
+signals the sweep so the pending record is retried in the next pass instead of
+ending the caller as a conflict it cannot act on; a sweep replay's own refusal
+does not re-signal itself. A request whose kind or destination
 session differs is a different launch and keeps the first-payload-wins conflict.
 
 Reservation ownership is session-keyed. A stale process-start callback first

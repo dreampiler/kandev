@@ -106,7 +106,12 @@ bounded instance capacity, so that one installation does not overload its host.
   eligible deferred launches in the order defined by .11. A queued launch that a
   dispatcher already holds a valid, unexpired dispatch claim for is being
   launched now and claims no additional priority, so it shall not hold a free
-  unit against later launches until its claim lease expires. Manual override and
+  unit against later launches until its claim lease expires; the launch that
+  owns that claim shall not, however, yield its own free unit to a record
+  ordered after it. Re-evaluation after a refusal shall be driven by admission
+  inputs changing (a launch leaving the population, a release, a failure, or an
+  applied capacity change) and the periodic sweep, not by the refusal itself.
+  Manual override and
   already admitted continuations shall retain their existing behavior.
 - **AC-AGENTS-SESSION-CEILING-001.13:** A retry that pauses before admission
   shall record its task, destination, launch kind, and reason without recording
