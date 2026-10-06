@@ -11,27 +11,24 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-func TestDeferredRetrySchedule_SpacesAttemptsAndCapsTheWait(t *testing.T) {
+// TestDeferredRetrySchedule_FailureWaitIsBoundedAndIdentityScoped pins the only
+// time-based wait the schedule keeps: a replay that failed for a non-capacity
+// reason is not retried again until the base interval elapses, and a replaced
+// record does not inherit the wait.
+func TestDeferredRetrySchedule_FailureWaitIsBoundedAndIdentityScoped(t *testing.T) {
 	schedule := newDeferredRetrySchedule()
 	now := time.Now()
 	schedule.now = func() time.Time { return now }
 
-	require.True(t, schedule.beginAttempt("task-a"), "the first attempt of a waiting record is due now")
-	require.False(t, schedule.beginAttempt("task-a"), "a repeat refusal must not be retried on the next tick")
+	require.False(t, schedule.failureWaiting("task-a", "start|t0"), "an untracked record is never waiting")
 
-	// Each granted attempt doubles the wait, bounded by the cap.
-	for attempt := 2; attempt <= 8; attempt++ {
-		now = now.Add(ceilingRetryMaxInterval)
-		require.True(t, schedule.beginAttempt("task-a"), "attempt %d is due once the wait elapsed", attempt)
-	}
-	schedule.mu.Lock()
-	refusals := schedule.entries["task-a"].refusals
-	schedule.mu.Unlock()
-	require.Equal(t, 8, refusals)
+	schedule.recordFailure("task-a", "start|t0")
+	require.True(t, schedule.failureWaiting("task-a", "start|t0"), "a failed replay waits out the base interval")
+	require.False(t, schedule.failureWaiting("task-a", "start|t1"),
+		"a replaced record is a different launch and does not inherit the wait")
 
-	wait := schedule.delay(refusals)
-	require.LessOrEqual(t, wait, ceilingRetryMaxInterval)
-	require.Greater(t, wait, time.Duration(0))
+	now = now.Add(ceilingRetryBaseInterval)
+	require.False(t, schedule.failureWaiting("task-a", "start|t0"), "the wait clears once the base interval elapsed")
 }
 
 func TestDeferredRetrySchedule_SettleAndPruneForgetFinishedRecords(t *testing.T) {
@@ -39,20 +36,24 @@ func TestDeferredRetrySchedule_SettleAndPruneForgetFinishedRecords(t *testing.T)
 	now := time.Now()
 	schedule.now = func() time.Time { return now }
 
-	require.True(t, schedule.beginAttempt("launched"))
-	require.True(t, schedule.beginAttempt("dropped"))
-	require.True(t, schedule.beginAttempt("still-waiting"))
+	schedule.recordFailure("launched", "k")
+	schedule.recordFailure("dropped", "k")
+	schedule.recordFailure("still-waiting", "k")
 
 	schedule.settle("launched")
 	schedule.prune(map[string]struct{}{"still-waiting": {}})
-	schedule.settle("still-waiting")
 
+	schedule.mu.Lock()
+	require.Len(t, schedule.entries, 1)
+	_, kept := schedule.entries["still-waiting"]
+	schedule.mu.Unlock()
+	require.True(t, kept)
+
+	// A task that stops waiting and defers again must not inherit the old wait.
+	schedule.settle("still-waiting")
 	schedule.mu.Lock()
 	require.Len(t, schedule.entries, 0)
 	schedule.mu.Unlock()
-
-	// A task that stops waiting and defers again must not inherit the old wait.
-	require.True(t, schedule.beginAttempt("still-waiting"))
 }
 
 func TestDeferredRetrySchedule_ObserveRebindsAReplacedRecord(t *testing.T) {
@@ -60,27 +61,26 @@ func TestDeferredRetrySchedule_ObserveRebindsAReplacedRecord(t *testing.T) {
 	now := time.Now()
 	schedule.now = func() time.Time { return now }
 
-	require.True(t, schedule.beginAttempt("task-a"))
-	require.False(t, schedule.beginAttempt("task-a"))
+	schedule.recordFailure("task-a", "start|t0")
+	require.True(t, schedule.failureWaiting("task-a", "start|t0"))
 
 	// The record this entry already describes keeps its wait, however many
 	// times the sweep re-reads it.
-	schedule.observe("task-a", "start|2026-10-03T00:00:00Z")
-	require.False(t, schedule.beginAttempt("task-a"))
-	schedule.observe("task-a", "start|2026-10-03T00:00:00Z")
-	require.False(t, schedule.beginAttempt("task-a"))
+	schedule.observe("task-a", "start|t0")
+	require.True(t, schedule.failureWaiting("task-a", "start|t0"))
 
-	// A record replaced while it waited is a different launch, so it is due now
-	// rather than inheriting the previous launch's backoff.
-	schedule.observe("task-a", "start|2026-10-03T00:05:00Z")
-	require.True(t, schedule.beginAttempt("task-a"))
+	// A record replaced while it waited is a different launch, so the failure
+	// wait is cleared rather than inherited.
+	schedule.observe("task-a", "start|t1")
+	require.False(t, schedule.failureWaiting("task-a", "start|t0"))
+	require.False(t, schedule.failureWaiting("task-a", "start|t1"))
 }
 
-// TestCeilingSweep_PeriodicPassIsPacedAndSignalPassIsNot pins the two halves of
-// the pacing contract: the periodic backstop does not repeat the same refusal
-// on every tick, and a pass that exists because capacity freed up retries the
-// record immediately rather than waiting out the backoff.
-func TestCeilingSweep_PeriodicPassIsPacedAndSignalPassIsNot(t *testing.T) {
+// TestCeilingSweep_PeriodicBackstopOnlyDispatchesWhenALaneIsFree pins the
+// change-gated backstop: while the lane is saturated a periodic pass does not
+// re-run admission, and once capacity frees the periodic pass itself retries the
+// record, so a release whose signal never reached the sweeper still recovers.
+func TestCeilingSweep_PeriodicBackstopOnlyDispatchesWhenALaneIsFree(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "pace-task-a", "pace-session-a", models.TaskSessionStateCreated)
@@ -95,11 +95,6 @@ func TestCeilingSweep_PeriodicPassIsPacedAndSignalPassIsNot(t *testing.T) {
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
 
-	// Freeze the retry schedule's clock so "the wait has not elapsed" is a
-	// statement about pacing rather than about wall-clock timing.
-	frozen := time.Now()
-	svc.deferredRetrySchedule.now = func() time.Time { return frozen }
-
 	decision := svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: "pace-task-a", sessionID: "pace-session-a", origin: launchOriginAutomatic, seam: "test-setup",
 	})
@@ -110,45 +105,43 @@ func TestCeilingSweep_PeriodicPassIsPacedAndSignalPassIsNot(t *testing.T) {
 	require.Nil(t, exec)
 	require.NotNil(t, deferredLaunchOf(t, svc, "pace-task-b"))
 
-	// First periodic pass: the record is due, so it is attempted and refused.
+	// Saturated: the periodic backstop must not re-run admission, so no agent
+	// is dispatched and the record is preserved.
 	svc.ceilingSweepTick(ctx, ceilingSweepPeriodic)
 	require.NotNil(t, deferredLaunchOf(t, svc, "pace-task-b"), "a still-refused replay must not clear the record")
 
-	// The slot frees, but the periodic backstop has already counted a refusal
-	// for this record, so the next tick within the wait does not repeat it.
+	agentMgr.mu.Lock()
+	callsWhileSaturated := len(agentMgr.setExecutionDescriptionCalls)
+	agentMgr.mu.Unlock()
+	require.Zero(t, callsWhileSaturated, "a periodic pass must not re-run admission while the lane is saturated")
+
+	// The slot frees without an explicit signal (release() alone does not
+	// signal); the periodic backstop must still see the free capacity and retry.
 	svc.sessionCeiling.release("pace-session-a")
 	svc.ceilingSweepTick(ctx, ceilingSweepPeriodic)
 
 	agentMgr.mu.Lock()
-	callsWhileBackingOff := len(agentMgr.setExecutionDescriptionCalls)
+	callsAfterFree := len(agentMgr.setExecutionDescriptionCalls)
 	agentMgr.mu.Unlock()
-	require.Zero(t, callsWhileBackingOff, "a periodic pass must not retry a record whose backoff has not elapsed")
-	require.NotNil(t, deferredLaunchOf(t, svc, "pace-task-b"))
-
-	// A release-driven pass exists because capacity changed, so it retries now.
-	svc.ceilingSweepTick(ctx, ceilingSweepSignal)
-
-	agentMgr.mu.Lock()
-	callsAfterSignal := len(agentMgr.setExecutionDescriptionCalls)
-	agentMgr.mu.Unlock()
-	require.Equal(t, 1, callsAfterSignal, "a release-driven pass must retry a waiting record immediately")
+	require.Equal(t, 1, callsAfterFree, "the periodic backstop must retry once free capacity appears")
 	require.False(t, models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
 		models.MetaKeyDeferredLaunch: deferredLaunchOf(t, svc, "pace-task-b"),
 	}}), "the admitted replay must clear the ceiling record")
 }
 
 // TestCeilingSweep_DirectDrainIsNotPaced keeps a caller that is not the periodic
-// sweeper — the send-now path, a bootstrap recovery — outside the schedule.
+// sweeper — the send-now path, a bootstrap recovery — outside the capacity gate.
 func TestCeilingSweep_DirectDrainIsNotPaced(t *testing.T) {
 	require.False(t, isPeriodicCeilingSweep(context.Background()))
 	require.False(t, isPeriodicCeilingSweep(withCeilingSweepCause(context.Background(), ceilingSweepSignal)))
 	require.True(t, isPeriodicCeilingSweep(withCeilingSweepCause(context.Background(), ceilingSweepPeriodic)))
 
-	// A nil schedule must not gate anything: a Service built without the pacing
-	// field still admits every record.
+	// A nil schedule must not gate anything: a Service built without it still
+	// retries every record.
 	var missing *deferredRetrySchedule
-	require.True(t, missing.beginAttempt("task-a"))
+	require.False(t, missing.failureWaiting("task-a", "identity"))
 	missing.observe("task-a", "identity")
+	missing.recordFailure("task-a", "identity")
 	missing.settle("task-a")
 	missing.prune(nil)
 }

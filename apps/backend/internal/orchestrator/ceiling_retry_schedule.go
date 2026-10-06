@@ -5,27 +5,26 @@ import (
 	"time"
 )
 
-// ceilingRetryBaseInterval is the wait before the first retry of a launch the
-// session ceiling refused, doubling up to ceilingRetryMaxInterval. It is two
-// sweep intervals, not one: the periodic pass runs exactly every
-// ceilingSweepInterval, so a one-interval wait would come due on the very next
-// tick and pace nothing. A wait equal to the tick is only reached from a pass
-// that is not the ticker — a release-driven pass retries unconditionally
-// instead, so it never consults this schedule at all.
-const (
-	ceilingRetryBaseInterval = 2 * ceilingSweepInterval
-	ceilingRetryMaxInterval  = 5*time.Minute - ceilingSweepInterval
-)
+// ceilingRetryBaseInterval is the wait before a launch that failed for a
+// non-capacity reason is retried. It is two sweep intervals, not one: the
+// periodic pass runs exactly every ceilingSweepInterval, so a one-interval wait
+// would come due on the very next tick and pace nothing.
+const ceilingRetryBaseInterval = 2 * ceilingSweepInterval
 
-// deferredRetrySchedule paces the periodic ceiling sweep. While the ceiling is
-// saturated every deferred launch is refused again on every tick, and each
-// refusal costs the same admission, route and record round trips whether or not
-// anything changed. Spacing the attempts out keeps a long saturation from
-// repeating that work every ceilingSweepInterval forever, while a released
-// reservation still retries immediately: capacity that actually freed up does
-// not wait for a backoff.
+// deferredRetrySchedule remembers, per deferred task, which durable record the
+// sweep last saw and whether that record's last replay failed for a reason
+// unrelated to capacity.
 //
-// The schedule is process-local retry pacing, not durable state. A restart
+// It is deliberately not a refusal timer. A launch the ceiling refused is
+// retried only when an admission input actually changes: the periodic sweep
+// arms a lane once that lane has free capacity, and a release, a failed launch,
+// or an applied capacity change signals a pass immediately. While a lane is
+// saturated there is nothing to re-decide, so no retry is scheduled from the
+// clock alone. The one time-based wait kept here is for a replay that failed
+// for a non-capacity reason, so a broken launch is not hammered on every tick
+// that sees free capacity.
+//
+// The schedule is process-local retry state, not durable state. A restart
 // replays every deferred launch once, which is the correct thing to do anyway,
 // and no persisted record depends on it.
 type deferredRetrySchedule struct {
@@ -37,9 +36,8 @@ type deferredRetrySchedule struct {
 
 type deferredRetryEntry struct {
 	// identity is the record this entry describes. A record that was replaced
-	// while it waited is a different launch and starts from the base interval.
+	// while it waited is a different launch and starts with no failure wait.
 	identity    string
-	refusals    int
 	nextAttempt time.Time
 	failed      bool
 }
@@ -48,36 +46,9 @@ func newDeferredRetrySchedule() *deferredRetrySchedule {
 	return &deferredRetrySchedule{entries: map[string]*deferredRetryEntry{}, now: time.Now}
 }
 
-// beginAttempt reports whether the periodic sweep may attempt taskID's record
-// now, and reserves the following slot when it may. Counting the attempt when it
-// is granted rather than when it is refused keeps the call a single decision
-// point; settle discards the count for a record that stopped waiting.
-func (s *deferredRetrySchedule) beginAttempt(taskID string) bool {
-	if s == nil || taskID == "" {
-		return true
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.now()
-	entry, tracked := s.entries[taskID]
-	if !tracked {
-		entry = &deferredRetryEntry{}
-		s.entries[taskID] = entry
-	}
-	// refusals == 0 means no attempt has been counted yet, so the record is due
-	// however far the clock has moved since it was first tracked.
-	if entry.refusals > 0 && now.Before(entry.nextAttempt) {
-		return false
-	}
-	entry.refusals++
-	entry.failed = false
-	entry.nextAttempt = now.Add(s.delay(entry.refusals))
-	return true
-}
-
 // observe re-binds a tracked entry to the record the sweep actually read. A
-// record whose identity changed is a different launch, so it is retried on the
-// next tick instead of inheriting the previous launch's backoff.
+// record whose identity changed is a different launch, so a failure wait it
+// inherited from its predecessor is cleared.
 func (s *deferredRetrySchedule) observe(taskID, identity string) {
 	if s == nil || taskID == "" {
 		return
@@ -85,23 +56,17 @@ func (s *deferredRetrySchedule) observe(taskID, identity string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	entry, tracked := s.entries[taskID]
-	if !tracked {
+	if !tracked || entry.identity == identity {
 		return
 	}
-	if entry.identity == "" {
-		// The first pass that reads a record binds it. Binding is not a
-		// replacement, so it must not clear a wait this pass already counted.
-		entry.identity = identity
-		return
-	}
-	if entry.identity != identity {
-		entry.identity = identity
-		entry.refusals = 0
-		entry.failed = false
-		entry.nextAttempt = s.now()
-	}
+	entry.identity = identity
+	entry.failed = false
+	entry.nextAttempt = time.Time{}
 }
 
+// recordFailure starts a bounded wait before a launch that failed for a
+// non-capacity reason is retried, so a permanently failing replay does not run
+// on every pass while its lane has free capacity.
 func (s *deferredRetrySchedule) recordFailure(taskID, identity string) {
 	if s == nil {
 		return
@@ -118,6 +83,9 @@ func (s *deferredRetrySchedule) recordFailure(taskID, identity string) {
 	entry.nextAttempt = s.now().Add(ceilingRetryBaseInterval)
 }
 
+// failureWaiting reports whether a record's non-capacity failure wait is still
+// in effect. A record whose identity changed since the failure is a different
+// launch and is not held back.
 func (s *deferredRetrySchedule) failureWaiting(taskID, identity string) bool {
 	if s == nil {
 		return false
@@ -128,8 +96,8 @@ func (s *deferredRetrySchedule) failureWaiting(taskID, identity string) bool {
 	return entry != nil && entry.identity == identity && entry.failed && s.now().Before(entry.nextAttempt)
 }
 
-// settle forgets a task that is no longer waiting, so the next launch it defers
-// starts from the base interval instead of inheriting a stale backoff.
+// settle forgets a task that is no longer waiting, so a later launch it defers
+// starts fresh instead of inheriting a stale failure wait.
 func (s *deferredRetrySchedule) settle(taskID string) {
 	if s == nil || taskID == "" {
 		return
@@ -152,18 +120,4 @@ func (s *deferredRetrySchedule) prune(deferred map[string]struct{}) {
 			delete(s.entries, taskID)
 		}
 	}
-}
-
-// delay is the wait after the refusals-th consecutive attempt: the base interval
-// doubling per refusal, capped so a long saturation still retries on a bounded
-// cadence rather than drifting into never.
-func (s *deferredRetrySchedule) delay(refusals int) time.Duration {
-	wait := ceilingRetryBaseInterval
-	for attempt := 1; attempt < refusals; attempt++ {
-		wait *= 2
-		if wait >= ceilingRetryMaxInterval {
-			return ceilingRetryMaxInterval
-		}
-	}
-	return wait
 }

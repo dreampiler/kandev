@@ -75,11 +75,10 @@ func (s *Service) deferCeilingRefusal(
 	// paths, so they run after the durable record is released.
 	admissionCtx, release := s.lockCeilingEntryAdmission(ctx, taskID)
 	var (
-		result     error
-		reconcile  bool
-		surface    bool
-		publish    bool
-		reevaluate bool
+		result    error
+		reconcile bool
+		surface   bool
+		publish   bool
 	)
 	func() {
 		defer release()
@@ -116,11 +115,12 @@ func (s *Service) deferCeilingRefusal(
 					if ceilingDeferralSharesDestination(existingCeiling, deferral) {
 						// The same queued launch, re-derived by a later request or by
 						// a replay: the stored payload and queue time stay authoritative
-						// and this refusal asks for that record to be re-evaluated now
-						// instead of ending the caller as a conflict it cannot act on.
+						// and this refusal reuses that record instead of ending the
+						// caller as a conflict it cannot act on. The refusal is not an
+						// admission-input change, so it does not schedule a sweep pass
+						// of its own; the caller's own admission attempt already ran.
 						reconcile = true
-						reevaluate = true
-						s.logger.Zap().Info("ceiling refusal re-evaluating the pending deferral for the same destination",
+						s.logger.Zap().Info("ceiling refusal reusing the pending deferral for the same destination",
 							zap.String("task_id", taskID),
 							zap.String("kind", string(existingCeiling.Kind)),
 							zap.String("destination_session_id", sessionIDFromCeilingPayload(existingCeiling)))
@@ -192,15 +192,6 @@ func (s *Service) deferCeilingRefusal(
 	}
 	if reconcile {
 		s.reconcileQueuedTaskState(ctx, taskID)
-	}
-	if reevaluate {
-		// An external re-request of the same queued launch moves it within one
-		// pass. A sweep replay's own refusal, however, must not re-signal itself:
-		// it already holds the dispatch claim, so the periodic sweep plus the
-		// release and capacity-change events drive the next attempt.
-		if ceilingDispatchClaimFromContext(ctx) == nil {
-			s.signalCeilingSweep()
-		}
 	}
 	if surface {
 		s.attemptCeilingSurfaceWrite(ctx, taskID)
