@@ -242,6 +242,12 @@ type AgentEvent struct {
 	// restart that resets the backend's own in-memory generation counter.
 	ControlTurnID int64 `json:"control_turn_id,omitempty"`
 
+	// Recovered marks a terminal event that lifecycle re-applied from its
+	// retained, pre-restart turn outcome (manager_recovery_turn_outcome.go)
+	// rather than delivering it live. It is backend-internal and never part
+	// of the wire payload.
+	Recovered bool `json:"-"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.

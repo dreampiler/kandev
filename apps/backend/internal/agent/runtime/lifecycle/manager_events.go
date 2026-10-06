@@ -591,7 +591,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	}
 	m.finishExecutionWorkspaceActivity(execution, "turn_complete")
 
-	execution.markAgentActivity()
+	if event.Recovered {
+		execution.markRecoveredAgentActivity()
+	} else {
+		execution.markAgentActivity()
+	}
 
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
