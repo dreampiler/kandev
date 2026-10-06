@@ -50,6 +50,7 @@ export type {
   LastSeenDisplay,
   OfficeOverviewScope,
   OverviewSort,
+  MessageTimeDisplay,
   MCPTaskAgentProfileDefault,
   StartupPage,
   UserSettings,

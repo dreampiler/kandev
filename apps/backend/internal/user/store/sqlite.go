@@ -676,6 +676,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"office_overview_scope":                    models.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		"office_overview_refresh_seconds":          models.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
 		"office_overview_sort":                     models.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
+		"message_time_display":                     models.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
@@ -766,6 +767,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		OfficeOverviewScope:               models.OfficeOverviewScopeOffice,
 		OfficeOverviewRefreshSeconds:      models.OfficeOverviewRefreshSecondsDefault,
 		OfficeOverviewSort:                models.OfficeOverviewSortName,
+		MessageTimeDisplay:                models.MessageTimeDisplayRelative,
 		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorDeleteSession,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
@@ -877,6 +879,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		OfficeOverviewScope               json.RawMessage                         `json:"office_overview_scope"`
 		OfficeOverviewRefreshSeconds      json.RawMessage                         `json:"office_overview_refresh_seconds"`
 		OfficeOverviewSort                json.RawMessage                         `json:"office_overview_sort"`
+		MessageTimeDisplay                json.RawMessage                         `json:"message_time_display"`
 		AgentTabCloseBehavior             json.RawMessage                         `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings     `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                                   `json:"app_status_bar_enabled"`
@@ -1079,6 +1082,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.OfficeOverviewScope = normalizeOfficeOverviewScopeStored(payload.OfficeOverviewScope)
 	settings.OfficeOverviewRefreshSeconds = normalizeOfficeOverviewRefreshSecondsStored(payload.OfficeOverviewRefreshSeconds)
 	settings.OfficeOverviewSort = normalizeOfficeOverviewSortStored(payload.OfficeOverviewSort)
+	settings.MessageTimeDisplay = normalizeMessageTimeDisplayStored(payload.MessageTimeDisplay)
 	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
@@ -1131,6 +1135,16 @@ func normalizeLastSeenDisplayStored(raw json.RawMessage) string {
 		return models.LastSeenDisplayAbsolute
 	}
 	return models.NormalizeLastSeenDisplay(value)
+}
+func normalizeMessageTimeDisplayStored(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return models.MessageTimeDisplayRelative
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.MessageTimeDisplayRelative
+	}
+	return models.NormalizeMessageTimeDisplay(value)
 }
 
 // normalizeOfficeOverviewScopeStored maps a stored JSON value to the canonical

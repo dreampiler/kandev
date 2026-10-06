@@ -733,6 +733,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"officeOverviewScope":               usermodels.NormalizeOfficeOverviewScope(settings.OfficeOverviewScope),
 		"officeOverviewRefreshSeconds":      usermodels.NormalizeOfficeOverviewRefreshSeconds(settings.OfficeOverviewRefreshSeconds),
 		"officeOverviewSort":                usermodels.NormalizeOfficeOverviewSort(settings.OfficeOverviewSort),
+		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
 		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{

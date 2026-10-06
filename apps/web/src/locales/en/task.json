@@ -1739,7 +1739,7 @@
   "showErrorDetails": "Show error details: {{displayLabel}}",
   "showFormatted": "Show formatted",
   "showFormattedMessage": "Show formatted message",
-  "showFullTimestamp": "Show full timestamp: {{absoluteTime}}",
+  "messageTimestampAriaLabel": "Message time: {{label}}, {{counterpart}}",
   "showMcpConnectionStatus": "Show MCP connection status",
   "showMessageMetadata": "Show message metadata",
   "showOlderSessions_one": "Show {{count}} older session",

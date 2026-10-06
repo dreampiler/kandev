@@ -117,6 +117,7 @@ function makeUnloadedSettings(): UserSettingsState {
     officeOverviewScope: "office",
     officeOverviewRefreshSeconds: 60,
     officeOverviewSort: "name",
+    messageTimeDisplay: "relative",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     sidebarHoverEnabled: true,
     sidebarHoverDelayMs: 500,
