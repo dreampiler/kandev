@@ -229,9 +229,16 @@ After releasing the controller mutex, disabling or increasing capacity calls
 `signalCeilingSweep`. Keep the sweeper running when capacity is zero, including
 on startup, so existing durable deferrals can recover. Replay still checks task,
 entry, workflow, and payload ownership; capacity changes do not clear records
-directly. The 20-second sweep remains the recovery backstop. Periodic pacing is
-capped at five minutes minus one sweep interval, leaving room for tick alignment
-inside the five-minute retry bound. Existing historical
+directly. The 20-second sweep remains the recovery backstop, but it is
+change-driven: a periodic pass reads each lane's free capacity once and re-runs
+admission only for a lane that actually has a free unit. While a lane is
+saturated the pass still evaluates each deferred record's eligibility and drops
+an ineligible one, but it does not re-run admission, so a waiting refusal is not
+re-decided on every tick. A release, a failed launch, or an applied capacity
+change still signals a pass immediately, and the periodic pass catches a change
+whose signal was missed well inside the five-minute retry bound. The only
+time-based wait is the short backoff after a replay that failed for a
+non-capacity reason. Existing historical
 manual-override messages remain history; they are not an effective-limit badge.
 Every applied capacity change also requests an observation/status refresh through
 the existing projection path, including a decrease. Do not let an old count imply
@@ -283,10 +290,11 @@ admission. Expired claims are ordinary stale claims and rank normally.
 
 A later request that addresses the same queued launch — the same task, launch
 kind, and destination session — is not a second launch. The stored record's
-payload and original queue time stay authoritative, and an external such request
-signals the sweep so the pending record is retried in the next pass instead of
-ending the caller as a conflict it cannot act on; a sweep replay's own refusal
-does not re-signal itself. A request whose kind or destination
+payload and original queue time stay authoritative, and the refusal reuses that
+record instead of ending the caller as a conflict it cannot act on. The request
+is not an admission-input change: the caller's own admission attempt already ran,
+and the pending record is retried by the next release, capacity change, or
+periodic backstop. A request whose kind or destination
 session differs is a different launch and keeps the first-payload-wins conflict.
 
 Reservation ownership is session-keyed. A stale process-start callback first

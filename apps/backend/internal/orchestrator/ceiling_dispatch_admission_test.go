@@ -102,7 +102,7 @@ func testCeilingReplaySuccessorClaim(t *testing.T, changeRoute bool) {
 		}
 		return f.steps.steps[id], nil
 	}
-	f.svc.retryOneDeferredCeilingLaunch(ctx, f.task)
+	f.svc.retryOneDeferredCeilingLaunch(ctx, f.task, nil)
 	require.True(t, replaced)
 	require.Empty(t, f.agent.capturedPrompts, "the replaced claim must not dispatch")
 	record, _, err := f.repo.GetTaskDeferredLaunch(ctx, f.task.ID)

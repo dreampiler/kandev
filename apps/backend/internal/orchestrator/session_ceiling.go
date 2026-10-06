@@ -276,6 +276,44 @@ func (c *sessionCeilingController) classCeilingLocked(class ceilingClass) int {
 	return c.ceiling
 }
 
+// classOf classifies one launch's resolved agent profile under the controller's
+// mutex. The periodic sweep calls it outside the admission path, so it cannot
+// take classOfLocked directly.
+func (c *sessionCeilingController) classOf(agentProfileID string) ceilingClass {
+	if c == nil {
+		return ceilingClassWorker
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.classOfLocked(agentProfileID)
+}
+
+// freeCapacityByLane reports, per lane, whether at least one unit is available
+// for an automatic launch right now. It is the periodic sweep's arm condition:
+// while a lane is saturated, re-running admission for records waiting in that
+// lane cannot change the outcome, so the sweep must not do it. A nil controller
+// means no ceiling is in effect, so every lane reports free.
+func (c *sessionCeilingController) freeCapacityByLane(ctx context.Context) (workerFree, controlFree bool, err error) {
+	if c == nil {
+		return true, true, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	counted, err := c.countedRowsLocked(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	if c.ceiling == unlimitedSessionCeiling {
+		workerFree = true
+	} else {
+		workerFree = c.classPopulationLocked(counted, ceilingClassWorker) < c.ceiling
+	}
+	if len(c.controlProfiles) > 0 {
+		controlFree = c.classPopulationLocked(counted, ceilingClassControl) < c.controlCeiling
+	}
+	return workerFree, controlFree, nil
+}
+
 // population returns the admitted session population across both lanes.
 func (c *sessionCeilingController) population(ctx context.Context) (int, error) {
 	c.mu.Lock()

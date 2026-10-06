@@ -51,13 +51,18 @@ const (
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
-// every ceiling-deferred task once, in priority/position/queue-time/ID order, retrying
-// each in turn. A candidate that fails for a non-ceiling reason is skipped
-// for the rest of this pass (AC-15d) rather than retried immediately or
+// every ceiling-deferred task once, in priority/position/queue-time/ID order,
+// retrying each in turn. A candidate that fails for a non-ceiling reason is
+// skipped for the rest of this pass (AC-15d) rather than retried immediately or
 // stopping the pass.
 //
-// A periodic pass skips a task whose retry is not due yet; a release-driven
-// pass, and any direct caller that is not the sweeper, retries everything.
+// A periodic pass is a backstop, not a driver: it dispatches only for a lane
+// that actually has free capacity right now (read once for the whole pass).
+// While a lane is saturated, re-running admission for records waiting in it
+// cannot change the outcome, so the pass leaves them untouched. A release, an
+// applied capacity change, or a failed launch signals a pass immediately, and a
+// direct caller that is not the sweeper (Send Now, startup recovery) always
+// dispatches.
 func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
@@ -70,6 +75,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	}
 	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
 	paced := isPeriodicCeilingSweep(ctx)
+	allowDispatch := func(models.CeilingDeferral) bool { return true }
 	if paced {
 		deferred := make(map[string]struct{}, len(tasks))
 		for _, task := range tasks {
@@ -78,12 +84,25 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 			}
 		}
 		s.deferredRetrySchedule.prune(deferred)
+		workerFree, controlFree, freeErr := s.sessionCeiling.freeCapacityByLane(ctx)
+		if freeErr != nil {
+			// Without a capacity reading there is nothing to re-decide yet;
+			// admission itself fails closed on an unknown population, so a
+			// retry here would only repeat the same refusal. The next pass,
+			// release, or capacity change retries.
+			s.logger.Zap().Warn("ceiling backstop could not read free capacity; deferring retries to the next pass",
+				zap.Error(freeErr))
+			return
+		}
+		allowDispatch = func(deferral models.CeilingDeferral) bool {
+			if s.sessionCeiling.classOf(s.ceilingDeferredProfile(ctx, deferral)) == ceilingClassControl {
+				return controlFree
+			}
+			return workerFree
+		}
 	}
 	for _, task := range tasks {
-		if paced && !s.deferredRetrySchedule.beginAttempt(task.ID) {
-			continue
-		}
-		s.retryOneDeferredCeilingLaunch(ctx, task)
+		s.retryOneDeferredCeilingLaunch(ctx, task, allowDispatch)
 	}
 }
 
@@ -143,67 +162,25 @@ func (s *Service) reconcileDeferredCeilingTaskState(
 }
 
 // retryOneDeferredCeilingLaunch reads one task's deferral, evaluates AC-17b's
-// drop reasons, and otherwise dispatches to the kind's own replay.
-func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *models.Task) {
-	if task == nil || task.ID == "" {
+// drop reasons, and otherwise dispatches to the kind's own replay. allowDispatch
+// gates only the admission/dispatch half: the reload, record read, binding
+// enrichment, state repair, and drop evaluation always run, so the periodic
+// backstop keeps detecting eligibility changes. A nil gate dispatches.
+func (s *Service) retryOneDeferredCeilingLaunch(
+	ctx context.Context, task *models.Task, allowDispatch func(models.CeilingDeferral) bool,
+) {
+	task, deferral, ok := s.loadDeferredCeilingRetry(ctx, task)
+	if !ok {
 		return
 	}
-	// The lister snapshot is only an index. Reload both task and record before
-	// admission so a later workflow entry cannot inherit the old destination.
-	freshTask, err := s.repo.GetTask(ctx, task.ID)
-	if err != nil || freshTask == nil {
-		s.logCeilingReplayPause(ctx, task.ID, models.CeilingDeferral{}, "task_unavailable", "task could not be reloaded")
-		return
-	}
-	task = freshTask
-	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
-	if err != nil {
-		s.logger.Zap().Warn("could not read deferred launch for retry sweep",
-			zap.String("task_id", task.ID), zap.Error(err))
-		return
-	}
-	deferral, err := models.ReadCeilingDeferral(raw)
-	if err != nil {
-		var unreplayable *models.UnreplayableCeilingRecordError
-		if errors.As(err, &unreplayable) {
-			s.dropCeilingDeferral(ctx, task, "", deferral, ceilingReasonDroppedUnreplayableRecord,
-				fmt.Sprintf("the deferred launch record could not be replayed: %v", err))
-		}
-		// Any other read failure (most likely: a concurrent writer already
-		// cleared the record between the list and this read) is not this
-		// task's fault; leave it for the next tick to see the current state.
-		s.logCeilingReplayPause(ctx, task.ID, deferral, "record_unavailable", "record no longer carries a replayable launch")
-		return
-	}
-	// Re-bind the retry schedule to the record this pass actually read, so a
-	// record replaced while it waited starts from the base interval instead of
-	// inheriting the previous launch's backoff.
-	s.deferredRetrySchedule.observe(task.ID, ceilingDeferralIdentityKey(deferral))
-
-	deferral, err = s.enrichCeilingDeferralBinding(ctx, task, deferral)
-	if err != nil {
-		if errors.Is(err, ErrCeilingLaunchSuperseded) {
-			// A successor record won while this legacy record was being enriched.
-			// Leave the successor untouched for the next sweep; this pass must not
-			// retarget the old launch to it.
-			s.logCeilingReplayPause(ctx, task.ID, deferral, "binding_changed", "a successor won binding enrichment")
-			return
-		}
-		s.logger.Zap().Warn("could not bind deferred workflow entry for retry sweep",
-			zap.String("task_id", task.ID), zap.Error(err))
-		return
-	}
-
-	// A valid queued destination repairs the legacy REVIEW projection before a
-	// replay attempt. The repair itself is fail-closed on queue/route reads.
-	s.reconcileDeferredCeilingTaskState(ctx, task, deferral)
-
 	if reasonCode, detail, drop := s.evaluateCeilingDropReasons(ctx, task, deferral); drop {
 		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
 	}
-
+	if !s.deferredCeilingRetryAllowed(ctx, task.ID, deferral, allowDispatch) {
+		return
+	}
 	claim, found, claimErr := s.claimCeilingDeferredLaunch(
 		ctx, task.ID, sessionIDFromCeilingPayload(deferral), ceilingClaimOwnerReplay,
 	)
@@ -213,12 +190,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		return
 	}
 	if !found || claim == nil {
-		// No matching record, or Send Now already owns it.
-		reason := "recipient_changed"
-		if found {
-			reason = "claimed"
-		}
-		s.logCeilingReplayPause(ctx, task.ID, deferral, reason, "deferred launch claim was not acquired")
+		s.logDeferredCeilingClaimMiss(ctx, task.ID, deferral, found)
 		return
 	}
 	deferral = claim.deferral
@@ -231,6 +203,105 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	}
 
 	s.settleCeilingReplay(ctx, task, claim, deferral, s.replayCeilingDeferral(ctx, currentTask, deferral))
+}
+
+// loadDeferredCeilingRetry reloads the task and its deferral, binds the retry
+// schedule to the record actually read, enriches the workflow-entry binding,
+// and repairs a legacy queued projection. It leaves the record for the caller
+// to drop or dispatch, and reports false when the record is unavailable,
+// unreplayable, or was superseded while its binding was enriched.
+func (s *Service) loadDeferredCeilingRetry(
+	ctx context.Context, task *models.Task,
+) (*models.Task, models.CeilingDeferral, bool) {
+	if task == nil || task.ID == "" {
+		return nil, models.CeilingDeferral{}, false
+	}
+	// The lister snapshot is only an index. Reload both task and record before
+	// admission so a later workflow entry cannot inherit the old destination.
+	freshTask, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil || freshTask == nil {
+		s.logCeilingReplayPause(ctx, task.ID, models.CeilingDeferral{}, "task_unavailable", "task could not be reloaded")
+		return nil, models.CeilingDeferral{}, false
+	}
+	task = freshTask
+	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
+	if err != nil {
+		s.logger.Zap().Warn("could not read deferred launch for retry sweep",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return nil, models.CeilingDeferral{}, false
+	}
+	deferral, err := models.ReadCeilingDeferral(raw)
+	if err != nil {
+		var unreplayable *models.UnreplayableCeilingRecordError
+		if errors.As(err, &unreplayable) {
+			s.dropCeilingDeferral(ctx, task, "", deferral, ceilingReasonDroppedUnreplayableRecord,
+				fmt.Sprintf("the deferred launch record could not be replayed: %v", err))
+		}
+		// Any other read failure (most likely: a concurrent writer already
+		// cleared the record between the list and this read) is not this
+		// task's fault; leave it for the next tick to see the current state.
+		s.logCeilingReplayPause(ctx, task.ID, deferral, "record_unavailable", "record no longer carries a replayable launch")
+		return nil, models.CeilingDeferral{}, false
+	}
+	// Re-bind the retry schedule to the record this pass actually read, so a
+	// record replaced while it waited starts fresh instead of inheriting the
+	// previous launch's failure wait.
+	s.deferredRetrySchedule.observe(task.ID, ceilingDeferralIdentityKey(deferral))
+
+	deferral, err = s.enrichCeilingDeferralBinding(ctx, task, deferral)
+	if err != nil {
+		if errors.Is(err, ErrCeilingLaunchSuperseded) {
+			// A successor record won while this legacy record was being enriched.
+			// Leave the successor untouched for the next sweep; this pass must not
+			// retarget the old launch to it.
+			s.logCeilingReplayPause(ctx, task.ID, deferral, "binding_changed", "a successor won binding enrichment")
+			return nil, models.CeilingDeferral{}, false
+		}
+		s.logger.Zap().Warn("could not bind deferred workflow entry for retry sweep",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return nil, models.CeilingDeferral{}, false
+	}
+
+	// A valid queued destination repairs the legacy REVIEW projection before a
+	// replay attempt. The repair itself is fail-closed on queue/route reads.
+	s.reconcileDeferredCeilingTaskState(ctx, task, deferral)
+	return task, deferral, true
+}
+
+// deferredCeilingRetryAllowed applies the two gates that stop the periodic
+// backstop from re-deciding an unchanged refusal: the record's lane must have
+// free capacity, and a record whose last replay failed for a non-capacity
+// reason must have finished its short wait. It never signals the sweep, so a
+// waiting refusal cannot drive itself.
+func (s *Service) deferredCeilingRetryAllowed(
+	ctx context.Context, taskID string, deferral models.CeilingDeferral,
+	allowDispatch func(models.CeilingDeferral) bool,
+) bool {
+	if allowDispatch != nil && !allowDispatch(deferral) {
+		// No admission input changed in this record's lane: it is still
+		// saturated, so re-running admission cannot change the outcome. Leave
+		// the record exactly as stored for the pass that follows a release, a
+		// capacity change, or the next tick that sees free capacity.
+		return false
+	}
+	if isPeriodicCeilingSweep(ctx) &&
+		s.deferredRetrySchedule.failureWaiting(taskID, ceilingDeferralIdentityKey(deferral)) {
+		s.logCeilingReplayPause(ctx, taskID, deferral, "failure_backoff", "a non-capacity failure is still backing off")
+		return false
+	}
+	return true
+}
+
+// logDeferredCeilingClaimMiss reports a replay that could not acquire its claim
+// because no matching record remains, or because another dispatcher owns it.
+func (s *Service) logDeferredCeilingClaimMiss(
+	ctx context.Context, taskID string, deferral models.CeilingDeferral, found bool,
+) {
+	reason := "recipient_changed"
+	if found {
+		reason = "claimed"
+	}
+	s.logCeilingReplayPause(ctx, taskID, deferral, reason, "deferred launch claim was not acquired")
 }
 
 // settleCeilingReplay applies a claimed replay's outcome to its record.

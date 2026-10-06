@@ -110,7 +110,10 @@ bounded instance capacity, so that one installation does not overload its host.
   owns that claim shall not, however, yield its own free unit to a record
   ordered after it. Re-evaluation after a refusal shall be driven by admission
   inputs changing (a launch leaving the population, a release, a failure, or an
-  applied capacity change) and the periodic sweep, not by the refusal itself.
+  applied capacity change), not by the refusal itself, a repeated request for
+  the same launch, or the passage of time. The periodic sweep is a backstop that
+  detects such a change; while a lane is still saturated it shall not re-run
+  admission for that lane's deferred launches.
   Manual override and
   already admitted continuations shall retain their existing behavior.
 - **AC-AGENTS-SESSION-CEILING-001.13:** A retry that pauses before admission
