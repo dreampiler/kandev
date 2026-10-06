@@ -194,10 +194,13 @@ func (s *Service) deferCeilingRefusal(
 		s.reconcileQueuedTaskState(ctx, taskID)
 	}
 	if reevaluate {
-		// A signal-driven sweep pass retries every queued launch without waiting
-		// for the periodic backoff, so an operator or a monitor re-requesting the
-		// launch moves it within one pass instead of one backoff interval.
-		s.signalCeilingSweep()
+		// An external re-request of the same queued launch moves it within one
+		// pass. A sweep replay's own refusal, however, must not re-signal itself:
+		// it already holds the dispatch claim, so the periodic sweep plus the
+		// release and capacity-change events drive the next attempt.
+		if ceilingDispatchClaimFromContext(ctx) == nil {
+			s.signalCeilingSweep()
+		}
 	}
 	if surface {
 		s.attemptCeilingSurfaceWrite(ctx, taskID)

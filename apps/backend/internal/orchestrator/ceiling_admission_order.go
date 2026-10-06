@@ -11,18 +11,11 @@ import (
 )
 
 func (s *Service) admitCeilingLaunch(ctx context.Context, req admissionRequest) admissionDecision {
-	return s.finishCeilingAdmission(s.sessionCeiling.admit(ctx, s.orderedCeilingAdmission(req)))
+	return s.sessionCeiling.admit(ctx, s.orderedCeilingAdmission(req))
 }
 
 func (s *Service) handOffOrAdmitCeilingLaunch(ctx context.Context, req admissionRequest) admissionDecision {
-	return s.finishCeilingAdmission(s.sessionCeiling.handOffOrAdmit(ctx, s.orderedCeilingAdmission(req)))
-}
-
-func (s *Service) finishCeilingAdmission(decision admissionDecision) admissionDecision {
-	if !decision.admitted && decision.populationKnown && decision.classPopulation < decision.classCeiling {
-		s.signalCeilingSweep()
-	}
-	return decision
+	return s.sessionCeiling.handOffOrAdmit(ctx, s.orderedCeilingAdmission(req))
 }
 
 func (s *Service) orderedCeilingAdmission(req admissionRequest) admissionRequest {
@@ -35,11 +28,22 @@ func (s *Service) orderedCeilingAdmission(req admissionRequest) admissionRequest
 // The controller calls this read-only selection while it owns the capacity
 // mutex. It must not acquire task admission locks or perform runtime dispatch.
 //
-// A queued launch that a dispatcher already holds the durable claim for is
-// being launched now, so it claims no additional priority: otherwise one
-// in-flight record would keep every later automatic launch and every later
-// queued launch out of a free slot until its lease expires.
+// Only a record ordered before the requesting launch's own queue position is a
+// predecessor. A record a dispatcher already holds the durable claim for is
+// being launched now and ranks as no additional priority for other launches;
+// it must not, however, make a later record look earlier than the launch that
+// owns it. The scan therefore recognizes the request's own record (even while
+// its own in-flight claim would exclude it from ordinary candidacy) and stops
+// there, so ownership, an already-dispatched record, and a deleted or otherwise
+// invalid record never make a later record precede this request.
 func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissionRequest, class ceilingClass) deferredPrecedence {
+	if claim := ceilingDispatchClaimFromContext(ctx); claim != nil && claim.taskID != "" && claim.taskID == req.taskID {
+		// A request that already owns a deferred record's dispatch claim is the
+		// head of the queue it is dispatching. It takes its own free slot and
+		// never yields to a record ordered after it, including when its own
+		// record was already cleared between the claim and this admission.
+		return deferredPrecedence{}
+	}
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
 		return deferredPrecedence{}
@@ -52,8 +56,17 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 	}
 	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
 	for _, task := range tasks {
-		deferral, eligible := s.ceilingAdmissionCandidate(ctx, task)
-		if !eligible || s.sessionCeiling.classOfLocked(s.ceilingDeferredProfile(ctx, deferral)) != class {
+		deferral, readable := s.readCeilingDeferralCandidate(task)
+		if !readable {
+			continue
+		}
+		if s.ceilingRequestOwnsDeferredRecord(ctx, req, task.ID, deferral) {
+			// The scan reached this request's own queued record. Every record
+			// after it is later, so none of them precedes this request.
+			return deferredPrecedence{}
+		}
+		if !s.ceilingAdmissionCandidateEligible(ctx, task, deferral) ||
+			s.sessionCeiling.classOfLocked(s.ceilingDeferredProfile(ctx, deferral)) != class {
 			continue
 		}
 		destination := models.CeilingDeferralSessionID(task, deferral)
@@ -61,7 +74,7 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 			continue
 		}
 		return deferredPrecedence{
-			precedes:  !s.ceilingRequestOwnsDeferredRecord(ctx, req, task.ID, deferral),
+			precedes:  true,
 			taskID:    task.ID,
 			sessionID: destination,
 			kind:      deferral.Kind,
@@ -92,28 +105,47 @@ func (s *Service) ceilingRequestOwnsDeferredRecord(
 	return taskID == req.taskID && sessionIDFromCeilingPayload(deferral) == req.sessionID
 }
 
-func (s *Service) ceilingAdmissionCandidate(ctx context.Context, task *models.Task) (models.CeilingDeferral, bool) {
-	if task == nil || taskArchived(task) || task.State == v1.TaskStateCancelled {
+// readCeilingDeferralCandidate reads a listed task's deferred record without
+// judging eligibility. The precedence scan uses it so it can recognize the
+// request's own record before the claim-based candidacy filter would hide it.
+func (s *Service) readCeilingDeferralCandidate(task *models.Task) (models.CeilingDeferral, bool) {
+	if task == nil {
 		return models.CeilingDeferral{}, false
+	}
+	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	deferral, err := models.ReadCeilingDeferral(record)
+	if err != nil {
+		return models.CeilingDeferral{}, false
+	}
+	return deferral, true
+}
+
+// ceilingAdmissionCandidateEligible reports whether a deferred record can rank
+// as an earlier queued launch: it is not already being dispatched, not waiting
+// on a non-capacity retry, and still a valid entry for its task.
+func (s *Service) ceilingAdmissionCandidateEligible(
+	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
+) bool {
+	if task == nil || taskArchived(task) || task.State == v1.TaskStateCancelled {
+		return false
 	}
 	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	if claim, held := models.ReadCeilingLaunchClaimDetails(record); held && !claim.Expired(time.Now().UTC()) {
 		// A dispatcher owns this exact record and is dispatching it now. It
 		// takes the next free slot itself, so it must not also reserve one
 		// against every other automatic and queued launch until its lease ends.
-		return models.CeilingDeferral{}, false
+		return false
 	}
-	deferral, err := models.ReadCeilingDeferral(record)
-	if err != nil || s.deferredRetrySchedule.failureWaiting(task.ID, ceilingDeferralIdentityKey(deferral)) {
-		return deferral, false
+	if s.deferredRetrySchedule.failureWaiting(task.ID, ceilingDeferralIdentityKey(deferral)) {
+		return false
 	}
 	if deferral.Kind == models.CeilingLaunchStart {
 		if _, _, drop := s.evaluateCeilingStartDropReasons(ctx, task, deferral.Payload); drop {
-			return deferral, false
+			return false
 		}
 	}
 	disposition, _, err := s.validateCeilingEntryWithDestinationState(ctx, task, deferral, true)
-	return deferral, err == nil && disposition == ceilingEntryValid
+	return err == nil && disposition == ceilingEntryValid
 }
 
 func (s *Service) ceilingDeferredProfile(ctx context.Context, deferral models.CeilingDeferral) string {

@@ -14,6 +14,17 @@ func withCeilingDispatchClaim(ctx context.Context, claim *ceilingDeferredLaunchC
 	return context.WithValue(ctx, ceilingDispatchClaimContextKey{}, claim)
 }
 
+// ceilingDispatchClaimFromContext reads the dispatch claim a replay or Send Now
+// attached before it dispatched. A nil context is treated as no claim so callers
+// that run without one (most unit fixtures) take the ordinary path.
+func ceilingDispatchClaimFromContext(ctx context.Context) *ceilingDeferredLaunchClaim {
+	if ctx == nil {
+		return nil
+	}
+	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
+	return claim
+}
+
 // admitCeilingDispatch orders final route validation and renewal of the exact
 // dispatch claim with route mutation. The renewal is the local admission
 // boundary; later route changes use lifecycle cancellation. No admission lock
