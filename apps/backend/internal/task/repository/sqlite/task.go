@@ -2071,6 +2071,20 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
+	// A later move may have left and returned to the same source step (A→B→A):
+	// the step id still matches, but the transition ledger advanced. Compare
+	// the ledger id the deferred move captured at arm time so a move superseded
+	// by a later move is not applied against the returned-to source step. A
+	// legacy row (FromTransitionID 0) skips this guard and keeps its behavior.
+	if deferredMove != nil && deferredMove.Move.FromTransitionID != 0 {
+		latestTransitionID, ledgerErr := r.getLatestTaskStepTransitionIDTx(ctx, tx, task.ID)
+		if ledgerErr != nil {
+			return false, false, ledgerErr
+		}
+		if latestTransitionID != deferredMove.Move.FromTransitionID {
+			return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
+		}
+	}
 	if exactOperation != nil {
 		currentVersion, err := r.readTaskUpdatedAtInTx(ctx, tx, task.ID)
 		if err != nil {
