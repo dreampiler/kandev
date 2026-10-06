@@ -242,6 +242,11 @@ func (h *Handlers) deferMoveTask(
 	// before committing the deferred move. Without this check a stale or
 	// foreign step_id would be stored and silently fail at turn-end, leaving
 	// the task orphaned on the board.
+	//
+	// sourceStepID records the step the task occupies now. The deferred move
+	// remembers it so a later explicit move (which relocates the card while this
+	// move sits armed) can supersede it instead of being overwritten at replay.
+	sourceStepID := ""
 	if h.workflowCtrl != nil {
 		stepResp, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
 		if err != nil || stepResp == nil || stepResp.Step == nil {
@@ -285,6 +290,7 @@ func (h *Handlers) deferMoveTask(
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 				"target workflow_id does not exist", nil)
 		}
+		sourceStepID = task.WorkflowStepID
 		if targetWorkflow.WorkspaceID != task.WorkspaceID {
 			h.logger.Error("move_task: target workflow is in a different workspace",
 				zap.String("task_id", req.TaskID),
@@ -312,6 +318,7 @@ func (h *Handlers) deferMoveTask(
 		TaskID:               req.TaskID,
 		WorkflowID:           req.WorkflowID,
 		WorkflowStepID:       req.WorkflowStepID,
+		FromStepID:           sourceStepID,
 		Position:             req.Position,
 		Actor:                string(wfmodels.StepTransitionActorAgent),
 		SenderSessionID:      req.SenderSessionID,
