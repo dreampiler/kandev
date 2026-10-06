@@ -575,9 +575,15 @@ type PendingMove struct {
 	// compares it with the task's current step so a move whose board position was
 	// superseded by a later move is dropped instead of relocating the card.
 	// Legacy rows decode as empty and fall back to the current step.
-	FromStepID string    `json:"from_step_id,omitempty"`
-	Position   int       `json:"position"`
-	QueuedAt   time.Time `json:"queued_at"`
+	FromStepID string `json:"from_step_id,omitempty"`
+	// FromTransitionID is the task's latest step-transition ledger id when this
+	// move was armed. Replay compares it with the task's latest id: a later step
+	// change advances the id even when the card returns to FromStepID (A→B→A),
+	// so a move superseded by a later move is dropped instead of relocating the
+	// card. Legacy rows decode as 0 and skip the ordering guard.
+	FromTransitionID int64     `json:"from_transition_id,omitempty"`
+	Position         int       `json:"position"`
+	QueuedAt         time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`

@@ -5101,6 +5101,16 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.dropSupersededPendingMove(ctx, taskID, sessionID, move, record)
 		return
 	}
+	// The task is back on the recorded source step, but a later move may have
+	// left and returned (A→B→A): comparing step ids cannot tell "never moved"
+	// from "came back". The step-transition ledger id advances on every step
+	// change, so a newer id than the one captured at arm time means a later move
+	// superseded this deferred move.
+	if move.FromStepID != "" && move.FromTransitionID != 0 &&
+		s.pendingMoveSupersededByLaterTransition(ctx, taskID, move) {
+		s.dropSupersededPendingMove(ctx, taskID, sessionID, move, record)
+		return
+	}
 
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, move.WorkflowStepID)
 	if err != nil || targetStep == nil {
@@ -5280,6 +5290,29 @@ func (s *Service) consumePendingMoveAtCurrentStep(
 	if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
 		s.consumeUnfencedPendingMove(ctx, taskID, sessionID, record)
 	}
+}
+
+// pendingMoveSupersededByLaterTransition reports whether the task has taken a
+// workflow-step transition since the move was armed, which makes the recorded
+// source stale even when the card is back on that step. It returns false when
+// the ledger is unreadable so an uncertain guard preserves the move rather than
+// dropping it (the move then applies as it did before this guard).
+func (s *Service) pendingMoveSupersededByLaterTransition(
+	ctx context.Context,
+	taskID string,
+	move *messagequeue.PendingMove,
+) bool {
+	reader, ok := s.repo.(workflowStepTransitionReader)
+	if !ok {
+		return false
+	}
+	latest, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to read latest step transition for pending move; applying as before",
+			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
+		return false
+	}
+	return latest != move.FromTransitionID
 }
 
 // dropSupersededPendingMove discards a deferred move whose recorded source step
