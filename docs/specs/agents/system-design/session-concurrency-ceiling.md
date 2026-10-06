@@ -30,6 +30,7 @@ in force when enabled.
 | `REQ-AGENTS-SESSION-CEILING-001` | [Admission and replay](#admission-and-replay), [Failure and recovery](#failure-and-recovery) |
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
 | `REQ-AGENTS-SESSION-CEILING-003` | [Control lane](#control-lane), [Settings contract](#settings-contract), [Observability](#observability) |
+| `REQ-AGENTS-SESSION-CEILING-004` | [Scheduling orphan recovery](#scheduling-orphan-recovery) |
 
 ## Components and responsibilities
 
@@ -322,6 +323,33 @@ not survive a backend restart: startup reconciliation fails the unbound run, and
 the sweep then drops the start. When the task is hard-deleted while its start is
 queued, the task-deleted event fails the unbound run. Its concurrency slot is
 released, and the missing task prevents a later replay.
+
+### Scheduling orphan recovery
+
+A task that was mid-launch when the backend restarted or rolled back can remain
+in `SCHEDULING` with no deferred-launch record, no queue destination, and no
+lifecycle token. No existing startup pass lists it: the lifecycle sweep lists
+durable tokens, the WIP queue reconciliation lists queued destinations, and the
+ceiling sweep lists deferred records. Startup therefore adds one bounded pass
+over `SCHEDULING` tasks.
+
+The pass runs once per startup, after active sessions are normalized for lazy
+recovery and before the durable-token sweep, inside the same bounded background
+sweep that joins on shutdown. Running before the token sweep means a task a token
+still owns is skipped rather than observed as an orphan after its token was
+cleared but before its detached launch created a session.
+
+A candidate is excluded by the same contracts that already own a legitimate
+wait: a queue destination, any deferred-launch record, a recorded launch error,
+an Office task, a step without `on_enter` auto-start, and an unresolved
+dependency. A task with no active session is re-driven through the ordinary
+no-session auto-start path. A task whose current step holds a resumable
+(`WAITING_FOR_INPUT` or `IDLE`) session is re-entered on that session so the
+destination step's `on_enter` runs without a duplicate session; if that session
+already accepted a user prompt, only the stale `SCHEDULING` state is repaired by
+compare-and-set. A `STARTING`, `RUNNING`, or `CREATED` session means a launch is
+already live and is left alone. Recovery reuses the existing chokepoint, so the
+ceiling, WIP, prompt, and session-serialization contracts are unchanged.
 
 ## Persistence
 

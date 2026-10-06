@@ -4089,6 +4089,25 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 	return r.scanTasks(rows)
 }
 
+// ListSchedulingTasks returns non-archived, non-ephemeral tasks whose durable
+// state is SCHEDULING. It is used by startup reconciliation: a task left in
+// SCHEDULING by a backend restart or rollback mid-launch has no deferred_launch
+// record, no queue destination, and no lifecycle token, so no other startup
+// pass lists it. Ordered like ListQueuedTasks so recovery is deterministic.
+func (r *Repository) ListSchedulingTasks(ctx context.Context) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.state = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
+	`), string(v1.TaskStateScheduling))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
 // named metadata key. It is used by startup lifecycle recovery, where queue
 // destination columns alone cannot find already-admitted work whose entry or

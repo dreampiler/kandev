@@ -202,6 +202,33 @@ work.
   lane, that lane's ceiling, and that lane's population. Labels shall be limited
   to those values; no task, session, or agent identifier shall become a label.
 
+### REQ-AGENTS-SESSION-CEILING-004: Recover an interrupted automatic launch after restart
+
+**Intent:** A backend restart or rollback must not strand a task whose automatic
+launch was interrupted before it produced a running session.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-004.1:** On startup, a task left in `SCHEDULING`
+  with no deferred-launch record, no queue destination, and no lifecycle token
+  shall be re-driven through the existing automatic-launch chokepoint. Recovery
+  shall respect the current ceiling, workflow WIP admission, the destination
+  step's prompt, and session serialization; it shall not force a launch or bypass
+  a limit.
+- **AC-AGENTS-SESSION-CEILING-004.2:** A task waiting for workflow WIP admission,
+  holding a deferred-launch record, holding a recorded launch error, being an
+  Office task, targeting a step that cannot auto-start an agent, or having
+  unresolved dependencies shall not be re-driven. Each retains its existing
+  owner.
+- **AC-AGENTS-SESSION-CEILING-004.3:** A candidate whose current step already
+  holds a resumable session with no accepted user prompt shall re-enter that step
+  on the existing session; no second session or turn is created. A candidate
+  whose session already accepted a prompt shall have only its stale `SCHEDULING`
+  state repaired.
+- **AC-AGENTS-SESSION-CEILING-004.4:** Recovery shall run at most once per
+  startup and shall not start a second session or turn for a task another
+  recovery path already owns.
+
 ## Out of scope
 
 - Per-workspace or per-user ceilings.
