@@ -648,12 +648,18 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 	if decision.reasonCode != "" {
 		fields = append(fields, zap.String(ceilingFieldReasonCode, decision.reasonCode))
 	}
+	// The precedence state is reported for every precedence refusal, including
+	// the fail-closed one that names no record, so an operator can tell an
+	// unreadable deferred list from a queue-ordering decision without a second
+	// observable. The record's identity follows only when one was selected.
+	if decision.precedesState != "" {
+		fields = append(fields, zap.String(ceilingFieldPrecedesState, decision.precedesState))
+	}
 	if decision.precedesTaskID != "" {
 		fields = append(fields,
 			zap.String(ceilingFieldPrecedesTask, decision.precedesTaskID),
 			zap.String(ceilingFieldPrecedesSession, decision.precedesSessionID),
-			zap.String(ceilingFieldPrecedesKind, string(decision.precedesKind)),
-			zap.String(ceilingFieldPrecedesState, decision.precedesState))
+			zap.String(ceilingFieldPrecedesKind, string(decision.precedesKind)))
 	}
 	c.logger.Info("session ceiling admission decision", fields...)
 }
