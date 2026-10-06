@@ -243,10 +243,13 @@ func (h *Handlers) deferMoveTask(
 	// foreign step_id would be stored and silently fail at turn-end, leaving
 	// the task orphaned on the board.
 	//
-	// sourceStepID records the step the task occupies now. The deferred move
-	// remembers it so a later explicit move (which relocates the card while this
-	// move sits armed) can supersede it instead of being overwritten at replay.
+	// sourceStepID records the step the task occupies now, and
+	// sourceTransitionID its latest step-transition ledger id. The deferred move
+	// remembers both so a later explicit move (which relocates the card while
+	// this move sits armed) can supersede it instead of being overwritten at
+	// replay — including when the card returns to the same source step (A→B→A).
 	sourceStepID := ""
+	var sourceTransitionID int64
 	if h.workflowCtrl != nil {
 		stepResp, err := h.workflowCtrl.GetStep(ctx, req.WorkflowStepID)
 		if err != nil || stepResp == nil || stepResp.Step == nil {
@@ -291,6 +294,14 @@ func (h *Handlers) deferMoveTask(
 				"target workflow_id does not exist", nil)
 		}
 		sourceStepID = task.WorkflowStepID
+		if reader, ok := h.taskRepo.(taskStepTransitionIDReader); ok {
+			if id, readErr := reader.GetLatestTaskStepTransitionID(ctx, req.TaskID); readErr != nil {
+				h.logger.Warn("move_task: failed to read source transition id; deferred move keeps legacy ordering",
+					zap.String("task_id", req.TaskID), zap.Error(readErr))
+			} else {
+				sourceTransitionID = id
+			}
+		}
 		if targetWorkflow.WorkspaceID != task.WorkspaceID {
 			h.logger.Error("move_task: target workflow is in a different workspace",
 				zap.String("task_id", req.TaskID),
@@ -319,6 +330,7 @@ func (h *Handlers) deferMoveTask(
 		WorkflowID:           req.WorkflowID,
 		WorkflowStepID:       req.WorkflowStepID,
 		FromStepID:           sourceStepID,
+		FromTransitionID:     sourceTransitionID,
 		Position:             req.Position,
 		Actor:                string(wfmodels.StepTransitionActorAgent),
 		SenderSessionID:      req.SenderSessionID,
