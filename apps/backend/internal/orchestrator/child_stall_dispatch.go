@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/childstall"
@@ -16,9 +17,12 @@ func (s *Service) SetChildStallProducer(producer *ChildStallProducer) {
 	s.childStallProducer = producer
 }
 
-// pruneStaleChildStallAlerts removes pending child stall alerts whose every
-// source candidate stopped qualifying, so a stale alert never creates a model
-// turn. Alerts with at least one eligible source stay queued.
+// pruneStaleChildStallAlerts removes pending child stall alerts that no longer
+// need delivery: alerts whose every candidate stopped qualifying, and alerts
+// whose every candidate is superseded by a newer pending alert for the same
+// child task. Alerts with at least one still-needed candidate stay queued. Only
+// child stall alert entries are considered, so user, agent, and other server
+// entries are never touched, and entries are only removed — never reordered.
 func (s *Service) pruneStaleChildStallAlerts(ctx context.Context, identity messagequeue.QueueSessionIdentity) {
 	producer := s.childStallProducer
 	if producer == nil || s.messageQueue == nil {
@@ -28,37 +32,107 @@ func (s *Service) pruneStaleChildStallAlerts(ctx context.Context, identity messa
 	if err != nil {
 		return
 	}
+	newest := producer.newestEligibleAlertKeysByChild(ctx, entries)
 	for i := range entries {
 		entry := &entries[i]
-		if !messagequeue.IsChildStallAlert(entry) || producer.anyAlertEligible(ctx, entry) {
+		if !messagequeue.IsChildStallAlert(entry) {
+			continue
+		}
+		keep, reason := producer.alertEntryDisposition(ctx, entry, newest)
+		if keep {
 			continue
 		}
 		if _, removed, takeErr := s.messageQueue.TakeQueuedEntryForSession(ctx, identity, entry.ID); takeErr != nil {
 			s.logger.Warn("failed to remove stale child stall alert",
 				zap.String("session_id", identity.SessionID), zap.String("queue_id", entry.ID), zap.Error(takeErr))
 		} else if removed {
-			recordChildStallOutcome("stale_at_dispatch")
+			recordChildStallOutcome(reason)
 			s.publishQueueStatusEventForIdentity(ctx, identity)
 		}
 	}
 }
 
-// anyAlertEligible reports whether any candidate folded into entry still
-// qualifies. Unreadable candidates count as eligible so a read failure never
-// drops an alert.
-func (p *ChildStallProducer) anyAlertEligible(ctx context.Context, entry *messagequeue.QueuedMessage) bool {
-	alerts, _ := entry.Metadata[messagequeue.MetadataChildStallAlerts].([]interface{})
-	if len(alerts) == 0 {
-		return true
+// alertOrderKey orders pending alert entries by enqueue time, with the FIFO
+// position as a tie-break, so one alert can be identified as newer than another.
+type alertOrderKey struct {
+	queuedAt time.Time
+	position int64
+}
+
+func (k alertOrderKey) after(other alertOrderKey) bool {
+	if k.queuedAt.Equal(other.queuedAt) {
+		return k.position > other.position
 	}
-	for _, raw := range alerts {
-		descriptor, _ := raw.(map[string]interface{})
-		turnID, _ := descriptor["turn_id"].(string)
-		if turnID == "" || p.sourceStillStalled(ctx, turnID) {
-			return true
+	return k.queuedAt.After(other.queuedAt)
+}
+
+func alertOrderKeyOf(entry *messagequeue.QueuedMessage) alertOrderKey {
+	return alertOrderKey{queuedAt: entry.QueuedAt, position: entry.Position}
+}
+
+// newestEligibleAlertKeysByChild maps each child task to the order key of the
+// newest pending alert whose candidate for that child still qualifies. Only a
+// still-eligible newer alert can supersede an older one, so an eligible alert is
+// never dropped in favor of a stale sibling.
+func (p *ChildStallProducer) newestEligibleAlertKeysByChild(
+	ctx context.Context,
+	entries []messagequeue.QueuedMessage,
+) map[string]alertOrderKey {
+	newest := make(map[string]alertOrderKey)
+	for i := range entries {
+		entry := &entries[i]
+		if !messagequeue.IsChildStallAlert(entry) {
+			continue
+		}
+		key := alertOrderKeyOf(entry)
+		for _, descriptor := range messagequeue.ChildStallAlertDescriptors(entry) {
+			if descriptor.ChildTaskID == "" || !p.alertDescriptorEligible(ctx, descriptor.TurnID) {
+				continue
+			}
+			if current, ok := newest[descriptor.ChildTaskID]; !ok || key.after(current) {
+				newest[descriptor.ChildTaskID] = key
+			}
 		}
 	}
-	return false
+	return newest
+}
+
+// alertEntryDisposition reports whether a pending alert entry must stay queued,
+// and why it is removed when it must not. An entry is kept when at least one of
+// its candidates is still eligible and not superseded by a newer eligible alert
+// for the same child. A candidate with no child or turn identity is treated as
+// eligible and never superseded, so unclear provenance is preserved.
+func (p *ChildStallProducer) alertEntryDisposition(
+	ctx context.Context,
+	entry *messagequeue.QueuedMessage,
+	newest map[string]alertOrderKey,
+) (keep bool, reason string) {
+	descriptors := messagequeue.ChildStallAlertDescriptors(entry)
+	if len(descriptors) == 0 {
+		return true, ""
+	}
+	key := alertOrderKeyOf(entry)
+	eligible := false
+	for _, descriptor := range descriptors {
+		if !p.alertDescriptorEligible(ctx, descriptor.TurnID) {
+			continue
+		}
+		eligible = true
+		if !newest[descriptor.ChildTaskID].after(key) {
+			return true, ""
+		}
+	}
+	if !eligible {
+		return false, "stale_at_dispatch"
+	}
+	return false, "superseded_at_dispatch"
+}
+
+// alertDescriptorEligible reports whether one folded candidate still qualifies.
+// A candidate with no turn identity, or an unreadable one, counts as eligible so
+// a read failure never drops an alert.
+func (p *ChildStallProducer) alertDescriptorEligible(ctx context.Context, turnID string) bool {
+	return turnID == "" || p.sourceStillStalled(ctx, turnID)
 }
 
 func (p *ChildStallProducer) sourceStillStalled(ctx context.Context, turnID string) bool {
