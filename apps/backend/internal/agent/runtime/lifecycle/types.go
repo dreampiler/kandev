@@ -670,6 +670,20 @@ func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Unlock()
 }
 
+// markRecoveredAgentActivity records agent output for a terminal event that
+// lifecycle re-applied from a retained, pre-restart turn outcome. The turn
+// completed before the restart, so it must not stamp lastActivityAt=now: the
+// idle reaper would then restart the session's idle interval from the restart
+// instead of its prior real activity. It still records that the turn produced
+// output and advances the activity epoch so a genuine successor event can be
+// distinguished; only the timestamp is preserved.
+func (e *AgentExecution) markRecoveredAgentActivity() {
+	e.lastActivityAtMu.Lock()
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
 func (e *AgentExecution) markLifecycleActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()

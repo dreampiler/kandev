@@ -40,7 +40,7 @@ Maintain a monotonic candidate clock keyed by workspace, session, execution, and
 Settlement or an explicit focus event starts/refreshes the interval. A focus-triggered resume starts a fresh interval after readiness.
 A new prompt or known active work invalidates the old interval; settlement starts another interval after work ends.
 An unchanged open tab is not a heartbeat. Passive stream traffic and row timestamps are not semantic activity.
-After backend recovery without trustworthy idle history, start a full interval after observing a settled live session.
+After backend recovery, continue the interval from the strongest trustworthy durable activity already recorded (the session's last semantic activity, such as its last turn settlement or state change) instead of restarting the clock. A replayed retained turn outcome counts as the turn that already happened, not as new activity, so it must not stamp a fresh start time. Only when no trustworthy activity exists (a new session, or an invalid/future timestamp) start a full interval after observing a settled live session.
 
 Use the existing orchestrator maintenance owner with a scan cadence at most 30 seconds.
 Inspect durable runtime inventory independently of coarse state, then evaluate each row's workspace policy and session eligibility.

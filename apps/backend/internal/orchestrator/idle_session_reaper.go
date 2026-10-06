@@ -430,13 +430,14 @@ func (s *Service) logWorkspaceIdleSuspensionFailure(sessionID string, suspendErr
 
 func (s *Service) logWorkspaceIdleScan(summary idleParkingScanSummary) {
 	if len(summary.skipped) > 0 {
-		fields := make([]zap.Field, 0, len(idleParkingSkipReasonOrder))
+		fields := make([]zap.Field, 0, len(idleParkingSkipReasonOrder)+1)
+		fields = append(fields, zap.Int("candidates_observed", len(summary.observed)))
 		for _, reason := range idleParkingSkipReasonOrder {
 			if count := summary.skipped[reason]; count > 0 {
 				fields = append(fields, zap.Int("skip_"+string(reason), count))
 			}
 		}
-		s.logger.Debug("workspace ACP idle suspension scan skipped candidates", fields...)
+		s.logger.Info("workspace ACP idle suspension scan skipped candidates", fields...)
 	}
 	if summary.suspended > 0 || summary.failed > 0 || summary.recovered > 0 {
 		s.logger.Info("workspace ACP idle suspension scan completed",
@@ -470,7 +471,7 @@ func (s *Service) workspaceIdleCandidate(
 	if s.sessionHasKnownIdleWork(ctx, current.SessionID) {
 		return workspaceIdleCandidate{}, idleParkingSkipKnownWork, false
 	}
-	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, workspace, now)
+	executionID, generation, activityEpoch, lastActivityAt, reason, ok := s.workspaceIdleActivity(ctx, current, session, now)
 	if !ok {
 		return workspaceIdleCandidate{}, reason, false
 	}
@@ -541,7 +542,6 @@ func (s *Service) workspaceIdleActivity(
 	ctx context.Context,
 	row *models.ExecutorRunning,
 	session *models.TaskSession,
-	workspace *models.Workspace,
 	now time.Time,
 ) (string, uint64, uint64, time.Time, idleParkingSkipReason, bool) {
 	reader, ok := s.agentManager.(idlePromptActivityReader)
@@ -549,23 +549,24 @@ func (s *Service) workspaceIdleActivity(
 		return "", 0, 0, time.Time{}, idleParkingSkipActivityUnavailable, false
 	}
 	executionID, generation, activityEpoch, lastActivityAt, err := reader.GetPromptActivityForSession(ctx, row.SessionID)
-	if err != nil || executionID != row.AgentExecutionID || activityEpoch == 0 || lastActivityAt.IsZero() || lastActivityAt.After(now) {
+	if err != nil || executionID != row.AgentExecutionID {
 		return "", 0, 0, time.Time{}, idleParkingSkipStaleActivity, false
 	}
-	lastActivityAt = latestIdleActivity(lastActivityAt, session.UpdatedAt, row.UpdatedAt, workspace.UpdatedAt)
-	if lastActivityAt.After(now) {
+	// Anchor the idle interval to genuine activity only. A recovered execution
+	// starts with no in-memory activity, so fall back to the session's durable
+	// semantic activity (its last state/turn change) rather than skipping the
+	// candidate and losing the pre-restart idle window. Row/workspace update
+	// timestamps are deliberately not used here: they are passive bookkeeping
+	// (recovery re-persists the row with updated_at=now) and would reset the
+	// clock on every backend restart.
+	anchor := lastActivityAt
+	if anchor.IsZero() {
+		anchor = session.UpdatedAt
+	}
+	if anchor.IsZero() || anchor.After(now) {
 		return "", 0, 0, time.Time{}, idleParkingSkipStaleActivity, false
 	}
-	return executionID, generation, activityEpoch, lastActivityAt, "", true
-}
-
-func latestIdleActivity(activityAt time.Time, activitySources ...time.Time) time.Time {
-	for _, candidate := range activitySources {
-		if candidate.After(activityAt) {
-			activityAt = candidate
-		}
-	}
-	return activityAt
+	return executionID, generation, activityEpoch, anchor, "", true
 }
 
 func buildWorkspaceIdleCandidate(
