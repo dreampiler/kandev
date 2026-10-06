@@ -536,6 +536,37 @@ An interrupted task keeps a warning indicator until the agent confirms
 recovery. Opening the task or starting a recovery attempt does not clear the
 indicator; a failed attempt keeps it visible with the existing retry actions.
 
+## Use agent commands in the composer
+
+In task Chat or Quick Chat, type `/` to browse the commands advertised by the
+active agent. Select an entry with the arrow keys, Enter, Tab, a pointer, or a
+touch. Selection adds the command to your editable draft. It does not send a
+message or change the session configuration. Review the draft, add context if
+needed, then select **Send**.
+
+Kandev labels a command as a skill only when the agent identifies it as one.
+For example, Codex ACP advertises `$retro`; the menu shows `/retro` with a
+localized **Skill** chip, while the submitted command remains `/$retro`.
+Commands without classification keep their advertised names and have no
+inferred chip.
+
+Verified mode-command metadata adds a **Mode** chip. Kandev shows **Active**
+only when the session has confirmed that mode. A command can also show its
+advertised argument hint, such as `/goal`'s supported arguments. These labels
+and hints describe the command; they do not apply it until you send the draft.
+Pasted rich text does not create a command chip; Kandev uses its visible plain text.
+
+For a supported interactive task, Kandev can continue an unfinished request
+in the same live conversation after the normal retry delay when the model is
+at capacity and at least one tool has a confirmed result. Kandev keeps those
+actions in the conversation and asks the agent to continue without repeating
+them. This does not guarantee exactly-once execution. The inline notice shows
+the attempt count and lets you cancel while Kandev waits. Kandev leaves the
+error for you to handle when a tool or permission is still pending, an outcome
+is uncertain, background work is unaccounted for, the provider does not
+support live continuation, or the runtime is no longer usable. The composer
+remains available for a new message.
+
 ## Answer clarification questions
 
 When an agent asks a clarification question, answer it from the question panel

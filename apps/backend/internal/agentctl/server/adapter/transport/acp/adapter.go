@@ -361,27 +361,34 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn               context.CancelCauseFunc
-	rpcDone               chan struct{}
-	abortCh               chan struct{}
-	handoffCh             chan struct{}
-	providerErrorCh       chan providerNoticeDiagnostic
-	promptGeneration      uint64
-	evidenceMu            sync.Mutex
-	codexSystemError      bool
-	codexCapacity         bool
-	codexUsageLimit       *streams.ProviderError
-	quotaNoticeText       string
-	quotaNoticeClassified string
-	quotaNoticeClass      *routingerr.Error
-	cursorRetriable       bool
-	cursorRetriableAt     time.Time
-	continuationTools     map[string]bool
-	continuationUnsafe    bool
-	allowHandoff          bool
-	handedOff             bool
-	gateOwned             bool
-	finishing             bool
+	endTurn                     context.CancelCauseFunc
+	rpcDone                     chan struct{}
+	abortCh                     chan struct{}
+	handoffCh                   chan struct{}
+	providerErrorCh             chan providerNoticeDiagnostic
+	promptGeneration            uint64
+	evidenceMu                  sync.Mutex
+	codexSystemError            bool
+	codexCapacity               bool
+	codexUsageLimit             *streams.ProviderError
+	cursorRetriableMsg          string
+	cursorRetriableComplete     bool
+	cursorRetriableAt           time.Time
+	continuationTools           map[string]bool
+	continuationPermissions     uint16
+	continuationPermissionTools map[string]struct{}
+	continuationUnsafe          bool
+	capacityTools               map[string]capacityToolEvidence
+	capacityUnknown             bool
+	capacityBackground          bool
+	capacityPermissions         int
+	allowHandoff                bool
+	handedOff                   bool
+	gateOwned                   bool
+	finishing                   bool
+	quotaNoticeText             string
+	quotaNoticeClassified       string
+	quotaNoticeClass            *routingerr.Error
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -485,15 +492,16 @@ func (t *promptTurnState) quotaNoticeClassification(buffer, providerID string) (
 	return t.quotaNoticeClass, true
 }
 
-func (t *promptTurnState) setCursorRetriable() {
+func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {
 	if t == nil {
 		return
 	}
 	t.evidenceMu.Lock()
-	if !t.cursorRetriable {
+	if t.cursorRetriableMsg == "" {
 		t.cursorRetriableAt = time.Now().UTC()
 	}
-	t.cursorRetriable = true
+	t.cursorRetriableMsg = msg
+	t.cursorRetriableComplete = complete
 	t.evidenceMu.Unlock()
 }
 
@@ -502,23 +510,29 @@ func (t *promptTurnState) clearCursorRetriable() {
 		return
 	}
 	t.evidenceMu.Lock()
-	t.cursorRetriable = false
+	t.cursorRetriableMsg = ""
+	t.cursorRetriableComplete = false
 	t.cursorRetriableAt = time.Time{}
 	t.evidenceMu.Unlock()
 }
 
 func (t *promptTurnState) cursorRetriableFailure() bool {
-	failure, _ := t.cursorRetriableFailureAt()
+	failure, _, _, _ := t.cursorRetriableFailureDetails()
 	return failure
 }
 
 func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	failure, _, occurredAt, _ := t.cursorRetriableFailureDetails()
+	return failure, occurredAt
+}
+
+func (t *promptTurnState) cursorRetriableFailureDetails() (bool, string, time.Time, bool) {
 	if t == nil {
-		return false, time.Time{}
+		return false, "", time.Time{}, false
 	}
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
-	return t.cursorRetriable, t.cursorRetriableAt
+	return t.cursorRetriableMsg != "", t.cursorRetriableMsg, t.cursorRetriableAt, t.cursorRetriableComplete
 }
 
 type asyncTurnFinalizer struct {

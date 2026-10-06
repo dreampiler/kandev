@@ -4209,6 +4209,10 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 			return
 		}
 	}
+	configOptionsSource := ""
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		configOptionsSource = stringFromMap(data, "config_options_source")
+	}
 	if providerRestored {
 		s.persistProviderRestoredSessionModelsSnapshot(
 			ctx, sessionID, identity,
@@ -4225,10 +4229,12 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		TaskID:                payload.TaskID,
 		SessionID:             sessionID,
 		AgentID:               payload.AgentID,
+		AgentExecutionID:      payload.ExecutionID,
 		CurrentModelID:        payload.Data.CurrentModelID,
 		SessionSettingsPolicy: s.sessionSettingsProjectionPolicy(ctx, sessionID, identity, payload.Data.SessionSettingsPolicy),
 		Models:                payload.Data.SessionModels,
 		ConfigOptions:         payload.Data.ConfigOptions,
+		ConfigOptionsSource:   configOptionsSource,
 		ConfigOptionsSettled:  settled,
 		ConfigBaseline:        configBaseline,
 		Timestamp:             time.Now().UTC().Format(time.RFC3339),
