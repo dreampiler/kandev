@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"sort"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -25,7 +26,7 @@ func (s *Service) finishCeilingAdmission(decision admissionDecision) admissionDe
 }
 
 func (s *Service) orderedCeilingAdmission(req admissionRequest) admissionRequest {
-	req.yieldToDeferred = func(ctx context.Context, class ceilingClass) bool {
+	req.yieldToDeferred = func(ctx context.Context, class ceilingClass) deferredPrecedence {
 		return s.ceilingDeferredLaunchPrecedes(ctx, req, class)
 	}
 	return req
@@ -33,16 +34,21 @@ func (s *Service) orderedCeilingAdmission(req admissionRequest) admissionRequest
 
 // The controller calls this read-only selection while it owns the capacity
 // mutex. It must not acquire task admission locks or perform runtime dispatch.
-func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissionRequest, class ceilingClass) bool {
+//
+// A queued launch that a dispatcher already holds the durable claim for is
+// being launched now, so it claims no additional priority: otherwise one
+// in-flight record would keep every later automatic launch and every later
+// queued launch out of a free slot until its lease expires.
+func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissionRequest, class ceilingClass) deferredPrecedence {
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
-		return false
+		return deferredPrecedence{}
 	}
 	tasks, err := lister.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
 		s.logger.Zap().Warn("could not select deferred launch before automatic admission",
 			zap.String("task_id", req.taskID), zap.Error(err))
-		return true
+		return deferredPrecedence{precedes: true, state: deferredPrecedesListUnavailable}
 	}
 	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
 	for _, task := range tasks {
@@ -50,13 +56,19 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 		if !eligible || s.sessionCeiling.classOfLocked(s.ceilingDeferredProfile(ctx, deferral)) != class {
 			continue
 		}
-		if destination := models.CeilingDeferralSessionID(task, deferral); destination != "" &&
-			s.sessionCeiling.reservations[destination] != nil {
+		destination := models.CeilingDeferralSessionID(task, deferral)
+		if destination != "" && s.sessionCeiling.reservations[destination] != nil {
 			continue
 		}
-		return !s.ceilingRequestOwnsDeferredRecord(ctx, req, task.ID, deferral)
+		return deferredPrecedence{
+			precedes:  !s.ceilingRequestOwnsDeferredRecord(ctx, req, task.ID, deferral),
+			taskID:    task.ID,
+			sessionID: destination,
+			kind:      deferral.Kind,
+			state:     deferredPrecedesEligible,
+		}
 	}
-	return false
+	return deferredPrecedence{}
 }
 
 // ceilingRequestOwnsDeferredRecord reports whether the deferred record the
@@ -85,6 +97,12 @@ func (s *Service) ceilingAdmissionCandidate(ctx context.Context, task *models.Ta
 		return models.CeilingDeferral{}, false
 	}
 	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if claim, held := models.ReadCeilingLaunchClaimDetails(record); held && !claim.Expired(time.Now().UTC()) {
+		// A dispatcher owns this exact record and is dispatching it now. It
+		// takes the next free slot itself, so it must not also reserve one
+		// against every other automatic and queued launch until its lease ends.
+		return models.CeilingDeferral{}, false
+	}
 	deferral, err := models.ReadCeilingDeferral(record)
 	if err != nil || s.deferredRetrySchedule.failureWaiting(task.ID, ceilingDeferralIdentityKey(deferral)) {
 		return deferral, false

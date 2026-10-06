@@ -103,12 +103,20 @@ bounded instance capacity, so that one installation does not overload its host.
   available and remains available, an eligible deferred `start_created` launch
   shall be retried within five minutes, including periodic sweep alignment.
   New automatic launches in the same lane shall yield available capacity to
-  eligible deferred launches in the order defined by .11. Manual override and
+  eligible deferred launches in the order defined by .11. A queued launch that a
+  dispatcher already holds a valid, unexpired dispatch claim for is being
+  launched now and claims no additional priority, so it shall not hold a free
+  unit against later launches until its claim lease expires. Manual override and
   already admitted continuations shall retain their existing behavior.
 - **AC-AGENTS-SESSION-CEILING-001.13:** A retry that pauses before admission
   shall record its task, destination, launch kind, and reason without recording
   prompt or credential content. Ineligible entries and a replay waiting after a
-  non-capacity failure shall not reserve available capacity for themselves.
+  non-capacity failure shall not reserve available capacity for themselves. A
+  launch refused while its lane has free capacity because that capacity is
+  reserved for an earlier queued launch shall carry a distinct reason code and
+  name the record it yielded to, and a later request for the same task, launch
+  kind, and destination session shall re-evaluate the stored record instead of
+  ending as a conflict.
 
 ### REQ-AGENTS-SESSION-CEILING-002: Configure automatic session capacity
 

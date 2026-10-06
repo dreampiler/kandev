@@ -263,6 +263,25 @@ and sessions that already hold admission retain their existing paths. A
 non-capacity replay failure temporarily yields priority using the existing retry
 schedule, retaining its record without blocking independent launches.
 
+A refusal that still had free capacity is reported under its own reason code,
+`ceiling_deferred_precedes`, rather than the saturated lane's `ceiling` or
+`ceiling_control`, and the decision log names the queued launch that was yielded
+to together with the closed state that made it rank first (`eligible`, or
+`list_unavailable` when the deferred list could not be read and the check fails
+closed). The card note for that reason says an earlier queued launch takes the
+free slot, because a population reading would misdescribe it. A record a
+dispatcher already holds a valid, unexpired claim for is excluded from the
+ranking: it is dispatching now and takes a slot itself, so leaving it ranked
+would hold every later automatic and queued launch out of a free slot until its
+lease expired. Expired claims are ordinary stale claims and rank normally.
+
+A later request that addresses the same queued launch — the same task, launch
+kind, and destination session — is not a second launch. The stored record's
+payload and original queue time stay authoritative, and the refusal signals the
+sweep so the pending record is retried in the next pass instead of ending the
+caller as a conflict it cannot act on. A request whose kind or destination
+session differs is a different launch and keeps the first-payload-wins conflict.
+
 Reservation ownership is session-keyed. A stale process-start callback first
 checks the persisted session execution identity; it cannot release a successor's
 reservation. A dynamic relaunch reports three outcomes: succeeded, deferred, or
