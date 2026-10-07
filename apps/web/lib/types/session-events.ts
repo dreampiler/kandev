@@ -2,7 +2,11 @@ import type { BackendMessage } from "./backend-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type { ForegroundActivity } from "./activity";
-import type { TaskPendingAction, TaskPendingActionRevision } from "./http";
+import type {
+  TaskPendingAction,
+  TaskPendingActionRevision,
+  WorkspaceRecoveryProjection,
+} from "./http";
 import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
@@ -111,6 +115,14 @@ export type SessionPendingActionChangedPayload = {
   session_id: string;
   pending_action: TaskPendingAction | null;
   pending_action_revision: TaskPendingActionRevision;
+};
+
+export type SessionWorkspaceRecoveryChangedPayload = {
+  task_id: string;
+  environment_id: string;
+  session_id: string;
+  session_ids?: string[];
+  workspace_recovery: WorkspaceRecoveryProjection;
 };
 
 export type TaskSessionNotificationPayload = {
@@ -283,6 +295,10 @@ export type SessionBackendMessageMap = {
   "session.child_stall_undeliverable": BackendMessage<
     "session.child_stall_undeliverable",
     TaskSessionNotificationPayload
+  >;
+  "session.workspace_recovery.changed": BackendMessage<
+    "session.workspace_recovery.changed",
+    SessionWorkspaceRecoveryChangedPayload
   >;
   "session.clarification_requested": BackendMessage<
     "session.clarification_requested",
