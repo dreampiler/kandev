@@ -44,6 +44,9 @@ type promptAttemptEvidence struct {
 	// resourceSuccessClaimed records that this attempt's first real output
 	// already cleared its resource suspension history.
 	resourceSuccessClaimed bool
+	// executionProfileID is the concrete profile that owns this attempt's route,
+	// captured with routeGeneration when the attempt begins.
+	executionProfileID string
 }
 
 type pendingDynamicStreakReset struct {
@@ -90,19 +93,24 @@ func (s *Service) beginPromptAttempt(
 		return
 	}
 	routeGeneration := int64(0)
+	executionProfileID := ""
 	if dynamic && s.repo != nil {
 		if session, err := s.repo.GetTaskSession(context.Background(), sessionID); err == nil && session != nil {
 			routeGeneration = session.RouteGeneration
+			if routeGeneration > 0 {
+				executionProfileID = session.ExecutionProfileID
+			}
 		}
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
 	state.mu.Lock()
 	s.dynamicAttemptEvidence.Store(sessionID, &promptAttemptEvidence{
-		routeGeneration:  routeGeneration,
-		executionID:      executionID,
-		promptGeneration: promptGeneration,
-		evidenceKnown:    true,
-		dynamic:          dynamic,
+		routeGeneration:    routeGeneration,
+		executionProfileID: executionProfileID,
+		executionID:        executionID,
+		promptGeneration:   promptGeneration,
+		evidenceKnown:      true,
+		dynamic:            dynamic,
 	})
 	// A new prompt must publish its complete execution identity before it opens
 	// a retired retry lifecycle to provider events. Initial launches have no
@@ -478,7 +486,6 @@ func (s *Service) persistPendingDynamicStreakReset(
 	if stale || err != nil {
 		return stale, err
 	}
-	s.recordDynamicResourceSuccess(ctx, session, snapshot)
 	task, err := s.repo.GetTask(ctx, snapshot.event.TaskID)
 	if err != nil {
 		return false, err
