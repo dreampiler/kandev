@@ -2055,10 +2055,12 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
-	// A ceiling-deferred Office launch is replayed by the orchestrator's own
-	// sweep, independent of this scheduler; it needs a fresh runtime JWT
-	// rather than the one captured (and redacted) at defer time.
-	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
+	// Office launches carry a short-lived runtime JWT; the orchestrator
+	// re-mints it immediately before dispatch with the task session the
+	// launch will actually use, so the token is session-scoped (and a
+	// ceiling-deferred replay gets a fresh token rather than the one captured
+	// and redacted at defer time).
+	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
