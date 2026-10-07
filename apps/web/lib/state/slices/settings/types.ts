@@ -475,6 +475,8 @@ export type UserSettingsState = {
   messageTimeDisplay: MessageTimeDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarFastActionsEnabled: boolean;
+  sidebarNewTaskStyle: "simple" | "compact";
   sidebarHoverEnabled: boolean;
   sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;

@@ -9,9 +9,11 @@ import (
 
 // recordDynamicResourceOutput clears the suspension history of the candidate
 // whose current attempt produced its first real output. Each attempt records
-// at most once, so streaming chunks do not repeat the write.
+// at most once, so streaming chunks do not repeat the write. The profile was
+// captured when the attempt began, so the raw stream callback makes no
+// repository read.
 func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, executionID string, promptGeneration uint64) {
-	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
+	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
 	attempt, ok := s.promptAttemptForSession(sessionID)
@@ -19,20 +21,16 @@ func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, ex
 		return
 	}
 	attempt.mu.Lock()
-	claim := attempt.dynamic && !attempt.resourceSuccessClaimed &&
+	executionProfileID := attempt.executionProfileID
+	claim := attempt.dynamic && executionProfileID != "" && !attempt.resourceSuccessClaimed &&
 		attempt.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
 	if claim {
 		attempt.resourceSuccessClaimed = true
 	}
 	attempt.mu.Unlock()
-	if !claim {
-		return
+	if claim {
+		s.profileExecutionResolver.RecordResourceSuccess(ctx, executionProfileID)
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.ExecutionProfileID == "" || session.RouteGeneration <= 0 {
-		return
-	}
-	s.profileExecutionResolver.RecordResourceSuccess(ctx, session.ExecutionProfileID)
 }
 
 // observeDynamicResourceWait schedules a fresh selection for a route that is
