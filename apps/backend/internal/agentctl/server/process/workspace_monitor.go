@@ -104,7 +104,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 
 	for {
 		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
-		timer.Reset(filePoll)
+		timer.Reset(wt.monitorInterval(filePoll))
 
 		select {
 		case <-ctx.Done():
@@ -158,6 +158,16 @@ func (wt *WorkspaceTracker) handleMonitorTimerTick(ctx context.Context, lastStat
 	return wt.monitorTick(ctx, lastState, consecutiveFailures)
 }
 
+// monitorInterval returns how long the monitor loop waits before its next scan.
+// Only slow mode backs off: fast keeps its own short interval, and paused is
+// woken rarely by pollIntervals itself.
+func (wt *WorkspaceTracker) monitorInterval(base time.Duration) time.Duration {
+	if wt.GetPollMode() != PollModeSlow {
+		return base
+	}
+	return slowPollInterval(base, wt.slowIdleMonitorTicks.Load())
+}
+
 // monitorTick runs a single monitor cycle: checks workspace state and triggers
 // updates if changes are detected. Returns true if the loop should stop.
 // The deferred flag reset ensures monitorRunning is cleared even on panic.
@@ -200,7 +210,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		return false
 	}
 	*consecutiveFailures = 0
-	if currentState.changed(*lastState) {
+	changed := currentState.changed(*lastState)
+	wt.noteSlowPollIdle(&wt.slowIdleMonitorTicks, changed)
+	if changed {
 		*lastState = currentState
 		wt.logger.Debug("workspace state changed, updating")
 
