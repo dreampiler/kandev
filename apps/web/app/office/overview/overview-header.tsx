@@ -12,8 +12,15 @@ import { getCurrentOrg } from "@/lib/api/domains/org-api";
 import { OVERVIEW_REFRESH_SECONDS_CHOICES } from "@/lib/settings/overview-refresh";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { toast } from "@/lib/toast/sonner";
-import type { OverviewScope, OverviewSort } from "@/lib/state/slices/office/overview-types";
-import { OVERVIEW_SORT_OPTIONS } from "@/lib/state/slices/office/overview-types";
+import type {
+  OverviewScope,
+  OverviewSort,
+  OverviewStatsWindowHours,
+} from "@/lib/state/slices/office/overview-types";
+import {
+  OVERVIEW_SORT_OPTIONS,
+  OVERVIEW_STATS_WINDOW_HOURS,
+} from "@/lib/state/slices/office/overview-types";
 import type { UserSettingsResponse } from "@/lib/types/http";
 import { createQueuedUserSettingsSyncWithResponse } from "@/lib/user-settings-sync";
 import { occurredTime, relativeTime } from "./overview-format";
@@ -61,6 +68,15 @@ type OverviewHeaderProps = {
   receivedAt: string | null;
   refreshSeconds: number;
   onRefreshSecondsChanged: (seconds: number) => void;
+  statsWindowHours: OverviewStatsWindowHours;
+  onStatsWindowChanged: (hours: OverviewStatsWindowHours) => void;
+};
+
+/** Catalog keys for the statistics period options, keyed by hours. */
+const STATS_WINDOW_KEYS: Record<number, string> = {
+  24: "office:overviewStatsPeriod24h",
+  168: "office:overviewStatsPeriod7d",
+  720: "office:overviewStatsPeriod30d",
 };
 
 /** Persists a header preference and folds the response back into the store. */
@@ -118,10 +134,17 @@ export function OverviewHeader(props: OverviewHeaderProps) {
     await save(() => syncOverviewSort(next as OverviewSort));
   };
 
+  const changeStatsWindow = (next: string) => {
+    const hours = Number(next);
+    if (!OVERVIEW_STATS_WINDOW_HOURS.includes(hours as OverviewStatsWindowHours)) return;
+    props.onStatsWindowChanged(hours as OverviewStatsWindowHours);
+  };
+
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <ScopeSelect scope={scope} saving={saving} onChange={changeScope} />
+        <StatsWindowSelect windowHours={props.statsWindowHours} onChange={changeStatsWindow} />
         <SortSelect sort={sort} saving={saving} onChange={changeSort} />
         <RefreshSelect
           refreshSeconds={props.refreshSeconds}
@@ -174,6 +197,45 @@ function ScopeSelect({
           <SelectItem value="reachable" className="cursor-pointer">
             {t("office:overviewScopeReachable")}
           </SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+/**
+ * The period the project-statistics block covers. It follows the card's own
+ * read rather than the whole-scope sections, so only the numbers under it change
+ * when it is switched.
+ */
+function StatsWindowSelect({
+  windowHours,
+  onChange,
+}: {
+  windowHours: OverviewStatsWindowHours;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-2">
+      <Label htmlFor="overview-stats-period" className="text-xs text-muted-foreground">
+        {t("office:overviewStatsPeriodLabel")}
+      </Label>
+      <Select value={String(windowHours)} onValueChange={onChange}>
+        <SelectTrigger
+          id="overview-stats-period"
+          size="sm"
+          className="min-h-11 cursor-pointer sm:min-h-0"
+          data-testid="overview-stats-period"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {OVERVIEW_STATS_WINDOW_HOURS.map((hours) => (
+            <SelectItem key={hours} value={String(hours)} className="cursor-pointer">
+              {t(STATS_WINDOW_KEYS[hours])}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

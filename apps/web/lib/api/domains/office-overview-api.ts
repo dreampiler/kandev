@@ -47,8 +47,15 @@ export function getWorkspaceAggregateRunning(
  * answers independently, so a slow workspace cannot hold back the ones that are
  * ready; the caller renders a card as soon as its own read lands.
  */
-export function getWorkspaceOverview(workspaceId: string, options?: ApiRequestOptions) {
-  const params = new URLSearchParams({ workspace_id: workspaceId });
+export function getWorkspaceOverview(
+  workspaceId: string,
+  windowHours: number,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({
+    workspace_id: workspaceId,
+    window_hours: String(windowHours),
+  });
   return fetchJson<WorkspaceAggregateWire>(
     `${BASE}/workspaces/aggregate/workspace?${params.toString()}`,
     options,

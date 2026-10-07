@@ -58,7 +58,11 @@ func overviewFixture(t *testing.T) *testDeps {
 		id TEXT PRIMARY KEY, session_id TEXT NOT NULL, task_id TEXT NOT NULL, position INTEGER NOT NULL,
 		content TEXT NOT NULL DEFAULT '', queued_at TIMESTAMP NOT NULL, queued_by TEXT NOT NULL DEFAULT '')`)
 	mustExec(t, deps, `CREATE TABLE IF NOT EXISTS task_step_transitions (
-		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, to_workflow_step_id TEXT, occurred_at TIMESTAMP NOT NULL)`)
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, to_workflow_step_id TEXT, from_workflow_step_id TEXT,
+		trigger TEXT NOT NULL DEFAULT '', occurred_at TIMESTAMP NOT NULL)`)
+	mustExec(t, deps, `CREATE TABLE IF NOT EXISTS task_session_turns (
+		id TEXT PRIMARY KEY, task_session_id TEXT NOT NULL DEFAULT '', task_id TEXT NOT NULL DEFAULT '',
+		started_at TIMESTAMP, completed_at TIMESTAMP)`)
 	mustExec(t, deps, `INSERT INTO workflow_steps (id, workflow_id, name, position, complete_task_on_enter, created_at, updated_at)
 		VALUES ('step-done', 'wf', 'Done', 1, 1, ?, ?), ('step-work', 'wf', 'Work', 0, 0, ?, ?)`,
 		time.Now().UTC(), time.Now().UTC(), time.Now().UTC(), time.Now().UTC())

@@ -18,6 +18,25 @@ export type OverviewSort = (typeof OVERVIEW_SORT_OPTIONS)[number];
 
 export type OverviewStatus = "error" | "stalled" | "delayed" | "running" | "waiting" | "blocked";
 
+/**
+ * The periods the project-statistics block can cover, in hours. The rest of the
+ * overview keeps its own fixed 24-hour window; only this block follows the
+ * selection.
+ */
+export const OVERVIEW_STATS_WINDOW_HOURS = [24, 168, 720] as const;
+
+export type OverviewStatsWindowHours = (typeof OVERVIEW_STATS_WINDOW_HOURS)[number];
+
+export const OVERVIEW_STATS_WINDOW_DEFAULT: OverviewStatsWindowHours = 24;
+
+/** Stable reason buckets for failed sessions, phrased by the client. */
+export type OverviewFailureBucketCode = "no_response" | "limit" | "start_failed" | "other";
+
+export type OverviewFailureBucket = {
+  code: OverviewFailureBucketCode;
+  count: number;
+};
+
 export type OverviewQueueStatus = "undeliverable" | "delayed" | "waiting";
 
 export type OverviewReason = {
@@ -93,6 +112,24 @@ export type OverviewThresholds = {
   window_hours: number;
 };
 
+/**
+ * The project-statistics block for one workspace: five period totals plus the
+ * failure breakdown the owner asked to be able to expand. `window_hours` is the
+ * period the backend actually applied, so the client labels the numbers with
+ * the server's answer rather than its own guess.
+ */
+export type OverviewWorkspaceActivity = {
+  window_hours: OverviewStatsWindowHours;
+  completed: number;
+  sessions_started: number;
+  sessions_failed: number;
+  agent_turns: number;
+  step_moves: number;
+  failure_buckets?: OverviewFailureBucket[];
+  /** The agent's own first-line errors behind the buckets, shown verbatim. */
+  failure_samples?: { kind: string; count: number }[];
+};
+
 export type OverviewWorkspaceMetrics = {
   status: OverviewStatus;
   active_tasks: number;
@@ -113,6 +150,8 @@ export type OverviewWorkspaceMetrics = {
     status: OverviewStatus;
     reason?: OverviewReason;
   };
+  /** The period statistics block; present whenever the overview answered. */
+  activity?: OverviewWorkspaceActivity;
 };
 
 export type OverviewParentTask = {

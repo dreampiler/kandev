@@ -116,9 +116,9 @@ func unresolvedCircuitProfileIDs(snap *overviewSnapshot, identities []circuitIde
 // caller's scope. Each workspace is computed and cached on its own, so a slow
 // workspace cannot hold back the ones that are ready.
 func (s *DashboardService) GetWorkspaceOverview(
-	ctx context.Context, workspaceID string,
+	ctx context.Context, workspaceID string, windowHours int,
 ) (*WorkspaceAggregateResponse, error) {
-	snap, err := s.loadWorkspaceSnapshot(ctx, workspaceID)
+	snap, err := s.loadWorkspaceSnapshot(ctx, workspaceID, windowHours)
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +127,11 @@ func (s *DashboardService) GetWorkspaceOverview(
 
 // getWorkspaceOverview serves GET /workspaces/aggregate/workspace.
 func (h *Handler) getWorkspaceOverview(c *gin.Context) {
-	resp, err := h.svc.GetWorkspaceOverview(c.Request.Context(), c.Query("workspace_id"))
+	windowHours, ok := statsWindowFromQuery(c)
+	if !ok {
+		return
+	}
+	resp, err := h.svc.GetWorkspaceOverview(c.Request.Context(), c.Query("workspace_id"), windowHours)
 	switch {
 	case err == nil:
 		c.JSON(http.StatusOK, resp)

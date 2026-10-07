@@ -84,7 +84,15 @@ type workspaceAgentCounts struct {
 // and served from memory for overviewCacheTTL; concurrent misses share one
 // computation.
 func (s *DashboardService) GetWorkspacesAggregate(ctx context.Context) (*WorkspaceAggregateResponse, error) {
-	snap, err := s.loadOverviewSnapshot(ctx)
+	return s.getWorkspacesAggregate(ctx, defaultOverviewStatsWindowHours)
+}
+
+// getWorkspacesAggregate is the period-aware entry point: the handler passes
+// the validated `window_hours`, while in-process callers keep the default.
+func (s *DashboardService) getWorkspacesAggregate(
+	ctx context.Context, windowHours int,
+) (*WorkspaceAggregateResponse, error) {
+	snap, err := s.loadOverviewSnapshot(ctx, windowHours)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +169,11 @@ func (s *DashboardService) aggregateAgentCounts(ctx context.Context) (map[string
 // is already identity-scoped by the lister, so this handler does no
 // per-workspace ownership loop.
 func (h *Handler) getWorkspacesAggregate(c *gin.Context) {
-	resp, err := h.svc.GetWorkspacesAggregate(c.Request.Context())
+	windowHours, ok := statsWindowFromQuery(c)
+	if !ok {
+		return
+	}
+	resp, err := h.svc.getWorkspacesAggregate(c.Request.Context(), windowHours)
 	if err != nil {
 		if errors.Is(err, ErrWorkspaceAggregateUnavailable) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
@@ -171,4 +183,18 @@ func (h *Handler) getWorkspacesAggregate(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// statsWindowFromQuery reads and validates the `window_hours` request value for
+// the project-statistics block. It writes a 400 and returns false for a value
+// outside the supported set, so a caller cannot believe it selected a period
+// the screen ignores. The parameter applies only to the statistics block; every
+// other overview section keeps its own fixed window.
+func statsWindowFromQuery(c *gin.Context) (int, bool) {
+	windowHours, ok := ParseOverviewStatsWindow(c.Query("window_hours"))
+	if !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "window_hours must be 24, 168, or 720"})
+		return 0, false
+	}
+	return windowHours, true
 }

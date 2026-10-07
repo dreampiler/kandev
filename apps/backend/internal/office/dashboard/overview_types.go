@@ -1,6 +1,46 @@
 package dashboard
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
+
+// The periods the project-statistics block may cover. The owner asked for a
+// period selection, so the block follows the caller's choice while every other
+// overview section keeps its own fixed 24-hour window.
+const (
+	OverviewStatsWindow24h = 24
+	OverviewStatsWindow7d  = 168
+	OverviewStatsWindow30d = 720
+)
+
+// defaultOverviewStatsWindowHours is the period a request that names none gets,
+// so the default screen is unchanged.
+const defaultOverviewStatsWindowHours = OverviewStatsWindow24h
+
+var overviewStatsWindowHours = []int{OverviewStatsWindow24h, OverviewStatsWindow7d, OverviewStatsWindow30d}
+
+// ParseOverviewStatsWindow validates the `window_hours` request value. An empty
+// value is the default; anything outside the supported set is rejected rather
+// than clamped, so a caller never believes it selected a period the screen will
+// not use.
+func ParseOverviewStatsWindow(raw string) (int, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return defaultOverviewStatsWindowHours, true
+	}
+	hours, err := strconv.Atoi(trimmed)
+	if err != nil {
+		return 0, false
+	}
+	for _, allowed := range overviewStatsWindowHours {
+		if hours == allowed {
+			return hours, true
+		}
+	}
+	return 0, false
+}
 
 // Overview wire types for the multi-workspace aggregate. Reasons travel as a
 // code plus values so the UI composes the sentence in the viewer's language;
@@ -180,6 +220,11 @@ type OverviewWorkspaceMetrics struct {
 	BlockedByTasks int                   `json:"blocked_by_tasks"`
 	Problems       OverviewProblemCounts `json:"problems"`
 	TopWarning     *OverviewWarning      `json:"top_warning,omitempty"`
+	// Activity is the period statistics block. It is present whenever the
+	// overview reader answered, even for a workspace with no work, because the
+	// block answers "how much happened here in the period" rather than "what is
+	// running now".
+	Activity *OverviewWorkspaceActivity `json:"activity,omitempty"`
 }
 
 // OverviewParentTask is an open task that groups child tasks.
@@ -195,6 +240,32 @@ type OverviewParentTask struct {
 type OverviewErrorKind struct {
 	Kind  string `json:"kind"`
 	Count int    `json:"count"`
+}
+
+// OverviewFailureBucket counts the failed sessions of one period that fell in
+// one reason bucket. Code is a stable identifier the client phrases, never the
+// agent's own words.
+type OverviewFailureBucket struct {
+	Code  string `json:"code"`
+	Count int    `json:"count"`
+}
+
+// OverviewWorkspaceActivity is the project-statistics block for one workspace:
+// five period totals plus the failure breakdown the owner asked to be able to
+// expand. WindowHours is the period actually applied, so the client labels the
+// numbers with the backend's answer rather than its own guess.
+type OverviewWorkspaceActivity struct {
+	WindowHours     int                     `json:"window_hours"`
+	Completed       int                     `json:"completed"`
+	SessionsStarted int                     `json:"sessions_started"`
+	SessionsFailed  int                     `json:"sessions_failed"`
+	AgentTurns      int                     `json:"agent_turns"`
+	StepMoves       int                     `json:"step_moves"`
+	FailureBuckets  []OverviewFailureBucket `json:"failure_buckets,omitempty"`
+	// FailureSamples carries the agent's own first-line errors behind the
+	// buckets, the same verbatim text the model card already shows, so the
+	// breakdown answers "why" with something more specific than the bucket.
+	FailureSamples []OverviewErrorKind `json:"failure_samples,omitempty"`
 }
 
 // Overview model kinds. A dynamic profile routes one logical session through

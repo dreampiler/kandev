@@ -19,10 +19,12 @@ import { resolveHomeHref } from "@/lib/navigation/workspace-home";
 import type { WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
 import type {
   OverviewRunningTask,
+  OverviewStatsWindowHours,
   OverviewTaskFilter,
   OverviewThresholds,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
+import { OverviewActivityLine } from "./overview-activity-line";
 import { WorkspaceMetrics } from "./overview-metrics";
 import { OverviewListBody } from "./overview-system-cards";
 import { OverviewTaskTable } from "./overview-tables";
@@ -56,13 +58,15 @@ const FILTER_CHIPS: { filter: OverviewTaskFilter; labelKey: string }[] = [
 export function OverviewWorkspaceCard({
   workspace,
   refreshSeconds,
+  statsWindowHours,
   thresholds,
 }: {
   workspace: WorkspaceAggregateEntry;
   refreshSeconds: number;
+  statsWindowHours: OverviewStatsWindowHours;
   thresholds?: OverviewThresholds;
 }) {
-  const state = useWorkspaceOverview(workspace.workspace_id, refreshSeconds);
+  const state = useWorkspaceOverview(workspace.workspace_id, refreshSeconds, statsWindowHours);
   if (state.status === "loading") {
     return <WorkspaceCardSkeleton name={workspace.name} />;
   }
@@ -144,6 +148,9 @@ function WorkspaceCardBody({
           <span className="text-xs text-muted-foreground">{t("office:allClear")}</span>
         )}
       </div>
+      {/* The period statistics are the card's own numbers, so they show even when
+          the body is otherwise quiet; only the workspace's live work is hidden. */}
+      <OverviewActivityLine activity={metrics?.activity} />
       {active && metrics && (
         <WorkspaceActiveBody
           workspace={workspace}
