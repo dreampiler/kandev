@@ -309,7 +309,7 @@ func (m *Manager) reuseRequiredWorktree(ctx context.Context, req CreateRequest) 
 		(requestedBranchSlug != "" && SanitizeBranchSlug(wt.BranchSlug) != requestedBranchSlug) {
 		return nil, ErrReuseWorktreeUnavailable
 	}
-	handle, valid, err := m.openReusableWorktreePath(ctx, wt.Path, wt)
+	handle, valid, err := m.openReusableWorktreePath(ctx, wt.Path, wt, req.RepositoryPath)
 	if err != nil {
 		return nil, err
 	}
@@ -378,7 +378,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.SessionID != "" {
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing, req.RepositoryPath)
 			if err != nil {
 				return nil, true, err
 			}
@@ -414,7 +414,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	if req.WorktreeID != "" {
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
-			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing)
+			handle, valid, err := m.openReusableWorktreePath(ctx, existing.Path, existing, req.RepositoryPath)
 			if err != nil {
 				return nil, true, err
 			}
@@ -505,7 +505,7 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 	return handle, nil
 }
 
-func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree) (storageworkspaces.DirectoryHandle, bool, error) {
+func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree, repositoryPath string) (storageworkspaces.DirectoryHandle, bool, error) {
 	handle, err := m.validateWorktreePathSafe(worktreePath)
 	if err != nil {
 		return nil, false, err
@@ -528,6 +528,13 @@ func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath str
 		if handle != nil {
 			_ = handle.Close()
 		}
+		return nil, false, nil
+	}
+	// A structurally healthy checkout is not reusable unless it belongs to the
+	// selected repository. Without this check a worktree that was replaced by
+	// an unrelated (or moved/recloned) checkout would be attached silently.
+	if !checkoutMatchesRepositoryIdentity(worktreePath, repositoryPath) {
+		_ = handle.Close()
 		return nil, false, nil
 	}
 	if err := handle.VerifyPath(filepath.Clean(worktreePath)); err != nil {

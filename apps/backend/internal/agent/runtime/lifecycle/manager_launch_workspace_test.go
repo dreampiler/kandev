@@ -165,11 +165,13 @@ func TestValidateLaunchWorkspaceAdmissionUsesSanitizedRepositoryDirectory(t *tes
 	}
 }
 
-// TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedSanitizedWorktreeOnResume
-// keeps the resume path fail-closed once the sanitized directory is the one
-// inspected: a checkout of a different repository must not be admitted just
-// because the raw display name resolves to nothing.
-func TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedSanitizedWorktreeOnResume(t *testing.T) {
+// TestValidateLaunchWorkspaceAdmissionDefersUnrelatedSanitizedWorktreeOnResume
+// pins the delegated meaning of the resume admission: an unrelated checkout at
+// the sanitized directory is no longer rejected here. It is handed to the
+// worktree recovery path, which validates repository identity under its
+// recovery claim and never attaches the unrelated checkout (see the worktree
+// reuse-identity tests).
+func TestValidateLaunchWorkspaceAdmissionDefersUnrelatedSanitizedWorktreeOnResume(t *testing.T) {
 	root := t.TempDir()
 	first := initGitRepo(t)
 	second := initGitRepo(t)
@@ -186,8 +188,28 @@ func TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedSanitizedWorktreeOnResu
 		},
 	}
 
-	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err == nil {
-		t.Fatal("validateLaunchWorkspaceAdmission() accepted an unrelated checkout at the sanitized directory")
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err != nil {
+		t.Fatalf("validateLaunchWorkspaceAdmission() rejected a worktree resume instead of deferring to recovery: %v", err)
+	}
+}
+
+// TestValidateLaunchWorkspaceAdmissionDefersPresentButInvalidWorktreeResume
+// pins that a worktree resume whose checkout exists but is not a valid
+// checkout of the recorded repository (empty directory, broken .git pointer,
+// moved/recloned repository) is delegated to the worktree recovery path
+// instead of hard-failing admission.
+func TestValidateLaunchWorkspaceAdmissionDefersPresentButInvalidWorktreeResume(t *testing.T) {
+	source := initGitRepo(t)
+	invalid := t.TempDir() // exists but is not a Git checkout
+	req := &LaunchRequest{
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryID:   "repository-1",
+		RepositoryPath: source,
+		ACPSessionID:   "acp-session-1",
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, invalid); err != nil {
+		t.Fatalf("validateLaunchWorkspaceAdmission() rejected a present-but-invalid worktree resume: %v", err)
 	}
 }
 
