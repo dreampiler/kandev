@@ -41,6 +41,14 @@ type WorkspaceAggregateEntry struct {
 	IsOffice bool                      `json:"is_office"`
 	Metrics  *OverviewWorkspaceMetrics `json:"metrics,omitempty"`
 	Parents  []OverviewParentTask      `json:"parents,omitempty"`
+	// Running lists the tasks that have a session executing right now, most
+	// severe first. It is absent when none is, so the client can say so in one
+	// line instead of rendering an empty list.
+	Running []OverviewRunningTask `json:"running,omitempty"`
+	// RunningTruncated counts the running tasks the limit left out, so the card
+	// can say how many more exist rather than showing a list that stops for no
+	// stated reason.
+	RunningTruncated int `json:"running_truncated,omitempty"`
 }
 
 // WorkspaceAggregateResponse is the read-only multi-workspace overview: one

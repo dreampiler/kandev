@@ -23,6 +23,7 @@ import type { OfficeAgentProfile as AgentProfile } from "@/lib/types/agent-profi
 import type { QuorumResponseDTO, TaskQuorumSliceState } from "./quorum-types";
 import type {
   OverviewParentTask,
+  OverviewRunningTask,
   OverviewSections,
   OverviewWorkspaceMetrics,
 } from "./overview-types";
@@ -449,6 +450,13 @@ export type WorkspaceAggregateEntry = {
   is_office?: boolean;
   metrics?: OverviewWorkspaceMetrics;
   parents?: OverviewParentTask[];
+  /**
+   * The tasks that have a session executing right now, most severe first.
+   * Absent when none is, so the card can say so in one line.
+   */
+  running?: OverviewRunningTask[];
+  /** How many running tasks the card's own limit left out. */
+  running_truncated?: number;
 };
 
 /**

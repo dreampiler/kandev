@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { linkToTask } from "@/lib/links";
@@ -68,6 +69,17 @@ function Metric({
   return <div className={`rounded-md border p-2 text-center ${surface}`}>{body}</div>;
 }
 
+/**
+ * The last-output tile's hover reading: how long ago the output happened, and
+ * what the tile opens. The tile is the one figure that is a link rather than a
+ * filter, so the hint names the task the link goes to: the task whose most
+ * recent live session produced that output.
+ */
+function lastOutputTitle(t: TFunction, at: string | undefined): string {
+  const hint = t("office:overviewLastOutputHint");
+  return at ? `${relativeTime(at)} · ${hint}` : hint;
+}
+
 /** The project's six figures, each one a tile and each one a filter. */
 export function WorkspaceMetrics({
   metrics,
@@ -97,7 +109,7 @@ export function WorkspaceMetrics({
       <Metric
         label={t("office:overviewLastOutput")}
         value={metrics.last_output_at ? occurredTime(metrics.last_output_at) : "-"}
-        title={metrics.last_output_at ? relativeTime(metrics.last_output_at) : undefined}
+        title={metrics.last_output_task_id ? lastOutputTitle(t, metrics.last_output_at) : undefined}
         href={metrics.last_output_task_id ? linkToTask(metrics.last_output_task_id) : undefined}
       />
       <Metric

@@ -163,11 +163,11 @@ function laneCount(t: TFunction, used: number, limit: number): string {
  * scope-wide tile carries the scope's own running count and the scope's own
  * waiting-input count, both of which are scope readings there.
  *
- * With lanes present, neither tile carries the waiting-input count. The waiting
- * count is a single scope-wide reading, so putting it on one lane's tile would
- * present the instance total as that lane's own number. A per-lane count needs a
- * per-lane reading from the server, and until it exists the lane tiles report
- * only what is measured per lane: the population and its limit.
+ * With lanes present, each tile also carries its own lane's waiting-input count,
+ * because the server splits the scope's waiting sessions by the same control set
+ * it classified the lanes with. A lane whose waiting reading did not arrive
+ * shows its population and limit alone rather than the scope total, so a missing
+ * per-lane reading never reads as another lane's number.
  *
  * Both lane tiles open the same session list, so the tiles differ only in what
  * they report.
@@ -206,6 +206,7 @@ function sessionLaneCards(
         tone={general > 0 ? "running" : null}
         title={t("office:overviewSessionLaneTitleGeneral")}
         value={laneCount(t, general, lanes.general_limit)}
+        sub={laneWaitingSub(t, lanes.general_waiting_input_sessions)}
         {...sessionProps}
       />
       {control !== undefined && (
@@ -214,11 +215,21 @@ function sessionLaneCards(
           tone={control > 0 ? "running" : null}
           title={t("office:overviewSessionLaneTitleControl")}
           value={laneCount(t, control, lanes.control_limit)}
+          sub={laneWaitingSub(t, lanes.control_waiting_input_sessions)}
           {...sessionProps}
         />
       )}
     </>
   );
+}
+
+/**
+ * One lane's waiting-input sub line, or nothing when that lane's reading did not
+ * arrive. A measured zero is reported as a zero, because the server only omits
+ * the pair when the populations themselves are unread.
+ */
+function laneWaitingSub(t: TFunction, waiting: number | undefined): string | undefined {
+  return waiting === undefined ? undefined : t("office:overviewWaitingInput", { count: waiting });
 }
 
 /** The system cards; four of them open the cross-workspace lists. */
