@@ -488,8 +488,10 @@ func (t *promptTurnState) quotaNoticeClassification(buffer, providerID string) (
 	if !routingerr.MayClassify(input) {
 		return nil, false
 	}
-	t.quotaNoticeClass = routingerr.Classify(input)
-	return t.quotaNoticeClass, true
+	// The buffer is the agent's own prose; only a notice the output opens with
+	// is the provider speaking, so the anchored notice classifier reads it.
+	t.quotaNoticeClass = routingerr.ClassifyAgentNotice(input)
+	return t.quotaNoticeClass, t.quotaNoticeClass != nil
 }
 
 func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {

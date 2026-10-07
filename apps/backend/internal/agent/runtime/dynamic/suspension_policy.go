@@ -57,6 +57,12 @@ var freeRateLimitLadder = []time.Duration{
 	time.Hour, 2 * time.Hour, 4 * time.Hour,
 }
 
+// renewalLagLadder is the block length for an exhausted plan whose notice says
+// the renewal day has already begun. The provider's own renewal is due, and
+// only its processing lags, so the account is retried within the hour rather
+// than written off until a later reset.
+var renewalLagLadder = []time.Duration{30 * time.Minute, time.Hour}
+
 // limitPolicy is the scope and duration rule for usage-limit failures of one
 // model.
 type limitPolicy struct {
@@ -171,9 +177,11 @@ func suspensionTarget(candidate Candidate, code routingerr.Code) string {
 }
 
 // suspensionUntil sizes one suspension. A known reset instant wins: the
-// failure's own reset hint, then a fully consumed usage window. Without one,
-// a laddered provider blocks by strike count and never past its next monthly
-// reset; every other failure keeps the standard short backoff.
+// failure's own reset hint, then a fully consumed usage window. A plan whose
+// stated renewal day has begun is retried on the short renewal-lag ladder.
+// Without either, a laddered provider blocks by strike count and never past
+// its next monthly reset or its stated renewal day; every other failure keeps
+// the standard short backoff.
 func (e *Engine) suspensionUntil(
 	ctx context.Context,
 	candidate Candidate,
@@ -189,6 +197,9 @@ func (e *Engine) suspensionUntil(
 	if !isUsageLimitCode(failure.Code) || len(policy.ladder) == 0 {
 		return until
 	}
+	if renewalDue(failure, now) {
+		return now.Add(ladderStep(renewalLagLadder, strikes))
+	}
 	if e.calendar != nil {
 		if exhausted, ok := e.calendar.ExhaustedUntil(ctx, candidate, now); ok && exhausted.After(until) {
 			return exhausted
@@ -197,7 +208,29 @@ func (e *Engine) suspensionUntil(
 	if candidate.SuspendedUntil.After(until) {
 		return candidate.SuspendedUntil
 	}
-	return e.ladderUntil(ctx, candidate, policy, strikes, now)
+	return capAtRenewal(e.ladderUntil(ctx, candidate, policy, strikes, now), failure, now)
+}
+
+// renewalDue reports whether the failure's notice names a renewal day that has
+// already begun somewhere, so the exhaustion it reports is the provider's
+// renewal lag rather than a spent allowance.
+func renewalDue(failure *routingerr.Error, now time.Time) bool {
+	return failure.RenewalAt != nil && !failure.RenewalAt.After(now)
+}
+
+// capAtRenewal keeps a ladder block from outlasting the renewal day the
+// provider stated; at that point a retry either succeeds or reports the lag.
+func capAtRenewal(until time.Time, failure *routingerr.Error, now time.Time) time.Time {
+	if failure.RenewalAt != nil && failure.RenewalAt.After(now) && until.After(*failure.RenewalAt) {
+		return *failure.RenewalAt
+	}
+	return until
+}
+
+// ladderStep returns the block length for a strike count on a ladder whose
+// last step repeats.
+func ladderStep(ladder []time.Duration, strikes int) time.Duration {
+	return ladder[min(max(strikes, 1), len(ladder))-1]
 }
 
 // ladderUntil sizes a suspension whose reset instant is unknown by its strike

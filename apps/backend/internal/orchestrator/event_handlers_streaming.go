@@ -158,7 +158,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		)
 	}
 	if observedOutput {
-		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.ExecutionProfileID, payload.Data.PromptGeneration)
 	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
