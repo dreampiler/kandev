@@ -99,9 +99,9 @@ func (m *Manager) validateManagedToolPolicyAdmission(ctx context.Context, req *L
 	if m.registry == nil {
 		return fmt.Errorf("%w: agent registry is unavailable", ErrManagedToolPolicyUnsupported)
 	}
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return fmt.Errorf("%w: agent type %q is unavailable", ErrManagedToolPolicyUnsupported, agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrManagedToolPolicyUnsupported, err)
 	}
 	return validateManagedToolPolicyProvider(profileContext, agentTypeName, agentConfig.Runtime())
 }
@@ -1871,9 +1871,9 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		releaseOpenCodeAdmission := m.acquireOpenCodeLaunchAdmission(agentTypeName)
 		defer releaseOpenCodeAdmission()
-		agentConfig, ok := m.registry.Get(agentTypeName)
-		if !ok {
-			return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+		agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+		if err != nil {
+			return nil, err
 		}
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
@@ -1963,9 +1963,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	defer releaseOpenCodeAdmission()
 
 	// 2. Get agent config from registry
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return nil, err
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
