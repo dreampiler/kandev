@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"expvar"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -85,6 +86,17 @@ type OverviewReader interface {
 	ListOverviewFailureFollowups(
 		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 	) ([]*sqlite.OverviewFailureFollowupRow, error)
+
+	// The project-statistics reads: exact period totals per workspace and the
+	// failed sessions behind them, grouped by reason bucket. Both are required
+	// reads, so a snapshot that cannot answer them fails rather than presenting
+	// a card with no statistics as if the statistics were zero.
+	ListOverviewWorkspaceActivity(
+		ctx context.Context, workspaceIDs []string, since time.Time,
+	) (map[string]sqlite.OverviewWorkspaceActivityCounts, error)
+	ListOverviewFailureBuckets(
+		ctx context.Context, workspaceIDs []string, since time.Time,
+	) ([]*sqlite.OverviewFailureBucketRow, error)
 }
 
 // AnswerableQuestionLister lists answerable clarification bundles of the
@@ -205,6 +217,10 @@ type overviewSnapshot struct {
 	// buildVersion is the running binary's version for this pass, empty when
 	// nothing wired one.
 	buildVersion string
+	// windowHours is the period this snapshot's statistics block covers. It is
+	// part of the cache key, so two callers on different periods never share a
+	// snapshot whose totals answer a different question.
+	windowHours int
 }
 
 // overviewScope resolves the caller's scope, falling back to Office.
@@ -220,14 +236,14 @@ func (s *DashboardService) overviewScope(ctx context.Context) string {
 }
 
 // loadOverviewSnapshot returns the caller's cached snapshot or builds it.
-func (s *DashboardService) loadOverviewSnapshot(ctx context.Context) (*overviewSnapshot, error) {
+func (s *DashboardService) loadOverviewSnapshot(ctx context.Context, windowHours int) (*overviewSnapshot, error) {
 	if s.workspaceLister == nil {
 		return nil, ErrWorkspaceAggregateUnavailable
 	}
 	scope := s.overviewScope(ctx)
-	key := overviewCallerKey(ctx) + "|" + scope
+	key := overviewCallerKey(ctx) + "|" + scope + "|win:" + strconv.Itoa(windowHours)
 	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
-		return s.buildOverviewSnapshot(ctx, scope, "")
+		return s.buildOverviewSnapshot(ctx, scope, "", windowHours)
 	})
 }
 
@@ -235,7 +251,7 @@ func (s *DashboardService) loadOverviewSnapshot(ctx context.Context) (*overviewS
 // caller's scope, cached under its own key so the per-workspace reads compute
 // and expire independently of the whole-scope one.
 func (s *DashboardService) loadWorkspaceSnapshot(
-	ctx context.Context, workspaceID string,
+	ctx context.Context, workspaceID string, windowHours int,
 ) (*overviewSnapshot, error) {
 	if s.workspaceLister == nil {
 		return nil, ErrWorkspaceAggregateUnavailable
@@ -244,9 +260,9 @@ func (s *DashboardService) loadWorkspaceSnapshot(
 		return nil, ErrOverviewWorkspaceNotFound
 	}
 	scope := s.overviewScope(ctx)
-	key := overviewCallerKey(ctx) + "|" + scope + "|ws:" + workspaceID
+	key := overviewCallerKey(ctx) + "|" + scope + "|ws:" + workspaceID + "|win:" + strconv.Itoa(windowHours)
 	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
-		return s.buildOverviewSnapshot(ctx, scope, workspaceID)
+		return s.buildOverviewSnapshot(ctx, scope, workspaceID, windowHours)
 	})
 }
 
@@ -264,7 +280,7 @@ func (s *DashboardService) overviewCacheOrInit() *overviewCache {
 // answers ErrOverviewWorkspaceNotFound rather than an empty overview, so a
 // foreign or nonexistent workspace is indistinguishable from a miss.
 func (s *DashboardService) buildOverviewSnapshot(
-	ctx context.Context, scope, only string,
+	ctx context.Context, scope, only string, windowHours int,
 ) (*overviewSnapshot, error) {
 	started := time.Now()
 	workspaces, err := s.workspaceLister.ListWorkspaces(ctx)
@@ -282,7 +298,10 @@ func (s *DashboardService) buildOverviewSnapshot(
 	if err != nil {
 		return nil, err
 	}
-	snap := &overviewSnapshot{resp: resp, now: started.UTC(), names: map[string]string{}, buildVersion: s.buildVersion}
+	snap := &overviewSnapshot{
+		resp: resp, now: started.UTC(), names: map[string]string{},
+		buildVersion: s.buildVersion, windowHours: windowHours,
+	}
 	for _, w := range ordered {
 		snap.names[w.ID] = w.Name
 	}
@@ -316,6 +335,9 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 	}
 	assembleWorkspaceMetrics(snap, counts, childCounts)
 	assembleRunningTasks(snap)
+	if err := s.fillWorkspaceActivity(ctx, snap, ids); err != nil {
+		return err
+	}
 	if err := s.assembleModels(ctx, snap, ids, since); err != nil {
 		return err
 	}

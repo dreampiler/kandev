@@ -16,7 +16,11 @@ export type WorkspaceOverviewState =
  * independent read, so one slow workspace delays only its own card and the
  * rest of the overview is shown as soon as it is ready.
  */
-export function useWorkspaceOverview(workspaceId: string, refreshSeconds: number) {
+export function useWorkspaceOverview(
+  workspaceId: string,
+  refreshSeconds: number,
+  windowHours: number,
+) {
   const [state, setState] = useState<WorkspaceOverviewState>({ status: "loading" });
   const generationRef = useRef(0);
   const inFlightRef = useRef(false);
@@ -26,7 +30,7 @@ export function useWorkspaceOverview(workspaceId: string, refreshSeconds: number
     inFlightRef.current = true;
     const generation = ++generationRef.current;
     try {
-      const data: WorkspaceAggregateWire = await getWorkspaceOverview(workspaceId, {
+      const data: WorkspaceAggregateWire = await getWorkspaceOverview(workspaceId, windowHours, {
         cache: "no-store",
       });
       if (generation !== generationRef.current) return;
@@ -38,7 +42,7 @@ export function useWorkspaceOverview(workspaceId: string, refreshSeconds: number
     } finally {
       inFlightRef.current = false;
     }
-  }, [workspaceId]);
+  }, [workspaceId, windowHours]);
 
   useEffect(() => {
     void load();

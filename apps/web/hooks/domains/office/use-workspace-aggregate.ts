@@ -7,6 +7,10 @@ import {
   type WorkspaceAggregateWire,
 } from "@/lib/api/domains/office-extended-api";
 import type { OverviewSections } from "@/lib/state/slices/office/overview-types";
+import {
+  OVERVIEW_STATS_WINDOW_DEFAULT,
+  type OverviewStatsWindowHours,
+} from "@/lib/state/slices/office/overview-types";
 import { OVERVIEW_REFRESH_SECONDS_DEFAULT } from "@/lib/settings/overview-refresh";
 
 export type WorkspaceAggregateLoadState = "loading" | "loaded" | "error";
@@ -40,7 +44,10 @@ export function sectionsFrom(data: WorkspaceAggregateWire): OverviewSections {
  * so a widget can say how fresh it is and a control can show that a refresh is
  * running instead of guessing from the interval.
  */
-export function useWorkspaceAggregate(refreshSeconds: number = OVERVIEW_REFRESH_SECONDS_DEFAULT) {
+export function useWorkspaceAggregate(
+  refreshSeconds: number = OVERVIEW_REFRESH_SECONDS_DEFAULT,
+  windowHours: OverviewStatsWindowHours = OVERVIEW_STATS_WINDOW_DEFAULT,
+) {
   const setWorkspaceAggregate = useAppStore((state) => state.setWorkspaceAggregate);
   const [loadState, setLoadState] = useState<WorkspaceAggregateLoadState>("loading");
   const [refreshing, setRefreshing] = useState(true);
@@ -55,7 +62,7 @@ export function useWorkspaceAggregate(refreshSeconds: number = OVERVIEW_REFRESH_
 
     const requestGeneration = ++requestGenerationRef.current;
     setRefreshing(true);
-    const request = getWorkspaceAggregate({ cache: "no-store" })
+    const request = getWorkspaceAggregate(windowHours, { cache: "no-store" })
       .then((data) => {
         if (requestGeneration !== requestGenerationRef.current) return;
         setWorkspaceAggregate({
@@ -76,7 +83,7 @@ export function useWorkspaceAggregate(refreshSeconds: number = OVERVIEW_REFRESH_
 
     inFlightRef.current = { promise: request, generation: requestGeneration };
     return request;
-  }, [setWorkspaceAggregate]);
+  }, [setWorkspaceAggregate, windowHours]);
 
   useEffect(() => {
     void refresh();

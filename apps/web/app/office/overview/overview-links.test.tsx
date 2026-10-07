@@ -197,7 +197,9 @@ describe("overview project card destinations", () => {
   });
 
   it("links the project card to its board, tasks, and last output", async () => {
-    render(<OverviewWorkspaceCard workspace={workspace} refreshSeconds={60} />);
+    render(
+      <OverviewWorkspaceCard workspace={workspace} refreshSeconds={60} statsWindowHours={24} />,
+    );
     expect(hrefOf(screen.getByTestId("overview-workspace-link"))).toBe(
       "/?home=overview&workspaceId=ws-1",
     );
@@ -238,7 +240,11 @@ describe("overview project card destinations", () => {
 
   it("links an Office workspace to its Office home", () => {
     render(
-      <OverviewWorkspaceCard workspace={{ ...workspace, is_office: true }} refreshSeconds={60} />,
+      <OverviewWorkspaceCard
+        workspace={{ ...workspace, is_office: true }}
+        refreshSeconds={60}
+        statsWindowHours={24}
+      />,
     );
     expect(hrefOf(screen.getByTestId("overview-workspace-link"))).toBe("/office?workspaceId=ws-1");
   });

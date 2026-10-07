@@ -54,7 +54,9 @@ func (s *DashboardService) overviewListSnapshot(ctx context.Context) (*overviewS
 	if s.overviewReader == nil {
 		return nil, ErrWorkspaceAggregateUnavailable
 	}
-	return s.loadOverviewSnapshot(ctx)
+	// The list routes show the default period's snapshot; only the workspace
+	// card follows the caller's period selection.
+	return s.loadOverviewSnapshot(ctx, defaultOverviewStatsWindowHours)
 }
 
 // GetOverviewWorkspaceTasks returns one workspace's tasks for a filter, most

@@ -38,7 +38,7 @@ The Office system owns the aggregate view. The task service owns workspace visib
 
 ## Data and contracts
 
-The frontend sends `GET /api/v1/office/workspaces/aggregate`. The response contains `workspaces` and `recent_activity`.
+The frontend sends `GET /api/v1/office/workspaces/aggregate`. The response contains `workspaces` and `recent_activity`. The per-workspace route `GET /api/v1/office/workspaces/aggregate/workspace` additionally accepts a `window_hours` value (24, 168, or 720) for the project-statistics block, and both routes carry the result on each workspace's `metrics.activity`.
 
 Each workspace entry contains its ID and name, task counts, pending approvals, agent count, and running-agent count. The activity list contains at most 20 entries across all returned workspaces.
 
@@ -78,6 +78,15 @@ The user setting `office_overview_scope` is stored with the other user settings.
 - The open-task breakdown is one partition read once per task in `addTaskMetrics`: on hold, then waiting on an unfinished predecessor, then in progress, then the rest. `BlockedTasks` carries the hold count and a new `BlockedByTasks` carries the predecessor count, so the three card figures are three separate answers rather than one number read under two names, and `WaitingTasks` keeps meaning every open task that is not being driven. The card's third figure is `open_tasks - blocked_tasks - blocked_by_tasks`, which carries the tasks in progress along with the ones waiting on a person, so it is worded neutrally.
 - `GET /api/v1/office/workspaces/aggregate/tasks` and `GET /api/v1/office/workspaces/aggregate/running` filter the same snapshot. The tasks route answers 404 for a workspace outside the snapshot. Only the queue list reads the head of each queue, once per snapshot.
 - The page loads lists only while expanded. `use-workspace-aggregate.ts` and `use-overview-list.ts` refresh every 30 seconds, and only while the document is visible.
+
+## Project statistics
+
+- `aggregate_overview_activity.go` holds two reads. `ListOverviewWorkspaceActivity` returns the period totals per workspace: sessions started and failed from one grouped read over `task_sessions`, agent turns from `task_session_turns`, step moves from `task_step_transitions` (excluding `trigger = 'task_created'`), and completed tasks from the completing-step transitions (the same `complete_task_on_enter` definition the completed list uses, counted with `COUNT(DISTINCT task_id)`). Every read takes the caller's look-back window and reuses the batch helper and the automation/ephemeral exclusions of the rest of the overview.
+- `ListOverviewFailureBuckets` groups failed sessions of the window by workspace, reason bucket, and the session's own error text. The bucket is one SQL `CASE` over the session's existing state, completion, and error text: a provider limit signal first, then a failure that never ran a turn or names a start fault, then a failure with no recorded text (no response), and everything else. No new column, no dynamic-routing JSON, and no dialect-specific function is used, so the read is exact on SQLite and PostgreSQL alike.
+- The buckets are always reported in a fixed order with their counts, so a zero bucket is named rather than dropped. The agent's own first-line error text travels as `failure_samples`, folded to the same `errorKind` first-line form the model card uses and shown verbatim.
+- `overview_activity.go` receives the period from the snapshot's window and hangs the block on each workspace's `metrics.activity`. The read is required, not optional: a snapshot that cannot answer the statistics fails rather than presenting a zeroed block. The window is part of the cache key (`overview_cache.go` keys gain `|win:<hours>`), so a caller on 7 days never receives a snapshot computed for 24 hours. The list routes keep the default window.
+- The `window_hours` query value is validated by `ParseOverviewStatsWindow`; anything outside {24, 168, 720} is rejected with HTTP 400. `statsWindowFromQuery` in the handler owns that. The period applies to `metrics.activity` only and does not move the rest of the overview's fixed window, so `last_24h`, the model session counts, and the completed-24 figure keep their meaning.
+- `overview-activity-line.tsx` renders the five totals, the period label, and the failure disclosure. It reads the period the server reported rather than the client's selection, and it renders whenever `metrics.activity` is present, including on a quiet card.
 
 ## Failure and recovery
 

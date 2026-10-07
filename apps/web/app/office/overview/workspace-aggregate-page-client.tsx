@@ -7,8 +7,10 @@ import type { WorkspaceAggregate } from "@/lib/state/slices/office/types";
 import type {
   OverviewSections,
   OverviewSort,
+  OverviewStatsWindowHours,
   OverviewThresholds,
 } from "@/lib/state/slices/office/overview-types";
+import { OVERVIEW_STATS_WINDOW_DEFAULT } from "@/lib/state/slices/office/overview-types";
 import { OVERVIEW_REFRESH_SECONDS_DEFAULT } from "@/lib/settings/overview-refresh";
 import { useWorkspaceAggregate } from "@/hooks/domains/office/use-workspace-aggregate";
 import { useTranslation } from "react-i18next";
@@ -38,7 +40,13 @@ export function WorkspaceAggregatePageClient() {
   const [refreshSeconds, setRefreshSeconds] = useState(
     savedRefreshSeconds || OVERVIEW_REFRESH_SECONDS_DEFAULT,
   );
-  const { loadState, refresh, refreshing, receivedAt } = useWorkspaceAggregate(refreshSeconds);
+  const [statsWindowHours, setStatsWindowHours] = useState<OverviewStatsWindowHours>(
+    OVERVIEW_STATS_WINDOW_DEFAULT,
+  );
+  const { loadState, refresh, refreshing, receivedAt } = useWorkspaceAggregate(
+    refreshSeconds,
+    statsWindowHours,
+  );
   const onRefresh = useCallback(() => void refresh(), [refresh]);
 
   return (
@@ -50,6 +58,8 @@ export function WorkspaceAggregatePageClient() {
         receivedAt={receivedAt}
         refreshSeconds={refreshSeconds}
         onRefreshSecondsChanged={setRefreshSeconds}
+        statsWindowHours={statsWindowHours}
+        onStatsWindowChanged={setStatsWindowHours}
       />
       {loadState === "error" && (
         <div className="text-sm text-destructive" role="alert">
@@ -61,6 +71,7 @@ export function WorkspaceAggregatePageClient() {
         loading={loadState === "loading"}
         refreshSeconds={refreshSeconds}
         sort={sort}
+        statsWindowHours={statsWindowHours}
       />
     </div>
   );
@@ -105,11 +116,13 @@ function OverviewBody({
   loading,
   refreshSeconds,
   sort,
+  statsWindowHours,
 }: {
   aggregate: WorkspaceAggregate | null;
   loading: boolean;
   refreshSeconds: number;
   sort: OverviewSort;
+  statsWindowHours: OverviewStatsWindowHours;
 }) {
   const workspaces = useMemo(() => aggregate?.workspaces ?? [], [aggregate]);
   const ordered = useMemo(() => sortWorkspaces(workspaces, sort), [workspaces, sort]);
@@ -131,6 +144,7 @@ function OverviewBody({
       <WorkspaceCards
         workspaces={ordered}
         refreshSeconds={refreshSeconds}
+        statsWindowHours={statsWindowHours}
         thresholds={sections?.system?.problem_thresholds}
       />
       {sections && !loading && (
@@ -147,10 +161,12 @@ function OverviewBody({
 function WorkspaceCards({
   workspaces,
   refreshSeconds,
+  statsWindowHours,
   thresholds,
 }: {
   workspaces: WorkspaceAggregate["workspaces"];
   refreshSeconds: number;
+  statsWindowHours: OverviewStatsWindowHours;
   thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
@@ -164,6 +180,7 @@ function WorkspaceCards({
           key={workspace.workspace_id}
           workspace={workspace}
           refreshSeconds={refreshSeconds}
+          statsWindowHours={statsWindowHours}
           thresholds={thresholds}
         />
       ))}

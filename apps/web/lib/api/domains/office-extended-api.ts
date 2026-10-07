@@ -607,8 +607,12 @@ export type WorkspaceAggregateWire = OverviewSections & {
   workspaces: WorkspaceAggregateEntry[];
 };
 
-export function getWorkspaceAggregate(options?: ApiRequestOptions) {
-  return fetchJson<WorkspaceAggregateWire>(`${BASE}/workspaces/aggregate`, options);
+export function getWorkspaceAggregate(windowHours: number, options?: ApiRequestOptions) {
+  const params = new URLSearchParams({ window_hours: String(windowHours) });
+  return fetchJson<WorkspaceAggregateWire>(
+    `${BASE}/workspaces/aggregate?${params.toString()}`,
+    options,
+  );
 }
 
 export * from "./office-runs-api";
