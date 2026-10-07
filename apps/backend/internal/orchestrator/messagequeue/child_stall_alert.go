@@ -58,3 +58,55 @@ func childStallAlertList(metadata map[string]interface{}) []interface{} {
 		return nil
 	}
 }
+
+// ChildStallAlertDescriptor is one child-turn stalled candidate folded into a
+// queued alert entry.
+type ChildStallAlertDescriptor struct {
+	ChildTaskID string
+	TurnID      string
+	Cause       string
+}
+
+// ChildStallAlertDescriptors returns the candidate descriptors folded into a
+// child-turn stalled alert entry, in stored order. A non-alert entry yields nil.
+func ChildStallAlertDescriptors(message *QueuedMessage) []ChildStallAlertDescriptor {
+	if !IsChildStallAlert(message) {
+		return nil
+	}
+	raw := childStallAlertList(message.Metadata)
+	descriptors := make([]ChildStallAlertDescriptor, 0, len(raw))
+	for _, item := range raw {
+		descriptor, _ := item.(map[string]interface{})
+		childID, _ := descriptor["child_task_id"].(string)
+		turnID, _ := descriptor["turn_id"].(string)
+		cause, _ := descriptor["cause"].(string)
+		descriptors = append(descriptors, ChildStallAlertDescriptor{
+			ChildTaskID: childID,
+			TurnID:      turnID,
+			Cause:       cause,
+		})
+	}
+	return descriptors
+}
+
+// ChildStallAlertChildIDs returns the distinct child task IDs a child-turn
+// stalled alert entry refers to, in first-seen order.
+func ChildStallAlertChildIDs(message *QueuedMessage) []string {
+	descriptors := ChildStallAlertDescriptors(message)
+	if len(descriptors) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(descriptors))
+	ids := make([]string, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.ChildTaskID == "" {
+			continue
+		}
+		if _, ok := seen[descriptor.ChildTaskID]; ok {
+			continue
+		}
+		seen[descriptor.ChildTaskID] = struct{}{}
+		ids = append(ids, descriptor.ChildTaskID)
+	}
+	return ids
+}
