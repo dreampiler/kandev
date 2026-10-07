@@ -7,12 +7,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// recordDynamicResourceOutput clears the suspension history of the candidate
+// recordDynamicResourceOutput clears the suspension history of the profile
 // whose current attempt produced its first real output. Each attempt records
-// at most once, so streaming chunks do not repeat the write. The profile was
-// captured when the attempt began, so the raw stream callback makes no
-// repository read.
-func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, executionID string, promptGeneration uint64) {
+// at most once, so streaming chunks do not repeat the write. The success
+// belongs to the profile the producing execution runs, which the stream event
+// carries; the route profile captured when the attempt began is the fallback
+// for an event without it. Neither needs a repository read in the raw stream
+// callback.
+func (s *Service) recordDynamicResourceOutput(
+	ctx context.Context,
+	sessionID, executionID, eventExecutionProfileID string,
+	promptGeneration uint64,
+) {
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
@@ -28,9 +34,16 @@ func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, ex
 		attempt.resourceSuccessClaimed = true
 	}
 	attempt.mu.Unlock()
-	if claim {
-		s.profileExecutionResolver.RecordResourceSuccess(ctx, executionProfileID)
+	if !claim {
+		return
 	}
+	// A route that claimed a successor whose launch is deferred keeps the
+	// predecessor execution serving prompts, so the captured route profile
+	// can name a candidate that never ran.
+	if eventExecutionProfileID != "" {
+		executionProfileID = eventExecutionProfileID
+	}
+	s.profileExecutionResolver.RecordResourceSuccess(ctx, executionProfileID)
 }
 
 // observeDynamicResourceWait schedules a fresh selection for a route that is

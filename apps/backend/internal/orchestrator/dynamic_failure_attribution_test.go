@@ -170,3 +170,56 @@ func launchDynamicDownstreamWithError(t *testing.T, launchErr error) error {
 	})
 	return err
 }
+
+// The route claimed sol while the claude execution kept serving the session.
+// Claude's first real output is claude's success: it must clear claude's strike
+// history and leave sol's untouched, although the prompt began after the route
+// already named sol.
+func TestDynamicOutputSuccessBelongsToTheExecutionsOwnProfile(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-output-attribution"
+		sessionID   = "session-dynamic-output-attribution"
+		executionID = "execution-claude-output"
+		dynamicID   = "dynamic-output-attribution"
+		claude      = "candidate-claude"
+		sol         = "candidate-sol"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	now := time.Now()
+	circuits := dynamicruntime.NewCircuitRegistry(dynamicruntime.WithCircuitClock(func() time.Time { return now }))
+	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, dynamicID, []workflowDynamicCandidate{
+		{executionProfileID: claude, enabled: true},
+		{executionProfileID: sol, enabled: true},
+	}, dynamicruntime.WithPersistence(repo), dynamicruntime.WithCircuitRegistry(circuits))
+	svc.SetProfileExecutionResolver(resolver)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = dynamicID
+	session.ExecutionProfileID = sol
+	session.RouteGeneration = 2
+	session.AgentExecutionID = executionID
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("project route: %v", err)
+	}
+	claudeKey := dynamicruntime.ResourceKey(dynamicruntime.ScopeProfile, claude)
+	solKey := dynamicruntime.ResourceKey(dynamicruntime.ScopeProfile, sol)
+	circuits.Open(claudeKey, now.Add(-time.Minute), routingerr.CodeRateLimited)
+	circuits.Open(solKey, now.Add(-time.Minute), routingerr.CodeRateLimited)
+	svc.beginPromptAttempt(sessionID, executionID, 1, true)
+
+	svc.recordDynamicResourceOutput(ctx, sessionID, executionID, claude, 1)
+
+	if got := circuits.Inspect(claudeKey, now); got.Strikes != 0 || got.State != dynamicruntime.ResourceAvailable {
+		t.Fatalf("claude after its own output = %#v, want cleared", got)
+	}
+	if got := circuits.Inspect(solKey, now); got.Strikes != 1 {
+		t.Fatalf("sol after claude's output = %#v, want its strike kept", got)
+	}
+}
