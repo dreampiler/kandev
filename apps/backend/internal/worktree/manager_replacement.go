@@ -59,6 +59,37 @@ func (m *Manager) replaceUnrecoverableWorktree(
 	return &replacement, nil
 }
 
+// replaceUnrecoverableReuseWorktree handles an attach-only reuse that was
+// rejected because the recorded branch no longer exists locally or on the
+// authoritative remote. The attach-only contract refuses to create a checkout,
+// so a verified branch loss would otherwise fail the launch. Instead, re-prepare
+// a fresh task copy through the same replacement recovery the recreate path
+// uses, retaining the existing task-environment repository record. The original
+// checkout is left in place. A request without the task-directory identity
+// cannot build a replacement, so it keeps the typed rejection instead of being
+// silently replaced.
+func (m *Manager) replaceUnrecoverableReuseWorktree(
+	ctx context.Context,
+	req CreateRequest,
+	branchErr *BranchUnrecoverableError,
+) (*Worktree, error) {
+	unavailable := fmt.Errorf("%w: %w", ErrReuseWorktreeUnavailable, branchErr)
+	existing, err := m.GetByID(ctx, req.WorktreeID)
+	if err != nil || existing == nil {
+		return nil, unavailable
+	}
+	if req.BaseBranch == "" || req.TaskDirName == "" || req.RepoName == "" {
+		return nil, unavailable
+	}
+	repoLock := m.getRepoLock(req.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(req.RepositoryPath)
+	}()
+	return m.replaceUnrecoverableWorktree(ctx, existing, req, branchErr)
+}
+
 // cleanupFailedReplacement removes the physical checkout and the branch that
 // gitAddWorktree created before the replacement record could be persisted. The
 // original record remains authoritative when this compensation runs.
