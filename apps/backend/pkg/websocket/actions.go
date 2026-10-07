@@ -112,22 +112,28 @@ const (
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"
 
+	// ActionCoordinatorUpdated forwards events.CoordinatorUpdated to a
+	// coordinator's workspace subscribers.
+	ActionCoordinatorUpdated = "coordinator.updated"
+
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
 	ActionTaskLaunchRecover = "task.launch.recover"
 
 	// Unified session launch
-	ActionSessionLaunch       = "session.launch"
-	ActionSessionFork         = "session.fork"
-	ActionSessionEnsure       = "session.ensure"
-	ActionSessionRecover      = "session.recover"
-	ActionSessionResetContext = "session.reset_context"
-	ActionSessionStop         = "session.stop"
-	ActionSessionDelete       = "session.delete"
-	ActionSessionSetPrimary   = "session.set_primary"
-	ActionSessionSetPlanMode  = "session.set_plan_mode"
-	ActionSessionRename       = "session.rename"
-	ActionSessionRouteAction  = "session.route_action"
+	ActionSessionLaunch                   = "session.launch"
+	ActionSessionFork                     = "session.fork"
+	ActionSessionEnsure                   = "session.ensure"
+	ActionSessionRecover                  = "session.recover"
+	ActionSessionWorkspaceRecoveryGet     = "session.workspace_recovery.get"
+	ActionSessionWorkspaceRecoveryChanged = "session.workspace_recovery.changed"
+	ActionSessionResetContext             = "session.reset_context"
+	ActionSessionStop                     = "session.stop"
+	ActionSessionDelete                   = "session.delete"
+	ActionSessionSetPrimary               = "session.set_primary"
+	ActionSessionSetPlanMode              = "session.set_plan_mode"
+	ActionSessionRename                   = "session.rename"
+	ActionSessionRouteAction              = "session.route_action"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -543,6 +549,9 @@ const (
 	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
 	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
 	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionPromptsChanged           = "prompts.changed"
+	ActionMCPCreateSharedPrompt    = "mcp.create_shared_prompt"
+	ActionMCPUpdateSharedPrompt    = "mcp.update_shared_prompt"
 	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
 	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
 	ActionMCPSearchSettings        = "mcp.search_settings"

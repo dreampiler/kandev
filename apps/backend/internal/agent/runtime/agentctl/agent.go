@@ -54,14 +54,27 @@ type InitializeResponse struct {
 	Error     string     `json:"error,omitempty"`
 }
 
+// InitializeError preserves bounded process evidence returned by agentctl.
+type InitializeError struct {
+	Message         string
+	StartupEvidence *types.ManagedStartupEvidence
+}
+
+func (e *InitializeError) Error() string { return "initialize failed: " + e.Message }
+
 // Initialize sends the ACP initialize request via the agent WebSocket stream.
 func (c *Client) Initialize(ctx context.Context, clientName, clientVersion string) (*AgentInfo, error) {
+	c.mu.RLock()
+	processGeneration := c.processGeneration
+	c.mu.RUnlock()
 	payload := struct {
-		ClientName    string `json:"client_name"`
-		ClientVersion string `json:"client_version"`
+		ClientName        string `json:"client_name"`
+		ClientVersion     string `json:"client_version"`
+		ProcessGeneration uint64 `json:"process_generation,omitempty"`
 	}{
-		ClientName:    clientName,
-		ClientVersion: clientVersion,
+		ClientName:        clientName,
+		ClientVersion:     clientVersion,
+		ProcessGeneration: processGeneration,
 	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.initialize", payload)
@@ -74,7 +87,10 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		if err := resp.ParsePayload(&errPayload); err != nil {
 			return nil, fmt.Errorf("initialize failed: unable to parse error")
 		}
-		return nil, fmt.Errorf("initialize failed: %s", errPayload.Message)
+		return nil, &InitializeError{
+			Message:         errPayload.Message,
+			StartupEvidence: managedStartupEvidenceFromDetails(errPayload.Details),
+		}
 	}
 
 	var result InitializeResponse
@@ -85,6 +101,22 @@ func (c *Client) Initialize(ctx context.Context, clientName, clientVersion strin
 		return nil, fmt.Errorf("initialize failed: %s", result.Error)
 	}
 	return result.AgentInfo, nil
+}
+
+func managedStartupEvidenceFromDetails(details map[string]any) *types.ManagedStartupEvidence {
+	value, ok := details["startup_evidence"]
+	if !ok || value == nil {
+		return nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var evidence types.ManagedStartupEvidence
+	if err := json.Unmarshal(data, &evidence); err != nil || evidence.ProcessGeneration == 0 {
+		return nil
+	}
+	return &evidence
 }
 
 // NewSessionResponse from agentctl
@@ -143,10 +175,28 @@ func (c *Client) ResetSession(ctx context.Context, cwd string, mcpServers []type
 // mcpServers are forwarded to the agentctl handler so agents that receive MCP configs
 // via the protocol (e.g. Auggie) can reconnect to MCP servers on the new instance.
 func (c *Client) LoadSession(ctx context.Context, sessionID string, mcpServers []types.McpServer) error {
+	return c.LoadSessionWithPolicy(ctx, sessionID, mcpServers, streams.SessionSettingsPolicyStrict)
+}
+
+// LoadSessionWithPolicy restores an existing ACP session while carrying the
+// host-selected policy onto its initial settings reports.
+func (c *Client) LoadSessionWithPolicy(
+	ctx context.Context,
+	sessionID string,
+	mcpServers []types.McpServer,
+	policy streams.SessionSettingsPolicy,
+) error {
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		SessionID  string            `json:"session_id"`
-		McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+		SessionID             string                        `json:"session_id"`
+		McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}{SessionID: sessionID, McpServers: mcpServers}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	c.setLastSessionModelState(nil)
 	resp, err := c.sendStreamRequest(ctx, "agent.session.load", payload)
@@ -289,10 +339,27 @@ func (c *Client) SetModel(ctx context.Context, modelID string) error {
 
 // SetConfigOption sets a session config option via the agent WebSocket stream.
 func (c *Client) SetConfigOption(ctx context.Context, configID, value string) error {
+	return c.SetConfigOptionWithPolicy(ctx, configID, value, streams.SessionSettingsPolicyStrict)
+}
+
+// SetConfigOptionWithPolicy applies a startup config option and carries its
+// host-selected provenance to the adapter's convergence event.
+func (c *Client) SetConfigOptionWithPolicy(
+	ctx context.Context,
+	configID, value string,
+	policy streams.SessionSettingsPolicy,
+) error {
+	if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+		return fmt.Errorf("unsupported session settings policy %q", policy)
+	}
 	payload := struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID              string                        `json:"config_id"`
+		Value                 string                        `json:"value"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}{ConfigID: configID, Value: value}
+	if policy != streams.SessionSettingsPolicyStrict {
+		payload.SessionSettingsPolicy = policy
+	}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.session.set_config_option", payload)
 	if err != nil {
@@ -523,6 +590,14 @@ func (c *Client) readUpdatesStream(
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
+			// Retention/admission checks must observe transport loss before the
+			// ordered event worker drains. Keep the disconnect callback delayed
+			// until after that drain, but retire this connection's live handle now.
+			c.mu.Lock()
+			if c.agentStreamConn == conn {
+				c.agentStreamConn = nil
+			}
+			c.mu.Unlock()
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				c.logger.Info("updates stream closed normally")
 				// Normal close — don't report as disconnect error

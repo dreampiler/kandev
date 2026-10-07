@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -117,6 +118,90 @@ func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	}
 	if streamedText != "Hello." {
 		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
+	}
+}
+
+func TestIdleSuspensionReplaysBufferedAgentEventsWhenCancelled(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := runOwnerTestRepository(t)
+	mgr, eventBus := createTestManagerWithTracking()
+	mgr.SetExecutorRunningWriter(repo)
+	execution := createTestExecution("exec-idle-event", "task-idle-event", "session-idle-event")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: execution.SessionID, SessionID: execution.SessionID, AgentExecutionID: execution.ID,
+	}); err != nil {
+		t.Fatalf("upsert running row: %v", err)
+	}
+
+	execution.idleSuspensionInProgress.Store(true)
+	mgr.handleAgentEventAtContextResetBoundary(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "completion that crossed the suspension boundary\n",
+	}, false, "attempt-1")
+	if got := len(eventBus.getStreamEvents()); got != 0 {
+		t.Fatalf("buffered event published before suspension outcome: got %d events", got)
+	}
+	if err := mgr.CancelIdleSuspension(ctx, execution.SessionID, execution.ID); err != nil {
+		t.Fatalf("cancel idle suspension: %v", err)
+	}
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events = %d, want original evidence and transcript projection after suspension cancellation", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion that crossed the suspension boundary\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
+	}
+}
+
+func TestSuspendIdleReplaysEventsWhenCandidateValidationFails(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := runOwnerTestRepository(t)
+	mgr, eventBus := createTestManagerWithTracking()
+	mgr.SetExecutorRunningWriter(repo)
+	execution := createTestExecution("exec-idle-validation", "task-idle-validation", "session-idle-validation")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	releaseAdmission, err := execution.acquireContextResetExclusive(ctx)
+	if err != nil {
+		t.Fatalf("acquire reset admission: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		result <- mgr.SuspendIdle(ctx, IdleSuspensionIdentity{
+			ExecutionID: execution.ID, SessionID: execution.SessionID,
+		})
+	}()
+	deadline := time.Now().Add(time.Second)
+	for !execution.idleSuspensionInProgress.Load() && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	if !execution.idleSuspensionInProgress.Load() {
+		releaseAdmission()
+		t.Fatal("suspension did not establish its event fence")
+	}
+	mgr.handleAgentEventAtContextResetBoundary(execution, agentctl.AgentEvent{
+		Type: "message_chunk", Text: "completion before rejected suspension\n",
+	}, false, "attempt-2")
+	releaseAdmission()
+	if err := <-result; err == nil {
+		t.Fatal("candidate validation unexpectedly succeeded")
+	}
+	streamed := eventBus.getStreamEvents()
+	if len(streamed) != 2 {
+		t.Fatalf("replayed stream events after rejected claim = %d, want original evidence and transcript projection", len(streamed))
+	}
+	if streamed[0].Data.Type != "message_chunk" || streamed[0].Data.Text != "completion before rejected suspension\n" {
+		t.Fatalf("replayed original evidence = %+v, want buffered message_chunk", streamed[0].Data)
+	}
+	if streamed[1].Data.Type != "message_streaming" {
+		t.Fatalf("replayed transcript projection = %+v, want message_streaming", streamed[1].Data)
 	}
 }
 
@@ -2171,7 +2256,7 @@ func TestHandleCompleteEventMarkState_ErrorDoesNotRemoveExecution(t *testing.T) 
 		Data:  map[string]interface{}{"is_error": true},
 	}
 
-	mgr.handleCompleteEventMarkState(execution, errorEvent, true, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, errorEvent, true, nil)
 
 	// Execution must still be in the store so the orchestrator can clean it up
 	if _, found := mgr.executionStore.Get("exec-1"); !found {
@@ -2191,7 +2276,7 @@ func TestHandleCompleteEventMarkState_SuccessKeepsExecution(t *testing.T) {
 		Type: "complete",
 	}
 
-	mgr.handleCompleteEventMarkState(execution, successEvent, false, nil)
+	callCompletionStateWithStartupLease(t, mgr, execution, successEvent, false, nil)
 
 	got, found := mgr.executionStore.Get("exec-1")
 	if !found {

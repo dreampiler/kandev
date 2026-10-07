@@ -638,6 +638,7 @@ function hydrateSessionRuntime(
     );
   }
   mergeBySession("contextWindow");
+  mergeBySession("sessionMode");
   if (state.environmentIdBySessionId) {
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
@@ -926,8 +927,8 @@ export function hydrateState(
   }
 
   // System slice - shallow-merge whichever fields the caller supplied.
-  // `system` aggregates many independently-fetched fields (info, diskUsage,
-  // updates, jobs, metrics, ...); callers only ever provide the
+  // `system` aggregates many independently-fetched fields (info, updates,
+  // jobs, metrics, ...); callers only ever provide the
   // subset they fetched, so use the same leaf-level deepMerge as the other
   // multi-field slices above rather than overwriting the whole object.
   if (state.system) deepMerge(draft.system, state.system);

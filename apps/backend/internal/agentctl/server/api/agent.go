@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
+	agentctlconfig "github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/server/process/probe"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -37,8 +38,9 @@ const (
 
 // InitializeRequest is a request to initialize the agent session.
 type InitializeRequest struct {
-	ClientName    string `json:"client_name"`
-	ClientVersion string `json:"client_version"`
+	ClientName        string `json:"client_name"`
+	ClientVersion     string `json:"client_version"`
+	ProcessGeneration uint64 `json:"process_generation,omitempty"`
 }
 
 // AgentInfoResponse contains information about the connected agent.
@@ -70,8 +72,9 @@ type NewSessionResponse struct {
 
 // LoadSessionRequest is a request to load an existing ACP session
 type LoadSessionRequest struct {
-	SessionID  string            `json:"session_id"`
-	McpServers []types.McpServer `json:"mcp_servers,omitempty"`
+	SessionID             string                        `json:"session_id"`
+	McpServers            []types.McpServer             `json:"mcp_servers,omitempty"`
+	SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 }
 
 // LoadSessionResponse is the response to a load session call
@@ -477,8 +480,11 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
-
-	adapter := s.procMgr.GetAdapter()
+	adapter, generationCurrent := s.procMgr.GetAdapterForGeneration(req.ProcessGeneration)
+	if !generationCurrent {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent process generation changed before initialization", nil)
+		return resp
+	}
 	if adapter == nil {
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "agent not running", nil)
 		return resp
@@ -486,7 +492,11 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 
 	if err := adapter.Initialize(ctx); err != nil {
 		s.logger.Error("initialize failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		var details map[string]any
+		if evidence := s.procMgr.ManagedStartupEvidence(ctx, req.ProcessGeneration); evidence != nil {
+			details = map[string]any{"startup_evidence": evidence}
+		}
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), details)
 		return resp
 	}
 
@@ -516,12 +526,12 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 	kandevMcpSse := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportSSE,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathSSE),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathSSE),
 	}
 	kandevMcpHttp := types.McpServer{
 		Name: kandevMcpServerName,
 		Type: mcpTransportHTTP,
-		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
+		URL:  agentctlconfig.MCPServerURL(s.cfg.MCPHost, s.cfg.Port, mcpPathHTTP),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
 	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
@@ -675,6 +685,10 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "session_id is required", nil)
 		return resp
 	}
+	if req.SessionSettingsPolicy != "" && req.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "unsupported session settings policy", nil)
+		return resp
+	}
 
 	ctx, cancel := context.WithTimeout(ctx, constants.SessionLoadTimeout)
 	defer cancel()
@@ -707,6 +721,7 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 
 	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
 	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
+	ctx = streams.WithSessionSettingsPolicy(ctx, req.SessionSettingsPolicy)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
 		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
@@ -968,15 +983,23 @@ func (s *Server) handleWSSetModel(ctx context.Context, msg *ws.Message) *ws.Mess
 
 func (s *Server) handleWSSetConfigOption(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req struct {
-		ConfigID string `json:"config_id"`
-		Value    string `json:"value"`
+		ConfigID              string                        `json:"config_id"`
+		Value                 string                        `json:"value"`
+		SessionSettingsPolicy streams.SessionSettingsPolicy `json:"session_settings_policy,omitempty"`
 	}
 	return s.adapterAction(ctx, msg, &req, func(a adapter.AgentAdapter) error {
+		policy := req.SessionSettingsPolicy
+		if policy == "" {
+			policy = streams.SessionSettingsPolicyStrict
+		}
+		if policy != streams.SessionSettingsPolicyStrict && policy != streams.SessionSettingsPolicyProviderRestored {
+			return fmt.Errorf("unsupported session settings policy %q", policy)
+		}
 		cs, ok := a.(adapter.ConfigOptionSettableAdapter)
 		if !ok {
 			return fmt.Errorf("agent does not support set_config_option")
 		}
-		return cs.SetConfigOption(ctx, req.ConfigID, req.Value)
+		return cs.SetConfigOption(streams.WithSessionSettingsPolicy(ctx, policy), req.ConfigID, req.Value)
 	})
 }
 

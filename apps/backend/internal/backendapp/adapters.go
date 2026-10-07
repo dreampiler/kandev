@@ -308,11 +308,15 @@ type lifecycleAdapter struct {
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
+	AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool
 	GetACPSessionIDForSession(sessionID string) (string, bool)
 	OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool
 	GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error)
+	SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error
+	CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error
 	CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error
 	PreparePassthroughRunning(sessionID string) (func(), error)
+	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -392,6 +396,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		requestedBaseBranch = execution.PrepareResult.RequestedBaseBranch
 		baseBranch = execution.PrepareResult.BaseBranch
 		baseBranchFallbackWarning = execution.PrepareResult.BaseBranchFallbackWarning
+		if worktreePath == "" && execution.PrepareResult.WorktreeID != "" && len(execution.PrepareResult.Worktrees) == 0 {
+			worktreePath = execution.PrepareResult.WorkspacePath
+		}
 	}
 	if execution.PrepareResult != nil && len(execution.PrepareResult.Worktrees) > 0 {
 		worktrees = make([]executor.RepoWorktreeResult, 0, len(execution.PrepareResult.Worktrees))
@@ -438,6 +445,9 @@ func buildLifecycleLaunchRequest(
 ) *lifecycle.LaunchRequest {
 	launchReq := &lifecycle.LaunchRequest{
 		TaskID:                        req.TaskID,
+		TaskScope:                     req.TaskScope,
+		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
+		RequiredNativeConversationID:  req.RequiredNativeConversationID,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -501,6 +511,13 @@ func buildLifecycleLaunchRequest(
 	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
 	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
 	return launchReq
+}
+
+func lifecycleSessionSettingsPolicy(policy executor.ResumeSettingsPolicy) lifecycle.SessionSettingsPolicy {
+	if policy == executor.ResumeSettingsPolicyProviderRestored {
+		return lifecycle.SessionSettingsPolicyProviderRestored
+	}
+	return lifecycle.SessionSettingsPolicyStrict
 }
 
 func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {
@@ -634,6 +651,12 @@ func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceI
 	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
 }
 
+// RegisterInitialPromptDispatchCallbacks forwards initial prompt acceptance
+// to orchestrator owners that must keep a launch attempt active until dispatch.
+func (a *lifecycleAdapter) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return a.mgr.RegisterInitialPromptDispatchCallbacks(executionID, onDispatched, onFailure)
+}
+
 func (a *lifecycleAdapter) IsAgentCommandConfigured(agentInstanceID string) bool {
 	return a.mgr.IsAgentCommandConfigured(agentInstanceID)
 }
@@ -744,12 +767,24 @@ func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, se
 	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	return a.mgr.AcknowledgeRetainedPromptFailure(executionID, generation)
+}
+
 func (a *lifecycleAdapter) OwnsPromptActivity(sessionID, executionID string, generation, activityEpoch uint64) bool {
 	return a.mgr.OwnsPromptActivity(sessionID, executionID, generation, activityEpoch)
 }
 
 func (a *lifecycleAdapter) GetPromptActivityForSession(ctx context.Context, sessionID string) (executionID string, generation, activityEpoch uint64, lastActivityAt time.Time, err error) {
 	return a.mgr.GetPromptActivityForSession(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) SuspendIdle(ctx context.Context, identity runtimeapi.IdleSuspensionIdentity) error {
+	return a.mgr.SuspendIdle(ctx, identity)
+}
+
+func (a *lifecycleAdapter) CancelIdleSuspension(ctx context.Context, sessionID, executionID string) error {
+	return a.mgr.CancelIdleSuspension(ctx, sessionID, executionID)
 }
 
 func (a *lifecycleAdapter) CancelAgentForPrompt(ctx context.Context, sessionID, executionID string, generation, activityEpoch uint64) error {
@@ -792,6 +827,39 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// RegisterInitialPromptAdmissionCallbacks forwards the restart prompt's final
+// ownership check and acceptance callbacks to the lifecycle execution.
+func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
+	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
+		executionID, beforeAdmission, onDispatched, onFailure,
+	)
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	agentInstanceID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallback(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // Compile-time guard for the steer capability. The executor selects the steer
 // path by asserting the agent manager to its unexported
 // steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
@@ -800,6 +868,11 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // error, not a runtime regression.
 var _ interface {
 	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
+var _ interface {
+	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 
 // SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
@@ -1025,6 +1098,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		NativeSessionResume:        info.NativeSessionResume,
 		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
@@ -1096,6 +1170,20 @@ func (a *lifecycleAdapter) GetGitStatusFresh(ctx context.Context, sessionID stri
 		return nil, nil
 	}
 	return agentClient.GetGitStatusFresh(ctx)
+}
+
+// GetGitStatusWithDetails retrieves a fresh status after enrichment completes.
+func (a *lifecycleAdapter) GetGitStatusWithDetails(ctx context.Context, sessionID string) (*client.GitStatusResult, error) {
+	execution, ok := a.mgr.GetExecutionBySessionID(sessionID)
+	if !ok {
+		return nil, nil
+	}
+	agentClient, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if agentClient == nil {
+		return nil, nil
+	}
+	return agentClient.GetGitStatusWithDetails(ctx)
 }
 
 // WaitForAgentctlReady waits for the agentctl HTTP server to be ready for a session.
@@ -1229,8 +1317,8 @@ func (a githubTaskIssueStoreAdapter) GetRepository(ctx context.Context, reposito
 	return a.svc.GetRepository(ctx, repositoryID)
 }
 
-func (a githubTaskIssueStoreAdapter) UpdateTaskMetadata(ctx context.Context, taskID string, metadata map[string]interface{}) (*models.Task, error) {
-	task, err := a.svc.UpdateTask(ctx, taskID, &taskservice.UpdateTaskRequest{Metadata: metadata})
+func (a githubTaskIssueStoreAdapter) UpdateTaskGitHubIssue(ctx context.Context, taskID string, link *models.TaskGitHubIssueLink) (*models.Task, error) {
+	task, err := a.svc.UpdateTaskGitHubIssue(ctx, taskID, link)
 	if err != nil {
 		return nil, wrapGitHubTaskIssueStoreError(err)
 	}
@@ -1491,6 +1579,25 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 		Type:          messageType,
 		Metadata:      metadata,
 		RequestsInput: requestsInput,
+	})
+	return err
+}
+
+// CreateLifecycleSessionMessage persists a message in an already-completed
+// lifecycle-only turn.
+func (a *messageCreatorAdapter) CreateLifecycleSessionMessage(
+	ctx context.Context,
+	taskID, content, agentSessionID, messageType string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		CompletedTurn: true,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
 	})
 	return err
 }

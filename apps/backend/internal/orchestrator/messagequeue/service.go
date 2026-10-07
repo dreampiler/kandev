@@ -3315,6 +3315,20 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	return status
 }
 
+// HasPendingForSession reports whether a session still owns queued actionable
+// work. Callers that need an atomic admission boundary must hold the session
+// admission lock while checking it.
+func (s *Service) HasPendingForSession(ctx context.Context, sessionID string) (bool, error) {
+	if s == nil || s.repo == nil || sessionID == "" {
+		return false, nil
+	}
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
+}
+
 // Snapshot returns an ordered status bound to one immutable session identity.
 func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (*QueueStatus, error) {
 	snapshot, err := s.repo.Snapshot(ctx, identity)
@@ -3375,12 +3389,18 @@ func (s *Service) Snapshot(ctx context.Context, identity QueueSessionIdentity) (
 func (s *Service) CountPendingByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
 	counts, err := s.repo.CountPendingByTaskIDs(ctx, taskIDs)
 	if err != nil {
-		s.logger.Error("count pending by task ids failed",
-			zap.Int("task_count", len(taskIDs)),
-			zap.Error(err))
+		if !isCanceledRequestError(ctx, err) {
+			s.logger.Error("count pending by task ids failed",
+				zap.Int("task_count", len(taskIDs)),
+				zap.Error(err))
+		}
 		return nil, err
 	}
 	return counts, nil
+}
+
+func isCanceledRequestError(ctx context.Context, err error) bool {
+	return errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled)
 }
 
 // CountPendingByTask returns the pending prompt count for one task.

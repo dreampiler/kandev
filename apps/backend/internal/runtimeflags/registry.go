@@ -199,6 +199,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerInterruptionContinuation",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_INTERRUPTION_CONTINUATION",
+			Kind:            KindFeature,
+			Label:           "Interrupted conversation continuation",
+			Description:     "Restores supported interrupted conversations and continues after completed tools.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Native restoration and tool outcomes must be verified. Uncertain work requires manual recovery.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderInterruptionContinuation },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderInterruptionContinuation = value },
+	},
+
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.agentBackgroundWork",
 			EnvVar:          "KANDEV_FEATURES_AGENT_BACKGROUND_WORK",
 			Kind:            KindFeature,
@@ -267,6 +284,23 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.coordinator",
+			EnvVar:      "KANDEV_FEATURES_COORDINATOR",
+			Kind:        KindFeature,
+			Label:       "Workspace coordinators",
+			Description: "Enables per-workspace coordinators: a copilot conversation that proposes ordinary, unstarted tasks for a human to approve.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "Coordinators can only propose tasks; approval always requires an explicit human decision and no proposal can " +
+				"ever auto-start an agent. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.Coordinator },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.Coordinator = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

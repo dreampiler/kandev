@@ -27,6 +27,7 @@ import {
   shouldShowFileTreeTouchActions,
 } from "./file-browser-parts";
 import { FileBrowserContentArea } from "./file-browser-content-area";
+import { FileTreeRefreshStatus } from "./file-browser-load-state";
 import {
   useFileBrowserTree,
   useScrollPersistence,
@@ -35,6 +36,7 @@ import {
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { useFileBrowserData } from "./file-browser-data";
+import { labelFileBrowserPath } from "./file-browser-repository-labels";
 import { useFileUploadEntryPoints } from "./use-file-upload-entry-points";
 import { FileUploadStatusList } from "./file-upload-status-list";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
@@ -133,14 +135,14 @@ function useFileBrowserHandlers(
   );
   const handleCancelCreate = useCallback(() => setCreatingInPath(null), []);
   const handleAddToChatContext = useCallback(
-    (node: FileTreeNode) => {
+    (node: FileTreeNode, displayName = node.name) => {
       addContextFile(sessionId, {
         path: node.path,
-        name: node.name,
+        name: displayName,
         isDirectory: node.is_dir,
       });
       toast({
-        description: t("chat:addedToChatContext", { name: node.name }),
+        description: t("chat:addedToChatContext", { name: displayName }),
         variant: "success",
       });
     },
@@ -456,6 +458,7 @@ function FileBrowserTreeContent({
         sessionId={data.sessionId}
         isSearchActive={search.isSearchActive}
         searchResults={search.searchResults}
+        repositoryDisplayLabels={data.repositoryDisplayLabels}
         isSessionFailed={isSessionFailed}
         sessionError={sessionError}
         loadState={treeState.loadState}
@@ -475,7 +478,13 @@ function FileBrowserTreeContent({
         onRenameFile={workspaceBlocked ? undefined : onRenameFile}
         onDownloadFile={onDownloadFile}
         onUploadFilesHere={workspaceBlocked ? undefined : onUploadFilesHere}
-        onAddToChatContext={handlers.handleAddToChatContext}
+        onAddToChatContext={(node) => {
+          const labeledPath = labelFileBrowserPath(node.path, data.repositoryDisplayLabels);
+          handlers.handleAddToChatContext(
+            node,
+            labeledPath === node.path ? node.name : labeledPath,
+          );
+        }}
         showTouchActions={showTouchActions}
         onCreateFileSubmit={workspaceBlocked ? () => undefined : handlers.handleCreateFileSubmit}
         onCancelCreate={handlers.handleCancelCreate}
@@ -531,6 +540,7 @@ export function FileBrowser({
   const { folderAction, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   const workspaceBlocked =
     data.workspaceRestoration.status !== null && data.workspaceRestoration.status !== "ready";
+  const canUseTree = !workspaceBlocked && !data.isSessionFailed;
   const { openPicker, uploads, elements } = useFileUploadEntryPoints(sessionId);
   const handleToolbarUpload = useCallback(
     (mode: "files" | "folder") => openPicker(mode, handlers.activeFolderPath ?? ""),
@@ -546,7 +556,7 @@ export function FileBrowser({
         onMouseDown={handleClickOutside}
       >
         <FileBrowserHeader
-          treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
+          treeLoaded={Boolean(treeState.tree && canUseTree)}
           search={search}
           displayPath={displayPath}
           fullPath={fullPath}
@@ -579,6 +589,15 @@ export function FileBrowser({
           onUploadFilesHere={sessionId ? handleUploadHere : undefined}
           showTouchActions={showTouchActions}
         />
+        {canUseTree && (
+          <FileTreeRefreshStatus
+            tree={treeState.tree}
+            loadState={treeState.loadState}
+            isLoadingTree={treeState.isLoadingTree}
+            loadError={treeState.loadError}
+            onRetry={() => treeState.loadTree({ resetRetry: true })}
+          />
+        )}
         <span role="status" className="sr-only">
           {folderAction.isLoading ? t("editors:openingFolder") : ""}
         </span>

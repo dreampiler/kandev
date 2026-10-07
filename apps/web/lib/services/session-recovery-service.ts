@@ -2,6 +2,7 @@ import { buildRestoreWorkspaceRequest } from "./session-launch-helpers";
 import { launchSession, type LaunchSessionResponse } from "./session-launch-service";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError, type WebSocketRequestErrorDetails } from "@/lib/ws/client";
+import type { WorkspaceRecoveryProjection } from "@/lib/types/http";
 
 export type SessionRecoveryAction =
   | "resume"
@@ -9,6 +10,17 @@ export type SessionRecoveryAction =
   | "fresh_start"
   | "runtime_retry"
   | "relocate_and_resume";
+
+export type SessionRecoverySettingsPolicy = "provider_restored";
+
+export type SessionRecoveryRequest = {
+  taskId: string;
+  sessionId: string;
+  action: SessionRecoveryAction;
+  failureMessage: string;
+  errorStamp?: string | null;
+  settingsPolicy?: SessionRecoverySettingsPolicy;
+};
 
 const MANAGED_CLONE_RELOCATION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -34,6 +46,9 @@ export type SessionRecoveryGuardDetails = WebSocketRequestErrorDetails & {
 };
 
 type RecoveryResponse = { success?: boolean; error?: string };
+type WorkspaceRecoveryStatusResponse = {
+  workspace_recovery?: WorkspaceRecoveryProjection | null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -115,14 +130,12 @@ export function asRecoveryError(error: unknown, fallback: string): Error {
 }
 
 /** Send one of the explicit session.recover actions. */
-export async function requestSessionRecover(
-  taskId: string,
-  sessionId: string,
-  action: SessionRecoveryAction,
-  failureMessage: string,
-  errorStamp?: string | null,
-): Promise<void> {
+export async function requestSessionRecover(options: SessionRecoveryRequest): Promise<void> {
+  const { taskId, sessionId, action, failureMessage, errorStamp, settingsPolicy } = options;
   if (action === "relocate_and_resume" && !errorStamp) {
+    throw new Error(failureMessage);
+  }
+  if (settingsPolicy && action !== "resume") {
     throw new Error(failureMessage);
   }
   const client = getWebSocketClient();
@@ -134,11 +147,28 @@ export async function requestSessionRecover(
       session_id: sessionId,
       action,
       ...(action === "relocate_and_resume" ? { error_stamp: errorStamp } : {}),
+      ...(action === "resume" && settingsPolicy ? { settings_policy: settingsPolicy } : {}),
     },
     action === "relocate_and_resume" ? MANAGED_CLONE_RELOCATION_TIMEOUT_MS : 30_000,
   );
   const failure = responseFailure(response, failureMessage);
   if (failure) throw failure;
+}
+
+/** Read current recovery state without reconstructing or inspecting the workspace. */
+export async function getWorkspaceRecoveryStatus(
+  taskId: string,
+  sessionId: string,
+  failureMessage: string,
+): Promise<WorkspaceRecoveryProjection | null> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error(failureMessage);
+  const response = await client.request<WorkspaceRecoveryStatusResponse>(
+    "session.workspace_recovery.get",
+    { task_id: taskId, session_id: sessionId },
+    10_000,
+  );
+  return response.workspace_recovery ?? null;
 }
 
 /** Restore the existing task workspace without starting the provider. */

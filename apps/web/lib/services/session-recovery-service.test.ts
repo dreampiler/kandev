@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   branchRecoveryDetails,
+  getWorkspaceRecoveryStatus,
   managedCloneRelocationRecoveryDetails,
   requestSessionRecover,
   sessionRecoveryGuardDetails,
@@ -70,7 +71,13 @@ describe("sessionRecoveryGuardDetails", () => {
 
 it("sends the current stamp with an explicit managed clone relocation", async () => {
   mocks.request.mockResolvedValueOnce({ success: true });
-  await requestSessionRecover("task-1", "session-1", "relocate_and_resume", "failed", "stamp-1");
+  await requestSessionRecover({
+    taskId: "task-1",
+    sessionId: "session-1",
+    action: "relocate_and_resume",
+    failureMessage: "failed",
+    errorStamp: "stamp-1",
+  });
   expect(mocks.request).toHaveBeenCalledWith(
     "session.recover",
     {
@@ -83,19 +90,86 @@ it("sends the current stamp with an explicit managed clone relocation", async ()
   );
 });
 
+it("reads durable workspace recovery status without launching the session", async () => {
+  const projection = {
+    task_id: "task-1",
+    environment_id: "environment-1",
+    session_id: "session-1",
+    operation_id: "operation-1",
+    attempt_id: "attempt-1",
+    ownership_generation: "generation-1",
+    revision: "3",
+    kind: "managed_clone_relocation",
+    state: "running",
+    phase: "restoring",
+    repository_position: 2,
+    repository_total: 2,
+    completed_slots: 1,
+    workspace_complete: false,
+    agent_ready: false,
+    runner_live: true,
+    started_at: "2026-10-05T12:00:00Z",
+    updated_at: "2026-10-05T12:01:00Z",
+  };
+  mocks.request.mockResolvedValueOnce({ workspace_recovery: projection });
+
+  await expect(getWorkspaceRecoveryStatus("task-1", "session-1", "unavailable")).resolves.toEqual(
+    projection,
+  );
+  expect(mocks.request).toHaveBeenCalledWith(
+    "session.workspace_recovery.get",
+    { task_id: "task-1", session_id: "session-1" },
+    10_000,
+  );
+});
+
+it("sends provider-restored settings policy only with an explicit resume", async () => {
+  mocks.request.mockResolvedValueOnce({ success: true });
+  await requestSessionRecover({
+    taskId: "task-1",
+    sessionId: "session-1",
+    action: "resume",
+    failureMessage: "failed",
+    settingsPolicy: "provider_restored",
+  });
+  expect(mocks.request).toHaveBeenCalledWith(
+    "session.recover",
+    {
+      task_id: "task-1",
+      session_id: "session-1",
+      action: "resume",
+      settings_policy: "provider_restored",
+    },
+    30_000,
+  );
+});
+
+it("rejects provider-restored settings policy for actions other than resume", async () => {
+  await expect(
+    requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action: "fresh_start",
+      failureMessage: "failed",
+      settingsPolicy: "provider_restored",
+    }),
+  ).rejects.toThrow("failed");
+  expect(mocks.request).not.toHaveBeenCalled();
+});
+
 it("waits for a relocation response that arrives after the previous 30 second deadline", async () => {
   vi.useFakeTimers();
   try {
     mocks.request.mockImplementationOnce(
       () => new Promise((resolve) => setTimeout(() => resolve({ success: true }), 35_000)),
     );
-    const request = requestSessionRecover(
-      "task-1",
-      "session-1",
-      "relocate_and_resume",
-      "failed",
-      "stamp-1",
-    );
+    const request = requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action: "relocate_and_resume",
+      failureMessage: "failed",
+      errorStamp: "stamp-1",
+    });
     await vi.advanceTimersByTimeAsync(35_000);
     await expect(request).resolves.toBeUndefined();
   } finally {
@@ -105,7 +179,12 @@ it("waits for a relocation response that arrives after the previous 30 second de
 
 it("requires a stamp before requesting managed clone relocation", async () => {
   await expect(
-    requestSessionRecover("task-1", "session-1", "relocate_and_resume", "failed"),
+    requestSessionRecover({
+      taskId: "task-1",
+      sessionId: "session-1",
+      action: "relocate_and_resume",
+      failureMessage: "failed",
+    }),
   ).rejects.toThrow("failed");
   expect(mocks.request).not.toHaveBeenCalled();
 });

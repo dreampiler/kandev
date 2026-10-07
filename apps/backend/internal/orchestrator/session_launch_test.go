@@ -179,6 +179,7 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 		"",
 		LaunchActivationSourceUserAction,
 		LaunchActivationSourceSessionOpen,
+		LaunchActivationSourceSessionFocus,
 	} {
 		if err := validateLaunchActivationSource(source); err != nil {
 			t.Errorf("validateLaunchActivationSource(%q) = %v", source, err)
@@ -186,6 +187,13 @@ func TestValidateLaunchActivationSource(t *testing.T) {
 	}
 	if err := validateLaunchActivationSource("background_recovery"); err == nil {
 		t.Fatal("unknown launch activation source was accepted")
+	}
+	if err := validateFocusActivationIntent(&LaunchSessionRequest{
+		ActivationSource: LaunchActivationSourceSessionFocus,
+		Intent:           IntentResume,
+		Prompt:           "must not become a synthetic prompt",
+	}); err == nil {
+		t.Fatal("session focus accepted a prompt")
 	}
 }
 
@@ -430,6 +438,33 @@ func TestLaunchSession_RejectsMismatchedTaskSessionBeforeAttachmentClaim(t *test
 	}
 	if claimer.taskID != "" || len(claimer.attachments) != 0 {
 		t.Fatalf("attachment claimer ran for mismatched pair: %+v", claimer)
+	}
+}
+
+// LaunchSession must consult the installed task-prompt checker before doing
+// anything else for an ordinary (non-restore) intent: this is the seam
+// backendapp wires to AuthorizeTaskPromptScope so that session.launch cannot
+// bypass the coordinator attended-only restriction that message.add already
+// enforces (docs/specs/coordinator/system-design/copilot.md#attended-only).
+func TestLaunchSession_ConsultsTaskPromptCheckerForOrdinaryIntent(t *testing.T) {
+	wantErr := errors.New("workspace.manage required")
+	var calledWith string
+	service := &Service{}
+	service.SetTaskPromptChecker(func(_ context.Context, taskID string) error {
+		calledWith = taskID
+		return wantErr
+	})
+
+	_, err := service.LaunchSession(context.Background(), &LaunchSessionRequest{
+		TaskID:    "task-coordinator",
+		SessionID: "session-1",
+		Intent:    IntentStartCreated,
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("LaunchSession error = %v, want %v", err, wantErr)
+	}
+	if calledWith != "task-coordinator" {
+		t.Fatalf("task prompt checker called with %q, want %q", calledWith, "task-coordinator")
 	}
 }
 

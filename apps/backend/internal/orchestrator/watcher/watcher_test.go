@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -19,6 +20,66 @@ type mockSubscription struct {
 	valid        bool
 	mu           sync.Mutex
 	unsubscribed bool
+}
+
+func TestAgentLifecycleSettingsPolicyReachesWatcher(t *testing.T) {
+	w := &Watcher{}
+	payload := lifecycle.AgentEventPayload{
+		TaskID:                "task-1",
+		SessionID:             "session-1",
+		AgentExecutionID:      "execution-1",
+		AttemptID:             "resume-3",
+		SessionSettingsPolicy: streams.SessionSettingsPolicyProviderRestored,
+	}
+	var got AgentEventData
+	if err := w.parseEventData(payload, &got); err != nil {
+		t.Fatalf("parse lifecycle event: %v", err)
+	}
+	if got.SessionSettingsPolicy != streams.SessionSettingsPolicyProviderRestored {
+		t.Fatalf("settings policy = %q, want provider_restored", got.SessionSettingsPolicy)
+	}
+	if got.AttemptID != payload.AttemptID || got.AgentExecutionID != payload.AgentExecutionID {
+		t.Fatalf("attempt/execution identity changed in watcher: %#v", got)
+	}
+}
+
+func TestAgentTurnFailedEventReachesHandlerWithFailureIdentity(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	eventBus := newMockEventBus()
+	received := make(chan AgentEventData, 1)
+	w := NewWatcher(eventBus, EventHandlers{
+		OnAgentTurnFailed: func(_ context.Context, data AgentEventData) { received <- data },
+	}, "turn-failure-test", createTestLogger())
+	if err := w.Start(ctx); err != nil {
+		t.Fatalf("start watcher: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Stop() })
+
+	payload := lifecycle.AgentEventPayload{
+		TaskID: "task-1", SessionID: "session-1", AgentExecutionID: "execution-1",
+		TurnID: "turn-1", PromptGeneration: 9, ErrorMessage: "capacity",
+		PromptFailureDisposition: streams.PromptFailureDispositionRetainRuntime,
+		CapacityContinuation: &streams.CapacityContinuationSnapshot{
+			Support: streams.CapacityContinuationCodexLiveSessionV1, PromptGeneration: 9,
+			EvidenceComplete: true, CompletedTools: 1,
+		},
+	}
+	if err := eventBus.Publish(ctx, events.AgentTurnFailed, bus.NewEvent(events.AgentTurnFailed, "test", payload)); err != nil {
+		t.Fatalf("publish retained failure: %v", err)
+	}
+	select {
+	case got := <-received:
+		if got.PromptFailureDisposition != streams.PromptFailureDispositionRetainRuntime ||
+			got.PromptGeneration != 9 || got.TurnID != "turn-1" || got.ErrorMessage != "capacity" {
+			t.Fatalf("watcher changed retained failure identity: %+v", got)
+		}
+		if got.CapacityContinuation == nil || got.CapacityContinuation.PromptGeneration != 9 || got.CapacityContinuation.CompletedTools != 1 {
+			t.Fatalf("watcher changed capacity continuation evidence: %+v", got.CapacityContinuation)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher did not dispatch agent.turn_failed")
+	}
 }
 
 func (s *mockSubscription) Unsubscribe() error {

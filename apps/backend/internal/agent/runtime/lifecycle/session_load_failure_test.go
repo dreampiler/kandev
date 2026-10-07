@@ -14,6 +14,7 @@ import (
 func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 	tests := []struct {
 		name    string
+		agentID string
 		message string
 	}{
 		{
@@ -40,6 +41,11 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 		{
 			name:    "unstructured missing rollout phrase",
 			message: "internal error: no rollout found for thread id saved-session",
+		},
+		{
+			name:    "OpenCode missing saved session",
+			agentID: "opencode-acp",
+			message: "Resource not found",
 		},
 	}
 
@@ -71,8 +77,12 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			}
 			waitForWSConnected(t, mock)
 
+			agentID := tt.agentID
+			if agentID == "" {
+				agentID = "test-agent"
+			}
 			agentConfig := &testAgent{
-				id:      "test-agent",
+				id:      agentID,
 				enabled: true,
 				runtimeConfig: &agents.RuntimeConfig{
 					Cmd:      agents.NewCommand("test-agent"),
@@ -195,5 +205,65 @@ func TestInitializeSession_LoadCompatibilityFailureCreatesReplacement(t *testing
 				t.Fatalf("load/new calls = %d/%d, want 1/1; actions: %v", loadCalls, newCalls, actions)
 			}
 		})
+	}
+}
+
+func TestInitializeSession_ProviderRestoredPolicyPreservesIdentityOnLoadFailure(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.session.load" {
+			response, _ := ws.NewError(
+				msg.ID,
+				msg.Action,
+				ws.ErrorCodeInternalError,
+				"agent does not support session loading (LoadSession capability is false)",
+				nil,
+			)
+			return response
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	stopCh := newTestStopCh(t)
+	sessionManager := NewSessionManager(newSessionTestLogger(), stopCh)
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	if err := client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect agent stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	agentConfig := &testAgent{
+		id:      "auggie",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:      agents.NewCommand("auggie"),
+			Protocol: agent.ProtocolACP,
+			SessionConfig: agents.SessionConfig{
+				NativeSessionResume: true,
+			},
+		},
+	}
+
+	_, err := sessionManager.InitializeSessionWithSettingsPolicy(
+		context.Background(), client, agentConfig, "saved-session", "/workspace", nil,
+		SessionSettingsPolicyProviderRestored,
+	)
+	if err == nil {
+		t.Fatal("expected session/load failure while preserving provider identity")
+	}
+
+	var loadSeen bool
+	for _, action := range mock.getActionLog() {
+		if action == "agent.session.load" {
+			loadSeen = true
+		}
+		if action == "agent.session.new" {
+			t.Fatal("provider-restored recovery must not replace the stored provider conversation")
+		}
+	}
+	if !loadSeen {
+		t.Fatal("expected provider-restored recovery to attempt loading the stored conversation")
 	}
 }

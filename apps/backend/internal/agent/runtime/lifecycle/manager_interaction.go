@@ -60,7 +60,7 @@ func (m *Manager) GetSessionAuthMethods(sessionID string) []streams.AuthMethodIn
 // on first prompt before the agent could report its own auth methods).
 func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 	switch agentID {
-	case "claude-acp":
+	case claudeACPAgentID:
 		return []streams.AuthMethodInfo{
 			{
 				ID:          "claude-auth-login",
@@ -104,11 +104,22 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 // that prompt asynchronously, so callers that own startup cancellation must
 // wait for either provider acceptance or a pre-acceptance delivery failure.
 func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error {
+	return m.RegisterInitialPromptAdmissionCallbacks(executionID, nil, onDispatched, onFailure)
+}
+
+// RegisterInitialPromptAdmissionCallbacks installs a final admission check and
+// one-shot acceptance/failure callbacks for the initial prompt sent during
+// StartAgentProcess.
+func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
+	executionID string,
+	beforeAdmission func() error,
+	onDispatched, onFailure func(),
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	execution.setInitialPromptDispatchCallbacks(onDispatched, onFailure)
+	execution.setInitialPromptDispatchCallbacks(beforeAdmission, onDispatched, onFailure)
 	return nil
 }
 
@@ -134,6 +145,48 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	}
 	defer operationRelease()
 	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+		if err != nil {
+			m.setRuntimeInterest(execution.SessionID, false)
+		}
+	}
+	return result, err
+}
+
+// PromptAgentWithAdmissionCallback lets the orchestrator revalidate its
+// dispatch reservation after lifecycle stream preparation and before a new
+// prompt generation is allocated.
+func (m *Manager) PromptAgentWithAdmissionCallback(
+	ctx context.Context,
+	executionID string,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	m.setRuntimeInterest(execution.SessionID, true)
+	operationRelease, err := execution.acquireContextResetOperation(ctx)
+	if err != nil {
+		m.releaseActivity(key)
+		m.setRuntimeInterest(execution.SessionID, false)
+		return nil, err
+	}
+	defer operationRelease()
+	result, err := m.sessionManager.SendPromptWithAdmissionCallback(
+		ctx, execution, prompt, true, attachments, dispatchOnly, beforeAdmission, onDispatched,
+	)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 		if err != nil {
@@ -236,6 +289,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		zap.String("task_id", execution.TaskID),
 		zap.String("session_id", execution.SessionID))
 
+	snapshot := m.captureCancelPromptSnapshot(execution)
 	cancelErr := client.Cancel(ctx)
 	streamDisconnected := errors.Is(cancelErr, agentctlclient.ErrAgentStreamNotConnected)
 	if cancelErr != nil &&
@@ -252,19 +306,29 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 	// which triggers handleCompleteEvent() to properly flush buffers and mark state.
 	// Clearing here would race with in-flight notifications and lose content.
 
-	execution.promptFinishedMu.Lock()
-	ch := execution.promptFinished
-	execution.promptFinishedMu.Unlock()
-
-	if ch == nil {
-		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, nil)
-		}
+	if snapshot.ownershipConflict {
+		return ErrPromptActivityNotOwned
+	}
+	if snapshot.finished == nil && !snapshot.dispatchOnly {
 		if streamDisconnected {
 			m.logger.Info("agent stream already disconnected; cancel is complete",
 				zap.String("execution_id", executionID))
 		}
 		return nil
+	}
+	if snapshot.dispatchOnly {
+		immediate := streamDisconnected || errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged)
+		if streamDisconnected {
+			m.logger.Warn("agent stream disconnected before cancel; escalating locally",
+				zap.String("execution_id", executionID),
+				zap.Error(cancelErr))
+		}
+		if errors.Is(cancelErr, agentctlclient.ErrTurnCancelNotAcknowledged) {
+			m.logger.Warn("agent cancel not acknowledged; escalating immediately",
+				zap.String("execution_id", executionID),
+				zap.Error(cancelErr))
+		}
+		return m.cancelDispatchOnlyPrompt(ctx, execution, snapshot, immediate)
 	}
 
 	// Teardown may close the stream immediately before an explicit cancel (for
@@ -275,7 +339,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -285,27 +349,13 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, ch)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
 	}
 
 	m.logger.Info("agent cancel sent, waiting for turn completion",
 		zap.String("execution_id", executionID))
 
-	// Wait for the in-flight SendPrompt to finish processing the cancel completion.
-	// Without this, a follow-up PromptAgent races on promptDoneCh with two readers.
-	select {
-	case <-ch:
-		if execution.dispatchedPromptPending.Load() {
-			return m.escalateStuckCancel(ctx, execution, ch)
-		}
-		m.logger.Debug("in-flight prompt finished after cancel",
-			zap.String("execution_id", executionID))
-		return nil
-	case <-time.After(cancelWaitTimeout):
-		return m.escalateStuckCancel(ctx, execution, ch)
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return m.waitForPromptFinishedAfterCancel(ctx, execution, snapshot)
 }
 
 // escalateStuckCancel unblocks a SendPrompt that is stuck waiting for a completion
@@ -1446,6 +1496,7 @@ func (m *Manager) restartAgentProcess(
 			return err
 		}
 	}
+	execution.beginStartupAttemptPreservingIdentity()
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
 	// methods rather than client.Close — the latter is a terminal drain
@@ -2073,6 +2124,33 @@ func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID str
 	return execution.promptGenerationSnapshot(), nil
 }
 
+// AcknowledgeRetainedPromptFailure releases successor admission only after the
+// durable owner has settled this exact failed turn and its completion waiter
+// has observed the error outcome.
+func (m *Manager) AcknowledgeRetainedPromptFailure(executionID string, generation uint64) bool {
+	if m == nil || executionID == "" || generation == 0 || m.executionStore == nil {
+		return false
+	}
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists || execution == nil {
+		return false
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	current, exists := m.executionStore.Get(executionID)
+	if !exists || current != execution || execution.promptGeneration != generation ||
+		execution.promptSettlementGeneration != generation {
+		return false
+	}
+	execution.promptSettlementAcknowledgedGeneration = generation
+	if execution.promptSettlementWaiterReleasedGeneration == generation {
+		execution.promptSettlementGeneration = 0
+		execution.promptSettlementAcknowledgedGeneration = 0
+		execution.promptSettlementWaiterReleasedGeneration = 0
+	}
+	return true
+}
+
 // GetPromptActivityForSession returns the execution ID, prompt generation,
 // activity epoch, and last-activity timestamp currently owned by sessionID's
 // active prompt. Unlike OwnsPromptGeneration/OwnsPromptActivity (which check
@@ -2144,13 +2222,40 @@ func (m *Manager) markBootReadyForStartup(
 		ctx, executionID, events.AgentBootReady, false, startupGeneration,
 		func(execution *AgentExecution) {
 			m.finalWorkspaceRefresh(execution, "startup_grace")
+			execution.markLifecycleActivity()
 		},
 		func(execution *AgentExecution) {
 			m.setRuntimeInterest(execution.SessionID, false)
 			m.releaseActivity(executionActivityKey(execution.ID))
+			if err := m.clearIdleSuspensionAfterReady(ctx, execution); err != nil {
+				m.logger.Warn("failed to clear idle suspension provenance after agent readiness",
+					zap.String("execution_id", execution.ID), zap.String("session_id", execution.SessionID), zap.Error(err))
+			}
 		},
 	)
 	return err
+}
+
+func (m *Manager) clearIdleSuspensionAfterReady(ctx context.Context, execution *AgentExecution) error {
+	store, ok := m.runningWriter.(idleSuspensionInventory)
+	if !ok || execution == nil {
+		return nil
+	}
+	running, err := store.GetExecutorRunningBySessionID(ctx, execution.SessionID)
+	if err != nil {
+		return err
+	}
+	if running.AgentExecutionID != execution.ID || running.IdleSuspensionState == models.ExecutorIdleSuspensionNone {
+		return nil
+	}
+	if err := store.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, execution.SessionID, execution.ID, time.Time{},
+		running.IdleSuspensionState, models.ExecutorIdleSuspensionNone,
+	); err != nil {
+		return err
+	}
+	execution.idleSuspensionAgentStopped.Store(false)
+	return nil
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
@@ -2175,9 +2280,14 @@ func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID strin
 			return fmt.Errorf("execution %q has no startup generation for resume attempt %q", executionID, attemptID)
 		}
 	}
-	return m.markReadyEventWithStartupGeneration(
-		ctx, executionID, events.AgentBootReady, false, startupGeneration, nil, nil,
+	err := m.markReadyEventWithStartupGeneration(
+		ctx, executionID, events.AgentBootReady, false, startupGeneration,
+		func(current *AgentExecution) { current.markLifecycleActivity() }, nil,
 	)
+	if err != nil {
+		return err
+	}
+	return m.clearIdleSuspensionAfterReady(ctx, execution)
 }
 
 // markReadyEventWithContext flips executionID to Ready and publishes
@@ -2414,6 +2524,131 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	)
 
 	return nil
+}
+
+type promptErrorCompletionPublication struct {
+	execution   *AgentExecution
+	eventType   string
+	payload     AgentEventPayload
+	exitCode    int
+	errorMsg    string
+	wasShutdown bool
+}
+
+// preparePromptErrorCompletion applies a numbered prompt's terminal state
+// without publishing synchronously. The caller holds promptLifecycleMu, so
+// admission cannot pass the completion fence before this state is visible.
+func (m *Manager) preparePromptErrorCompletion(
+	execution *AgentExecution,
+	event *agentctlclient.AgentEvent,
+	failureEvidence *PromptAttemptEvidence,
+) (*promptErrorCompletionPublication, error) {
+	errorMsg := extractErrorMessage(event)
+	wasShutdown := m.IsShuttingDown()
+	eventType := events.AgentFailed
+	terminalStatus := v1.AgentStatusFailed
+	if wasShutdown {
+		eventType = events.AgentStopped
+		terminalStatus = v1.AgentStatusStopped
+	}
+	if failureEvidence == nil {
+		failureEvidence = ensureCompletionFailureEvidence(execution, 1, errorMsg, nil)
+	}
+	if wasShutdown {
+		failureEvidence = nil
+	}
+
+	publication := &promptErrorCompletionPublication{
+		execution:   execution,
+		eventType:   eventType,
+		exitCode:    1,
+		errorMsg:    errorMsg,
+		wasShutdown: wasShutdown,
+	}
+	applied := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if current != execution || isTerminalStatus(current.Status) {
+			return
+		}
+		now := time.Now()
+		exitCode := publication.exitCode
+		current.FinishedAt = &now
+		current.ExitCode = &exitCode
+		current.ErrorMessage = publication.errorMsg
+		current.Status = terminalStatus
+
+		payload := cloneTerminalAgentEventPayload(
+			newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence),
+		)
+		if event.AttemptID != "" {
+			payload.AttemptID = event.AttemptID
+		}
+		publication.payload = payload
+		applied = true
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !applied {
+		m.logger.Debug("ignoring stale/duplicate prompt error completion",
+			zap.String("execution_id", execution.ID),
+			zap.String("current_status", string(execution.Status)))
+		return nil, nil
+	}
+	return publication, nil
+}
+
+func cloneTerminalAgentEventPayload(payload AgentEventPayload) AgentEventPayload {
+	if payload.FinishedAt != nil {
+		finishedAt := *payload.FinishedAt
+		payload.FinishedAt = &finishedAt
+	}
+	if payload.ExitCode != nil {
+		exitCode := *payload.ExitCode
+		payload.ExitCode = &exitCode
+	}
+	if payload.ProviderError != nil {
+		providerError := *payload.ProviderError
+		if payload.ProviderError.ResetAt != nil {
+			resetAt := *payload.ProviderError.ResetAt
+			providerError.ResetAt = &resetAt
+		}
+		payload.ProviderError = &providerError
+	}
+	return payload
+}
+
+// finishPromptErrorCompletion performs terminal side effects and publishes the
+// identity/evidence snapshot captured while promptLifecycleMu was held.
+func (m *Manager) finishPromptErrorCompletion(publication *promptErrorCompletionPublication) {
+	execution := publication.execution
+	if publication.wasShutdown {
+		m.logger.Warn("error completion during shutdown, treating as cancellation",
+			zap.String("execution_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.Int("exit_code", publication.exitCode),
+			zap.String("error", publication.errorMsg))
+	} else {
+		m.logger.Warn("error completion received, marking execution as failed",
+			zap.String("execution_id", execution.ID),
+			zap.String("task_id", execution.TaskID),
+			zap.String("error", publication.errorMsg),
+			zap.String("status", publication.payload.Status),
+			zap.String("agent_command", execution.AgentCommand),
+			zap.String("acp_session_id", execution.ACPSessionID))
+	}
+
+	execution.EndSessionSpan()
+	m.persistExecutorRunning(context.Background(), execution)
+	m.releaseActivity(executionActivityKey(execution.ID))
+	if !publication.wasShutdown {
+		m.logger.Info("execution completed",
+			zap.String("execution_id", execution.ID),
+			zap.Int("exit_code", publication.exitCode),
+			zap.String("status", publication.payload.Status))
+		m.classifyAndMaybeRemediate(execution, publication.exitCode, publication.errorMsg)
+	}
+	m.eventPublisher.publishAgentEventPayload(context.Background(), publication.eventType, publication.payload)
 }
 
 func ensureCompletionFailureEvidence(
@@ -2802,7 +3037,7 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 	if err != nil {
 		return agentCommands{}, err
 	}
-	managedRuntimeVersion, err := m.resolveManagedRuntimeVersion(ctx, execution.RuntimeName, agentConfig)
+	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, execution.RuntimeName, agentConfig)
 	if err != nil {
 		return agentCommands{}, err
 	}
@@ -2818,7 +3053,10 @@ func (m *Manager) buildFreshAgentCommandWithProfile(
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.
 		Runtime:               execution.RuntimeName,
-		ManagedRuntimeVersion: managedRuntimeVersion,
+		ManagedRuntimeVersion: managedRuntimeOptions.ManagedRuntimeVersion,
+		ManagedRuntimeFamily:  managedRuntimeOptions.ManagedRuntimeFamily,
+		ManagedRuntimeSource:  managedRuntimeOptions.ManagedRuntimeSource,
+		NativeRuntimeVersion:  managedRuntimeOptions.NativeRuntimeVersion,
 	}
 	args := m.commandBuilder.BuildCommandArgs(agentConfig, opts)
 	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, opts)
