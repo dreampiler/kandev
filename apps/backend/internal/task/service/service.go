@@ -554,12 +554,13 @@ type Service struct {
 	// host process detection. Nil selects the real platform implementation
 	// (resource_cleanup_orphan_reap_host_*.go); tests override them
 	// directly since they are unexported and this is a whitebox package.
-	orphanReapHostSnapshotter orphanReapHostSnapshotter
-	orphanReapVerifier        orphanReapVerifier
-	orphanReapSignaler        orphanReapSignaler
-	sessionRunningChecker     SessionRunningChecker
-	sessionExecutionRegistry  SessionExecutionRegistry
-	stallDetectionThreshold   time.Duration
+	orphanReapHostSnapshotter  orphanReapHostSnapshotter
+	orphanReapVerifier         orphanReapVerifier
+	orphanReapSignaler         orphanReapSignaler
+	sessionRunningChecker      SessionRunningChecker
+	sessionExecutionRegistry   SessionExecutionRegistry
+	stallDetectionThreshold    time.Duration
+	creatingEnvironmentTimeout time.Duration
 	// stallNotifiedSessions dedupes task.stalled events per stall episode:
 	// task ID -> session IDs already reported. A session is reported at most
 	// once per episode; an episode ends when the session leaves the stalled
@@ -920,6 +921,16 @@ func (s *Service) SetStallDetectionThreshold(threshold time.Duration) {
 		return
 	}
 	s.stallDetectionThreshold = threshold
+}
+
+// SetCreatingEnvironmentTimeout configures how long a task environment may stay
+// creating with a claimed materialization owner before the reconciliation sweep
+// fails it (default 10m). Non-positive values keep the default.
+func (s *Service) SetCreatingEnvironmentTimeout(timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	s.creatingEnvironmentTimeout = timeout
 }
 
 // SetClarificationCanceller wires terminal clarification cleanup for session
