@@ -157,6 +157,65 @@ func TestDeferCeilingRefusalRetainsEarlierRecordOnDifferingDuplicate(t *testing.
 	}
 }
 
+// TestDeferCeilingRefusalReusesRecordForSameAutomationRun pins the double-start
+// fix: two automatic refusals for one task that serve the same automation run
+// are one queued launch even when their prompts differ (a scheduled trigger
+// and a manual trigger recompose different prompts around one run). The second
+// refusal must reuse the stored record instead of reporting a conflict.
+func TestDeferCeilingRefusalReusesRecordForSameAutomationRun(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "defer-same-run", Title: "T"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	first := map[string]interface{}{
+		"prompt":                       "scheduled",
+		ceilingPayloadAutomationRunKey: map[string]interface{}{"run_id": "run-1"},
+	}
+	if err := svc.deferCeilingRefusal(ctx, "defer-same-run", "", models.CeilingLaunchStart, first, ceilingReasonRefused, 0, false, 0); err != nil {
+		t.Fatalf("deferCeilingRefusal (1): %v", err)
+	}
+	second := map[string]interface{}{
+		"prompt":                       "manual",
+		ceilingPayloadAutomationRunKey: map[string]interface{}{"run_id": "run-1"},
+	}
+	if err := svc.deferCeilingRefusal(ctx, "defer-same-run", "", models.CeilingLaunchStart, second, ceilingReasonRefused, 0, false, 0); err != nil {
+		t.Fatalf("deferCeilingRefusal (2) error = %v, want nil (same automation run reuses the record)", err)
+	}
+
+	record := deferredLaunchOf(t, svc, "defer-same-run")
+	nested, _ := record[models.CeilingLaunchPayloadKey].(map[string]interface{})
+	if nested["prompt"] != "scheduled" {
+		t.Fatalf("the earlier record was not retained: %+v", record)
+	}
+}
+
+// TestDeferCeilingRefusalConflictsAcrossAutomationRuns pins the other side: two
+// refusals that serve different automation runs stay different launches and
+// keep the conflict disposition, so one run's queued start never silently
+// absorbs another run's.
+func TestDeferCeilingRefusalConflictsAcrossAutomationRuns(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "defer-other-run", Title: "T"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	first := map[string]interface{}{
+		"prompt":                       "first",
+		ceilingPayloadAutomationRunKey: map[string]interface{}{"run_id": "run-1"},
+	}
+	if err := svc.deferCeilingRefusal(ctx, "defer-other-run", "", models.CeilingLaunchStart, first, ceilingReasonRefused, 0, false, 0); err != nil {
+		t.Fatalf("deferCeilingRefusal (1): %v", err)
+	}
+	second := map[string]interface{}{
+		"prompt":                       "second",
+		ceilingPayloadAutomationRunKey: map[string]interface{}{"run_id": "run-2"},
+	}
+	if err := svc.deferCeilingRefusal(ctx, "defer-other-run", "", models.CeilingLaunchStart, second, ceilingReasonRefused, 0, false, 0); !errors.Is(err, ErrCeilingLaunchConflict) {
+		t.Fatalf("deferCeilingRefusal (2) error = %v, want ErrCeilingLaunchConflict", err)
+	}
+}
+
 // TestDeferCeilingRefusalReplacesNonObjectValue pins AC-46: a non-object
 // deferred_launch value is replaced wholesale by the ceiling record.
 func TestDeferCeilingRefusalReplacesNonObjectValue(t *testing.T) {
