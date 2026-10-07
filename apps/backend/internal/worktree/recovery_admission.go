@@ -881,6 +881,17 @@ func (m *Manager) inspectRecoverySlot(
 	} else if err != nil {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, fmt.Sprintf("cannot inspect persisted checkout: %v", err))
 	}
+	// A present checkout that is not a valid checkout of the recorded
+	// repository (an empty directory, a broken .git pointer, or an unrelated
+	// checkout) is moved aside inside the same task directory, preserving it,
+	// so the missing-checkout recovery materializes a fresh checkout at the
+	// recorded path. A failed move fails closed via recoverySlotError.
+	if shouldQuarantinePresentCheckout(slot) {
+		if _, err := m.quarantineInvalidCheckout(wt.Path); err != nil {
+			return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
+		}
+		return m.inspectMissingCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)
+	}
 	missing, inspectErr := m.inspectMissingCheckout(
 		ctx, taskID, ownershipGeneration, slot, true, allowBranchReplacement,
 	)
