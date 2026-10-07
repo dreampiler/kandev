@@ -135,10 +135,6 @@ func (t *overviewTask) awaitingStep() bool {
 	return t.row.StepID != "" && !t.automation.RunsOnEntry() && t.runningSession() == nil
 }
 
-func (t *overviewTask) isHold() bool {
-	return t.row.State == stateBlocked || t.row.OpenBlockers > 0
-}
-
 // holdStepNames are the step names a workflow uses for the step a task is held
 // on. No workflow_steps column marks a hold step: stage_type has no hold value
 // and no boolean does either, so the stored name is the only signal that a
@@ -451,34 +447,31 @@ func (t *overviewTask) queueDelay(now time.Time, th overviewThresholds) *Overvie
 // dwellLimit is how long the task may stay in its current step before that is
 // a delay. Only a step that exists to be finished carries a limit: review, and a
 // working step that owes its next move to nobody. A task on hold, a task waiting
-// on a prerequisite, and a task waiting on a person have nowhere to be late —
-// their own clock says nothing about whether they need a hand, so they take no
-// limit and are read by classifySteady instead. A step that does start work by
-// itself keeps the limit even when its last turn ended, because that is how a
-// step that stopped advancing becomes visible.
+// on a prerequisite, a task parked on a step that starts nothing by itself, a
+// task waiting on a person, and a parent read through its open children have
+// nowhere to be late — their own clock says nothing about whether they need a
+// hand, so they take no limit and are read by classifySteady instead. A step
+// that does start work by itself keeps the limit even when its last turn ended,
+// because that is how a step that stopped advancing becomes visible.
 func dwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
 	switch {
-	case t.isHold():
+	case t.awaitingNextMove():
 		return 0
 	case t.row.State == stateInReview:
 		return th.DwellReview
 	case t.row.State == stateInProgress:
-		return inProgressDwellLimit(t, th)
+		return th.DwellInProgress
 	}
 	return 0
 }
 
-// inProgressDwellLimit is the limit for a working step. Time spent in one
-// means something different depending on who owes the next move: a step that
-// starts nothing by itself waits for a person, a task waiting for an answer
-// waits for a person, a task whose question is unanswered waits for that
-// answer, and a parent with open children is read through them.
-func inProgressDwellLimit(t *overviewTask, th overviewThresholds) time.Duration {
-	switch {
-	case t.awaitingStep(), t.awaitingPerson(), t.awaitingOwner, t.row.OpenChildCount > 0:
-		return 0
-	}
-	return th.DwellInProgress
+// awaitingNextMove reports that the task's next move belongs to somebody else,
+// so time in its current step cannot make it late: it is on hold, waiting on an
+// unfinished prerequisite, parked on a step that starts nothing by itself,
+// waiting on an answer, or read through its open children.
+func (t *overviewTask) awaitingNextMove() bool {
+	return t.isOnHold() || t.row.OpenBlockers > 0 || t.awaitingStep() ||
+		t.awaitingPerson() || t.awaitingOwner || t.row.OpenChildCount > 0
 }
 
 // steadySession is the session a resting verdict reads: the task's own session,
@@ -493,7 +486,7 @@ func (t *overviewTask) steadySession() *sqlite.OverviewSessionRow {
 func (t *overviewTask) classifySteady() {
 	steady := t.steadySession()
 	switch {
-	case t.row.State == stateBlocked:
+	case t.isOnHold():
 		t.status, t.reason = OverviewStatusBlocked, reason(reasonOnHold, nil)
 	case t.row.OpenBlockers > 0:
 		t.status = OverviewStatusWaiting

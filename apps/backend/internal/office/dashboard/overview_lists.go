@@ -154,7 +154,7 @@ func taskMatchesFilter(t *overviewTask, filter string) bool {
 	case OverviewFilterQueued:
 		return t.queued > 0
 	case OverviewFilterHold:
-		return t.isHold()
+		return t.isOnHold()
 	}
 	return true
 }
