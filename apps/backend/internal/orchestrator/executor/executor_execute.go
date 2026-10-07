@@ -731,6 +731,25 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	}
 }
 
+// failOwnedCreatingTaskEnvironment marks the task's creating environment failed
+// when sessionID is its materialization owner. An abandoned launch must not
+// leave its own creating environment behind: nothing else finalizes it, and the
+// next launch then waits forever on a workspace that never becomes ready.
+// Environments owned by a different materializer are left untouched.
+func (e *Executor) failOwnedCreatingTaskEnvironment(ctx context.Context, taskID, sessionID string) {
+	if taskID == "" || sessionID == "" {
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to load task environment after early launch error",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID)
+}
+
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
 	if e.onTaskReviewStateReconcile != nil {
 		e.onTaskReviewStateReconcile(ctx, taskID, failedSessionID)
@@ -2266,6 +2285,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
+	e.failOwnedCreatingTaskEnvironment(failCtx, taskID, sessionID)
 	safeErr, changed := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr,
 	)
