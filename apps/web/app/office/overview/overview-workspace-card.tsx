@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { TFunction } from "i18next";
 import Link from "@/components/routing/app-link";
 import { Card } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -17,12 +18,11 @@ import { linkToTask } from "@/lib/links";
 import { resolveHomeHref } from "@/lib/navigation/workspace-home";
 import type { WorkspaceAggregateEntry } from "@/lib/state/slices/office/types";
 import type {
-  OverviewParentTask,
+  OverviewRunningTask,
   OverviewTaskFilter,
   OverviewThresholds,
   OverviewWorkspaceMetrics,
 } from "@/lib/state/slices/office/overview-types";
-import { reasonText } from "./overview-format";
 import { WorkspaceMetrics } from "./overview-metrics";
 import { OverviewListBody } from "./overview-system-cards";
 import { OverviewTaskTable } from "./overview-tables";
@@ -38,6 +38,10 @@ const TASK_LIST_LIMIT = 50;
 const FILTER_CHIPS: { filter: OverviewTaskFilter; labelKey: string }[] = [
   { filter: "problems", labelKey: "office:overviewFilterProblems" },
   { filter: "active", labelKey: "common:taskStateInProgress" },
+  // The running-sessions tile filters the list by this chip, so the chip is here
+  // for the same reason the completed one is: pressing the tile must leave the
+  // reader on a list whose selected filter they can see and change.
+  { filter: "sessions", labelKey: "office:overviewRunningSessions" },
   { filter: "completed", labelKey: "office:overviewCompleted24h" },
   { filter: "hold", labelKey: "office:projectStatusOnHold" },
   { filter: "all", labelKey: "office:all" },
@@ -96,8 +100,11 @@ function WorkspaceCardBody({
   const startupPage = useAppStore((state) => state.userSettings.startupPage);
   const [filter, setFilter] = useState<OverviewTaskFilter | null>(null);
   const [limit, setLimit] = useState(TASK_LIST_LIMIT);
+  // The disclosure lives here rather than inside the detail area, because a tile
+  // is what selects a filter and a tile press has to show the list it selected.
+  const [open, setOpen] = useState(false);
+  const detailRef = useRef<HTMLDivElement | null>(null);
   const metrics = detail.metrics;
-  const parents = detail.parents ?? [];
   const homeHref = resolveHomeHref({
     workspaceId: workspace.workspace_id,
     inOffice: Boolean(workspace.is_office),
@@ -106,6 +113,8 @@ function WorkspaceCardBody({
   const show = (next: OverviewTaskFilter) => {
     setFilter(next);
     setLimit(TASK_LIST_LIMIT);
+    setOpen(true);
+    scrollDetailIntoView(detailRef);
   };
   const quiet = !metrics || (metrics.open_tasks === 0 && metrics.running_sessions === 0);
   const active = !quiet && Boolean(metrics);
@@ -138,12 +147,15 @@ function WorkspaceCardBody({
       {active && metrics && (
         <WorkspaceActiveBody
           workspace={workspace}
+          detail={detail}
           metrics={metrics}
-          parents={parents}
           listId={listId}
           filter={filter}
           limit={limit}
+          open={open}
+          detailRef={detailRef}
           onFilter={show}
+          onToggleOpen={() => setOpen((current) => !current)}
           onShowAll={() => setLimit(OVERVIEW_LIST_ALL)}
           refreshSeconds={refreshSeconds}
           thresholds={thresholds}
@@ -161,23 +173,29 @@ function WorkspaceCardBody({
  */
 function WorkspaceActiveBody({
   workspace,
+  detail,
   metrics,
-  parents,
   listId,
   filter,
   limit,
+  open,
+  detailRef,
   onFilter,
+  onToggleOpen,
   onShowAll,
   refreshSeconds,
   thresholds,
 }: {
   workspace: WorkspaceAggregateEntry;
+  detail: WorkspaceAggregateEntry;
   metrics: OverviewWorkspaceMetrics;
-  parents: OverviewParentTask[];
   listId: string;
   filter: OverviewTaskFilter | null;
   limit: number;
+  open: boolean;
+  detailRef: React.RefObject<HTMLDivElement | null>;
   onFilter: (filter: OverviewTaskFilter) => void;
+  onToggleOpen: () => void;
   onShowAll: () => void;
   refreshSeconds: number;
   thresholds?: OverviewThresholds;
@@ -185,14 +203,17 @@ function WorkspaceActiveBody({
   return (
     <>
       <WorkspaceMetrics metrics={metrics} filter={filter} onFilter={onFilter} />
-      <ParentsAndWarning metrics={metrics} parents={parents} />
+      <RunningNow running={detail.running ?? []} truncated={detail.running_truncated ?? 0} />
       <WorkspaceDetail
         id={listId}
         workspaceId={workspace.workspace_id}
         metrics={metrics}
         filter={filter}
         limit={limit}
+        open={open}
+        detailRef={detailRef}
         onFilter={onFilter}
+        onToggleOpen={onToggleOpen}
         onShowAll={onShowAll}
         refreshSeconds={refreshSeconds}
         thresholds={thresholds}
@@ -275,56 +296,69 @@ function ProblemToneLine({ problems }: { problems: OverviewWorkspaceMetrics["pro
 }
 
 /**
- * The parent tasks and the one warning worth surfacing. Each line wears the
- * color of its own state, so a parent task that is on hold does not read like
- * one that is running.
+ * What is moving in this workspace right now: the tasks that have a session
+ * executing, each with its own running and waiting counts. It replaces the
+ * parent-task and worst-problem lines, which reported work the card already
+ * counts elsewhere, so the card leads with the work in front of the operator.
+ * A workspace with nothing running says so in one line rather than showing an
+ * empty block.
  */
-
-function ParentsAndWarning({
-  metrics,
-  parents,
-}: {
-  metrics: OverviewWorkspaceMetrics;
-  parents: OverviewParentTask[];
-}) {
+function RunningNow({ running, truncated }: { running: OverviewRunningTask[]; truncated: number }) {
   const { t } = useTranslation();
-  const warning = metrics.top_warning;
-  if (!warning && parents.length === 0) return null;
   return (
     <div className="px-4 pt-2">
       <div className="space-y-1 rounded-md border border-tile-border bg-tile p-2">
-        {parents.map((parent) => (
-          <Link
-            key={parent.task_id}
-            href={linkToTask(parent.task_id)}
-            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-xs hover:underline"
-            data-testid="overview-parent-task"
-          >
-            <OverviewStatusName status={parent.status} />
-            <span className="truncate font-medium">{parent.title}</span>
-            <span className="text-muted-foreground">
-              {t("office:overviewSubtasksOpen", {
-                open: parent.open_children,
-                total: parent.children,
-              })}
-            </span>
-          </Link>
-        ))}
-        {warning && (
-          <Link
-            href={linkToTask(warning.task_id)}
-            className="flex items-center gap-2 rounded-md border border-status-error/30 bg-status-error/5 px-1 py-0.5 text-xs hover:underline"
-            data-testid="overview-warning"
-          >
-            <OverviewStatusName status={warning.status} />
-            <span className={statusTextClass("error")}>
-              {warning.task_title} · {reasonText(t, warning.reason)}
-            </span>
-          </Link>
+        {running.length === 0 ? (
+          <span className="px-1 text-xs text-muted-foreground">
+            {t("office:overviewNothingRunning")}
+          </span>
+        ) : (
+          running.map((task) => (
+            <Link
+              key={task.task_id}
+              href={linkToTask(task.task_id)}
+              className="flex items-center gap-2 rounded-md px-1 py-0.5 text-xs hover:underline"
+              data-testid="overview-running-task"
+            >
+              <OverviewStatusName status={task.status} />
+              <span className="truncate font-medium">{task.title}</span>
+              <span className="truncate text-muted-foreground">{runningTaskCounts(t, task)}</span>
+            </Link>
+          ))
+        )}
+        {truncated > 0 && (
+          <span className="px-1 text-[11px] text-muted-foreground">
+            {t("office:overviewRunningMore", { count: truncated })}
+          </span>
         )}
       </div>
     </div>
   );
+}
+
+/**
+ * One running task's own sessions: what is executing, what waits on a person, and
+ * which agent runs it. The model name is dropped when the row carries none,
+ * because an empty agent name would read as a missing value rather than as
+ * nothing to report.
+ */
+function runningTaskCounts(t: TFunction, task: OverviewRunningTask): string {
+  const counts = t("office:overviewRunningTaskCounts", {
+    running: task.running_sessions,
+    waiting: task.waiting_input_sessions,
+  });
+  return task.agent_name ? `${counts} · ${task.agent_name}` : counts;
+}
+
+/**
+ * scrollDetailIntoView brings the list a tile selected into view once the card
+ * has rendered it, so pressing a tile reads as an answer rather than as a
+ * silent selection elsewhere on the card.
+ */
+function scrollDetailIntoView(detailRef: React.RefObject<HTMLDivElement | null>): void {
+  requestAnimationFrame(() => {
+    detailRef.current?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 /**
@@ -341,7 +375,10 @@ function WorkspaceDetail({
   metrics,
   filter,
   limit,
+  open,
+  detailRef,
   onFilter,
+  onToggleOpen,
   onShowAll,
   refreshSeconds,
   thresholds,
@@ -351,18 +388,20 @@ function WorkspaceDetail({
   metrics: OverviewWorkspaceMetrics;
   filter: OverviewTaskFilter | null;
   limit: number;
+  open: boolean;
+  detailRef: React.RefObject<HTMLDivElement | null>;
   onFilter: (filter: OverviewTaskFilter) => void;
+  onToggleOpen: () => void;
   onShowAll: () => void;
   refreshSeconds: number;
   /** The limits the backend applied on this read, shown by the criteria tooltip. */
   thresholds?: OverviewThresholds;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
   const problems = metrics.problems;
 
   return (
-    <div className="mt-2 border-t border-border bg-tile px-4 pb-3">
+    <div className="mt-2 border-t border-border bg-tile px-4 pb-3" ref={detailRef}>
       <div className="flex flex-wrap items-center gap-2 pt-3">
         <Button
           variant="outline"
@@ -371,7 +410,7 @@ function WorkspaceDetail({
           aria-expanded={open}
           aria-controls={id}
           data-testid="overview-workspace-expand"
-          onClick={() => setOpen((current) => !current)}
+          onClick={onToggleOpen}
         >
           {open ? (
             <IconChevronUp className="h-3.5 w-3.5" aria-hidden="true" />

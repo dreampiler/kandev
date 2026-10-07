@@ -192,7 +192,21 @@ func taskItem(snap *overviewSnapshot, t *overviewTask) OverviewTaskItem {
 		item.ModelName = snap.profileNames[t.shown.AgentProfileID]
 	}
 	item.Failure = taskFailure(snap, t)
+	item.WaitingInputSessions = taskWaitingInputSessions(t)
 	return item
+}
+
+// taskWaitingInputSessions counts the task's own sessions waiting on a person,
+// so an expanded list answers that per row instead of leaving the reader to add
+// up the scope's single waiting figure.
+func taskWaitingInputSessions(t *overviewTask) int {
+	waiting := 0
+	for _, sess := range t.sessions {
+		if sess.State == sessionStateWaitingForInput {
+			waiting++
+		}
+	}
+	return waiting
 }
 
 // taskFailure reports what followed the newest failed session of a task, so the

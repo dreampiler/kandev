@@ -115,6 +115,10 @@ type SessionCapacityReading struct {
 	ControlLimit    int
 	ControlEnabled  bool
 	PopulationKnown bool
+	// ControlProfileIDs is the control set the same reading classified its
+	// populations with, so a session this package already read is put in a lane
+	// by the admission controller's own rule rather than by a second one.
+	ControlProfileIDs []string
 }
 
 // SessionCapacityReader reads the live session admission state. It is read on
@@ -311,6 +315,7 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 		return err
 	}
 	assembleWorkspaceMetrics(snap, counts, childCounts)
+	assembleRunningTasks(snap)
 	if err := s.assembleModels(ctx, snap, ids, since); err != nil {
 		return err
 	}

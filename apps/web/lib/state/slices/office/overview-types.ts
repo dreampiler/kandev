@@ -58,6 +58,28 @@ export type OverviewSessionLanes = {
   /** Absent together with the control count when the population was unread. */
   general_running_sessions?: number;
   control_running_sessions?: number;
+  /**
+   * Each lane's own share of the scope's waiting-input sessions. Absent together
+   * when the populations are, and a measured zero is a zero rather than a
+   * missing reading.
+   */
+  general_waiting_input_sessions?: number;
+  control_waiting_input_sessions?: number;
+};
+
+/**
+ * One workspace task that has a session executing right now. It is what a
+ * project card's summary line reads, because the card answers "what is moving
+ * here" from the same read that counted it.
+ */
+export type OverviewRunningTask = {
+  task_id: string;
+  title: string;
+  status: OverviewStatus;
+  step_name: string;
+  agent_name?: string;
+  running_sessions: number;
+  waiting_input_sessions: number;
 };
 
 export type OverviewThresholds = {
@@ -296,6 +318,12 @@ export type OverviewTaskItem = {
    */
   archived?: boolean;
   queued_messages: number;
+  /**
+   * How many of this task's own sessions wait on a person, so an expanded list
+   * answers that per row instead of leaving the reader to add up the scope's
+   * single waiting figure.
+   */
+  waiting_input_sessions: number;
   /**
    * What followed this row's failed session. Present only for a row that has one,
    * so a task row answers "and what happened to it?" where the operator is

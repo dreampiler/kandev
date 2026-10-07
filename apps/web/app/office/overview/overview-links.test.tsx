@@ -49,6 +49,12 @@ import { OverviewSystemCards } from "./overview-system-cards";
 import { OverviewLast24h, OverviewNeedsHuman } from "./overview-sections";
 import { OverviewModels } from "./overview-models";
 
+// jsdom does not implement scrollIntoView, and a tile press scrolls the list it
+// opened into view.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 const createdAt = "2026-10-03T00:00:00Z";
 
 const workspace: WorkspaceAggregateEntry = {
@@ -108,6 +114,7 @@ const taskPage = {
       failures_24h: 0,
       step_entered_at: createdAt,
       queued_messages: 0,
+      waiting_input_sessions: 0,
     },
   ],
 };
@@ -189,13 +196,11 @@ describe("overview project card destinations", () => {
     vi.clearAllMocks();
   });
 
-  it("links the project card to its board, tasks, last output, parent and warning", async () => {
+  it("links the project card to its board, tasks, and last output", async () => {
     render(<OverviewWorkspaceCard workspace={workspace} refreshSeconds={60} />);
     expect(hrefOf(screen.getByTestId("overview-workspace-link"))).toBe(
       "/?home=overview&workspaceId=ws-1",
     );
-    expect(hrefOf(screen.getByTestId("overview-parent-task"))).toBe("/t/task-parent");
-    expect(hrefOf(screen.getByTestId("overview-warning"))).toBe("/t/task-warn");
     expect(hrefOf(screen.getByText("Last output"))).toBe("/t/task-out");
     expect(getWorkspaceAggregateTasks).not.toHaveBeenCalled();
 

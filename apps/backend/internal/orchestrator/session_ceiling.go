@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -180,6 +181,11 @@ type SessionCeilingObservation struct {
 	// ControlConfigured reports whether a control lane exists at all, so an
 	// install with no control profiles does not display a meaningless zero cap.
 	ControlConfigured bool
+	// ControlProfileIDs is the same control profile set this observation's
+	// populations were classified with, read under the same lock. A reader that
+	// has to classify sessions itself would otherwise need a second reading of
+	// the same rule, and two readings can disagree.
+	ControlProfileIDs []string
 }
 
 // SessionCeilingCapacity is the live capacity pair the controller enforces.
@@ -249,6 +255,22 @@ func (c *sessionCeilingController) classOfLocked(agentProfileID string) ceilingC
 		return ceilingClassControl
 	}
 	return ceilingClassWorker
+}
+
+// controlProfileIDsLocked renders the live control set for a reader outside this
+// package, so the classification rule stays the one in classOfLocked instead of
+// being restated as a second rule somewhere else. The caller reads it while
+// holding the controller lock, next to the populations it classifies.
+func controlProfileIDsLocked(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func controlProfileSet(ids []string) map[string]struct{} {
@@ -342,6 +364,7 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 		Known:             err == nil,
 		ControlLimit:      c.controlCeiling,
 		ControlConfigured: len(c.controlProfiles) > 0,
+		ControlProfileIDs: controlProfileIDsLocked(c.controlProfiles),
 	}
 	if err != nil {
 		return observation, err

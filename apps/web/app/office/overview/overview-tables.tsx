@@ -149,6 +149,7 @@ export function OverviewTaskTable({
           <TableHead className="text-right">{t("office:overviewLastOutput")}</TableHead>
           <TableHead className="text-right">{t(timeColumnLabelKey)}</TableHead>
           <TableHead className="text-right">{t("task:queued")}</TableHead>
+          <TableHead className="text-right">{t("office:overviewWaitingInputColumn")}</TableHead>
           <TableHead>{t("office:reason")}</TableHead>
         </TableRow>
       </TableHeader>
@@ -194,6 +195,9 @@ export function OverviewTaskTable({
             </TableCell>
             <TableCell className="text-right text-xs tabular-nums">
               {row.queued_messages || ""}
+            </TableCell>
+            <TableCell className="text-right text-xs tabular-nums">
+              {row.waiting_input_sessions || ""}
             </TableCell>
             <TableCell>
               <OverviewReasonCell reason={row.reason} status={row.status} />

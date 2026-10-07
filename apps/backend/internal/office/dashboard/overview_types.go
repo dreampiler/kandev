@@ -103,6 +103,13 @@ type OverviewSessionLanes struct {
 	ControlLimit           int  `json:"control_limit"`
 	GeneralRunningSessions *int `json:"general_running_sessions,omitempty"`
 	ControlRunningSessions *int `json:"control_running_sessions,omitempty"`
+	// GeneralWaitingInputSessions and ControlWaitingInputSessions split the same
+	// scope's waiting-input count by lane, so a lane's tile reports that lane's
+	// own sessions waiting on a person rather than the instance total. They are
+	// absent together when the populations are, and a measured zero is reported
+	// as a zero rather than dropped.
+	GeneralWaitingInputSessions *int `json:"general_waiting_input_sessions,omitempty"`
+	ControlWaitingInputSessions *int `json:"control_waiting_input_sessions,omitempty"`
 }
 
 // OverviewThresholds are the time limits the status rules actually applied, in
@@ -133,6 +140,23 @@ type OverviewWarning struct {
 	TaskTitle string          `json:"task_title"`
 	Status    string          `json:"status"`
 	Reason    *OverviewReason `json:"reason,omitempty"`
+}
+
+// OverviewRunningTask is one workspace task that has a session executing right
+// now. It is what the project card's summary line reads, because the card
+// answers "what is moving in this project" from the same read that counted it
+// rather than from a second list that only loads once the card is expanded.
+type OverviewRunningTask struct {
+	TaskID    string `json:"task_id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	StepName  string `json:"step_name"`
+	AgentName string `json:"agent_name,omitempty"`
+	// RunningSessions and WaitingInputSessions are that task's own sessions, so
+	// one line says how much of it is working and how much of it waits on a
+	// person.
+	RunningSessions      int `json:"running_sessions"`
+	WaitingInputSessions int `json:"waiting_input_sessions"`
 }
 
 // OverviewWorkspaceMetrics are the six project-card metrics plus problems.
@@ -434,6 +458,10 @@ type OverviewTaskItem struct {
 	// they just saw finish is not on any board.
 	Archived       bool `json:"archived,omitempty"`
 	QueuedMessages int  `json:"queued_messages"`
+	// WaitingInputSessions is how many of this task's own sessions are waiting
+	// on a person, so the expanded list answers that per row rather than leaving
+	// the reader to add up the scope's one waiting figure.
+	WaitingInputSessions int `json:"waiting_input_sessions"`
 	// Failure is what followed this row's failed session, so a task that is in
 	// trouble reports what became of the failure on its own row rather than only
 	// in the events list. It is the same value the failed-session event carries.

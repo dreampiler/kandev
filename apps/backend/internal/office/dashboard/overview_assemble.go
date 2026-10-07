@@ -432,15 +432,16 @@ func assembleSystem(snap *overviewSnapshot, capacity SessionCapacityReading, cap
 		sys.BlockedAccountsTotal = &total
 	}
 	sys.ProblemThresholds = overviewThresholdsWire(thresholds)
-	assembleSessionCapacity(sys, capacity, capacityKnown)
+	assembleSessionCapacity(snap, sys, capacity, capacityKnown)
 	snap.resp.System = sys
 }
 
 // assembleSessionCapacity reports the running-session card's denominators from
-// the admission reading taken on this pass. A reading that did not arrive leaves
+// the admission reading taken on this pass, together with each lane's own share
+// of the scope's waiting-input sessions. A reading that did not arrive leaves
 // the capacities absent, so the client shows the scope's own running count
 // without a limit rather than a denominator nothing measured.
-func assembleSessionCapacity(sys *OverviewSystem, capacity SessionCapacityReading, known bool) {
+func assembleSessionCapacity(snap *overviewSnapshot, sys *OverviewSystem, capacity SessionCapacityReading, known bool) {
 	if !known {
 		return
 	}
@@ -452,6 +453,9 @@ func assembleSessionCapacity(sys *OverviewSystem, capacity SessionCapacityReadin
 		general, control := capacity.GeneralUsed, capacity.ControlUsed
 		lanes.GeneralRunningSessions = &general
 		lanes.ControlRunningSessions = &control
+		generalWaiting, controlWaiting := laneWaitingInput(snap, capacity.ControlProfileIDs)
+		lanes.GeneralWaitingInputSessions = &generalWaiting
+		lanes.ControlWaitingInputSessions = &controlWaiting
 	}
 	sys.SessionLanes = lanes
 }
