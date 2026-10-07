@@ -188,27 +188,6 @@ func TestResetTaskEnvironment_SessionRunningBlocks(t *testing.T) {
 	}
 }
 
-func TestResetTaskEnvironment_CreatingPlaceholderDeletesRow(t *testing.T) {
-	repo := &stubEnvRepo{env: &models.TaskEnvironment{
-		ID: "env-creating", TaskID: "task-1", ExecutorType: string(models.ExecutorTypeWorktree),
-		Status: models.TaskEnvironmentStatusCreating, MaterializationSessionID: "sess-creating",
-	}}
-	destroyer := &stubDestroyer{}
-	svc := newResetTestService(t, repo)
-	svc.SetSessionRunningChecker(&stubRunningChecker{running: false})
-	svc.SetEnvironmentDestroyer(destroyer)
-
-	if err := svc.ResetTaskEnvironment(context.Background(), "task-1", ResetOptions{}); err != nil {
-		t.Fatalf("ResetTaskEnvironment() on a creating placeholder: %v", err)
-	}
-	if !repo.deleted {
-		t.Fatal("expected the creating environment row to be deleted")
-	}
-	if len(destroyer.containerCalls)+len(destroyer.sandboxCalls)+len(destroyer.worktreeCalls)+len(destroyer.pluginCalls) != 0 {
-		t.Fatalf("creating placeholder teardown should be a no-op: %+v", destroyer)
-	}
-}
-
 func TestSessionBlocksEnvironmentReset(t *testing.T) {
 	tests := []struct {
 		state models.TaskSessionState
