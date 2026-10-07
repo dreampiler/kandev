@@ -157,6 +157,15 @@ type WorkspaceTracker struct {
 	monitorTickTotalNanos atomic.Int64
 	monitorStatsMu        sync.Mutex
 
+	// Slow-mode backoff counters: the number of consecutive completed scans
+	// that observed nothing, one per polling loop because the loops have
+	// independent cadences and independent observations. Each is reset the
+	// moment that loop's next scan sees a change, and both are reset by
+	// SetPollMode so a push (focus, resubscribe, task resume) always restarts
+	// the base cadence. See slowPollInterval.
+	slowIdleMonitorTicks atomic.Uint32
+	slowIdleGitPollTicks atomic.Uint32
+
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex

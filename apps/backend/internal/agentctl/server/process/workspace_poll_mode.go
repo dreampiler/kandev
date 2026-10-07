@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -52,6 +53,53 @@ const defaultSlowPollInterval = 30 * time.Second
 // via SetPollMode pushing on pollModeChanged.
 const pausedTickInterval = 60 * time.Second
 
+// Slow-mode backoff. A slow tracker polls unconditionally on a fixed 30s
+// cadence, so a workspace nobody is looking at and nobody is working in costs
+// the same spawns forever as one that is actively being edited. On Windows a
+// poll's cost is almost entirely process creation plus AV inspection rather
+// than git work (see workspace_git_poll.go on spawn overhead), so the total
+// cost is (trackers × cadence) and cadence is the only lever left once the
+// per-tick spawn count is already minimal.
+//
+// The backoff therefore lengthens the slow interval only while consecutive
+// scans observe nothing, and any observed change returns it to the base
+// interval immediately. A workspace with real activity keeps the full 30s
+// freshness because its very next scan sees the change and resets the counter,
+// so an idle-detection slowdown can never make an actively-changing workspace
+// staler than it is today.
+//
+// slowBackoffStartTicks is how many unchanged scans run at the base interval
+// before the interval starts growing, so a brief quiet spell never delays a
+// change that lands right after it. slowBackoffMaxMultiplier caps the growth:
+// at 10x the worst case for a workspace nobody is watching is one scan per
+// 5 minutes, bounded rather than open-ended, and the cap is what keeps a
+// long-idle workspace from going permanently stale.
+const (
+	slowBackoffStartTicks    = 2
+	slowBackoffMaxMultiplier = 10
+)
+
+// slowPollInterval returns the interval a slow-mode loop should wait for its
+// next scan, given how many consecutive scans have observed nothing.
+//
+// Callers pass the loop's idle counter; this function reads it and never
+// mutates it, so advancing or resetting the counter stays with the tick body
+// that owns the observation.
+func slowPollInterval(base time.Duration, idleTicks uint32) time.Duration {
+	if idleTicks < slowBackoffStartTicks {
+		return base
+	}
+	shift := idleTicks - slowBackoffStartTicks
+	if shift > 5 {
+		shift = 5
+	}
+	multiplier := uint32(1) << shift
+	if multiplier > slowBackoffMaxMultiplier {
+		multiplier = slowBackoffMaxMultiplier
+	}
+	return base * time.Duration(multiplier)
+}
+
 // pollIntervals returns the file-monitor and git-poll intervals for a mode,
 // plus whether the mode is paused (in which case the body should skip git work).
 func (wt *WorkspaceTracker) pollIntervals(mode PollMode) (filePoll, gitPoll time.Duration, paused bool) {
@@ -75,6 +123,24 @@ func (wt *WorkspaceTracker) GetPollMode() PollMode {
 	return wt.pollMode
 }
 
+// resetSlowBackoff returns both polling loops to the base slow cadence. Called
+// on any poll-mode push and by each loop when it observes a change.
+func (wt *WorkspaceTracker) resetSlowBackoff() {
+	wt.slowIdleMonitorTicks.Store(0)
+	wt.slowIdleGitPollTicks.Store(0)
+}
+
+// noteSlowPollIdle records one completed scan's outcome for the loop that owns
+// idleTicks: a change returns that loop to the base cadence, and an unchanged
+// scan lets the interval grow on the next one.
+func (wt *WorkspaceTracker) noteSlowPollIdle(idleTicks *atomic.Uint32, changed bool) {
+	if changed {
+		idleTicks.Store(0)
+		return
+	}
+	idleTicks.Add(1)
+}
+
 // SetPollMode updates the poll mode. Calling with the current mode is a no-op.
 // Transitioning into PollModeFast (from any other mode) wakes both polling loops
 // immediately so the focused user sees fresh git state without waiting up to
@@ -92,6 +158,12 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	// what the grace demotion exists to detect the absence of.
 	wt.pollModePushed = true
 	wt.disarmPollModeGraceLocked()
+	// Any push restarts the slow-mode backoff, including a push that repeats
+	// the current mode. A push is the gateway telling us someone is looking at
+	// this workspace again (focus, resubscribe, or a task resuming), and it
+	// must see state at the base cadence rather than inheriting an idle
+	// interval that may have grown to the cap while nobody was watching.
+	wt.resetSlowBackoff()
 	if mode == PollModeFast {
 		// Focus is an explicit visible-user retry after an access denial.
 		wt.accessDenied.Store(false)
