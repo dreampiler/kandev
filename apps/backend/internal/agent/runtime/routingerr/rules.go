@@ -9,11 +9,45 @@ type rule struct {
 	confidence Confidence
 }
 
+// Provider rules match provider error signatures, never a bare topic word.
+// Every error channel these rules read can also carry an agent's own words
+// (a turn that ends in error reports its final text), and agents routinely
+// quote and explain the errors they read; a rule that fires on "rate limit"
+// or "quota" anywhere would suspend a healthy account because its agent wrote
+// about another one.
+const (
+	// genericRateLimitSignature is the rate-limit wording shared by the
+	// AI-SDK based adapters: "AI_APICallError: Rate limit exceeded. Please
+	// try again later", "Rate limit exceeded: free-models-per-min",
+	// "rate_limit_exceeded", "429 Too Many Requests".
+	genericRateLimitSignature = `(?i)\brate[\s_-]?limit(?:ed)?\b[\s:]*(?:exceeded|reached)\b|` +
+		`\brate_limit_(?:exceeded|error)\b|\btoo\s+many\s+requests\b`
+	// genericQuotaSignature is exhausted-quota wording such as OpenAI's
+	// "insufficient_quota" and "You exceeded your current quota".
+	genericQuotaSignature = `(?i)\binsufficient_quota\b|\bquota[\s_-]+(?:exceeded|exhausted|reached)\b|` +
+		`\bexceeded\s+(?:your\s+)?(?:current\s+)?quota\b|\bout\s+of\s+quota\b|\bresource_exhausted\b`
+	// claudeRateLimitSignature is the Anthropic API rate-limit error as Claude
+	// Code reports it ("API Error: 429 {...rate_limit_error...}", "API Error:
+	// Request rejected (429)"), its second-person rate-limit notice, and a
+	// "Rate limit exceeded" error line. The bare phrase counts only when it
+	// opens a line: a Claude prompt error can carry the agent's final prose,
+	// and prose quotes other providers' "Rate limit exceeded" mid-sentence.
+	claudeRateLimitSignature = `(?im)\bAPI\s+Error:\s*(?:429\b|Request\s+rejected\s+\(429\))|\brate_limit_error\b|` +
+		`\b429\s+Too\s+Many\s+Requests\b|\byou(?:['’]ve|\s+have)?\s+hit\s+(?:your|the)\s+rate[\s_-]?limit\b|` +
+		`^\s*(?:Internal\s+error:\s*)?(?:API\s+Error:\s*)?rate[\s_-]?limit(?:ed)?\b[\s:]*(?:exceeded|reached)\b`
+	// claudeSubscriptionSignature is a missing or lapsed plan requirement, not
+	// any mention of a subscription.
+	claudeSubscriptionSignature = `(?i)\brequires?\s+(?:an?\s+)?(?:active\s+)?(?:paid\s+)?claude\s+` +
+		`(?:(?:pro|max|team|enterprise)\s+(?:or\s+(?:pro|max|team|enterprise)\s+)?)?subscription\b|` +
+		`\bsubscription\s+(?:has\s+)?(?:expired|is\s+required|required|is\s+inactive|is\s+not\s+active|not\s+active)\b|` +
+		`\bno\s+active\s+subscription\b`
+)
+
 var providerRules = map[string][]rule{
 	"claude-acp": {
-		mustRule("claude.stderr.quota.v1", `(?i)anthropic_quota_exceeded|credit balance|insufficient credits`, CodeQuotaLimited, ConfHigh),
+		mustRule("claude.stderr.quota.v1", `(?i)\banthropic_quota_exceeded\b|\bcredit\s+balance\s+is\s+too\s+low\b|\binsufficient\s+credits\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.session_limit.v1", `(?i)\b(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
-		mustRule("claude.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
+		mustRule("claude.stderr.rate.v1", claudeRateLimitSignature, CodeRateLimited, ConfHigh),
 		// A proxy can reject every account credential before it sends a request
 		// upstream. This is a hard credential condition; a retry or a switch
 		// back to the same proxy cannot repair it. Require proxy_error plus the
@@ -21,7 +55,7 @@ var providerRules = map[string][]rule{
 		// ordinary Anthropic auth messages as proxy failures.
 		mustRule("claude.proxy.credentials_refused.v1", `(?i)\bproxy_error\b[^\n]{0,512}\b(?:credentials?\s+(?:were\s+)?refused|oauth\s+entitlement)\b`, CodeMissingCredentials, ConfHigh),
 		mustRule("claude.stderr.auth.v1", `(?i)not authenticated|please log in|run `+"`"+`claude`+"`"+` to authenticate`, CodeAuthRequired, ConfHigh),
-		mustRule("claude.stderr.subscription.v1", `(?i)subscription`, CodeSubscriptionRequired, ConfMedium),
+		mustRule("claude.stderr.subscription.v1", claudeSubscriptionSignature, CodeSubscriptionRequired, ConfMedium),
 		mustRule("claude.stderr.model.v1", `(?i)model.*not found|unknown model`, CodeModelUnavailable, ConfHigh),
 		mustRule("claude.stderr.notinstalled.v1", `(?i)command not found|no such file`, CodeProviderNotConfigured, ConfMedium),
 	},
@@ -44,19 +78,19 @@ var providerRules = map[string][]rule{
 		// Explicit credit exhaustion takes precedence over generic payment wording.
 		mustRule("opencode.stderr.credit.v1", `(?i)\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?i)\bpayment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
-		mustRule("opencode.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
-		mustRule("opencode.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
+		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
+		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
 	},
 	"copilot-acp": {
 		mustRule("copilot.stderr.subscription.v1", `(?i)not entitled|subscription required|copilot is disabled`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("copilot.stderr.auth.v1", `(?i)please.*sign in|gh auth login`, CodeAuthRequired, ConfHigh),
-		mustRule("copilot.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
+		mustRule("copilot.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 	},
 	"amp-acp": {
 		mustRule("amp.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
-		mustRule("amp.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
-		mustRule("amp.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
+		mustRule("amp.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
+		mustRule("amp.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 	},
 }
 

@@ -576,6 +576,9 @@ func (e *Engine) ApplyFailureContext(
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
+	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
+		return RouteDecision{}, err
+	}
 	e.openCircuitForFailure(ctx, profile, currentCandidateID, failure)
 	e.observeLimit(ctx, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)

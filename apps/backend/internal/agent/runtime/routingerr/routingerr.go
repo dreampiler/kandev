@@ -124,8 +124,13 @@ type Error struct {
 	ClassifierRule   string
 	ExitCode         *int
 	ResetHint        *time.Time
-	RawExcerpt       string
-	RemediationPath  string // path to clean before retry; only set for codes that have a known remediation
+	// RenewalAt is the earliest instant the plan renewal day stated in an
+	// exhausted-capacity notice can have begun in any time zone. The notice
+	// names a calendar day without a zone, so this bound is only ever used to
+	// shorten a suspension, never to extend one.
+	RenewalAt       *time.Time
+	RawExcerpt      string
+	RemediationPath string // path to clean before retry; only set for codes that have a known remediation
 }
 
 // ClassForCode returns the policy class assigned by the provider-error
@@ -178,30 +183,42 @@ const statusOverloaded = 529
 // input; callers may dereference the result without a nil check.
 func Classify(in Input) *Error {
 	e := classify(in)
-	if e.ResetHint == nil && (e.Code == CodeQuotaLimited || e.Code == CodeRateLimited) {
-		// Providers such as codex state the retry time only in the human
-		// notice, not in a structured field. Deriving it here lets every
-		// consumer (short retry, circuit breaker) honor it uniformly.
-		observedAt := in.OccurredAt
-		if observedAt.IsZero() {
-			observedAt = time.Now()
-		}
-		text := in.Stderr + "\n" + in.Stdout
-		hint := parseResetHintAt(text, observedAt)
-		if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
-			hint = parseResetClockHintAt(text, observedAt)
-		}
-		if hint == nil {
-			// A notice may state only the remaining time ("will reset in 1 hour,
-			// 28 minutes") with no date, zone, or wall clock. The elapsed
-			// duration is unambiguous when anchored to the observation instant.
-			hint = parseRelativeResetHintAt(text, observedAt)
-		}
-		if hint != nil {
-			e.ResetHint = hint
-		}
-	}
+	deriveLimitTiming(e, in)
 	return e
+}
+
+// deriveLimitTiming reads the reset and renewal times a usage-limit notice
+// states in prose. Providers such as codex state the retry time only in the
+// human notice, not in a structured field; deriving it here lets every
+// consumer (short retry, circuit breaker) honor it uniformly.
+func deriveLimitTiming(e *Error, in Input) {
+	if e.Code != CodeQuotaLimited && e.Code != CodeRateLimited {
+		return
+	}
+	observedAt := in.OccurredAt
+	if observedAt.IsZero() {
+		observedAt = time.Now()
+	}
+	text := in.Stderr + "\n" + in.Stdout
+	if e.Code == CodeQuotaLimited {
+		e.RenewalAt = parseRenewalDayStart(text)
+	}
+	if e.ResetHint != nil {
+		return
+	}
+	hint := parseResetHintAt(text, observedAt)
+	if hint == nil && e.ClassifierRule == "claude.stderr.session_limit.v1" {
+		hint = parseResetClockHintAt(text, observedAt)
+	}
+	if hint == nil {
+		// A notice may state only the remaining time ("will reset in 1 hour,
+		// 28 minutes") with no date, zone, or wall clock. The elapsed
+		// duration is unambiguous when anchored to the observation instant.
+		hint = parseRelativeResetHintAt(text, observedAt)
+	}
+	if hint != nil {
+		e.ResetHint = hint
+	}
 }
 
 func classify(in Input) *Error {
