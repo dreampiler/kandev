@@ -1669,6 +1669,21 @@ func constructOfficeServices(
 		return runProcessorSvc, true
 	}
 
+	// Office agent runtime JWTs are signed with an HMAC key. When the operator
+	// has not supplied one, load or create a persisted key under the Kandev
+	// home so tokens survive a restart instead of being invalidated by a fresh
+	// ephemeral key. A persistence failure aborts Office startup rather than
+	// silently downgrading to an ephemeral key.
+	officeJWTKey := cfg.Office.JWTSigningKey
+	if officeJWTKey == "" {
+		resolved, err := resolveOfficeJWTSigningKey(cfg.ResolvedHomeDir(), log)
+		if err != nil {
+			log.Error("office jwt signing key unavailable; refusing to start Office with an ephemeral key", zap.Error(err))
+			return nil, false
+		}
+		officeJWTKey = resolved
+	}
+
 	services.Office = runProcessorSvc
 	log.Info("Office service constructed with all dependencies")
 
@@ -1689,7 +1704,7 @@ func constructOfficeServices(
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
-		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
+		agentRegistry, log, services, lifecycleMgr, officeJWTKey,
 	)
 	if services.OfficeSvcs != nil {
 		wireOfficeOverview(
@@ -2668,18 +2683,6 @@ func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
 		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
 }
 
-// newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
-// no signing key is configured, so the empty-key fallback can't silently
-// invalidate agent tokens on every restart in production.
-func newAgentAuth(jwtSigningKey string, log *logger.Logger) *officeagents.AgentAuth {
-	if jwtSigningKey == "" {
-		log.Warn("office.jwtSigningKey is empty; generating an ephemeral key. " +
-			"Agent JWTs will be invalidated on every backend restart. " +
-			"Set KANDEV_OFFICE_JWTSIGNINGKEY for stable tokens.")
-	}
-	return officeagents.NewAgentAuth(jwtSigningKey)
-}
-
 // buildOfficeFeatureServices creates the feature-level office services used by
 // the HTTP handler layer (office.RegisterAllRoutes). The monolithic
 // services.Office is passed for shared interfaces during the transition period.
@@ -2700,7 +2703,7 @@ func buildOfficeFeatureServices(
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
 	agentSvc.SetProfileStore(settingsRepo)
-	agentSvc.SetAuth(newAgentAuth(jwtSigningKey, log))
+	agentSvc.SetAuth(officeagents.NewAgentAuth(jwtSigningKey))
 	if services.Office != nil {
 		services.Office.SetAgentTokenMinter(agentSvc)
 	}
