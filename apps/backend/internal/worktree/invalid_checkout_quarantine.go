@@ -31,19 +31,23 @@ func (m *Manager) quarantineInvalidCheckout(path string) (string, error) {
 
 // shouldQuarantinePresentCheckout reports whether a present checkout must be
 // moved aside before recovery: it is not a valid checkout of the recorded
-// repository (an empty directory, a broken .git pointer, or a checkout of an
-// unrelated repository). The comparison reuses the Git common-directory
-// identity check, so a valid worktree of the recorded repository is never
-// quarantined.
+// repository (an empty directory, a broken .git pointer, or a structurally
+// healthy checkout of an unrelated repository). A checkout of the recorded
+// repository is never quarantined.
 //
-// Two present-invalid shapes keep their dedicated handling and are never
-// moved: a linked worktree whose well-formed pointer targets a missing admin
-// directory (repaired in place by the snapshot recovery path, preserving the
-// working tree), and a main checkout whose Git metadata is present but
-// incomplete (the existing fail-closed refusal). Managed-clone relocation also
-// keeps its dedicated recovery path.
+// Shapes with dedicated handling are never moved:
+//   - a linked worktree whose well-formed pointer targets a missing admin
+//     directory (repaired in place by the snapshot recovery path, preserving
+//     the working tree);
+//   - a main checkout whose Git metadata is present but incomplete (the
+//     existing fail-closed refusal);
+//   - a healthy linked checkout of a provider-managed repository, which the
+//     managed-clone relocation path owns. A managed-clone proof proves only
+//     that the repository is provider-managed, not that a relocation is
+//     pending, so an invalid checkout of such a repository is still
+//     quarantined.
 func shouldQuarantinePresentCheckout(slot *RecoverySlot) bool {
-	if slot == nil || slot.Worktree == nil || slot.Worktree.Path == "" || slot.CloneRelocation != nil {
+	if slot == nil || slot.Worktree == nil || slot.Worktree.Path == "" {
 		return false
 	}
 	path := slot.Worktree.Path
@@ -51,7 +55,8 @@ func shouldQuarantinePresentCheckout(slot *RecoverySlot) bool {
 	if repositoryPath == "" {
 		return false
 	}
-	if checkoutMatchesRepositoryIdentity(path, repositoryPath) {
+	pathInfo, err := os.Lstat(path)
+	if err != nil || !pathInfo.IsDir() || pathInfo.Mode()&os.ModeSymlink != 0 {
 		return false
 	}
 	gitInfo, err := os.Lstat(filepath.Join(path, ".git"))
@@ -60,16 +65,45 @@ func shouldQuarantinePresentCheckout(slot *RecoverySlot) bool {
 		// recoverable; any other error fails closed by leaving it in place.
 		return errors.Is(err, os.ErrNotExist)
 	}
-	if gitInfo.Mode().IsRegular() {
-		return inspectLinkedWorktree(path).class != linkedWorktreeMissingAdmin
-	}
 	if gitInfo.IsDir() {
-		// A main checkout is quarantined only when its Git metadata is
-		// complete; incomplete metadata keeps the existing refusal.
-		if _, err := os.Lstat(filepath.Join(path, ".git", "HEAD")); err != nil {
+		return shouldQuarantineMainCheckout(path, repositoryPath)
+	}
+	if !gitInfo.Mode().IsRegular() {
+		return false
+	}
+	return shouldQuarantineLinkedCheckout(path, repositoryPath, slot.CloneRelocation != nil)
+}
+
+// shouldQuarantineMainCheckout reports whether a main checkout (a real .git
+// directory) must be moved aside. A main checkout is reused when it belongs to
+// the recorded repository; complete metadata that does not belong to it is
+// foreign and recoverable. Incomplete metadata keeps the existing fail-closed
+// refusal.
+func shouldQuarantineMainCheckout(path, repositoryPath string) bool {
+	if checkoutMatchesRepositoryIdentity(path, repositoryPath) {
+		return false
+	}
+	if _, err := os.Lstat(filepath.Join(path, ".git", "HEAD")); err != nil {
+		return false
+	}
+	return true
+}
+
+// shouldQuarantineLinkedCheckout reports whether a linked-worktree pointer file
+// must be moved aside. A missing admin target is repaired in place, and a
+// healthy linked checkout of a provider-managed repository is owned by the
+// managed-clone relocation path. A malformed or ambiguous pointer is
+// recoverable once the managed task root validates.
+func shouldQuarantineLinkedCheckout(path, repositoryPath string, managed bool) bool {
+	switch inspectLinkedWorktree(path).class {
+	case linkedWorktreeMissingAdmin:
+		return false
+	case linkedWorktreeHealthy:
+		if managed {
 			return false
 		}
+		return !checkoutMatchesRepositoryIdentity(path, repositoryPath)
+	default:
 		return true
 	}
-	return false
 }

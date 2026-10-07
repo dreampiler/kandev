@@ -30,6 +30,11 @@ type RecoverySlot struct {
 	Worktree        *Worktree
 	CloneRelocation *ManagedCloneRelocationProof
 	missingCheckout *missingCheckoutInspection
+	// quarantinePresentCheckout marks a present checkout that is not a valid
+	// checkout of the recorded repository. Outer inspection records the intent
+	// read-only; only the claimed mutation path moves it aside, so a refusal
+	// elsewhere never mutates the checkout.
+	quarantinePresentCheckout bool
 }
 
 // ManagedRepositoryIdentity is the provider identity selected by the
@@ -517,6 +522,9 @@ func (m *Manager) recoverClaimedRecoverySlot(
 		return nil
 	}
 	if inspection.needsMissingCheckout {
+		if slot.quarantinePresentCheckout {
+			return m.quarantinePresentCheckoutSlot(ctx, req, slot, claim)
+		}
 		return m.restoreMissingCheckout(ctx, req, slot, claim)
 	}
 	if inspection.needsBranchReplacement {
@@ -542,6 +550,42 @@ func (m *Manager) recoverClaimedRecoverySlot(
 	}
 	slot.Worktree = recovered
 	return nil
+}
+
+// quarantinePresentCheckoutSlot moves a present but invalid checkout aside and
+// recreates the recorded checkout. It runs only in the claimed mutation path,
+// after the complete-inventory preflight, the durable recovery claim, the OS
+// operation locks, and the inspection locks are already held. The path is
+// validated through a pinned no-follow handle and the task-root ownership
+// marker immediately before the move; a failed move fails closed and leaves
+// the original checkout in place.
+func (m *Manager) quarantinePresentCheckoutSlot(
+	ctx context.Context,
+	req *RecoveryAdmissionRequest,
+	slot *RecoverySlot,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) error {
+	path := slot.Worktree.Path
+	handle, err := m.validateWorktreePathSafe(path)
+	if err != nil {
+		return recoveryAdmissionError(*req, err.Error())
+	}
+	if handle == nil {
+		return recoveryAdmissionError(*req, "cannot pin invalid checkout path before quarantine")
+	}
+	ownerErr := m.validateExistingWorktreePathOwner(path, slot.Worktree)
+	if ownerErr == nil {
+		ownerErr = handle.VerifyPath(filepath.Clean(path))
+	}
+	_ = handle.Close()
+	if ownerErr != nil {
+		return recoveryAdmissionError(*req, ownerErr.Error())
+	}
+	if _, err := m.quarantineInvalidCheckout(path); err != nil {
+		return recoveryAdmissionError(*req, err.Error())
+	}
+	slot.quarantinePresentCheckout = false
+	return m.restoreMissingCheckout(ctx, req, slot, claim)
 }
 
 func (m *Manager) relocateRecoverySlot(
@@ -881,16 +925,8 @@ func (m *Manager) inspectRecoverySlot(
 	} else if err != nil {
 		return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, fmt.Sprintf("cannot inspect persisted checkout: %v", err))
 	}
-	// A present checkout that is not a valid checkout of the recorded
-	// repository (an empty directory, a broken .git pointer, or an unrelated
-	// checkout) is moved aside inside the same task directory, preserving it,
-	// so the missing-checkout recovery materializes a fresh checkout at the
-	// recorded path. A failed move fails closed via recoverySlotError.
 	if shouldQuarantinePresentCheckout(slot) {
-		if _, err := m.quarantineInvalidCheckout(wt.Path); err != nil {
-			return recoverySlotInspection{}, recoverySlotError(taskID, wt.Path, err.Error())
-		}
-		return m.inspectMissingCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)
+		return m.inspectQuarantinePresentCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)
 	}
 	missing, inspectErr := m.inspectMissingCheckout(
 		ctx, taskID, ownershipGeneration, slot, true, allowBranchReplacement,
@@ -920,6 +956,33 @@ func (m *Manager) inspectMissingCheckoutSlot(
 	missing, err := m.inspectMissingCheckout(ctx, taskID, ownershipGeneration, slot, false, allowBranchReplacement)
 	if err != nil {
 		return recoverySlotInspection{}, err
+	}
+	slot.missingCheckout = &missing
+	return missingCheckoutRecoverySlotInspection(missing), nil
+}
+
+// inspectQuarantinePresentCheckoutSlot classifies a present but invalid
+// checkout as missing-checkout recovery work without touching the filesystem.
+// The checkout is inspected as if the recorded path were absent (its branch
+// plan and stale registration are resolved), and the slot records that the
+// checkpoint must be moved aside. The move itself happens only in the claimed
+// mutation path, so a refusal elsewhere never mutates the checkout.
+func (m *Manager) inspectQuarantinePresentCheckoutSlot(
+	ctx context.Context,
+	taskID string,
+	ownershipGeneration int64,
+	slot *RecoverySlot,
+	allowBranchReplacement bool,
+) (recoverySlotInspection, error) {
+	slot.quarantinePresentCheckout = true
+	missing, err := m.inspectMissingCheckout(ctx, taskID, ownershipGeneration, slot, false, allowBranchReplacement)
+	if err != nil {
+		slot.quarantinePresentCheckout = false
+		return recoverySlotInspection{}, err
+	}
+	if !missing.needsRecovery {
+		slot.quarantinePresentCheckout = false
+		return recoverySlotInspection{}, recoverySlotError(taskID, slot.Worktree.Path, "invalid present checkout has no recoverable branch identity")
 	}
 	slot.missingCheckout = &missing
 	return missingCheckoutRecoverySlotInspection(missing), nil
