@@ -102,6 +102,10 @@ func TestDynamicLaunchFailuresFromKandevAreNotProviderFailures(t *testing.T) {
 		errors.New("workspace reuse is unsafe: load task environment while waiting: context deadline exceeded"),
 		errors.New("validate agent command: agent command cannot be empty"),
 		errors.New("detect native OpenCode runtime: read native OpenCode version: exit status 1"),
+		errors.New("detect native OpenCode runtime: read native OpenCode version: exit status 1 (timed out after 10s)"),
+		errors.New(`detect native OpenCode runtime: read native OpenCode version: exit status 1; ` +
+			`output: "Error: connect ECONNREFUSED 127.0.0.1:4096 rate limit exceeded"`),
+		errors.New(`detect native OpenCode runtime: read native OpenCode version: unsupported output; output: "Too Many Requests"`),
 		errors.New("session ceiling refused seam 3 admission (ceiling)"),
 		errors.New(`failed to create execution: failed to create standalone instance: failed to create instance: ` +
 			`Post "http://127.0.0.1:41044/api/v1/instances": dial tcp 127.0.0.1:41044: i/o timeout`),
