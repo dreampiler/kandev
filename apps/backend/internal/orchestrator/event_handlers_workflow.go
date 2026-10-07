@@ -5824,6 +5824,9 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if !ok {
 		return queueDrainSkipped
 	}
+	if s.resumeAttemptStore().holdsInitialPromptForSession(sessionID) {
+		return queueDrainSkipped
+	}
 	s.pruneStaleChildStallAlerts(ctx, queueIdentity)
 	dispatched, autoRun, err := s.reserveAndDispatchQueueHead(ctx, queueIdentity)
 	if err != nil {

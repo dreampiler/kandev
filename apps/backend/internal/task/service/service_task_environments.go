@@ -324,6 +324,11 @@ func (s *Service) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string)
 //   - No environment → ErrNoEnvironment
 //   - Any session on the task is actively running → ErrSessionRunning
 //
+// A creating placeholder is supported: it owns no physical resources yet, so
+// teardown is a no-op and the row is deleted, letting the next launch provision
+// a fresh workspace. This is the operator path for a task environment stuck in
+// creating whose materialization owner is gone.
+//
 // Cleanup is best-effort per resource. If any resource fails to destroy, the
 // TaskEnvironment row is preserved so the user can retry. Success deletes the row.
 //

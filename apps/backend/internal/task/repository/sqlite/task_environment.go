@@ -919,6 +919,113 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	return tx.Commit()
 }
 
+// staleCreatingEnvironmentListQuery returns creating environments whose
+// materialization owner claimed them (materialization_session_id non-empty).
+const staleCreatingEnvironmentListQuery = `
+	SELECT id, task_id, materialization_session_id, created_at, updated_at
+	FROM task_environments
+	WHERE status = ? AND COALESCE(materialization_session_id, '') <> '' AND created_at < ?`
+
+// ListStaleCreatingTaskEnvironments returns creating environments whose owner
+// has not advanced the row into a physical workspace before createdBefore. A
+// creating environment is owned while materialization_session_id is non-empty;
+// the caller decides whether the owner is still actively materializing.
+func (r *Repository) ListStaleCreatingTaskEnvironments(
+	ctx context.Context, createdBefore time.Time,
+) ([]*models.TaskEnvironment, error) {
+	rows, err := r.ro.QueryContext(
+		ctx, r.ro.Rebind(staleCreatingEnvironmentListQuery),
+		string(models.TaskEnvironmentStatusCreating), createdBefore,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var environments []*models.TaskEnvironment
+	for rows.Next() {
+		env := &models.TaskEnvironment{Status: models.TaskEnvironmentStatusCreating}
+		if err := rows.Scan(&env.ID, &env.TaskID, &env.MaterializationSessionID, &env.CreatedAt, &env.UpdatedAt); err != nil {
+			return nil, err
+		}
+		environments = append(environments, env)
+	}
+	return environments, rows.Err()
+}
+
+// FailStaleCreatingTaskEnvironment marks a creating environment failed when it
+// still belongs to materializationSessionID, predates createdBefore, and its
+// owner is not an actively materializing session. The owner counts as active
+// only while its session is STARTING/RUNNING AND an executors_running row
+// exists; an owner that is waiting, terminal, missing, or never launched does
+// not hold the environment. Returns whether a row changed — a concurrent
+// finalize or launch that already advanced the environment leaves it untouched.
+// A shared-group environment's materialized pointer is cleared in the same
+// transaction so the group can elect a fresh materializer.
+func (r *Repository) FailStaleCreatingTaskEnvironment(
+	ctx context.Context,
+	environmentID, materializationSessionID string,
+	createdBefore time.Time,
+) (bool, error) {
+	if environmentID == "" || materializationSessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	now := r.nowUTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ? AND materialization_session_id = ? AND created_at < ?
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_sessions s
+			JOIN executors_running er ON er.session_id = s.id
+			WHERE s.id = task_environments.materialization_session_id
+			  AND s.state IN (?, ?)
+		  )
+	`), string(models.TaskEnvironmentStatusFailed), now,
+		environmentID, string(models.TaskEnvironmentStatusCreating), materializationSessionID, createdBefore,
+		string(models.TaskSessionStateStarting), string(models.TaskSessionStateRunning))
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET materialized_environment_id = '', updated_at = ?
+		WHERE materialized_environment_id = ?
+	`), now, environmentID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DeleteTaskEnvironmentsByTask deletes all task environments for a given task.
 func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)
