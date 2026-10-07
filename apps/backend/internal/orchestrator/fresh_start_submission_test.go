@@ -421,6 +421,14 @@ func assertFreshStartSubmissionReplay(t *testing.T, scenario freshStartSubmissio
 		launchAgentFunc: func(_ context.Context, request *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			launchCount++
 			launchDescription = request.TaskDescription
+			// A real launch registers the new runtime before the replay prompt is
+			// dispatched; prompt acceptance checks the registered execution.
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: sessionID, SessionID: sessionID, TaskID: taskID,
+				AgentExecutionID: "fresh-start-submission-execution", Status: "ready",
+			}); err != nil {
+				return nil, err
+			}
 			return &executor.LaunchAgentResponse{AgentExecutionID: "fresh-start-submission-execution"}, nil
 		},
 		startAgentProcessFunc: func(context.Context, string) error {

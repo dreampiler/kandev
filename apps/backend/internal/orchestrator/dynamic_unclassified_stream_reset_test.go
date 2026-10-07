@@ -365,8 +365,10 @@ func TestUncapturedResetReadFailureRetainsManualRecoveryFence(t *testing.T) {
 	}
 
 	fixture.svc.beginInteractivePromptAttempt(fixture.ctx, fixture.sessionID, "execution-two", true)
-	if repository.sessionReads != 2 {
-		t.Fatalf("new-prompt retry session reads = %d, want a second failed read", repository.sessionReads)
+	// The retry's failed reset read, plus the new attempt's route-generation capture.
+	if repository.sessionReads != 3 {
+		t.Fatalf("new-prompt retry session reads = %d, want a second failed reset read and the attempt capture",
+			repository.sessionReads)
 	}
 	if _, ok := fixture.svc.pendingDynamicStreakResets.Load(fixture.sessionID); !ok {
 		t.Fatal("failed new-prompt retry discarded the uncaptured reset intent")
@@ -442,6 +444,8 @@ func TestOwnedSuccessfulCompletionClearsUncapturedPriorReset(t *testing.T) {
 			fixture.svc.repo = repository
 			fixture.barrier.snapshotCalls = 0
 			completed := fixture.event("execution-two", 3)
+			// Starting the attempt records its route generation; count only the completion's reads.
+			repository.sessionReads, repository.taskReads, fixture.barrier.snapshotCalls = 0, 0, 0
 			cleared := fixture.svc.clearDynamicUnclassifiedStreakForCompletion(fixture.ctx, completed)
 			if ownsPrompt {
 				assertCurrentCompletionClearedReset(t, fixture, repository, cleared)
@@ -587,7 +591,10 @@ func TestCompletionResetPersistenceFailureRetainsPendingIntent(t *testing.T) {
 	fixture.svc.repo = repository
 	fixture.barrier.snapshotCalls = 0
 	fixture.barrier.snapshotError = errors.New("completion reset persistence failed")
-	if fixture.svc.clearDynamicUnclassifiedStreakForCompletion(fixture.ctx, fixture.event("execution-two", 2)) {
+	completed := fixture.event("execution-two", 2)
+	// Starting the attempt records its route generation; count only the completion's reads.
+	repository.sessionReads, repository.taskReads, fixture.barrier.snapshotCalls = 0, 0, 0
+	if fixture.svc.clearDynamicUnclassifiedStreakForCompletion(fixture.ctx, completed) {
 		t.Fatal("completion reported success after its route reset write failed")
 	}
 	if repository.sessionReads != 1 || repository.taskReads != 1 || fixture.barrier.snapshotCalls != 1 {

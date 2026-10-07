@@ -478,6 +478,7 @@ func (s *Service) persistPendingDynamicStreakReset(
 	if stale || err != nil {
 		return stale, err
 	}
+	s.recordDynamicResourceSuccess(ctx, session, snapshot)
 	task, err := s.repo.GetTask(ctx, snapshot.event.TaskID)
 	if err != nil {
 		return false, err

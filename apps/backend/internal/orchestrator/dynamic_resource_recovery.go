@@ -5,34 +5,35 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
-// recordDynamicResourceOutput clears the suspension history of the candidate
-// whose current attempt produced its first real output. Each attempt records
-// at most once, so streaming chunks do not repeat the write.
-func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, executionID string, promptGeneration uint64) {
-	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
-		return
-	}
-	attempt, ok := s.promptAttemptForSession(sessionID)
-	if !ok {
+// recordDynamicResourceSuccess clears the suspension history of the candidate
+// whose current attempt produced real output. It runs where the deferred
+// streak reset has already loaded the session, so raw stream callbacks stay
+// free of repository reads. Each attempt records at most once.
+func (s *Service) recordDynamicResourceSuccess(
+	ctx context.Context,
+	session *models.TaskSession,
+	snapshot pendingDynamicStreakResetSnapshot,
+) {
+	attempt := snapshot.attempt
+	if s.profileExecutionResolver == nil || attempt == nil || session == nil ||
+		session.ExecutionProfileID == "" || session.RouteGeneration <= 0 {
 		return
 	}
 	attempt.mu.Lock()
 	claim := attempt.dynamic && !attempt.resourceSuccessClaimed &&
-		attempt.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
+		attempt.promptIdentityMatchesForClearLocked(snapshot.event.AgentExecutionID, snapshot.event.PromptGeneration) &&
+		attempt.outputObservedLocked(snapshot.event)
 	if claim {
 		attempt.resourceSuccessClaimed = true
 	}
 	attempt.mu.Unlock()
-	if !claim {
-		return
+	if claim {
+		s.profileExecutionResolver.RecordResourceSuccess(ctx, session.ExecutionProfileID)
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.ExecutionProfileID == "" || session.RouteGeneration <= 0 {
-		return
-	}
-	s.profileExecutionResolver.RecordResourceSuccess(ctx, session.ExecutionProfileID)
 }
 
 // observeDynamicResourceWait schedules a fresh selection for a route that is
