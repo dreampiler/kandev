@@ -41,10 +41,11 @@ func (m *Manager) quarantineInvalidCheckout(path string) (string, error) {
 //     the working tree);
 //   - a main checkout whose Git metadata is present but incomplete (the
 //     existing fail-closed refusal);
-//   - a healthy linked checkout of a provider-managed repository, which the
+//   - a healthy linked checkout that positively belongs to the recorded
+//     repository or to a managed-clone relocation source, which the
 //     managed-clone relocation path owns. A managed-clone proof proves only
 //     that the repository is provider-managed, not that a relocation is
-//     pending, so an invalid checkout of such a repository is still
+//     pending, so a healthy checkout that belongs to neither is still
 //     quarantined.
 func shouldQuarantinePresentCheckout(slot *RecoverySlot) bool {
 	if slot == nil || slot.Worktree == nil || slot.Worktree.Path == "" {
@@ -71,7 +72,7 @@ func shouldQuarantinePresentCheckout(slot *RecoverySlot) bool {
 	if !gitInfo.Mode().IsRegular() {
 		return false
 	}
-	return shouldQuarantineLinkedCheckout(path, repositoryPath, slot.CloneRelocation != nil)
+	return shouldQuarantineLinkedCheckout(path, repositoryPath, slot.CloneRelocation)
 }
 
 // shouldQuarantineMainCheckout reports whether a main checkout (a real .git
@@ -90,20 +91,51 @@ func shouldQuarantineMainCheckout(path, repositoryPath string) bool {
 }
 
 // shouldQuarantineLinkedCheckout reports whether a linked-worktree pointer file
-// must be moved aside. A missing admin target is repaired in place, and a
-// healthy linked checkout of a provider-managed repository is owned by the
-// managed-clone relocation path. A malformed or ambiguous pointer is
-// recoverable once the managed task root validates.
-func shouldQuarantineLinkedCheckout(path, repositoryPath string, managed bool) bool {
+// must be moved aside. A missing admin target is repaired in place. A
+// structurally healthy checkout of the recorded repository, or of a positively
+// established managed-clone relocation source, is preserved. A healthy checkout
+// that belongs to neither is foreign and recoverable.
+func shouldQuarantineLinkedCheckout(path, repositoryPath string, proof *ManagedCloneRelocationProof) bool {
 	switch inspectLinkedWorktree(path).class {
 	case linkedWorktreeMissingAdmin:
 		return false
 	case linkedWorktreeHealthy:
-		if managed {
+		matches, resolved := checkoutIdentityMatches(path, repositoryPath)
+		if matches {
 			return false
 		}
-		return !checkoutMatchesRepositoryIdentity(path, repositoryPath)
+		if managedCheckoutMatchesSource(path, proof) {
+			return false
+		}
+		if proof == nil {
+			return true
+		}
+		// Managed: move only on positive evidence that the recorded repository
+		// identity resolved and differs. An unavailable comparison fails closed
+		// and leaves the checkout for the existing managed path to refuse.
+		return resolved
 	default:
 		return true
 	}
+}
+
+// managedCheckoutMatchesSource reports whether the checkout at path belongs to
+// a managed-clone relocation source named by the proof. A proof only proves the
+// repository is provider-managed, not that a relocation is pending, so the
+// recorded source identities decide rather than the proof's presence.
+func managedCheckoutMatchesSource(path string, proof *ManagedCloneRelocationProof) bool {
+	if proof == nil {
+		return false
+	}
+	root, err := canonicalExistingPath(proof.ManagedRoot)
+	if err != nil {
+		return false
+	}
+	destination, _ := canonicalExistingPath(proof.ExpectedDestinationPath)
+	for _, source := range managedCloneSourceCandidates(root, destination, proof) {
+		if matches, _ := checkoutIdentityMatches(path, source); matches {
+			return true
+		}
+	}
+	return false
 }

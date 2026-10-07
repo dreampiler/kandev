@@ -168,19 +168,37 @@ func managedCloneRelocationSource(
 	taskID, root, destination, worktreeCommon string,
 	proof *ManagedCloneRelocationProof,
 ) (string, error) {
-	for _, candidate := range []string{proof.ExpectedSourcePath, proof.LegacyOwnerNameSourcePath} {
-		if strings.TrimSpace(candidate) == "" {
-			continue
-		}
-		canonical, err := canonicalExistingPath(candidate)
-		if err != nil || !pathWithin(root, canonical) || filepath.Clean(canonical) == filepath.Clean(destination) {
-			continue
-		}
+	for _, canonical := range managedCloneSourceCandidates(root, destination, proof) {
 		if filepath.Clean(worktreeCommon) == filepath.Join(canonical, ".git") {
 			return canonical, nil
 		}
 	}
 	return "", managedCloneRelocationError(taskID, "worktree does not belong to the expected managed source clone")
+}
+
+// managedCloneSourceCandidates returns the canonical source-clone paths named
+// by the proof that are inside the managed root and distinct from the
+// destination. Classification and relocation share this so they agree on which
+// checkouts a legitimate managed source owns.
+func managedCloneSourceCandidates(root, destination string, proof *ManagedCloneRelocationProof) []string {
+	if proof == nil {
+		return nil
+	}
+	var candidates []string
+	for _, candidate := range []string{proof.ExpectedSourcePath, proof.LegacyOwnerNameSourcePath} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		canonical, err := canonicalExistingPath(candidate)
+		if err != nil || !pathWithin(root, canonical) {
+			continue
+		}
+		if destination != "" && filepath.Clean(canonical) == filepath.Clean(destination) {
+			continue
+		}
+		candidates = append(candidates, canonical)
+	}
+	return candidates
 }
 
 func verifyRecordedManagedCloneSource(source, worktreeCommon string, proof *ManagedCloneRelocationProof) error {
