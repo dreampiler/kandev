@@ -2245,11 +2245,15 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 		}
 	}
 	if env == nil {
-		inherited, inheritedErr := e.resolveInheritedTaskEnvironment(ctx, task, session)
+		inherited, retiredBinding, inheritedErr := e.resolveInheritedTaskEnvironment(ctx, task, session)
 		if inheritedErr != nil {
 			return nil, replaced, inheritedErr
 		}
-		return inherited, replaced, nil
+		// A persisted binding that names an already-retired environment is the
+		// same replacement checkpoint as a retirement performed by this call:
+		// the task has no active canonical owner, so the resume must reserve a
+		// fresh one before it materializes a physical worktree.
+		return inherited, replaced || retiredBinding, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
 		session.TaskEnvironmentID = env.ID
@@ -2266,37 +2270,42 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 // tries to CREATE a new row using the inherited ID — which already exists,
 // producing "UNIQUE constraint failed: task_environments.id".
 //
+// It also reports whether the persisted binding named an already-retired row
+// (no active canonical owner remains). That is a replacement checkpoint: the
+// caller must reserve a fresh owner before materializing a worktree.
+//
 // Unlike the launch path (executor_execute.go), which hard-errors with
 // ErrWorkspaceReuseUnsafe when the referenced row is absent, resume falls
-// through to (nil, nil): the ID is then free, so the create path produces a
-// valid fresh environment rather than a failing resume. A missing row surfaces
-// as ErrTaskEnvironmentNotFound, which is a miss, not a fatal error; any other
-// lookup error still propagates.
-func (e *Executor) resolveInheritedTaskEnvironment(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+// through to (nil, false, nil): the ID is then free, so the create path
+// produces a valid fresh environment rather than a failing resume. A missing
+// row surfaces as ErrTaskEnvironmentNotFound, which is a miss, not a fatal
+// error; any other lookup error still propagates.
+func (e *Executor) resolveInheritedTaskEnvironment(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, bool, error) {
 	if session.TaskEnvironmentID == "" {
-		return nil, nil
+		return nil, false, nil
 	}
 	inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 	if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
-		return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+		return nil, false, fmt.Errorf("lookup inherited task environment: %w", inhErr)
 	}
 	// A retired row is inactive and must never be reused; fall through so a
 	// fresh environment is materialized. The stale binding is cleared so
 	// persistTaskEnvironment does not attempt to create over it.
-	if inherited != nil && inherited.IsRetired() {
+	retiredBinding := inherited != nil && inherited.IsRetired()
+	if retiredBinding {
 		session.TaskEnvironmentID = ""
 		inherited = nil
 	}
 	if inherited != nil {
 		if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
-			return nil, err
+			return nil, retiredBinding, err
 		}
-		return inherited, nil
+		return inherited, retiredBinding, nil
 	}
 	if taskUsesInheritedWorkspace(task) {
-		return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
+		return nil, retiredBinding, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
 	}
-	return nil, nil
+	return nil, retiredBinding, nil
 }
 
 // reserveReplacementTaskEnvironment creates the fresh canonical environment
