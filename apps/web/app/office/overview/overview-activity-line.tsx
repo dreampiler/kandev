@@ -144,7 +144,7 @@ function FailureBuckets({
               data-testid="overview-failure-sample"
             >
               <span className="tabular-nums text-muted-foreground">{sample.count}</span>
-              <span className="min-w-0 break-words text-muted-foreground/80" title={sample.kind}>
+              <span className="min-w-0 break-words text-muted-foreground" title={sample.kind}>
                 {sample.kind}
               </span>
             </span>
