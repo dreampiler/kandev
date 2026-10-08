@@ -82,7 +82,7 @@ export function OverviewNeedsHuman({ items }: { items: OverviewHumanItem[] }) {
       action={
         <Link
           href={needsYouEnabled ? NEEDS_YOU_INBOX_HREF : "/office/inbox"}
-          className="text-xs text-primary hover:underline"
+          className="text-xs text-primary hover:underline dark:text-primary-foreground"
         >
           {t("office:overviewOpenInbox")}
         </Link>
@@ -279,7 +279,7 @@ function EventKindChips({
             onClick={() => onSelect(kind)}
             className={`min-h-11 cursor-pointer rounded-full border px-2.5 text-xs sm:min-h-0 ${
               active
-                ? "border-primary bg-primary/10 text-foreground"
+                ? "border-primary bg-primary text-primary-foreground"
                 : "border-border text-muted-foreground"
             }`}
             data-testid={`overview-event-kind-${kind}`}
