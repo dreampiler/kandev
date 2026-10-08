@@ -588,3 +588,16 @@ func errorKind(msg string) string {
 	}
 	return truncateRunes(line, 80)
 }
+
+// failureSampleKind reduces an error message to the agent's own first line for
+// the failure breakdown. Unlike errorKind it keeps the whole line: the
+// breakdown exists to show the agent's words verbatim, so no display cap is
+// applied here.
+func failureSampleKind(msg string) string {
+	for _, line := range strings.Split(msg, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
+}
