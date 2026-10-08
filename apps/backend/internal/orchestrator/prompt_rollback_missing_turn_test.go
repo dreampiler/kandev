@@ -109,7 +109,7 @@ func TestRollbackMissingOwnTurnPreservesReplacementOwner(t *testing.T) {
 			if scenario == "accepted_provider" {
 				// Exercise the real accepted-result boundary, not an independently set
 				// rollback flag. A missing DB turn does not invalidate accepted work.
-				_, err = svc.handlePromptDispatchFailure(ctx, tid, sid, "accepted long task", false, false, nil, rollback, true, true, errPromptAdmissionRejected, false, "", "", "")
+				_, err = svc.handlePromptDispatchFailure(ctx, tid, sid, "accepted long task", false, false, nil, rollback, true, true, errPromptAdmissionRejected, false, "", "", "", false, nil, false)
 				require.ErrorIs(t, err, errPromptAdmissionRejected)
 			} else {
 				svc.rollbackPromptClaim(ctx, tid, sid, rollback)
