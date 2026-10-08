@@ -11,35 +11,51 @@ var agentProseAboutLimits = []string{
 	"The child's sessions are all persistently rate-limited free models.",
 	"The newest session (05:48) died on rate limit, so I moved the card to hold.",
 	"The plan document hit its size quota earlier today; I trimmed old sections.",
+	"The plan document ran out of quota earlier today.",
 	"This step does not need a subscription; it only reads the board.",
 	"I checked the billing page: the credit balance is fine for this month.",
+	"The child reports that its subscription has expired.",
+	"The OpenCode task quoted `payment required`.",
+	"The Copilot task quoted `subscription required`.",
+	"The child reports that it is not entitled to Copilot.",
+	"The child reports that its other provider has insufficient credits.",
+	"The Claude child says, `You've hit your session limit`.",
+	"The OpenCode child reports that a daily usage limit was reached.",
+	"The OpenCode child reports insufficient credits.",
 }
 
-// claudeProseQuotingOtherProviders is Claude prose that quotes another
-// provider's exact error lines mid-sentence. A Claude prompt error can carry
-// the agent's final text, and this text names no Anthropic failure.
-var claudeProseQuotingOtherProviders = []string{
+// agentProseQuotingOtherProviders is agent prose that quotes another
+// provider's exact error signatures mid-sentence. A prompt error can carry
+// the agent's final text, and this text does not name its own provider failure.
+var agentProseQuotingOtherProviders = []string{
 	"Blocked: six child tasks failed when resuming their sessions (`AI_APICallError: Not Found`, `Rate limit exceeded`) and stopped without a completion signal.",
 	"Child session log: Agent encountered an error: AI_APICallError: Rate limit exceeded. Please try again later",
 	"The OpenCode child reported `AI_APICallError: Go usage limit exceeded` and another child reported `credit limit reached`.",
+	"The child sent too many requests while it retried.",
+	"The child reported rate_limit_exceeded and RESOURCE_EXHAUSTED.",
+	"The child reported insufficient_quota for its account.",
+	`The child reported {"code":-32603,"message":"Internal error","data":{"codexErrorInfo":"usageLimitExceeded"}}.`,
 }
 
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.4
 func TestClassify_AgentProseAboutLimitsIsNotAProviderLimit(t *testing.T) {
 	resetInjection()
-	for _, text := range claudeProseQuotingOtherProviders {
-		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "claude-acp", Stderr: text})
-		switch got.Code {
-		case CodeRateLimited, CodeQuotaLimited, CodeSubscriptionRequired:
-			t.Fatalf("claude prose %q classified as %s by %s", text, got.Code, got.ClassifierRule)
-		}
-	}
-	for _, provider := range []string{"claude-acp", "opencode-acp", "copilot-acp", "amp-acp"} {
+	for _, provider := range []string{"claude-acp", "codex-acp", "opencode-acp", "copilot-acp", "amp-acp"} {
 		for _, text := range agentProseAboutLimits {
 			for _, phase := range []Phase{PhasePromptSend, PhaseStreaming} {
 				got := Classify(Input{Phase: phase, ProviderID: provider, Stderr: text})
 				switch got.Code {
 				case CodeRateLimited, CodeQuotaLimited, CodeSubscriptionRequired:
 					t.Fatalf("%s prose %q classified as %s by %s", provider, text, got.Code, got.ClassifierRule)
+				}
+			}
+		}
+		for _, text := range agentProseQuotingOtherProviders {
+			for _, phase := range []Phase{PhasePromptSend, PhaseStreaming} {
+				got := Classify(Input{Phase: phase, ProviderID: provider, Stderr: text})
+				switch got.Code {
+				case CodeRateLimited, CodeQuotaLimited, CodeSubscriptionRequired:
+					t.Fatalf("%s quoted prose %q classified as %s by %s", provider, text, got.Code, got.ClassifierRule)
 				}
 			}
 		}
