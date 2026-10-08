@@ -63,6 +63,12 @@ const (
 // applied capacity change, or a failed launch signals a pass immediately, and a
 // direct caller that is not the sweeper (Send Now, startup recovery) always
 // dispatches.
+//
+// ceilingReplayTaskTimeout bounds one task's replay inside a sweep pass. It
+// is long enough for a normal launch and short enough that one wedged replay
+// cannot hold the pass's remaining tasks for the whole stall interval.
+const ceilingReplayTaskTimeout = 30 * time.Second
+
 func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
@@ -102,7 +108,54 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 		}
 	}
 	for _, task := range tasks {
+		s.replayOneDeferredCeilingLaunchGuarded(ctx, task, allowDispatch)
+	}
+	s.logger.Zap().Info("ceiling retry sweep pass completed",
+		zap.Int("tasks", len(tasks)), zap.Bool("periodic", paced))
+}
+
+// replayOneDeferredCeilingLaunchGuarded runs one task's replay with a
+// per-task timeout so a replay wedged on a blocking lock or wait cannot hold
+// the pass's remaining tasks. The timeout bounds the pass's wait: an
+// overrunning replay keeps running in the background and its durable record
+// stays queued, so the launch is retried — never dropped — by a later pass.
+// Its claim lease keeps a following pass from dispatching the same record
+// twice.
+func (s *Service) replayOneDeferredCeilingLaunchGuarded(
+	ctx context.Context, task *models.Task, allowDispatch func(models.CeilingDeferral) bool,
+) {
+	if task == nil || task.ID == "" {
+		return
+	}
+	taskID := task.ID
+	s.logger.Zap().Info("ceiling retry sweep replay started",
+		zap.String("task_id", taskID), zap.Bool("periodic", isPeriodicCeilingSweep(ctx)))
+	timeout := s.ceilingReplayTaskTimeout
+	if timeout <= 0 {
 		s.retryOneDeferredCeilingLaunch(ctx, task, allowDispatch)
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.retryOneDeferredCeilingLaunch(ctx, task, allowDispatch)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		// The sweep itself is stopping. The pass no longer waits for this
+		// replay, so stopping the backend cannot hang on a wedged launch;
+		// the replay keeps its record and its claim, and a later pass
+		// retries it.
+		s.logger.Zap().Warn("ceiling retry sweep pass cancelled while a replay was in flight",
+			zap.String("task_id", taskID))
+	case <-timer.C:
+		// The pass no longer waits for this replay: its wedged goroutine
+		// keeps the record and the claim, and a later pass retries it.
+		s.logger.Zap().Warn("ceiling retry sweep replay exceeded its per-task budget; continuing with the next task",
+			zap.String("task_id", taskID), zap.Duration("timeout", timeout))
 	}
 }
 
@@ -194,6 +247,12 @@ func (s *Service) retryOneDeferredCeilingLaunch(
 		return
 	}
 	deferral = claim.deferral
+	// Record the attempt after a successful claim: the stall clock tracks
+	// records the sweep actually acquired, so a head wedged inside its
+	// replay stops refreshing and yields precedence after the stall
+	// interval, while a head awaiting capacity it has never claimed keeps
+	// a zero clock and holds its place.
+	s.deferredRetrySchedule.markAttempt(task.ID, ceilingDeferralIdentityKey(deferral))
 	ctx = withCeilingDispatchClaim(ctx, claim)
 
 	defer claim.releaseIfHeld(ctx)
@@ -282,6 +341,7 @@ func (s *Service) deferredCeilingRetryAllowed(
 		// saturated, so re-running admission cannot change the outcome. Leave
 		// the record exactly as stored for the pass that follows a release, a
 		// capacity change, or the next tick that sees free capacity.
+		s.logCeilingReplayPause(ctx, taskID, deferral, "lane_saturated", "the record's lane has no free capacity in this pass")
 		return false
 	}
 	if isPeriodicCeilingSweep(ctx) &&

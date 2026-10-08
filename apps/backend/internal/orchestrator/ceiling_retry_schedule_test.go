@@ -76,6 +76,41 @@ func TestDeferredRetrySchedule_ObserveRebindsAReplacedRecord(t *testing.T) {
 	require.False(t, schedule.failureWaiting("task-a", "start|t1"))
 }
 
+// TestDeferredRetrySchedule_ProgressStallIsAttemptClocked pins fix B's clock:
+// the sweep records when it acquired a record for replay, and a head whose
+// record has not been acquired within the stall interval is stalled. A record
+// the sweep never acquired is not stalled; a replaced record restarts fresh.
+func TestDeferredRetrySchedule_ProgressStallIsAttemptClocked(t *testing.T) {
+	schedule := newDeferredRetrySchedule()
+	now := time.Now()
+	schedule.now = func() time.Time { return now }
+
+	require.False(t, schedule.progressStalled("task-a", "start|t0"),
+		"a record the sweep never attempted is not stalled")
+
+	schedule.markAttempt("task-a", "start|t0")
+	require.False(t, schedule.progressStalled("task-a", "start|t0"),
+		"a just-attempted record is live")
+	require.False(t, schedule.progressStalled("task-a", "start|t1"),
+		"a replaced identity is a different launch")
+
+	now = now.Add(ceilingProgressStallInterval)
+	require.False(t, schedule.progressStalled("task-a", "start|t0"),
+		"exactly one interval is still live")
+
+	now = now.Add(time.Second)
+	require.True(t, schedule.progressStalled("task-a", "start|t0"),
+		"a head unattempted past the stall interval is stalled")
+
+	// A fresh attempt clears the stall: the sweeper is reaching it again.
+	schedule.markAttempt("task-a", "start|t0")
+	require.False(t, schedule.progressStalled("task-a", "start|t0"))
+
+	// A replaced record restarts fresh, not stalled on its predecessor's clock.
+	schedule.observe("task-a", "start|t1")
+	require.False(t, schedule.progressStalled("task-a", "start|t1"))
+}
+
 // TestCeilingSweep_PeriodicBackstopOnlyDispatchesWhenALaneIsFree pins the
 // change-gated backstop: while the lane is saturated a periodic pass does not
 // re-run admission, and once capacity frees the periodic pass itself retries the

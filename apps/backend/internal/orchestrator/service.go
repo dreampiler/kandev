@@ -1216,6 +1216,12 @@ type Service struct {
 	// ceiling_retry_schedule.go.
 	deferredRetrySchedule *deferredRetrySchedule
 
+	// ceilingReplayTaskTimeout, when positive, bounds one task's replay
+	// inside a sweep pass so a wedged replay cannot hold the pass's
+	// remaining tasks. Zero disables the guard (tests). Production sets it
+	// from ceilingReplayTaskTimeout.
+	ceilingReplayTaskTimeout time.Duration
+
 	// launchCredentialReminter re-mints short-lived Office runtime
 	// credentials immediately before a launch that carries Office run
 	// identity, so the token names the session the launch actually uses.
@@ -1826,6 +1832,7 @@ func NewService(
 		idleReaper:                   newIdleSessionReaper(),
 		ceilingSweeper:               newCeilingSweeper(),
 		deferredRetrySchedule:        newDeferredRetrySchedule(),
+		ceilingReplayTaskTimeout:     ceilingReplayTaskTimeout,
 		sessionCeiling: newSessionCeilingForRepo(repo, SessionCeilingCapacity{
 			WorkerCeiling:     cfg.SessionCapacity,
 			ControlCeiling:    cfg.ControlSessionCapacity,
