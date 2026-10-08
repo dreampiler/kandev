@@ -798,12 +798,35 @@ func (m *Manager) resolveOpenCodeCommandOptions(
 	}
 	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
 	if err != nil {
-		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", err)
+		return m.fallbackOpenCodeCommandOptions(err, selected, options)
 	}
 	if !found {
 		return agents.CommandOptions{}, errors.New("selected native OpenCode runtime is unavailable")
 	}
 	options.NativeRuntimeVersion = native.Version
+	return options, nil
+}
+
+// fallbackOpenCodeCommandOptions keeps a native OpenCode launch alive when the
+// version probe fails transiently. The native command's arguments are identical
+// for every supported major, so the selected family's known version is a safe
+// substitute; an unsupported major stays fail-closed, and a missing or
+// unparseable selected version preserves the probe error.
+func (m *Manager) fallbackOpenCodeCommandOptions(
+	probeErr error,
+	selected agents.OpenCodeRuntimeResolution,
+	options agents.CommandOptions,
+) (agents.CommandOptions, error) {
+	if agents.IsUnsupportedOpenCodeMajorError(probeErr) {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	if _, argErr := agents.OpenCodeACPArgsForVersion(selected.Version); argErr != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	m.logger.Warn("native OpenCode version probe failed; using the selected runtime version",
+		zap.String("selected_version", selected.Version),
+		zap.Error(probeErr))
+	options.NativeRuntimeVersion = selected.Version
 	return options, nil
 }
 
