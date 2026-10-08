@@ -1161,6 +1161,97 @@ func (r *Repository) FailStaleCreatingTaskEnvironment(
 	return true, nil
 }
 
+// reclaimFailedWorkspaceMaterializationSQL re-elects sessionID as the
+// materialization owner of a failed environment that never materialized. The
+// WHERE clause is the safety fence: only an ownerless failed row with no
+// workspace path, no container or sandbox handle, and no live repository
+// inventory can be reclaimed, because such a row carries no physical workspace
+// to protect. Stale container handles and secret references are cleared in the
+// same write so the re-elected launch provisions fresh ones.
+const reclaimFailedWorkspaceMaterializationSQL = `
+	UPDATE task_environments
+	SET status = ?, materialization_session_id = ?,
+		container_id = '', container_bootstrap_nonce_secret_id = '',
+		container_control_auth_token_secret_id = '', sandbox_id = '',
+		updated_at = ?
+	WHERE id = ? AND status = ?
+	  AND COALESCE(materialization_session_id, '') = ''
+	  AND COALESCE(workspace_path, '') = ''
+	  AND COALESCE(container_id, '') = ''
+	  AND COALESCE(sandbox_id, '') = ''
+	  AND NOT EXISTS (
+		SELECT 1 FROM task_environment_repos
+		WHERE task_environment_id = task_environments.id AND deleted_at IS NULL
+	  )
+`
+
+// reclaimFailedWorkspaceMaterializationTx runs the reclaim inside the caller's
+// transaction. The caller owns the task cleanup barrier and the recovery-claim
+// admission (createTaskSessionWithWorkspaceBinding and
+// bindReadySharedGroupEnvironment already hold both when they reach their
+// not-attachable cases).
+func (r *Repository) reclaimFailedWorkspaceMaterializationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID, sessionID string,
+) (bool, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(reclaimFailedWorkspaceMaterializationSQL),
+		string(models.TaskEnvironmentStatusCreating), sessionID, r.nowUTC(),
+		environmentID, string(models.TaskEnvironmentStatusFailed))
+	if err != nil {
+		return false, fmt.Errorf("reclaim failed workspace materialization: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return changed > 0, nil
+}
+
+// ReclaimFailedTaskEnvironmentMaterialization re-elects sessionID as the
+// materialization owner of a failed environment that never materialized, so a
+// retrying launch re-runs full preparation instead of being rejected forever.
+// Returns false when the row is not reclaimable (already claimed by a
+// concurrent launch, still carrying a physical workspace, or no longer
+// failed). A shared-group pointer to this environment is left in place: the
+// reclaimed environment returns to creating, so sibling sessions observe
+// workspace-preparing against the same canonical row.
+func (r *Repository) ReclaimFailedTaskEnvironmentMaterialization(
+	ctx context.Context,
+	environmentID, sessionID string,
+) (bool, error) {
+	if environmentID == "" || sessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	changed, err := r.reclaimFailedWorkspaceMaterializationTx(ctx, tx, environmentID, sessionID)
+	if err != nil || !changed {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DeleteTaskEnvironmentsByTask deletes all task environments for a given task.
 func (r *Repository) DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error {
 	tx, err := r.db.BeginTxx(ctx, nil)

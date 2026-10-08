@@ -172,6 +172,8 @@ export function DynamicAgentProfileEditor({
         updateManualWindow={state.updateManualWindow}
         updateCandidate={state.updateCandidate}
         updateCandidatePolicy={state.updateCandidatePolicy}
+        updateCandidateUnclassified={state.updateCandidateUnclassified}
+        applyUnclassifiedToAll={state.applyUnclassifiedToAllCandidates}
       />
     </>
   );

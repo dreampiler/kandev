@@ -81,6 +81,8 @@ function renderList(
     updateManualWindow: vi.fn(),
     updateCandidate: vi.fn(),
     updateCandidatePolicy: vi.fn(),
+    updateCandidateUnclassified: vi.fn(),
+    applyUnclassifiedToAll: vi.fn(),
     ...overrides,
   };
   return {

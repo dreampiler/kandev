@@ -657,6 +657,35 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+// httpDiscardDeferredLaunch releases a task's queued automatic launch that the
+// session ceiling deferred. It is the operator escape hatch for a deferral whose
+// runtime is gone and will never be replayed: without it the durable record
+// keeps every later automatic launch for the task refused as a conflict. A task
+// with no deferred record is a no-op, so a retried release is idempotent.
+func (h *TaskHandlers) httpDiscardDeferredLaunch(c *gin.Context) {
+	taskID := c.Param("id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task id is required"})
+		return
+	}
+	if h.service != nil {
+		if err := h.service.AuthorizeTaskAccess(c.Request.Context(), taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+	}
+	if h.deferredLaunchDiscarder == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "deferred launch release is unavailable"})
+		return
+	}
+	discarded, err := h.deferredLaunchDiscarder.DiscardDeferredCeilingLaunch(c.Request.Context(), taskID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"discarded": discarded})
+}
+
 func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 	session, err := h.service.GetTaskSession(c.Request.Context(), c.Param("id"))
 	if err != nil {

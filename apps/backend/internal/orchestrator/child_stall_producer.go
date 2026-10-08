@@ -21,6 +21,7 @@ type ChildStallStore interface {
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	PatchTurnMetadata(ctx context.Context, sessionID, turnID string, updates map[string]interface{}) (bool, time.Time, error)
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
@@ -35,6 +36,9 @@ const (
 	childStallStateWaitingParent = "waiting_parent"
 	childStallStateDelivered     = "delivered"
 	childStallStateFailed        = "failed"
+	// childStallStateNudgedChild is a resolved candidate that reminded the
+	// child's own session instead of alerting the parent.
+	childStallStateNudgedChild = "nudged_child"
 )
 
 const (
@@ -60,7 +64,10 @@ type ChildStallProducer struct {
 	log    *logger.Logger
 	now    func() time.Time
 	policy childstall.Policy
-	kick   chan struct{}
+	// nudgePolicy bounds how many consecutive missing-signal stalls precede a
+	// parent alert.
+	nudgePolicy childstall.NudgePolicy
+	kick        chan struct{}
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -77,7 +84,10 @@ func NewChildStallProducer(svc *Service, store ChildStallStore, log *logger.Logg
 		log:    log.WithFields(zap.String("component", "child-stall-producer")),
 		now:    func() time.Time { return time.Now().UTC() },
 		policy: childstall.Policy{SettleGrace: childStallSettleGrace, SignalWait: childStallSignalWait},
-		kick:   make(chan struct{}, 1),
+		nudgePolicy: childstall.NudgePolicy{
+			EscalateAfter: childstall.DefaultNudgeEscalateAfter,
+		},
+		kick: make(chan struct{}, 1),
 	}
 }
 

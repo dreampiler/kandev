@@ -20,6 +20,9 @@ const (
 	TurnMetaKeyChildStall = "child_stall"
 	// TurnMetaKeyChildStallResolved marks a turn the producer no longer scans.
 	TurnMetaKeyChildStallResolved = "child_stall_resolved"
+	// SessionMetaKeyChildStallNudge holds the producer's consecutive
+	// missing-completion-signal nudge streak for a child session.
+	SessionMetaKeyChildStallNudge = "child_stall_nudge"
 )
 
 // Child-turn settlement kinds stored under TurnMetaKeyChildStallSettlement.
@@ -93,6 +96,39 @@ func LoadChildStallState(metadata map[string]interface{}) (ChildStallState, bool
 		return ChildStallState{}, false
 	}
 	return state, true
+}
+
+// ChildStallNudgeStreak is the persisted consecutive missing-signal nudge
+// state for one child session. It is keyed by the workflow entry the stalls
+// share; a new entry starts a fresh streak.
+type ChildStallNudgeStreak struct {
+	Cause        string    `json:"cause,omitempty"`
+	TransitionID int64     `json:"transition_id,omitempty"`
+	Count        int       `json:"count,omitempty"`
+	Escalated    bool      `json:"escalated,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// ToMap returns the JSON-compatible metadata value.
+func (s ChildStallNudgeStreak) ToMap() map[string]interface{} {
+	encoded, err := json.Marshal(s)
+	if err != nil {
+		return map[string]interface{}{"count": s.Count}
+	}
+	var value map[string]interface{}
+	if err := json.Unmarshal(encoded, &value); err != nil {
+		return map[string]interface{}{"count": s.Count}
+	}
+	return value
+}
+
+// LoadChildStallNudgeStreak decodes the nudge streak from session metadata.
+func LoadChildStallNudgeStreak(metadata map[string]interface{}) (ChildStallNudgeStreak, bool) {
+	var streak ChildStallNudgeStreak
+	if !decodeTurnMetadataValue(metadata, SessionMetaKeyChildStallNudge, &streak) {
+		return ChildStallNudgeStreak{}, false
+	}
+	return streak, true
 }
 
 // ChildStallSettlement returns the recorded non-live settlement kind, or "".

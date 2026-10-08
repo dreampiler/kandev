@@ -308,11 +308,15 @@ type mockRepository struct {
 	getTaskFunc                    func(ctx context.Context, id string) (*models.Task, error)
 	getTaskEnvironmentFunc         func(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	getTaskEnvironmentByTaskIDFunc func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
-	getExecutorRunningFunc         func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
-	hasExecutorRunningFunc         func(ctx context.Context, sessionID string) (bool, error)
-	createTaskEnvironmentRepoErr   error
-	finalizeTaskEnvironmentErr     error
-	createTaskSessionFunc          func(ctx context.Context, session *models.TaskSession) error
+	// reclaimFailedTaskEnvironmentFunc, when non-nil, overrides
+	// ReclaimFailedTaskEnvironmentMaterialization entirely — used to simulate a
+	// concurrent launch winning the reclaim CAS.
+	reclaimFailedTaskEnvironmentFunc func(ctx context.Context, environmentID, sessionID string) (bool, error)
+	getExecutorRunningFunc           func(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
+	hasExecutorRunningFunc           func(ctx context.Context, sessionID string) (bool, error)
+	createTaskEnvironmentRepoErr     error
+	finalizeTaskEnvironmentErr       error
+	createTaskSessionFunc            func(ctx context.Context, session *models.TaskSession) error
 	// listTaskRepositoriesFunc, when non-nil, overrides ListTaskRepositories
 	// entirely — used to simulate a transient attachment-set read failure.
 	listTaskRepositoriesFunc func(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
@@ -1511,6 +1515,28 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 }
 func (m *mockRepository) RetireUnusableTaskEnvironment(_ context.Context, environmentID string) (bool, error) {
 	return false, nil
+}
+func (m *mockRepository) ReclaimFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error) {
+	if m.reclaimFailedTaskEnvironmentFunc != nil {
+		return m.reclaimFailedTaskEnvironmentFunc(ctx, environmentID, sessionID)
+	}
+	env, ok := m.taskEnvironments[environmentID]
+	if !ok || env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" ||
+		env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" {
+		return false, nil
+	}
+	for _, repo := range env.Repos {
+		if repo != nil && repo.DeletedAt == nil {
+			return false, nil
+		}
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = sessionID
+	env.ContainerID = ""
+	env.ContainerBootstrapNonceSecretID = ""
+	env.ContainerControlAuthTokenSecretID = ""
+	env.SandboxID = ""
+	return true, nil
 }
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()

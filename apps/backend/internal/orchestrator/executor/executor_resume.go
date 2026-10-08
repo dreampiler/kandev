@@ -1445,7 +1445,7 @@ func (e *Executor) resumeSession(
 		// A reserved replacement environment must not be left CREATING when the
 		// launch fails before it materializes; the next resume would otherwise
 		// adopt a workspace that was never finalized. A no-op for a reused env.
-		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID, "resume launch failed before replacement environment materialized")
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
 				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
@@ -1468,7 +1468,7 @@ func (e *Executor) resumeSession(
 	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 		if !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil {
-			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID, "task environment persistence failed after resume relaunch")
 		}
 		if startAgent && (!isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil) {
 			e.rollbackResumeStateAfterFailure(launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
@@ -2362,7 +2362,7 @@ func (e *Executor) bindReplacementEnvironment(
 	session.WorkspacePath = ""
 	req.TaskEnvironmentID = reserved.ID
 	if err := e.persistSessionFullRowIfCurrentState(ctx, session, session.State); err != nil {
-		e.markTaskEnvironmentMaterializationFailed(ctx, reserved, session.ID)
+		e.markTaskEnvironmentMaterializationFailed(ctx, reserved, session.ID, "replacement environment binding persistence failed")
 		return nil, err
 	}
 	return reserved, nil

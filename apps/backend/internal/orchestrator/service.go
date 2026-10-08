@@ -550,6 +550,7 @@ type sessionExecutorStore interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error)
+	ReclaimFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error)
 	// Step-entry CAS markers (see internal/workflow/stepentry) — claim/complete
 	// an engine-owned on_enter action at most once per step-entry.
 	ClaimStepEntryMarker(ctx context.Context, entryID int64, position int, kind, operationID string, claimedAt time.Time) (bool, error)
@@ -1525,6 +1526,12 @@ type Service struct {
 	// callback. Each entry retains the prompt and route identity that authorized
 	// the reset across prompt-evidence replacement.
 	pendingDynamicStreakResets sync.Map
+	// pendingDynamicEmptyTurn records, per logical session, the execution and
+	// prompt generation of a no-output turn that was counted as an unclassified
+	// failure. It is consumed at agent.completed so a process exit cannot reset
+	// the streak the empty turn just advanced. Keyed by execution+generation so a
+	// later turn cannot match a stale entry.
+	pendingDynamicEmptyTurn sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by

@@ -86,10 +86,31 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	if err != nil || session == nil || session.RouteGeneration != state.Generation {
 		return
 	}
-	if !isOrphanableDynamicSessionState(session.State) {
+	if !isOrphanableDynamicSessionState(session.State) && !s.dynamicStartingRouteIsStranded(ctx, session) {
 		return
 	}
 	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
+}
+
+// dynamicStartingRouteIsStranded reports whether a session parked in
+// WAITING_FOR_INPUT still owns a "starting" route with no live launch owner. A
+// route reaches MarkActive only on a successful launch, so a WAITING_FOR_INPUT
+// session whose route is still "starting" had its launch owner disappear: the
+// process that owned it stopped, or a launch never completed. The exclusion in
+// isOrphanableDynamicSessionState assumes the ordinary UI explains that state,
+// but that only holds while a live executor backs the session. Once no
+// executors_running row remains, the route is genuinely stranded and no other
+// pass recovers it (the scheduling-orphan pass skips deferred intents, the
+// ceiling replay cannot bring up a runtime), so the sweep must mark it
+// action_required like any other orphaned starting route. A read error is
+// treated as "not stranded" so an unreadable row never demotes a session that
+// may still have a live launch.
+func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *models.TaskSession) bool {
+	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
+		return false
+	}
+	_, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
 }
 
 // isOrphanableDynamicSessionState reports whether a session's current state

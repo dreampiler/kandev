@@ -176,6 +176,14 @@ export function OverviewLast24h({
       title={t("sentry:statsPeriodLast24Hours")}
       action={<EventKindChips counts={counts} selected={kind} onSelect={setKind} />}
     >
+      {visible.some((event) => event.kind === "pr_merged") && (
+        <p
+          className="border-b border-border px-4 py-2 text-xs text-muted-foreground"
+          data-testid="overview-merged-pr-scope"
+        >
+          {t("office:overviewEventPRMergedScope")}
+        </p>
+      )}
       {visible.length === 0 ? (
         <SectionCardEmpty />
       ) : (
