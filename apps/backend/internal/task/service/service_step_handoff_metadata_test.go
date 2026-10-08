@@ -136,6 +136,21 @@ func TestProtectedTaskMetadataForCreateRejectsStepHandoffCarry(t *testing.T) {
 	}
 }
 
+func TestProtectedTaskMetadataForCreatePreservesAutomationStartOwnership(t *testing.T) {
+	metadata := map[string]interface{}{
+		"ordinary":                         "keep",
+		models.MetaKeyAutomationStartOwned: true,
+	}
+
+	created := protectedTaskMetadataForCreate(metadata, false)
+	if owned, ok := created[models.MetaKeyAutomationStartOwned].(bool); !ok || !owned {
+		t.Fatalf("automation start ownership marker = %v, want true", created[models.MetaKeyAutomationStartOwned])
+	}
+	if got := created["ordinary"]; got != "keep" {
+		t.Fatalf("ordinary metadata = %v, want keep", got)
+	}
+}
+
 func TestUpdateTaskMetadataPreservesTaskHandoffRecords(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

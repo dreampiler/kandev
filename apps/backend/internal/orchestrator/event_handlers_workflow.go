@@ -2067,6 +2067,20 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
+	// An automation-created task's initial start is owned by its automation
+	// run. A feeder pull's task.moved (or any other workflow entry) must not
+	// launch a second session for it; the automation dispatch or its ceiling
+	// replay performs the single launch and binds the run. See
+	// models.MetaKeyAutomationStartOwned.
+	if models.AutomationStartOwned(task.Metadata) {
+		s.logger.Info(eventName+": automation run owns this task's start; skipping workflow auto-start",
+			zap.String("task_id", task.ID),
+			zap.String("to_step_id", step.ID))
+		if autoStartOnCreateClaimed {
+			s.discardAutoStartOnCreate(ctx, task.ID, eventName)
+		}
+		return
+	}
 	if s.skipForkPRAutoStart(ctx, task, eventName, autoStartOnCreateClaimed) {
 		return
 	}
