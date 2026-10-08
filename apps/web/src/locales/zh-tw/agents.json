@@ -140,6 +140,17 @@
   "dynamicPolicyMaxWaitValidation": "請輸入 1 秒到 7 天之間的重置等待時間。",
   "dynamicPolicyNoRetry": "不重試同一候選設定。Kandev 會立即應用所選結果。",
   "dynamicPolicyOptionInfo": "解釋 {{option}} 策略",
+  "dynamicPolicyUnclassified": "無法分類的失敗反覆出現時切換",
+  "dynamicUnclassifiedErrors": "無法分類的失敗",
+  "dynamicUnclassifiedDescription": "當失敗無法歸類為暫時性或嚴重錯誤時適用。此候選項連續失敗達到閾值次數後，Kandev 會嘗試下一個候選項一次。",
+  "dynamicUnclassifiedSwitchDescription": "統計此候選項無法分類的失敗次數，達到閾值後轉到下一個候選項。",
+  "dynamicUnclassifiedThreshold": "連續無法分類的失敗次數",
+  "dynamicUnclassifiedThresholdValidation": "請輸入 2 到 10 之間的閾值。",
+  "dynamicPolicyUnclassifiedHelp": "針對分類器無法歸入暫時性或嚴重類別的失敗的可選恢復。預設關閉，因此無法分類的失敗仍為手動恢復。",
+  "dynamicUnclassifiedApplyAll": "應用到此設定檔的所有候選項",
+  "dynamicUnclassifiedApplyAllConfirmTitle": "為所有候選項啟用無法分類的失敗備援",
+  "dynamicUnclassifiedApplyAllConfirmDescription": "將所有候選項的無法分類策略設為啟用，閾值設為 2。順序、tier、模型選項以及暫時性和嚴重策略保持不變。",
+  "dynamicUnclassifiedApplyAllConfirmAction": "全部應用",
   "dynamicPolicyOutcomeHelp": "控制重置等待和同一候選設定的所有重試都耗盡後 Kandev 的操作。",
   "dynamicPolicyRetry": "重試此候選設定",
   "dynamicPolicyRetryHelp": "在應用所選結果前，以指數退避方式重試同一候選設定。",
@@ -527,5 +538,5 @@
   "profileUsageLimitHits": "30 天內達到上限：{{hits}} 次。達到時的中位數：24 小時 {{turns}} 輪，最近 {{relative}}",
   "profileUsageStaleObserved": "最後已知值，讀取於 {{relative}}",
   "profileUsageObserved": "代理執行時觀測到，{{relative}}",
-  "profileUsageMeasuredCall": "透過最小調用測量，{{relative}}"
+  "profileUsageMeasuredCall": "通過最小呼叫測量，{{relative}}"
 }
