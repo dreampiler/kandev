@@ -312,6 +312,7 @@ func (e *Engine) persistExhaustedSelection(
 	}
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
+		ResourceWait: resourceWait, RetryAt: deadline,
 	}
 }
 
@@ -575,6 +576,9 @@ func (e *Engine) ApplyFailureContext(
 ) (RouteDecision, error) {
 	if failure == nil {
 		return RouteDecision{}, ErrNoEligibleCandidate
+	}
+	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
+		return RouteDecision{}, err
 	}
 	e.openCircuitForFailure(ctx, profile, currentCandidateID, failure)
 	e.observeLimit(ctx, currentCandidateID, failure)

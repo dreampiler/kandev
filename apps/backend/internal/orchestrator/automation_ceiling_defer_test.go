@@ -409,7 +409,7 @@ func TestAutomationStartDeferredByCeiling_RunClosedBeforeReplayDropsTheStart(t *
 	require.NoError(t, err)
 
 	outcome := f.svc.replayCeilingDeferral(ctx, task, deferral)
-	require.Equal(t, ceilingReplayRunClosed, outcome)
+	require.Equal(t, ceilingReplayRunClosed, outcome.outcome)
 	require.Zero(t, f.launches)
 
 	f.svc.settleCeilingReplay(ctx, task, nil, deferral, outcome)

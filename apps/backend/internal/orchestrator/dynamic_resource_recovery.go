@@ -2,16 +2,43 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"go.uber.org/zap"
 )
 
-// recordDynamicResourceOutput clears the suspension history of the candidate
+// DynamicRecoverableResourceWait reports whether err is a dynamic-route
+// selection failure whose route state is durably waiting for suspended
+// resources, returning the earliest retry deadline the engine recorded.
+// Launch entry points use it to surface that wait at the observer's level
+// instead of a terminal ERROR, because time alone makes a candidate usable
+// again and the scheduled recovery reselects without operator action.
+func DynamicRecoverableResourceWait(err error) (time.Time, bool) {
+	if err == nil {
+		return time.Time{}, false
+	}
+	var noCandidate *dynamicruntime.NoEligibleCandidateError
+	if !errors.As(err, &noCandidate) || !noCandidate.ResourceWait {
+		return time.Time{}, false
+	}
+	return noCandidate.RetryAt, true
+}
+
+// recordDynamicResourceOutput clears the suspension history of the profile
 // whose current attempt produced its first real output. Each attempt records
-// at most once, so streaming chunks do not repeat the write.
-func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, executionID string, promptGeneration uint64) {
-	if s.repo == nil || s.profileExecutionResolver == nil || sessionID == "" {
+// at most once, so streaming chunks do not repeat the write. The success
+// belongs to the profile the producing execution runs, which the stream event
+// carries; the route profile captured when the attempt began is the fallback
+// for an event without it. Neither needs a repository read in the raw stream
+// callback.
+func (s *Service) recordDynamicResourceOutput(
+	ctx context.Context,
+	sessionID, executionID, eventExecutionProfileID string,
+	promptGeneration uint64,
+) {
+	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
 	attempt, ok := s.promptAttemptForSession(sessionID)
@@ -19,7 +46,8 @@ func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, ex
 		return
 	}
 	attempt.mu.Lock()
-	claim := attempt.dynamic && !attempt.resourceSuccessClaimed &&
+	executionProfileID := attempt.executionProfileID
+	claim := attempt.dynamic && executionProfileID != "" && !attempt.resourceSuccessClaimed &&
 		attempt.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
 	if claim {
 		attempt.resourceSuccessClaimed = true
@@ -28,11 +56,13 @@ func (s *Service) recordDynamicResourceOutput(ctx context.Context, sessionID, ex
 	if !claim {
 		return
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.ExecutionProfileID == "" || session.RouteGeneration <= 0 {
-		return
+	// A route that claimed a successor whose launch is deferred keeps the
+	// predecessor execution serving prompts, so the captured route profile
+	// can name a candidate that never ran.
+	if eventExecutionProfileID != "" {
+		executionProfileID = eventExecutionProfileID
 	}
-	s.profileExecutionResolver.RecordResourceSuccess(ctx, session.ExecutionProfileID)
+	s.profileExecutionResolver.RecordResourceSuccess(ctx, executionProfileID)
 }
 
 // observeDynamicResourceWait schedules a fresh selection for a route that is

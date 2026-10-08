@@ -118,6 +118,17 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		wt, err := m.reuseRequiredWorktree(ctx, req)
 		if err == nil {
 			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+			return wt, err
+		}
+		// Attach-only reuse refuses to create or recreate a checkout. When the
+		// rejection is a verified-unrecoverable branch (the recorded branch is
+		// gone locally and on the authoritative remote), re-prepare a fresh task
+		// copy through the same replacement recovery the recreate path uses
+		// instead of failing the launch. Every other rejection stays attach-only
+		// and fails closed.
+		var branchErr *BranchUnrecoverableError
+		if errors.As(err, &branchErr) {
+			return m.replaceUnrecoverableReuseWorktree(ctx, req, branchErr)
 		}
 		return wt, err
 	}
@@ -1289,9 +1300,17 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	if isFetchRefusedCheckedOut(outputStr) {
 		if result := m.retryFetchAsRemoteTrackingRef(ctx, repoPath, branch, prNumber, required); result != nil {
 			if required && result.Warning != "" {
+				detail := strings.TrimSpace(result.WarningDetail)
+				if detail == "" {
+					detail = strings.TrimSpace(result.Warning)
+				}
+				m.logger.Warn("required checkout branch refresh could not verify the refreshed ref",
+					zap.String("branch", branch),
+					zap.String("detail", detail),
+					zap.String("fetch_output", strings.TrimSpace(outputStr)))
 				return nil, fmt.Errorf(
-					"required refresh of checkout branch %q could not verify the refreshed ref: %w",
-					branch, ErrGitCommandFailed,
+					"required refresh of checkout branch %q could not verify the refreshed ref: %s: %w",
+					branch, detail, ErrGitCommandFailed,
 				)
 			}
 			return result, nil

@@ -5,11 +5,13 @@ import { IconArrowDown, IconArrowUp, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
 import { DynamicPolicyEditor } from "@/components/settings/dynamic-agent-policy-editor";
+import { DynamicUnclassifiedPolicyEditor } from "@/components/settings/dynamic-agent-unclassified-editor";
 import type {
   DynamicAgentCandidate,
   DynamicErrorClass,
   DynamicErrorPolicy,
   DynamicModelPolicy,
+  DynamicUnclassifiedPolicy,
   DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
 import { settingsActionClassName, settingsTouchSwitchClassName } from "./settings-control";
@@ -33,6 +35,7 @@ type DynamicAgentCandidateRowProps = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  onUpdateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
   children?: React.ReactNode;
 };
 
@@ -53,6 +56,7 @@ export function DynamicAgentCandidateRow({
   onRemove,
   onToggleEnabled,
   onUpdatePolicy,
+  onUpdateUnclassified,
   children,
 }: DynamicAgentCandidateRowProps) {
   const { t } = useTranslation();
@@ -100,6 +104,11 @@ export function DynamicAgentCandidateRow({
           onChange={(patch) => onUpdatePolicy(index, "hard", patch)}
         />
       </div>
+
+      <DynamicUnclassifiedPolicyEditor
+        policy={candidate.policies.unclassified}
+        onChange={(patch) => onUpdateUnclassified(index, patch)}
+      />
     </li>
   );
 }

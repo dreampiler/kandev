@@ -22,7 +22,9 @@ import (
 // The notice arrives in more than one block often enough that this check reads
 // the turn's accumulated assistant text, not the single chunk: a notice split
 // mid-sentence would otherwise never match. Only an assistant chunk may
-// contribute, since a user quoting a notice must never end the agent's turn.
+// contribute, since a user quoting a notice must never end the agent's turn,
+// and the turn's output must open with the notice: an agent that quotes or
+// summarizes another session's limit error is reporting, not failing.
 func (a *Adapter) observeUsageLimitNotice(sessionID, role, text string) {
 	if a.agentID == "" || role == acpUserRole || text == "" {
 		return

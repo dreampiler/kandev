@@ -116,10 +116,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	}
 	switch eventType {
-	case "message_streaming":
-		// Claude ACP emits some provider failures as a diagnostic message chunk
-		// immediately before the session/prompt RPC error. Track those chunks
-		// separately so the matching typed failure can still be safely routed.
+	case streams.EventTypeMessageChunk:
+		if payload.Data.Role == "user" {
+			break
+		}
 		if payload.Data.ProviderDiagnosticCandidate {
 			s.observeProviderDiagnostic(
 				payload.SessionID,
@@ -134,17 +134,17 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 				payload.SessionID,
 				eventExecutionID,
 				payload.Data.PromptGeneration,
-				strings.TrimSpace(payload.Data.Text) != "",
+				observedOutput,
 				false,
 			)
 		}
-	case "thinking_streaming":
+	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
 		s.observePromptAttempt(
 			payload.SessionID,
 			eventExecutionID,
 			payload.Data.PromptGeneration,
-			strings.TrimSpace(payload.Data.Text) != "",
+			observedOutput,
 			false,
 		)
 	case agentEventToolCall, agentEventToolUpdate:
@@ -158,13 +158,20 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		)
 	}
 	if observedOutput {
-		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.ExecutionProfileID, payload.Data.PromptGeneration)
 	}
 	if observedOutput || observedEffect {
-		s.clearDynamicUnclassifiedStreakForEvent(ctx, watcher.AgentEventData{
+		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
-		}, true)
+		}
+		s.markDynamicStreakResetPending(resetEvent)
+		if eventType == agentEventToolCall {
+			s.flushPendingDynamicStreakReset(ctx, sessionID, &resetEvent)
+		}
+	}
+	if observedOutput && s.markForegroundGenerating(sessionID, eventExecutionID) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -188,6 +195,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	// Handle different event types
 	switch eventType {
+	case streams.EventTypeMessageChunk, streams.EventTypeReasoning:
+		return
+
 	case "message_streaming":
 		s.handleMessageStreamingEvent(ctx, payload)
 
@@ -277,6 +287,10 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeTurnStarted:
 		s.persistNativeCodexTurnID(ctx, payload)
+		// A new turn retires any no-output-turn marker left by the previous
+		// turn. The marker is execution+generation keyed, so this is housekeeping
+		// rather than the correctness fence.
+		s.clearDynamicEmptyTurn(sessionID)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -819,14 +833,6 @@ func (s *Service) handleStreamingEventKind(
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
 // It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Only genuine
-	// output flips it; empty/invalid frames and provider-diagnostic transport
-	// text are discarded below (mirroring the lifecycle-tier suppression in
-	// Manager.recordActivity).
-	if payload.Data.Text != "" && !payload.Data.ProviderDiagnosticCandidate &&
-		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "message",
 		s.messageCreator.AppendAgentMessage,
 		s.messageCreator.CreateAgentMessageStreaming)
@@ -835,11 +841,6 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Keep the private ownership estimate current for accounting. Empty/invalid
-	// frames are discarded downstream.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
-		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
-	}
 	s.handleStreamingEventKind(ctx, payload, "thinking message",
 		s.messageCreator.AppendThinkingMessage,
 		s.messageCreator.CreateThinkingMessageStreaming)
@@ -3175,6 +3176,36 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 	s.handleCompleteStreamEventWithGuardRelease(ctx, payload, nil)
 }
 
+// routeDynamicEmptyTurnCompletionFromComplete turns a complete stream frame into
+// the prompt-attempt evidence the unclassified route needs, then defers to
+// routeDynamicEmptyTurnCompletion. The stream handler still holds the process
+// local prompt evidence here (it is cleared only after this handler returns),
+// so a no-output turn is classified from current evidence rather than a race
+// with the later agent.completed process-exit path.
+func (s *Service) routeDynamicEmptyTurnCompletionFromComplete(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+	session *models.TaskSession,
+) bool {
+	if session == nil || payload == nil || payload.SessionID == "" || payload.Data == nil {
+		return false
+	}
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	data := watcher.AgentEventData{
+		TaskID:           payload.TaskID,
+		SessionID:        payload.SessionID,
+		OwnerKind:        string(payload.OwnerKind),
+		AgentExecutionID: executionID,
+		AgentProfileID:   payload.AgentProfileID,
+		PromptGeneration: payload.Data.PromptGeneration,
+	}
+	data = s.withPromptAttemptEvidence(data)
+	return s.routeDynamicEmptyTurnCompletion(ctx, data, session)
+}
+
 func (s *Service) loadCompleteEventSession(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) (*models.TaskSession, bool) {
 	if payload.SessionID == "" {
 		return nil, true
@@ -3226,6 +3257,15 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 
 	if terminalCompleteStream {
 		s.flushTerminalCompleteStream(ctx, payload, session, terminalMarker)
+		return
+	}
+
+	// A dynamic turn that finishes with no assistant output or tool effect is
+	// counted as an unclassified failure for its candidate. A launched successor
+	// takes over the turn, so skip the ordinary completion follow-up. Below the
+	// threshold the route parks the session through the manual-recovery path and
+	// this returns false, leaving the ordinary completion to settle the turn.
+	if s.routeDynamicEmptyTurnCompletionFromComplete(ctx, payload, session) {
 		return
 	}
 

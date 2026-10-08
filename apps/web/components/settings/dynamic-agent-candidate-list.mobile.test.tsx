@@ -89,6 +89,8 @@ function renderPhone(count: number) {
         updateManualWindow={vi.fn()}
         updateCandidate={vi.fn()}
         updateCandidatePolicy={vi.fn()}
+        updateCandidateUnclassified={vi.fn()}
+        applyUnclassifiedToAll={vi.fn()}
       />
     </TooltipProvider>,
   );

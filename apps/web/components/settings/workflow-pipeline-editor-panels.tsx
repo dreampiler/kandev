@@ -325,7 +325,36 @@ function StepToggleRows({
         onUpdate={onUpdate}
         readOnly={readOnly}
       />
+      <StepHoldRow step={step} savedStep={savedStep} onUpdate={onUpdate} readOnly={readOnly} />
     </>
+  );
+}
+
+type StepHoldRowProps = {
+  step: WorkflowStep;
+  savedStep?: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+};
+
+// The step's hold nature. Setting it stops the workspace overview from reading
+// this step's name, so a task parked here is counted and listed as held whatever
+// the step is called, and a step merely named "hold" is not.
+function StepHoldRow({ step, savedStep, onUpdate, readOnly }: StepHoldRowProps) {
+  const { t } = useTranslation();
+  const stageType = step.stage_type ?? "custom";
+  return (
+    <StepCheckboxRow
+      id={`${step.id}-hold-step`}
+      checked={stageType === "hold"}
+      onCheckedChange={(checked) =>
+        !readOnly && onUpdate({ stage_type: checked ? "hold" : "custom" })
+      }
+      disabled={readOnly}
+      label={t("workflows:holdStep")}
+      helpText={t("workflows:holdStepHelp")}
+      isDirty={isWorkflowStepValueDirty(step, savedStep, (item) => item.stage_type ?? "custom")}
+    />
   );
 }
 

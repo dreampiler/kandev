@@ -71,6 +71,11 @@ const (
 	// ceilingReasonSurfaceWriteFailed is AC-49g: the deferral itself persisted
 	// successfully, but the card note describing it could not be written.
 	ceilingReasonSurfaceWriteFailed = "ceiling_surface_write_failed"
+	// ceilingReasonDroppedManualRelease is an operator-initiated discard of a
+	// queued automatic launch (the release escape hatch). It is not an
+	// admission outcome; it names the drop so the card note and the log line
+	// say why a still-pending record was cleared.
+	ceilingReasonDroppedManualRelease = "ceiling_dropped_manual_release"
 	// ceilingReasonDeferredPrecedes is a refusal that had free capacity: the
 	// lane was not saturated, and the slot was reserved for a launch that was
 	// already queued. It is distinct from ceiling/ceiling_control so an

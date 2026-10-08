@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
@@ -45,6 +46,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionFork, h.wsForkConversation)
 	d.RegisterFunc(ws.ActionSessionEnsure, h.wsEnsureSession)
 	d.RegisterFunc(ws.ActionSessionRecover, h.wsRecoverSession)
+	d.RegisterFunc(ws.ActionSessionWorkspaceRecoveryGet, h.wsGetWorkspaceRecoveryStatus)
 	d.RegisterFunc(ws.ActionTaskLaunchRecover, h.wsRecoverTaskLaunch)
 	d.RegisterFunc(ws.ActionSessionResetContext, h.wsResetContext)
 	d.RegisterFunc(ws.ActionSessionStop, h.wsStopSession)
@@ -159,8 +161,17 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
-		// crash. Genuine failures (unknown task, validation) stay ERROR.
-		if orchestrator.IsBenignLaunchTeardownErr(err) {
+		// crash. A dynamic route that durably waits for suspended resources is
+		// likewise recoverable: the observer already scheduled the retry at
+		// retry_at, so WARN keeps the launch path aligned with that meaning.
+		// Genuine failures (unknown task, validation) stay ERROR.
+		if retryAt, waiting := orchestrator.DynamicRecoverableResourceWait(err); waiting {
+			h.logger.Warn("session launch waiting for suspended dynamic route resources",
+				zap.String("task_id", req.TaskID),
+				zap.String("intent", string(intent)),
+				zap.Time("retry_at", retryAt),
+				zap.String("error", err.Error()))
+		} else if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
 				zap.String("intent", string(intent)),
@@ -313,6 +324,30 @@ type wsRecoverSessionRequest struct {
 	SettingsPolicy executor.ResumeSettingsPolicy `json:"settings_policy,omitempty"`
 }
 
+type wsGetWorkspaceRecoveryStatusRequest struct {
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+}
+
+func (h *Handlers) wsGetWorkspaceRecoveryStatus(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsGetWorkspaceRecoveryStatusRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" || req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
+	}
+	operation, runnerLive, err := h.service.GetWorkspaceRecoveryStatus(ctx, req.TaskID, req.SessionID)
+	if err != nil {
+		h.logger.Warn("failed to read workspace recovery status",
+			zap.String("task_id", req.TaskID), zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to read workspace recovery status", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, map[string]any{
+		"workspace_recovery": taskdto.WorkspaceRecoveryFromOperation(operation, runnerLive),
+	})
+}
+
 func managedCloneRelocationConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
 	var recoveryErr *orchestrator.ManagedCloneRelocationRecoveryError
 	if !errors.As(err, &recoveryErr) {
@@ -427,11 +462,24 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
 		}
-		h.logger.Error("failed to recover session",
-			zap.String("task_id", req.TaskID),
-			zap.String("session_id", req.SessionID),
-			zap.String("action", req.Action),
-			zap.Error(err))
+		// A dynamic route durably waiting for suspended resources is
+		// recoverable: the observer already scheduled the retry at retry_at,
+		// so WARN keeps the recovery path aligned with that meaning; other
+		// recovery failures stay ERROR.
+		if retryAt, waiting := orchestrator.DynamicRecoverableResourceWait(err); waiting {
+			h.logger.Warn("session recovery waiting for suspended dynamic route resources",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Time("retry_at", retryAt),
+				zap.String("error", err.Error()))
+		} else {
+			h.logger.Error("failed to recover session",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Error(err))
+		}
 		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Workspace inventory repair request is invalid", nil)
 		}

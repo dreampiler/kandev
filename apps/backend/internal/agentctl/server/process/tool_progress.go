@@ -44,9 +44,10 @@ func (m *Manager) recordToolProgress(event adapter.AgentEvent) {
 		delete(m.toolProgress, key)
 		return
 	}
-	if !executingToolStatus(event.ToolStatus) {
-		return
-	}
+	// Observe every non-terminal call, not only the executing status labels.
+	// Some agents (for example OpenCode) report an in-flight command under a
+	// non-executing label; a positive running/exit sample from ProbeToolProgress
+	// then supplies the lifecycle's execution evidence without trusting the label.
 	m.observeStartedToolLocked(key, event)
 }
 
@@ -81,10 +82,6 @@ func (m *Manager) clearToolProgress() {
 	defer m.toolProgressMu.Unlock()
 	m.toolProgress = nil
 	m.toolProgressRevision++
-}
-
-func executingToolStatus(status string) bool {
-	return status == "in_progress" || status == "running" || status == "started"
 }
 
 func terminalToolStatus(status string) bool {

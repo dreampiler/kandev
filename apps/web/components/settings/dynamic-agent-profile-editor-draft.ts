@@ -9,8 +9,10 @@ import type {
   DynamicErrorPolicy,
   DynamicModelPolicy,
   DynamicTierPolicy,
+  DynamicUnclassifiedPolicy,
   DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
+import { DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD } from "@/components/settings/dynamic-agent-unclassified-editor";
 import {
   isProfileRevisionNewer,
   reconcileAgentProfileSnapshot,
@@ -52,6 +54,8 @@ export type DynamicAgentProfileEditorDraft = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
   toggleJoin: (index: number) => void;
   updateTierPolicy: (tierIndex: number, patch: Partial<DynamicTierPolicy>) => void;
   updateCandidateModel: (index: number, patch: Partial<DynamicModelPolicy>) => void;
@@ -234,6 +238,44 @@ export function useDynamicAgentProfileEditorDraft({
     });
   };
 
+  const updateCandidateUnclassified = (
+    index: number,
+    patch: Partial<DynamicUnclassifiedPolicy>,
+  ) => {
+    setCandidates((current) => {
+      const next = current.map((candidate, candidateIndex) =>
+        candidateIndex === index
+          ? {
+              ...candidate,
+              policies: {
+                ...candidate.policies,
+                unclassified: { ...candidate.policies.unclassified, ...patch },
+              },
+            }
+          : candidate,
+      );
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
+  const applyUnclassifiedToAllCandidates = () => {
+    setCandidates((current) => {
+      const next = current.map((candidate) => ({
+        ...candidate,
+        policies: {
+          ...candidate.policies,
+          unclassified: {
+            enabled: true,
+            consecutiveFailureThreshold: DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD,
+          },
+        },
+      }));
+      notifyDraft(name, next);
+      return next;
+    });
+  };
+
   const reset = () => {
     const nextProfile = savedProfileRef.current;
     setName(nextProfile.name);
@@ -313,6 +355,8 @@ export function useDynamicAgentProfileEditorDraft({
     removeCandidate,
     updateCandidate,
     updateCandidatePolicy,
+    updateCandidateUnclassified,
+    applyUnclassifiedToAllCandidates,
     toggleJoin,
     updateTierPolicy: updateTier,
     updateCandidateModel: updateModel,

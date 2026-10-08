@@ -99,9 +99,9 @@ func (m *Manager) validateManagedToolPolicyAdmission(ctx context.Context, req *L
 	if m.registry == nil {
 		return fmt.Errorf("%w: agent registry is unavailable", ErrManagedToolPolicyUnsupported)
 	}
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return fmt.Errorf("%w: agent type %q is unavailable", ErrManagedToolPolicyUnsupported, agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrManagedToolPolicyUnsupported, err)
 	}
 	return validateManagedToolPolicyProvider(profileContext, agentTypeName, agentConfig.Runtime())
 }
@@ -798,12 +798,35 @@ func (m *Manager) resolveOpenCodeCommandOptions(
 	}
 	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
 	if err != nil {
-		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", err)
+		return m.fallbackOpenCodeCommandOptions(err, selected, options)
 	}
 	if !found {
 		return agents.CommandOptions{}, errors.New("selected native OpenCode runtime is unavailable")
 	}
 	options.NativeRuntimeVersion = native.Version
+	return options, nil
+}
+
+// fallbackOpenCodeCommandOptions keeps a native OpenCode launch alive when the
+// version probe fails transiently. The native command's arguments are identical
+// for every supported major, so the selected family's known version is a safe
+// substitute; an unsupported major stays fail-closed, and a missing or
+// unparseable selected version preserves the probe error.
+func (m *Manager) fallbackOpenCodeCommandOptions(
+	probeErr error,
+	selected agents.OpenCodeRuntimeResolution,
+	options agents.CommandOptions,
+) (agents.CommandOptions, error) {
+	if agents.IsUnsupportedOpenCodeMajorError(probeErr) {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	if _, argErr := agents.OpenCodeACPArgsForVersion(selected.Version); argErr != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	m.logger.Warn("native OpenCode version probe failed; using the selected runtime version",
+		zap.String("selected_version", selected.Version),
+		zap.Error(probeErr))
+	options.NativeRuntimeVersion = selected.Version
 	return options, nil
 }
 
@@ -1077,6 +1100,7 @@ func (m *Manager) newProgressCallbackForPreparation(taskID, sessionID, preparati
 			StepKind:             step.Kind,
 			MCPProvider:          step.MCPProvider,
 			MCPServerID:          step.MCPServerID,
+			Diagnostic:           normalizeCursorMCPDiagnostic(step.Diagnostic),
 			RemotePlatform:       step.RemotePlatform,
 			FailureCode:          step.FailureCode,
 			StepCommand:          step.Command,
@@ -1147,7 +1171,11 @@ func persistedPrepareSteps(metadata map[string]interface{}) []PrepareStep {
 	if json.Unmarshal(data, &stored) != nil {
 		return nil
 	}
-	return append([]PrepareStep(nil), stored.Steps...)
+	steps := append([]PrepareStep(nil), stored.Steps...)
+	for index := range steps {
+		steps[index].Diagnostic = normalizeCursorMCPDiagnostic(steps[index].Diagnostic)
+	}
+	return steps
 }
 
 func (m *Manager) newPreparationAttemptRecorder(taskID, sessionID string) *prepareProgressRecorder {
@@ -1205,6 +1233,24 @@ func (r *prepareProgressRecorder) SeedSteps(steps []PrepareStep) {
 		r.seededSteps = len(r.steps)
 	}
 	r.mu.Unlock()
+}
+
+// RestoreSteps republishes the prior snapshot under this attempt's identity.
+func (r *prepareProgressRecorder) RestoreSteps(steps []PrepareStep) {
+	if len(steps) == 0 {
+		return
+	}
+	restored := append([]PrepareStep(nil), steps...)
+	r.mu.Lock()
+	r.steps = restored
+	r.seededSteps = 0
+	callback := r.callback
+	r.mu.Unlock()
+	if callback != nil {
+		for index, step := range restored {
+			callback(step, index, len(restored))
+		}
+	}
 }
 
 func (r *prepareProgressRecorder) UpdateStep(index int, step PrepareStep) {
@@ -1871,9 +1917,9 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		releaseOpenCodeAdmission := m.acquireOpenCodeLaunchAdmission(agentTypeName)
 		defer releaseOpenCodeAdmission()
-		agentConfig, ok := m.registry.Get(agentTypeName)
-		if !ok {
-			return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+		agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+		if err != nil {
+			return nil, err
 		}
 		if !agentConfig.Enabled() {
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
@@ -1963,9 +2009,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	defer releaseOpenCodeAdmission()
 
 	// 2. Get agent config from registry
-	agentConfig, ok := m.registry.Get(agentTypeName)
-	if !ok {
-		return nil, fmt.Errorf("agent type %q not found in registry", agentTypeName)
+	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
+	if err != nil {
+		return nil, err
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)

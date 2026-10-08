@@ -263,7 +263,8 @@ func ValidStageType(stage string) bool {
 	case wfmodels.StageTypeWork,
 		wfmodels.StageTypeReview,
 		wfmodels.StageTypeApproval,
-		wfmodels.StageTypeCustom:
+		wfmodels.StageTypeCustom,
+		wfmodels.StageTypeHold:
 		return true
 	}
 	return false

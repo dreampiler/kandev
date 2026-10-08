@@ -82,7 +82,7 @@ export function OverviewNeedsHuman({ items }: { items: OverviewHumanItem[] }) {
       action={
         <Link
           href={needsYouEnabled ? NEEDS_YOU_INBOX_HREF : "/office/inbox"}
-          className="text-xs text-primary hover:underline"
+          className="text-xs text-primary hover:underline dark:text-primary-foreground"
         >
           {t("office:overviewOpenInbox")}
         </Link>
@@ -176,6 +176,14 @@ export function OverviewLast24h({
       title={t("sentry:statsPeriodLast24Hours")}
       action={<EventKindChips counts={counts} selected={kind} onSelect={setKind} />}
     >
+      {visible.some((event) => event.kind === "pr_merged") && (
+        <p
+          className="border-b border-border px-4 py-2 text-xs text-muted-foreground"
+          data-testid="overview-merged-pr-scope"
+        >
+          {t("office:overviewEventPRMergedScope")}
+        </p>
+      )}
       {visible.length === 0 ? (
         <SectionCardEmpty />
       ) : (
@@ -279,7 +287,7 @@ function EventKindChips({
             onClick={() => onSelect(kind)}
             className={`min-h-11 cursor-pointer rounded-full border px-2.5 text-xs sm:min-h-0 ${
               active
-                ? "border-primary bg-primary/10 text-foreground"
+                ? "border-primary bg-primary text-primary-foreground dark:bg-[oklch(0.51_0.23_277)]"
                 : "border-border text-muted-foreground"
             }`}
             data-testid={`overview-event-kind-${kind}`}

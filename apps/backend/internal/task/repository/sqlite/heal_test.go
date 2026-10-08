@@ -79,10 +79,10 @@ func insertTask(t *testing.T, db *sqlx.DB, taskID string) {
 func TestHealDuplicateTaskEnvironments_KeepsMostRecent(t *testing.T) {
 	repo := newRepoForHealTests(t)
 
-	// initSchema added the unique-task_id index — it would block our
+	// initSchema added the partial unique-task_id index — it would block our
 	// duplicate-row seeding. Drop it for the duration of the test; the heal
 	// step will succeed against the duplicate-free DB it leaves behind.
-	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+	if _, err := repo.db.Exec(`DROP INDEX IF EXISTS uniq_task_environments_active_task_id`); err != nil {
 		t.Fatalf("drop index: %v", err)
 	}
 

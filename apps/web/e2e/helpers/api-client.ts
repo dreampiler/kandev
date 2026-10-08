@@ -16,6 +16,7 @@ import type {
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
   Repository,
+  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
@@ -1400,9 +1401,14 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       startup_page?: "task_overview" | "last_task" | "threads";
+      sidebar_fast_actions_enabled?: boolean;
+      sidebar_new_task_style?: "simple" | "compact";
       sidebar_hover_enabled?: boolean;
       sidebar_hover_delay_ms?: number;
-      sidebar_layouts_by_workspace?: Record<string, { revision: number; [key: string]: unknown }>;
+      sidebar_layouts_by_workspace?: Record<
+        string,
+        import("../../lib/types/http-user-settings").SidebarLayoutApi
+      >;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -1436,6 +1442,8 @@ export class ApiClient {
     terminal_font_family?: string;
     terminal_font_size?: number;
     startup_page?: "task_overview" | "last_task" | "threads";
+    sidebar_fast_actions_enabled?: boolean;
+    sidebar_new_task_style?: "simple" | "compact";
     sidebar_hover_enabled?: boolean;
     sidebar_hover_delay_ms?: number;
     keyboard_shortcuts?: Record<string, unknown>;
@@ -1536,7 +1544,7 @@ export class ApiClient {
       pull_from_step_id?: string | null;
       cancel_triggers_turn_complete?: boolean;
       complete_task_on_enter?: boolean;
-      stage_type?: "work" | "review" | "approval" | "custom";
+      stage_type?: "work" | "review" | "approval" | "custom" | "hold";
       profile_session_start_policy?: WorkflowProfileSessionStartPolicy;
       profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
       session_target?: WorkflowSessionTarget | null;
@@ -2898,6 +2906,9 @@ export class ApiClient {
       agent_profile_id?: string;
       agent_profile_snapshot?: Record<string, unknown> | null;
       state: string;
+      task_environment_id?: string;
+      workspace_recovery?: WorkspaceRecoveryProjection | null;
+      error_message?: string;
     };
   }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);

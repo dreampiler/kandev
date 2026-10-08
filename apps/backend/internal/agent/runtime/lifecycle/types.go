@@ -243,17 +243,11 @@ type AgentExecution struct {
 	isResumedSession bool
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer strings.Builder
-	// messageBufferDiagnostic is the ProviderDiagnosticCandidate value of the
-	// chunk(s) currently held in messageBuffer (legacy no-protocol-ID path).
-	// A chunk whose marker differs from this flag forces an immediate flush of
-	// the buffered segment first, so a diagnostic chunk's marker is never
-	// merged away by concatenation with ordinary output.
-	messageBufferDiagnostic bool
-	thinkingBuffer          strings.Builder
-	messageMu               sync.Mutex
-	streamMu                sync.Mutex
-	stream                  *streamCoalescer
+	messageBuffer  strings.Builder
+	thinkingBuffer strings.Builder
+	messageMu      sync.Mutex
+	streamMu       sync.Mutex
+	stream         *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.
@@ -495,6 +489,12 @@ type activeTopLevelTool struct {
 	OutputBytes      uint64
 	OutputText       string
 	ForegroundExited bool
+	// ForegroundRunning records agentctl's positive process evidence that this
+	// open tool's foreground is still running. It lets the stall allowance
+	// treat a tool whose ACP status label is not one of the executing labels
+	// (for example OpenCode's "pending" while the command runs) as executing,
+	// without granting the allowance to a tool that is genuinely not running.
+	ForegroundRunning bool
 }
 
 func (e *AgentExecution) setActiveTool(tool activeTopLevelTool) {

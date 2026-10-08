@@ -92,6 +92,13 @@ or unauthorized wakes.
   tail is a pending, undispatched alert shall fold into that item, so alerts
   accumulated while the parent is busy are handled in one parent turn. Each
   folded candidate keeps its own replay identity.
+- **AC-TASKS-CHILD-STALL-002.7:** A `missing_completion_signal` candidate shall
+  be delivered as one short reminder to the child's own session, not to the
+  parent. The parent shall receive one alert only after the same child stalls on
+  the same workflow entry for three consecutive nudged turns; further stalls on
+  that escalated streak shall not alert the parent again. The consecutive count
+  is keyed to the child session and the captured workflow entry, and resets when
+  the entry or the cause changes. Every other cause keeps direct parent delivery.
 
 ### REQ-TASKS-CHILD-STALL-003: Attribution and operating visibility
 

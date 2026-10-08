@@ -649,7 +649,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 
 	var envID, status, materializationSessionID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id FROM task_environments
+		 WHERE task_id = ? AND retired_at IS NULL
+		 ORDER BY created_at DESC LIMIT 1
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -681,7 +683,18 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	default:
-		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		// A failed environment that never materialized carries no physical
+		// workspace to protect. Re-elect this session as its materialization
+		// owner so the launch re-runs full preparation instead of the task
+		// staying unlaunchable forever; anything else still fails closed.
+		reclaimed, err := r.reclaimFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID)
+		if err != nil {
+			return err
+		}
+		if !reclaimed {
+			return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+		session.TaskEnvironmentID = envID
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
 		return err
@@ -827,7 +840,18 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	case models.TaskEnvironmentStatusCreating:
 		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
 	default:
-		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+		// Mirror the non-shared binding: a failed environment that never
+		// materialized can be reclaimed by this session for a fresh
+		// materialization; the group pointer keeps naming the canonical row,
+		// which is creating again, so siblings observe workspace-preparing.
+		reclaimed, err := r.reclaimFailedWorkspaceMaterializationTx(ctx, tx, environmentID, session.ID)
+		if err != nil {
+			return err
+		}
+		if !reclaimed {
+			return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+		session.TaskEnvironmentID = environmentID
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
 		return err
@@ -2971,6 +2995,72 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
 	return nil
+}
+
+// SetSessionMetadataKeyIfJSONValue replaces one metadata value only when its
+// complete JSON value still equals expectedValue. The update keeps unrelated
+// session metadata and is atomic across concurrent writers.
+func (r *Repository) SetSessionMetadataKeyIfJSONValue(
+	ctx context.Context,
+	sessionID, key string,
+	expectedValue, value interface{},
+) (bool, error) {
+	expectedJSON, err := json.Marshal(expectedValue)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize expected session metadata: %w", err)
+	}
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize session metadata value: %w", err)
+	}
+	now := r.nowUTC()
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY[?]::text[], ?::jsonb, true
+			)::text, updated_at = ?
+			WHERE id = ?
+			  AND (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END -> ?) = ?::jsonb
+		`
+		args = []interface{}{key, string(valueJSON), now, sessionID, key, string(expectedJSON)}
+	} else {
+		path := jsonPath(key)
+		query = `
+			UPDATE task_sessions
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				?, json(?)
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = json_type(?)
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json(?))
+			  )
+			  AND NOT EXISTS (
+				SELECT fullkey, type, atom FROM json_tree(json(?))
+				EXCEPT SELECT fullkey, type, atom FROM json_tree(json_extract(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?
+				))
+			  )
+		`
+		args = []interface{}{
+			path, string(valueJSON), now, sessionID,
+			path, string(expectedJSON), path, string(expectedJSON), string(expectedJSON), path,
+		}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
 }
 
 // SetSessionMetadataKeyIfState atomically sets one metadata key only while the

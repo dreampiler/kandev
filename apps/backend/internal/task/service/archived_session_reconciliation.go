@@ -14,13 +14,17 @@ import (
 
 // StartSessionReconciliationLoop starts the background goroutine that
 // periodically reconciles task sessions that no request path owns anymore.
-// Each tick runs two passes:
+// Each tick runs three passes:
 //
 //  1. The archived-task pass: re-finalize archived tasks whose sessions
 //     never made it to a terminal DB state (see runArchivedSessionReconciliation).
 //  2. The active-task pass: detect and heal unarchived tasks holding active
 //     sessions whose backing execution is gone (see runActiveSessionSweep in
 //     active_session_stall.go).
+//  3. The creating-environment pass: fail a task environment whose
+//     materialization owner has been gone past the materialization timeout so
+//     the next launch provisions a fresh workspace (see
+//     runCreatingEnvironmentReconciliation in creating_environment_reconciliation.go).
 //
 // Pass 1 — archived tasks. finalizeCancelledSessions (see service_tasks.go)
 // already bounds its session-cancellation retry to a handful of fixed attempts
@@ -57,6 +61,7 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runArchivedSessionReconciliation(ctx)
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
+				s.runCreatingEnvironmentReconciliation(ctx, now)
 			}
 		}
 	}()

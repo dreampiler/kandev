@@ -269,19 +269,13 @@ func buildTaskDTOsWithSessionInfo(
 		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
 		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
 	}
-	if summaryErr == nil && pendingErr == nil {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		reconciledSummaries, reconcileErr := svc.ReconcileTaskStatusSummaries(
-			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+	if summaryErr == nil {
+		var reconcileErr error
+		statusSummaries, reconcileErr = reconcileTaskStatusSummariesAfterRevision(
+			ctx, svc, log, tasks, taskIDs, statusSummaries,
 		)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
-		}
-		statusSummaries = reconciledSummaries
 		if reconcileErr != nil {
-			log.Warn("failed to reconcile task status summaries", zap.Error(reconcileErr))
+			return nil, reconcileErr
 		}
 	}
 	// Stamp the authoritative per-task queued prompt count onto every summary.
@@ -376,6 +370,45 @@ func buildTaskDTOsWithSessionInfo(
 		return nil, err
 	}
 	return result, nil
+}
+
+func reconcileTaskStatusSummariesAfterRevision(
+	ctx context.Context,
+	svc *service.Service,
+	log *logger.Logger,
+	tasks []*models.Task,
+	taskIDs []string,
+	statusSummaries map[string]*statussummary.TaskStatusSummary,
+) (map[string]*statussummary.TaskStatusSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// The summary revision fences repairs, so observations used for a repair
+	// must be captured after that revision.
+	sessions, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh task sessions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	pendingActions, err := pendingActionsForInputCapableSessions(ctx, svc, sessions)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to refresh pending actions for status summary reconciliation", zap.Error(err))
+		return statusSummaries, nil
+	}
+	reconciled, err := svc.ReconcileTaskStatusSummaries(ctx, tasks, sessions, pendingActions, statusSummaries)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxErr
+	}
+	if err != nil {
+		log.Warn("failed to reconcile task status summaries", zap.Error(err))
+	}
+	return reconciled, nil
 }
 
 type sessionInfoFields struct {
@@ -515,6 +548,15 @@ func (h *TaskHandlers) taskSessionDTOWithPendingActions(
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	dto.EnrichParkedProjection(&result, h.parkedProjection)
+	if session != nil && session.TaskEnvironmentID != "" {
+		operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(ctx, session.TaskEnvironmentID)
+		if recoveryErr != nil {
+			h.logger.Warn("get task session workspace recovery projection failed",
+				zap.String("session_id", session.ID), zap.Error(recoveryErr))
+		} else {
+			dto.EnrichWorkspaceRecovery(&result, operation, runnerLive)
+		}
+	}
 	actions, revisions, err := read(
 		ctx,
 		[]string{session.ID},
@@ -613,6 +655,35 @@ func (h *TaskHandlers) httpEnsureTaskSession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// httpDiscardDeferredLaunch releases a task's queued automatic launch that the
+// session ceiling deferred. It is the operator escape hatch for a deferral whose
+// runtime is gone and will never be replayed: without it the durable record
+// keeps every later automatic launch for the task refused as a conflict. A task
+// with no deferred record is a no-op, so a retried release is idempotent.
+func (h *TaskHandlers) httpDiscardDeferredLaunch(c *gin.Context) {
+	taskID := c.Param("id")
+	if taskID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "task id is required"})
+		return
+	}
+	if h.service != nil {
+		if err := h.service.AuthorizeTaskAccess(c.Request.Context(), taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+	}
+	if h.deferredLaunchDiscarder == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "deferred launch release is unavailable"})
+		return
+	}
+	discarded, err := h.deferredLaunchDiscarder.DiscardDeferredCeilingLaunch(c.Request.Context(), taskID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"discarded": discarded})
 }
 
 func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
@@ -1078,6 +1149,10 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 
 	title := strings.TrimSpace(body.Title)
 	description := strings.TrimSpace(body.Description)
+	if body.StartAgent && len(description) > models.MaxInitialPromptSubmissionBytes {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "initial task prompt exceeds the maximum size"})
+		return
+	}
 	// Trimmed once here so the value ValidateAssigneeAgentProfile looks up
 	// and the value the runner seat is written under are identical — a
 	// padded ID that passed validation must not be stored un-trimmed, where
@@ -1129,7 +1204,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Autopilot:                             body.Autopilot,
 		Priority:                              body.Priority,
 		State:                                 body.State,
-		Repositories:                          convertToServiceRepos(repos),
+		Repositories:                          convertTaskRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
 		Metadata:                              metadata,
 		DeferredLaunch:                        deferredLaunch,
@@ -1653,14 +1728,22 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	body httpCreateTaskRequest,
 	resolvedStepID string,
 ) *startAgentDispatch {
+	submission, err := models.NewInitialPromptSubmission(
+		strings.TrimSpace(body.Description), body.PlanMode, body.Attachments,
+	)
+	if err != nil {
+		h.logger.Error("failed to capture initial task submission", zap.Error(err), zap.String("task_id", taskID))
+		return nil
+	}
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
-		TaskID:               taskID,
-		Intent:               orchestrator.IntentPrepare,
-		AgentProfileID:       body.AgentProfileID,
-		ExecutorID:           body.ExecutorID,
-		ExecutorProfileID:    body.ExecutorProfileID,
-		WorkflowStepID:       resolvedStepID,
+		InitialPromptPreview:    models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		InitialPromptSubmission: submission,
+		TaskID:                  taskID,
+		Intent:                  orchestrator.IntentPrepare,
+		AgentProfileID:          body.AgentProfileID,
+		ExecutorID:              body.ExecutorID,
+		ExecutorProfileID:       body.ExecutorProfileID,
+		WorkflowStepID:          resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that
@@ -1845,7 +1928,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Description:    description,
 		Priority:       body.Priority,
 		State:          body.State,
-		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Repositories:   convertTaskRepositories(body.Repositories != nil, repos),
 		Position:       body.Position,
 		Metadata:       body.Metadata,
 		ParentID:       body.ParentID,
@@ -2572,6 +2655,15 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
+		if item.Session != nil && item.Session.TaskEnvironmentID != "" {
+			operation, runnerLive, recoveryErr := h.service.WorkspaceRecoveryProjection(c.Request.Context(), item.Session.TaskEnvironmentID)
+			if recoveryErr != nil {
+				h.logger.Warn("get quick chat workspace recovery projection failed",
+					zap.String("session_id", item.Session.ID), zap.Error(recoveryErr))
+			} else {
+				dto.EnrichWorkspaceRecovery(&sessionDTO, operation, runnerLive)
+			}
+		}
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)

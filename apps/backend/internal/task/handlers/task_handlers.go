@@ -36,6 +36,7 @@ type TaskHandlers struct {
 	configChatRetirer             ConfigChatSessionRetirer
 	configChatAdmission           configChatAdmission
 	movePreviewer                 WorkflowMovePreviewer
+	deferredLaunchDiscarder       DeferredLaunchDiscarder
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
 	parkedProjection              dto.ParkedProvider
@@ -167,6 +168,14 @@ type WorkflowMovePreviewer interface {
 	PreviewWorkflowMove(context.Context, orchestrator.WorkflowMovePreviewRequest) (*orchestrator.WorkflowMovePreview, error)
 }
 
+// DeferredLaunchDiscarder is the operator escape hatch for a task whose
+// automatic launch the session ceiling has deferred. It is deliberately
+// separate from OrchestratorStarter, like WorkflowMovePreviewer, so existing
+// launch fakes and plugin adapters do not need to implement it.
+type DeferredLaunchDiscarder interface {
+	DiscardDeferredCeilingLaunch(ctx context.Context, taskID string) (bool, error)
+}
+
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
 		service:      svc,
@@ -177,6 +186,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 	if previewer, ok := orchestrator.(WorkflowMovePreviewer); ok {
 		h.movePreviewer = previewer
+	}
+	if discarder, ok := orchestrator.(DeferredLaunchDiscarder); ok {
+		h.deferredLaunchDiscarder = discarder
 	}
 	if retirer, ok := orchestrator.(ConfigChatSessionRetirer); ok {
 		h.configChatRetirer = retirer
@@ -233,6 +245,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/task-sessions/:id/mark-read", h.httpMarkSessionRead)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
+	// Operator escape hatch for a task whose automatic launch the session
+	// ceiling has deferred and can no longer replay (its runtime is gone).
+	// Releasing the durable record lets later automatic launches proceed.
+	api.POST("/tasks/:id/deferred-launch/discard", h.httpDiscardDeferredLaunch)
 	api.GET("/tasks/:id/environment", h.httpGetTaskEnvironment)
 	api.GET("/tasks/:id/environment/live", h.httpGetTaskEnvironmentLive)
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
@@ -363,13 +379,8 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 	return result
 }
 
-// convertUpdateRepositories maps an update request's repositories field to the
-// service's replace semantics: an absent field (provided=false) must stay nil
-// so UpdateTask leaves task repositories untouched; a provided list — including
-// an explicitly empty one — replaces them. convertToServiceRepos alone returns
-// a non-nil empty slice for nil input, which wiped repositories on title-only
-// renames.
-func convertUpdateRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
+// convertTaskRepositories preserves whether the repositories field was provided.
+func convertTaskRepositories(provided bool, repos []dto.TaskRepositoryInput) []service.TaskRepositoryInput {
 	if !provided {
 		return nil
 	}

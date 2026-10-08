@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { isDynamicErrorPolicyValid } from "@/components/settings/dynamic-agent-policy-editor";
+import { isDynamicUnclassifiedPolicyValid } from "@/components/settings/dynamic-agent-unclassified-editor";
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
@@ -19,6 +20,7 @@ import type {
   DynamicErrorPolicy,
   DynamicModelPolicy,
   DynamicTierPolicy,
+  DynamicUnclassifiedPolicy,
   DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
 import type { DynamicCandidateTier } from "@/components/settings/dynamic-agent-tiers";
@@ -64,6 +66,8 @@ export type DynamicAgentProfileEditorState = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
   candidates: DynamicAgentCandidate[];
   tiers: DynamicCandidateTier[];
   preview: DynamicPreviewController;
@@ -290,7 +294,8 @@ export function useDynamicAgentProfileEditorState({
   const policiesValid = draft.candidates.every(
     (candidate) =>
       isDynamicErrorPolicyValid(candidate.policies.transient) &&
-      isDynamicErrorPolicyValid(candidate.policies.hard),
+      isDynamicErrorPolicyValid(candidate.policies.hard) &&
+      isDynamicUnclassifiedPolicyValid(candidate.policies.unclassified),
   );
   let invalidReason = t("agents:dynamicPolicyValidation");
   if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
@@ -353,6 +358,8 @@ export function useDynamicAgentProfileEditorState({
     keepModelWhileRunning: draft.keepModelWhileRunning,
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
+    updateCandidateUnclassified: draft.updateCandidateUnclassified,
+    applyUnclassifiedToAllCandidates: draft.applyUnclassifiedToAllCandidates,
     candidates: draft.candidates,
     tiers: deriveTiers(draft.candidates),
     preview,

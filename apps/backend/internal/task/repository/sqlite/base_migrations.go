@@ -183,6 +183,11 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
+	// Retained (inactive) environments keep their real owner and history; a
+	// task may have at most one active environment. Must run AFTER
+	// migrateTaskEnvironmentsRemoveAgentExecutionID, whose rebuild copies an
+	// explicit column list and would otherwise drop this column.
+	_ = r.migrate.Apply("task_environments.retired_at", `ALTER TABLE task_environments ADD COLUMN retired_at TIMESTAMP`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_branch_owner", `ALTER TABLE task_environment_repos ADD COLUMN worktree_branch_owner TEXT NOT NULL DEFAULT 'unknown'`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_integration_ref", `ALTER TABLE task_environment_repos ADD COLUMN worktree_integration_ref TEXT NOT NULL DEFAULT ''`)
 	_ = r.migrate.Apply("task_environment_repos.worktree_recovery_head_sha", `ALTER TABLE task_environment_repos ADD COLUMN worktree_recovery_head_sha TEXT NOT NULL DEFAULT ''`)
@@ -1367,7 +1372,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`ALTER TABLE task_environments_new RENAME TO task_environments`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_task_id ON task_environments(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environments_status ON task_environments(status)`,
-		// uniq_task_environments_task_id is created by ensureTaskEnvironmentTaskUniqueIndex
+		// uniq_task_environments_active_task_id is created by ensureTaskEnvironmentTaskUniqueIndex
 		// AFTER healDuplicateTaskEnvironments collapses any pre-existing duplicates.
 		// Creating it here would fail on databases that still have duplicate task_id rows.
 	})
@@ -1578,8 +1583,10 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 // (normalizeTaskWorktreeOwnership in worktree_ownership_migration.go). The
 // legacy tables and columns they read no longer exist at startup.
 // healDuplicateTaskEnvironments collapses rows where a single task has more
-// than one task_environments row (race in lazy create). Keeps the most recently
-// updated row and re-points any sessions still referring to the loser.
+// than one ACTIVE (retired_at IS NULL) task_environments row (race in lazy
+// create). Keeps the most recently updated active row and re-points any
+// sessions still referring to the loser. Retained (retired_at IS NOT NULL)
+// rows are never losers and are preserved.
 //
 // Runs before ensureTaskEnvironmentTaskUniqueIndex so the unique constraint
 // can be added cleanly. Idempotent — a no-op once the data is healed.
@@ -1593,6 +1600,7 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 	rows, err := tx.QueryContext(r.migrationContext(), `
 		SELECT task_id
 		  FROM task_environments
+		 WHERE retired_at IS NULL
 		 GROUP BY task_id
 		HAVING COUNT(*) > 1
 	`)
@@ -1622,13 +1630,15 @@ func (r *Repository) healDuplicateTaskEnvironments() error {
 	return tx.Commit()
 }
 
-// healDuplicateTaskEnvForTask keeps the most recently updated env for a task,
-// re-points sessions on the loser rows to the winner, then deletes losers.
+// healDuplicateTaskEnvForTask keeps the most recently updated active env for a
+// task, re-points sessions on the loser rows to the winner, then deletes the
+// active losers. Retained rows are left untouched.
 func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string) error {
 	var winnerID string
 	if err := tx.QueryRowContext(ctx, `
 		SELECT id FROM task_environments
 		 WHERE task_id = ?
+		   AND retired_at IS NULL
 		 ORDER BY updated_at DESC, created_at DESC
 		 LIMIT 1
 	`, taskID).Scan(&winnerID); err != nil {
@@ -1639,14 +1649,18 @@ func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string)
 		UPDATE task_sessions
 		   SET task_environment_id = ?
 		 WHERE task_id = ?
-		   AND task_environment_id != ?
-	`, winnerID, taskID, winnerID); err != nil {
+		   AND task_environment_id IN (
+		         SELECT id FROM task_environments
+		          WHERE task_id = ? AND retired_at IS NULL AND id != ?
+		       )
+	`, winnerID, taskID, taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: relink sessions for task %s: %w", taskID, err)
 	}
 
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM task_environments
 		 WHERE task_id = ?
+		   AND retired_at IS NULL
 		   AND id != ?
 	`, taskID, winnerID); err != nil {
 		return fmt.Errorf("heal duplicate envs: delete losers for task %s: %w", taskID, err)
@@ -1654,14 +1668,20 @@ func healDuplicateTaskEnvForTask(ctx context.Context, tx *sql.Tx, taskID string)
 	return nil
 }
 
-// ensureTaskEnvironmentTaskUniqueIndex adds a UNIQUE index on
-// task_environments(task_id) so that a future race in env creation fails loud
-// instead of silently producing two rows for the same task. Must run AFTER
-// healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
+// ensureTaskEnvironmentTaskUniqueIndex enforces at most one ACTIVE environment
+// per task so a future race in env creation fails loud instead of silently
+// producing two active rows. Retained (retired_at IS NOT NULL) environments are
+// excluded so an unusable environment can be preserved for evidence while a
+// fresh active one replaces it. Must run AFTER healDuplicateTaskEnvironments,
+// which collapses any pre-existing active duplicates, and after the retired_at
+// column exists.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
+	if _, err := r.db.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+		return err
+	}
 	_, err := r.db.ExecContext(r.migrationContext(), `
-		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_task_id
-		    ON task_environments(task_id)
+		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_active_task_id
+		    ON task_environments(task_id) WHERE retired_at IS NULL
 	`)
 	return err
 }
@@ -1674,21 +1694,24 @@ func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
 // untouched.
 //
 // Must run AFTER backfillTaskEnvironments + healDuplicateTaskEnvironments +
-// ensureTaskEnvironmentTaskUniqueIndex so each task has exactly one env to
-// link to.
+// ensureTaskEnvironmentTaskUniqueIndex so each task has exactly one active env
+// to link to. Retained (inactive) rows are never chosen as the binding.
 func (r *Repository) healSessionTaskEnvironmentIDs() error {
-	// LIMIT 1 is defensive — the unique index added by
-	// ensureTaskEnvironmentTaskUniqueIndex guarantees ≤1 row per task at
+	// LIMIT 1 is defensive — the partial unique index added by
+	// ensureTaskEnvironmentTaskUniqueIndex guarantees ≤1 active row per task at
 	// runtime, but the SQL reads as non-deterministic in isolation. Belt
 	// and suspenders.
 	if _, err := r.db.ExecContext(r.migrationContext(), `
 		UPDATE task_sessions
 		   SET task_environment_id = (
-		         SELECT te.id FROM task_environments te WHERE te.task_id = task_sessions.task_id LIMIT 1
+		         SELECT te.id FROM task_environments te
+		          WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL
+		          LIMIT 1
 		       )
 		 WHERE (task_environment_id = '' OR task_environment_id IS NULL)
 		   AND EXISTS (
-		         SELECT 1 FROM task_environments te WHERE te.task_id = task_sessions.task_id
+		         SELECT 1 FROM task_environments te
+		          WHERE te.task_id = task_sessions.task_id AND te.retired_at IS NULL
 		       )
 	`); err != nil {
 		return fmt.Errorf("heal session env id: update: %w", err)

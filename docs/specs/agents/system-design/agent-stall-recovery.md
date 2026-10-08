@@ -133,7 +133,9 @@ classifications are terminal. The latter uses the foreground-tool policy below.
 
 The lifecycle stores current open top-level calls by tool ID, preserving
 overlapping calls and clearing them on prompt dispatch. Pending/permission
-states do not count as executing. Status transitions and newly accepted output
+states do not count as executing by their status label; a non-terminal call
+whose label is not an executing status is still treated as executing once
+agentctl reports its foreground running. Status transitions and newly accepted output
 are meaningful activity; repeated tool-status/cumulative-output frames are not.
 ACP normalization carries a monotonic output byte counter separately from its
 bounded display buffers.

@@ -3,16 +3,9 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSystemSlice, defaultSystemState } from "./system-slice";
 import type { SystemSlice } from "./types";
-import type {
-  DiskUsageResponse,
-  SnapshotInfo,
-  UpdatesResponse,
-  SystemJob,
-  StorageOverviewResponse,
-} from "@/lib/types/system";
+import type { UpdatesResponse, SystemJob, StorageOverviewResponse } from "@/lib/types/system";
 
 const TS = "2026-05-18T00:00:00Z";
-const SNAPSHOT_AT = "2026-05-17T00:00:00Z";
 
 function makeStore() {
   return create<SystemSlice>()(
@@ -20,30 +13,6 @@ function makeStore() {
     immer((...a) => ({ ...(createSystemSlice as any)(...a) })),
   );
 }
-
-const DISK_USAGE: DiskUsageResponse = {
-  data: {
-    data_dir: 100,
-    worktrees: 200,
-    repos: 300,
-    sessions: 400,
-    tasks: 500,
-    quick_chat: 600,
-    backups: 700,
-    total: 2800,
-    warnings: [],
-    computed_at: TS,
-  },
-  computing: false,
-  home_dir: "/data/kandev",
-};
-
-const SNAPSHOT: SnapshotInfo = {
-  name: "manual-1.db",
-  size_bytes: 1024,
-  mtime: SNAPSHOT_AT,
-  kind: "manual",
-};
 
 const UPDATES: UpdatesResponse = {
   current: "1.2.3",
@@ -154,21 +123,11 @@ describe("system slice", () => {
     const store = makeStore();
     const s = store.getState();
     expect(s.system).toEqual(defaultSystemState.system);
-    expect(s.system.diskUsage).toBeNull();
+    expect("diskUsage" in s.system).toBe(false);
     expect("database" in s.system).toBe(false);
-    expect(s.system.backups).toEqual({ items: [], loaded: false });
+    expect("backups" in s.system).toBe(false);
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
-  });
-
-  it("setSystemDiskUsage replaces the cached response", () => {
-    const store = makeStore();
-    store.getState().setSystemDiskUsage(DISK_USAGE);
-    expect(store.getState().system.diskUsage).toEqual(DISK_USAGE);
-
-    const computing: DiskUsageResponse = { data: null, computing: true, home_dir: "/data/kandev" };
-    store.getState().setSystemDiskUsage(computing);
-    expect(store.getState().system.diskUsage).toEqual(computing);
   });
 
   it("setSystemRetention stores the status", () => {
@@ -193,16 +152,6 @@ describe("system slice", () => {
     };
     store.getState().setSystemRetention(status);
     expect(store.getState().system.retention).toEqual(status);
-  });
-
-  it("setSystemBackups marks the list as loaded", () => {
-    const store = makeStore();
-    store.getState().setSystemBackups([SNAPSHOT]);
-    expect(store.getState().system.backups).toEqual({ items: [SNAPSHOT], loaded: true });
-
-    // Empty list also flips loaded to true.
-    store.getState().setSystemBackups([]);
-    expect(store.getState().system.backups).toEqual({ items: [], loaded: true });
   });
 
   it("setSystemUpdates stores the response", () => {

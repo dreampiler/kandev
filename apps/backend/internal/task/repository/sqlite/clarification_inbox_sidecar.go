@@ -79,7 +79,22 @@ func (r *Repository) DeleteClarificationInboxSidecar(ctx context.Context, userID
 func (r *Repository) CountHiddenClarificationBundles(
 	ctx context.Context,
 	opts models.ListClarificationBundlesOptions,
-) (models.ClarificationInboxHiddenSummary, error) {
+) (summary models.ClarificationInboxHiddenSummary, err error) {
+	operationCtx, release, wait, err := r.beginClarificationRead(ctx)
+	if err != nil {
+		r.logClarificationRead("count_hidden_bundles", wait, 0, err)
+		return models.ClarificationInboxHiddenSummary{}, err
+	}
+	started := time.Now()
+	defer func() {
+		err = normalizeClarificationReadError(ctx, operationCtx, err)
+		release()
+		r.logClarificationRead("count_hidden_bundles", wait, time.Since(started), err)
+	}()
+	if err := operationCtx.Err(); err != nil {
+		return models.ClarificationInboxHiddenSummary{}, err
+	}
+
 	drv := r.ro.DriverName()
 	joinExtra, joinArgs := clarificationSidecarJoin(opts.Sidecar)
 	innerExtra, innerArgs := clarificationWorkspaceScanRestriction(opts.WorkspaceID)
@@ -87,7 +102,7 @@ func (r *Repository) CountHiddenClarificationBundles(
 	args := clarificationBundleArgs(innerArgs, joinArgs, whereArgs)
 	query := clarificationBundleCountQuery(drv, joinExtra, whereExtra, innerExtra)
 
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), args...)
+	row := r.ro.QueryRowContext(operationCtx, r.ro.Rebind(query), args...)
 	var count int
 	if dialect.IsPostgres(drv) {
 		var nextExpiry sql.NullTime

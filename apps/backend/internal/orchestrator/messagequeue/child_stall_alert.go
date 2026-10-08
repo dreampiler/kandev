@@ -7,6 +7,11 @@ const MetadataChildStallAlert = "child_stall_alert"
 // item. Folding unions the lists of the two items.
 const MetadataChildStallAlerts = "child_stall_alerts"
 
+// MetadataChildStallNudge marks a server-queued reminder sent to the stalled
+// child's own session. It is not a parent alert, so parent-alert folding and
+// pruning never treat it as one.
+const MetadataChildStallNudge = "child_stall_nudge"
+
 // IsChildStallAlert reports whether a queue entry is a child-turn stalled alert.
 func IsChildStallAlert(message *QueuedMessage) bool {
 	if message == nil || message.QueuedBy != QueuedByServer || message.Metadata == nil {
@@ -14,6 +19,16 @@ func IsChildStallAlert(message *QueuedMessage) bool {
 	}
 	alert, _ := message.Metadata[MetadataChildStallAlert].(bool)
 	return alert
+}
+
+// IsChildStallNudge reports whether a queue entry is a reminder queued for a
+// stalled child's own session.
+func IsChildStallNudge(message *QueuedMessage) bool {
+	if message == nil || message.QueuedBy != QueuedByServer || message.Metadata == nil {
+		return false
+	}
+	nudge, _ := message.Metadata[MetadataChildStallNudge].(bool)
+	return nudge
 }
 
 // admissionFoldEnabled reports whether admission may fold candidate into the

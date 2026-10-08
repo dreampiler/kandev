@@ -115,6 +115,7 @@ func (d *dynamicTaskDownstream) Launch(
 			return dynamicruntime.DownstreamExecution{}, err
 		}
 	}
+	d.service.flushPendingDynamicStreakReset(ctx, d.sessionID, nil)
 	d.service.beginDynamicAttempt(d.sessionID)
 	taskID := ""
 	if d.task != nil {
@@ -129,21 +130,7 @@ func (d *dynamicTaskDownstream) Launch(
 	defer releaseDispatchCommit()
 	execution, err := d.service.executor.LaunchPreparedSession(dispatchCtx, d.task, d.sessionID, options)
 	if err != nil {
-		var classified *routingerr.Error
-		if errors.As(err, &classified) {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		classified = routingerr.Classify(routingerr.Input{
-			Phase:      routingerr.PhaseProcessStart,
-			ProviderID: launch.ExecutionProfileID,
-			Stderr:     err.Error(),
-		})
-		// Unknown low-confidence launch failures are workspace/runtime errors,
-		// not provider failures. Let the ordinary launch recovery own them.
-		if classified.Confidence == routingerr.ConfLow {
-			return dynamicruntime.DownstreamExecution{}, err
-		}
-		return dynamicruntime.DownstreamExecution{}, fmt.Errorf("%w: %v", classified, err)
+		return dynamicruntime.DownstreamExecution{}, classifyDynamicLaunchFailure(err, launch.ExecutionProfileID)
 	}
 	d.service.bindDynamicAttemptExecution(d.sessionID, execution.AgentExecutionID)
 	d.service.bindPromptAttemptToExecution(dispatchCtx, d.sessionID, execution.AgentExecutionID)
@@ -859,7 +846,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	guardHeld bool,
 ) dynamicFailureRouteResult {
 	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
-	if (unclassified || dynamicruntime.InterruptedFailureAllowed(classified)) && !guardHeld && data.SessionID != "" {
+	if !guardHeld && data.SessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 		lock.Lock()
 		defer func() {
@@ -871,15 +858,26 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		}
 	}
 	data = s.withDynamicAttemptEvidence(data)
+	if !s.flushPendingDynamicStreakReset(ctx, data.SessionID, &data) {
+		if _, pending := s.pendingDynamicStreakResets.Load(data.SessionID); pending {
+			return dynamicFailureRouteResult{}
+		}
+	}
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
+		s.recordSupersededCandidateFailure(ctx, data, classified)
 		return dynamicFailureRouteResult{}
 	}
 	if s.supersededInterruptedDynamicAttempt(data, session) {
 		return dynamicFailureRouteResult{handled: true}
 	}
 	if data.EvidenceKnown && (data.OutputObserved || data.EffectObserved) &&
-		!s.currentInterruptedDynamicAttempt(data, session) {
+		!s.currentInterruptedDynamicAttempt(data, session) &&
+		!routingerr.IsResumeCorrupted(data.ErrorMessage) {
+		// A post-result failure is normally not a no-result replacement: its
+		// output must be preserved. A recognized non-replayable session-state
+		// failure is exempt because the successor is a fresh session that
+		// discards the poisoned turn output; resuming would repeat it.
 		return dynamicFailureRouteResult{}
 	}
 	interrupted := s.interruptedDynamicFailure(ctx, data, session, classified)
@@ -1018,7 +1016,7 @@ func (s *Service) prepareUnclassifiedFailureEvidence(
 	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
-	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, classified, startupEvidence)
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -1038,12 +1036,48 @@ func (s *Service) unclassifiedFailureRouteEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
+	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) dynamicruntime.UnclassifiedFailureEvidence {
 	if startupEvidence != nil {
 		return *startupEvidence
 	}
+	// A post-start runtime failure that produced no result carries no complete
+	// provider diagnostic, so it uses the no-result origin with a bounded,
+	// normalized error-type diagnostic instead of the terminal-provider origin.
+	if classified != nil && classified.Code == routingerr.CodeAgentRuntime {
+		return s.unclassifiedPostStartEvidence(ctx, data, session, classified.Phase)
+	}
 	return s.unclassifiedPromptEvidence(ctx, data, session)
+}
+
+// unclassifiedPostStartEvidence builds the no-result evidence for a post-start
+// runtime failure. The diagnostic is the bounded, sanitized failure message, so
+// no secret or personal path reaches the stored evidence or the fingerprint. The
+// phase is the classified failure phase, so the origin gate and the fingerprint
+// stay scoped to post-start failures with no output or effect.
+func (s *Service) unclassifiedPostStartEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	phase routingerr.Phase,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	evidence := s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginPostStartNoResult,
+		phase, promptUnclassifiedAttemptID(data), data.AgentID,
+		dynamicruntime.NormalizePostStartDiagnostic(data.ErrorMessage), false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
+	// A recognized non-replayable session-state failure (lost reasoning state)
+	// keeps its evidence admissible even after turn output: the successor is a
+	// fresh session and does not continue from that output.
+	evidence.NonReplayable = routingerr.IsResumeCorrupted(data.ErrorMessage)
+	return evidence
 }
 
 func (s *Service) clearStreakAfterCurrentClassifiedFailure(
@@ -1463,24 +1497,6 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 	return nil
 }
 
-func (s *Service) dynamicFailureSession(
-	ctx context.Context,
-	data watcher.AgentEventData,
-) (*models.TaskSession, bool) {
-	if s.profileExecutionResolver == nil || data.SessionID == "" {
-		return nil, false
-	}
-	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
-	if err != nil || session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return nil, false
-	}
-	if session.AgentExecutionID != "" && data.AgentExecutionID != "" &&
-		session.AgentExecutionID != data.AgentExecutionID {
-		return nil, false
-	}
-	return session, true
-}
-
 func (s *Service) unclassifiedPromptEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
@@ -1502,6 +1518,64 @@ func (s *Service) unclassifiedPromptEvidence(
 		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), providerID, diagnostic, complete,
 		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
 	)
+}
+
+// unclassifiedEmptyTurnEvidence builds the unclassified failure evidence for a
+// turn that finished without assistant output or tool effect. It carries no
+// provider diagnostic, so ProviderID and DiagnosticText stay empty and the
+// empty-turn origin relaxes those requirements instead of fabricating
+// identifier defaults.
+func (s *Service) unclassifiedEmptyTurnEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginEmptyTurnCompletion,
+		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), "", "", false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
+}
+
+// routeDynamicEmptyTurnCompletion counts a no-output turn as an unclassified
+// failure for the current candidate and, at the threshold, launches a successor.
+// It returns true only when a successor was launched, so the caller skips the
+// ordinary completion follow-up; a below-threshold count parks the session
+// through the ordinary manual-recovery path and returns false. A profile with
+// the policy off returns false without touching any state.
+func (s *Service) routeDynamicEmptyTurnCompletion(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	if session == nil || s.profileExecutionResolver == nil || !data.DynamicRouteAttempt ||
+		!data.EvidenceKnown || data.OutputObserved || data.EffectObserved {
+		return false
+	}
+	if !s.profileExecutionResolver.UnclassifiedEmptyTurnEnabled(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+	) {
+		return false
+	}
+	evidence := s.unclassifiedEmptyTurnEvidence(ctx, data, session)
+	if !evidence.TaskScope || !evidence.CurrentAttempt {
+		return false
+	}
+	s.markDynamicEmptyTurn(data)
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend})
+	result := s.routeDynamicAgentFailureWithEvidence(ctx, data, failure, &evidence, true)
+	if !result.handled {
+		// The route declined, so the streak was not advanced; the marker must not
+		// suppress a later successful-completion reset.
+		s.clearDynamicEmptyTurn(data.SessionID)
+		return false
+	}
+	return !result.manualRecovery
 }
 
 func (s *Service) unclassifiedStartupEvidence(

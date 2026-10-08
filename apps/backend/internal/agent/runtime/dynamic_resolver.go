@@ -347,6 +347,35 @@ func (r *ProfileExecutionResolver) RouteAfterUnclassifiedFailure(
 	)
 }
 
+// UnclassifiedEmptyTurnEnabled reports whether the candidate that owns a
+// session's current route has the repeated-failure (unclassified) policy
+// enabled with a valid threshold. The orchestrator checks it before routing a
+// no-output turn as an unclassified failure: a profile with the policy off must
+// keep its ordinary turn completion rather than fall into manual recovery.
+func (r *ProfileExecutionResolver) UnclassifiedEmptyTurnEnabled(
+	ctx context.Context,
+	sessionID, profileID, candidateID string,
+) bool {
+	if r == nil || !r.enabled.Load() || r.dynamic == nil || sessionID == "" ||
+		profileID == "" || candidateID == "" {
+		return false
+	}
+	profile, err := r.loadDynamicProfileForSession(ctx, profileID, sessionID, "")
+	if err != nil {
+		return false
+	}
+	for _, candidate := range profile.Candidates {
+		if candidate.ID != candidateID {
+			continue
+		}
+		policy := candidate.Policies.Unclassified
+		return policy != nil && policy.Enabled &&
+			policy.ConsecutiveFailureThreshold >= routingpolicy.MinUnclassifiedThreshold &&
+			policy.ConsecutiveFailureThreshold <= routingpolicy.MaxUnclassifiedThreshold
+	}
+	return false
+}
+
 // RouteAfterInterruptedFailure preserves the failed session's executor scope.
 func (r *ProfileExecutionResolver) RouteAfterInterruptedFailure(ctx context.Context, sessionID, profileID, candidateID string, generation int64, failure *routingerr.Error) (dynamic.RouteDecision, error) {
 	if r.engine == nil || sessionID == "" {
@@ -858,6 +887,9 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
 	if err != nil {
 		return "", fmt.Errorf("resolve agent for execution profile %s: %w", profile.ID, err)
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return "", fmt.Errorf("execution profile %s: %w", profile.ID, ErrVirtualProfile)
 	}
 	return agent.Name, nil
 }

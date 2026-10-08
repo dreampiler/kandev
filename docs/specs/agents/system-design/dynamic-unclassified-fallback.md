@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002
 created: 2026-09-28
-updated: 2026-09-28
+updated: 2026-10-06
 owners:
   - cfl
 ---
@@ -111,6 +111,27 @@ Successful turn completion, output, or tool activity clears it through the same 
 For a startup streak, successful initialization clears it before prompt dispatch.
 Explicit stop, candidate/profile/step changes, profile-version changes, policy disabling, or step veto clear it.
 
+Prompt output and effects update the in-memory safety evidence as their original
+events arrive, while marking one coalesced pending clear intent per session.
+Raw message, reasoning, tool-update and effect callbacks do not read or write
+route state. Transcript projections are not evidence sources and never create
+another clear intent. Persist a pending clear at a real tool-call boundary,
+terminal-failure decision, successful completion, explicit stop or before a
+replacement prompt begins.
+
+If a reset read or write fails, retain the intent. A terminal failure with an
+unresolved reset remains in manual recovery and does not advance the candidate
+or the streak. A captured intent is discarded without writing when its route
+generation, candidate or logical profile is no longer current. Before route
+identity has been captured, apply the intent only while its exact prompt
+evidence and generation still own the session; if that proof is lost, retain
+the intent and fail closed. A manager-owned successful completion is an
+independent clear reason: clear the current route once, and retire an older
+pending intent only after that persistence succeeds. A stale completion does
+no repository reads or writes. Permanent session deletion retires any retained
+pending intent only after the session row is deleted successfully; a failed
+deletion preserves it.
+
 At threshold, claim the next candidate once, in configured order, using the existing route transaction.
 Do not wrap, open a shared circuit, or transfer the count to the successor.
 Persist continuation and attribution before downstream launch, as current routing requires.
@@ -141,7 +162,11 @@ Use the existing profile-session-policy fields as a propagation reference, inclu
 Candidate policy API serialization, browser normalization, editor drafts, and save requests preserve the new section.
 A browser edit of unrelated settings must not disable an API-configured policy.
 
-No rendered controls or layout changes are planned. Desktop and phone use existing manual recovery and route-change presentation.
+The dynamic agent profile editor renders a per-candidate unclassified control
+(enabled toggle and consecutive-failure threshold) and one profile-wide action
+that sets every candidate's unclassified policy to enabled with threshold 2,
+leaving order, tiers, model options, and the transient and hard policies
+unchanged. Runtime recovery and route-change presentation stay as they are.
 Use the existing `policy_skip` path and structured unknown error code. Do not manufacture a classified provider reason.
 Existing chat state, composer contents, and historical provider attribution remain intact.
 Public documentation must explain API configuration, threshold counting, the workflow veto, and the conservative eligibility limits when implementation ships.

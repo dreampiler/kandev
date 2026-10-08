@@ -796,6 +796,15 @@ func (s *Service) dispatchAutomationRun(
 		s.logger.Error("failed to dispatch automation run",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		if errors.Is(err, ErrCeilingLaunchConflict) {
+			// The queued launch already holds a start for this automation's run, so
+			// the run's task remains reachable through the stored deferral. Deleting
+			// the task here would erase the failure's cause while the queued start
+			// still owns it; the ceiling sweep replays that record or drops it with
+			// its own reason, so this path only records the outcome and keeps both.
+			s.markAutomationRunTerminal(ctx, taskID, false, err.Error())
+			return true
+		}
 	}
 	s.cleanupFailedAutomationTask(ctx, automationID, taskID, action)
 	return true

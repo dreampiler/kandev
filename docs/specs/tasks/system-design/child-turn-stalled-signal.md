@@ -143,6 +143,30 @@ Transient failures retry with waits of 1, 5, 30, and 120 seconds, up to five
 attempts. Failed candidates keep their original identity and metadata and
 remain inspectable and retryable by the operator.
 
+## Missing-signal routing
+
+A `missing_completion_signal` candidate does not wake the parent on its own.
+The producer queues one short reminder for the child's own session through the
+same keyed admission path, so the child's normal queue policy, capacity, and
+Auto-run rules still govern dispatch. The parent alert that the operator turned
+into a child nudge is thereby removed.
+
+Escalation is bounded by a consecutive count keyed to the child session and the
+workflow entry captured at turn start (`child_stall_nudge` session metadata,
+updated with a single-key atomic write). The count advances only after a
+successful delivery, so a retried candidate is not counted twice. The first two
+consecutive nudged stalls on one entry stay with the child; the third alerts the
+parent once and marks the streak escalated, after which further stalls on that
+entry are suppressed. A change of workflow entry or cause starts a new streak.
+Because a replaced child session carries no streak, its first stall after
+replacement is nudged afresh. Every other cause continues to use direct parent
+delivery unchanged.
+
+The new outcomes are recorded on the existing counters: the child reminder under
+`task_child_stall_outcome_total{nudged_child}`, the escalation under the existing
+`delivered` outcome, and a suppressed escalated streak under reason
+`nudge_escalated`; the cause counter still counts every missing-signal candidate.
+
 ## Folding
 
 Alerts are queued with `queued_by=server` and alert metadata. A new alert folds

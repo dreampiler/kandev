@@ -361,7 +361,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 				// release any launch-side claim without publishing FAILED.
 				cleanupCtx := context.WithoutCancel(ctx)
 				attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-					cleanupCtx, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+					cleanupCtx, taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 				)
 				if attemptOwned && e.onAgentProcessStartFailed != nil {
 					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
@@ -396,7 +396,7 @@ func (e *Executor) runAgentProcessAsyncWithObservation(
 			// not run the resume success callback or restore task/session state.
 			// Teardown is exact-execution scoped so a retry cannot be stopped.
 			attemptOwned := e.stopFailedStartExecutionIfCurrentAttempt(
-				context.WithoutCancel(ctx), sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
+				context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, startAttemptID, "cancelled resume startup",
 			)
 			if attemptOwned && e.onAgentProcessStartFailed != nil {
 				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
@@ -559,7 +559,7 @@ func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionI
 
 func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 	ctx context.Context,
-	sessionID, agentExecutionID string,
+	taskID, sessionID, agentExecutionID string,
 	expectedStartAttemptID string,
 	phase string,
 ) bool {
@@ -576,7 +576,11 @@ func (e *Executor) stopFailedStartExecutionIfCurrentAttempt(
 		return false
 	}
 	if owned || cleanupSafe {
-		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		if e.onCancelledResumeExecutionCleanup != nil {
+			e.onCancelledResumeExecutionCleanup(ctx, taskID, sessionID, agentExecutionID, expectedStartAttemptID)
+		} else {
+			e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+		}
 	}
 	return owned
 }
@@ -713,7 +717,7 @@ func (e *Executor) cleanupUnstartedExecutionAfterPersistError(
 func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	ctx context.Context,
 	env *models.TaskEnvironment,
-	sessionID string,
+	sessionID, reason string,
 ) {
 	if env == nil || env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != sessionID {
 		return
@@ -724,7 +728,109 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 		e.logger.Warn("failed to mark workspace materialization failed",
 			zap.String("task_environment_id", env.ID),
 			zap.Error(err))
+		return
 	}
+	e.logger.Warn("closed owned creating task environment after materialization gave up",
+		zap.String("task_environment_id", env.ID),
+		zap.String("session_id", sessionID),
+		zap.String("reason", reason))
+}
+
+// FailOwnedCreatingTaskEnvironment marks the task's creating environment failed
+// when sessionID is its materialization owner. An abandoned launch must not
+// leave its own creating environment behind: nothing else finalizes it, and the
+// next launch then waits forever on a workspace that never becomes ready.
+// Environments owned by a different materializer are left untouched.
+func (e *Executor) FailOwnedCreatingTaskEnvironment(ctx context.Context, taskID, sessionID, reason string) {
+	if taskID == "" || sessionID == "" {
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to load task environment after early launch error",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID, reason)
+}
+
+// taskEnvironmentNeverMaterialized reports whether the environment carries no
+// physical workspace evidence. A creating environment is born without a
+// workspace path and per-repository rows are published only when the launch
+// finalizes, so a failed row with no path, no container or sandbox handle, and
+// no live repository inventory never reached a physical workspace.
+func taskEnvironmentNeverMaterialized(env *models.TaskEnvironment) bool {
+	if env == nil {
+		return false
+	}
+	if env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" {
+		return false
+	}
+	for _, repo := range env.Repos {
+		if repo != nil && repo.DeletedAt == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// reelectFailedTaskEnvironmentForLaunch hands a failed environment that never
+// materialized back to full preparation instead of rejecting every later
+// launch forever. The repository CAS is the authority; the in-memory check
+// only decides whether to attempt it. A failed environment that carried a
+// physical workspace, an inherited environment owned by another task, and a
+// failed row another launch already re-claimed all keep failing closed.
+func (e *Executor) reelectFailedTaskEnvironmentForLaunch(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) error {
+	if !taskEnvironmentNeverMaterialized(env) || env.MaterializationSessionID != "" || env.TaskID != task.ID {
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	reclaimed, err := e.repo.ReclaimFailedTaskEnvironmentMaterialization(ctx, env.ID, session.ID)
+	if err != nil {
+		return fmt.Errorf("reclaim failed task environment: %w", err)
+	}
+	if !reclaimed {
+		return e.failedReclaimOutcome(ctx, env, session.ID)
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = session.ID
+	env.ContainerID = ""
+	env.ContainerBootstrapNonceSecretID = ""
+	env.ContainerControlAuthTokenSecretID = ""
+	env.SandboxID = ""
+	e.logger.Info("re-elected failed task environment for fresh materialization",
+		zap.String("task_id", task.ID),
+		zap.String("task_environment_id", env.ID),
+		zap.String("session_id", session.ID))
+	return nil
+}
+
+// failedReclaimOutcome resolves a lost reclaim race: another launch owns the
+// environment now. A creating owner is awaited like any sibling, a published
+// workspace is adopted, and anything else keeps failing closed.
+func (e *Executor) failedReclaimOutcome(ctx context.Context, env *models.TaskEnvironment, sessionID string) error {
+	fresh, loadErr := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if loadErr != nil || fresh == nil {
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if fresh.Status == models.TaskEnvironmentStatusCreating && fresh.MaterializationSessionID != sessionID {
+		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, fresh.ID)
+		if waitErr != nil {
+			return waitErr
+		}
+		*env = *readyEnv
+		return nil
+	}
+	if fresh.Status == models.TaskEnvironmentStatusReady || fresh.Status == models.TaskEnvironmentStatusStopped {
+		*env = *fresh
+		return nil
+	}
+	return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
@@ -1525,11 +1631,21 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		if bindWorkspace && selectedEnv != nil && selectedEnv.ID != "" && session.TaskEnvironmentID == "" {
 			session.TaskEnvironmentID = selectedEnv.ID
 		}
-		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, false, 0, false)
+		// A new session may auto-reprepare a fresh task copy when the bound
+		// branch is verified unrecoverable: allow the recovery admission to
+		// defer that case to the attach-only worktree path, which replaces the
+		// lost branch instead of failing the launch.
+		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType, true, 0, false)
 		if envErr != nil {
 			return "", envErr
 		}
 	}
+
+	// A failed, consumer-free canonical environment is retained and replaced so
+	// the session below binds to a fresh environment instead of refusing at the
+	// workspace-binding boundary. A live consumer leaves the row in place and
+	// the existing attach-only refusal applies (fail-closed).
+	e.admitEnvironmentRecovery(ctx, task.ID)
 
 	createCtx := ctx
 	if recoveryAdmission != nil {
@@ -1734,6 +1850,92 @@ func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) err
 	return e.worktreeRecoveryAdmission(ctx, taskID)
 }
 
+// admitEnvironmentRecovery retires a task's canonical environment when it is a
+// failed, consumer-free row, so the affected session can be created/bound to a
+// fresh canonical environment instead of refusing. It is a no-op when the task
+// has no active environment or the active environment is not failed. A failed
+// environment with a live consumer is left in place, and the caller's normal
+// attach-only refusal then applies (fail-closed).
+//
+// It is best-effort: a lookup or storage failure is logged and swallowed so it
+// cannot preempt the normal launch path's sanitized error handling, and the
+// unusable row still blocks reuse until it is retired.
+func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) {
+	if e.repo == nil || taskID == "" {
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil || env.Status != models.TaskEnvironmentStatusFailed {
+		return
+	}
+	if _, err := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID); err != nil {
+		e.logger.Warn("failed to retire unusable task environment",
+			zap.String("task_id", taskID), zap.String("environment_id", env.ID), zap.Error(err))
+	}
+}
+
+// resolveFreshTaskDirName returns the per-task directory name to use when a
+// session is about to (re)materialize a worktree environment. It reuses a name
+// already recorded on the environment; otherwise it prefers the deterministic
+// semantic name. When that root is already occupied by a preserved (retained)
+// environment of the same task, it selects a distinct fresh root tied to the
+// requesting session so the preserved checkout is never overwritten. Every
+// candidate, including the session-suffixed one, is checked against the
+// recorded names, so a second replacement of the same session cannot reselect
+// an already-used root. A lookup error fails closed to a fully fresh root
+// rather than risk clobbering a preserved checkout.
+func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, session *models.TaskSession, existingEnv *models.TaskEnvironment) string {
+	if existingEnv != nil && existingEnv.TaskDirName != "" {
+		return existingEnv.TaskDirName
+	}
+	if task == nil {
+		return ""
+	}
+	base := worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
+	if base == "" {
+		return ""
+	}
+	names, err := e.listTaskDirNames(ctx, task.ID)
+	if err != nil {
+		// Cannot prove the base or a previously used session suffix is free;
+		// fall back to a fully fresh root instead of risking a clobber.
+		return base + "_" + uuid.New().String()[:8]
+	}
+	if !taskDirNameInList(names, base) {
+		return base
+	}
+	suffix := ""
+	if session != nil {
+		suffix = worktree.TaskDirSuffix(session.ID)
+	}
+	if suffix == "" {
+		suffix = uuid.New().String()[:8]
+	}
+	candidate := base + "_" + suffix
+	for attempt := 2; taskDirNameInList(names, candidate); attempt++ {
+		candidate = fmt.Sprintf("%s_%s_%d", base, suffix, attempt)
+	}
+	return candidate
+}
+
+// listTaskDirNames returns the per-task directory names recorded for a task
+// across active and retained environments. A nil repository yields no names.
+func (e *Executor) listTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	if e.repo == nil || taskID == "" {
+		return nil, nil
+	}
+	return e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
+}
+
+func taskDirNameInList(names []string, name string) bool {
+	for _, existing := range names {
+		if existing == name {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
 func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
@@ -1766,7 +1968,23 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 // subprocess is not started and the session state remains CREATED.
 // When opts.StartAgent is true and the workspace was already launched (AgentExecutionID set), only the
 // agent subprocess is started.
+//
+// Every error return closes the session's own creating task environment: an
+// abandoned launch must not leave its materialization claim behind, or later
+// launches wait on a workspace that never becomes ready.
 func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
+	execution, err := e.launchPreparedSession(ctx, task, sessionID, opts)
+	if err != nil && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) {
+		e.FailOwnedCreatingTaskEnvironment(
+			context.WithoutCancel(ctx), task.ID, sessionID,
+			fmt.Sprintf("launch abandoned before completion: %v", err),
+		)
+	}
+	return execution, err
+}
+
+//nolint:cyclop,funlen,gocognit,maintidx // Session construction keeps its existing validation sequence in one launch path.
+func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
 	agentProfileID := opts.AgentProfileID
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
@@ -1890,7 +2108,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		existingEnv = readyEnv
 	}
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		if err := e.reelectFailedTaskEnvironmentForLaunch(ctx, task, session, existingEnv); err != nil {
+			return nil, err
+		}
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
@@ -2008,7 +2228,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}
 
 	var recoveryAdmission *worktree.RecoveryAdmission
-	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, false, 0, true)
+	// A new session may auto-reprepare a fresh task copy when the bound branch
+	// is verified unrecoverable: allow the recovery admission to defer that
+	// case to the attach-only worktree path, which replaces the lost branch
+	// instead of failing the launch.
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType, true, 0, true)
 	if err != nil {
 		return nil, err
 	}
@@ -2042,7 +2266,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if hasRunning {
 		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(
 			launchCtx, task, session, prompt, startAgent, opts.McpMode, req,
-			opts.OnExecutionAdmitted, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+			opts.OnExecutionAdmitted, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 			opts.RefuseIfAgentRunning, opts.TurnID,
 		)
 		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
@@ -2081,13 +2306,14 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Create or update the task environment with launch results
 	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID, "task environment persistence failed after launch")
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && (prompt != "" || len(opts.Attachments) > 0) {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			resp.AgentExecutionID, opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			resp.AgentExecutionID, opts.BeforeInitialPromptDispatch,
+			opts.OnInitialPromptAccepted, opts.OnInitialPromptFailed,
 		); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
@@ -2260,6 +2486,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
+	e.FailOwnedCreatingTaskEnvironment(failCtx, taskID, sessionID, "early launch failure")
 	safeErr, changed := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr,
 	)
@@ -2523,6 +2750,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
+	}
+	// Select the per-task root: reuse a recorded name, else the deterministic
+	// semantic name, or a distinct fresh root when a preserved environment still
+	// occupies the deterministic root (see resolveFreshTaskDirName).
+	if req.UseWorktree && req.RepoName != "" {
+		req.TaskDirName = e.resolveFreshTaskDirName(ctx, task, session, existingEnv)
 	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -2799,7 +3032,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		Env:         cloneStringMap(env),
 	}
 	return e.startAgentOnExistingWorkspaceWithRequest(
-		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, false, turnIDs...,
+		ctx, task, session, prompt, startAgent, mcpMode, request, nil, nil, nil, nil, false, turnIDs...,
 	)
 }
 
@@ -2812,6 +3045,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
+	beforeInitialPromptDispatch func(string) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
@@ -2895,8 +3129,9 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		return nil, err
 	}
 	if prompt != "" || len(request.Attachments) > 0 {
-		if err := e.registerInitialPromptDispatchCallbacks(
-			executionID, onInitialPromptAccepted, onInitialPromptFailed,
+		if err := e.registerInitialPromptCallbacks(
+			executionID, beforeInitialPromptDispatch,
+			onInitialPromptAccepted, onInitialPromptFailed,
 		); err != nil {
 			return nil, fmt.Errorf("register initial prompt dispatch callbacks: %w", err)
 		}
@@ -3413,6 +3648,16 @@ func (e *Executor) persistTaskEnvironment(
 		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
+	}
+
+	// A stale binding to a retired or failed environment must not be reused as
+	// the new environment's ID: the retired row still owns that primary key.
+	// Clear it so CreateTaskEnvironment mints a fresh identity.
+	if session.TaskEnvironmentID != "" {
+		if referenced, refErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); refErr == nil && referenced != nil &&
+			(referenced.IsRetired() || referenced.Status == models.TaskEnvironmentStatusFailed) {
+			session.TaskEnvironmentID = ""
+		}
 	}
 
 	env := &models.TaskEnvironment{

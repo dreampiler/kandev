@@ -23,6 +23,7 @@ type Repository struct {
 	log                     *logger.Logger
 	migrate                 *db.MigrateLogger
 	queuePurgeMu            sync.RWMutex
+	clarificationAdmission  clarificationReadAdmission
 	queuePurger             func(context.Context, string)
 	queuePurgePrepare       func(context.Context, string)
 	queuePurgeNotify        func(context.Context, string)

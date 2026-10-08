@@ -83,6 +83,9 @@ func (m *mockRepository) CreateWorkspace(ctx context.Context, workspace *models.
 func (m *mockRepository) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
 	return nil, nil
 }
+func (m *mockRepository) UpdateWorkspaceFields(_ context.Context, _ string, _ models.WorkspaceFieldUpdate, _ *time.Time) (*models.Workspace, error) {
+	return nil, nil
+}
 func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error {
 	return nil
 }
@@ -287,6 +290,9 @@ func (m *mockRepository) GetWorkflow(ctx context.Context, id string) (*models.Wo
 }
 func (m *mockRepository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	return nil
+}
+func (m *mockRepository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow field updates are not configured in this fixture")
 }
 func (m *mockRepository) DeleteWorkflow(ctx context.Context, id string) error {
 	return nil
@@ -690,11 +696,17 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil
+}
+func (m *mockRepository) RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) DeleteTaskEnvironment(ctx context.Context, id string) error {
 	return nil

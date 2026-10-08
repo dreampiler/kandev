@@ -11,6 +11,7 @@ import type {
   TaskPendingActionRevision,
   Turn,
   TaskSession,
+  WorkspaceRecoveryProjection,
   TaskPlan,
   TaskPlanCommentSnapshot,
   TaskPlanRevision,
@@ -148,6 +149,7 @@ export type AppState = KanbanSlice & {
   shell: (typeof defaultSessionRuntimeState)["shell"];
   processes: (typeof defaultSessionRuntimeState)["processes"];
   gitStatus: (typeof defaultSessionRuntimeState)["gitStatus"];
+  gitStatusDisplay: (typeof defaultSessionRuntimeState)["gitStatusDisplay"];
   environmentIdBySessionId: (typeof defaultSessionRuntimeState)["environmentIdBySessionId"];
   sessionCommits: (typeof defaultSessionRuntimeState)["sessionCommits"];
   gitCheckoutGeneration: (typeof defaultSessionRuntimeState)["gitCheckoutGeneration"];
@@ -502,6 +504,10 @@ export type AppState = KanbanSlice & {
     revision?: TaskPendingActionRevision,
     taskId?: string,
   ) => void;
+  setWorkspaceRecoveryProjection: (
+    sessionIds: string[],
+    projection: WorkspaceRecoveryProjection,
+  ) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (
     taskId: string,
@@ -718,11 +724,14 @@ export type AppState = KanbanSlice & {
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
-// independently-fetched fields (info, diskUsage, updates, ...). Callers that
+// independently-fetched fields (info, updates, ...). Callers that
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+export type HydrationState = Omit<
+  Partial<AppState>,
+  "system" | "quickChat" | "gitStatusDisplay"
+> & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
   // The Needs-you Inbox boot-hydration producer's raw wire shape, carried

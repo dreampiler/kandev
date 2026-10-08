@@ -1147,6 +1147,7 @@ func registerRoutes(p routeParams) {
 	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
 	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	wireOfficeProjectRepositorySources(p.taskSvc, p.officeRepo)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
@@ -2408,6 +2409,9 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	if p.orchestratorSvc != nil {
+		mcpHandlers.SetStepCompleteSessionRebinder(p.orchestratorSvc)
+	}
 	mcpHandlers.SetPluginService(p.services.Plugins)
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {
 		mcpHandlers.SetCanvasAuthoringService(newCanvasAuthoringService(
