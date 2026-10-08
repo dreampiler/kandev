@@ -279,7 +279,7 @@ function EventKindChips({
             onClick={() => onSelect(kind)}
             className={`min-h-11 cursor-pointer rounded-full border px-2.5 text-xs sm:min-h-0 ${
               active
-                ? "border-primary bg-primary text-primary-foreground"
+                ? "border-primary bg-primary text-primary-foreground dark:bg-[oklch(0.51_0.23_277)]"
                 : "border-border text-muted-foreground"
             }`}
             data-testid={`overview-event-kind-${kind}`}
