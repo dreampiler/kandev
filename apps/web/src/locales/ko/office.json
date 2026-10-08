@@ -1102,6 +1102,7 @@
   "overviewEventModelBlocked": "모델 막힘",
   "overviewEventModelUnblocked": "모델 풀림",
   "overviewEventPRMerged": "PR 병합",
+  "overviewEventPRMergedScope": "Kandev 작업에 연결된 PR을 셉니다: GitHub PR, 그리고 설치된 코드호스트 플러그인이 보고한 병합(예: Forgejo, Gitea). GitLab이나 Azure DevOps의 병합, Kandev가 추적하지 않는 PR의 병합은 세지 않습니다.",
   "overviewEventAutomationFailed": "자동화 실패",
   "overviewEventOwnerDecision": "결정 요청",
   "overviewEventStepMove": "칸 이동",

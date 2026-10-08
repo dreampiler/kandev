@@ -1102,6 +1102,7 @@
   "overviewEventModelBlocked": "Model blocked",
   "overviewEventModelUnblocked": "Model unblocked",
   "overviewEventPRMerged": "PR merged",
+  "overviewEventPRMergedScope": "Counts pull requests linked to a Kandev task: GitHub pull requests, and merges reported by an installed code-host plugin (for example Forgejo or Gitea). Merges on GitLab or Azure DevOps, and merges of pull requests Kandev does not track, are not counted.",
   "overviewEventAutomationFailed": "Automation failed",
   "overviewEventOwnerDecision": "Decision asked",
   "overviewEventStepMove": "Step move",

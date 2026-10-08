@@ -252,6 +252,7 @@ func TestApplyGitCredentialSnapshotAllowsPluginBrokerWithoutGitHubPolicy(t *test
 }
 
 func TestConfigureGitHubCredentialBrokerHelperSurvivesPathReset(t *testing.T) {
+	isolateHostCredentialEnvironment(t)
 	helperDir := filepath.Join(t.TempDir(), "managed github helper")
 	if err := os.MkdirAll(helperDir, 0o700); err != nil {
 		t.Fatalf("create helper directory: %v", err)

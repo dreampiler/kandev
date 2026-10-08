@@ -222,6 +222,14 @@ type UnclassifiedFailureEvidence struct {
 	EvidenceKnown      bool
 	OutputObserved     bool
 	EffectObserved     bool
+	// NonReplayable marks a failure whose saved session state cannot be
+	// replayed: a resume repeats the identical failure, so the successor must
+	// be a fresh session. Because that successor discards the failed attempt's
+	// turn output rather than continuing from it, the pre-result no-output
+	// safety requirement does not apply. It is set only from a trusted,
+	// recognized diagnostic signature (routingerr.IsResumeCorrupted), never
+	// from caller-supplied booleans.
+	NonReplayable bool
 }
 
 func (e UnclassifiedFailureEvidence) currentFor(
@@ -243,8 +251,12 @@ func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
 }
 
 func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
-	base := e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
-		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved
+	base := e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto && e.EvidenceKnown
+	if !e.NonReplayable {
+		// A replayable successor must not throw away a completed result, so an
+		// authoritative no-output/no-effect signal is required.
+		base = base && !e.OutputObserved && !e.EffectObserved
+	}
 	if e.relaxesProviderDiagnostic() {
 		// These origins have no complete provider diagnostic to require.
 		return base

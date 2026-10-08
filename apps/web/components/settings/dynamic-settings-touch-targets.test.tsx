@@ -56,6 +56,7 @@ describe("dynamic settings touch targets", () => {
           onUpdateModel={vi.fn()}
           onUpdateWindows={vi.fn()}
           onUpdatePolicy={vi.fn()}
+          onUpdateUnclassified={vi.fn()}
         />
       </TooltipProvider>,
     );

@@ -107,7 +107,9 @@ func (m *Manager) inspectMissingCheckout(
 		}
 		return missingCheckoutInspection{}, missingCheckoutError(taskID, wt.Path, "automatic recovery requires a persisted managed task-root identity")
 	}
-	parent, rootMissing, record, err := inspectMissingCheckoutTaskRoot(taskID, wt, location, pathPresent)
+	parent, rootMissing, record, err := inspectMissingCheckoutTaskRoot(
+		taskID, wt, location, pathPresent, slot.quarantinePresentCheckout,
+	)
 	if err != nil {
 		return missingCheckoutInspection{}, err
 	}
@@ -125,7 +127,7 @@ func (m *Manager) inspectMissingCheckout(
 	if pathPresent {
 		return missingCheckoutInspection{}, nil
 	}
-	return m.inspectAbsentMissingCheckout(ctx, taskID, slot, location, parent, rootMissing, record, allowBranchReplacement)
+	return m.inspectAbsentMissingCheckout(ctx, taskID, slot, location, parent, rootMissing, record, allowBranchReplacement, slot.quarantinePresentCheckout)
 }
 
 func inspectMissingCheckoutTaskRoot(
@@ -133,6 +135,7 @@ func inspectMissingCheckoutTaskRoot(
 	wt *Worktree,
 	location missingCheckoutLocation,
 	pathPresent bool,
+	allowPresent bool,
 ) (storageworkspaces.DirectoryHandle, bool, *missingCheckoutRecoveryRecord, error) {
 	parent, rootMissing, err := openMissingCheckoutTaskRoot(location, false)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -148,7 +151,7 @@ func inspectMissingCheckoutTaskRoot(
 		}
 		return nil, false, nil, missingCheckoutError(taskID, wt.Path, "persisted checkout path is outside its managed task root")
 	}
-	if err := verifyMissingCheckoutTarget(parent, location.name, pathPresent); err != nil {
+	if err := verifyMissingCheckoutTarget(parent, location.name, pathPresent, allowPresent); err != nil {
 		if parent != nil {
 			_ = parent.Close()
 		}
@@ -203,7 +206,7 @@ func (m *Manager) inspectMissingCheckoutRecord(
 	if err != nil {
 		return missingCheckoutInspection{}, true, missingCheckoutCauseError(taskID, wt.Path, err.Error(), err)
 	}
-	prune, err := m.inspectMissingCheckoutRegistration(ctx, slot.RepositoryPath, wt.Path, plan)
+	prune, err := m.inspectMissingCheckoutRegistration(ctx, slot.RepositoryPath, wt.Path, plan, slot.quarantinePresentCheckout)
 	if err != nil {
 		return missingCheckoutInspection{}, true, missingCheckoutError(taskID, wt.Path, err.Error())
 	}
@@ -290,13 +293,14 @@ func (m *Manager) inspectAbsentMissingCheckout(
 	rootMissing bool,
 	record *missingCheckoutRecoveryRecord,
 	allowBranchReplacement bool,
+	allowPresent bool,
 ) (missingCheckoutInspection, error) {
 	wt := slot.Worktree
 	if parent != nil {
 		if err := validateMissingCheckoutTaskRoot(parent, wt); err != nil {
 			return missingCheckoutInspection{}, missingCheckoutError(taskID, wt.Path, err.Error())
 		}
-		if err := verifyMissingCheckoutTarget(parent, location.name, false); err != nil {
+		if err := verifyMissingCheckoutTarget(parent, location.name, false, allowPresent); err != nil {
 			return missingCheckoutInspection{}, missingCheckoutError(taskID, wt.Path, err.Error())
 		}
 	}
@@ -311,7 +315,7 @@ func (m *Manager) inspectAbsentMissingCheckout(
 		}
 		return missingCheckoutInspection{}, err
 	}
-	prune, err := m.inspectMissingCheckoutRegistration(ctx, slot.RepositoryPath, wt.Path, plan)
+	prune, err := m.inspectMissingCheckoutRegistration(ctx, slot.RepositoryPath, wt.Path, plan, allowPresent)
 	if err != nil {
 		return missingCheckoutInspection{}, missingCheckoutError(taskID, wt.Path, err.Error())
 	}
@@ -405,7 +409,7 @@ func validateMissingCheckoutTaskRoot(parent storageworkspaces.DirectoryHandle, w
 	return nil
 }
 
-func verifyMissingCheckoutTarget(parent storageworkspaces.DirectoryHandle, name string, present bool) error {
+func verifyMissingCheckoutTarget(parent storageworkspaces.DirectoryHandle, name string, present, allowPresent bool) error {
 	if parent == nil {
 		if present {
 			return fmt.Errorf("managed checkout parent is unavailable")
@@ -422,7 +426,7 @@ func verifyMissingCheckoutTarget(parent storageworkspaces.DirectoryHandle, name 
 	if err != nil {
 		return fmt.Errorf("inspect checkout path without following links: %w", err)
 	}
-	if !present {
+	if !present && !allowPresent {
 		return fmt.Errorf("checkout path appeared during recovery inspection")
 	}
 	if !mode.IsDir() || mode&os.ModeSymlink != 0 {
@@ -711,6 +715,7 @@ func (m *Manager) inspectMissingCheckoutRegistration(
 	ctx context.Context,
 	repositoryPath, worktreePath string,
 	plan missingCheckoutBranchPlan,
+	quarantinePresent bool,
 ) (bool, error) {
 	output, err := m.runBoundedGitInspect(ctx, repositoryPath, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
@@ -728,8 +733,13 @@ func (m *Manager) inspectMissingCheckoutRegistration(
 			return false, fmt.Errorf("linked-worktree registration path is invalid")
 		}
 		if registeredPath == wantPath {
-			if staleRegistration || !registration.prunable || registration.locked ||
-				registration.branch != wantBranch || !strings.EqualFold(registration.head, plan.head) {
+			// A present-but-invalid checkout is quarantined before the
+			// recovery materializes the path, so its still-registered
+			// worktree becomes stale even when Git does not yet mark it
+			// prunable (its pointer file still exists).
+			if staleRegistration || registration.locked ||
+				registration.branch != wantBranch || !strings.EqualFold(registration.head, plan.head) ||
+				(!quarantinePresent && !registration.prunable) {
 				return false, fmt.Errorf("recorded checkout has a conflicting Git registration")
 			}
 			staleRegistration = true

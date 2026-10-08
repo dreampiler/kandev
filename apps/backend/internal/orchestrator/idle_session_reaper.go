@@ -102,6 +102,14 @@ type idlePromptActivityReader interface {
 	GetPromptActivityForSession(context.Context, string) (string, uint64, uint64, time.Time, error)
 }
 
+// idleDurableActivityReader reads the newest transcript timestamp per session.
+// It is an optional capability (type-asserted off s.repo) so the idle reaper
+// can anchor a recovered execution's idle interval to its last genuine message
+// instead of a row timestamp that the startup reconciliation re-stamps.
+type idleDurableActivityReader interface {
+	GetLastMessageTimeBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]time.Time, error)
+}
+
 type idleSuspender interface {
 	SuspendIdle(context.Context, agentruntime.IdleSuspensionIdentity) error
 }
@@ -554,19 +562,40 @@ func (s *Service) workspaceIdleActivity(
 	}
 	// Anchor the idle interval to genuine activity only. A recovered execution
 	// starts with no in-memory activity, so fall back to the session's durable
-	// semantic activity (its last state/turn change) rather than skipping the
-	// candidate and losing the pre-restart idle window. Row/workspace update
-	// timestamps are deliberately not used here: they are passive bookkeeping
-	// (recovery re-persists the row with updated_at=now) and would reset the
-	// clock on every backend restart.
+	// last message rather than skipping the candidate and losing the
+	// pre-restart idle window. The session row's updated_at is deliberately not
+	// the primary fallback: the startup reconciliation re-stamps it when it
+	// normalizes a pre-restart active session, which would restart the clock on
+	// every backend restart. It remains the last resort for a session that has
+	// no transcript yet.
 	anchor := lastActivityAt
 	if anchor.IsZero() {
-		anchor = session.UpdatedAt
+		anchor = s.durableIdleActivityAnchor(ctx, row.SessionID, session.UpdatedAt)
 	}
 	if anchor.IsZero() || anchor.After(now) {
 		return "", 0, 0, time.Time{}, idleParkingSkipStaleActivity, false
 	}
 	return executionID, generation, activityEpoch, anchor, "", true
+}
+
+// durableIdleActivityAnchor returns the newest durable activity timestamp for a
+// session whose in-memory activity was lost to a restart. It prefers the newest
+// transcript message (genuine user or agent activity); when no reader is wired
+// or the session has no message yet, it falls back to the session row's
+// updated_at.
+func (s *Service) durableIdleActivityAnchor(ctx context.Context, sessionID string, fallback time.Time) time.Time {
+	reader, ok := s.repo.(idleDurableActivityReader)
+	if !ok || reader == nil || sessionID == "" {
+		return fallback
+	}
+	times, err := reader.GetLastMessageTimeBySessionIDs(ctx, []string{sessionID})
+	if err != nil {
+		return fallback
+	}
+	if at, found := times[sessionID]; found && !at.IsZero() {
+		return at
+	}
+	return fallback
 }
 
 func buildWorkspaceIdleCandidate(

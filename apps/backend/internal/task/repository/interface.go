@@ -716,6 +716,9 @@ type GitSnapshotRepository interface {
 	DeleteSessionCommit(ctx context.Context, id string) error
 }
 
+// RepositoryCheckoutIntent preserves omission for the two checkout choices.
+type RepositoryCheckoutIntent = models.RepositoryCheckoutIntent
+
 // RepositoryEntityRepository handles git repository entity CRUD and repository scripts.
 // Named RepositoryEntityRepository to avoid conflation with the Repository interface itself;
 // mirrors the sqlite/repository_entity.go implementation file.
@@ -723,6 +726,7 @@ type RepositoryEntityRepository interface {
 	CreateRepository(ctx context.Context, repository *models.Repository) error
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	UpdateRepositoryWithCheckoutIntent(ctx context.Context, repository *models.Repository, intent RepositoryCheckoutIntent) error
 	DeleteRepository(ctx context.Context, id string) error
 	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	CreateRepositoryScript(ctx context.Context, script *models.RepositoryScript) error
@@ -809,6 +813,7 @@ type RepositorySecretBindingMutator interface {
 	RepositorySecretBindingRepository
 	CreateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
 	UpdateRepositoryWithSecretBindings(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding) error
+	UpdateRepositoryWithSecretBindingsAndCheckoutIntent(ctx context.Context, repository *models.Repository, bindings []models.RepositorySecretBinding, intent RepositoryCheckoutIntent) error
 }
 
 // RepositoryCleanupRepository performs guarded deletion of repositories
@@ -830,6 +835,9 @@ type ExecutorRepository interface {
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	UpdateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
+	// UpdateExecutorProfileWithScriptIntent preserves omitted scripts and installs
+	// the committed script pair and timestamp in profile only after success.
+	UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error
 	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
@@ -908,12 +916,22 @@ type TaskEnvironmentRepository interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	// ListTaskEnvironmentTaskDirNames returns the non-empty per-task directory
+	// names recorded for a task across active and retained environments, so a
+	// replacement can select a fresh root that does not collide with a
+	// preserved checkout.
+	ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error)
 	// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs,
 	// whether any task_environments row exists. Batched sibling of the
 	// single-task presence check the runner-mutability evaluator uses, for
 	// list/board projections that must not fan out into a per-task query.
 	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// RetireUnusableTaskEnvironment retains a failed, consumer-free
+	// environment for evidence while freeing its task's active-environment
+	// slot. It returns whether a row was retired; a live consumer refuses
+	// the retirement fail-closed.
+	RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error)
 	DeleteTaskEnvironment(ctx context.Context, id string) error
 	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error

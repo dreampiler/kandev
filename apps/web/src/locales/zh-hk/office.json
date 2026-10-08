@@ -1102,6 +1102,7 @@
   "overviewEventModelBlocked": "模型被阻斷",
   "overviewEventModelUnblocked": "模型已解除阻斷",
   "overviewEventPRMerged": "PR 已合併",
+  "overviewEventPRMergedScope": "統計與 Kandev 任務關聯的拉取要求:GitHub 拉取要求，以及已安裝程式碼託管外掛程式報告的合併(例如 Forgejo、Gitea)。GitLab 或 Azure DevOps 上的合併，以及 Kandev 未跟蹤的拉取要求的合併，均不計入。",
   "overviewEventAutomationFailed": "自動化失敗",
   "overviewEventOwnerDecision": "請求決策",
   "overviewEventStepMove": "階段移動",

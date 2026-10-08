@@ -84,6 +84,15 @@ func DetectOpenCodeNativeRuntime(ctx context.Context) (OpenCodeNativeRuntime, bo
 	return defaultOpenCodeNativeDetector.detect(ctx)
 }
 
+// IsUnsupportedOpenCodeMajorError reports whether err is the definite
+// unsupported-major answer the executable itself produced. A launch must fail
+// closed on that; it is not a transient version-run failure that may fall back
+// to the selected runtime's known version.
+func IsUnsupportedOpenCodeMajorError(err error) bool {
+	var unsupported *unsupportedOpenCodeMajorError
+	return errors.As(err, &unsupported)
+}
+
 func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRuntime, bool, error) {
 	path, err := d.lookPath(opencodeNativeBinary)
 	if err != nil {

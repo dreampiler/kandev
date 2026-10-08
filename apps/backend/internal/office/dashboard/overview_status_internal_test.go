@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -167,5 +168,31 @@ func workspacesForScopeTest() []*taskmodels.Workspace {
 		{ID: "office", Name: "Beta", OfficeWorkflowID: "wf"},
 		{ID: "kanban", Name: "Alpha"},
 		nil,
+	}
+}
+
+// The failure breakdown shows the agent's own first line verbatim, so a line
+// longer than the model card's 80-rune display cap must survive whole.
+func TestSummarizeFailureBucketsKeepsFirstLineVerbatim(t *testing.T) {
+	long := strings.Repeat("x", 200)
+	rows := []*sqlite.OverviewFailureBucketRow{{
+		WorkspaceID:  "ws",
+		Bucket:       "no_response",
+		ErrorMessage: "\n  " + long + "  \n stack detail below",
+		Count:        2,
+	}}
+	_, samples := summarizeFailureBuckets(rows)
+	got := samples["ws"]
+	if len(got) != 1 || got[0].Kind != long || got[0].Count != 2 {
+		t.Fatalf("samples = %+v, want one whole-first-line kind (len %d)", got, len(long))
+	}
+}
+
+func TestFailureSampleKindSkipsBlankLines(t *testing.T) {
+	if got := failureSampleKind("   \n\n  "); got != "" {
+		t.Fatalf("blank message kind = %q, want empty", got)
+	}
+	if got := failureSampleKind("  first line  \nsecond"); got != "first line" {
+		t.Fatalf("kind = %q, want the trimmed first line", got)
 	}
 }

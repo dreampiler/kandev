@@ -1102,6 +1102,7 @@
   "overviewEventModelBlocked": "Modelo bloqueado",
   "overviewEventModelUnblocked": "Modelo desbloqueado",
   "overviewEventPRMerged": "PR fundido",
+  "overviewEventPRMergedScope": "Conta PRs ligados a uma tarefa Kandev: PRs do GitHub e fundidos reportados por um plugin de code host instalado (por exemplo Forgejo ou Gitea). Fundidos no GitLab ou Azure DevOps, e fundidos de PRs que o Kandev não acompanha, não são contados.",
   "overviewEventAutomationFailed": "Automação falhou",
   "overviewEventOwnerDecision": "Decisão pedida",
   "overviewEventStepMove": "Mudança de etapa",

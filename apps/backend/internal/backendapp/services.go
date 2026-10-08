@@ -503,7 +503,7 @@ func initIntegrationWiring(
 		automationComponents.Service.SetManagedConversationAutomationDelivery(managedConversationAutomationDeliveryAdapter{plugins: pluginsSvc})
 		pluginsSvc.SetManagedConversationSchedules(managedConversationScheduleAdapter{service: automationComponents.Service})
 	}
-	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, log)
+	coordinatorSvc, err := initCoordinatorWiring(ctx, dbPool, storeTracker, taskSvc, workflowSvc, repos.AgentSettings, cfg.Features.Coordinator, cfg.Features.CoordinatorPhase2, log)
 	if err != nil {
 		return nil, err
 	}
@@ -1798,6 +1798,7 @@ func recordPluginStores(ctx context.Context, tracker *requiredstores.Tracker, in
 		"plugin-state",
 		"plugin-instance-state",
 		"plugin-user-state",
+		"plugin-task-change-requests",
 	} {
 		if err := recordRequiredStore(ctx, tracker, id, initErrors[id]); err != nil {
 			failures = append(failures, err)

@@ -14,26 +14,35 @@ import (
 // reused as this repository's workspace. A missing or unresolvable common
 // directory fails closed.
 func checkoutMatchesRepositoryIdentity(checkoutPath, repositoryPath string) bool {
-	if checkoutPath == "" || repositoryPath == "" {
-		return false
+	matches, _ := checkoutIdentityMatches(checkoutPath, repositoryPath)
+	return matches
+}
+
+// checkoutIdentityMatches reports whether the checkout at checkoutPath and the
+// checkout or repository at otherPath share a Git common directory. resolved is
+// false when either common directory cannot be resolved, so a caller can fail
+// closed instead of treating an unavailable comparison as a mismatch.
+func checkoutIdentityMatches(checkoutPath, otherPath string) (matches, resolved bool) {
+	if checkoutPath == "" || otherPath == "" {
+		return false, false
 	}
 	checkoutCommonDir, err := resolveCommonGitDirPath(checkoutPath)
 	if err != nil {
-		return false
+		return false, false
 	}
-	repositoryCommonDir, err := resolveCommonGitDirPath(repositoryPath)
+	otherCommonDir, err := resolveCommonGitDirPath(otherPath)
 	if err != nil {
-		return false
+		return false, false
 	}
 	checkoutInfo, err := os.Stat(checkoutCommonDir)
 	if err != nil || !checkoutInfo.IsDir() {
-		return false
+		return false, false
 	}
-	repositoryInfo, err := os.Stat(repositoryCommonDir)
-	if err != nil || !repositoryInfo.IsDir() {
-		return false
+	otherInfo, err := os.Stat(otherCommonDir)
+	if err != nil || !otherInfo.IsDir() {
+		return false, false
 	}
-	return os.SameFile(checkoutInfo, repositoryInfo)
+	return os.SameFile(checkoutInfo, otherInfo), true
 }
 
 // resolveCommonGitDirPath resolves the shared Git directory of a checkout

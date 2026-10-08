@@ -97,10 +97,20 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	if execution.SessionID == "" {
 		return m.startAgentProcess(ctx, executionID)
 	}
-	_, err := m.doCoalescedExecution(ctx, execution.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, coalescedStartKey(execution.SessionID), func(sharedCtx context.Context) (interface{}, error) {
 		return nil, m.startAgentProcess(sharedCtx, executionID)
 	})
 	return err
+}
+
+// coalescedStartKey separates the actual process-start operation from a
+// workspace ensure that happens to share the session ID. Without the
+// discriminator an ensure peer and a real start would join one singleflight
+// bucket, so a workspace-only ensure result (or error) could stand in for the
+// start result. Concurrent starts of the same execution still share this key
+// and run once.
+func coalescedStartKey(sessionID string) string {
+	return sessionID + "\x00start"
 }
 
 func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (retErr error) {

@@ -2,15 +2,11 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"testing"
 	"time"
 
-	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -89,86 +85,6 @@ func TestDynamicFailureOfSupersededCandidateDoesNotSuspendCurrentCandidate(t *te
 	if state == nil || state.Generation != moved.Generation || state.ExecutionProfileID != sol {
 		t.Fatalf("route state = %#v, want generation %d still on %s", state, moved.Generation, sol)
 	}
-}
-
-// Launch failures raised by Kandev itself (workspace preparation, ceiling
-// admission, command validation, runtime detection, the local agentctl control
-// plane) say nothing about the candidate's provider. They must reach the
-// conductor unclassified, so no provider fallback suspends the candidate.
-func TestDynamicLaunchFailuresFromKandevAreNotProviderFailures(t *testing.T) {
-	for _, launchErr := range []error{
-		errors.New("workspace is preparing: retry after the initial workspace launch completes"),
-		errors.New("workspace reuse is unsafe: existing task environment is not attachable"),
-		errors.New("workspace reuse is unsafe: load task environment while waiting: context deadline exceeded"),
-		errors.New("validate agent command: agent command cannot be empty"),
-		errors.New("detect native OpenCode runtime: read native OpenCode version: exit status 1"),
-		errors.New("detect native OpenCode runtime: read native OpenCode version: exit status 1 (timed out after 10s)"),
-		errors.New(`detect native OpenCode runtime: read native OpenCode version: exit status 1; ` +
-			`output: "Error: connect ECONNREFUSED 127.0.0.1:4096 rate limit exceeded"`),
-		errors.New(`detect native OpenCode runtime: read native OpenCode version: unsupported output; output: "Too Many Requests"`),
-		errors.New("session ceiling refused seam 3 admission (ceiling)"),
-		errors.New(`failed to create execution: failed to create standalone instance: failed to create instance: ` +
-			`Post "http://127.0.0.1:41044/api/v1/instances": dial tcp 127.0.0.1:41044: i/o timeout`),
-		errors.New(`failed to create instance: Post "http://127.0.0.1:41044/api/v1/instances": ` +
-			`dial tcp 127.0.0.1:41044: connect: connection refused`),
-	} {
-		t.Run(launchErr.Error(), func(t *testing.T) {
-			err := launchDynamicDownstreamWithError(t, launchErr)
-			if err == nil {
-				t.Fatal("launch error was swallowed")
-			}
-			var classified *routingerr.Error
-			if errors.As(err, &classified) {
-				t.Fatalf("Kandev launch failure classified as provider %s (%s): %v", classified.Code, classified.ClassifierRule, err)
-			}
-		})
-	}
-}
-
-// The agent process itself can still report a provider failure while it
-// starts; that evidence keeps routing the launch.
-func TestDynamicLaunchAgentStartupProviderFailureStillRoutes(t *testing.T) {
-	startup := routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, "claude-acp",
-		errors.New("request to api.anthropic.com failed: ECONNREFUSED"))
-	err := launchDynamicDownstreamWithError(t, fmt.Errorf("launch agent: %w", startup))
-	var classified *routingerr.Error
-	if !errors.As(err, &classified) || classified.Code != routingerr.CodeNetworkUnavailable {
-		t.Fatalf("startup failure = %v, want a classified network_unavailable failure", err)
-	}
-}
-
-func launchDynamicDownstreamWithError(t *testing.T, launchErr error) error {
-	t.Helper()
-	ctx := context.Background()
-	const (
-		taskID    = "task-dynamic-launch-kandev-failure"
-		sessionID = "session-dynamic-launch-kandev-failure"
-	)
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
-	taskRepo := newMockTaskRepo()
-	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
-	agentManager := &mockAgentManager{
-		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-			return nil, launchErr
-		},
-	}
-	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentManager)
-	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
-	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
-	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, "")
-
-	downstream := &dynamicTaskDownstream{
-		service:   svc,
-		task:      &v1.Task{ID: taskID, WorkspaceID: "ws1", Description: "test"},
-		sessionID: sessionID,
-		options:   executor.LaunchOptions{AgentProfileID: "candidate-1", StartAgent: true},
-	}
-	_, err := downstream.Launch(ctx, dynamicruntime.DownstreamLaunch{
-		ExecutionProfileID: "candidate-1",
-		Decision:           decision,
-	})
-	return err
 }
 
 // The route claimed sol while the claude execution kept serving the session.

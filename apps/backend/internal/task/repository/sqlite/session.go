@@ -649,7 +649,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 
 	var envID, status, materializationSessionID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id FROM task_environments
+		 WHERE task_id = ? AND retired_at IS NULL
+		 ORDER BY created_at DESC LIMIT 1
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
@@ -681,7 +683,18 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	default:
-		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		// A failed environment that never materialized carries no physical
+		// workspace to protect. Re-elect this session as its materialization
+		// owner so the launch re-runs full preparation instead of the task
+		// staying unlaunchable forever; anything else still fails closed.
+		reclaimed, err := r.reclaimFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID)
+		if err != nil {
+			return err
+		}
+		if !reclaimed {
+			return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+		session.TaskEnvironmentID = envID
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
 		return err
@@ -827,7 +840,18 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	case models.TaskEnvironmentStatusCreating:
 		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
 	default:
-		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+		// Mirror the non-shared binding: a failed environment that never
+		// materialized can be reclaimed by this session for a fresh
+		// materialization; the group pointer keeps naming the canonical row,
+		// which is creating again, so siblings observe workspace-preparing.
+		reclaimed, err := r.reclaimFailedWorkspaceMaterializationTx(ctx, tx, environmentID, session.ID)
+		if err != nil {
+			return err
+		}
+		if !reclaimed {
+			return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+		session.TaskEnvironmentID = environmentID
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
 		return err

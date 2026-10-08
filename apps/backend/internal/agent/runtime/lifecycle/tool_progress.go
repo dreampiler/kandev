@@ -11,7 +11,10 @@ func (e *AgentExecution) stallThreshold() time.Duration {
 	e.activeToolMu.RLock()
 	defer e.activeToolMu.RUnlock()
 	for _, tool := range e.openTools {
-		if toolIsExecuting(tool.Status) && !tool.ForegroundExited {
+		if tool.ForegroundExited {
+			continue
+		}
+		if toolIsExecuting(tool.Status) || tool.ForegroundRunning {
 			return toolStallEscalationThreshold
 		}
 	}
@@ -32,9 +35,10 @@ func (e *AgentExecution) toolProbeSnapshot() ([]string, uint64) {
 	defer e.activeToolMu.RUnlock()
 	var ids []string
 	for id, tool := range e.openTools {
-		if toolIsExecuting(tool.Status) && !tool.ForegroundExited {
-			ids = append(ids, id)
+		if tool.ForegroundExited {
+			continue
 		}
+		ids = append(ids, id)
 	}
 	return ids, e.toolRevision
 }
@@ -84,7 +88,7 @@ func (e *AgentExecution) applyToolProgress(revision uint64, result streams.ToolP
 	progress, changed := false, false
 	for _, sample := range result.Tools {
 		tool, exists := e.openTools[sample.ToolCallID]
-		if !exists || !toolIsExecuting(tool.Status) || tool.ForegroundExited {
+		if !exists || tool.ForegroundExited {
 			continue
 		}
 		switch sample.ForegroundState {
@@ -93,6 +97,11 @@ func (e *AgentExecution) applyToolProgress(revision uint64, result streams.ToolP
 			e.openTools[sample.ToolCallID] = tool
 			changed = true
 		case "running":
+			if !tool.ForegroundRunning {
+				tool.ForegroundRunning = true
+				e.openTools[sample.ToolCallID] = tool
+				changed = true
+			}
 			progress = progress || sample.CPUProgress
 		}
 	}

@@ -1102,6 +1102,7 @@
   "overviewEventModelBlocked": "模型被阻断",
   "overviewEventModelUnblocked": "模型已解除阻断",
   "overviewEventPRMerged": "PR 已合并",
+  "overviewEventPRMergedScope": "统计与 Kandev 任务关联的拉取请求:GitHub 拉取请求，以及已安装代码托管插件报告的合并(例如 Forgejo、Gitea)。GitLab 或 Azure DevOps 上的合并，以及 Kandev 未跟踪的拉取请求的合并，均不计入。",
   "overviewEventAutomationFailed": "自动化失败",
   "overviewEventOwnerDecision": "请求决策",
   "overviewEventStepMove": "阶段移动",

@@ -352,6 +352,15 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			metadata[mcpprofile.ManagedToolPolicyMetadataKey] = encoded
 		}
 	}
+	delete(metadata, mcpprofile.CoordinatorToolPolicyMetadataKey)
+	if req.McpProfile != nil && req.McpProfile.CoordinatorToolPolicy != nil {
+		encoded, err := mcpprofile.MarshalCoordinatorToolPolicy(*req.McpProfile.CoordinatorToolPolicy)
+		if err != nil {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = map[string]any{"invalid": true}
+		} else {
+			metadata[mcpprofile.CoordinatorToolPolicyMetadataKey] = encoded
+		}
+	}
 	putPrimaryCheckoutOptions(metadata, req)
 	for k, v := range req.ExecutorConfig {
 		if isTrustedExecutorConfigKey(k) {
@@ -359,6 +368,9 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 			// or buggy task metadata payload can't swap out the SSH host /
 			// pinned fingerprint and pivot the launch to a different target.
 			metadata[k] = v
+			continue
+		}
+		if k == mcpprofile.CoordinatorToolPolicyMetadataKey {
 			continue
 		}
 		if _, exists := metadata[k]; !exists {
@@ -798,12 +810,35 @@ func (m *Manager) resolveOpenCodeCommandOptions(
 	}
 	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
 	if err != nil {
-		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", err)
+		return m.fallbackOpenCodeCommandOptions(err, selected, options)
 	}
 	if !found {
 		return agents.CommandOptions{}, errors.New("selected native OpenCode runtime is unavailable")
 	}
 	options.NativeRuntimeVersion = native.Version
+	return options, nil
+}
+
+// fallbackOpenCodeCommandOptions keeps a native OpenCode launch alive when the
+// version probe fails transiently. The native command's arguments are identical
+// for every supported major, so the selected family's known version is a safe
+// substitute; an unsupported major stays fail-closed, and a missing or
+// unparseable selected version preserves the probe error.
+func (m *Manager) fallbackOpenCodeCommandOptions(
+	probeErr error,
+	selected agents.OpenCodeRuntimeResolution,
+	options agents.CommandOptions,
+) (agents.CommandOptions, error) {
+	if agents.IsUnsupportedOpenCodeMajorError(probeErr) {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	if _, argErr := agents.OpenCodeACPArgsForVersion(selected.Version); argErr != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	}
+	m.logger.Warn("native OpenCode version probe failed; using the selected runtime version",
+		zap.String("selected_version", selected.Version),
+		zap.Error(probeErr))
+	options.NativeRuntimeVersion = selected.Version
 	return options, nil
 }
 

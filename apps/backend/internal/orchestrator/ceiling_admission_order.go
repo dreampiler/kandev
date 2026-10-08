@@ -121,8 +121,9 @@ func (s *Service) readCeilingDeferralCandidate(task *models.Task) (models.Ceilin
 }
 
 // ceilingAdmissionCandidateEligible reports whether a deferred record can rank
-// as an earlier queued launch: it is not already being dispatched, not waiting
-// on a non-capacity retry, and still a valid entry for its task.
+// as an earlier queued launch: it is not already being dispatched, has not
+// failed its replay for a non-capacity reason, and is still a valid entry for
+// its task.
 func (s *Service) ceilingAdmissionCandidateEligible(
 	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
 ) bool {
@@ -136,7 +137,11 @@ func (s *Service) ceilingAdmissionCandidateEligible(
 		// against every other automatic and queued launch until its lease ends.
 		return false
 	}
-	if s.deferredRetrySchedule.failureWaiting(task.ID, ceilingDeferralIdentityKey(deferral)) {
+	if s.deferredRetrySchedule.failureRecorded(task.ID, ceilingDeferralIdentityKey(deferral)) {
+		// A record whose replay failed for a non-capacity reason no longer
+		// holds the head of the queue: it yields the free slot to later
+		// launches until it actually starts or is replaced, so a broken head
+		// cannot block the queue while it never starts itself.
 		return false
 	}
 	if deferral.Kind == models.CeilingLaunchStart {

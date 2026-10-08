@@ -696,11 +696,17 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil
+}
+func (m *mockRepository) RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) DeleteTaskEnvironment(ctx context.Context, id string) error {
 	return nil

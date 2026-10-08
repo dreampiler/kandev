@@ -90,8 +90,14 @@ type executorStore interface {
 	// Task environment
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error)
+	// ReclaimFailedTaskEnvironmentMaterialization re-elects sessionID as the
+	// materialization owner of a failed environment that never materialized,
+	// returning false when the row is not reclaimable.
+	ReclaimFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error)
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
@@ -1049,6 +1055,7 @@ type GitLabCredentialResolver interface {
 type CoordinatorLookup interface {
 	CoordinatorForConversationTask(ctx context.Context, taskID string) (coordinatorID string, ok bool, err error)
 	CoordinatorProfilesReady(ctx context.Context, coordinatorID string) (bool, error)
+	Phase2Enabled() bool
 }
 
 // Executor manages agent execution for tasks
