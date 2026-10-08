@@ -162,7 +162,11 @@ Use the existing profile-session-policy fields as a propagation reference, inclu
 Candidate policy API serialization, browser normalization, editor drafts, and save requests preserve the new section.
 A browser edit of unrelated settings must not disable an API-configured policy.
 
-No rendered controls or layout changes are planned. Desktop and phone use existing manual recovery and route-change presentation.
+The dynamic agent profile editor renders a per-candidate unclassified control
+(enabled toggle and consecutive-failure threshold) and one profile-wide action
+that sets every candidate's unclassified policy to enabled with threshold 2,
+leaving order, tiers, model options, and the transient and hard policies
+unchanged. Runtime recovery and route-change presentation stay as they are.
 Use the existing `policy_skip` path and structured unknown error code. Do not manufacture a classified provider reason.
 Existing chat state, composer contents, and historical provider attribution remain intact.
 Public documentation must explain API configuration, threshold counting, the workflow veto, and the conservative eligibility limits when implementation ships.
