@@ -46,7 +46,11 @@ func writeHostGHFakeExecutable(t *testing.T, dir string) string {
 	if err != nil {
 		t.Fatalf("open test executable: %v", err)
 	}
-	defer source.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			t.Errorf("close test executable: %v", err)
+		}
+	}()
 
 	ghPath := filepath.Join(dir, "gh.exe")
 	destination, err := os.OpenFile(ghPath, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o700)
