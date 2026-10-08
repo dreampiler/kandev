@@ -650,25 +650,30 @@ func int64Field(payload map[string]interface{}, key string) int64 {
 	}
 }
 
-// remintCeilingLaunchCredentials refreshes the short-lived Office runtime
+// remintLaunchCredentials refreshes the short-lived Office runtime
 // credentials redactedCeilingLaunchEnv stripped before persisting, using
-// whichever CeilingLaunchCredentialReminter was wired (nil for a non-Office
+// whichever LaunchCredentialReminter was wired (nil for a non-Office
 // deployment, or when no reminter is registered — env round-trips unchanged
-// in that case). A re-mint failure is not fatal to the replay attempt: it
-// logs and falls back to the captured env, which is only stale — not
-// wrong — for a non-Office launch, since only Office launches carry these
-// credential keys in the first place.
-func (s *Service) remintCeilingLaunchCredentials(ctx context.Context, taskID string, env map[string]string) map[string]string {
-	if s.ceilingCredentialReminter == nil || len(env) == 0 {
-		return env
+// in that case). sessionID is the session this launch will use; a
+// ceiling-deferred replay has none yet, so it passes "" and the re-minter
+// falls back to the run's persisted session id.
+//
+// A re-mint failure is returned, never swallowed: the captured env is not a
+// safe fallback for an Office launch. On a first launch it carries the token
+// minted before this task session existed (empty session id, which every
+// session-scoped runtime action rejects), and on a ceiling replay the bearer
+// keys were redacted before persisting, so proceeding would dispatch with no
+// runtime credentials at all. Both recreate the handoff failure this re-mint
+// exists to prevent, so the caller must fail or retain the launch instead.
+func (s *Service) remintLaunchCredentials(ctx context.Context, taskID, sessionID string, env map[string]string) (map[string]string, error) {
+	if s.launchCredentialReminter == nil || len(env) == 0 {
+		return env, nil
 	}
-	refreshed, err := s.ceilingCredentialReminter.RemintCeilingLaunchCredentials(ctx, taskID, env)
+	refreshed, err := s.launchCredentialReminter.RemintLaunchCredentials(ctx, taskID, sessionID, env)
 	if err != nil {
-		s.logger.Zap().Warn("ceiling replay: credential re-mint failed; replaying with the captured env",
-			zap.String("task_id", taskID), zap.Error(err))
-		return env
+		return nil, fmt.Errorf("launch credential re-mint: %w", err)
 	}
-	return refreshed
+	return refreshed, nil
 }
 
 // decodeCeilingPayloadField reconstructs a typed replay field from its
@@ -709,7 +714,19 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		entryBinding = &binding
 	}
 
-	env = s.remintCeilingLaunchCredentials(ctx, task.ID, env)
+	// No session exists yet at seam 1's re-mint point; the start this replay
+	// drives re-mints again with the session it creates, so the token ends up
+	// session-scoped even though this early pass is not. A failed re-mint must
+	// not fall through to the start below: the persisted env has had its
+	// bearer keys redacted, so proceeding would dispatch without runtime
+	// credentials. Retain the record for a later sweep instead.
+	remintedEnv, remintErr := s.remintLaunchCredentials(ctx, task.ID, "", env)
+	if remintErr != nil {
+		s.logger.Zap().Warn("ceiling replay: credential re-mint failed; retaining the record for a later sweep",
+			zap.String("task_id", task.ID), zap.Error(remintErr))
+		return ceilingReplayFailed
+	}
+	env = remintedEnv
 	automationRun := automationRunFromCeilingPayload(payload)
 
 	opts := startTaskOptions{
