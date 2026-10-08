@@ -1011,7 +1011,7 @@ func (s *Service) prepareUnclassifiedFailureEvidence(
 	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
-	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, classified, startupEvidence)
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -1031,12 +1031,43 @@ func (s *Service) unclassifiedFailureRouteEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
+	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) dynamicruntime.UnclassifiedFailureEvidence {
 	if startupEvidence != nil {
 		return *startupEvidence
 	}
+	// A post-start runtime failure that produced no result carries no complete
+	// provider diagnostic, so it uses the no-result origin with a bounded,
+	// normalized error-type diagnostic instead of the terminal-provider origin.
+	if classified != nil && classified.Code == routingerr.CodeAgentRuntime {
+		return s.unclassifiedPostStartEvidence(ctx, data, session, classified.Phase)
+	}
 	return s.unclassifiedPromptEvidence(ctx, data, session)
+}
+
+// unclassifiedPostStartEvidence builds the no-result evidence for a post-start
+// runtime failure. The diagnostic is the bounded, sanitized failure message, so
+// no secret or personal path reaches the stored evidence or the fingerprint. The
+// phase is the classified failure phase, so the origin gate and the fingerprint
+// stay scoped to post-start failures with no output or effect.
+func (s *Service) unclassifiedPostStartEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	phase routingerr.Phase,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginPostStartNoResult,
+		phase, promptUnclassifiedAttemptID(data), data.AgentID,
+		dynamicruntime.NormalizePostStartDiagnostic(data.ErrorMessage), false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
 }
 
 func (s *Service) clearStreakAfterCurrentClassifiedFailure(
@@ -1477,6 +1508,64 @@ func (s *Service) unclassifiedPromptEvidence(
 		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), providerID, diagnostic, complete,
 		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
 	)
+}
+
+// unclassifiedEmptyTurnEvidence builds the unclassified failure evidence for a
+// turn that finished without assistant output or tool effect. It carries no
+// provider diagnostic, so ProviderID and DiagnosticText stay empty and the
+// empty-turn origin relaxes those requirements instead of fabricating
+// identifier defaults.
+func (s *Service) unclassifiedEmptyTurnEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginEmptyTurnCompletion,
+		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), "", "", false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
+}
+
+// routeDynamicEmptyTurnCompletion counts a no-output turn as an unclassified
+// failure for the current candidate and, at the threshold, launches a successor.
+// It returns true only when a successor was launched, so the caller skips the
+// ordinary completion follow-up; a below-threshold count parks the session
+// through the ordinary manual-recovery path and returns false. A profile with
+// the policy off returns false without touching any state.
+func (s *Service) routeDynamicEmptyTurnCompletion(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	if session == nil || s.profileExecutionResolver == nil || !data.DynamicRouteAttempt ||
+		!data.EvidenceKnown || data.OutputObserved || data.EffectObserved {
+		return false
+	}
+	if !s.profileExecutionResolver.UnclassifiedEmptyTurnEnabled(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+	) {
+		return false
+	}
+	evidence := s.unclassifiedEmptyTurnEvidence(ctx, data, session)
+	if !evidence.TaskScope || !evidence.CurrentAttempt {
+		return false
+	}
+	s.markDynamicEmptyTurn(data)
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend})
+	result := s.routeDynamicAgentFailureWithEvidence(ctx, data, failure, &evidence, true)
+	if !result.handled {
+		// The route declined, so the streak was not advanced; the marker must not
+		// suppress a later successful-completion reset.
+		s.clearDynamicEmptyTurn(data.SessionID)
+		return false
+	}
+	return !result.manualRecovery
 }
 
 func (s *Service) unclassifiedStartupEvidence(

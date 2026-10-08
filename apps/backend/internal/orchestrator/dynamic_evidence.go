@@ -887,11 +887,58 @@ func (s *Service) clearDynamicUnclassifiedStreakForCompletion(
 	ctx context.Context,
 	data watcher.AgentEventData,
 ) bool {
+	if s.consumeDynamicEmptyTurn(data.SessionID, data.AgentExecutionID, data.PromptGeneration) {
+		// The completed turn produced no output and was already counted as an
+		// unclassified failure. A process exit must not reset that streak.
+		s.deletePendingDynamicStreakReset(data.SessionID)
+		return true
+	}
 	if !s.clearDynamicUnclassifiedStreakForEvent(ctx, data, false) {
 		return false
 	}
 	s.deletePendingDynamicStreakReset(data.SessionID)
 	return true
+}
+
+// pendingDynamicEmptyTurnEntry identifies the no-output turn that was counted as
+// an unclassified failure. Execution plus prompt generation fence it to that one
+// turn so a later turn cannot consume a stale entry.
+type pendingDynamicEmptyTurnEntry struct {
+	executionID      string
+	promptGeneration uint64
+}
+
+func (s *Service) markDynamicEmptyTurn(data watcher.AgentEventData) {
+	if data.SessionID == "" || data.AgentExecutionID == "" || data.PromptGeneration == 0 {
+		return
+	}
+	s.pendingDynamicEmptyTurn.Store(data.SessionID, pendingDynamicEmptyTurnEntry{
+		executionID:      data.AgentExecutionID,
+		promptGeneration: data.PromptGeneration,
+	})
+}
+
+func (s *Service) consumeDynamicEmptyTurn(sessionID, executionID string, promptGeneration uint64) bool {
+	if sessionID == "" {
+		return false
+	}
+	value, ok := s.pendingDynamicEmptyTurn.Load(sessionID)
+	if !ok {
+		return false
+	}
+	entry, ok := value.(pendingDynamicEmptyTurnEntry)
+	if !ok || entry.executionID != executionID || entry.promptGeneration != promptGeneration {
+		return false
+	}
+	s.pendingDynamicEmptyTurn.CompareAndDelete(sessionID, value)
+	return true
+}
+
+func (s *Service) clearDynamicEmptyTurn(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.pendingDynamicEmptyTurn.Delete(sessionID)
 }
 
 func (s *Service) claimUnclassifiedStreakReset(

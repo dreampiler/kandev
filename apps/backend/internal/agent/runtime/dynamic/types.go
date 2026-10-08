@@ -181,6 +181,20 @@ type UnclassifiedFailureOrigin string
 const (
 	UnclassifiedOriginTerminalProvider UnclassifiedFailureOrigin = "terminal_provider_result"
 	UnclassifiedOriginAgentStartup     UnclassifiedFailureOrigin = "agent_startup"
+	// UnclassifiedOriginEmptyTurnCompletion is a turn that finished without any
+	// assistant output or tool effect. It carries no provider diagnostic, so the
+	// provider-diagnostic evidence requirements are relaxed for this origin only
+	// (see safeBeforeResult/trustedFailureShape and the origin-scoped fingerprint).
+	UnclassifiedOriginEmptyTurnCompletion UnclassifiedFailureOrigin = "empty_turn_completion"
+	// UnclassifiedOriginPostStartNoResult is a post-start failure (prompt send or
+	// later) that arrived before any assistant output or tool effect and carried
+	// no complete provider diagnostic, such as a provider header timeout or a
+	// runtime execution error. It is safe to retry on another candidate for the
+	// same reason the other pre-result origins are: no output or effect was
+	// produced. The DiagnosticComplete/ProviderID requirements are relaxed for
+	// this origin only, and its fingerprint is a normalized error-type prefix so
+	// repeated identical failures accumulate.
+	UnclassifiedOriginPostStartNoResult UnclassifiedFailureOrigin = "post_start_no_result"
 )
 
 // UnclassifiedFailureEvidence is the typed, default-deny context for the
@@ -229,8 +243,21 @@ func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
 }
 
 func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
-	return e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
-		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved && e.DiagnosticComplete
+	base := e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
+		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved
+	if e.relaxesProviderDiagnostic() {
+		// These origins have no complete provider diagnostic to require.
+		return base
+	}
+	return base && e.DiagnosticComplete
+}
+
+// relaxesProviderDiagnostic reports whether the origin supplies its own bounded
+// diagnostic instead of a provider-complete one. The relaxation is origin
+// scoped: every other origin still requires DiagnosticComplete and a ProviderID.
+func (e UnclassifiedFailureEvidence) relaxesProviderDiagnostic() bool {
+	return e.Origin == UnclassifiedOriginEmptyTurnCompletion ||
+		e.Origin == UnclassifiedOriginPostStartNoResult
 }
 
 func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
@@ -241,7 +268,11 @@ func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Err
 		return false
 	}
 	if routingerr.ClassForCode(failure.Code) != routingerr.ClassUnclassified ||
-		failure.Phase != e.Phase || e.ProviderID == "" {
+		failure.Phase != e.Phase {
+		return false
+	}
+	if e.Origin != UnclassifiedOriginEmptyTurnCompletion && e.ProviderID == "" &&
+		e.Origin != UnclassifiedOriginPostStartNoResult {
 		return false
 	}
 	return true
@@ -254,6 +285,23 @@ func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Er
 	case UnclassifiedOriginAgentStartup:
 		return failure.Code == routingerr.CodeAgentRuntime &&
 			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
+	case UnclassifiedOriginEmptyTurnCompletion:
+		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend
+	case UnclassifiedOriginPostStartNoResult:
+		return failure.Code == routingerr.CodeAgentRuntime && isPostStartEvidencePhase(e.Phase)
+	default:
+		return false
+	}
+}
+
+// isPostStartEvidencePhase reports whether phase is a post-start phase where a
+// no-result failure can be adopted. It mirrors the post-start set the error
+// classifier uses for phase.poststart.unknown; shutdown is excluded because the
+// session is already stopping.
+func isPostStartEvidencePhase(phase routingerr.Phase) bool {
+	switch phase {
+	case routingerr.PhasePromptSend, routingerr.PhaseStreaming, routingerr.PhaseToolExecution:
+		return true
 	default:
 		return false
 	}
