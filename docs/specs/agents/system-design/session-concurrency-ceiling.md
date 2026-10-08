@@ -270,8 +270,11 @@ The check performs no task admission locking, provider dispatch, event publicati
 or record mutation while holding the controller mutex. Final workflow-entry and
 claim validation still belongs to dispatch. Manual origins, unlimited capacity,
 and sessions that already hold admission retain their existing paths. A
-non-capacity replay failure temporarily yields priority using the existing retry
-schedule, retaining its record without blocking independent launches.
+non-capacity replay failure stops the record ranking as an earlier launch, so a
+broken head (an un-attachable workspace, a launch error) yields the free slot to
+later automatic launches instead of blocking them while it never starts itself.
+The record keeps its durable place and its own retries keep their short pacing;
+the yield clears once the record actually starts or is replaced.
 
 A refusal that still had free capacity is reported under its own reason code,
 `ceiling_deferred_precedes`, rather than the saturated lane's `ceiling` or
