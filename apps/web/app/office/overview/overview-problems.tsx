@@ -18,7 +18,7 @@ export function OverviewProblemBreakdown({
     return <span className="text-xs text-muted-foreground">{t("office:overviewNoProblems")}</span>;
   }
   return (
-    <span className="text-xs text-destructive" data-testid="overview-problem-counts">
+    <span className="text-xs text-status-error-text" data-testid="overview-problem-counts">
       {t("office:overviewProblemCount", { count: total })}
       {" ("}
       {(["error", "stalled", "delayed"] as const)
