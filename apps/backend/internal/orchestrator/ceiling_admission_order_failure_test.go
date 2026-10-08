@@ -36,11 +36,11 @@ func TestDeferredRetrySchedule_FailureRecordedOutlivesTheRetryBackoff(t *testing
 		"settling the record clears the yield")
 }
 
-// TestCeilingAdmissionCandidateEligibleYieldsAFailedHead pins the queue
-// head-blocking fix at the eligibility seam: a valid deferred record ranks as
-// an earlier launch, but a record whose replay failed for a non-capacity reason
-// no longer holds that rank, so a later automatic launch can take the free slot.
-func TestCeilingAdmissionCandidateEligibleYieldsAFailedHead(t *testing.T) {
+// TestCeilingAdmissionCandidateEligibleYieldsAStalledHead pins fix B at the
+// eligibility seam: a valid record the sweep has not acquired within the
+// stall interval no longer holds head precedence, so a later automatic launch
+// can take the free slot; a record the sweep keeps acquiring stays eligible.
+func TestCeilingAdmissionCandidateEligibleYieldsAStalledHead(t *testing.T) {
 	f := newCeilingDispatchFixture(t)
 	ctx := context.Background()
 	task, err := f.repo.GetTask(ctx, f.task.ID)
@@ -49,7 +49,14 @@ func TestCeilingAdmissionCandidateEligibleYieldsAFailedHead(t *testing.T) {
 	require.True(t, f.svc.ceilingAdmissionCandidateEligible(ctx, task, f.deferral),
 		"a valid deferred record with no failure ranks as an earlier launch")
 
-	f.svc.deferredRetrySchedule.recordFailure(f.task.ID, ceilingDeferralIdentityKey(f.deferral))
+	f.svc.deferredRetrySchedule.now = time.Now
+	f.svc.deferredRetrySchedule.markAttempt(f.task.ID, ceilingDeferralIdentityKey(f.deferral))
+	require.True(t, f.svc.ceilingAdmissionCandidateEligible(ctx, task, f.deferral),
+		"a head the sweep keeps acquiring holds precedence")
+
+	f.svc.deferredRetrySchedule.now = func() time.Time {
+		return time.Now().Add(ceilingProgressStallInterval + time.Second)
+	}
 	require.False(t, f.svc.ceilingAdmissionCandidateEligible(ctx, task, f.deferral),
-		"a record whose replay failed must not hold head precedence")
+		"a head the sweep has not acquired within the stall interval must yield precedence")
 }
