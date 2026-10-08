@@ -297,6 +297,7 @@ type Handlers struct {
 	sessionCanceller       SessionCanceller
 	inputPauser            ClarificationInputPauser
 	sessionCeilingReleaser SessionCeilingReleaser
+	stepCompleteRebinder   StepCompleteSessionRebinder
 	messageCreator         MessageCreator
 	sessionRepo            SessionRepository
 	taskRepo               TaskRepository
@@ -449,6 +450,13 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 // out of the counted population.
 func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
 	h.sessionCeilingReleaser = releaser
+}
+
+// SetStepCompleteSessionRebinder wires the orchestrator-owned primary-session
+// promotion used to rebind a step-completion signal when the session the task
+// currently designates for the step is gone or running the wrong profile.
+func (h *Handlers) SetStepCompleteSessionRebinder(rebinder StepCompleteSessionRebinder) {
+	h.stepCompleteRebinder = rebinder
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
@@ -2632,6 +2640,14 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 			launchStepID, task.WorkflowStepID), nil)
 	}
 
+	// Ownership is resolved after the launch-step stamp so a caller that is not
+	// the step's session can still be rebound to the current step when the
+	// designated session is gone or running the wrong profile. A turn that
+	// started in an older step never reaches the rebind path.
+	if errMsg, err := h.ensureStepCompleteSessionOwnership(ctx, msg, session, task, launchStepID); errMsg != nil {
+		return errMsg, err
+	}
+
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
 	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
@@ -2783,11 +2799,13 @@ func (h *Handlers) handleDuplicateStepComplete(
 }
 
 // resolveStepCompleteTarget loads the session + task the signal applies to
-// and runs the up-front validation (task ownership, terminal-state guard,
-// workflow-step presence, and that the caller is the session currently
-// driving that step). Returns a populated session+task pair on success,
-// or a ready-to-send WS error envelope (and its marshal error if any) on
-// any failed precondition.
+// and runs the up-front validation (task ownership, terminal-state guard, and
+// workflow-step presence). Step ownership is resolved separately, after the
+// calling turn's launch-step stamp is known, so it can rebind a live
+// current-step session when the designated one is gone or running the wrong
+// profile. Returns a populated session+task pair on success, or a
+// ready-to-send WS error envelope (and its marshal error if any) on any failed
+// precondition.
 func (h *Handlers) resolveStepCompleteTarget(
 	ctx context.Context, msg *ws.Message, taskID, sessionID string,
 ) (*models.TaskSession, *models.Task, *ws.Message, error) {
@@ -2839,15 +2857,6 @@ func (h *Handlers) resolveStepCompleteTarget(
 	}
 	if task.WorkflowStepID == "" {
 		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task has no current workflow step", nil)
-		return nil, nil, errMsg, mErr
-	}
-	if ownership := h.resolveCurrentStepSessionOwnership(ctx, session, task); !ownership.Owned {
-		message := fmt.Sprintf(
-			"this session is not the current step's session (current step: %s)", ownership.StepName)
-		if ownership.Reason != "" {
-			message += ". " + ownership.Reason
-		}
-		errMsg, mErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, message, nil)
 		return nil, nil, errMsg, mErr
 	}
 	return session, task, nil, nil

@@ -392,7 +392,7 @@ func TestLoadRecordedWorkflowSessionRouteReturnsCommittedDestination(t *testing.
 	require.Equal(t, fixture.current.ID, session.ID)
 }
 
-func TestLoadRecordedWorkflowSessionRouteRejectsDeletedDestination(t *testing.T) {
+func TestLoadRecordedWorkflowSessionRouteAllocatesFreshFallbackFromMissingDestination(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
@@ -407,8 +407,62 @@ func TestLoadRecordedWorkflowSessionRouteRejectsDeletedDestination(t *testing.T)
 		Phase:             workflowSessionRoutePrepared,
 	}))
 
+	route, session, err := fixture.svc.loadRecordedWorkflowSessionRoute(ctx, "t1", operationID, step, "profile-a")
+	require.NoError(t, err, "a missing destination must not block the step; the caller allocates a fresh session")
+	require.NotNil(t, route)
+	require.Nil(t, session)
+}
+
+func TestLoadRecordedWorkflowSessionRouteAllocatesFreshFallbackFromMismatchedDestination(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	fixture.current.AgentProfileID = "profile-b"
+	require.NoError(t, fixture.repo.UpdateTaskSession(ctx, fixture.current))
+	target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
+	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Position: 1, SessionTarget: target}
+	operationID := workflowSessionRouteID("t1", step.ID, "entry:00000000000000000010", target, models.WorkflowProfileSessionStartPolicyReuse)
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       operationID,
+		DestinationStepID: step.ID,
+		TargetKind:        string(target.Kind),
+		AgentProfileID:    "profile-a",
+		DestinationID:     fixture.current.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}))
+
+	route, session, err := fixture.svc.loadRecordedWorkflowSessionRoute(ctx, "t1", operationID, step, "profile-a")
+	require.NoError(t, err, "a destination that no longer matches the route must not block the step")
+	require.NotNil(t, route)
+	require.Nil(t, session)
+}
+
+type failingWorkflowDestinationRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r failingWorkflowDestinationRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return nil, r.err
+}
+
+func TestLoadRecordedWorkflowSessionRouteKeepsRepositoryFailureFatal(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
+	step := &wfmodels.WorkflowStep{ID: "step-review", WorkflowID: "wf1", Position: 1, SessionTarget: target}
+	operationID := workflowSessionRouteID("t1", step.ID, "entry:00000000000000000011", target, models.WorkflowProfileSessionStartPolicyReuse)
+	require.NoError(t, fixture.repo.SetTaskMetadataKey(ctx, "t1", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       operationID,
+		DestinationStepID: step.ID,
+		TargetKind:        string(target.Kind),
+		AgentProfileID:    "profile-a",
+		DestinationID:     fixture.current.ID,
+		Phase:             workflowSessionRoutePrepared,
+	}))
+	fixture.svc.repo = failingWorkflowDestinationRepo{sessionExecutorStore: fixture.svc.repo, err: errors.New("session store unavailable")}
+
 	_, _, err := fixture.svc.loadRecordedWorkflowSessionRoute(ctx, "t1", operationID, step, "profile-a")
-	require.ErrorContains(t, err, "recorded workflow session route destination")
+	require.ErrorContains(t, err, "load recorded workflow session route destination")
 }
 
 func TestLoadRecordedWorkflowSessionRouteAllowsFreshFallbackFromTerminalDestination(t *testing.T) {
