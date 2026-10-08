@@ -872,7 +872,12 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 		return dynamicFailureRouteResult{handled: true}
 	}
 	if data.EvidenceKnown && (data.OutputObserved || data.EffectObserved) &&
-		!s.currentInterruptedDynamicAttempt(data, session) {
+		!s.currentInterruptedDynamicAttempt(data, session) &&
+		!routingerr.IsResumeCorrupted(data.ErrorMessage) {
+		// A post-result failure is normally not a no-result replacement: its
+		// output must be preserved. A recognized non-replayable session-state
+		// failure is exempt because the successor is a fresh session that
+		// discards the poisoned turn output; resuming would repeat it.
 		return dynamicFailureRouteResult{}
 	}
 	interrupted := s.interruptedDynamicFailure(ctx, data, session, classified)
@@ -1061,13 +1066,18 @@ func (s *Service) unclassifiedPostStartEvidence(
 		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
 		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
 	)
-	return s.unclassifiedFailureEvidence(
+	evidence := s.unclassifiedFailureEvidence(
 		ctx, data, session, currentAttempt,
 		dynamicruntime.UnclassifiedOriginPostStartNoResult,
 		phase, promptUnclassifiedAttemptID(data), data.AgentID,
 		dynamicruntime.NormalizePostStartDiagnostic(data.ErrorMessage), false,
 		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
 	)
+	// A recognized non-replayable session-state failure (lost reasoning state)
+	// keeps its evidence admissible even after turn output: the successor is a
+	// fresh session and does not continue from that output.
+	evidence.NonReplayable = routingerr.IsResumeCorrupted(data.ErrorMessage)
+	return evidence
 }
 
 func (s *Service) clearStreakAfterCurrentClassifiedFailure(
