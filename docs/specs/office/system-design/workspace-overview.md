@@ -79,6 +79,11 @@ The user setting `office_overview_scope` is stored with the other user settings.
 - `GET /api/v1/office/workspaces/aggregate/tasks` and `GET /api/v1/office/workspaces/aggregate/running` filter the same snapshot. The tasks route answers 404 for a workspace outside the snapshot. Only the queue list reads the head of each queue, once per snapshot.
 - The page loads lists only while expanded. `use-workspace-aggregate.ts` and `use-overview-list.ts` refresh every 30 seconds, and only while the document is visible.
 
+## Last 24 hours events
+
+- `overview_events.go` assembles the last-24-hours list from the dedicated sources, each read independently, so one unavailable table omits its kind rather than failing the overview. Every builder sends codes and values; the client phrases them in the viewer's language.
+- The merged change-request kind (`pr_merged`) is read by `ListOverviewMergedPRs` (`aggregate_overview_events.go`) from `github_task_prs` only, so it covers pull requests the Kandev GitHub integration tracks for a task. The screen states that scope: the chip and row label name GitHub, and `overview-sections.tsx` renders a scope note above the list when a merged-PR row is visible. Merges on other code hosts, and merges of pull requests Kandev does not track, are not counted, and no code-host-agnostic merge source exists.
+
 ## Project statistics
 
 - `aggregate_overview_activity.go` holds two reads. `ListOverviewWorkspaceActivity` returns the period totals per workspace: sessions started and failed from one grouped read over `task_sessions`, agent turns from `task_session_turns`, step moves from `task_step_transitions` (excluding `trigger = 'task_created'`), and completed tasks from the completing-step transitions (the same `complete_task_on_enter` definition the completed list uses, counted with `COUNT(DISTINCT task_id)`). Every read takes the caller's look-back window and reuses the batch helper and the automation/ephemeral exclusions of the rest of the overview.
