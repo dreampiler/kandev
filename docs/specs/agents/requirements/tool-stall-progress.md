@@ -22,7 +22,8 @@ unresponsive tool bounded.
 
 #### Acceptance criteria
 
-- **AC-AGENTS-TOOL-STALL-PROGRESS-001.1:** When a current top-level tool is executing, the system shall allow up to 45 minutes without genuine activity or confirmed progress. Pending tools and permission waits shall retain the ordinary 15-minute silence policy.
+- **AC-AGENTS-TOOL-STALL-PROGRESS-001.1:** When a current top-level tool is executing, the system shall allow up to 45 minutes without genuine activity or confirmed progress. Pending tools and permission waits shall retain the ordinary 15-minute silence policy, except that a non-terminal call whose status label is not an executing label shall still earn the 45-minute allowance once agentctl confirms its foreground running.
+- **AC-AGENTS-TOOL-STALL-PROGRESS-001.10:** While a durable user-input request awaits the user's answer, the system shall not publish a stall advisory or escalate the turn; a genuinely unresponsive turn after the request clears shall still be escalated.
 - **AC-AGENTS-TOOL-STALL-PROGRESS-001.2:** When accepted tool output increases or attributable foreground CPU time increases, the system shall restart the inactivity clock; a progressing tool may run longer than 45 minutes in total.
 - **AC-AGENTS-TOOL-STALL-PROGRESS-001.3:** When observation is unavailable, ambiguous, unsupported, or returns no progress, the system shall not restart the clock and shall terminate the stalled turn at the 45-minute inactivity limit, with the existing one-minute check granularity.
 - **AC-AGENTS-TOOL-STALL-PROGRESS-001.4:** When the invoking shell has demonstrably exited, the system shall ignore surviving child/server activity and apply the ordinary 15-minute foreground inactivity limit. An unobserved shell exit shall remain unknown, with the bounded fallback.

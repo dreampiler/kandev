@@ -616,6 +616,16 @@ func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessio
 	m.sessionAccessCheck = check
 }
 
+// SetClarificationPendingChecker installs the session-scoped check that reports
+// whether a durable user-input request still awaits an answer. The stall
+// watchdog skips its advisory and escalation decision while it returns true,
+// because a user-input wait is not agent silence. The check must fail open
+// (return false when the state cannot be read) so a read failure never
+// suppresses a genuine stall. Set once during startup wiring.
+func (m *Manager) SetClarificationPendingChecker(check func(ctx context.Context, sessionID string) bool) {
+	m.sessionManager.clarificationPending = check
+}
+
 // SetSessionExecAccessChecker installs the session.exec check used by the
 // terminal, shell, file-write, VS Code and port-preview surfaces.
 func (m *Manager) SetSessionExecAccessChecker(check func(ctx context.Context, sessionID string) error) {

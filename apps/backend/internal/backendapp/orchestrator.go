@@ -168,6 +168,9 @@ func provideOrchestrator(
 	}
 	orchestratorSvc.SetSessionAttachmentTransferer(taskSvc)
 	orchestratorSvc.SetTitleBranchRuntime(lifecycleMgr)
+	// A turn blocked on a durable user-input request must not be escalated by
+	// the lifecycle stall watchdog as if it were agent silence.
+	lifecycleMgr.SetClarificationPendingChecker(orchestratorSvc.SessionStallExemptByPendingClarification)
 	if githubSvc != nil {
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 		orchestratorSvc.SetPRBaseResolver(githubPRBaseResolver{service: githubSvc})

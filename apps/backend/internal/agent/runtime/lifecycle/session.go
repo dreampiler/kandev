@@ -85,6 +85,13 @@ type SessionManager struct {
 	historyManager       *SessionHistoryManager
 	attachmentReader     AttachmentReader
 	stopCh               <-chan struct{} // For graceful shutdown coordination
+	// clarificationPending, when set, reports whether the session currently
+	// awaits an answer to a durable user-input request. While it returns true
+	// the stall watchdog neither publishes its advisory nor escalates the turn,
+	// because a user-input wait is not agent silence. It must fail open (treat
+	// an unreadable check as "no pending request") so a read failure never
+	// suppresses a genuine stall.
+	clarificationPending func(ctx context.Context, sessionID string) bool
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -1372,6 +1379,13 @@ func (sm *SessionManager) waitForPromptDone(
 			return nil, ctx.Err()
 
 		case <-stallTicker.C:
+			// A pending user-input request owns the turn, not silence. Skip both
+			// the advisory and the escalation decision while it is unanswered;
+			// once the user answers, the ordinary activity clock resumes and a
+			// genuinely unresponsive turn is still escalated.
+			if sm.clarificationPending != nil && sm.clarificationPending(ctx, execution.SessionID) {
+				continue
+			}
 			execution.probeToolProgress(ctx, promptGeneration, startupGeneration)
 			lastActivity, agentEventSeen, activityEpoch, toolRevision := execution.promptStallSnapshot()
 			if terminalReported && terminalActivityEpoch != activityEpoch {

@@ -27,6 +27,26 @@ func (s *Service) sessionHasPendingClarification(ctx context.Context, sessionID 
 	return len(msgs) > 0
 }
 
+// SessionStallExemptByPendingClarification reports whether a durable
+// clarification still awaits the user's answer for this session, so the
+// lifecycle stall watchdog skips its advisory and escalation decision. It fails
+// open (returns false) when the state cannot be read: a check failure must not
+// suppress a genuinely unresponsive turn. A pending clarification is a
+// platform pause, not agent silence.
+func (s *Service) SessionStallExemptByPendingClarification(ctx context.Context, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	msgs, err := s.repo.FindActiveClarificationMessagesBySessionID(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to check pending clarifications for stall watchdog; treating as none",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+	return len(msgs) > 0
+}
+
 // sessionHasLiveClarification reports whether a current-turn clarification
 // still owns the agent turn. A detached bundle remains pending and answerable,
 // but it no longer owns a live turn, so a parked session may dispatch a newer
