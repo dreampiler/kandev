@@ -312,6 +312,7 @@ func (e *Engine) persistExhaustedSelection(
 	}
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
+		ResourceWait: resourceWait, RetryAt: deadline,
 	}
 }
 

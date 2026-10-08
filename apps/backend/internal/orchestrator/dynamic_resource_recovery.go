@@ -2,10 +2,29 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"go.uber.org/zap"
 )
+
+// DynamicRecoverableResourceWait reports whether err is a dynamic-route
+// selection failure whose route state is durably waiting for suspended
+// resources, returning the earliest retry deadline the engine recorded.
+// Launch entry points use it to surface that wait at the observer's level
+// instead of a terminal ERROR, because time alone makes a candidate usable
+// again and the scheduled recovery reselects without operator action.
+func DynamicRecoverableResourceWait(err error) (time.Time, bool) {
+	if err == nil {
+		return time.Time{}, false
+	}
+	var noCandidate *dynamicruntime.NoEligibleCandidateError
+	if !errors.As(err, &noCandidate) || !noCandidate.ResourceWait {
+		return time.Time{}, false
+	}
+	return noCandidate.RetryAt, true
+}
 
 // recordDynamicResourceOutput clears the suspension history of the profile
 // whose current attempt produced its first real output. Each attempt records
