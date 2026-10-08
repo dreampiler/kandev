@@ -477,6 +477,12 @@ func (s *Service) prepareAutomationTask(
 
 	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)
 	reasons.Repository = repoReason
+	// The automation dispatch owns this task's initial start. Stamping it here,
+	// before CreateTask runs its feeder pull, keeps the pull's task.moved
+	// auto-start from launching the same task a second time (the double-start
+	// that fails the run). Continuation reuses an existing task and returns
+	// above, so only a freshly created task is marked.
+	metadata[models.MetaKeyAutomationStartOwned] = true
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,

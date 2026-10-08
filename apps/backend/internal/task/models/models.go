@@ -134,6 +134,12 @@ const (
 	MetaKeyAutomationTaskMode       = "automation_task_mode"
 	MetaKeyAutomationRepositoryMode = "automation_repository_mode"
 	MetaKeyDeferredLaunch           = "deferred_launch"
+	// MetaKeyAutomationStartOwned marks a task whose initial agent start is
+	// owned by the automation run that created it. It is stamped at create
+	// time, before the feeder pull can publish task.moved, so the workflow
+	// auto-start chokepoint does not launch the same task a second time; the
+	// automation dispatch (or its ceiling replay) is the single start owner.
+	MetaKeyAutomationStartOwned = "automation_start_owned"
 	// MetaKeyCoordinatorID records the coordinator that owns a conversation
 	// task, set at creation and read by the startup cleanup pass that
 	// archives/deletes conversation tasks whose coordinator no longer exists.
@@ -541,6 +547,15 @@ func HasAutoStartOnCreateIntent(metadata map[string]interface{}) bool {
 func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
 	inFlight, ok := metadata[MetaKeyAutoStartOnCreateInFlight].(bool)
 	return ok && inFlight
+}
+
+// AutomationStartOwned reports whether task metadata marks the task's initial
+// agent start as owned by the automation run that created it. Only an explicit
+// true value counts. When set, the workflow auto-start chokepoint must not
+// launch the task; the automation dispatch owns the launch and its binding.
+func AutomationStartOwned(metadata map[string]interface{}) bool {
+	owned, ok := metadata[MetaKeyAutomationStartOwned].(bool)
+	return ok && owned
 }
 
 // TaskSession.Metadata key that records how the session came into existence.
