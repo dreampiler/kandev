@@ -1796,8 +1796,11 @@ func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) 
 // already recorded on the environment; otherwise it prefers the deterministic
 // semantic name. When that root is already occupied by a preserved (retained)
 // environment of the same task, it selects a distinct fresh root tied to the
-// requesting session so the preserved checkout is never overwritten. A lookup
-// error fails closed to the distinct root rather than risk clobbering it.
+// requesting session so the preserved checkout is never overwritten. Every
+// candidate, including the session-suffixed one, is checked against the
+// recorded names, so a second replacement of the same session cannot reselect
+// an already-used root. A lookup error fails closed to a fully fresh root
+// rather than risk clobbering a preserved checkout.
 func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, session *models.TaskSession, existingEnv *models.TaskEnvironment) string {
 	if existingEnv != nil && existingEnv.TaskDirName != "" {
 		return existingEnv.TaskDirName
@@ -1806,7 +1809,16 @@ func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, s
 		return ""
 	}
 	base := worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
-	if base == "" || !e.taskDirNameRecorded(ctx, task.ID, base) {
+	if base == "" {
+		return ""
+	}
+	names, err := e.listTaskDirNames(ctx, task.ID)
+	if err != nil {
+		// Cannot prove the base or a previously used session suffix is free;
+		// fall back to a fully fresh root instead of risking a clobber.
+		return base + "_" + uuid.New().String()[:8]
+	}
+	if !taskDirNameInList(names, base) {
 		return base
 	}
 	suffix := ""
@@ -1816,22 +1828,25 @@ func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, s
 	if suffix == "" {
 		suffix = uuid.New().String()[:8]
 	}
-	return base + "_" + suffix
+	candidate := base + "_" + suffix
+	for attempt := 2; taskDirNameInList(names, candidate); attempt++ {
+		candidate = fmt.Sprintf("%s_%s_%d", base, suffix, attempt)
+	}
+	return candidate
 }
 
-// taskDirNameRecorded reports whether any environment of the task (active or
-// retained) already records taskDirName. A read error is treated as recorded so
-// the caller picks a distinct root instead of overwriting a preserved checkout.
-func (e *Executor) taskDirNameRecorded(ctx context.Context, taskID, taskDirName string) bool {
-	if e.repo == nil || taskID == "" || taskDirName == "" {
-		return false
+// listTaskDirNames returns the per-task directory names recorded for a task
+// across active and retained environments. A nil repository yields no names.
+func (e *Executor) listTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	if e.repo == nil || taskID == "" {
+		return nil, nil
 	}
-	names, err := e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
-	if err != nil {
-		return true
-	}
-	for _, name := range names {
-		if name == taskDirName {
+	return e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
+}
+
+func taskDirNameInList(names []string, name string) bool {
+	for _, existing := range names {
+		if existing == name {
 			return true
 		}
 	}

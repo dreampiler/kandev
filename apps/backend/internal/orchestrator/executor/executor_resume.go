@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/gitref"
@@ -1064,8 +1065,12 @@ type ResumeOptions struct {
 type resumePreflight struct {
 	persistedEnvironmentID string
 	selectedEnv            *models.TaskEnvironment
-	admission              *worktree.RecoveryAdmission
-	ctx                    context.Context
+	// replacedEnvironment records that preparation retired an unusable,
+	// consumer-free canonical environment and the resume must reserve a fresh
+	// canonical owner before any physical worktree is written.
+	replacedEnvironment bool
+	admission           *worktree.RecoveryAdmission
+	ctx                 context.Context
 }
 
 type cancellableResumeContextKey struct{}
@@ -1355,6 +1360,23 @@ func (e *Executor) resumeSession(
 	if existingEnv != nil {
 		session.TaskEnvironmentID = existingEnv.ID
 	}
+	// A resume that retired an unusable canonical environment must reserve the
+	// replacement owner and persist the session binding before the agent launch
+	// materializes a physical worktree. Worktree.CreateWorktree resolves the
+	// session's persisted environment, so binding it to the retained row would
+	// write the new worktree under the old owner and duplicate ownership.
+	if preflight.replacedEnvironment {
+		reserved, reserveErr := e.bindReplacementEnvironment(ctx, task, session, req, execCfg)
+		if reserveErr != nil {
+			if resumeStatePersisted {
+				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeAttemptID, resumeInitialState, reserveErr, nil)
+			}
+			return nil, reserveErr
+		}
+		if reserved != nil {
+			existingEnv = reserved
+		}
+	}
 	launchCtx := ctx
 	if recoveryAdmission != nil {
 		launchCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
@@ -1420,6 +1442,10 @@ func (e *Executor) resumeSession(
 		return nil, launchCtx.Err()
 	}
 	if err != nil {
+		// A reserved replacement environment must not be left CREATING when the
+		// launch fails before it materializes; the next resume would otherwise
+		// adopt a workspace that was never finalized. A no-op for a reused env.
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
 				launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
@@ -1548,11 +1574,12 @@ func (e *Executor) prepareResumePreflight(
 	// environment ID that is actually persisted on the session row.
 	selectionSession := *session
 	selectionSession.Metadata = cloneMetadata(session.Metadata)
-	selectedEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, &selectionSession)
+	selectedEnv, replaced, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, &selectionSession)
 	if err != nil {
 		return err
 	}
 	preflight.selectedEnv = selectedEnv
+	preflight.replacedEnvironment = replaced && selectedEnv == nil
 	if options.RepairWorkspaceInventory || requestedExecutorType != string(models.ExecutorTypeWorktree) ||
 		selectedEnv == nil || selectedEnv.ExecutorType != string(models.ExecutorTypeWorktree) ||
 		e.selectedWorktreeRecoveryAdmission == nil {
@@ -1999,7 +2026,7 @@ func (e *Executor) prepareResumeRepositorySettings(
 	req *LaunchAgentRequest,
 	options ResumeOptions,
 ) (string, *models.TaskEnvironment, []*repoInfo, error) {
-	existingEnv, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+	existingEnv, _, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
 	if err != nil {
 		return "", nil, nil, err
 	}
@@ -2187,82 +2214,155 @@ func (e *Executor) resolveResumeTaskEnvironment(ctx context.Context, taskID stri
 	if taskModel != nil {
 		task = taskModel.ToAPI()
 	}
-	return e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+	env, _, err := e.resolveResumeTaskEnvironmentForTask(ctx, task, session)
+	return env, err
 }
 
-func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, bool, error) {
 	if task == nil || session == nil {
-		return nil, nil
+		return nil, false, nil
 	}
 	taskID := task.ID
 	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("lookup existing task environment: %w", err)
+		return nil, false, fmt.Errorf("lookup existing task environment: %w", err)
 	}
 	// A failed, consumer-free canonical environment is retained and replaced so
 	// the resume below materializes a fresh environment instead of reusing the
 	// unusable row. A live consumer leaves the row active (fail-closed) and the
 	// normal refusal applies. Retirement reuses this single read so a resume
 	// that observes a changed environment still detects it.
+	replaced := false
 	if env != nil && env.Status == models.TaskEnvironmentStatusFailed {
 		retired, retireErr := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID)
 		if retireErr != nil {
-			return nil, fmt.Errorf("retire unusable task environment: %w", retireErr)
+			return nil, false, fmt.Errorf("retire unusable task environment: %w", retireErr)
 		}
 		if retired {
 			env = nil
+			replaced = true
 			session.TaskEnvironmentID = ""
 		}
 	}
 	if env == nil {
-		// Inherited-environment fallback: a child task created by an office
-		// task-handoff may have had session.TaskEnvironmentID rewritten to point
-		// at the parent's / shared group's env row, which is owned by a
-		// *different* task. GetTaskEnvironmentByTaskID misses that row because it
-		// indexes by the child task id, so without this lookup the resume path
-		// treats the env as absent and persistTaskEnvironment tries to CREATE a
-		// new row using the inherited ID — which already exists, producing
-		// "UNIQUE constraint failed: task_environments.id".
-		//
-		// Unlike the launch path (executor_execute.go), which hard-errors with
-		// ErrWorkspaceReuseUnsafe when the referenced row is absent, resume
-		// falls through to (nil, nil): the ID is then free, so the create path
-		// produces a valid fresh environment rather than a failing resume. A
-		// missing row surfaces as ErrTaskEnvironmentNotFound, which is a miss,
-		// not a fatal error; any other lookup error still propagates.
-		if session.TaskEnvironmentID != "" {
-			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
-			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
-				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
-			}
-			// A retired row is inactive and must never be reused; fall through so
-			// a fresh environment is materialized. The stale binding is cleared
-			// so persistTaskEnvironment does not attempt to create over it.
-			if inherited != nil && inherited.IsRetired() {
-				session.TaskEnvironmentID = ""
-				inherited = nil
-			}
-			if inherited != nil {
-				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
-					return nil, err
-				}
-				return inherited, nil
-			}
-			if taskUsesInheritedWorkspace(task) {
-				return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
-			}
+		inherited, inheritedErr := e.resolveInheritedTaskEnvironment(ctx, task, session)
+		if inheritedErr != nil {
+			return nil, replaced, inheritedErr
 		}
-		return nil, nil
+		return inherited, replaced, nil
 	}
 	if session.TaskEnvironmentID != env.ID {
 		session.TaskEnvironmentID = env.ID
 	}
+	return env, replaced, nil
+}
+
+// resolveInheritedTaskEnvironment handles the case where no active environment
+// is owned by task. A child task created by an office task-handoff may have had
+// session.TaskEnvironmentID rewritten to point at the parent's / shared group's
+// env row, which is owned by a *different* task. GetTaskEnvironmentByTaskID
+// misses that row because it indexes by the child task id, so without this
+// lookup the resume path treats the env as absent and persistTaskEnvironment
+// tries to CREATE a new row using the inherited ID — which already exists,
+// producing "UNIQUE constraint failed: task_environments.id".
+//
+// Unlike the launch path (executor_execute.go), which hard-errors with
+// ErrWorkspaceReuseUnsafe when the referenced row is absent, resume falls
+// through to (nil, nil): the ID is then free, so the create path produces a
+// valid fresh environment rather than a failing resume. A missing row surfaces
+// as ErrTaskEnvironmentNotFound, which is a miss, not a fatal error; any other
+// lookup error still propagates.
+func (e *Executor) resolveInheritedTaskEnvironment(ctx context.Context, task *v1.Task, session *models.TaskSession) (*models.TaskEnvironment, error) {
+	if session.TaskEnvironmentID == "" {
+		return nil, nil
+	}
+	inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+	if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
+		return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+	}
+	// A retired row is inactive and must never be reused; fall through so a
+	// fresh environment is materialized. The stale binding is cleared so
+	// persistTaskEnvironment does not attempt to create over it.
+	if inherited != nil && inherited.IsRetired() {
+		session.TaskEnvironmentID = ""
+		inherited = nil
+	}
+	if inherited != nil {
+		if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {
+			return nil, err
+		}
+		return inherited, nil
+	}
+	if taskUsesInheritedWorkspace(task) {
+		return nil, fmt.Errorf("%w: inherited task environment %s no longer exists", models.ErrWorkspaceReuseUnsafe, session.TaskEnvironmentID)
+	}
+	return nil, nil
+}
+
+// reserveReplacementTaskEnvironment creates the fresh canonical environment
+// row for a resume that retired an unusable, consumer-free environment and
+// binds the requesting session to it before any physical worktree inventory is
+// written. The row is CREATING with this session as its materializer so the
+// launch's worktree is recorded under this owner and persistTaskEnvironment
+// finalizes the same row instead of duplicating ownership. Returns nil when the
+// request does not materialize a worktree.
+func (e *Executor) reserveReplacementTaskEnvironment(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	execCfg executorConfig,
+) (*models.TaskEnvironment, error) {
+	if task == nil || session == nil || req == nil || !req.UseWorktree || session.ID == "" {
+		return nil, nil
+	}
+	env := &models.TaskEnvironment{
+		ID:                       uuid.New().String(),
+		TaskID:                   task.ID,
+		ExecutorType:             req.ExecutorType,
+		ExecutorID:               execCfg.ExecutorID,
+		ExecutorProfileID:        session.ExecutorProfileID,
+		Status:                   models.TaskEnvironmentStatusCreating,
+		TaskDirName:              req.TaskDirName,
+		MaterializationSessionID: session.ID,
+	}
+	if err := e.repo.CreateTaskEnvironment(ctx, env); err != nil {
+		return nil, fmt.Errorf("reserve replacement task environment: %w", err)
+	}
 	return env, nil
+}
+
+// bindReplacementEnvironment reserves the fresh canonical environment and
+// persists the requesting session's binding to it before any physical worktree
+// inventory is written. The persisted binding, the launch request, and the
+// physical inventory therefore name the same owner. A failed binding write
+// marks the reserved row failed so it is never adopted as a materialized
+// workspace. A no-op (nil) when the request does not materialize a worktree.
+func (e *Executor) bindReplacementEnvironment(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	req *LaunchAgentRequest,
+	execCfg executorConfig,
+) (*models.TaskEnvironment, error) {
+	reserved, err := e.reserveReplacementTaskEnvironment(ctx, task, session, req, execCfg)
+	if err != nil || reserved == nil {
+		return nil, err
+	}
+	session.TaskEnvironmentID = reserved.ID
+	session.WorkspacePath = ""
+	req.TaskEnvironmentID = reserved.ID
+	if err := e.persistSessionFullRowIfCurrentState(ctx, session, session.State); err != nil {
+		e.markTaskEnvironmentMaterializationFailed(ctx, reserved, session.ID)
+		return nil, err
+	}
+	return reserved, nil
 }
 
 // applyExecutorConfigToResumeRequest resolves executor config and applies it to the
 // resume request, persisting executor assignment if newly resolved.
-func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
+func (e *Executor) applyExecutorConfigToResumeRequest(
+	ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, metadata map[string]interface{}) executorConfig {
 	executorWasEmpty := session.ExecutorID == ""
 	execConfig := e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
 	session.ExecutorID = execConfig.ExecutorID
