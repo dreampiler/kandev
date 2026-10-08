@@ -186,7 +186,11 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		var reviewRebindings []profileRebinding
 		if existing != nil {
 			step.CreatedAt = existing.CreatedAt
-			step.StageType = existing.StageType // not carried by the portable format
+			if sp.StageType == "" {
+				// A document written before stage types were portable states
+				// none, so the step keeps the nature it already has.
+				step.StageType = existing.StageType
+			}
 			if stepMatchesDefinition(existing, step) {
 				continue
 			}
@@ -373,6 +377,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		models.EqualWorkflowSessionTarget(existing.SessionTarget, desired.SessionTarget) &&
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
+		existing.StageType == desired.StageType &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&
 		existing.CancelTriggersTurnComplete == desired.CancelTriggersTurnComplete &&
 		existing.CompleteTaskOnEnter == desired.CompleteTaskOnEnter &&

@@ -94,6 +94,8 @@
   "failedToMigrateTasks": "Ƒàĩĺēď ţō ḿĩĝŕàţē ţàśķś",
   "failedToSaveWorkflowChanges": "Ƒàĩĺēď ţō śàvē ŵōŕķƒĺōŵ ćĥàńĝēś",
   "failedToUpdateWorkflowStep": "Ƒàĩĺēď ţō ũƥďàţē ŵōŕķƒĺōŵ śţēƥ",
+  "holdStep": "Ĥōĺď śţēƥ",
+  "holdStepHelp": "Ćōũńţ àńď ĺĩśţ ţàśķś ƥàŕķēď ĩń ţĥĩś śţēƥ àś ōń ĥōĺď ĩń ţĥē ŵōŕķśƥàćē ōvēŕvĩēŵ. Ţĥē śţēƥ'ś ńàḿē ďōēś ńōţ ḿàţţēŕ.",
   "hopNumber": "Ĥōƥ {{index}}",
   "import": "Ĩḿƥōŕţ",
   "importCompleteTitle": "Ĩḿƥōŕţ ćōḿƥĺēţē",

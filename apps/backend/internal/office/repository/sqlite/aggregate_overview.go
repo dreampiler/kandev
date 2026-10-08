@@ -21,7 +21,8 @@ import (
 // OverviewTaskRow is one open (not completed, not cancelled) task with the
 // step-entry time and the number of unfinished blocker tasks. The step's own
 // automation travels with it, so a reader can tell a step that starts work by
-// itself from one that waits for a person without a second query.
+// itself from one that waits for a person without a second query, and so is the
+// step's stage nature, which is what marks a hold step.
 type OverviewTaskRow struct {
 	ID                 string `db:"id"`
 	WorkspaceID        string `db:"workspace_id"`
@@ -30,6 +31,7 @@ type OverviewTaskRow struct {
 	ParentID           string `db:"parent_id"`
 	StepName           string `db:"step_name"`
 	StepID             string `db:"step_id"`
+	StepStageType      string `db:"step_stage_type"`
 	StepEventsRaw      string `db:"step_events"`
 	StepPullFromStepID string `db:"pull_from_step_id"`
 	CreatedAtRaw       string `db:"created_at"`
@@ -155,6 +157,7 @@ func (r *Repository) ListOverviewOpenTasks(ctx context.Context, workspaceIDs []s
 			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title, COALESCE(t.state, '') AS state,
 			       COALESCE(t.parent_id, '') AS parent_id, COALESCE(ws.name, '') AS step_name,
 			       COALESCE(ws.id, '') AS step_id,
+			       COALESCE(ws.stage_type, '') AS step_stage_type,
 			       COALESCE(ws.events, '') AS step_events,
 			       COALESCE(ws.pull_from_step_id, '') AS pull_from_step_id,
 			       CAST(t.created_at AS TEXT) AS created_at, CAST(t.updated_at AS TEXT) AS updated_at,

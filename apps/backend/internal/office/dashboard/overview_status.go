@@ -135,28 +135,15 @@ func (t *overviewTask) awaitingStep() bool {
 	return t.row.StepID != "" && !t.automation.RunsOnEntry() && t.runningSession() == nil
 }
 
-// holdStepNames are the step names a workflow uses for the step a task is held
-// on. No workflow_steps column marks a hold step: stage_type has no hold value
-// and no boolean does either, so the stored name is the only signal that a
-// workflow has one. The names are workflow data an author typed, not UI copy, so
-// they are read the same whatever language the screen is in. A workflow that
-// names its hold step something else reports fewer holds, never more.
-var holdStepNames = map[string]bool{
-	"보류":      true,
-	"보류중":     true,
-	"hold":    true,
-	"on hold": true,
-	"blocked": true,
-	"paused":  true,
-}
-
-// onHoldStep reports that the task sits on a step its workflow calls a hold.
+// onHoldStep reports that the task sits on a step whose stored nature is a
+// hold. The step's stage_type says so; its name is never read, so renaming a
+// hold step keeps it a hold and naming a step "hold" does not make it one.
 func (t *overviewTask) onHoldStep() bool {
-	return holdStepNames[strings.ToLower(strings.TrimSpace(t.row.StepName))]
+	return t.row.StepStageType == string(wfmodels.StageTypeHold)
 }
 
 // isOnHold reports that this task is being held rather than running: either its
-// state says so, or it is parked on the workflow's hold step. A task that is on
+// state says so, or it is parked on a step marked as a hold. A task that is on
 // hold is not waiting on a predecessor, so the hold reading comes first.
 func (t *overviewTask) isOnHold() bool {
 	return t.row.State == stateBlocked || t.onHoldStep()

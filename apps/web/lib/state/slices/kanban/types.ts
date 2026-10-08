@@ -83,7 +83,7 @@ export type KanbanState = {
      * pick the right meta surface (review/approval shows multi-agent
      * decisions). Backend never branches on this field.
      */
-    stage_type?: "work" | "review" | "approval" | "custom";
+    stage_type?: "work" | "review" | "approval" | "custom" | "hold";
     /**
      * Last order-revision this step's task order was written at
      * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37), as of when this step

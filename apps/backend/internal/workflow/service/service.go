@@ -1008,6 +1008,7 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 		CompleteTaskOnEnter:         sp.CompleteTaskOnEnter,
 		WIPLimit:                    sp.WIPLimit,
 		PullFromStepID:              sp.PullFromStepID(posToID),
+		StageType:                   sp.StageType,
 	}
 	if matchDirectProfile && sp.AgentProfile != nil && matchProfile != nil {
 		step.AgentProfileID = matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode, existingProfileID)
