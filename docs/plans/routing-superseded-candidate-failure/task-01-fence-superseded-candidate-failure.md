@@ -1,7 +1,7 @@
 ---
 id: "01-fence-superseded-candidate-failure"
 title: "Fence a dynamic failure to the candidate that produced it"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -31,6 +31,9 @@ the candidate the route holds now.
   generation differs from the known route state, or whose candidate differs
   from the route's current candidate, returns `ErrStaleGeneration`. A session
   without known route state keeps the existing behavior.
+- Capture `ExecutionProfileID` from the execution in lifecycle stream events.
+  Carry that value through `handleAgentErrorEvent` to the existing guard.
+  Keep logical-profile attribution and Office identity separate.
 
 ## Acceptance
 
@@ -41,6 +44,10 @@ the candidate the route holds now.
 2. When the session already names candidate B but candidate A's execution
    still serves it, a failure of that execution leaves candidate B's circuit
    closed and the persisted route state unchanged.
+3. Stream events retain the concrete profile through publication and decoding.
+   A predecessor stream error leaves the successor's circuit and route unchanged.
+   Current-candidate errors still apply the configured policy.
+   Legacy events without a concrete profile retain their existing behavior.
 
 ## Verification
 
@@ -48,3 +55,12 @@ the candidate the route holds now.
 - `go test -tags fts5 ./internal/orchestrator/ -run TestDynamicFailureOfSupersededCandidateDoesNotChargeCurrentCandidate`
 - `golangci-lint run ./internal/agent/runtime/dynamic/... ./internal/orchestrator/...`
 - `make -C apps/backend build`
+- `go test -trimpath -tags fts5 ./internal/agent/runtime/lifecycle/ -run TestAgentStreamEventCarriesConcreteExecutionProfile`
+- `go test -trimpath -tags fts5 ./internal/orchestrator/ -run TestStreamErrorFailureAttributionAfterRouteChange`
+
+## Results
+
+The original contributor supplied verification results in PR #4328.
+The review follow-up adds stream attribution and regression coverage.
+The review did not run validation commands, as requested.
+Verification of the added coverage remains pending.

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-08
-status: implemented
+status: in_progress
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 system_design:
@@ -33,12 +33,15 @@ them, in the orchestrator and in the engine. See
 - `dynamicFailureSession` in `apps/backend/internal/orchestrator`.
 - `Engine.ApplyFailureContext` in `apps/backend/internal/agent/runtime/dynamic`.
 - Unit tests for the engine fence and for the orchestrator failure path.
+- Concrete execution-profile attribution on lifecycle stream events and its
+  propagation through `handleAgentErrorEvent`.
+- Regression tests for stream-event publication, predecessor errors, current
+  candidate errors, and legacy events without a concrete profile.
 
 ### Out of scope
 
 - Recording the superseded execution's failure against its own profile.
 - Launch-error classification and routing error rules.
-- Carrying the execution profile on stream error payloads.
 
 ## Verification
 
@@ -46,3 +49,14 @@ them, in the orchestrator and in the engine. See
 - `go test -tags fts5 ./internal/orchestrator/`.
 - `golangci-lint run ./internal/agent/runtime/dynamic/... ./internal/orchestrator/...`.
 - `make -C apps/backend build`.
+
+## Review follow-up
+
+The stream-error publisher now captures the concrete profile from the execution.
+The error handler passes that profile to the existing failure guard.
+The logical profile and Office identity retain their existing meaning.
+Legacy events without a concrete profile retain their existing behavior.
+
+The added regression tests cover publication and error-handler attribution.
+The review did not run tests, builds, linters, or commit checks, as requested.
+Verification of the review follow-up remains pending.

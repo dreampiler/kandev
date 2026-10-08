@@ -124,6 +124,10 @@ require the current exclusive probe lease.
   it holds or loads with a stale-generation error before it opens any circuit.
   Such a failure neither opens the current candidate's circuit nor advances the
   route. A session without known route state keeps the existing behavior.
+- Lifecycle stream events capture the execution's concrete profile separately
+  from its logical profile or Office identity. The stream-error handler passes
+  that concrete profile to the same failure guard as terminal lifecycle events.
+  Legacy stream events without a concrete profile retain their existing behavior.
 - If an error is unclassified, Kandev enters manual recovery except for the
   [repeated-failure extension](dynamic-unclassified-fallback.md). Stale,
   conflicting, and effect-unsafe evidence never authorizes that extension.

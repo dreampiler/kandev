@@ -20,6 +20,7 @@ func (e *Engine) requireCurrentFailureRoute(
 	if !exists {
 		return nil
 	}
+	// A waiting route has no selected candidate to compare.
 	if state.Generation != generation ||
 		(state.ExecutionProfileID != "" && state.ExecutionProfileID != candidateID) {
 		return ErrStaleGeneration
