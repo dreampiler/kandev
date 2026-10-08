@@ -2978,8 +2978,19 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
+	// RetiredAt marks an environment retained for evidence after it became
+	// unusable. A retired row is inactive: it is never canonical and never
+	// reused, but its owner, history, and repository rows are preserved. Nil
+	// means active. A task has at most one active environment.
+	RetiredAt *time.Time `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsRetired reports whether the environment has been retained as inactive.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.

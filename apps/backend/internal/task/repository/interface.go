@@ -915,8 +915,8 @@ type TaskEnvironmentRepository interface {
 	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	// RetireUnusableTaskEnvironment retains a failed, consumer-free
-	// environment for evidence while releasing its canonical task binding.
-	// It returns whether a row was retired; a live consumer refuses
+	// environment for evidence while freeing its task's active-environment
+	// slot. It returns whether a row was retired; a live consumer refuses
 	// the retirement fail-closed.
 	RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error)
 	DeleteTaskEnvironment(ctx context.Context, id string) error

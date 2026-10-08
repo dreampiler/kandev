@@ -2199,6 +2199,21 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 	if err != nil {
 		return nil, fmt.Errorf("lookup existing task environment: %w", err)
 	}
+	// A failed, consumer-free canonical environment is retained and replaced so
+	// the resume below materializes a fresh environment instead of reusing the
+	// unusable row. A live consumer leaves the row active (fail-closed) and the
+	// normal refusal applies. Retirement reuses this single read so a resume
+	// that observes a changed environment still detects it.
+	if env != nil && env.Status == models.TaskEnvironmentStatusFailed {
+		retired, retireErr := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID)
+		if retireErr != nil {
+			return nil, fmt.Errorf("retire unusable task environment: %w", retireErr)
+		}
+		if retired {
+			env = nil
+			session.TaskEnvironmentID = ""
+		}
+	}
 	if env == nil {
 		// Inherited-environment fallback: a child task created by an office
 		// task-handoff may have had session.TaskEnvironmentID rewritten to point
@@ -2219,6 +2234,13 @@ func (e *Executor) resolveResumeTaskEnvironmentForTask(ctx context.Context, task
 			inherited, inhErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
 			if inhErr != nil && !errors.Is(inhErr, repoerrors.ErrTaskEnvironmentNotFound) {
 				return nil, fmt.Errorf("lookup inherited task environment: %w", inhErr)
+			}
+			// A retired row is inactive and must never be reused; fall through so
+			// a fresh environment is materialized. The stale binding is cleared
+			// so persistTaskEnvironment does not attempt to create over it.
+			if inherited != nil && inherited.IsRetired() {
+				session.TaskEnvironmentID = ""
+				inherited = nil
 			}
 			if inherited != nil {
 				if err := e.validateInheritedEnvironmentOwner(ctx, task, inherited); err != nil {

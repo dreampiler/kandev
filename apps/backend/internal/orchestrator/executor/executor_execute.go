@@ -731,21 +731,6 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	}
 }
 
-// retireUnusableTaskEnvironment retains a failed, consumer-free environment
-// for evidence while releasing its canonical task binding, so a later launch
-// creates a fresh environment instead of reusing the unusable one. Repositories
-// without the capability return false with no error, keeping the explicit
-// fail-closed refusal at the caller.
-func (e *Executor) retireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
-	retirer, ok := e.repo.(interface {
-		RetireUnusableTaskEnvironment(context.Context, string) (bool, error)
-	})
-	if !ok {
-		return false, nil
-	}
-	return retirer.RetireUnusableTaskEnvironment(ctx, environmentID)
-}
-
 // failOwnedCreatingTaskEnvironment marks the task's creating environment failed
 // when sessionID is its materialization owner. An abandoned launch must not
 // leave its own creating environment behind: nothing else finalizes it, and the
@@ -1573,6 +1558,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		}
 	}
 
+	// A failed, consumer-free canonical environment is retained and replaced so
+	// the session below binds to a fresh environment instead of refusing at the
+	// workspace-binding boundary. A live consumer leaves the row in place and
+	// the existing attach-only refusal applies (fail-closed).
+	e.admitEnvironmentRecovery(ctx, task.ID)
+
 	createCtx := ctx
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
@@ -1776,6 +1767,30 @@ func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) err
 	return e.worktreeRecoveryAdmission(ctx, taskID)
 }
 
+// admitEnvironmentRecovery retires a task's canonical environment when it is a
+// failed, consumer-free row, so the affected session can be created/bound to a
+// fresh canonical environment instead of refusing. It is a no-op when the task
+// has no active environment or the active environment is not failed. A failed
+// environment with a live consumer is left in place, and the caller's normal
+// attach-only refusal then applies (fail-closed).
+//
+// It is best-effort: a lookup or storage failure is logged and swallowed so it
+// cannot preempt the normal launch path's sanitized error handling, and the
+// unusable row still blocks reuse until it is retired.
+func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) {
+	if e.repo == nil || taskID == "" {
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil || env.Status != models.TaskEnvironmentStatusFailed {
+		return
+	}
+	if _, err := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID); err != nil {
+		e.logger.Warn("failed to retire unusable task environment",
+			zap.String("task_id", taskID), zap.String("environment_id", env.ID), zap.Error(err))
+	}
+}
+
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
 func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
@@ -1932,21 +1947,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		existingEnv = readyEnv
 	}
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		// A failed environment with no live consumer is retained for evidence
-		// and replaced: retire it, then fall through to fresh materialization
-		// with no canonical row. A live consumer (claim, session, runtime)
-		// refuses the retirement fail-closed and this launch keeps the
-		// explicit refusal.
-		retired, retireErr := e.retireUnusableTaskEnvironment(ctx, existingEnv.ID)
-		if retireErr != nil {
-			return nil, retireErr
-		}
-		if !retired {
-			return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
-		}
-		existingEnv = nil
-		session.TaskEnvironmentID = ""
-		session.WorkspacePath = ""
+		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
@@ -2200,10 +2201,6 @@ func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentI
 		case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 			return env, nil
 		case models.TaskEnvironmentStatusFailed:
-			// A sibling waiting on a failed environment must not wait forever
-			// on a workspace that never becomes ready. Surface the explicit
-			// refusal so the caller can retire and replace it through the
-			// launch path instead of blocking here.
 			return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 		}
 
@@ -3482,6 +3479,16 @@ func (e *Executor) persistTaskEnvironment(
 		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
+	}
+
+	// A stale binding to a retired or failed environment must not be reused as
+	// the new environment's ID: the retired row still owns that primary key.
+	// Clear it so CreateTaskEnvironment mints a fresh identity.
+	if session.TaskEnvironmentID != "" {
+		if referenced, refErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); refErr == nil && referenced != nil &&
+			(referenced.IsRetired() || referenced.Status == models.TaskEnvironmentStatusFailed) {
+			session.TaskEnvironmentID = ""
+		}
 	}
 
 	env := &models.TaskEnvironment{
