@@ -1011,7 +1011,7 @@ func (s *Service) prepareUnclassifiedFailureEvidence(
 	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
-	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, classified, startupEvidence)
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -1031,12 +1031,43 @@ func (s *Service) unclassifiedFailureRouteEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
+	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) dynamicruntime.UnclassifiedFailureEvidence {
 	if startupEvidence != nil {
 		return *startupEvidence
 	}
+	// A post-start runtime failure that produced no result carries no complete
+	// provider diagnostic, so it uses the no-result origin with a bounded,
+	// normalized error-type diagnostic instead of the terminal-provider origin.
+	if classified != nil && classified.Code == routingerr.CodeAgentRuntime {
+		return s.unclassifiedPostStartEvidence(ctx, data, session, classified.Phase)
+	}
 	return s.unclassifiedPromptEvidence(ctx, data, session)
+}
+
+// unclassifiedPostStartEvidence builds the no-result evidence for a post-start
+// runtime failure. The diagnostic is the bounded, sanitized failure message, so
+// no secret or personal path reaches the stored evidence or the fingerprint. The
+// phase is the classified failure phase, so the origin gate and the fingerprint
+// stay scoped to post-start failures with no output or effect.
+func (s *Service) unclassifiedPostStartEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	phase routingerr.Phase,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginPostStartNoResult,
+		phase, promptUnclassifiedAttemptID(data), data.AgentID,
+		dynamicruntime.NormalizePostStartDiagnostic(data.ErrorMessage), false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
 }
 
 func (s *Service) clearStreakAfterCurrentClassifiedFailure(
