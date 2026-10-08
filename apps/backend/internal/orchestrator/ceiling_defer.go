@@ -22,6 +22,23 @@ const deferredLaunchCASRetryBudget = 3
 // launch because no replay record was created for it.
 var ErrCeilingLaunchConflict = errors.New("a different ceiling launch is already deferred for this task")
 
+// ceilingDeferralSharesAutomationRun reports whether a stored record and an
+// incoming refusal serve the same automation run. Two deferrals of the same
+// kind that name the same run are the same queued launch even when their
+// prompts differ: a scheduled trigger and a manual trigger of one automation
+// recompose different prompts around one run, and treating the second as a
+// conflict deletes the task the run created. A deferral that names no run
+// never shares one.
+func ceilingDeferralSharesAutomationRun(stored, incoming models.CeilingDeferral) bool {
+	if stored.Kind != incoming.Kind {
+		return false
+	}
+	storedRun := automationRunFromCeilingPayload(stored.Payload)
+	incomingRun := automationRunFromCeilingPayload(incoming.Payload)
+	return storedRun != nil && incomingRun != nil && storedRun.RunID != "" &&
+		storedRun.RunID == incomingRun.RunID
+}
+
 // ceilingDeferralSharesDestination reports whether a stored record and an
 // incoming refusal are the same queued launch addressed to the same session.
 //
@@ -112,7 +129,8 @@ func (s *Service) deferCeilingRefusal(
 					return
 				}
 				if !equivalent {
-					if ceilingDeferralSharesDestination(existingCeiling, deferral) {
+					if ceilingDeferralSharesDestination(existingCeiling, deferral) ||
+						ceilingDeferralSharesAutomationRun(existingCeiling, deferral) {
 						// The same queued launch, re-derived by a later request or by
 						// a replay: the stored payload and queue time stay authoritative
 						// and this refusal reuses that record instead of ending the
