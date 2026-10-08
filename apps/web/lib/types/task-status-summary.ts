@@ -68,6 +68,8 @@ export type TaskStatusSummary = {
     id: string;
     state: TaskSessionState;
   } | null;
+  /** Task-wide RUNNING evidence. Undefined identifies a legacy summary. */
+  has_running_session?: boolean;
   foreground_activity?: ForegroundActivity;
   active_subagent_count?: number;
   pending_action?: TaskPendingAction;
