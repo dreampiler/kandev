@@ -731,6 +731,21 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	}
 }
 
+// retireUnusableTaskEnvironment retains a failed, consumer-free environment
+// for evidence while releasing its canonical task binding, so a later launch
+// creates a fresh environment instead of reusing the unusable one. Repositories
+// without the capability return false with no error, keeping the explicit
+// fail-closed refusal at the caller.
+func (e *Executor) retireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	retirer, ok := e.repo.(interface {
+		RetireUnusableTaskEnvironment(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return false, nil
+	}
+	return retirer.RetireUnusableTaskEnvironment(ctx, environmentID)
+}
+
 // failOwnedCreatingTaskEnvironment marks the task's creating environment failed
 // when sessionID is its materialization owner. An abandoned launch must not
 // leave its own creating environment behind: nothing else finalizes it, and the
@@ -1917,7 +1932,21 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		existingEnv = readyEnv
 	}
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		// A failed environment with no live consumer is retained for evidence
+		// and replaced: retire it, then fall through to fresh materialization
+		// with no canonical row. A live consumer (claim, session, runtime)
+		// refuses the retirement fail-closed and this launch keeps the
+		// explicit refusal.
+		retired, retireErr := e.retireUnusableTaskEnvironment(ctx, existingEnv.ID)
+		if retireErr != nil {
+			return nil, retireErr
+		}
+		if !retired {
+			return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		}
+		existingEnv = nil
+		session.TaskEnvironmentID = ""
+		session.WorkspacePath = ""
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
@@ -2171,6 +2200,10 @@ func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentI
 		case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 			return env, nil
 		case models.TaskEnvironmentStatusFailed:
+			// A sibling waiting on a failed environment must not wait forever
+			// on a workspace that never becomes ready. Surface the explicit
+			// refusal so the caller can retire and replace it through the
+			// launch path instead of blocking here.
 			return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 		}
 

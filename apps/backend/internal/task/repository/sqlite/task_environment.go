@@ -137,7 +137,9 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 }
 
 // GetTaskEnvironmentByTaskID retrieves the active task environment for a task,
-// including per-repo rows.
+// including per-repo rows. A failed environment is never canonical: it is
+// retained for evidence but no launch or resume may attach to it. Callers that
+// need the failed row itself (for example to retire it) resolve it by ID.
 func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	env := &models.TaskEnvironment{}
 	var status string
@@ -148,8 +150,8 @@ func (r *Repository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID stri
 			workspace_path,
 			container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id, COALESCE(task_dir_name, ''),
 			created_at, updated_at
-		FROM task_environments WHERE task_id = ? ORDER BY created_at DESC LIMIT 1
-	`), taskID).Scan(
+		FROM task_environments WHERE task_id = ? AND status <> ? ORDER BY created_at DESC LIMIT 1
+	`), taskID, string(models.TaskEnvironmentStatusFailed)).Scan(
 		&env.ID, &env.TaskID, &env.OwnershipGeneration, &env.ExecutorType, &env.ExecutorID, &env.ExecutorProfileID,
 		&env.ControlPort, &status, &env.MaterializationSessionID,
 		&env.WorkspacePath,
@@ -885,6 +887,91 @@ func (r *Repository) ReleaseTaskEnvironmentReset(
 	errStr string,
 ) error {
 	return r.CompleteTaskResourceCleanupJob(ctx, jobID, state, errStr, nil)
+}
+
+// RetireUnusableTaskEnvironment retains a failed, consumer-free environment
+// for evidence while releasing its canonical task binding. The row is kept
+// (never deleted): GetTaskEnvironmentByTaskID no longer returns failed rows,
+// so a later launch creates a fresh environment instead of reusing the
+// unusable one. Only a failed environment with no live consumer qualifies:
+// an active recovery claim, a non-terminal bound session, or a live runtime
+// row refuses the retirement fail-closed.
+func (r *Repository) RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	if environmentID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	taskID, err := retireUnusableTaskEnvironmentGuards(ctx, r, tx, environmentID)
+	if err != nil {
+		return false, err
+	}
+	if taskID == "" {
+		return false, nil
+	}
+	now := r.nowUTC()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE task_environments SET task_id = ?, updated_at = ? WHERE id = ? AND status = ?`), taskID+":retired:"+environmentID, now, environmentID, string(models.TaskEnvironmentStatusFailed))
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows != 1 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// retireUnusableTaskEnvironmentGuards verifies the retirement preconditions
+// and returns the owning task ID, or "" when the environment must be left in
+// place. An error is a barrier or storage failure, not a refusal.
+func retireUnusableTaskEnvironmentGuards(ctx context.Context, r *Repository, tx *sqlx.Tx, environmentID string) (string, error) {
+	var taskID, status, materializationSessionID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id, status, COALESCE(materialization_session_id, '') FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID, &status, &materializationSessionID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	if models.TaskEnvironmentStatus(status) != models.TaskEnvironmentStatusFailed || materializationSessionID != "" {
+		return "", nil
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return "", err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return "", err
+	}
+	if live, err := retireUnusableTaskEnvironmentHasConsumers(ctx, r, tx, environmentID); err != nil || live {
+		return "", err
+	}
+	return taskID, nil
+}
+
+// retireUnusableTaskEnvironmentHasConsumers reports whether a non-terminal
+// bound session or a live runtime row still references the environment.
+func retireUnusableTaskEnvironmentHasConsumers(ctx context.Context, r *Repository, tx *sqlx.Tx, environmentID string) (bool, error) {
+	var liveSessions int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(1) FROM task_sessions WHERE task_environment_id = ? AND state NOT IN ('COMPLETED', 'FAILED', 'CANCELLED')`), environmentID).Scan(&liveSessions); err != nil {
+		return false, err
+	}
+	if liveSessions > 0 {
+		return true, nil
+	}
+	var liveRuntimes int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(1) FROM executors_running er JOIN task_sessions ts ON ts.id = er.session_id WHERE ts.task_environment_id = ? AND (er.status IS NULL OR er.status NOT IN (?, ?, ?))`), environmentID, models.ExecutorRunningStatusFailed, models.ExecutorRunningStatusStopped, models.ExecutorRunningStatusComplete).Scan(&liveRuntimes); err != nil {
+		return false, err
+	}
+	return liveRuntimes > 0, nil
 }
 
 // DeleteTaskEnvironment deletes a task environment by ID.

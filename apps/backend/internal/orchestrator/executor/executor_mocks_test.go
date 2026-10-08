@@ -1500,6 +1500,9 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.taskEnvironments[env.ID] = env
 	return nil
 }
+func (m *mockRepository) RetireUnusableTaskEnvironment(_ context.Context, environmentID string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

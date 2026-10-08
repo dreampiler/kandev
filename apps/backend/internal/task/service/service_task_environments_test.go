@@ -50,6 +50,9 @@ func (s *stubEnvRepo) GetTaskEnvironmentExistenceByTaskIDs(context.Context, []st
 func (s *stubEnvRepo) UpdateTaskEnvironment(context.Context, *models.TaskEnvironment) error {
 	return nil
 }
+func (s *stubEnvRepo) RetireUnusableTaskEnvironment(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 	if s.delErr != nil {
 		return s.delErr

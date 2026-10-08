@@ -702,6 +702,9 @@ func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Contex
 func (m *mockRepository) UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error {
 	return nil
 }
+func (m *mockRepository) RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) DeleteTaskEnvironment(ctx context.Context, id string) error {
 	return nil
 }
