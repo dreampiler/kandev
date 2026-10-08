@@ -94,6 +94,8 @@
   "failedToMigrateTasks": "Failed to migrate tasks",
   "failedToSaveWorkflowChanges": "Failed to save workflow changes",
   "failedToUpdateWorkflowStep": "Failed to update workflow step",
+  "holdStep": "Hold step",
+  "holdStepHelp": "Count and list tasks parked in this step as on hold in the workspace overview. The step's name does not matter.",
   "hopNumber": "Hop {{index}}",
   "import": "Import",
   "importCompleteTitle": "Import complete",

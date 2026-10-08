@@ -169,10 +169,11 @@ export type WorkflowStep = {
   wip_limit?: number;
   pull_from_step_id?: string | null;
   /**
-   * Phase 2 (ADR-0004) semantic UX hint. Backend code does not branch on this;
-   * frontend uses it to choose presentation (review/approval styling, etc).
+   * Phase 2 (ADR-0004) statement of the step's nature. The execution engine
+   * does not branch on it; the frontend uses it to choose presentation and the
+   * office overview reads "hold" to report a parked task as held.
    */
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   /**
    * ADR 0015: gate on_turn_complete transitions on an explicit
    * `step_complete_kandev` MCP signal from the agent. When true, the
@@ -567,7 +568,7 @@ export type WorkflowStepDTO = {
   profile_session_end_policy?: WorkflowProfileSessionEndPolicy;
   disable_unclassified_fallback?: boolean;
   session_target?: WorkflowSessionTarget | null;
-  stage_type?: "work" | "review" | "approval" | "custom";
+  stage_type?: "work" | "review" | "approval" | "custom" | "hold";
   wip_limit?: number;
   pull_from_step_id?: string | null;
   complete_task_on_enter: boolean;

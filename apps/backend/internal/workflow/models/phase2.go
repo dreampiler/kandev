@@ -40,8 +40,10 @@ const (
 	ParticipantProvenanceManual ParticipantProvenance = "manual"
 )
 
-// StageType classifies a workflow_step's UX role. A semantic hint for the
-// frontend; the engine itself does not branch on it.
+// StageType classifies a workflow_step's nature. The execution engine does not
+// branch on it: a step of any stage type runs the same triggers. It is read by
+// the frontend and by overview classification, which reads StageTypeHold to
+// decide that a task parked on the step is being held rather than working.
 type StageType string
 
 const (
@@ -49,6 +51,9 @@ const (
 	StageTypeReview   StageType = "review"
 	StageTypeApproval StageType = "approval"
 	StageTypeCustom   StageType = "custom"
+	// StageTypeHold marks a step that parks a task on a person's decision. It
+	// is an overview reading only: it stops no run and moves no task.
+	StageTypeHold StageType = "hold"
 )
 
 // WorkflowStyle classifies a workflow's UX presentation. Read by the frontend
