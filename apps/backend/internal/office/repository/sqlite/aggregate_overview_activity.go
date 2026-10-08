@@ -57,11 +57,23 @@ var overviewLimitSignals = []string{
 
 // overviewStartSignals are the lowercased substrings that mark a failure to
 // launch. A session that never completed a turn is treated the same way: it
-// ended before it ran, whatever its message says.
+// ended before it ran, whatever its message says. The last three mirror the
+// concrete messages Kandev itself records for a launch fault: a generic
+// bootstrap failure, an empty agent command, and an unavailable worktree.
 var overviewStartSignals = []string{
 	"failed to start", "startup", "spawn", "command not found",
 	"no such file", "not installed", "permission denied", "eacces",
 	"exit code 127",
+	"could not start", "command cannot be empty", "required worktree is unavailable",
+}
+
+// overviewNoResponseSignals are the lowercased substrings that mark a failure
+// where the agent produced no answer at all. Kandev records this as a concrete
+// message, so it is matched before the completion-time heuristic: a
+// never-answered session whose completed_at is null must read as no_response,
+// not as a launch failure.
+var overviewNoResponseSignals = []string{
+	"produced no output since start",
 }
 
 // ListOverviewWorkspaceActivity returns the period totals per workspace:
@@ -161,15 +173,16 @@ func (r *Repository) ListOverviewFailureBuckets(
 	message := "LOWER(COALESCE(s.error_message, ''))"
 	bucket := `CASE
 			WHEN ` + overviewMessageLike(message, overviewLimitSignals) + ` THEN '` + overviewFailureBucketLimit + `'
-			WHEN ` + overviewMessageLike(message, overviewStartSignals) + `
-			     OR s.completed_at IS NULL OR s.completed_at <= s.started_at THEN '` + overviewFailureBucketStartFailed + `'
+			WHEN ` + overviewMessageLike(message, overviewStartSignals) + ` THEN '` + overviewFailureBucketStartFailed + `'
+			WHEN ` + overviewMessageLike(message, overviewNoResponseSignals) + ` THEN '` + overviewFailureBucketNoResponse + `'
+			WHEN s.completed_at IS NULL OR s.completed_at <= s.started_at THEN '` + overviewFailureBucketStartFailed + `'
 			WHEN COALESCE(TRIM(s.error_message), '') = '' THEN '` + overviewFailureBucketNoResponse + `'
 			ELSE '` + overviewFailureBucketOther + `'
 		END`
 	return readOverviewBatched[OverviewFailureBucketRow](ctx, r, workspaceIDs, `
 		SELECT t.workspace_id AS workspace_id,
 		       `+bucket+` AS bucket,
-		       SUBSTR(COALESCE(s.error_message, ''), 1, 300) AS error_message,
+		       COALESCE(MAX(s.error_message), '') AS error_message,
 		       COUNT(*) AS cnt
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
@@ -177,7 +190,7 @@ func (r *Repository) ListOverviewFailureBuckets(
 		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		  AND s.state = 'FAILED'
 		  AND s.started_at >= ?
-		GROUP BY t.workspace_id, bucket, error_message`, since)
+		GROUP BY t.workspace_id, bucket, SUBSTR(COALESCE(s.error_message, ''), 1, 300)`, since)
 }
 
 // overviewMessageLike builds a parenthesized `col LIKE '%a%' OR ...` clause for

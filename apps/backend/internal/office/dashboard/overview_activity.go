@@ -70,7 +70,7 @@ func summarizeFailureBuckets(
 			sums[row.WorkspaceID] = map[string]int{}
 		}
 		sums[row.WorkspaceID][row.Bucket] += row.Count
-		if kind := errorKind(row.ErrorMessage); kind != "" {
+		if kind := failureSampleKind(row.ErrorMessage); kind != "" {
 			if kinds[row.WorkspaceID] == nil {
 				kinds[row.WorkspaceID] = map[string]int{}
 			}

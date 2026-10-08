@@ -140,11 +140,13 @@ function FailureBuckets({
           {samples.map((sample) => (
             <span
               key={sample.kind}
-              className="flex items-center gap-1.5"
+              className="flex items-start gap-1.5"
               data-testid="overview-failure-sample"
             >
               <span className="tabular-nums text-muted-foreground">{sample.count}</span>
-              <span className="truncate text-muted-foreground/80">{sample.kind}</span>
+              <span className="min-w-0 break-words text-muted-foreground/80" title={sample.kind}>
+                {sample.kind}
+              </span>
             </span>
           ))}
         </span>
