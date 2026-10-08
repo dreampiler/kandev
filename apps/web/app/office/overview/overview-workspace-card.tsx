@@ -437,7 +437,9 @@ function WorkspaceDetail({
                 key={chip.filter}
                 size="sm"
                 variant={(filter ?? "problems") === chip.filter ? "default" : "outline"}
-                className="h-7 cursor-pointer"
+                className={`h-7 cursor-pointer${
+                  (filter ?? "problems") === chip.filter ? " dark:bg-[oklch(0.51_0.23_277)]" : ""
+                }`}
                 aria-pressed={(filter ?? "problems") === chip.filter}
                 onClick={() => onFilter(chip.filter)}
               >
