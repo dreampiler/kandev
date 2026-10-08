@@ -401,11 +401,14 @@ type OverviewEvent struct {
 	Failure *OverviewFailure `json:"failure,omitempty"`
 }
 
-// OverviewPullRequest names a merged change request.
+// OverviewPullRequest names a merged change request. Provider is the source
+// that reported it: "github" for built-in task PRs, anything else for a
+// plugin-reported change request (for example "forgejo").
 type OverviewPullRequest struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
+	Owner    string `json:"owner"`
+	Repo     string `json:"repo"`
+	Number   int    `json:"number"`
+	Provider string `json:"provider,omitempty"`
 }
 
 // OverviewStepMove is one step change inside a task's run of moves. StepName
