@@ -8,6 +8,7 @@ import { DynamicAgentCandidateRow } from "@/components/settings/dynamic-agent-ca
 import { DynamicAgentInsetSurface } from "@/components/settings/dynamic-agent-inset-surface";
 import { DynamicAgentModelSettings } from "@/components/settings/dynamic-agent-model-settings";
 import { DynamicAgentTierSettings } from "@/components/settings/dynamic-agent-tier-settings";
+import { DynamicUnclassifiedBulkApply } from "@/components/settings/dynamic-agent-unclassified-bulk-apply";
 import type { DynamicCandidateTier } from "@/components/settings/dynamic-agent-tiers";
 import { deriveTiers } from "@/components/settings/dynamic-agent-tiers";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -18,6 +19,7 @@ import type {
   DynamicErrorPolicy,
   DynamicModelPolicy,
   DynamicTierPolicy,
+  DynamicUnclassifiedPolicy,
   DynamicUsageWindow,
 } from "@/lib/types/agent-profile";
 import { settingsControlClassName } from "./settings-control";
@@ -40,6 +42,8 @@ export type DynamicAgentCandidateListProps = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAll: () => void;
 };
 
 export function candidateDisplayName(
@@ -71,6 +75,8 @@ export function DynamicAgentCandidateList(props: DynamicAgentCandidateListProps)
       <CandidateListHeader
         availableProfileOptions={props.availableProfileOptions}
         addCandidate={props.addCandidate}
+        hasCandidates={props.candidates.length > 0}
+        applyUnclassifiedToAll={props.applyUnclassifiedToAll}
       />
       {props.candidates.length === 0 ? (
         <NoCandidates />
@@ -173,6 +179,7 @@ function TierRow({
       onUpdateModel={props.updateCandidateModel}
       onUpdateWindows={props.updateManualWindow}
       onUpdatePolicy={props.updateCandidatePolicy}
+      onUpdateUnclassified={props.updateCandidateUnclassified}
     >
       {expanded ? (
         <DynamicAgentModelSettings
@@ -189,7 +196,12 @@ function TierRow({
 function CandidateListHeader({
   availableProfileOptions,
   addCandidate,
-}: Pick<DynamicAgentCandidateListProps, "availableProfileOptions" | "addCandidate">) {
+  hasCandidates,
+  applyUnclassifiedToAll,
+}: Pick<
+  DynamicAgentCandidateListProps,
+  "availableProfileOptions" | "addCandidate" | "applyUnclassifiedToAll"
+> & { hasCandidates: boolean }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -197,19 +209,22 @@ function CandidateListHeader({
         <h3 className="text-sm font-medium">{t("agents:dynamicCandidates")}</h3>
         <p className="text-xs text-muted-foreground">{t("agents:dynamicCandidatesDescription")}</p>
       </div>
-      <AgentProfilePicker
-        profiles={availableProfileOptions}
-        value=""
-        onValueChange={(value) => {
-          if (value) addCandidate(value);
-        }}
-        testId="add-dynamic-candidate"
-        placeholder={t("agents:addDynamicCandidate")}
-        searchPlaceholder={t("agents:searchDynamicCandidates")}
-        emptyMessage={t("agents:noDynamicCandidatesFound")}
-        ariaLabel={t("agents:addDynamicCandidate")}
-        triggerClassName={settingsControlClassName("w-full sm:w-auto")}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        <DynamicUnclassifiedBulkApply disabled={!hasCandidates} onApply={applyUnclassifiedToAll} />
+        <AgentProfilePicker
+          profiles={availableProfileOptions}
+          value=""
+          onValueChange={(value) => {
+            if (value) addCandidate(value);
+          }}
+          testId="add-dynamic-candidate"
+          placeholder={t("agents:addDynamicCandidate")}
+          searchPlaceholder={t("agents:searchDynamicCandidates")}
+          emptyMessage={t("agents:noDynamicCandidatesFound")}
+          ariaLabel={t("agents:addDynamicCandidate")}
+          triggerClassName={settingsControlClassName("w-full sm:w-auto")}
+        />
+      </div>
     </div>
   );
 }
