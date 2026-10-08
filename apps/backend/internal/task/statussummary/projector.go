@@ -51,8 +51,8 @@ type SessionObservationSnapshot struct {
 	ErrorsObserved   bool
 }
 
-// SessionObservationLoader rehydrates session, activity, and error source
-// observations for one task.
+// SessionObservationLoader rehydrates the complete session, activity, and
+// error source observations for one task.
 type SessionObservationLoader func(context.Context, string) (SessionObservationSnapshot, error)
 
 // TaskLaunchErrorObservation reports whether the task-owned launch-error key
@@ -172,6 +172,7 @@ type projectionState struct {
 	queuedCount       int
 	lastActivityAt    *time.Time
 	sessions          map[string]sessionObservation
+	sessionsObserved  bool
 	pending           map[string]string
 	pendingRequests   map[string]pendingRequestIdentity
 	taskPending       string
@@ -336,6 +337,7 @@ func (p *Projector) Start(ctx context.Context) error {
 		events.TaskUpdated,
 		events.TaskStateChanged,
 		events.TaskSessionStateChanged,
+		events.SessionRemoved,
 		events.TaskSessionActivityChanged,
 		events.TaskSessionErrorChanged,
 		events.MessageAdded,
