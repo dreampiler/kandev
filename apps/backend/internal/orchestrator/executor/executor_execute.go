@@ -1641,6 +1641,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		}
 	}
 
+	// A failed, consumer-free canonical environment is retained and replaced so
+	// the session below binds to a fresh environment instead of refusing at the
+	// workspace-binding boundary. A live consumer leaves the row in place and
+	// the existing attach-only refusal applies (fail-closed).
+	e.admitEnvironmentRecovery(ctx, task.ID)
+
 	createCtx := ctx
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
@@ -1842,6 +1848,92 @@ func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) err
 		return nil
 	}
 	return e.worktreeRecoveryAdmission(ctx, taskID)
+}
+
+// admitEnvironmentRecovery retires a task's canonical environment when it is a
+// failed, consumer-free row, so the affected session can be created/bound to a
+// fresh canonical environment instead of refusing. It is a no-op when the task
+// has no active environment or the active environment is not failed. A failed
+// environment with a live consumer is left in place, and the caller's normal
+// attach-only refusal then applies (fail-closed).
+//
+// It is best-effort: a lookup or storage failure is logged and swallowed so it
+// cannot preempt the normal launch path's sanitized error handling, and the
+// unusable row still blocks reuse until it is retired.
+func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) {
+	if e.repo == nil || taskID == "" {
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil || env.Status != models.TaskEnvironmentStatusFailed {
+		return
+	}
+	if _, err := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID); err != nil {
+		e.logger.Warn("failed to retire unusable task environment",
+			zap.String("task_id", taskID), zap.String("environment_id", env.ID), zap.Error(err))
+	}
+}
+
+// resolveFreshTaskDirName returns the per-task directory name to use when a
+// session is about to (re)materialize a worktree environment. It reuses a name
+// already recorded on the environment; otherwise it prefers the deterministic
+// semantic name. When that root is already occupied by a preserved (retained)
+// environment of the same task, it selects a distinct fresh root tied to the
+// requesting session so the preserved checkout is never overwritten. Every
+// candidate, including the session-suffixed one, is checked against the
+// recorded names, so a second replacement of the same session cannot reselect
+// an already-used root. A lookup error fails closed to a fully fresh root
+// rather than risk clobbering a preserved checkout.
+func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, session *models.TaskSession, existingEnv *models.TaskEnvironment) string {
+	if existingEnv != nil && existingEnv.TaskDirName != "" {
+		return existingEnv.TaskDirName
+	}
+	if task == nil {
+		return ""
+	}
+	base := worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
+	if base == "" {
+		return ""
+	}
+	names, err := e.listTaskDirNames(ctx, task.ID)
+	if err != nil {
+		// Cannot prove the base or a previously used session suffix is free;
+		// fall back to a fully fresh root instead of risking a clobber.
+		return base + "_" + uuid.New().String()[:8]
+	}
+	if !taskDirNameInList(names, base) {
+		return base
+	}
+	suffix := ""
+	if session != nil {
+		suffix = worktree.TaskDirSuffix(session.ID)
+	}
+	if suffix == "" {
+		suffix = uuid.New().String()[:8]
+	}
+	candidate := base + "_" + suffix
+	for attempt := 2; taskDirNameInList(names, candidate); attempt++ {
+		candidate = fmt.Sprintf("%s_%s_%d", base, suffix, attempt)
+	}
+	return candidate
+}
+
+// listTaskDirNames returns the per-task directory names recorded for a task
+// across active and retained environments. A nil repository yields no names.
+func (e *Executor) listTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	if e.repo == nil || taskID == "" {
+		return nil, nil
+	}
+	return e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
+}
+
+func taskDirNameInList(names []string, name string) bool {
+	for _, existing := range names {
+		if existing == name {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
@@ -2658,6 +2750,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
+	}
+	// Select the per-task root: reuse a recorded name, else the deterministic
+	// semantic name, or a distinct fresh root when a preserved environment still
+	// occupies the deterministic root (see resolveFreshTaskDirName).
+	if req.UseWorktree && req.RepoName != "" {
+		req.TaskDirName = e.resolveFreshTaskDirName(ctx, task, session, existingEnv)
 	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -3550,6 +3648,16 @@ func (e *Executor) persistTaskEnvironment(
 		bindSessionToTaskEnvironment(session, existingEnv)
 		e.selfHealTaskRepositoryBaseBranches(ctx, taskID, req, resp)
 		return nil
+	}
+
+	// A stale binding to a retired or failed environment must not be reused as
+	// the new environment's ID: the retired row still owns that primary key.
+	// Clear it so CreateTaskEnvironment mints a fresh identity.
+	if session.TaskEnvironmentID != "" {
+		if referenced, refErr := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); refErr == nil && referenced != nil &&
+			(referenced.IsRetired() || referenced.Status == models.TaskEnvironmentStatusFailed) {
+			session.TaskEnvironmentID = ""
+		}
 	}
 
 	env := &models.TaskEnvironment{

@@ -1478,6 +1478,15 @@ func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID 
 	}
 	return nil, nil
 }
+func (m *mockRepository) ListTaskEnvironmentTaskDirNames(_ context.Context, taskID string) ([]string, error) {
+	var names []string
+	for _, env := range m.taskEnvironments {
+		if env.TaskID == taskID && env.TaskDirName != "" {
+			names = append(names, env.TaskDirName)
+		}
+	}
+	return names, nil
+}
 func (m *mockRepository) CreateTaskEnvironment(_ context.Context, env *models.TaskEnvironment) error {
 	if env.ID == "" {
 		env.ID = "env-" + env.TaskID
@@ -1503,6 +1512,9 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) RetireUnusableTaskEnvironment(_ context.Context, environmentID string) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) ReclaimFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error) {
 	if m.reclaimFailedTaskEnvironmentFunc != nil {

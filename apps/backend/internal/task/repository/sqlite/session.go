@@ -649,7 +649,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 
 	var envID, status, materializationSessionID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id, status, materialization_session_id FROM task_environments WHERE task_id = ?
+		SELECT id, status, materialization_session_id FROM task_environments
+		 WHERE task_id = ? AND retired_at IS NULL
+		 ORDER BY created_at DESC LIMIT 1
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):

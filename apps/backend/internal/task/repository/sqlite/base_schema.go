@@ -1418,6 +1418,7 @@ const sessionWorktreeSchemaDDL = `
 		container_control_auth_token_secret_id TEXT DEFAULT '',
 		sandbox_id TEXT DEFAULT '',
 		task_dir_name TEXT DEFAULT '',
+		retired_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE

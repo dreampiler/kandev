@@ -1732,7 +1732,7 @@ func TestResumeUsesTaskRepositoryBranchPolicyTemplateSnapshot(t *testing.T) {
 
 			req := &LaunchAgentRequest{}
 			exec.applyResumeWorktreeConfig(
-				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, req,
+				context.Background(), &v1.Task{ID: "task-1", Title: "Resume task"}, nil, req,
 				repo.repositories["repo-1"], "repo-1", repo.repositories["repo-1"].LocalPath, "main", nil,
 			)
 			if req.WorktreeBranchTemplate != testCase.want {
@@ -1757,7 +1757,7 @@ func TestApplyResumeWorktreeConfigPreservesSelectedRepositoryDestination(t *test
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)
 	req := &LaunchAgentRequest{ContributionDestination: &selectedDestination}
 	exec.applyResumeWorktreeConfig(
-		context.Background(), &v1.Task{ID: "task-1"}, req,
+		context.Background(), &v1.Task{ID: "task-1"}, nil, req,
 		&models.Repository{ID: "repo-selected"}, "repo-selected", "/tmp/repo", "main", nil,
 	)
 
