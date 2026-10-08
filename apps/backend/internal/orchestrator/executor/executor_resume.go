@@ -2492,10 +2492,10 @@ func (e *Executor) applyResumeRepoConfig(
 	}
 
 	if shouldUseWorktree(req.ExecutorType) && repositoryPath != "" {
-		e.applyResumeWorktreeConfig(ctx, task, req, repository, repositoryID, repositoryPath, baseBranch, existingEnv)
+		e.applyResumeWorktreeConfig(ctx, task, session, req, repository, repositoryID, repositoryPath, baseBranch, existingEnv)
 	}
 
-	if err := e.applyResumeMultiRepoConfig(task, req, existingEnv, allRepos); err != nil {
+	if err := e.applyResumeMultiRepoConfig(ctx, task, session, req, existingEnv, allRepos); err != nil {
 		return repositoryID, err
 	}
 
@@ -2617,13 +2617,13 @@ func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *mode
 // which never attaches the one-to-many task_repositories rows — that field is
 // always empty on this path. Gating on it silently dropped every repo but the
 // primary on any resume of a multi-repo task.
-func (e *Executor) applyResumeMultiRepoConfig(task *v1.Task, req *LaunchAgentRequest, existingEnv *models.TaskEnvironment, allRepos []*repoInfo) error {
+func (e *Executor) applyResumeMultiRepoConfig(ctx context.Context, task *v1.Task, session *models.TaskSession, req *LaunchAgentRequest, existingEnv *models.TaskEnvironment, allRepos []*repoInfo) error {
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
 		for i := range req.Repositories {
 			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
 		}
-		req.TaskDirName = resolveResumeTaskDirName(existingEnv, task)
+		req.TaskDirName = e.resolveFreshTaskDirName(ctx, task, session, existingEnv)
 	}
 	return nil
 }
@@ -2634,6 +2634,7 @@ func (e *Executor) applyResumeMultiRepoConfig(task *v1.Task, req *LaunchAgentReq
 func (e *Executor) applyResumeWorktreeConfig(
 	ctx context.Context,
 	task *v1.Task,
+	session *models.TaskSession,
 	req *LaunchAgentRequest,
 	repository *models.Repository,
 	repositoryID, repositoryPath, baseBranch string,
@@ -2670,26 +2671,12 @@ func (e *Executor) applyResumeWorktreeConfig(
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo
 	// tasks don't fail with ErrTaskDirRequired. Prefer a persisted
-	// TaskDirName so we reuse the same on-disk task root; fall back to a
-	// freshly generated one when the original launch failed before the
-	// environment was stamped.
+	// TaskDirName so we reuse the same on-disk task root; when the original
+	// root is occupied by a preserved environment, select a distinct fresh root.
 	if repository.Name != "" {
 		req.RepoName = repository.Name
 	}
-	req.TaskDirName = resolveResumeTaskDirName(existingEnv, task)
-}
-
-// resolveResumeTaskDirName returns the per-task directory name to use when
-// resuming. It prefers the value persisted on task_environments (so we reuse
-// the same ~/.kandev/tasks/{name}/ root the initial launch created) and falls
-// back to a fresh semantic name when the original launch failed before any
-// environment was stamped. That fallback is what lets a previously failed
-// session recover instead of looping on ErrTaskDirRequired.
-func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task) string {
-	if existingEnv != nil && existingEnv.TaskDirName != "" {
-		return existingEnv.TaskDirName
-	}
-	return worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
+	req.TaskDirName = e.resolveFreshTaskDirName(ctx, task, session, existingEnv)
 }
 
 // persistResumeState updates the session row for a resume launch. For an agent

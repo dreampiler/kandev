@@ -90,6 +90,7 @@ type executorStore interface {
 	// Task environment
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	RetireUnusableTaskEnvironment(ctx context.Context, environmentID string) (bool, error)

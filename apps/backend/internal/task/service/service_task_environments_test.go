@@ -44,6 +44,9 @@ func (s *stubEnvRepo) GetTaskEnvironment(context.Context, string) (*models.TaskE
 func (s *stubEnvRepo) GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error) {
 	return s.env, s.getErr
 }
+func (s *stubEnvRepo) ListTaskEnvironmentTaskDirNames(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (s *stubEnvRepo) GetTaskEnvironmentExistenceByTaskIDs(context.Context, []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }

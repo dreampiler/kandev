@@ -192,6 +192,30 @@ func nullTimePtr(nt sql.NullTime) *time.Time {
 	return &t
 }
 
+// ListTaskEnvironmentTaskDirNames returns the non-empty per-task directory
+// names recorded for a task across active and retained environments. Callers
+// use it to select a fresh root that does not collide with a preserved one.
+func (r *Repository) ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT task_dir_name FROM task_environments
+		 WHERE task_id = ? AND COALESCE(task_dir_name, '') <> ''
+	`), taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs, whether
 // any task_environments row exists — the same unconditional presence check
 // runnerHasEnvironment makes for one task, batched behind a single IN-clause

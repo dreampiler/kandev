@@ -1791,6 +1791,53 @@ func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) 
 	}
 }
 
+// resolveFreshTaskDirName returns the per-task directory name to use when a
+// session is about to (re)materialize a worktree environment. It reuses a name
+// already recorded on the environment; otherwise it prefers the deterministic
+// semantic name. When that root is already occupied by a preserved (retained)
+// environment of the same task, it selects a distinct fresh root tied to the
+// requesting session so the preserved checkout is never overwritten. A lookup
+// error fails closed to the distinct root rather than risk clobbering it.
+func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, session *models.TaskSession, existingEnv *models.TaskEnvironment) string {
+	if existingEnv != nil && existingEnv.TaskDirName != "" {
+		return existingEnv.TaskDirName
+	}
+	if task == nil {
+		return ""
+	}
+	base := worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
+	if base == "" || !e.taskDirNameRecorded(ctx, task.ID, base) {
+		return base
+	}
+	suffix := ""
+	if session != nil {
+		suffix = worktree.TaskDirSuffix(session.ID)
+	}
+	if suffix == "" {
+		suffix = uuid.New().String()[:8]
+	}
+	return base + "_" + suffix
+}
+
+// taskDirNameRecorded reports whether any environment of the task (active or
+// retained) already records taskDirName. A read error is treated as recorded so
+// the caller picks a distinct root instead of overwriting a preserved checkout.
+func (e *Executor) taskDirNameRecorded(ctx context.Context, taskID, taskDirName string) bool {
+	if e.repo == nil || taskID == "" || taskDirName == "" {
+		return false
+	}
+	names, err := e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
+	if err != nil {
+		return true
+	}
+	for _, name := range names {
+		if name == taskDirName {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
 func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
@@ -2587,6 +2634,12 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
+	}
+	// Select the per-task root: reuse a recorded name, else the deterministic
+	// semantic name, or a distinct fresh root when a preserved environment still
+	// occupies the deterministic root (see resolveFreshTaskDirName).
+	if req.UseWorktree && req.RepoName != "" {
+		req.TaskDirName = e.resolveFreshTaskDirName(ctx, task, session, existingEnv)
 	}
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree

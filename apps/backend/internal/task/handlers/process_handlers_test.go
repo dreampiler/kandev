@@ -696,6 +696,9 @@ func (m *mockRepository) GetTaskEnvironment(ctx context.Context, id string) (*mo
 func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
 	return nil, nil
 }
+func (m *mockRepository) ListTaskEnvironmentTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
+	return nil, nil
+}
 func (m *mockRepository) GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
 	return map[string]bool{}, nil
 }

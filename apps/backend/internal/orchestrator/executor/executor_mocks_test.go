@@ -1474,6 +1474,15 @@ func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID 
 	}
 	return nil, nil
 }
+func (m *mockRepository) ListTaskEnvironmentTaskDirNames(_ context.Context, taskID string) ([]string, error) {
+	var names []string
+	for _, env := range m.taskEnvironments {
+		if env.TaskID == taskID && env.TaskDirName != "" {
+			names = append(names, env.TaskDirName)
+		}
+	}
+	return names, nil
+}
 func (m *mockRepository) CreateTaskEnvironment(_ context.Context, env *models.TaskEnvironment) error {
 	if env.ID == "" {
 		env.ID = "env-" + env.TaskID
