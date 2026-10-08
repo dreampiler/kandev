@@ -12,15 +12,10 @@ requirements:
 
 ## Purpose and boundaries
 
-The Office system publishes the routine HTTP contract, so it owns the
-translation between that contract and the web client's model shape. This
-design places that translation in one adapter at the client's API boundary and
-forbids it anywhere else.
-
-Adjacent contracts this design uses but does not own: the routine HTTP
-endpoints and DTOs (`apps/backend/internal/office/routines`), the routine
-models (`apps/backend/internal/office/models`), and the shared fetch helpers
-(`apps/web/lib/api/client.ts`). None of them change.
+The backend DTO is the wire authority. The client adapter owns the only
+translation from its snake_case shape to the web model. `CreateRoutineRequest`
+accepts an optional nested `trigger`; update fields and response shapes remain
+unchanged. Backend domain models and shared fetch helpers do not change.
 
 ## Terminology
 
@@ -174,9 +169,9 @@ and `RoutineTrigger` does not declare the `secret` AC-002.1 requires:
 
 - `CreateRoutineInput`: `name`, and optional `description`, `taskTemplate`,
   `assigneeAgentProfileId`, `concurrencyPolicy`, `catchUpPolicy`, `catchUpMax`,
-  `variables`. No `status` and no `workspaceId` (AC-001.6).
-- `UpdateRoutinePatch`: every `CreateRoutineInput` field optional, plus
-  `status`. This is the key set AC-001.9 fixes.
+  `variables`, and `trigger`. No `status` and no `workspaceId` (AC-001.6).
+- `UpdateRoutinePatch`: routine fields in `CreateRoutineInput` except
+  `trigger` are optional, plus `status`. `trigger` is create-only (AC-001.9).
 - `CreateTriggerInput`: `kind`, and optional `cronExpression`, `timezone`,
   `publicId`, `signingMode`, `secret`.
 
@@ -504,10 +499,9 @@ mobile spec remains the check that it does.
 
 ## Out of scope
 
-- **Changing the HTTP contract.** The backend keeps snake_case JSON tags. An
-  existing wire spelling is the public contract and stays: the same keys are
-  consumed by the agentctl CLI, the YAML config loader, config import/export
-  and config sync. Fixing the client is the safer change.
+- **Changing existing update fields or resource responses.** Their snake_case
+  names stay stable for CLI, config and sync consumers. Routine creation alone
+  gains the optional nested `trigger` field.
 - **Populating `s.office.routines` anywhere but `/office/routines`.** Only that
   route's two page files call `setRoutines`, so a direct visit to
   `/office/agents/:id` renders `CoordinatorRoutineHint` against an empty array

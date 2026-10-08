@@ -10,6 +10,7 @@ requirements:
   - REQ-OFFICE-ROUTINE-WIRE-002
   - REQ-OFFICE-SCHEDULER-001
 acceptance_criteria:
+  - AC-OFFICE-ROUTINE-WIRE-001.2
   - AC-OFFICE-ROUTINE-WIRE-001.6
   - AC-OFFICE-ROUTINE-WIRE-002.2
   - AC-OFFICE-ROUTINE-WIRE-002.10
@@ -49,6 +50,8 @@ create into one transactional request.
 - `apps/web/lib/api/domains/office-routine-normalize.ts` and
   `apps/web/lib/state/slices/office/types.ts`: carry the optional `trigger`
   create field through the request builder and model.
+- `apps/web/lib/api/domains/office-routine-normalize.test.ts`: verify nested
+  trigger serialization, cron-expression trimming, and omission when absent.
 - `apps/web/e2e/tests/office/routines-ui.spec.ts`: the create-dialog test
   waits for the single routine-create request instead of a separate trigger
   POST.
@@ -75,6 +78,7 @@ pnpm run typecheck
 pnpm run lint
 pnpm run i18n:check
 pnpm run test -- app/office/routines/routines-content.test.tsx
+pnpm run test -- lib/api/domains/office-routine-normalize.test.ts
 pnpm run e2e:run -- tests/office/routines-ui.spec.ts
 ```
 
@@ -107,3 +111,12 @@ binary. `internal/office/routines` and
 trigger (`ErrInvalidTrigger` -> 400) writes no routine, and a failed trigger
 insert rolls the routine back. The updated Playwright create-dialog test
 passes against the single-request flow.
+
+Maintainer follow-up verification from `apps/`:
+`pnpm --filter @kandev/web test -- --run lib/api/domains/office-routine-normalize.test.ts`
+passed with 1 test file and 28 tests. The regression checks nested snake_case
+trigger serialization, expression trimming, and omission when no trigger is
+supplied. The routine wire requirement and design now mark `trigger` as
+create-only; update fields remain unchanged. `python3 scripts/list-docs.py
+validate` validated 343 decisions and 1319 specifications, and
+`python3 scripts/lint-spec-files.py --all` passed.
