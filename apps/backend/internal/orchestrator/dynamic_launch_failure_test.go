@@ -58,6 +58,23 @@ func TestDynamicLaunchAgentStartupProviderFailureStillRoutes(t *testing.T) {
 	}
 }
 
+func TestDynamicLaunchUnknownStartupFailureRemainsUnclassified(t *testing.T) {
+	for _, phase := range []routingerr.Phase{routingerr.PhaseProcessStart, routingerr.PhaseSessionInit} {
+		t.Run(string(phase), func(t *testing.T) {
+			startup := routingerr.NewAgentStartupFailure(phase, "claude-acp",
+				errors.New("unrecognized startup error"))
+			err := launchDynamicDownstreamWithError(t, fmt.Errorf("launch agent: %w", startup))
+			if !errors.Is(err, startup) {
+				t.Fatalf("startup failure = %v, want the original startup error preserved", err)
+			}
+			var classified *routingerr.Error
+			if errors.As(err, &classified) {
+				t.Fatalf("unknown startup failure classified as provider %s: %v", classified.Code, err)
+			}
+		})
+	}
+}
+
 // An error that already carries a classification keeps it.
 func TestDynamicLaunchKeepsAnExistingClassification(t *testing.T) {
 	existing := &routingerr.Error{
@@ -65,8 +82,8 @@ func TestDynamicLaunchKeepsAnExistingClassification(t *testing.T) {
 	}
 	err := launchDynamicDownstreamWithError(t, fmt.Errorf("launch agent: %w", existing))
 	var classified *routingerr.Error
-	if !errors.As(err, &classified) || classified.Code != routingerr.CodeAuthRequired {
-		t.Fatalf("classified launch failure = %v, want auth_required kept", err)
+	if !errors.As(err, &classified) || classified != existing {
+		t.Fatalf("classified launch failure = %v, want the original classification preserved", err)
 	}
 }
 
