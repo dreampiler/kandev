@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	dbutil "github.com/kandev/kandev/internal/db"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -122,6 +123,8 @@ func readOverviewBatched[T any](
 // OverviewMergedPRRow is one change request merged inside the window. Only rows
 // that name a workspace reach this read, so a workspace with no code-host
 // connection contributes none rather than contributing a row it cannot own.
+// Provider names the source: "github" for built-in task PRs, anything else
+// for a plugin-reported change request (for example "forgejo").
 type OverviewMergedPRRow struct {
 	WorkspaceID string `db:"workspace_id"`
 	TaskID      string `db:"task_id"`
@@ -129,18 +132,24 @@ type OverviewMergedPRRow struct {
 	Repo        string `db:"repo"`
 	Number      int    `db:"pr_number"`
 	Title       string `db:"title"`
+	Provider    string `db:"provider"`
 	MergedAtRaw string `db:"merged_at"`
 	MergedAt    time.Time
 }
 
 // ListOverviewMergedPRs returns the change requests merged since `since` in the
-// supplied workspaces, newest first, up to limit.
+// supplied workspaces, newest first, up to limit. Built-in GitHub task PRs
+// and plugin-reported change requests are read together: a Forgejo merge a
+// plugin reported lands next to a GitHub merge instead of vanishing from the
+// count. The plugin table may predate this install's schema — it is read
+// through the optional-source guard below, so an older database omits that
+// kind rather than failing the whole overview.
 func (r *Repository) ListOverviewMergedPRs(
 	ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 ) ([]*OverviewMergedPRRow, error) {
 	out, err := readOverviewBatched[OverviewMergedPRRow](ctx, r, workspaceIDs, `
 		SELECT workspace_id, COALESCE(task_id, '') AS task_id, owner, repo, pr_number,
-		       COALESCE(pr_title, '') AS title, CAST(merged_at AS TEXT) AS merged_at
+		       COALESCE(pr_title, '') AS title, 'github' AS provider, CAST(merged_at AS TEXT) AS merged_at
 		FROM github_task_prs
 		WHERE workspace_id IN (%s)
 		  AND merged_at IS NOT NULL AND merged_at >= ?
@@ -148,12 +157,42 @@ func (r *Repository) ListOverviewMergedPRs(
 	if err != nil {
 		return nil, err
 	}
+	pluginRows, err := r.listOverviewMergedPluginChangeRequests(ctx, workspaceIDs, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, pluginRows...)
 	for _, row := range out {
 		row.MergedAt = parseSqliteTime(row.MergedAtRaw)
 	}
 	sortByTimeDesc(out, func(row *OverviewMergedPRRow) time.Time { return row.MergedAt })
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
+	}
+	return out, nil
+}
+
+// listOverviewMergedPluginChangeRequests reads the Host-owned plugin ledger
+// for merged rows. A missing table (an install whose schema predates the
+// ledger) yields no rows rather than an error: the overview must never lose
+// its GitHub section over a supplementary source.
+func (r *Repository) listOverviewMergedPluginChangeRequests(
+	ctx context.Context, workspaceIDs []string, since time.Time, limit int,
+) ([]*OverviewMergedPRRow, error) {
+	out, err := readOverviewBatched[OverviewMergedPRRow](ctx, r, workspaceIDs, `
+		SELECT workspace_id, COALESCE(task_id, '') AS task_id,
+		       COALESCE(provider_host, '') AS owner, COALESCE(provider_id, '') AS repo,
+		       number AS pr_number, COALESCE(title, '') AS title,
+		       COALESCE(provider_id, '') AS provider, CAST(merged_at AS TEXT) AS merged_at
+		FROM plugin_task_change_requests
+		WHERE workspace_id IN (%s)
+		  AND state = 'merged' AND merged_at <> '' AND merged_at >= ?
+		ORDER BY merged_at DESC LIMIT ?`, since, limit)
+	if err != nil {
+		if dbutil.IsMissingTableError(err) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return out, nil
 }

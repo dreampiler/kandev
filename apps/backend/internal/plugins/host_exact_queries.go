@@ -780,6 +780,17 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 		}
 		prsByTask, err := source.ListTaskPRsByTaskIDs(ctx, taskIDs)
 		providerFailed := err != nil
+		ledger := h.changeRequestLedger()
+		pluginByTask := make(map[string][]state.ChangeRequestRecord)
+		if ledger != nil {
+			for _, id := range taskIDs {
+				reported, listErr := ledger.ListChangeRequestsByTask(ctx, h.installationID, q.WorkspaceID, id)
+				if listErr != nil {
+					return nil, status.Error(codes.Unavailable, "task change request data is unavailable")
+				}
+				pluginByTask[id] = reported
+			}
+		}
 		out := make([]pluginsdk.ChangeRequestEvidence, 0)
 		for _, id := range taskIDs {
 			prs := prsByTask[id]
@@ -788,7 +799,7 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "unavailable", ProviderError: &reason, ResourceVersion: byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano), ObservedAt: observed})
 				continue
 			}
-			if len(prs) == 0 {
+			if len(prs) == 0 && len(pluginByTask[id]) == 0 {
 				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", ProviderState: "no_evidence", ResourceVersion: byID[id].UpdatedAt.UTC().Format(time.RFC3339Nano), ObservedAt: observed})
 				continue
 			}
@@ -799,6 +810,16 @@ func (h *pluginHost) ListChangeRequestEvidence(ctx context.Context, q pluginsdk.
 				fetchedAt := timePtrToRFC3339(pr.LastSyncedAt)
 				version := digestPublicValue(map[string]string{"task_id": id, "pr_id": pr.ID, "head": pr.HeadSHA, "updated_at": pr.UpdatedAt.UTC().Format(time.RFC3339Nano)})
 				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: "github", RepositoryID: pr.RepositoryID, RepositoryOwner: pr.Owner, RepositoryName: pr.Repo, Number: int64(pr.PRNumber), URL: pr.PRURL, HeadRevision: pr.HeadSHA, ReviewState: pr.ReviewState, ChecksState: pr.ChecksState, MergeableState: pr.MergeableState, UnresolvedReviewThreads: int32(pr.UnresolvedReviewThreads), ChecksTotal: int32(pr.ChecksTotal), ChecksPassing: int32(pr.ChecksPassing), ProviderState: "available", FetchedAt: fetchedAt, ResourceVersion: version, ObservedAt: observed})
+			}
+			for _, reported := range pluginByTask[id] {
+				fetchedAt := timePtrToRFC3339(nil)
+				if reported.UpdatedAt != "" {
+					if parsed, parseErr := time.Parse(time.RFC3339Nano, reported.UpdatedAt); parseErr == nil {
+						fetchedAt = timePtrToRFC3339(&parsed)
+					}
+				}
+				version := digestPublicValue(map[string]string{"task_id": id, "change_request_id": reported.ID, "updated_at": reported.UpdatedAt})
+				out = append(out, pluginsdk.ChangeRequestEvidence{TaskID: id, Provider: reported.ProviderID, RepositoryID: reported.RepositoryID, Number: reported.Number, URL: reported.URL, ProviderState: "available", FetchedAt: fetchedAt, ResourceVersion: version, ObservedAt: observed})
 			}
 		}
 		return out, nil

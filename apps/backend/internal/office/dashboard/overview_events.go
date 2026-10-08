@@ -131,7 +131,7 @@ func mergedPREvents(rows []*sqlite.OverviewMergedPRRow) []OverviewEvent {
 		events = append(events, OverviewEvent{
 			Kind: overviewEventPRMerged, At: row.MergedAt, WorkspaceID: row.WorkspaceID,
 			TaskID: row.TaskID, Title: row.Title,
-			PullRequest: &OverviewPullRequest{Owner: row.Owner, Repo: row.Repo, Number: row.Number},
+			PullRequest: &OverviewPullRequest{Owner: row.Owner, Repo: row.Repo, Number: row.Number, Provider: row.Provider},
 		})
 	}
 	return events

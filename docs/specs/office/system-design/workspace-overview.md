@@ -82,7 +82,7 @@ The user setting `office_overview_scope` is stored with the other user settings.
 ## Last 24 hours events
 
 - `overview_events.go` assembles the last-24-hours list from the dedicated sources, each read independently, so one unavailable table omits its kind rather than failing the overview. Every builder sends codes and values; the client phrases them in the viewer's language.
-- The merged change-request kind (`pr_merged`) is read by `ListOverviewMergedPRs` (`aggregate_overview_events.go`) from `github_task_prs` only, so it covers pull requests the Kandev GitHub integration tracks for a task. The screen states that scope: the chip and row label name GitHub, and `overview-sections.tsx` renders a scope note above the list when a merged-PR row is visible. Merges on other code hosts, and merges of pull requests Kandev does not track, are not counted, and no code-host-agnostic merge source exists.
+- The merged change-request kind (`pr_merged`) is read by `ListOverviewMergedPRs` (`aggregate_overview_events.go`) from `github_task_prs` together with the Host-owned `plugin_task_change_requests` ledger, so it covers pull requests the Kandev GitHub integration tracks for a task plus merges an installed code-host plugin reports for a task. The screen states that scope: the chip and row label name the counted sources, and `overview-sections.tsx` renders a scope note above the list when a merged-PR row is visible. Merges on GitLab or Azure DevOps, and merges of pull requests Kandev does not track, are not counted. A missing plugin ledger table (an install whose schema predates it) omits that kind rather than failing the overview, and plugin rows carry their provider id on the event so a Forgejo merge reads as one.
 
 ## Project statistics
 
