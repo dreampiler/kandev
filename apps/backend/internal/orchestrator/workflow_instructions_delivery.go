@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/sysprompt"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -65,9 +66,9 @@ func (s *Service) clearWorkflowInstructionsDelivered(sessionID string) {
 // it drops the other prompt transforms, so nothing is recorded for it.
 func (s *Service) workflowInstructionsForPrompt(
 	ctx context.Context, taskID, sessionID, prompt string, internalContinuation bool,
-) (string, workflowInstructionsDelivery, bool) {
+) (string, workflowInstructionsDelivery, bool, string) {
 	if internalContinuation {
-		return prompt, workflowInstructionsDelivery{}, false
+		return prompt, workflowInstructionsDelivery{}, false, ""
 	}
 	return s.appendWorkflowInstructionsIfPending(ctx, taskID, sessionID, prompt)
 }
@@ -82,20 +83,43 @@ func (s *Service) workflowInstructionsForPrompt(
 // paths must not add it twice.
 func (s *Service) appendWorkflowInstructionsIfPending(
 	ctx context.Context, taskID, sessionID, prompt string,
-) (string, workflowInstructionsDelivery, bool) {
+) (string, workflowInstructionsDelivery, bool, string) {
 	if strings.Contains(prompt, workflowInstructionsEnd) {
-		return prompt, workflowInstructionsDelivery{}, false
+		return prompt, workflowInstructionsDelivery{}, false, ""
 	}
-	block, workflowUpdatedAt := s.workflowInstructionsForTask(ctx, taskID)
+	block, title, workflowUpdatedAt := s.workflowInstructionsForTask(ctx, taskID)
 	if block == "" {
-		return prompt, workflowInstructionsDelivery{}, false
+		return prompt, workflowInstructionsDelivery{}, false, ""
 	}
 	if delivered, ok := s.workflowInstructionsDeliveredFor(sessionID); ok &&
 		delivered.alreadyHolds(block, workflowUpdatedAt) {
-		return prompt, workflowInstructionsDelivery{}, false
+		return prompt, workflowInstructionsDelivery{}, false, ""
 	}
 	delivery := newWorkflowInstructionsDelivery(block, workflowUpdatedAt)
-	return block + "\n\n" + prompt, delivery, true
+	return block + "\n\n" + prompt, delivery, true, title
+}
+
+func (s *Service) prepareWorkflowTitleReferences(
+	ctx context.Context, prompt, title string, isPassthrough bool, options *promptTaskOptions,
+) string {
+	previous := options.promptReferenceContext
+	updated := s.appendTitlePromptReferencesToTrustedContext(ctx, title, previous, isPassthrough)
+	if updated == previous {
+		return prompt
+	}
+	if previous == "" && !options.promptReferencesPrepared {
+		prompt, updated = s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
+		options.promptReferencesPrepared = true
+	}
+	options.promptReferenceContext = updated
+	if previous != "" {
+		oldBlock, newBlock := sysprompt.Wrap(previous), sysprompt.Wrap(updated)
+		prompt = strings.Replace(prompt, oldBlock, newBlock, 1)
+		options.fallbackLaunchPrompt = strings.Replace(options.fallbackLaunchPrompt, oldBlock, newBlock, 1)
+		options.fallbackRetryPrompt = strings.Replace(options.fallbackRetryPrompt, oldBlock, newBlock, 1)
+	}
+	prompt, _ = s.applyDirectPromptReferenceContext(ctx, prompt, isPassthrough, updated, true)
+	return prompt
 }
 
 // pendingWorkflowInstructionsForSession reports whether the session still needs
@@ -125,13 +149,13 @@ func (s *Service) pendingWorkflowInstructionsForSession(sessionID, block string,
 // and workflow ID are needed to render the block, and the message path must not
 // spend a workflow-step lookup that stale-dispatch handling has explicitly
 // forbidden.
-func (s *Service) workflowInstructionsForTask(ctx context.Context, taskID string) (string, time.Time) {
+func (s *Service) workflowInstructionsForTask(ctx context.Context, taskID string) (string, string, time.Time) {
 	if s.workflowStepGetter == nil || s.repo == nil || taskID == "" {
-		return "", time.Time{}
+		return "", "", time.Time{}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil || task.WorkflowStepID == "" || task.WorkflowID == "" {
-		return "", time.Time{}
+		return "", "", time.Time{}
 	}
 	step := &wfmodels.WorkflowStep{ID: task.WorkflowStepID, WorkflowID: task.WorkflowID}
 	return s.workflowInstructionsBlockWithRevision(ctx, step, taskID)

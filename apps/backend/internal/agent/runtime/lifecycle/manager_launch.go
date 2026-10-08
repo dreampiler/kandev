@@ -810,6 +810,9 @@ func (m *Manager) resolveOpenCodeCommandOptions(
 	}
 	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return agents.CommandOptions{}, ctxErr
+		}
 		return m.fallbackOpenCodeCommandOptions(err, selected, options)
 	}
 	if !found {
