@@ -338,10 +338,19 @@ type NoEligibleCandidateError struct {
 	SessionID      string
 	LogicalProfile string
 	Generation     int64
+	// ResourceWait marks the all-candidates-suspended outcome: the route
+	// state is durably waiting and the observer retries at RetryAt, so the
+	// failure is recoverable rather than terminal.
+	ResourceWait bool
+	RetryAt      time.Time
 }
 
 func (e *NoEligibleCandidateError) Error() string {
-	return fmt.Sprintf("%s: session=%s profile=%s generation=%d", ErrNoEligibleCandidate, e.SessionID, e.LogicalProfile, e.Generation)
+	msg := fmt.Sprintf("%s: session=%s profile=%s generation=%d", ErrNoEligibleCandidate, e.SessionID, e.LogicalProfile, e.Generation)
+	if e.ResourceWait && !e.RetryAt.IsZero() {
+		msg += "; resources suspended, retry at " + e.RetryAt.UTC().Format(time.RFC3339)
+	}
+	return msg
 }
 
 func (e *NoEligibleCandidateError) Unwrap() error { return ErrNoEligibleCandidate }
