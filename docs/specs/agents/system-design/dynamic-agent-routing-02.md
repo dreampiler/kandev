@@ -37,6 +37,18 @@ Exhaustion persists `action_required`, retains exclusions and never arms a
 resource-wait timer. Auth, billing and unclassified post-result failures stay
 manual; utility and Office admission remain unchanged.
 
+After output or tool activity, a current, correlated task-owned dynamic attempt
+interrupted with `provider_unavailable` advances to the next eligible candidate
+whenever the recovery continuation can be built. The attempt is fenced by the
+execution and prompt generation captured when the prompt began, so a missing or
+advanced session projection does not by itself block the advance. The
+continuation carries no failed-turn assistant or tool text and enters
+`Interrupted` mode, so the successor inspects durable artifacts first. A failure
+whose continuation cannot be built, that does not name the session's live
+attempt, or whose route the session has already moved past (a late or duplicate
+failure) stays for manual recovery and never advances a successor again;
+non-task-owned failures remain manual.
+
 ## Migrated source detail
 
 ## Observability

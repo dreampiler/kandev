@@ -97,9 +97,7 @@ func (s *Service) beginPromptAttempt(
 	if dynamic && s.repo != nil {
 		if session, err := s.repo.GetTaskSession(context.Background(), sessionID); err == nil && session != nil {
 			routeGeneration = session.RouteGeneration
-			if routeGeneration > 0 {
-				executionProfileID = session.ExecutionProfileID
-			}
+			executionProfileID = session.ExecutionProfileID
 		}
 	}
 	state, release := s.acquireTransientRetryNoticeState(sessionID)
