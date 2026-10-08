@@ -1479,6 +1479,64 @@ func (s *Service) unclassifiedPromptEvidence(
 	)
 }
 
+// unclassifiedEmptyTurnEvidence builds the unclassified failure evidence for a
+// turn that finished without assistant output or tool effect. It carries no
+// provider diagnostic, so ProviderID and DiagnosticText stay empty and the
+// empty-turn origin relaxes those requirements instead of fabricating
+// identifier defaults.
+func (s *Service) unclassifiedEmptyTurnEvidence(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) dynamicruntime.UnclassifiedFailureEvidence {
+	currentAttempt := data.EvidenceKnown && data.AgentExecutionID != "" &&
+		data.PromptGeneration != 0 && s.currentDynamicPromptAttempt(
+		data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+	)
+	return s.unclassifiedFailureEvidence(
+		ctx, data, session, currentAttempt,
+		dynamicruntime.UnclassifiedOriginEmptyTurnCompletion,
+		routingerr.PhasePromptSend, promptUnclassifiedAttemptID(data), "", "", false,
+		data.EvidenceKnown, data.OutputObserved, data.EffectObserved,
+	)
+}
+
+// routeDynamicEmptyTurnCompletion counts a no-output turn as an unclassified
+// failure for the current candidate and, at the threshold, launches a successor.
+// It returns true only when a successor was launched, so the caller skips the
+// ordinary completion follow-up; a below-threshold count parks the session
+// through the ordinary manual-recovery path and returns false. A profile with
+// the policy off returns false without touching any state.
+func (s *Service) routeDynamicEmptyTurnCompletion(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) bool {
+	if session == nil || s.profileExecutionResolver == nil || !data.DynamicRouteAttempt ||
+		!data.EvidenceKnown || data.OutputObserved || data.EffectObserved {
+		return false
+	}
+	if !s.profileExecutionResolver.UnclassifiedEmptyTurnEnabled(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+	) {
+		return false
+	}
+	evidence := s.unclassifiedEmptyTurnEvidence(ctx, data, session)
+	if !evidence.TaskScope || !evidence.CurrentAttempt {
+		return false
+	}
+	s.markDynamicEmptyTurn(data)
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend})
+	result := s.routeDynamicAgentFailureWithEvidence(ctx, data, failure, &evidence, true)
+	if !result.handled {
+		// The route declined, so the streak was not advanced; the marker must not
+		// suppress a later successful-completion reset.
+		s.clearDynamicEmptyTurn(data.SessionID)
+		return false
+	}
+	return !result.manualRecovery
+}
+
 func (s *Service) unclassifiedStartupEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,

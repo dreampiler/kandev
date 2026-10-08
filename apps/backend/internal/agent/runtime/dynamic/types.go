@@ -181,6 +181,11 @@ type UnclassifiedFailureOrigin string
 const (
 	UnclassifiedOriginTerminalProvider UnclassifiedFailureOrigin = "terminal_provider_result"
 	UnclassifiedOriginAgentStartup     UnclassifiedFailureOrigin = "agent_startup"
+	// UnclassifiedOriginEmptyTurnCompletion is a turn that finished without any
+	// assistant output or tool effect. It carries no provider diagnostic, so the
+	// provider-diagnostic evidence requirements are relaxed for this origin only
+	// (see safeBeforeResult/trustedFailureShape and the origin-scoped fingerprint).
+	UnclassifiedOriginEmptyTurnCompletion UnclassifiedFailureOrigin = "empty_turn_completion"
 )
 
 // UnclassifiedFailureEvidence is the typed, default-deny context for the
@@ -229,8 +234,13 @@ func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
 }
 
 func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
-	return e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
-		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved && e.DiagnosticComplete
+	base := e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
+		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved
+	if e.Origin == UnclassifiedOriginEmptyTurnCompletion {
+		// An empty turn has no provider diagnostic to complete.
+		return base
+	}
+	return base && e.DiagnosticComplete
 }
 
 func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
@@ -241,7 +251,10 @@ func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Err
 		return false
 	}
 	if routingerr.ClassForCode(failure.Code) != routingerr.ClassUnclassified ||
-		failure.Phase != e.Phase || e.ProviderID == "" {
+		failure.Phase != e.Phase {
+		return false
+	}
+	if e.Origin != UnclassifiedOriginEmptyTurnCompletion && e.ProviderID == "" {
 		return false
 	}
 	return true
@@ -254,6 +267,8 @@ func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Er
 	case UnclassifiedOriginAgentStartup:
 		return failure.Code == routingerr.CodeAgentRuntime &&
 			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
+	case UnclassifiedOriginEmptyTurnCompletion:
+		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend
 	default:
 		return false
 	}
