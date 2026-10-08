@@ -489,6 +489,12 @@ type activeTopLevelTool struct {
 	OutputBytes      uint64
 	OutputText       string
 	ForegroundExited bool
+	// ForegroundRunning records agentctl's positive process evidence that this
+	// open tool's foreground is still running. It lets the stall allowance
+	// treat a tool whose ACP status label is not one of the executing labels
+	// (for example OpenCode's "pending" while the command runs) as executing,
+	// without granting the allowance to a tool that is genuinely not running.
+	ForegroundRunning bool
 }
 
 func (e *AgentExecution) setActiveTool(tool activeTopLevelTool) {
