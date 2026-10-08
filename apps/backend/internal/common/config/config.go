@@ -448,10 +448,10 @@ type AuthConfig struct {
 
 // OfficeConfig holds configuration for the office (autonomous agents) feature.
 type OfficeConfig struct {
-	// JWTSigningKey is the HMAC key used to sign agent runtime JWTs.
-	// When empty, a random key is generated at startup — fine for dev, but
-	// means every restart invalidates outstanding agent tokens. Production
-	// deployments should set a stable value (e.g. via KANDEV_OFFICE_JWTSIGNINGKEY).
+	// JWTSigningKey is the HMAC key used to sign agent runtime JWTs. When
+	// empty, Kandev loads or creates a key persisted under the home directory
+	// so tokens survive a restart; set KANDEV_OFFICE_JWTSIGNINGKEY only to pin
+	// an explicit key.
 	JWTSigningKey   string `mapstructure:"jwtSigningKey"`
 	SchedulerTickMs int    `mapstructure:"schedulerTickMs"`
 

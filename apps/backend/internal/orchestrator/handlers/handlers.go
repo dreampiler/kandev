@@ -161,8 +161,17 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
-		// crash. Genuine failures (unknown task, validation) stay ERROR.
-		if orchestrator.IsBenignLaunchTeardownErr(err) {
+		// crash. A dynamic route that durably waits for suspended resources is
+		// likewise recoverable: the observer already scheduled the retry at
+		// retry_at, so WARN keeps the launch path aligned with that meaning.
+		// Genuine failures (unknown task, validation) stay ERROR.
+		if retryAt, waiting := orchestrator.DynamicRecoverableResourceWait(err); waiting {
+			h.logger.Warn("session launch waiting for suspended dynamic route resources",
+				zap.String("task_id", req.TaskID),
+				zap.String("intent", string(intent)),
+				zap.Time("retry_at", retryAt),
+				zap.String("error", err.Error()))
+		} else if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
 				zap.String("intent", string(intent)),
@@ -453,11 +462,24 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
 			return guardResponse, responseErr
 		}
-		h.logger.Error("failed to recover session",
-			zap.String("task_id", req.TaskID),
-			zap.String("session_id", req.SessionID),
-			zap.String("action", req.Action),
-			zap.Error(err))
+		// A dynamic route durably waiting for suspended resources is
+		// recoverable: the observer already scheduled the retry at retry_at,
+		// so WARN keeps the recovery path aligned with that meaning; other
+		// recovery failures stay ERROR.
+		if retryAt, waiting := orchestrator.DynamicRecoverableResourceWait(err); waiting {
+			h.logger.Warn("session recovery waiting for suspended dynamic route resources",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Time("retry_at", retryAt),
+				zap.String("error", err.Error()))
+		} else {
+			h.logger.Error("failed to recover session",
+				zap.String("task_id", req.TaskID),
+				zap.String("session_id", req.SessionID),
+				zap.String("action", req.Action),
+				zap.Error(err))
+		}
 		if errors.Is(err, models.ErrWorkspaceInventoryRecoveryInvalid) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Workspace inventory repair request is invalid", nil)
 		}

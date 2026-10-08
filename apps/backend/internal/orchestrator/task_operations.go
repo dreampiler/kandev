@@ -1950,6 +1950,22 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
+	// The Office scheduler mints the runtime token before this session
+	// exists, so the captured token carries an empty session id and every
+	// session-scoped runtime action (handoff_task, decision recording)
+	// refuses it. Re-mint now that the session id is known; a non-Office env
+	// carries no run identity and round-trips unchanged. A failed re-mint must
+	// fail the launch rather than dispatch with the captured, sessionless (or
+	// redacted) token.
+	remintedEnv, remintErr := s.remintLaunchCredentials(ctx, taskID, sessionID, env)
+	if remintErr != nil {
+		if initialTurnCreated {
+			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
+		}
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, failPreparedLaunch(remintErr))
+	}
+	env = remintedEnv
+
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID:       agentProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,

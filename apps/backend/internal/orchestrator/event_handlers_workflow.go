@@ -2208,9 +2208,20 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			return
 		}
 		if err != nil {
-			s.logger.Error(eventName+": failed to auto-start task",
-				zap.String("task_id", task.ID),
-				zap.Error(err))
+			// A dynamic route durably waiting for suspended resources is
+			// recoverable: the observer already scheduled the retry at
+			// retry_at, so WARN keeps the auto-start path aligned with that
+			// meaning; other auto-start failures stay ERROR.
+			if retryAt, waiting := DynamicRecoverableResourceWait(err); waiting {
+				s.logger.Warn(eventName+": auto-start waiting for suspended dynamic route resources",
+					zap.String("task_id", task.ID),
+					zap.Time("retry_at", retryAt),
+					zap.String("error", err.Error()))
+			} else {
+				s.logger.Error(eventName+": failed to auto-start task",
+					zap.String("task_id", task.ID),
+					zap.Error(err))
+			}
 			s.handleAutoStartFailure(asyncCtx, task.ID, eventName, autoStartLaunchTokens{
 				hasGuard:                 hasGuard,
 				restoreQueuePromotion:    restoreQueuePromotion,
@@ -4419,10 +4430,22 @@ func (s *Service) maybySwitchSessionForProfile(
 ) (*models.TaskSession, bool) {
 	effective, _, err := s.prepareWorkflowStepSession(ctx, taskID, session, step, sourceStep, entryIDs...)
 	if err != nil {
-		s.logger.Error("failed to switch session for step agent profile",
-			zap.String("task_id", taskID),
-			zap.String("step_id", step.ID),
-			zap.Error(err))
+		// A dynamic route durably waiting for suspended resources is
+		// recoverable: the observer already scheduled the retry at retry_at,
+		// so WARN keeps the step-entry path aligned with that meaning; other
+		// step-entry failures stay ERROR.
+		if retryAt, waiting := DynamicRecoverableResourceWait(err); waiting {
+			s.logger.Warn("step entry waiting for suspended dynamic route resources",
+				zap.String("task_id", taskID),
+				zap.String("step_id", step.ID),
+				zap.Time("retry_at", retryAt),
+				zap.String("error", err.Error()))
+		} else {
+			s.logger.Error("failed to switch session for step agent profile",
+				zap.String("task_id", taskID),
+				zap.String("step_id", step.ID),
+				zap.Error(err))
+		}
 		if session != nil {
 			s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		}

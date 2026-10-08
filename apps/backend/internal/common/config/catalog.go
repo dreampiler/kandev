@@ -101,7 +101,7 @@ var startupCatalog = []CatalogEntry{
 	{Key: "repoClone.basePath", EnvVars: []string{"KANDEV_REPOCLONE_BASEPATH"}, Owner: "repository clone", Default: "<home>/repos"},
 	{Key: "debug.devMode", EnvVars: []string{"KANDEV_DEBUG_DEV_MODE"}, Owner: "debug", Default: "false"},
 	{Key: "debug.pprofEnabled", EnvVars: []string{"KANDEV_DEBUG_PPROF_ENABLED"}, Owner: "debug", Default: "false"},
-	{Key: "office.jwtSigningKey", EnvVars: []string{"KANDEV_OFFICE_JWTSIGNINGKEY"}, Owner: "office", Default: "random per start", Sensitive: true},
+	{Key: "office.jwtSigningKey", EnvVars: []string{"KANDEV_OFFICE_JWTSIGNINGKEY"}, Owner: "office", Default: "persisted per install", Sensitive: true},
 	{Key: "office.schedulerTickMs", EnvVars: []string{"KANDEV_OFFICE_SCHEDULER_TICK_MS"}, Owner: "office", Default: "5000"},
 	{Key: officeMaxConcurrentInstanceKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CONCURRENT_INSTANCE"}, Owner: "office", Default: "8"},
 	{Key: officeMaxConcurrentWorkspaceKey, EnvVars: []string{"KANDEV_OFFICE_MAX_CONCURRENT_WORKSPACE"}, Owner: "office", Default: "4"},
