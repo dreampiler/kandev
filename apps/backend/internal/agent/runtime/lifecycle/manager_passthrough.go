@@ -1033,6 +1033,9 @@ func (m *Manager) openCodePassthroughCommand(
 	}
 	if selected.Source == managedruntime.OpenCodeSourceNative && runtime == agentruntime.RuntimeStandalone && selected.Spec.NativeBinaryOnPath() {
 		if _, found, err := agents.DetectOpenCodeNativeRuntime(ctx); err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return agents.Command{}, ctxErr
+			}
 			if agents.IsUnsupportedOpenCodeMajorError(err) {
 				return agents.Command{}, err
 			}

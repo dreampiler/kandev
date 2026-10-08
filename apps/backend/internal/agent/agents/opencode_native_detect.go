@@ -15,10 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 )
 
-// opencodeNativeVersionTimeout bounds one `opencode --version` run. The CLI
-// boots a JavaScript runtime per call: with many agents launching at once a
-// healthy run takes more than three seconds on Windows, and a run killed by
-// its deadline reports nothing but "exit status 1".
+// opencodeNativeVersionTimeout bounds one `opencode --version` run.
 const opencodeNativeVersionTimeout = 10 * time.Second
 
 // opencodeNativeDetectionTTL is how long a successful detection may stand in
@@ -101,10 +98,14 @@ func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRunt
 		}
 		return OpenCodeNativeRuntime{}, false, fmt.Errorf("locate native OpenCode executable: %w", err)
 	}
-	cached, hasCached := d.cached(path)
-	var lastErr error
 	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return OpenCodeNativeRuntime{}, true, err
+		}
 		detected, err := d.detectOnce(ctx, path)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return OpenCodeNativeRuntime{}, true, ctxErr
+		}
 		if err == nil {
 			d.remember(path, detected)
 			return detected, true, nil
@@ -114,12 +115,14 @@ func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRunt
 			d.forget(path)
 			return OpenCodeNativeRuntime{}, true, err
 		}
-		if hasCached {
-			return cached, true, nil
+		if attempt >= len(d.backoff) {
+			if cached, ok := d.cached(path); ok {
+				return cached, true, nil
+			}
+			return OpenCodeNativeRuntime{}, true, err
 		}
-		lastErr = err
-		if attempt >= len(d.backoff) || ctx.Err() != nil || d.sleep(ctx, d.backoff[attempt]) != nil {
-			return OpenCodeNativeRuntime{}, true, lastErr
+		if err := d.sleep(ctx, d.backoff[attempt]); err != nil {
+			return OpenCodeNativeRuntime{}, true, err
 		}
 	}
 }

@@ -119,7 +119,7 @@ func TestOpenCodeNativeDetectionMarksTimedOutRuns(t *testing.T) {
 func TestOpenCodeNativeDetectionFallsBackToRecentDetectionOfTheSamePath(t *testing.T) {
 	fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
 		{output: "opencode 1.18.33"},
-		{err: errExitStatus1},
+		{err: errExitStatus1}, {err: errExitStatus1}, {err: errExitStatus1},
 	}}
 	d := newFakeOpenCodeDetector(fake, "/bin/opencode")
 	if _, _, err := d.detect(context.Background()); err != nil {
@@ -130,8 +130,69 @@ func TestOpenCodeNativeDetectionFallsBackToRecentDetectionOfTheSamePath(t *testi
 	if err != nil || !found || got.Version != "1.18.33" {
 		t.Fatalf("detect after a transient failure = %+v, found %v, err %v; want the cached 1.18.33", got, found, err)
 	}
-	if len(fake.calls) != 2 || len(fake.waits) != 0 {
-		t.Fatalf("runs = %d waits = %v, want one failed run answered from the cache", len(fake.calls), fake.waits)
+	if len(fake.calls) != 4 || !equalDurations(fake.waits, []time.Duration{300 * time.Millisecond, time.Second}) {
+		t.Fatalf("runs = %d waits = %v, want all retries before the cached result", len(fake.calls), fake.waits)
+	}
+}
+
+func TestOpenCodeNativeDetectionRetrySupersedesCachedVersion(t *testing.T) {
+	fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
+		{output: "opencode 1.18.33"},
+		{err: errExitStatus1},
+		{output: "opencode 2.0.18"},
+	}}
+	d := newFakeOpenCodeDetector(fake, "/bin/opencode")
+	if _, _, err := d.detect(context.Background()); err != nil {
+		t.Fatalf("first detect: %v", err)
+	}
+	got, found, err := d.detect(context.Background())
+	if err != nil || !found || got.Version != "2.0.18" || got.Family != managedruntime.OpenCodeFamilyV2 {
+		t.Fatalf("detect = %+v, found %v, err %v; want the retry's v2 runtime", got, found, err)
+	}
+	if len(fake.calls) != 3 || !equalDurations(fake.waits, []time.Duration{300 * time.Millisecond}) {
+		t.Fatalf("runs = %d waits = %v, want one retry before the updated version", len(fake.calls), fake.waits)
+	}
+}
+
+func TestOpenCodeNativeDetectionRetryRejectsUnsupportedMajorAndClearsCache(t *testing.T) {
+	fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
+		{output: "opencode 1.18.33"},
+		{err: errExitStatus1},
+		{output: "opencode 3.0.0"},
+		{err: errExitStatus1}, {err: errExitStatus1}, {err: errExitStatus1},
+	}}
+	d := newFakeOpenCodeDetector(fake, "/bin/opencode")
+	if _, _, err := d.detect(context.Background()); err != nil {
+		t.Fatalf("first detect: %v", err)
+	}
+	if _, found, err := d.detect(context.Background()); !found || err == nil || err.Error() != "native OpenCode major 3 is not supported" {
+		t.Fatalf("detect found %v, err %v; want the retry's unsupported major", found, err)
+	}
+	if len(fake.calls) != 3 || !equalDurations(fake.waits, []time.Duration{300 * time.Millisecond}) {
+		t.Fatalf("runs = %d waits = %v, want to stop at the unsupported major", len(fake.calls), fake.waits)
+	}
+	if _, found, err := d.detect(context.Background()); !found || !errors.Is(err, errExitStatus1) {
+		t.Fatalf("detect found %v, err %v; want failure after cache invalidation", found, err)
+	}
+}
+
+func TestOpenCodeNativeDetectionDoesNotReuseCacheThatExpiresDuringRetries(t *testing.T) {
+	fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
+		{output: "opencode 1.18.33"},
+		{err: errExitStatus1}, {err: errExitStatus1}, {err: errExitStatus1},
+	}}
+	d := newFakeOpenCodeDetector(fake, "/bin/opencode")
+	if _, _, err := d.detect(context.Background()); err != nil {
+		t.Fatalf("first detect: %v", err)
+	}
+	fake.now = fake.now.Add(10*time.Minute - time.Second)
+	d.sleep = func(_ context.Context, wait time.Duration) error {
+		fake.waits = append(fake.waits, wait)
+		fake.now = fake.now.Add(wait)
+		return nil
+	}
+	if _, found, err := d.detect(context.Background()); !found || !errors.Is(err, errExitStatus1) {
+		t.Fatalf("detect found %v, err %v; want failure after cache expiry", found, err)
 	}
 }
 
@@ -194,12 +255,66 @@ func TestOpenCodeNativeDetectionStopsRetryingWhenTheCallerGivesUp(t *testing.T) 
 		cancel()
 		return ctx.Err()
 	}
-	if _, _, err := d.detect(ctx); err == nil {
-		t.Fatal("detect succeeded after the caller cancelled")
+	if _, _, err := d.detect(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("detect error = %v, want caller cancellation", err)
 	}
 	if len(fake.calls) != 1 {
 		t.Fatalf("version runs = %d, want no retry after cancellation", len(fake.calls))
 	}
+}
+
+func TestOpenCodeNativeDetectionDoesNotUseCacheAfterCancellation(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		cancelled bool
+		run       versionRun
+		wantCalls int
+	}{
+		{name: "before the probe", cancelled: true, wantCalls: 1},
+		{name: "failed probe", run: versionRun{err: context.Canceled}, wantCalls: 2},
+		{name: "successful probe", run: versionRun{output: "opencode 2.0.18"}, wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeOpenCodeNative{now: time.Unix(1_000, 0), runs: []versionRun{
+				{output: "opencode 1.18.33"}, tc.run,
+			}}
+			d := newFakeOpenCodeDetector(fake, "/bin/opencode")
+			if _, _, err := d.detect(context.Background()); err != nil {
+				t.Fatalf("first detect: %v", err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.cancelled {
+				cancel()
+			} else {
+				runVersion := d.runVersion
+				d.runVersion = func(ctx context.Context, path string) ([]byte, error) {
+					output, err := runVersion(ctx, path)
+					cancel()
+					return output, err
+				}
+			}
+			got, found, err := d.detect(ctx)
+			if !errors.Is(err, context.Canceled) || !found || got != (OpenCodeNativeRuntime{}) {
+				t.Fatalf("detect = %+v, found %v, err %v; want caller cancellation", got, found, err)
+			}
+			if len(fake.calls) != tc.wantCalls || len(fake.waits) != 0 {
+				t.Fatalf("runs = %d waits = %v, want no work after cancellation", len(fake.calls), fake.waits)
+			}
+		})
+	}
+}
+
+func equalDurations(got, want []time.Duration) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestIsUnsupportedOpenCodeMajorErrorDistinguishesDefiniteAnswers(t *testing.T) {
@@ -224,16 +339,4 @@ func TestIsUnsupportedOpenCodeMajorErrorDistinguishesDefiniteAnswers(t *testing.
 	if IsUnsupportedOpenCodeMajorError(nil) {
 		t.Fatal("nil must not be reported as an unsupported-major error")
 	}
-}
-
-func equalDurations(got, want []time.Duration) bool {
-	if len(got) != len(want) {
-		return false
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			return false
-		}
-	}
-	return true
 }

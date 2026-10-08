@@ -2951,8 +2951,11 @@ func (s *Service) recordInitialMessageForTurn(
 }
 
 // buildWorkflowPrompt constructs the effective prompt using workflow step configuration.
-// If step.Prompt contains {{task_prompt}}, it is replaced with the base prompt.
-// Otherwise, step.Prompt fully replaces the base prompt.
+// If step.Prompt contains {{task_prompt}}, its first occurrence is replaced with
+// the base prompt. Otherwise, step.Prompt fully replaces the base prompt.
+// Step and workflow-level templates also substitute every occurrence of the
+// single-brace placeholders {task_id}, {step_entry_number} and {task_title};
+// these are resolved against the templates only, never inside the base prompt.
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
 func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
@@ -3065,51 +3068,72 @@ func (s *Service) buildWorkflowPromptWithTrustedContextOptions(
 	promptReferencesPrepared bool,
 ) (string, string) {
 	var parts []string
+	var taskTitleReferences []string
 
 	// The common-instructions block is a per-session delivery, not a per-step
 	// one: a session that already carries this exact block keeps it across the
 	// steps it moves through instead of accumulating a copy per step.
-	if block, workflowUpdatedAt := s.workflowInstructionsBlockWithRevision(ctx, step, taskID); block != "" &&
+	if block, title, workflowUpdatedAt := s.workflowInstructionsBlockWithRevision(ctx, step, taskID); block != "" &&
 		s.pendingWorkflowInstructionsForSession(sessionID, block, workflowUpdatedAt) {
 		parts = append(parts, block)
+		if title != "" {
+			taskTitleReferences = append(taskTitleReferences, title)
+		}
 	}
 
 	// skip_step_prompt suppresses the step prompt and its task-description
 	// fallback for this one entry; only the workflow-level block above (and any
 	// one-time move instructions appended by the caller) remain.
 	if !skipStepPrompt {
-		// {step_entry_number} is resolved against the step's own template before
-		// {{task_prompt}} substitution, so a literal token inside basePrompt (task
-		// description / direct message) is never treated as an interpolation
-		// target. The step is copied rather than mutated in place because it may
-		// be a cached/shared *wfmodels.WorkflowStep.
+		// {step_entry_number} and {task_title} are resolved against the step's
+		// own template before {{task_prompt}} substitution, so a literal token
+		// inside basePrompt (task description / direct message) is never treated
+		// as an interpolation target. The title is spliced in last, after
+		// stepPromptBodyWithOptions, so its text is never scanned for tokens.
+		// The step is copied rather than mutated in place because it may be a
+		// cached/shared *wfmodels.WorkflowStep.
+		interpolated := s.interpolateStepEntryNumberIfPresent(ctx, step.Prompt, taskID, step.ID)
+		interpolated, title, finalizeTitle := s.reserveTaskTitleInStepTemplate(ctx, interpolated, taskID)
+		if title != "" {
+			taskTitleReferences = append(taskTitleReferences, title)
+		}
 		interpolatedStep := step
-		if interpolated := s.interpolateStepEntryNumberIfPresent(ctx, step.Prompt, taskID, step.ID); interpolated != step.Prompt {
+		if interpolated != step.Prompt {
 			stepCopy := *step
 			stepCopy.Prompt = interpolated
 			interpolatedStep = &stepCopy
 		}
-		parts = append(parts, stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt))
+		parts = append(parts, finalizeTitle(stepPromptBodyWithOptions(interpolatedStep, taskID, basePrompt, preserveDirectPrompt)))
 	}
 
 	joined := strings.Join(parts, "\n\n")
-	if trustedPromptContext != "" {
-		trustedBlock := sysprompt.Wrap(trustedPromptContext)
-		if !strings.Contains(joined, trustedBlock) {
-			joined += "\n\n" + trustedBlock
-		}
-		return joined, trustedPromptContext
+	if trustedPromptContext == "" && !promptReferencesPrepared {
+		return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 	}
-	if promptReferencesPrepared {
+	acceptedContext := trustedPromptContext
+	if len(taskTitleReferences) > 0 {
+		trustedPromptContext = s.appendTitlePromptReferencesToTrustedContext(
+			ctx, strings.Join(taskTitleReferences, "\n\n"), trustedPromptContext, isPassthrough,
+		)
+	}
+	if acceptedContext != "" && trustedPromptContext != acceptedContext {
+		joined = strings.Replace(joined, sysprompt.Wrap(acceptedContext), sysprompt.Wrap(trustedPromptContext), 1)
+	}
+	if trustedPromptContext == "" {
 		return joined, ""
 	}
-	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+	trustedBlock := sysprompt.Wrap(trustedPromptContext)
+	if strings.Contains(joined, trustedBlock) {
+		return joined, trustedPromptContext
+	}
+	return joined + "\n\n" + trustedBlock, trustedPromptContext
 }
 
 // stepPromptBody renders the visible step prompt for one entry: the step's
 // prompt template with {{task_prompt}} resolved to basePrompt, a step prompt
 // without that placeholder used verbatim, or the base prompt when the step has
-// no prompt of its own.
+// no prompt of its own. It substitutes {task_id} itself; callers resolve
+// {step_entry_number} and {task_title} in step.Prompt beforehand.
 func stepPromptBody(step *wfmodels.WorkflowStep, taskID, basePrompt string) string {
 	return stepPromptBodyWithOptions(step, taskID, basePrompt, false)
 }
@@ -3132,9 +3156,9 @@ func stepPromptBodyWithOptions(step *wfmodels.WorkflowStep, taskID, basePrompt s
 // workflowInstructionsBlock returns the visible "## Workflow instructions"
 // section when the step's workflow has a non-empty prompt. Empty/whitespace
 // prompts and missing getters/workflows omit the section entirely.
-func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) string {
-	block, _ := s.workflowInstructionsBlockWithRevision(ctx, step, taskID)
-	return block
+func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) (string, string) {
+	block, title, _ := s.workflowInstructionsBlockWithRevision(ctx, step, taskID)
+	return block, title
 }
 
 // workflowInstructionsBlockWithRevision is workflowInstructionsBlock plus the
@@ -3142,9 +3166,9 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 // an unchanged workflow can be recognised without comparing the block.
 func (s *Service) workflowInstructionsBlockWithRevision(
 	ctx context.Context, step *wfmodels.WorkflowStep, taskID string,
-) (string, time.Time) {
+) (string, string, time.Time) {
 	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
-		return "", time.Time{}
+		return "", "", time.Time{}
 	}
 	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 	if err != nil {
@@ -3153,26 +3177,28 @@ func (s *Service) workflowInstructionsBlockWithRevision(
 				zap.String("workflow_id", step.WorkflowID),
 				zap.Error(err))
 		}
-		return "", time.Time{}
+		return "", "", time.Time{}
 	}
 	prompt := strings.TrimSpace(meta.Prompt)
 	if prompt == "" {
-		return "", meta.PromptUpdatedAt
+		return "", "", meta.PromptUpdatedAt
 	}
 	interpolated := sysprompt.InterpolatePlaceholders(prompt, taskID)
 	interpolated = s.interpolateStepEntryNumberIfPresent(ctx, interpolated, taskID, step.ID)
+	// The title is substituted last so its text is never scanned for tokens.
+	interpolated, title := s.interpolateTaskTitleIfPresent(ctx, interpolated, taskID)
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return "", meta.PromptUpdatedAt
+		return "", "", meta.PromptUpdatedAt
 	}
 	// Drop any accidental end-marker text from user content so chat split
 	// cannot cut the block early (frontend also prefers the final marker).
 	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
 	interpolated = strings.TrimSpace(interpolated)
 	if interpolated == "" {
-		return "", meta.PromptUpdatedAt
+		return "", "", meta.PromptUpdatedAt
 	}
-	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd, meta.PromptUpdatedAt
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd, title, meta.PromptUpdatedAt
 }
 
 // stepEntryNumberToken is the exact literal REQ-TWS-001 substitutes in
@@ -3247,6 +3273,22 @@ func (s *Service) expandPromptReferencesWithContext(
 		zapLogger = s.logger.Zap()
 	}
 	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
+}
+
+func (s *Service) appendTitlePromptReferencesToTrustedContext(
+	ctx context.Context,
+	title string,
+	trustedContext string,
+	isPassthrough bool,
+) string {
+	if s.promptExpander == nil || isPassthrough || !strings.Contains(title, "@") {
+		return trustedContext
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	return s.promptExpander.AppendReferenceExpansionsToTrustedContext(ctx, title, trustedContext, zapLogger)
 }
 
 // PrepareDirectPrompt applies the same backend-owned saved-prompt expansion
@@ -3611,6 +3653,9 @@ func (s *Service) resumeTaskSessionWithContinuation(
 			}
 			if owned, _ := resumeCtx.Value(continuationOwnedContextKey{}).(bool); owned {
 				return execution, decorateResumeFailure(err)
+			}
+			if executor.IsSafeResumeInspectionDeferral(err) {
+				return nil, decorateResumeFailure(err)
 			}
 			persistBranchRecovery()
 			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
@@ -6741,8 +6786,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if options.internalContinuation {
 		effectivePrompt = prompt
 	}
-	effectivePrompt, instructionsDelivery, instructionsPending :=
+	effectivePrompt, instructionsDelivery, instructionsPending, instructionsTitle :=
 		s.workflowInstructionsForPrompt(resumePromptCtx, taskID, sessionID, effectivePrompt, options.internalContinuation)
+	effectivePrompt = s.prepareWorkflowTitleReferences(
+		resumePromptCtx, effectivePrompt, instructionsTitle, session.IsPassthrough, &options,
+	)
 	if !options.preserveInitialSubmissionReplay {
 		submission, found, loadErr := models.LoadInitialPromptSubmission(session.Metadata)
 		if loadErr != nil {
