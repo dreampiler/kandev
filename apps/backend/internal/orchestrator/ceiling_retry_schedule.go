@@ -11,6 +11,13 @@ import (
 // would come due on the very next tick and pace nothing.
 const ceilingRetryBaseInterval = 2 * ceilingSweepInterval
 
+// ceilingProgressStallInterval is how long a head may go without a replay
+// attempt before it stops holding queue precedence. It is three sweep
+// intervals: long enough to absorb a slow sweep or a transient stall, short
+// enough that a stuck head yields within a minute instead of blocking the
+// queue for twenty.
+const ceilingProgressStallInterval = 3 * ceilingSweepInterval
+
 // deferredRetrySchedule remembers, per deferred task, which durable record the
 // sweep last saw and whether that record's last replay failed for a reason
 // unrelated to capacity.
@@ -40,6 +47,10 @@ type deferredRetryEntry struct {
 	identity    string
 	nextAttempt time.Time
 	failed      bool
+	// lastAttempt is when the sweep last started a replay for this task.
+	// A head whose last attempt is too old is not being retried — the
+	// sweeper is blocked or stuck — and must not hold queue precedence.
+	lastAttempt time.Time
 }
 
 func newDeferredRetrySchedule() *deferredRetrySchedule {
@@ -62,6 +73,10 @@ func (s *deferredRetrySchedule) observe(taskID, identity string) {
 	entry.identity = identity
 	entry.failed = false
 	entry.nextAttempt = time.Time{}
+	// A replaced record is a launch that was never attempted. It must not
+	// inherit its predecessor's attempt time, or it would hold precedence
+	// for up to a stall interval without ever being retried itself.
+	entry.lastAttempt = time.Time{}
 }
 
 // recordFailure starts a bounded wait before a launch that failed for a
@@ -113,6 +128,45 @@ func (s *deferredRetrySchedule) failureRecorded(taskID, identity string) bool {
 	defer s.mu.Unlock()
 	entry := s.entries[taskID]
 	return entry != nil && entry.identity == identity && entry.failed
+}
+
+// markAttempt records that the sweep acquired this task's record for a
+// replay. It is called after the claim, not at tick entry: a wedged replay
+// that never reaches the claim must keep a stale clock and yield precedence,
+// while a head the sweep keeps dispatching stays fresh.
+func (s *deferredRetrySchedule) markAttempt(taskID, identity string) {
+	if s == nil || taskID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[taskID]
+	if entry == nil {
+		entry = &deferredRetryEntry{}
+		s.entries[taskID] = entry
+	}
+	entry.identity = identity
+	entry.lastAttempt = s.now()
+}
+
+// progressStalled reports whether the sweep has not started a replay for this
+// task's current record within the stall interval. An entry the sweep never
+// attempted yet is not stalled: the sweep may simply not have reached it. A
+// replaced record starts fresh through observe, which clears lastAttempt.
+func (s *deferredRetrySchedule) progressStalled(taskID, identity string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[taskID]
+	if entry == nil || entry.identity != identity {
+		return false
+	}
+	if entry.lastAttempt.IsZero() {
+		return false
+	}
+	return s.now().Sub(entry.lastAttempt) > ceilingProgressStallInterval
 }
 
 // settle forgets a task that is no longer waiting, so a later launch it defers
