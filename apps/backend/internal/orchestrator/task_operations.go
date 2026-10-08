@@ -1172,6 +1172,16 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 	if !changed {
 		return false
 	}
+	// A failed session never finalizes the workspace it was elected to
+	// materialize. Close that creating environment inside its ownership so the
+	// next launch re-runs full preparation instead of waiting on a claim whose
+	// owner is gone; the creating-environment reconciliation sweep stays as the
+	// backstop for owners that vanish without a failure record.
+	if s.executor != nil {
+		s.executor.FailOwnedCreatingTaskEnvironment(
+			context.WithoutCancel(ctx), taskID, sessionID, "session launch failure recorded",
+		)
+	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to update task state to FAILED after early launch error",

@@ -92,6 +92,10 @@ type executorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+	// ReclaimFailedTaskEnvironmentMaterialization re-elects sessionID as the
+	// materialization owner of a failed environment that never materialized,
+	// returning false when the row is not reclaimable.
+	ReclaimFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error)
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
