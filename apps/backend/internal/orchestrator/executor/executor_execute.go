@@ -717,7 +717,7 @@ func (e *Executor) cleanupUnstartedExecutionAfterPersistError(
 func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	ctx context.Context,
 	env *models.TaskEnvironment,
-	sessionID string,
+	sessionID, reason string,
 ) {
 	if env == nil || env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != sessionID {
 		return
@@ -728,15 +728,20 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 		e.logger.Warn("failed to mark workspace materialization failed",
 			zap.String("task_environment_id", env.ID),
 			zap.Error(err))
+		return
 	}
+	e.logger.Warn("closed owned creating task environment after materialization gave up",
+		zap.String("task_environment_id", env.ID),
+		zap.String("session_id", sessionID),
+		zap.String("reason", reason))
 }
 
-// failOwnedCreatingTaskEnvironment marks the task's creating environment failed
+// FailOwnedCreatingTaskEnvironment marks the task's creating environment failed
 // when sessionID is its materialization owner. An abandoned launch must not
 // leave its own creating environment behind: nothing else finalizes it, and the
 // next launch then waits forever on a workspace that never becomes ready.
 // Environments owned by a different materializer are left untouched.
-func (e *Executor) failOwnedCreatingTaskEnvironment(ctx context.Context, taskID, sessionID string) {
+func (e *Executor) FailOwnedCreatingTaskEnvironment(ctx context.Context, taskID, sessionID, reason string) {
 	if taskID == "" || sessionID == "" {
 		return
 	}
@@ -747,7 +752,85 @@ func (e *Executor) failOwnedCreatingTaskEnvironment(ctx context.Context, taskID,
 			zap.Error(err))
 		return
 	}
-	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID)
+	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID, reason)
+}
+
+// taskEnvironmentNeverMaterialized reports whether the environment carries no
+// physical workspace evidence. A creating environment is born without a
+// workspace path and per-repository rows are published only when the launch
+// finalizes, so a failed row with no path, no container or sandbox handle, and
+// no live repository inventory never reached a physical workspace.
+func taskEnvironmentNeverMaterialized(env *models.TaskEnvironment) bool {
+	if env == nil {
+		return false
+	}
+	if env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" {
+		return false
+	}
+	for _, repo := range env.Repos {
+		if repo != nil && repo.DeletedAt == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// reelectFailedTaskEnvironmentForLaunch hands a failed environment that never
+// materialized back to full preparation instead of rejecting every later
+// launch forever. The repository CAS is the authority; the in-memory check
+// only decides whether to attempt it. A failed environment that carried a
+// physical workspace, an inherited environment owned by another task, and a
+// failed row another launch already re-claimed all keep failing closed.
+func (e *Executor) reelectFailedTaskEnvironmentForLaunch(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) error {
+	if !taskEnvironmentNeverMaterialized(env) || env.MaterializationSessionID != "" || env.TaskID != task.ID {
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	reclaimed, err := e.repo.ReclaimFailedTaskEnvironmentMaterialization(ctx, env.ID, session.ID)
+	if err != nil {
+		return fmt.Errorf("reclaim failed task environment: %w", err)
+	}
+	if !reclaimed {
+		return e.failedReclaimOutcome(ctx, env, session.ID)
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = session.ID
+	env.ContainerID = ""
+	env.ContainerBootstrapNonceSecretID = ""
+	env.ContainerControlAuthTokenSecretID = ""
+	env.SandboxID = ""
+	e.logger.Info("re-elected failed task environment for fresh materialization",
+		zap.String("task_id", task.ID),
+		zap.String("task_environment_id", env.ID),
+		zap.String("session_id", session.ID))
+	return nil
+}
+
+// failedReclaimOutcome resolves a lost reclaim race: another launch owns the
+// environment now. A creating owner is awaited like any sibling, a published
+// workspace is adopted, and anything else keeps failing closed.
+func (e *Executor) failedReclaimOutcome(ctx context.Context, env *models.TaskEnvironment, sessionID string) error {
+	fresh, loadErr := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if loadErr != nil || fresh == nil {
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if fresh.Status == models.TaskEnvironmentStatusCreating && fresh.MaterializationSessionID != sessionID {
+		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, fresh.ID)
+		if waitErr != nil {
+			return waitErr
+		}
+		*env = *readyEnv
+		return nil
+	}
+	if fresh.Status == models.TaskEnvironmentStatusReady || fresh.Status == models.TaskEnvironmentStatusStopped {
+		*env = *fresh
+		return nil
+	}
+	return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
@@ -1793,7 +1876,23 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 // subprocess is not started and the session state remains CREATED.
 // When opts.StartAgent is true and the workspace was already launched (AgentExecutionID set), only the
 // agent subprocess is started.
+//
+// Every error return closes the session's own creating task environment: an
+// abandoned launch must not leave its materialization claim behind, or later
+// launches wait on a workspace that never becomes ready.
 func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
+	execution, err := e.launchPreparedSession(ctx, task, sessionID, opts)
+	if err != nil && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) {
+		e.FailOwnedCreatingTaskEnvironment(
+			context.WithoutCancel(ctx), task.ID, sessionID,
+			fmt.Sprintf("launch abandoned before completion: %v", err),
+		)
+	}
+	return execution, err
+}
+
+//nolint:cyclop,funlen,gocognit,maintidx // Session construction keeps its existing validation sequence in one launch path.
+func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
 	agentProfileID := opts.AgentProfileID
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
@@ -1917,7 +2016,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		existingEnv = readyEnv
 	}
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		if err := e.reelectFailedTaskEnvironmentForLaunch(ctx, task, session, existingEnv); err != nil {
+			return nil, err
+		}
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
@@ -2113,7 +2214,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Create or update the task environment with launch results
 	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID, "task environment persistence failed after launch")
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
@@ -2293,7 +2394,7 @@ func (e *Executor) handleEarlyLaunchFailure(
 	launchErr error,
 ) error {
 	failCtx := context.WithoutCancel(ctx)
-	e.failOwnedCreatingTaskEnvironment(failCtx, taskID, sessionID)
+	e.FailOwnedCreatingTaskEnvironment(failCtx, taskID, sessionID, "early launch failure")
 	safeErr, changed := e.transitionLaunchFailure(
 		failCtx, taskID, sessionID, repositoryID, "", launchErr,
 	)

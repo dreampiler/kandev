@@ -1442,7 +1442,7 @@ func (e *Executor) resumeSession(
 	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
 		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 		if !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil {
-			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID, "task environment persistence failed after resume relaunch")
 		}
 		if startAgent && (!isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil) {
 			e.rollbackResumeStateAfterFailure(launchCtx, task.ID, session.ID, resumeAttemptID, resumeInitialState, err,
