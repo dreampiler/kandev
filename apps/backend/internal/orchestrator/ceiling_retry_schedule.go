@@ -96,6 +96,25 @@ func (s *deferredRetrySchedule) failureWaiting(taskID, identity string) bool {
 	return entry != nil && entry.identity == identity && entry.failed && s.now().Before(entry.nextAttempt)
 }
 
+// failureRecorded reports whether a record's most recent replay failed for a
+// non-capacity reason and the record has not been replaced or settled since.
+// Unlike failureWaiting it does not expire with the retry backoff: a head whose
+// replay keeps failing must keep yielding its free-slot precedence to later
+// automatic launches until it actually starts or is replaced, so a permanently
+// broken head (an un-attachable workspace, a launch error) cannot hold a free
+// slot behind it while it never starts itself. A transient failure recovers as
+// soon as the record's next replay succeeds (settle) or it is replaced
+// (observe).
+func (s *deferredRetrySchedule) failureRecorded(taskID, identity string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := s.entries[taskID]
+	return entry != nil && entry.identity == identity && entry.failed
+}
+
 // settle forgets a task that is no longer waiting, so a later launch it defers
 // starts fresh instead of inheriting a stale failure wait.
 func (s *deferredRetrySchedule) settle(taskID string) {
