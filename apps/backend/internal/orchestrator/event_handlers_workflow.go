@@ -1868,24 +1868,26 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 		}
 		return
 	}
-	// A deferred launch record is a task-level launch intent. A step-entry move
-	// into a step that cannot run an agent — a predecessor wait, a hold — must
-	// leave that record intact, so an execution-settings or prompt edit made
-	// while the task sits there cannot launch it, and the next agent step still
-	// consumes it.
+	// A queued ceiling "start" is not a task-level launch intent that survives
+	// every move: it cannot launch from a step that cannot run an agent — a
+	// predecessor wait, a hold — so the move clears the ceiling half at once
+	// instead of letting the stale record rank as the queue head when the task
+	// returns to an agent step. Any coexisting WIP-overflow or dependency
+	// intent stays, and the next agent step re-queues its own start.
 	//
-	// autoStartTaskForLoadedStep consults the record itself, so retaining it
-	// here has to be threaded into that call rather than just skipping this
-	// function's own attempt.
+	// autoStartTaskForLoadedStep consults the record itself, so retaining the
+	// non-ceiling intent here has to be threaded into that call rather than
+	// just skipping this function's own attempt.
 	//
 	// Only the step-entry move is narrowed. Dependency resolution, queue
 	// promotion and creation carry their own launch eligibility and are
 	// unchanged, and a step that cannot be read is not proof of an agentless
 	// step, so that case keeps attempting the launch above.
 	if eventName == events.TaskMoved && step != nil && !workflowmove.ShouldAutoStartAgent(step, nil) {
-		s.logger.Debug(eventName+": target step cannot run an agent; deferred launch intent retained",
+		s.logger.Debug(eventName+": target step cannot run an agent; clearing a queued start",
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID))
+		s.dropCeilingStartOnNonAutoStartMove(ctx, taskID, task, step)
 		s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed, true)
 		return
 	}

@@ -3,7 +3,11 @@ package orchestrator
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 )
 
 // DiscardDeferredCeilingLaunch drops a task's queued automatic launch at an
@@ -68,4 +72,39 @@ func ceilingDeferredRecordPresent(record map[string]interface{}) bool {
 	}
 	flag, ok := record[models.CeilingDeferredKey]
 	return ok && flag == true
+}
+
+// dropCeilingStartOnNonAutoStartMove clears a task's queued ceiling "start"
+// when the task has just moved into a step that cannot run an agent, without
+// waiting for the next sweep. A start cannot launch from a hold or a
+// predecessor wait, so keeping it queued only lets the stale record rank as
+// the queue head when the task returns to an agent step. The ceiling keys are
+// removed while any coexisting WIP-overflow or dependency intent stays, and a
+// non-start record (a resume or prompt for an existing session) is left alone.
+func (s *Service) dropCeilingStartOnNonAutoStartMove(
+	ctx context.Context,
+	taskID string,
+	task *models.Task,
+	step *wfmodels.WorkflowStep,
+) {
+	if taskID == "" || task == nil || step == nil {
+		return
+	}
+	if workflowmove.ShouldAutoStartAgent(step, nil) {
+		return
+	}
+	deferral, present, err := s.readPendingCeilingDeferral(ctx, taskID)
+	if err != nil || !present {
+		if err != nil {
+			s.logger.Zap().Warn("could not read deferred launch before clearing a queued start on a non-auto-start move",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+		return
+	}
+	if deferral.Kind != models.CeilingLaunchStart {
+		return
+	}
+	s.deferredRetrySchedule.settle(taskID)
+	s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
+		ceilingReasonSuperseded, "workflow destination step cannot auto-start after the move")
 }

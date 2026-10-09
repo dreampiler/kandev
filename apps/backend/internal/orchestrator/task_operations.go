@@ -1595,7 +1595,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			if opts.WorkflowEntryID > 0 {
 				bindingPayload["workflow_entry_id"] = opts.WorkflowEntryID
 			}
-			if binding, bound := s.deriveCeilingEntryBinding(ctx, bindingTask, bindingPayload, ""); bound {
+			if binding, bound, _ := s.deriveCeilingEntryBinding(ctx, bindingTask, bindingPayload, ""); bound {
 				opts.ceilingEntryBinding = &binding
 			}
 		}
