@@ -98,6 +98,29 @@ function Get-ProcessInfo {
   return Get-CimInstance Win32_Process -Filter "ProcessId = $TargetPid" -ErrorAction SilentlyContinue
 }
 
+# Operational paths are never terminated by this script, regardless of the
+# input port or pidfile: the production install and the live user home.
+function Test-OperationalProcessPath {
+  param($ProcessInfo)
+  if ($null -eq $ProcessInfo) { return $false }
+  $operationalRoots = @('C:\AIWS\Kandev', (Join-Path $env:USERPROFILE '.kandev'))
+  foreach ($root in $operationalRoots) {
+    if ([string]::IsNullOrWhiteSpace($root)) { continue }
+    $normalizedRoot = $root.TrimEnd('\', '/')
+    foreach ($candidate in @($ProcessInfo.ExecutablePath, $ProcessInfo.CommandLine)) {
+      if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+      if ($candidate.StartsWith($normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $boundary = $normalizedRoot + '\'
+        if ([string]::Equals($candidate, $normalizedRoot, [System.StringComparison]::OrdinalIgnoreCase) -or
+          $candidate.StartsWith($boundary, [System.StringComparison]::OrdinalIgnoreCase)) {
+          return $true
+        }
+      }
+    }
+  }
+  return $false
+}
+
 function Test-KandevBackend {
   param([int]$TargetPid)
   $info = Get-ProcessInfo -TargetPid $TargetPid
@@ -223,6 +246,10 @@ foreach ($listeningPort in $targetPorts) {
   }
 }
 if ($backendInfo) {
+  if (Test-OperationalProcessPath -ProcessInfo $backendInfo) {
+    Write-Fail "kandev-kill: PID $backendPid is an operational process ($($backendInfo.ExecutablePath)). Refusing to stop it."
+    exit 4
+  }
   if (-not (Test-KandevBackend -TargetPid $backendPid)) {
     Write-Fail "kandev-kill: PID $backendPid is not a kandev backend. Refusing to stop it."
     exit 4
@@ -287,6 +314,11 @@ foreach ($record in $killSet) {
       Write-Fail "kandev-kill: PID $($record.Pid) listens on guarded port $listeningPort."
       exit 3
     }
+  }
+  $recordInfo = Get-ProcessInfo -TargetPid $record.Pid
+  if (Test-OperationalProcessPath -ProcessInfo $recordInfo) {
+    Write-Fail "kandev-kill: PID $($record.Pid) is an operational process ($($recordInfo.ExecutablePath)). Refusing to stop it."
+    exit 4
   }
 }
 
