@@ -296,8 +296,19 @@ if ($NoBuild) {
   }
   if ($needBuild) {
     Write-Host "dev-isolated: building backend binaries (make -C apps/backend build)..."
-    & make -C $BackendDir build
-    if ($LASTEXITCODE -ne 0) { throw "dev-isolated: build failed (exit $LASTEXITCODE)." }
+    # `go build -v` writes package paths to stderr; under $ErrorActionPreference
+    # 'Stop' a redirected error stream turns that into a terminating
+    # NativeCommandError. Scope Continue to this call; the exit code still decides.
+    $previousErrorAction = $ErrorActionPreference
+    $buildExit = $null
+    try {
+      $ErrorActionPreference = 'Continue'
+      & make -C $BackendDir build
+      $buildExit = $LASTEXITCODE
+    } finally {
+      $ErrorActionPreference = $previousErrorAction
+    }
+    if ($buildExit -ne 0) { throw "dev-isolated: build failed (exit $buildExit)." }
     Write-Host "dev-isolated: build complete."
     if (-not (Test-RequiredBinsPresent)) {
       throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe after build, but one is missing."
@@ -370,11 +381,6 @@ $BackendOutLog = Join-Path $RunDir 'backend.out.log'
 $BackendErrLog = Join-Path $RunDir 'backend.err.log'
 $WebOutLog = Join-Path $RunDir 'web.out.log'
 $WebErrLog = Join-Path $RunDir 'web.err.log'
-# An empty stdin file keeps the detached child from inheriting the caller's
-# console/pipe handles; without it the launching shell can block until the
-# backend exits.
-$StdinFile = Join-Path $RunDir 'stdin.empty'
-New-Item -ItemType File -Path $StdinFile -Force | Out-Null
 $Pidfile = Join-Path $env:TEMP ("kandev-dev-isolated-" + $EffectiveBackendPort + '.pid')
 $BackendStartedFile = $Pidfile -replace '\.pid$', '.backend.started'
 $HomeFile = $Pidfile -replace '\.pid$', '.home'
@@ -386,9 +392,11 @@ $WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 # feature flags) from profiles.yaml. We also force mock providers so the
 # isolated instance needs no real GitHub/agents, and bind to loopback to avoid
 # Windows Firewall prompts.
-# Use cmd /c with internal file redirection so child processes (agentctl, mock-agent)
-# do not inherit the caller's console/pipe handles. This prevents the launching
-# shell from blocking when dev-isolated.ps1 is used in a pipeline (e.g. 2>&1 | Select-Object -Last N).
+# cmd /c with internal file redirection keeps the backend and its children
+# (agentctl, mock-agent) writing to files. Start-Process without -Redirect*
+# uses ShellExecute (its own hidden console), so cmd.exe does not inherit the
+# caller's stdout/stderr pipe and `2>&1 | Select-Object` returns when this
+# script finishes.
 $BackendUrl = "http://127.0.0.1:$EffectiveBackendPort"
 $WebInternalHost = if ($WebHost -in @('0.0.0.0', '::', '[::]')) { '127.0.0.1' } else { $WebHost }
 if ($WebInternalHost.Contains(':') -and -not $WebInternalHost.StartsWith('[')) { $WebInternalHost = "[$WebInternalHost]" }
@@ -421,13 +429,14 @@ $backendOverrides = [ordered]@{
 $BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
   -IsolatedHome $IsolatedHome -Overrides $backendOverrides
 
-# Build the cmd /c command line with internal redirection.
-# We use a sub-shell so the environment variables are applied before launch.
+# One outer quote pair: cmd's /c rule strips the first and last quote when the
+# line contains more than two, so the outer pair reconstructs the intended
+# `"<bin>" __backend > "<out>" 2> "<err>"`; without it the bin path and the err
+# redirect are mangled and cmd exits with a syntax error.
 $backendCmd = "`"$BackendBin`" __backend > `"$BackendOutLog`" 2> `"$BackendErrLog`""
 $backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -Action {
-  Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $backendCmd `
-    -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
-    -RedirectStandardInput $StdinFile
+  Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$backendCmd`"" `
+    -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru
 }
 $CmdPid = $backendProc.Id
 # The actual backend (kandev.exe) is a child of cmd.exe. Since cmd.exe may exit
@@ -507,13 +516,11 @@ if ($Web) {
     -IsolatedHome $IsolatedHome -Overrides $webOverrides
   $webProc = $null
   try {
-    # Launch Vite via cmd /c with internal file redirection so child processes
-    # do not inherit the caller's console/pipe handles.
+    # Same outer-quote and no -Redirect* shape as the backend launch.
     $viteCmd = "`"$($nodeCmd.Source)`" `"$WebDir\node_modules\vite\bin\vite.js`" --host $WebHost --port $EffectiveWebPort --strictPort > `"$WebOutLog`" 2> `"$WebErrLog`""
     $webProc = Invoke-WithIsolatedEnvironment -Environment $WebEnvironment -Action {
-      Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $viteCmd `
-        -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardInput $StdinFile
+      Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$viteCmd`"" `
+        -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru
     }
     $CmdPid = $webProc.Id
     # The actual Vite process (node.exe) is a child of cmd.exe. Since cmd.exe may exit
