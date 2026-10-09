@@ -523,28 +523,53 @@ func (s *Service) workflowReplacementRoute(
 // starts use the task's latest transition, while creation entries fall back to
 // the task creation stamp. The identity must not depend on the current primary
 // session because a retry can legitimately reload a different primary.
+//
+// Read failures collapse to the legacy sentinel so best-effort callers keep
+// their fail-closed behavior. Replay validation uses
+// readWorkflowEntryIdentity instead so a read failure retries rather than
+// terminating the record.
 func (s *Service) workflowEntryIdentity(ctx context.Context, taskID string, entryIDs ...int64) string {
+	identity, err := s.readWorkflowEntryIdentity(ctx, taskID, entryIDs...)
+	if err != nil {
+		return legacyWorkflowEntryIdentity
+	}
+	return identity
+}
+
+// readWorkflowEntryIdentity reports how workflowEntryIdentity derives its
+// value, distinguishing a read failure from a genuinely legacy record. Only a
+// record with no durable identity at all resolves to the legacy sentinel
+// without an error; a failed transition or task read returns the error so the
+// caller retries instead of dropping the queued launch.
+func (s *Service) readWorkflowEntryIdentity(ctx context.Context, taskID string, entryIDs ...int64) (string, error) {
 	if len(entryIDs) > 0 && entryIDs[0] > 0 {
-		return fmt.Sprintf("entry:%020d", entryIDs[0])
+		return fmt.Sprintf("entry:%020d", entryIDs[0]), nil
 	}
 	if reader, ok := s.repo.(workflowStepTransitionReader); ok {
-		if transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID); err == nil && transitionID > 0 {
-			return fmt.Sprintf("entry:%020d", transitionID)
+		transitionID, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
+		if err != nil {
+			return "", err
+		}
+		if transitionID > 0 {
+			return fmt.Sprintf("entry:%020d", transitionID), nil
 		}
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err == nil && task != nil {
+	if err != nil {
+		return "", err
+	}
+	if task != nil {
 		if task.WorkflowStepTransitionID > 0 {
-			return fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID)
+			return fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID), nil
 		}
 		if !task.CreatedAt.IsZero() {
-			return "created:" + task.CreatedAt.UTC().Format(time.RFC3339Nano)
+			return "created:" + task.CreatedAt.UTC().Format(time.RFC3339Nano), nil
 		}
 		if !task.UpdatedAt.IsZero() {
-			return "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+			return "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano), nil
 		}
 	}
-	return legacyWorkflowEntryIdentity
+	return legacyWorkflowEntryIdentity, nil
 }
 
 func (s *Service) reuseResolvedWorkflowSession(

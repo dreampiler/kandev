@@ -116,20 +116,25 @@ func ceilingEntryBindingValue(binding models.CeilingWorkflowEntryBinding) map[st
 // history: the route or transition ledger is the task-owned admission contract
 // and is the only identity replay may safely compare.
 //
+// A step read failure is reported as an error, not as an underivable binding:
+// the record may become valid on a later pass, so validation retries it. Only
+// structurally incomplete inputs (a missing step, route, workflow, or entry
+// identity) resolve to not-derived without an error.
+//
 //nolint:cyclop,funlen // Binding resolution validates independent route, workflow, and recipient identities.
 func (s *Service) deriveCeilingEntryBinding(
 	ctx context.Context,
 	task *models.Task,
 	payload map[string]interface{},
 	sessionID string,
-) (models.CeilingWorkflowEntryBinding, bool) {
+) (models.CeilingWorkflowEntryBinding, bool, error) {
 	if task == nil {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	}
 	if binding, present, err := models.ReadCeilingWorkflowEntryBinding(payload); err != nil {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	} else if present {
-		return binding, true
+		return binding, true, nil
 	}
 
 	requestedStepID := stringField(payload, metaKeyWorkflowStepID)
@@ -137,19 +142,23 @@ func (s *Service) deriveCeilingEntryBinding(
 		requestedStepID = task.WorkflowStepID
 	}
 	if requestedStepID == "" {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	}
 
 	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
 	if ok && (route.EntryIdentity == "" || route.OperationID == "" || route.DestinationStepID != requestedStepID) {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	}
 
 	var step *wfmodels.WorkflowStep
 	if s.workflowStepGetter != nil {
-		step, _ = s.workflowStepGetter.GetStep(ctx, requestedStepID)
+		var stepErr error
+		step, stepErr = s.workflowStepGetter.GetStep(ctx, requestedStepID)
+		if stepErr != nil {
+			return models.CeilingWorkflowEntryBinding{}, false, stepErr
+		}
 		if step == nil {
-			return models.CeilingWorkflowEntryBinding{}, false
+			return models.CeilingWorkflowEntryBinding{}, false, nil
 		}
 	}
 	workflowID := task.WorkflowID
@@ -157,22 +166,25 @@ func (s *Service) deriveCeilingEntryBinding(
 		workflowID = step.WorkflowID
 	}
 	if workflowID == "" {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	}
 
 	entryID := int64Field(payload, "workflow_entry_id")
-	entryIdentity := s.workflowEntryIdentity(ctx, task.ID, entryID)
+	entryIdentity, identityErr := s.readWorkflowEntryIdentity(ctx, task.ID, entryID)
+	if identityErr != nil {
+		return models.CeilingWorkflowEntryBinding{}, false, identityErr
+	}
 	if ok {
 		// A route already carries the authoritative identity. A supplied
 		// transition id must still agree with it, otherwise this payload belongs
 		// to a different entry than the route currently committed on the task.
 		if entryID > 0 && route.EntryIdentity != entryIdentity {
-			return models.CeilingWorkflowEntryBinding{}, false
+			return models.CeilingWorkflowEntryBinding{}, false, nil
 		}
 		entryIdentity = route.EntryIdentity
 	}
 	if entryIdentity == legacyWorkflowEntryIdentity {
-		return models.CeilingWorkflowEntryBinding{}, false
+		return models.CeilingWorkflowEntryBinding{}, false, nil
 	}
 
 	destinationSessionID := sessionID
@@ -181,7 +193,7 @@ func (s *Service) deriveCeilingEntryBinding(
 	}
 	if expectedSessionID := sessionIDFromPayload(payload); expectedSessionID != "" {
 		if destinationSessionID != "" && destinationSessionID != expectedSessionID {
-			return models.CeilingWorkflowEntryBinding{}, false
+			return models.CeilingWorkflowEntryBinding{}, false, nil
 		}
 		destinationSessionID = expectedSessionID
 	}
@@ -208,7 +220,7 @@ func (s *Service) deriveCeilingEntryBinding(
 		RouteOperationID:     operationID,
 		EntryIdentity:        entryIdentity,
 		DestinationSessionID: destinationSessionID,
-	}, true
+	}, true, nil
 }
 
 // workflowEntryBindingForStep creates the binding used by workflow entry
@@ -244,7 +256,7 @@ func (s *Service) workflowEntryBindingForStep(
 	if len(entryIDs) > 0 && entryIDs[0] > 0 {
 		payload["workflow_entry_id"] = entryIDs[0]
 	}
-	binding, ok := s.deriveCeilingEntryBinding(ctx, task, payload, sessionID)
+	binding, ok, _ := s.deriveCeilingEntryBinding(ctx, task, payload, sessionID)
 	if !ok {
 		return nil, false
 	}
@@ -513,7 +525,7 @@ func (s *Service) enrichCeilingLaunchPayload(
 			return payload
 		}
 	}
-	binding, ok := s.deriveCeilingEntryBinding(ctx, task, payload, sessionID)
+	binding, ok, _ := s.deriveCeilingEntryBinding(ctx, task, payload, sessionID)
 	if !ok {
 		return payload
 	}
@@ -574,10 +586,14 @@ func (s *Service) enrichCeilingDeferralBinding(
 				return deferral, nil
 			}
 		}
-		binding, present = s.deriveCeilingEntryBinding(ctx, task, deferral.Payload, sessionIDFromCeilingPayload(deferral))
-		if !present {
+		derived, derivedPresent, deriveErr := s.deriveCeilingEntryBinding(ctx, task, deferral.Payload, sessionIDFromCeilingPayload(deferral))
+		if deriveErr != nil {
+			return deferral, deriveErr
+		}
+		if !derivedPresent {
 			return deferral, nil
 		}
+		binding = derived
 	}
 	for attempt := 0; attempt < deferredLaunchCASRetryBudget; attempt++ {
 		record, prior, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
@@ -703,7 +719,10 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		if deferral.Kind == models.CeilingLaunchStart && sessionIDFromCeilingPayload(deferral) == "" {
 			return ceilingEntryPermanentlyUnavailable, "legacy sessionless workflow entry is ambiguous", nil
 		}
-		derivedBinding, derived := s.deriveCeilingEntryBinding(ctx, task, deferral.Payload, sessionIDFromCeilingPayload(deferral))
+		derivedBinding, derived, deriveErr := s.deriveCeilingEntryBinding(ctx, task, deferral.Payload, sessionIDFromCeilingPayload(deferral))
+		if deriveErr != nil {
+			return ceilingEntryUnavailable, deriveErr.Error(), deriveErr
+		}
 		if !derived {
 			return ceilingEntryPermanentlyUnavailable, "workflow entry binding is ambiguous", nil
 		}
@@ -732,7 +751,10 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 	if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
 		return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
 	}
-	currentEntryIdentity := s.workflowEntryIdentity(ctx, task.ID)
+	currentEntryIdentity, identityErr := s.readWorkflowEntryIdentity(ctx, task.ID)
+	if identityErr != nil {
+		return ceilingEntryUnavailable, identityErr.Error(), identityErr
+	}
 	if currentEntryIdentity != legacyWorkflowEntryIdentity && binding.EntryIdentity != currentEntryIdentity {
 		return ceilingEntrySuperseded, "workflow entry identity changed", nil
 	}
@@ -759,7 +781,7 @@ func (s *Service) validateUnroutedWorkflowEntry(
 	checkDestinationState bool,
 ) (ceilingEntryDisposition, string, error) {
 	if s.workflowStepGetter == nil {
-		return ceilingEntryPermanentlyUnavailable, "workflow destination step cannot be read", nil
+		return ceilingEntryUnavailable, "workflow destination step cannot be read", nil
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
 	if err != nil {
@@ -777,7 +799,10 @@ func (s *Service) validateUnroutedWorkflowEntry(
 	if task.WorkflowStepID != binding.DestinationStepID {
 		return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
 	}
-	currentEntryIdentity := s.workflowEntryIdentity(ctx, task.ID)
+	currentEntryIdentity, identityErr := s.readWorkflowEntryIdentity(ctx, task.ID)
+	if identityErr != nil {
+		return ceilingEntryUnavailable, identityErr.Error(), identityErr
+	}
 	if currentEntryIdentity == legacyWorkflowEntryIdentity {
 		return ceilingEntryPermanentlyUnavailable, "workflow entry identity is unavailable", nil
 	}

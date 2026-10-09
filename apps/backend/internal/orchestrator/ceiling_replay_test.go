@@ -839,6 +839,69 @@ func TestEvaluateCeilingDropReasons_StepReadErrorIsRetried(t *testing.T) {
 	require.Empty(t, detail)
 }
 
+func TestEvaluateCeilingDropReasons_BindingDerivationStepReadErrorIsRetried(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "keep-derive-unreadable", "derive-session", models.TaskSessionStateCreated)
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "keep-derive-unreadable", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       "route-derive",
+		DestinationStepID: "step-derive",
+		EntryIdentity:     "entry:00000000000000000001",
+		TargetKind:        "new_session",
+		DestinationID:     "derive-session",
+		Phase:             "committed",
+	}))
+	task, err := repo.GetTask(ctx, "keep-derive-unreadable")
+	require.NoError(t, err)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		return nil, errors.New("workflow store unavailable")
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	deferral := models.CeilingDeferral{Kind: models.CeilingLaunchStartCreated, Payload: map[string]interface{}{
+		metaKeySessionID:      "derive-session",
+		metaKeyWorkflowStepID: "step-derive",
+	}}
+	_, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, deferral)
+	require.False(t, drop, "a step read failure while deriving the binding is uncertainty, so the record must be kept")
+	require.Empty(t, detail)
+}
+
+func TestEvaluateCeilingDropReasons_IdentityReadErrorIsRetried(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "keep-identity-unreadable", "identity-session", "step-identity")
+	task, err := repo.GetTask(ctx, "keep-identity-unreadable")
+	require.NoError(t, err)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-identity"] = &wfmodels.WorkflowStep{ID: "step-identity", WorkflowID: "wf1"}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
+	binding := models.CeilingWorkflowEntryBinding{
+		WorkflowID:        "wf1",
+		DestinationStepID: "step-identity",
+		RouteOperationID:  workflowSessionRouteID(task.ID, "step-identity", entryIdentity, nil, svc.resolveStepProfileSessionStartPolicy(stepGetter.steps["step-identity"])),
+		EntryIdentity:     entryIdentity,
+	}
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:                    "identity-session",
+			metaKeyWorkflowStepID:               "step-identity",
+			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
+		},
+	}
+	failing := &workflowStartPromptTransitionReadFailureRepository{Repository: repo, err: errors.New("transition ledger unavailable")}
+	svc.repo = failing
+
+	_, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, deferral)
+	require.False(t, drop, "an entry identity read failure is uncertainty, so the record must be kept")
+	require.Empty(t, detail)
+}
+
 // --- end-to-end drain behaviour, through the real seam 2 gate ---------------
 
 func TestDrainDeferredCeilingLaunches_StillDeferredThenSucceedsOnceSlotFrees(t *testing.T) {
