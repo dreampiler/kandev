@@ -105,6 +105,18 @@ $RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin)
 # documented defaults.
 $GuardedPorts = @(38429, 37429, 39429, 38430)
 
+# Operational paths we must never launch from or shut down: the production
+# Kandev install and the live user home. Isolation requires the launched
+# binary to live under this repo checkout (the task worktree/copy).
+$OperationalRoots = @('C:\AIWS\Kandev', (Join-Path $env:USERPROFILE '.kandev'))
+foreach ($backendCandidate in @($BackendBin, $AgentctlBin, $MockAgentBin)) {
+  foreach ($operationalRoot in $OperationalRoots) {
+    if ($backendCandidate.StartsWith($operationalRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+      throw "dev-isolated: refusing binary '$backendCandidate' inside operational path '$operationalRoot'."
+    }
+  }
+}
+
 # Isolated defaults — deliberately far from production.
 $BackendBase = 48429
 $WebBase = 47429
@@ -374,6 +386,9 @@ $WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 # feature flags) from profiles.yaml. We also force mock providers so the
 # isolated instance needs no real GitHub/agents, and bind to loopback to avoid
 # Windows Firewall prompts.
+# Use cmd /c with internal file redirection so child processes (agentctl, mock-agent)
+# do not inherit the caller's console/pipe handles. This prevents the launching
+# shell from blocking when dev-isolated.ps1 is used in a pipeline (e.g. 2>&1 | Select-Object -Last N).
 $BackendUrl = "http://127.0.0.1:$EffectiveBackendPort"
 $WebInternalHost = if ($WebHost -in @('0.0.0.0', '::', '[::]')) { '127.0.0.1' } else { $WebHost }
 if ($WebInternalHost.Contains(':') -and -not $WebInternalHost.StartsWith('[')) { $WebInternalHost = "[$WebInternalHost]" }
@@ -406,25 +421,50 @@ $backendOverrides = [ordered]@{
 $BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
   -IsolatedHome $IsolatedHome -Overrides $backendOverrides
 
+# Build the cmd /c command line with internal redirection.
+# We use a sub-shell so the environment variables are applied before launch.
+$backendCmd = "`"$BackendBin`" __backend > `"$BackendOutLog`" 2> `"$BackendErrLog`""
 $backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -Action {
-  Start-Process -FilePath $BackendBin -ArgumentList '__backend' `
+  Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $backendCmd `
     -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
-    -RedirectStandardInput $StdinFile `
-    -RedirectStandardOutput $BackendOutLog -RedirectStandardError $BackendErrLog
+    -RedirectStandardInput $StdinFile
 }
-$BackendPid = $backendProc.Id
-$backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $BackendPid"
-if (-not $backendInfo) { throw "dev-isolated: cannot identify backend PID $BackendPid" }
+$CmdPid = $backendProc.Id
+# The actual backend (kandev.exe) is a child of cmd.exe. Since cmd.exe may exit
+# or the child may be reparented, we find the backend by its listening port.
+Start-Sleep -Milliseconds 500
+$backendInfo = $null
+$listenerRetry = 0
+while (-not $backendInfo -and $listenerRetry -lt 10) {
+  $listenerConn = Get-NetTCPConnection -State Listen -LocalPort $EffectiveBackendPort -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($listenerConn) {
+    $listenerPid = $listenerConn.OwningProcess
+    $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid AND Name = 'kandev.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+  }
+  if (-not $backendInfo) {
+    Start-Sleep -Milliseconds 500
+    $listenerRetry++
+  }
+}
+if (-not $backendInfo) {
+  throw "dev-isolated: cannot identify backend (kandev.exe) listening on port $EffectiveBackendPort"
+}
+$BackendPid = $backendInfo.ProcessId
 Set-Content -LiteralPath $Pidfile -Value $BackendPid -Encoding ASCII
 Set-Content -LiteralPath $BackendStartedFile -Value $backendInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
 Set-Content -LiteralPath $HomeFile -Value $IsolatedHome -Encoding UTF8
+
+# Store the actual backend process ID for health checks (cmd.exe will exit quickly)
+$ActualBackendPid = $BackendPid
 
 # --- Wait for backend health ---
 $HealthUrl = "$BackendUrl/api/v1/system/health"
 $deadline = (Get-Date).AddSeconds($Timeout)
 $healthy = $false
 while ((Get-Date) -lt $deadline) {
-  if ($backendProc.HasExited) {
+  # Check the actual backend process, not cmd.exe
+  $backendCheck = Get-Process -Id $ActualBackendPid -ErrorAction SilentlyContinue
+  if (-not $backendCheck) {
     Write-Host "dev-isolated: backend exited early. Last log lines:" -ForegroundColor Red
     if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
     if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
@@ -445,7 +485,7 @@ if (-not $healthy) {
   Write-Host "dev-isolated: backend did not become healthy within ${Timeout}s. Last log lines:" -ForegroundColor Red
   if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
   if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
-  Stop-Process -Id $BackendPid -Force -ErrorAction SilentlyContinue
+  & (Join-Path $ScriptDir 'kandev-kill.ps1') -Pidfile $Pidfile -Yes
   Remove-Item -LiteralPath $Pidfile -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $BackendStartedFile, $HomeFile -Force -ErrorAction SilentlyContinue
   throw "dev-isolated: backend did not become healthy within ${Timeout}s."
@@ -467,26 +507,50 @@ if ($Web) {
     -IsolatedHome $IsolatedHome -Overrides $webOverrides
   $webProc = $null
   try {
-    # Launch Vite directly so the recorded PID is the listener, not a pnpm/cmd wrapper.
+    # Launch Vite via cmd /c with internal file redirection so child processes
+    # do not inherit the caller's console/pipe handles.
+    $viteCmd = "`"$($nodeCmd.Source)`" `"$WebDir\node_modules\vite\bin\vite.js`" --host $WebHost --port $EffectiveWebPort --strictPort > `"$WebOutLog`" 2> `"$WebErrLog`""
     $webProc = Invoke-WithIsolatedEnvironment -Environment $WebEnvironment -Action {
-      Start-Process -FilePath $nodeCmd.Source `
-        -ArgumentList 'node_modules/vite/bin/vite.js', '--host', $WebHost, '--port', "$EffectiveWebPort", '--strictPort' `
+      Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', $viteCmd `
         -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardInput $StdinFile `
-        -RedirectStandardOutput $WebOutLog -RedirectStandardError $WebErrLog
+        -RedirectStandardInput $StdinFile
     }
-    $webInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $($webProc.Id)"
-    if (-not $webInfo) { throw "dev-isolated: cannot identify web PID $($webProc.Id)" }
-    Set-Content -LiteralPath $WebPidfile -Value $webProc.Id -Encoding ASCII
+    $CmdPid = $webProc.Id
+    # The actual Vite process (node.exe) is a child of cmd.exe. Since cmd.exe may exit
+    # or the child may be reparented, we find Vite by its listening port.
+    Start-Sleep -Milliseconds 500
+    $webInfo = $null
+    $webRetry = 0
+    while (-not $webInfo -and $webRetry -lt 10) {
+      $webConn = Get-NetTCPConnection -State Listen -LocalPort $EffectiveWebPort -ErrorAction SilentlyContinue | Select-Object -First 1
+      if ($webConn) {
+        $webListenerPid = $webConn.OwningProcess
+        $webInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $webListenerPid AND Name = 'node.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Verify it's the Vite process by checking command line contains vite
+        if ($webInfo -and $webInfo.CommandLine -notmatch 'vite') {
+          $webInfo = $null
+        }
+      }
+      if (-not $webInfo) {
+        Start-Sleep -Milliseconds 500
+        $webRetry++
+      }
+    }
+    if (-not $webInfo) {
+      throw "dev-isolated: cannot identify web (node.exe/vite) listening on port $EffectiveWebPort"
+    }
+    $ActualWebPid = $webInfo.ProcessId
+    Set-Content -LiteralPath $WebPidfile -Value $ActualWebPid -Encoding ASCII
     Set-Content -LiteralPath $WebStartedFile -Value $webInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
   } catch {
-    if ($webProc) { Stop-Process -Id $webProc.Id -Force -ErrorAction SilentlyContinue }
     & (Join-Path $ScriptDir 'kandev-kill.ps1') -Pidfile $Pidfile -Yes
     throw
   }
   $webDeadline = (Get-Date).AddSeconds($Timeout)
   while ((Get-Date) -lt $webDeadline) {
-    if ($webProc.HasExited) { break }
+    # Check the actual Vite process, not cmd.exe
+    $webCheck = Get-Process -Id $ActualWebPid -ErrorAction SilentlyContinue
+    if (-not $webCheck) { break }
     try {
       $webResp = Invoke-WebRequest -Uri $webUrl -UseBasicParsing -TimeoutSec 2
       if ($webResp.StatusCode -ge 200 -and $webResp.StatusCode -lt 500) { $webStarted = $true; break }
