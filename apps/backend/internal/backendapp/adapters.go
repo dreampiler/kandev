@@ -325,6 +325,7 @@ var _ interface {
 	RegisterInitialPromptDispatchCallbacks(executionID string, onDispatched, onFailure func()) error
 	SnapshotRuntimeFootprint(ctx context.Context) agentruntime.RuntimeFootprintSnapshot
 } = (*lifecycleAdapter)(nil)
+var _ runtimeapi.DurableDeliveryCapabilityReader = (*lifecycleAdapter)(nil)
 
 // SnapshotRuntimeFootprint forwards one live-footprint observation to the
 // lifecycle manager. The adapter is what the orchestrator holds as its agent
@@ -468,12 +469,15 @@ func buildLifecycleLaunchRequest(
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
+		ForceContextContinuation:      req.ForceContextContinuation,
+		RecoveryAction:                req.RecoveryAction,
 		TaskTitle:                     req.TaskTitle,
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
+		OriginalWorkspacePath:         req.OriginalWorkspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
 		Env:                           req.Env,
@@ -482,6 +486,10 @@ func buildLifecycleLaunchRequest(
 		EnvironmentDefinitions:        append([]runtimeenv.Definition(nil), req.EnvironmentDefinitions...),
 		EnvironmentResolutionRequired: req.EnvironmentResolutionRequired,
 		ACPSessionID:                  req.ACPSessionID,
+		DeliveryStreamID:              req.DeliveryStreamID,
+		DeliveryIncarnationID:         req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:     req.DeliveryHarnessGeneration,
+		InitialDeliverySubmissionID:   req.InitialDeliverySubmissionID,
 		Metadata:                      req.Metadata,
 		ModelOverride:                 req.ModelOverride,
 		ExecutorType:                  req.ExecutorType,
@@ -630,6 +638,10 @@ func (a *lifecycleAdapter) SetExecutionDescription(ctx context.Context, agentExe
 
 func (a *lifecycleAdapter) SetPromptTurnID(ctx context.Context, agentExecutionID, turnID string) error {
 	return a.mgr.SetPromptTurnID(ctx, agentExecutionID, turnID)
+}
+
+func (a *lifecycleAdapter) SetInitialDeliverySubmissionID(ctx context.Context, agentExecutionID, submissionID string) error {
+	return a.mgr.SetInitialDeliverySubmissionID(ctx, agentExecutionID, submissionID)
 }
 
 // RequiresCloneURL implements executor.ExecutorTypeCapabilities by delegating to
@@ -869,10 +881,42 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
 	if err != nil {
 		return nil, err
 	}
-	return &executor.PromptResult{
-		StopReason:   result.StopReason,
-		AgentMessage: result.AgentMessage,
-	}, nil
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (a *lifecycleAdapter) PromptAgentWithAdmissionCallbackAndSubmissionID(
+	ctx context.Context,
+	agentInstanceID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	beforeAdmission func() error,
+	onDispatched func(),
+	submissionID string,
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithAdmissionCallbackAndSubmissionID(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, beforeAdmission, onDispatched, submissionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
+}
+
+func (a *lifecycleAdapter) PromptAgentWithDispatchCallbackAndSubmissionID(
+	ctx context.Context,
+	agentInstanceID, prompt string,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+	submissionID string,
+) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithDispatchCallbackAndSubmissionID(
+		ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched, submissionID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{StopReason: result.StopReason, AgentMessage: result.AgentMessage}, nil
 }
 
 // Compile-time guard for the steer capability. The executor selects the steer
@@ -1053,6 +1097,13 @@ func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, session
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) DurableDeliveryCapabilityForExecution(
+	ctx context.Context,
+	executionID string,
+) (runtimeapi.DurableDeliveryCapability, bool) {
+	return a.mgr.DurableDeliveryCapabilityForExecution(ctx, executionID)
+}
+
 func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
 	return a.mgr.ListExecutionsForTask(taskID)
 }
@@ -1213,6 +1264,8 @@ type orchestratorWrapper struct {
 }
 
 var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+var _ orchestrator.DeliverySubmissionPromptStarter = (*orchestratorWrapper)(nil)
+var _ orchestrator.DirectPromptStarterWithDeliverySubmission = (*orchestratorWrapper)(nil)
 
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
@@ -1286,10 +1339,11 @@ func (w *orchestratorWrapper) ResumeTaskSessionAndPromptWithPromptContext(
 	promptReferencesPrepared bool,
 	references []v1.EntityReference,
 	initialTaskBriefDispatchOwner bool,
+	submissionIDs ...string,
 ) (*orchestrator.PromptResult, error) {
 	return w.svc.ResumeTaskSessionAndPromptWithPromptContext(
 		ctx, taskID, taskSessionID, prompt, model, planMode, attachments,
-		promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner,
+		promptReferenceContext, promptReferencesPrepared, references, initialTaskBriefDispatchOwner, submissionIDs...,
 	)
 }
 
@@ -1380,6 +1434,16 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
 		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+func (w *orchestratorWrapper) StartCreatedSessionWithDeliverySubmission(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	options orchestrator.DirectPromptStartOptions,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithDeliverySubmission(
+		ctx, taskID, sessionID, agentProfileID, prompt, options,
 	)
 }
 
@@ -1932,6 +1996,13 @@ func (a *messageCreatorAdapter) CreateAgentMessageStreaming(ctx context.Context,
 // AppendAgentMessage appends additional content to an existing streaming message.
 func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageID, additionalContent string) error {
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
+}
+
+// PublishMessageEvent announces a message that was already persisted by a
+// canonical projector. It is used by the orchestrator's durable streaming
+// path to notify connected clients without repeating the message write.
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message)
 }
 
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.

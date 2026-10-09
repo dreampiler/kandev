@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/office/routines"
 )
 
+// listRoutinesViaHTTP fetches the workspace routine list over HTTP and
+// returns the decoded routines.
 func listRoutinesViaHTTP(t *testing.T, router *gin.Engine) []*routines.RoutineWithSchedule {
 	t.Helper()
 	rec := doRequest(t, router, http.MethodGet, "/api/v1/workspaces/ws-1/routines", "")
