@@ -61,9 +61,8 @@ running agents unattended.
   false`) stays queued and launches when the WIP queue promotes it. Dependency
   resolution grants **eligibility**, never a bypass.
 - A dependency resolves only on **successful** completion of the predecessor.
-  `FAILED`, `CANCELLED`, and archival do not resolve a dependency. The
-  dependent task stays blocked and its blocked reason changes to name the
-  failed predecessor, so a chain never proceeds on a failed step.
+  `FAILED`, `CANCELLED`, and unfinished work do not resolve; archival never
+  revokes a recorded success, so a chain never proceeds on a failed step.
 - A dependency-failed state SHALL raise a notification and SHALL require
   explicit human action to clear (retry the predecessor, remove the edge, or
   start the dependent manually). Kandev never auto-retries a failed
@@ -155,15 +154,18 @@ model can ask — the answer is always "the last one to resolve".
 denormalized `is_blocked` column: a stale copy of it would gate launches
 incorrectly, which is the one failure this feature must not have.
 
-A predecessor is **resolved** when its persisted state is `COMPLETED`.
+A predecessor is **resolved** when its persisted state is `COMPLETED`,
+archived or not.
 [Task completion](task-completion.md) owns the explicit step-entry setting
 and compatibility backfill. Step name, position, or membership alone does not
 resolve a dependency. A conversation follow-up does not create another
 dependency-completion cycle.
 
-A predecessor is **failed** when `state` is `FAILED` or `CANCELLED`.
+A predecessor is **failed** when `state` is `FAILED` or `CANCELLED`, archived
+or not.
 
-A predecessor is **pending** in every other case, including archived.
+A predecessor is **pending** in every other case, including an archived
+unfinished task.
 
 ## API surface
 
@@ -377,7 +379,7 @@ dependencies. A user who removes the edge is taking manual control.
 | Edge would create a cycle | `409` with the cycle path; no row written. |
 | Edge is a self-edge or crosses workspaces | `400`; no row written. |
 | Predecessor enters `FAILED`/`CANCELLED` | Dependent stays blocked with `blocked_reason: "failed"`; `task.dependency_failed` published; notification raised; no launch. |
-| Predecessor is archived while a dependent is blocked | Treated as pending, not resolved. The dependent stays blocked and the reason names the archived predecessor. |
+| Predecessor is archived while a dependent is blocked | Verdict follows state: `COMPLETED` stays resolved, unfinished stays pending, `FAILED`/`CANCELLED` stay failed. |
 | Predecessor is deleted | Edge is removed. The dependent may become unblocked but its launch intent does not fire. |
 | Dependent has no deferred launch intent | It unblocks and waits for a user or for its step's normal `on_enter` behavior on a later move. |
 | Dependent is not WIP-admitted when its dependencies resolve | No launch. The existing WIP promotion path launches it once capacity opens; the intent survives. |
@@ -471,8 +473,8 @@ Failure paths:
   intent fires exactly once.
 - **GIVEN** B depends on A and A is `CANCELLED`, **WHEN** the dependency state
   is read, **THEN** B is blocked with `blocked_reason: "failed"`.
-- **GIVEN** B depends on A, **WHEN** A is archived, **THEN** B stays blocked
-  and A is reported as a pending predecessor.
+- **GIVEN** A completed and B depends on A, **WHEN** A is archived, **THEN** B
+  unblocks and A is reported resolved.
 - **GIVEN** B depends on A and B has an intent, **WHEN** A is deleted, **THEN**
   the edge is removed, B unblocks, and no session is created.
 - **GIVEN** A has completed and B has launched, **WHEN** A is reopened to
