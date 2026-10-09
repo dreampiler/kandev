@@ -196,6 +196,8 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
 	previousState := session.State
+	previousAgentID := s.resolveExecutionProfileAgentID(ctx, previousExecutionProfileID)
+	newAgentID := s.resolveExecutionProfileAgentID(ctx, decision.ExecutionProfileID)
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Status
@@ -214,7 +216,7 @@ func (s *Service) persistDynamicLaunchDecision(
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
 	}
-	return s.updateDynamicLaunchSession(ctx, session, previousExecutionProfileID, previousState)
+	return s.updateDynamicLaunchSession(ctx, session, previousExecutionProfileID, previousState, previousAgentID, newAgentID)
 }
 
 func (s *Service) persistDynamicACPSession(
