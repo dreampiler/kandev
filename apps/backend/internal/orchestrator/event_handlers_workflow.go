@@ -1883,9 +1883,10 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	// unchanged, and a step that cannot be read is not proof of an agentless
 	// step, so that case keeps attempting the launch above.
 	if eventName == events.TaskMoved && step != nil && !workflowmove.ShouldAutoStartAgent(step, nil) {
-		s.logger.Debug(eventName+": target step cannot run an agent; deferred launch intent retained",
+		s.logger.Debug(eventName+": target step cannot run an agent; clearing a queued start",
 			zap.String("task_id", taskID),
 			zap.String("to_step_id", stepID))
+		s.dropCeilingStartOnNonAutoStartMove(ctx, taskID, task, step)
 		s.autoStartTaskForLoadedStep(ctx, task, step, eventName, false, stepTransitionID, autoStartOnCreateClaimed, true)
 		return
 	}

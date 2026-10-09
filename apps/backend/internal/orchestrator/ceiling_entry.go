@@ -71,7 +71,14 @@ type ceilingEntryDisposition int
 const (
 	ceilingEntryValid ceilingEntryDisposition = iota
 	ceilingEntrySuperseded
+	// ceilingEntryUnavailable keeps the record for a later pass: the route
+	// or step read failed and retrying may succeed. Structural dead ends
+	// that can never become valid use ceilingEntryPermanentlyUnavailable.
 	ceilingEntryUnavailable
+	// ceilingEntryPermanentlyUnavailable terminates the record: the queued
+	// entry is structurally unable to start (a sessionless legacy start or
+	// an unresolvable workflow binding), so no later sweep can replay it.
+	ceilingEntryPermanentlyUnavailable
 )
 
 // ErrCeilingLaunchSuperseded is returned after a replay claim when the
@@ -691,18 +698,19 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		// A legacy sessionless start has no recipient identity to compare with
 		// the current route. Replaying it against whichever destination happens
 		// to be current would retarget an old workflow entry, so only the newer
-		// bound form is eligible for this shape.
+		// bound form is eligible for this shape. The record can never become
+		// valid: drop it instead of pausing forever.
 		if deferral.Kind == models.CeilingLaunchStart && sessionIDFromCeilingPayload(deferral) == "" {
-			return ceilingEntryUnavailable, "legacy sessionless workflow entry is ambiguous", nil
+			return ceilingEntryPermanentlyUnavailable, "legacy sessionless workflow entry is ambiguous", nil
 		}
 		derivedBinding, derived := s.deriveCeilingEntryBinding(ctx, task, deferral.Payload, sessionIDFromCeilingPayload(deferral))
 		if !derived {
-			return ceilingEntryUnavailable, "workflow entry binding is ambiguous", nil
+			return ceilingEntryPermanentlyUnavailable, "workflow entry binding is ambiguous", nil
 		}
 		binding = derivedBinding
 	}
 	if !binding.Valid() {
-		return ceilingEntryUnavailable, "workflow entry binding is incomplete", nil
+		return ceilingEntryPermanentlyUnavailable, "workflow entry binding is incomplete", nil
 	}
 	switch {
 	case routePresent && (route.OperationID != binding.RouteOperationID ||
@@ -751,7 +759,7 @@ func (s *Service) validateUnroutedWorkflowEntry(
 	checkDestinationState bool,
 ) (ceilingEntryDisposition, string, error) {
 	if s.workflowStepGetter == nil {
-		return ceilingEntryUnavailable, "workflow destination step cannot be read", nil
+		return ceilingEntryPermanentlyUnavailable, "workflow destination step cannot be read", nil
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
 	if err != nil {
@@ -761,7 +769,7 @@ func (s *Service) validateUnroutedWorkflowEntry(
 		return ceilingEntrySuperseded, "workflow destination step no longer exists", nil
 	}
 	if step.SessionTarget != nil {
-		return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
+		return ceilingEntryPermanentlyUnavailable, "workflow entry route is unavailable", nil
 	}
 	if task.WorkflowID != "" && task.WorkflowID != binding.WorkflowID {
 		return ceilingEntrySuperseded, ceilingEntryDetailWorkflowChanged, nil
@@ -771,7 +779,7 @@ func (s *Service) validateUnroutedWorkflowEntry(
 	}
 	currentEntryIdentity := s.workflowEntryIdentity(ctx, task.ID)
 	if currentEntryIdentity == legacyWorkflowEntryIdentity {
-		return ceilingEntryUnavailable, "workflow entry identity is unavailable", nil
+		return ceilingEntryPermanentlyUnavailable, "workflow entry identity is unavailable", nil
 	}
 	if currentEntryIdentity != binding.EntryIdentity {
 		return ceilingEntrySuperseded, "workflow entry identity changed", nil
@@ -887,7 +895,7 @@ func (s *Service) validateClaimedCeilingBinding(
 	if validationErr != nil {
 		return validationErr
 	}
-	if disposition == ceilingEntrySuperseded {
+	if disposition == ceilingEntrySuperseded || disposition == ceilingEntryPermanentlyUnavailable {
 		if detail == "" {
 			return ErrCeilingLaunchSuperseded
 		}

@@ -455,6 +455,11 @@ func (s *Service) evaluateCeilingDropReasons(
 		return "", "", false
 	} else if disposition == ceilingEntrySuperseded {
 		return ceilingReasonSuperseded, detail, true
+	} else if disposition == ceilingEntryPermanentlyUnavailable {
+		// The queued entry is structurally unable to start. Drop it with the
+		// same terminal disposition as a superseded entry so it stops
+		// consuming a sweep retry on every pass.
+		return ceilingReasonSuperseded, detail, true
 	} else if disposition == ceilingEntryUnavailable {
 		// Read uncertainty is not a terminal disposition. Keep the durable
 		// record for a later pass and leave the current task state untouched.
@@ -632,7 +637,7 @@ func (s *Service) loadCeilingReplayTask(ctx context.Context, taskID string, defe
 	if validationErr != nil || disposition == ceilingEntryUnavailable {
 		return nil, ceilingReplayFailedResult(validationErr, "workflow entry ownership unavailable: "+detail)
 	}
-	if disposition == ceilingEntrySuperseded {
+	if disposition == ceilingEntrySuperseded || disposition == ceilingEntryPermanentlyUnavailable {
 		return nil, ceilingReplaySupersededResult()
 	}
 	return current, ceilingReplaySucceededResult()
