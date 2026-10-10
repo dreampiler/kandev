@@ -981,6 +981,7 @@
   "variables": "變數",
   "waiting": "等待中…",
   "waitingForCapacity": "等待容量",
+  "waitingForSessionCapacity": "等待會話容量",
   "wakeBudgetAlert": "預算告警",
   "wakeBudgetAlertLong": "預算告警是快速確認工作；代理程式讀取告警、決定是否暫停工作或通知人工，然後繼續休眠。幾乎不涉及重推理，因此最便宜的層級幾乎總是夠用。",
   "wakeBudgetAlertRecommendation": "快速確認工作 → 更便宜的層級即可。",

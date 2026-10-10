@@ -981,6 +981,7 @@
   "variables": "Variáveis",
   "waiting": "À espera…",
   "waitingForCapacity": "À espera de capacidade",
+  "waitingForSessionCapacity": "À espera de capacidade de sessão",
   "wakeBudgetAlert": "Alerta de orçamento",
   "wakeBudgetAlertLong": "Os alertas de orçamento são confirmações rápidas; o agente lê o alerta, decide se pausa o trabalho ou notifica uma pessoa, e volta a adormecer. Não há raciocínio pesado envolvido, pelo que o escalão mais barato é quase sempre suficiente.",
   "wakeBudgetAlertRecommendation": "Trabalho de confirmação rápida → um escalão mais barato chega.",

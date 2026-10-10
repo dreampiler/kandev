@@ -34,7 +34,18 @@ const (
 const (
 	StatusWaitingForCapacity    = "waiting_for_provider_capacity"
 	StatusBlockedActionRequired = "blocked_provider_action_required"
+	// StatusWaitingForSessionCapacity is the park reason for a launch the
+	// orchestrator's session ceiling deferred. It carries an automatic
+	// retry deadline, unlike StatusBlockedActionRequired.
+	StatusWaitingForSessionCapacity = "waiting_for_session_capacity"
 )
+
+// SessionCeilingRetryDelay is how long a run parked under
+// StatusWaitingForSessionCapacity waits before the Office scheduler re-attempts
+// admission. It mirrors the orchestrator ceiling sweeper's own 20s cadence so a
+// freed slot is picked up by whichever loop notices first, while staying far
+// below any promotion or staleness horizon.
+const SessionCeilingRetryDelay = 20 * time.Second
 
 // Skip reason values recorded on SkippedCandidate.Reason. Short string
 // constants so the HTTP layer and tests can compare without re-spelling.

@@ -612,3 +612,53 @@ func TestClearAllParkedRoutingForWorkspace_RestampsPriorityClassToRecoveryUnless
 		t.Errorf("human run priority_class = %v, want %v", gotHuman.PriorityClass, models.PriorityClassHuman)
 	}
 }
+
+// TestListPendingProviderCapacityRuns_IncludesSessionCapacityExcludesActionRequired
+// pins the timed-lift query's status set: both capacity-waiting statuses
+// (provider and the orchestrator's session ceiling) are listed once their
+// deadline passes, while blocked_provider_action_required — which carries no
+// deadline and is only cleared by an operator — is never listed.
+func TestListPendingProviderCapacityRuns_IncludesSessionCapacityExcludesActionRequired(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+	seedAgentProfile(t, db, "agent-cap", "ws-cap")
+
+	past := time.Now().UTC().Add(-1 * time.Minute)
+	park := func(status runsmodels.RoutingBlockedStatus) *runsmodels.Run {
+		run := &runsmodels.Run{
+			AgentProfileID: "agent-cap",
+			Reason:         "task_assigned",
+			Payload:        `{}`,
+			Status:         "queued",
+			CoalescedCount: 1,
+		}
+		if err := repo.CreateRun(ctx, run); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+		if err := repo.ParkRunForProviderCapacity(ctx, run.ID, string(status), past); err != nil {
+			t.Fatalf("park %s: %v", status, err)
+		}
+		return run
+	}
+	sessionRun := park(runsmodels.RoutingBlockedWaitingForSessionCapacity)
+	providerRun := park(runsmodels.RoutingBlockedWaitingForCapacity)
+	actionRun := park(runsmodels.RoutingBlockedActionRequired)
+
+	pending, err := repo.ListPendingProviderCapacityRuns(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list pending: %v", err)
+	}
+	got := make(map[string]bool, len(pending))
+	for _, r := range pending {
+		got[r.ID] = true
+	}
+	if !got[sessionRun.ID] {
+		t.Errorf("session-capacity run missing from timed pending list")
+	}
+	if !got[providerRun.ID] {
+		t.Errorf("provider-capacity run missing from timed pending list")
+	}
+	if got[actionRun.ID] {
+		t.Errorf("action-required run must not be listed as timed pending")
+	}
+}

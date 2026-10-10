@@ -811,34 +811,33 @@ func (si *SchedulerIntegration) launchAgent(
 }
 
 // handleLaunchDeferred is launchAgent's disposition when the task starter
-// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
-// ceiling already persisted a replay record for this exact launch and owns
-// retrying it, so this run must not be counted as launched (no session was
-// created) and must not go through HandleRunFailure's backoff-retry path —
-// a second automatic attempt from there would race the ceiling's own
-// replay into a double launch. Parking under blocked_provider_action_required
-// (the same status the routed dispatch path uses for the identical
-// disposition, see scheduler.SchedulerService.handleLaunchDeferred) keeps
-// the scheduler's own wake-up loop from ever picking the run back up on
-// its own. There is no reconciliation path back from the orchestrator's
-// ceiling state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism), so
-// the run stays parked until an operator finds it and clears the routing
-// block by hand.
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session ceiling
+// refused this launch, so this run must not be counted as launched (no session
+// was created) and must not go through HandleRunFailure's backoff-retry path.
+//
+// The run parks under waiting_for_session_capacity with an automatic retry
+// deadline — the same status and cadence the routed dispatch path uses (see
+// scheduler.SchedulerService.handleLaunchDeferred) — so the scheduler's own
+// wake-up loop re-attempts admission when the deadline passes and the run
+// launches as soon as a slot is free. The ceiling's admission gate keeps this
+// single-owner: while it is saturated the launch is refused again and re-parks,
+// so this loop and the orchestrator's ceiling replay can never both admit.
 func (si *SchedulerIntegration) handleLaunchDeferred(ctx context.Context, run *models.Run) {
 	si.releaseCheckoutIfNeeded(ctx, run)
 	si.svc.AppendRunEvent(ctx, run.ID, "adapter.invoke", "info", map[string]interface{}{
 		"phase":  "deferred",
 		"reason": "session_ceiling",
 	})
+	retryAt := time.Now().UTC().Add(routing.SessionCeilingRetryDelay)
 	if err := si.svc.repo.ParkRunForProviderCapacity(ctx,
-		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		run.ID, routing.StatusWaitingForSessionCapacity, retryAt); err != nil {
 		si.logger.Error("failed to park run deferred by session ceiling",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return
 	}
 	si.logger.Info("run parked: launch deferred by session ceiling",
-		zap.String("run_id", run.ID))
+		zap.String("run_id", run.ID),
+		zap.Time("earliest_retry_at", retryAt))
 }
 
 // persistLaunchedSession stores the session id a successful direct

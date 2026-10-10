@@ -981,6 +981,7 @@
   "variables": "Variables",
   "waiting": "Waiting…",
   "waitingForCapacity": "Waiting for capacity",
+  "waitingForSessionCapacity": "Waiting for session capacity",
   "wakeBudgetAlert": "Budget alert",
   "wakeBudgetAlertLong": "Budget alerts are quick acknowledgements; the agent reads the alert, decides whether to pause work or notify a human, and goes back to sleep. There is no heavy reasoning involved, so the cheapest tier is almost always enough.",
   "wakeBudgetAlertRecommendation": "Quick acknowledgement work → cheaper tier is enough.",

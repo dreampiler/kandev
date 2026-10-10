@@ -497,19 +497,19 @@ func (ss *SchedulerService) handleLaunchSuccess(
 }
 
 // handleLaunchDeferred is tryCandidates' disposition when the task starter
-// reports ErrLaunchDeferredByCapacity: the orchestrator's own session
-// ceiling already persisted a replay record for this exact launch and owns
-// retrying it, so this attempt must not be counted as launched (no session
-// was created) and this run must not be retried by the scheduler's own
-// routing/park wake-up loop — a second automatic attempt here would race
-// the ceiling's own replay into a double launch. Parking under
-// blocked_provider_action_required (the same status parkRunMaxAttempts
-// uses) keeps LiftParkedRuns from ever picking the run back up on its own.
-// There is no reconciliation path back from the orchestrator's ceiling
-// state today (REQ-OFFICE-LAUNCH-SAFETY-003/REQ-OFFICE-BACKPRESSURE-003
-// require a durable operator-visible record here, not a lift mechanism),
-// so the run stays parked until an operator finds it and clears the
-// routing block by hand.
+// reports ErrLaunchDeferredByCapacity: the orchestrator's own session ceiling
+// refused this launch, so this attempt must not be counted as launched (no
+// session was created) and must not go through the retry/backoff path.
+//
+// The run parks under waiting_for_session_capacity with an automatic retry
+// deadline. That status is what LiftParkedRuns lists, so the run re-attempts
+// admission on its own as soon as its deadline passes and launches when a slot
+// is free — no operator action, and no distinction from a genuine provider
+// fault. The session ceiling's own admission gate remains the arbiter: while
+// the ceiling is saturated this run is refused again and re-parks, so at most
+// one of this loop and the orchestrator's ceiling replay can be admitted.
+// retry_count is not incremented, because parking is a deferral rather than a
+// failed attempt.
 func (ss *SchedulerService) handleLaunchDeferred(
 	ctx context.Context, run *models.Run, workspaceID string, seq int,
 ) (bool, *routing.BlockReason, error) {
@@ -529,14 +529,16 @@ func (ss *SchedulerService) handleLaunchDeferred(
 	})
 	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
 	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
+	retryAt := now.Add(routing.SessionCeilingRetryDelay)
 	if err := ss.repo.ParkRunForProviderCapacity(ctx,
-		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
+		run.ID, routing.StatusWaitingForSessionCapacity, retryAt); err != nil {
 		return false, nil, err
 	}
 	ss.logger.Info("run parked: launch deferred by session ceiling",
-		zap.String("run_id", run.ID))
-	ss.recordRouteParked(workspaceID, run.ID, routing.StatusBlockedActionRequired)
-	return false, &routing.BlockReason{Status: routing.StatusBlockedActionRequired}, nil
+		zap.String("run_id", run.ID),
+		zap.Time("earliest_retry_at", retryAt))
+	ss.recordRouteParked(workspaceID, run.ID, routing.StatusWaitingForSessionCapacity)
+	return false, &routing.BlockReason{Status: routing.StatusWaitingForSessionCapacity}, nil
 }
 
 // persistLaunchedSession stores the session id a successful launch
