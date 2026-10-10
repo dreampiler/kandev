@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -24,9 +25,15 @@ var retryDelays = []time.Duration{
 
 // HandleRunFailure handles a failed run by scheduling a retry or
 // marking it as permanently failed and escalating to the CEO agent.
+// A deterministic launch-validation failure is never retried: the
+// configuration the next attempt would launch with is unchanged, so a
+// retry would only burn a session per attempt.
 func (s *Service) HandleRunFailure(
 	ctx context.Context, run *models.Run, runErr error,
 ) error {
+	if isDeterministicLaunchValidationError(runErr) {
+		return s.escalateFailure(ctx, run, runErr)
+	}
 	if run.RetryCount < MaxRetryCount {
 		errMsg := ""
 		if runErr != nil {
@@ -82,6 +89,20 @@ func (s *Service) scheduleRetryAt(
 		zap.String("source", source))
 
 	return s.repo.ScheduleRetry(ctx, run.ID, retryAt, newCount)
+}
+
+// isDeterministicLaunchValidationError reports whether a run failure comes
+// from launch validation that a later attempt cannot fix (an empty or
+// otherwise invalid agent command). The match is a narrow prefix on the
+// validation family, not a substring, so a transient failure that merely
+// mentions validation keeps its retry budget.
+func isDeterministicLaunchValidationError(runErr error) bool {
+	if runErr == nil {
+		return false
+	}
+	msg := runErr.Error()
+	return strings.HasPrefix(msg, "validate agent command:") ||
+		strings.HasPrefix(msg, "validate continue command:")
 }
 
 // retryMaxAge is the maximum age of the original run before retries are abandoned.

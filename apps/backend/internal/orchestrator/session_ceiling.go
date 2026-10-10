@@ -65,6 +65,11 @@ const (
 	// ceilingReasonDroppedLaunchGateDeclined is AC-17b(e): the launch's own
 	// precondition (today, the terminal-PR guard) declined it at replay time.
 	ceilingReasonDroppedLaunchGateDeclined = "ceiling_dropped_launch_gate_declined"
+	// ceilingReasonDroppedLaunchInvalid is a deterministic launch failure:
+	// the launch's own validation (agent command validation, wiring the
+	// replay cannot fix) failed, so the record is dropped instead of
+	// retried. Retaining it would create one failed session per sweep.
+	ceilingReasonDroppedLaunchInvalid = "ceiling_dropped_launch_invalid"
 	// ceilingReasonDroppedUnreplayableRecord is AC-17b(f): the record's own
 	// ceiling_launch_kind is absent or outside the closed set.
 	ceilingReasonDroppedUnreplayableRecord = "ceiling_dropped_unreplayable_record"
