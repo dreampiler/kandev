@@ -6,7 +6,9 @@ package service_test
 // when the orchestrator's session ceiling defers a launch. This path had
 // no test coverage before this change; its routed-dispatch sibling in
 // internal/office/scheduler now writes the same record (see
-// dispatch_routing_launch_deferred_event_test.go).
+// dispatch_routing_launch_deferred_event_test.go). It also pins the
+// waiting_for_session_capacity park status, so the scheduler wake-up loop
+// re-attempts admission instead of leaving the run parked forever.
 
 import (
 	"context"
@@ -54,8 +56,8 @@ func TestSchedulerTick_LaunchDeferredByCapacity_ParksAndRecordsDurableRunEvent(t
 		t.Fatalf("expected 1 run, got %d", len(runs))
 	}
 	gotRun := runs[0]
-	if gotRun.RoutingBlockedStatus == nil || string(*gotRun.RoutingBlockedStatus) != routing.StatusBlockedActionRequired {
-		t.Fatalf("routing block = %v, want %s", gotRun.RoutingBlockedStatus, routing.StatusBlockedActionRequired)
+	if gotRun.RoutingBlockedStatus == nil || string(*gotRun.RoutingBlockedStatus) != routing.StatusWaitingForSessionCapacity {
+		t.Fatalf("routing block = %v, want %s", gotRun.RoutingBlockedStatus, routing.StatusWaitingForSessionCapacity)
 	}
 
 	events, err := svc.ListRunEventsForTest(ctx, gotRun.ID)

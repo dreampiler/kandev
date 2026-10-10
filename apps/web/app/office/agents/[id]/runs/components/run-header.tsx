@@ -137,6 +137,14 @@ function RoutingBlockBadge({ status, retryAt }: { status: string; retryAt?: stri
       </Badge>
     );
   }
+  if (status === "waiting_for_session_capacity") {
+    return (
+      <Badge variant="secondary" data-testid="run-routing-waiting">
+        {t("office:waitingForSessionCapacity")}
+        {retryAt ? t("office:retryAtSuffix", { retryAt }) : ""}
+      </Badge>
+    );
+  }
   return null;
 }
 
