@@ -50,10 +50,11 @@ func isNoActiveTurnError(err error) bool {
 
 // Common errors
 var (
-	ErrServiceAlreadyRunning            = errors.New("service is already running")
-	ErrServiceNotRunning                = errors.New("service is not running")
-	ErrRouteActionActiveTurn            = errors.New("route actions require a settled turn")
-	ErrIdleSuspensionProvenanceRequired = errors.New("session is not suspended by the workspace idle policy")
+	ErrServiceAlreadyRunning             = errors.New("service is already running")
+	ErrServiceNotRunning                 = errors.New("service is not running")
+	ErrRouteActionActiveTurn             = errors.New("route actions require a settled turn")
+	ErrRouteActionRequiresDynamicProfile = errors.New("route actions are only available for sessions using a dynamic profile")
+	ErrIdleSuspensionProvenanceRequired  = errors.New("session is not suspended by the workspace idle policy")
 )
 
 const maxStartupTransferReconcileAttempts = 30
