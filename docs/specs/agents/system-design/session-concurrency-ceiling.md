@@ -162,7 +162,9 @@ launch request
 ```
 
 Manual origins bypass refusal and write a manual-override audit entry. Automatic
-origins never become manual during replay. The sweep clears a record only after
+origins never become manual during replay. Task focus that resumes an
+idle-suspended session is passive inspection, like opening a conversation, so it
+uses the automatic origin. The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
