@@ -40,6 +40,12 @@ func newTestControlClient(t *testing.T, srv *httptest.Server, opts ...ControlCli
 	return NewControlClient(host, port, newTestLogger(), opts...)
 }
 
+type controlRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f controlRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestNewControlClient_BuildsBaseURLFromHostAndPort(t *testing.T) {
 	c := NewControlClient("agentctl.internal", 7777, newTestLogger())
 	if c.baseURL != "http://agentctl.internal:7777" {
@@ -377,6 +383,31 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 
 	if resp.ID != "inst-1" || resp.Port != 41234 {
 		t.Errorf("response = %+v, want inst-1 on port 41234", resp)
+	}
+}
+
+func TestCreateInstance_UsesLongerHTTPTimeout(t *testing.T) {
+	var remaining time.Duration
+	c := NewControlClient("agentctl.test", 80, newTestLogger())
+	c.httpClient.Transport = controlRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		deadline, ok := req.Context().Deadline()
+		if !ok {
+			t.Fatal("request has no deadline")
+		}
+		remaining = time.Until(deadline)
+		return &http.Response{
+			StatusCode: http.StatusCreated,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"id":"inst-1","port":41234}`)),
+			Request:    req,
+		}, nil
+	})
+
+	if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{ID: "inst-1", WorkspacePath: "/workspace"}); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if remaining < 119*time.Second || remaining > createInstanceHTTPTimeout {
+		t.Errorf("CreateInstance deadline had %v remaining, want close to %v", remaining, createInstanceHTTPTimeout)
 	}
 }
 
