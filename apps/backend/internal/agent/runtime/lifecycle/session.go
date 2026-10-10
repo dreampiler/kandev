@@ -2503,6 +2503,11 @@ const (
 	jsonRPCInvalidParams         = -32602
 	missingProviderRolloutPrefix = "no rollout found for thread id "
 	missingProviderSessionPrefix = "Session not found: "
+	// Codex reports a session it has archived with an internal error whose
+	// details name the requested session ("session <id> is archived. ...").
+	// The stored token can no longer be loaded, so the resume must fall back to
+	// a fresh session like the other missing-provider-session shapes.
+	missingProviderArchivedSessionFormat = "session %s is archived"
 )
 
 type sessionLoadRequestError struct {
@@ -2514,9 +2519,10 @@ type sessionLoadRequestError struct {
 }
 
 // isMissingProviderSessionErr recognizes Codex's explicit not-found response
-// after its process-local rollout state disappeared and Auggie's session not
-// found error. The session ID must match the one Kandev attempted to load so an
-// unrelated provider error cannot be classified as missing native state.
+// after its process-local rollout state disappeared, Codex's archived-session
+// response, and Auggie's session not found error. The session ID must match the
+// one Kandev attempted to load so an unrelated provider error cannot be
+// classified as missing native state.
 func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
@@ -2551,6 +2557,11 @@ func matchesMissingProviderSession(encoded []byte, expectedSessionID string) boo
 	if projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
 		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	if projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		strings.HasPrefix(projected.Data.Details, fmt.Sprintf(missingProviderArchivedSessionFormat, expectedSessionID)) {
 		return true
 	}
 	if projected.Code == jsonRPCInvalidParams &&
