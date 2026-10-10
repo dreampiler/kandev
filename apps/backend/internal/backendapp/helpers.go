@@ -2481,6 +2481,7 @@ func registerMCPAndDebugRoutes(
 	)
 	if p.orchestratorSvc != nil {
 		mcpHandlers.SetStepCompleteSessionRebinder(p.orchestratorSvc)
+		mcpHandlers.SetStepCompleteSessionBindingResolver(p.orchestratorSvc)
 	}
 	mcpHandlers.SetPluginService(p.services.Plugins)
 	if p.features.Canvases && p.services != nil && p.services.Canvas != nil && p.services.Plugins != nil {

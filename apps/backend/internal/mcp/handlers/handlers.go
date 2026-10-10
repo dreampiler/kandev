@@ -290,35 +290,36 @@ type AgentProfileVerifier interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	automationCreator      AutomationCreator
-	taskSvc                *service.Service
-	workflowCtrl           *workflowctrl.Controller
-	clarificationSvc       ClarificationService
-	sessionCanceller       SessionCanceller
-	inputPauser            ClarificationInputPauser
-	sessionCeilingReleaser SessionCeilingReleaser
-	stepCompleteRebinder   StepCompleteSessionRebinder
-	messageCreator         MessageCreator
-	sessionRepo            SessionRepository
-	taskRepo               TaskRepository
-	eventBus               EventBus
-	planService            *service.PlanService
-	walkthroughService     *service.WalkthroughService
-	sessionLauncher        SessionLauncher
-	taskStopper            TaskStopper
-	titleBranchRenamer     TaskTitleBranchRenamer
-	stopTaskGetter         func(context.Context, string) (*models.Task, error)
-	childTaskReorderer     ChildTaskReorderService
-	messageQueue           MessageQueuer
-	promptResolver         PromptReferenceResolver
-	promptReader           PromptReader
-	promptWriter           PromptWriter
-	promptAuthEnabled      func() bool
-	userSettingsProvider   UserSettingsProvider
-	agentProfileVerifier   AgentProfileVerifier
-	settingsRegistry       *settingscatalog.Registry
-	settingsOperations     SettingsOperations
-	logger                 *logger.Logger
+	automationCreator           AutomationCreator
+	taskSvc                     *service.Service
+	workflowCtrl                *workflowctrl.Controller
+	clarificationSvc            ClarificationService
+	sessionCanceller            SessionCanceller
+	inputPauser                 ClarificationInputPauser
+	sessionCeilingReleaser      SessionCeilingReleaser
+	stepCompleteRebinder        StepCompleteSessionRebinder
+	stepCompleteBindingResolver StepCompleteSessionBindingResolver
+	messageCreator              MessageCreator
+	sessionRepo                 SessionRepository
+	taskRepo                    TaskRepository
+	eventBus                    EventBus
+	planService                 *service.PlanService
+	walkthroughService          *service.WalkthroughService
+	sessionLauncher             SessionLauncher
+	taskStopper                 TaskStopper
+	titleBranchRenamer          TaskTitleBranchRenamer
+	stopTaskGetter              func(context.Context, string) (*models.Task, error)
+	childTaskReorderer          ChildTaskReorderService
+	messageQueue                MessageQueuer
+	promptResolver              PromptReferenceResolver
+	promptReader                PromptReader
+	promptWriter                PromptWriter
+	promptAuthEnabled           func() bool
+	userSettingsProvider        UserSettingsProvider
+	agentProfileVerifier        AgentProfileVerifier
+	settingsRegistry            *settingscatalog.Registry
+	settingsOperations          SettingsOperations
+	logger                      *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc         *workflowsvc.Service
@@ -457,6 +458,13 @@ func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
 // currently designates for the step is gone or running the wrong profile.
 func (h *Handlers) SetStepCompleteSessionRebinder(rebinder StepCompleteSessionRebinder) {
 	h.stepCompleteRebinder = rebinder
+}
+
+// SetStepCompleteSessionBindingResolver wires the orchestrator-owned durable
+// step binding the step-completion judgment reads to recognize the session a
+// restart or substitution moved onto the current step.
+func (h *Handlers) SetStepCompleteSessionBindingResolver(resolver StepCompleteSessionBindingResolver) {
+	h.stepCompleteBindingResolver = resolver
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {

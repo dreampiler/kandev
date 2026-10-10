@@ -66,27 +66,20 @@ func (r *Repository) GetWorkflowSessionBinding(
 	return &binding, nil
 }
 
-// UpsertWorkflowSessionBinding commits a source-step session choice. Versioned
-// step-entry operations compare their immutable entry identity inside the same
-// upsert statement, while legacy operations retain timestamp ordering. The
-// bool reports whether this operation won the conditional write.
-func (r *Repository) UpsertWorkflowSessionBinding(
-	ctx context.Context,
-	binding *models.WorkflowSessionBinding,
-) (bool, error) {
-	if binding == nil || binding.TaskID == "" || binding.TargetKey == "" ||
-		binding.WorkflowID == "" || binding.AgentProfileID == "" || binding.OperationID == "" {
-		return false, fmt.Errorf("workflow session binding identity is required")
-	}
-	if binding.UpdatedAt.IsZero() {
-		binding.UpdatedAt = time.Now().UTC()
-	}
-
-	query := `
+// workflowSessionBindingInsert is the shared insert prefix for both upsert
+// shapes; the caller supplies the ON CONFLICT body that decides whether an
+// existing row is replaced.
+const workflowSessionBindingInsert = `
 		INSERT INTO task_workflow_session_bindings
 			(task_id, target_key, workflow_id, agent_profile_id, session_id, operation_id, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (task_id, target_key) DO UPDATE SET
+`
+
+// workflowSessionBindingOrderedConflict compares immutable entry identities
+// (and timestamps for legacy rows) so a superseded step entry cannot overwrite
+// a newer one.
+const workflowSessionBindingOrderedConflict = `
 			workflow_id = EXCLUDED.workflow_id,
 			agent_profile_id = EXCLUDED.agent_profile_id,
 			session_id = EXCLUDED.session_id,
@@ -105,7 +98,53 @@ func (r *Repository) UpsertWorkflowSessionBinding(
 				AND task_workflow_session_bindings.updated_at < EXCLUDED.updated_at)
 		)
 	`
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+
+// workflowSessionBindingSessionConflict overwrites only the session and
+// timestamp, leaving the workflow, profile, and operation identity intact.
+const workflowSessionBindingSessionConflict = `
+			session_id = EXCLUDED.session_id,
+			updated_at = EXCLUDED.updated_at
+	`
+
+// UpsertWorkflowSessionBinding commits a source-step session choice. Versioned
+// step-entry operations compare their immutable entry identity inside the same
+// upsert statement, while legacy operations retain timestamp ordering. The
+// bool reports whether this operation won the conditional write.
+func (r *Repository) UpsertWorkflowSessionBinding(
+	ctx context.Context,
+	binding *models.WorkflowSessionBinding,
+) (bool, error) {
+	return r.upsertWorkflowSessionBinding(ctx, binding, workflowSessionBindingOrderedConflict)
+}
+
+// SetWorkflowSessionBindingSession moves a binding's session without the
+// step-entry ordering guard UpsertWorkflowSessionBinding applies. It serves an
+// explicit session promotion, which re-homes the session that drives a step but
+// is not a new workflow entry: the guard would compare equal operation
+// identities and equal timestamps, reject the write, and leave the binding on
+// the replaced session. An absent row is inserted with the supplied identity; an
+// existing row keeps its workflow, profile, and operation identity and only its
+// session and timestamp change.
+func (r *Repository) SetWorkflowSessionBindingSession(
+	ctx context.Context,
+	binding *models.WorkflowSessionBinding,
+) (bool, error) {
+	return r.upsertWorkflowSessionBinding(ctx, binding, workflowSessionBindingSessionConflict)
+}
+
+func (r *Repository) upsertWorkflowSessionBinding(
+	ctx context.Context,
+	binding *models.WorkflowSessionBinding,
+	conflictClause string,
+) (bool, error) {
+	if err := validateWorkflowSessionBinding(binding); err != nil {
+		return false, err
+	}
+	if binding.UpdatedAt.IsZero() {
+		binding.UpdatedAt = time.Now().UTC()
+	}
+
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(workflowSessionBindingInsert+conflictClause),
 		binding.TaskID,
 		binding.TargetKey,
 		binding.WorkflowID,
@@ -119,6 +158,16 @@ func (r *Repository) UpsertWorkflowSessionBinding(
 	}
 	rows, err := result.RowsAffected()
 	return rows > 0, err
+}
+
+func validateWorkflowSessionBinding(binding *models.WorkflowSessionBinding) error {
+	if binding == nil || binding.TaskID == "" || binding.TargetKey == "" {
+		return fmt.Errorf("workflow session binding identity is required")
+	}
+	if binding.WorkflowID == "" || binding.AgentProfileID == "" || binding.OperationID == "" {
+		return fmt.Errorf("workflow session binding identity is required")
+	}
+	return nil
 }
 
 func nullableBindingSessionID(sessionID string) interface{} {
