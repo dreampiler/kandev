@@ -124,8 +124,12 @@ func (r *recordingAgentDeliveryRepository) ProjectAgentDeliveryEvent(_ context.C
 		return false, r.projectErr
 	}
 	if r.cursor == nil {
-		r.cursor = &models.AgentDeliveryCursor{}
+		r.cursor = &models.AgentDeliveryCursor{
+			StreamID: event.StreamID, SessionID: event.SessionID,
+			IncarnationID: event.IncarnationID, HarnessGeneration: event.HarnessGeneration,
+		}
 	}
+	r.cursor.ReceivedSequence = event.Sequence
 	r.cursor.ProjectedSequence = event.Sequence
 	return true, nil
 }

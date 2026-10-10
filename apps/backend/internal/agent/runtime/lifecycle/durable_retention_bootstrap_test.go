@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -68,6 +70,14 @@ func TestDurableRetentionBootstrapWaitsForCommittedGeneration(t *testing.T) {
 	repo := &retentionBootstrapRepository{firstRead: make(chan struct{})}
 	ack := make(chan struct{}, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(journal.RecoveryDescriptor{
+				StorageCapability: journal.StorageCapability{Version: journal.CurrentVersion, Durable: true},
+				SessionID:         "bootstrap-session", IncarnationID: "bootstrap-incarnation", HarnessGeneration: 1, StreamID: "bootstrap-stream",
+				Stream: &journal.Stream{SessionID: "bootstrap-session", IncarnationID: "bootstrap-incarnation", HarnessGeneration: 1, StreamID: "bootstrap-stream", HighWater: 1, FirstRetained: 1},
+			})
+			return
+		}
 		if request.URL.Path != "/api/v1/agent/delivery/stream/ack" || repo.generation.Load() == nil || repo.projections.Load() == 0 {
 			http.Error(w, "ACK arrived without committed owner and projection", http.StatusConflict)
 			return
@@ -88,6 +98,7 @@ func TestDurableRetentionBootstrapWaitsForCommittedGeneration(t *testing.T) {
 	manager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
 	defer manager.Wait()
 	execution, event := retentionBootstrapOwner()
+	execution.agentctl = client
 	processor := newStreamEventProcessor(manager, ctx, execution, client, repo, 0)
 	defer func() { _ = processor.close() }()
 	if !processor.enqueue(event) {

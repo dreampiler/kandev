@@ -76,3 +76,11 @@ Native SHA-256: `818c856021b1280439043548f81e4da5a20968864d9550ea4dd77c8b46fe33f
 Whole-backend lint passed with zero issues using `golangci-lint run ./... --new-from-rev=d6cff57659ae5aea28e9457c587a8c9d70d0a130 --timeout=20m --allow-serial-runners`. Catalog (370 decisions/1498 specifications), full specification lint, package coverage (22/22 ACs, 68 links) and whitespace checks passed.
 
 Current rebased pending-index/receipt-plan native/helper/web/plugin build passed. Native SHA-256: `1d6b09b2a65dc1bb82b055a8cac29916688ebcc29e4162705a9ca8718aa3fe92`. Use this fresh artifact for remaining runtime checks. Whole-backend lint against refreshed main passed with zero issues; catalog, full specification lint, package audit and formatting pass. Runtime/storage/browser gates and SQLite latency remain open.
+
+## Sequential PR delivery reconciliation (2026-10-11)
+
+Merged the current main after the journal shutdown and interrupted-session recovery predecessors. Conflict resolution retains delivery identity fields, retention serialization and the recovery session revision fence. The lifecycle fixtures now provide a persisted execution owner, a complete projected cursor and the authenticated descriptor/client required by the predecessor ACK worker. No production ownership or uncertainty check is relaxed.
+
+Local conflict validation passed: race-enabled repository recovery-block/reconstruction/harness/retention-integration selection (5.041s); watcher and orchestrator delivery/recovery/terminal selections (1.085s / 15.517s); lifecycle durable/reconstruction and the two retained/remote replay regressions (6.612s). Backend lint against the merged base reported zero issues. Catalog, full specification lint and package validation passed. These checks do not complete storage, latency, native rollback or browser acceptance.
+
+The original compatibility and pre-retention benchmark artifacts are not available in the accessible task directories on this runner. Their recorded `/root` location is inaccessible to this account, so its contents are unverified. The original artifacts must be transferred before the unchanged compatibility and latency acceptance can run. Keep this PR draft and Task 08 in progress; the prior failed storage and browser CI evidence is not waived.

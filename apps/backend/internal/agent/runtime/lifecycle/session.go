@@ -757,6 +757,13 @@ func (sm *SessionManager) initializeACPConnection(
 			NativeStateReference: execution.ACPSessionID,
 		},
 	)
+	if err == nil && execution.InterruptedSubmissionID != "" {
+		if result == nil || result.SessionID != execution.RequiredNativeConversationID {
+			err = ErrDeliveryOwnerMismatch
+		} else {
+			err = retireInterruptedDeliverySubmission(ctx, client, execution)
+		}
+	}
 	if err == nil && execution.ForceContextContinuation {
 		if retireErr := retireUnresolvedDeliverySubmissions(ctx, client, execution); retireErr != nil {
 			err = retireErr
@@ -1936,6 +1943,10 @@ func (sm *SessionManager) sendPrompt(
 			return nil, err
 		}
 	}
+	if err := sm.persistInitialDeliveryBeforeDispatch(preparedCtx, execution, effectivePrompt, materializedAttachments, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, 0, err, callbacks.onAdmissionRejected)
+		return nil, err
+	}
 	promptGeneration, err := sm.admitPrompt(execution, validateStatus)
 	if err != nil {
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
@@ -1943,6 +1954,9 @@ func (sm *SessionManager) sendPrompt(
 	}
 	if sm.beforePromptDispatchHook != nil {
 		sm.beforePromptDispatchHook()
+	}
+	if callbacks.deliverySubmissionID != "" {
+		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))
 	}
 	if err := sm.triggerPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,

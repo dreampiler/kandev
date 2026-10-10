@@ -53,6 +53,7 @@ type AgentEventData struct {
 	DeliverySequence          uint64                                `json:"delivery_sequence,omitempty"`
 	DeliverySubmissionID      string                                `json:"delivery_submission_id,omitempty"`
 	DeliveryOutcome           string                                `json:"delivery_outcome,omitempty"`
+	Status                    string                                `json:"status,omitempty"`
 	ExitCode                  *int                                  `json:"exit_code,omitempty"`
 	ErrorMessage              string                                `json:"error_message,omitempty"`
 	FailureCode               string                                `json:"failure_code,omitempty"`
@@ -68,6 +69,7 @@ type AgentEventData struct {
 	PromptFailureDisposition  streams.PromptFailureDisposition      `json:"prompt_failure_disposition,omitempty"`
 	SessionSettingsPolicy     streams.SessionSettingsPolicy         `json:"session_settings_policy,omitempty"`
 	PromptGeneration          uint64                                `json:"prompt_generation,omitempty"`
+	RecoveredAvailabilityOnly bool                                  `json:"recovered_availability_only,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
