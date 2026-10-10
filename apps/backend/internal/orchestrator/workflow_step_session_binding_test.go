@@ -81,3 +81,33 @@ func TestBoundWorkflowStepSessionUnknownStep(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, bound)
 }
+
+// TestSetPrimarySessionOverwritesExistingStepBinding is the regression guard
+// for the promotion path: when the step already has a binding on a replaced
+// session, promoting a different session must overwrite it. The ordinary
+// order-guarded upsert would compare equal operation identities and equal
+// timestamps (a promotion is not a new workflow entry and does not touch the
+// task row) and reject the write, leaving the binding stale.
+func TestSetPrimarySessionOverwritesExistingStepBinding(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedBoundStepTask(t, repo)
+	svc := newBoundStepService(repo)
+
+	step := &wfmodels.WorkflowStep{
+		ID: "step-bind", WorkflowID: "wf-bind", Name: "bind", AgentProfileID: "profile-step",
+	}
+	sessionA, err := repo.GetTaskSession(ctx, "session-a")
+	require.NoError(t, err)
+	require.NoError(t, svc.recordWorkflowSourceBinding(ctx, "task-bind", step, sessionA))
+
+	bound, err := svc.BoundWorkflowStepSession(ctx, "task-bind", "step-bind")
+	require.NoError(t, err)
+	require.Equal(t, "session-a", bound)
+
+	require.NoError(t, svc.SetPrimarySession(ctx, "session-b"))
+
+	bound, err = svc.BoundWorkflowStepSession(ctx, "task-bind", "step-bind")
+	require.NoError(t, err)
+	assert.Equal(t, "session-b", bound, "the promotion must overwrite the existing binding")
+}
