@@ -27,6 +27,11 @@ const (
 	RoutingBlockedWaitingForCapacity      RoutingBlockedStatus = "waiting_for_provider_capacity"
 	RoutingBlockedActionRequired          RoutingBlockedStatus = "blocked_provider_action_required"
 	RoutingBlockedSessionRecoveryRequired RoutingBlockedStatus = "session_recovery_required"
+	// RoutingBlockedWaitingForSessionCapacity marks a run whose launch the
+	// orchestrator's session ceiling deferred. It retries itself on a
+	// schedule and is never a provider fault, so it must stay distinct from
+	// RoutingBlockedActionRequired.
+	RoutingBlockedWaitingForSessionCapacity RoutingBlockedStatus = "waiting_for_session_capacity"
 )
 
 // String implements fmt.Stringer.
@@ -235,7 +240,8 @@ type Run struct {
 	RouteCycleBaselineSeq int `json:"route_cycle_baseline_seq" db:"route_cycle_baseline_seq"`
 	// RoutingBlockedStatus is set when every provider candidate is
 	// unavailable; values: 'waiting_for_provider_capacity' |
-	// 'blocked_provider_action_required' | 'session_recovery_required'.
+	// 'blocked_provider_action_required' | 'session_recovery_required' |
+	// 'waiting_for_session_capacity'.
 	RoutingBlockedStatus *RoutingBlockedStatus `json:"routing_blocked_status,omitempty" db:"routing_blocked_status"`
 	// SessionRecoveryBlockID links a parked Office run to the canonical task
 	// session recovery block. It remains set until the operator settles that

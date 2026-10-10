@@ -975,6 +975,7 @@
   "variables": "변수",
   "waiting": "대기 중...",
   "waitingForCapacity": "여유 대기 중",
+  "waitingForSessionCapacity": "세션 여유 대기 중",
   "wakeBudgetAlert": "예산 경고",
   "wakeBudgetAlertLong": "예산 경고는 빠른 확인입니다. 에이전트가 경고를 읽고 작업을 일시 중지할지 사람에게 알릴지 결정한 후 다시 잠듭니다. 무거운 추론이 필요 없으므로 가장 저렴한 티어로 거의 항상 충분합니다.",
   "wakeBudgetAlertRecommendation": "빠른 확인 작업 → 더 저렴한 티어로 충분.",

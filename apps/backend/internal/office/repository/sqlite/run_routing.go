@@ -242,20 +242,25 @@ func (r *Repository) RequeueRunForNextCandidate(
 	return nil
 }
 
-// ListPendingProviderCapacityRuns returns runs parked under
-// waiting_for_provider_capacity whose earliest_retry_at has passed.
+// ListPendingProviderCapacityRuns returns queued runs parked under a
+// capacity-waiting routing_blocked_status whose earliest_retry_at has passed.
 // Used by the scheduler wake-up tick to lift parked runs.
+//
+// Both capacity-waiting statuses are listed: provider capacity and the
+// orchestrator's session ceiling. Runs parked under
+// blocked_provider_action_required are deliberately absent — that status
+// carries no deadline and is cleared by an operator, not by a timer.
 func (r *Repository) ListPendingProviderCapacityRuns(
 	ctx context.Context, now time.Time,
 ) ([]runsmodels.Run, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT * FROM runs
-		WHERE routing_blocked_status = 'waiting_for_provider_capacity'
+		WHERE routing_blocked_status IN (?, ?)
 		  AND status = 'queued'
 		  AND (earliest_retry_at IS NULL OR earliest_retry_at <= ?)
 		ORDER BY earliest_retry_at ASC
 		LIMIT 50
-	`), now)
+	`), runsmodels.RoutingBlockedWaitingForCapacity, runsmodels.RoutingBlockedWaitingForSessionCapacity, now)
 	if err != nil {
 		return nil, fmt.Errorf("run_routing: list pending: %w", err)
 	}

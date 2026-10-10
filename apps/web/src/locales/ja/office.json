@@ -975,6 +975,7 @@
   "variables": "変数",
   "waiting": "待機中…",
   "waitingForCapacity": "キャパシティ待ち",
+  "waitingForSessionCapacity": "セッションキャパシティ待ち",
   "wakeBudgetAlert": "予算アラート",
   "wakeBudgetAlertLong": "予算アラートは、素早い確認だけ。エージェントがアラートを読み、作業を止めるか人に通知するか判断し、またスリープに戻る。重い推論は不要だから、最安ティアでほぼ十分。",
   "wakeBudgetAlertRecommendation": "素早い確認作業なら、安いティアで十分。",

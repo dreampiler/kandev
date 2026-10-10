@@ -164,6 +164,21 @@ describe("RunHeader routing strip", () => {
     expect(screen.getByTestId("run-routing-blocked")).toBeTruthy();
   });
 
+  it("renders the waiting-for-session-capacity badge on ceiling-deferred runs", () => {
+    const deferred: RunDetail = {
+      ...withRouting({
+        logical_provider_order: [CLAUDE],
+        blocked_status: "waiting_for_session_capacity",
+        earliest_retry_at: "2026-05-01T13:00:00Z",
+        attempts: [],
+      }),
+      status: "queued",
+    };
+    render(<RunHeader run={deferred} />);
+    expect(screen.getByTestId("run-routing-waiting")).toBeTruthy();
+    expect(screen.queryByTestId("run-routing-blocked")).toBeNull();
+  });
+
   it("renders an actionable session recovery route for parked runs", () => {
     const parked: RunDetail = {
       ...withRouting({
