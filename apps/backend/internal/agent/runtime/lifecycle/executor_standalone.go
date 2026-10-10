@@ -421,7 +421,12 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 // read-only and never gates a stop: a failure here leaves reclamation to the
 // existing lifecycle guards.
 func (r *StandaloneExecutor) ReadRuntimeFootprints(ctx context.Context) ([]agentctl.RuntimeFootprint, error) {
-	return r.ctl.ListRuntimeFootprints(ctx)
+	control, controlCtx, release, _, err := r.acquireControl(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	return control.ListRuntimeFootprints(controlCtx)
 }
 func (r *StandaloneExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance.StandaloneInstanceID == "" {
