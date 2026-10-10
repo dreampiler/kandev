@@ -308,6 +308,14 @@ func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapsh
 	return snapshot, nil
 }
 
+// createInstanceTimeout bounds one instance-creation request. Creation runs
+// workspace git discovery on the control server, and each git spawn queues on
+// the process-wide git pool, which background polling of every live runtime can
+// saturate. Under that load a healthy creation took ~34s, so the client-wide 30s
+// deadline abandoned it and failed the launch (and the server then discarded the
+// instance it had nearly finished).
+const createInstanceTimeout = 120 * time.Second
+
 // CreateInstance creates a new agent instance.
 func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceRequest) (*CreateInstanceResponse, error) {
 	body, err := json.Marshal(req)
@@ -321,7 +329,12 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(httpReq)
+	// Copy so the other control calls keep the short client-wide deadline.
+	createClient := *c.httpClient
+	if createClient.Timeout > 0 && createClient.Timeout < createInstanceTimeout {
+		createClient.Timeout = createInstanceTimeout
+	}
+	resp, err := createClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create instance: %w", err)
 	}

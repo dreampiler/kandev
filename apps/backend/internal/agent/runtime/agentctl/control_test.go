@@ -717,3 +717,28 @@ func TestClaimOwnership_SuccessReturnsNilError(t *testing.T) {
 		t.Fatalf("ClaimOwnership() error = %v, want nil", err)
 	}
 }
+
+func TestCreateInstance_OutlivesTheShortClientDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"inst-1","port":4242}`))
+	}))
+	defer srv.Close()
+	c := newTestControlClient(t, srv)
+	c.httpClient.Timeout = 50 * time.Millisecond
+
+	resp, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	if resp.Port != 4242 {
+		t.Errorf("port = %d, want 4242", resp.Port)
+	}
+	if c.httpClient.Timeout != 50*time.Millisecond {
+		t.Errorf("shared client timeout changed to %v", c.httpClient.Timeout)
+	}
+	if _, err := c.ListInstances(context.Background()); err == nil {
+		t.Error("other control calls must keep the short deadline")
+	}
+}
