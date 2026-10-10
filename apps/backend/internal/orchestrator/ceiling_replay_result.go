@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 )
@@ -40,12 +41,16 @@ func ceilingReplayFailedResult(err error, detail string) ceilingReplayResult {
 // points (start, start_created, resume — and, by the same contract, any future
 // kind) that return (*executor.TaskExecution, error): a non-nil execution is
 // success, a nil execution with a nil error is still-deferred (the seam's own
-// gate re-persisted the record internally), and anything else is a non-ceiling
-// failure whose error is retained for diagnostics.
+// gate re-persisted the record internally), a deterministic launch-validation
+// failure is permanently failed (the record is dropped, never retried), and
+// anything else is a non-ceiling failure whose error is retained for
+// diagnostics.
 func ceilingReplayResultFromExecution(execution *executor.TaskExecution, err error) ceilingReplayResult {
 	switch {
 	case errors.Is(err, ErrCeilingLaunchSuperseded):
 		return ceilingReplaySupersededResult()
+	case isDeterministicLaunchFailure(err):
+		return ceilingReplayPermanentlyFailedResult(err, "launch validation failed")
 	case err != nil:
 		return ceilingReplayFailedResult(err, "dispatch failed")
 	case execution == nil:
@@ -53,4 +58,22 @@ func ceilingReplayResultFromExecution(execution *executor.TaskExecution, err err
 	default:
 		return ceilingReplaySucceededResult()
 	}
+}
+
+// isDeterministicLaunchFailure reports whether a launch error will fail the
+// same way on every later pass, so retaining the record only burns a session
+// per retry. The match is a narrow prefix on the launch-validation family
+// produced by validateBuiltAgentCommands, not a substring, so a transient
+// failure that merely mentions validation keeps retrying.
+func isDeterministicLaunchFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.HasPrefix(msg, "validate agent command:") ||
+		strings.HasPrefix(msg, "validate continue command:")
+}
+
+func ceilingReplayPermanentlyFailedResult(err error, detail string) ceilingReplayResult {
+	return ceilingReplayResult{outcome: ceilingReplayPermanentlyFailed, err: err, detail: detail}
 }

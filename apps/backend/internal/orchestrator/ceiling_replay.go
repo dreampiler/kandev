@@ -42,6 +42,11 @@ const (
 	// the ceiling (AC-15d): the record is retained for a later pass and the
 	// failure is logged, since — unlike a refusal — nothing else observes it.
 	ceilingReplayFailed
+	// ceilingReplayPermanentlyFailed means the launch failed for a
+	// deterministic reason that a later pass cannot fix (a launch
+	// validation or wiring fault): the record is dropped so the sweep
+	// does not create a new session per retry.
+	ceilingReplayPermanentlyFailed
 	// ceilingReplaySuperseded is a terminal disposition for a claimed launch
 	// whose workflow entry or destination changed before dispatch.
 	ceilingReplaySuperseded
@@ -387,6 +392,10 @@ func (s *Service) settleCeilingReplay(
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)),
 			zap.String("detail", result.detail), zap.Error(result.err))
+	case ceilingReplayPermanentlyFailed:
+		s.deferredRetrySchedule.settle(task.ID)
+		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
+			ceilingReasonDroppedLaunchInvalid, result.detail)
 	case ceilingReplayStillDeferred:
 		// Remove the in-flight claim after the replay gate has restored the
 		// durable deferral. The next sweep must be able to own it again.
