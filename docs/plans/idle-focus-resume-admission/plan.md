@@ -25,12 +25,15 @@ Issue #4321 reports the gap.
 
 - Pass the automatic origin for a focus-driven idle-suspension resume.
 - Cover the saturated-ceiling focus path with a regression test.
-- Record the focus origin in the session ceiling design.
+- Keep the completed-session permission and the idle-suspension check in the
+  deferred resume record, so a parked completed session replays once capacity
+  frees.
+- Record the focus origin and its replay in the session ceiling design.
 
 ### Out of scope
 
 - Explicit Resume and message delivery, which keep their manual admission.
-- Changes to ceiling limits, deferral storage, replay, or rendered UI.
+- Changes to ceiling limits, other deferral kinds, or rendered UI.
 
 ## Technical approach
 
@@ -38,12 +41,23 @@ Issue #4321 reports the gap.
 `ResumeTaskSessionWithOptions`. A full ceiling now refuses the resume through the
 existing automatic deferral path instead of granting a manual override.
 
+A focus resume of a completed session needs the completed-session permission,
+which the deferred resume record did not keep, and the sweep treated a completed
+destination as superseded. The resume record now stores both resume options,
+the replay restores them, and a completed destination stays valid only for a
+record that carries both. The idle-suspension check on replay accepts the
+session's own queued launch when the sweep's dispatch claim owns it, and a replay
+that finds the session no longer parked drops the record as superseded.
+
 ## Tests
 
 `idle_session_focus_ceiling_test.go` covers
 `TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling`:
 AC-AGENTS-SESSION-CEILING-001.1. The ceiling is set to one and held by an
 unrelated launch; focusing an idle-suspended session must not launch an agent.
+`TestFocusTaskSessionDeferredCompletedResumeReplaysAfterCapacityFrees` defers a
+focus resume of a parked completed session, frees the slot, and runs one sweep;
+the replay must reach the executor.
 
 ## E2E tests
 
@@ -57,7 +71,11 @@ Only the agent manager is simulated. No rendered UI changes require browser cove
 ## Verification results
 
 The new test failed on the original code (one agent launched past the ceiling)
-and passed after the change. Existing focus and idle-suspension tests pass.
+and passed after the change. The completed-session replay test launched no
+agent before the deferred record kept the focus resume permission and passes
+with the change. Existing focus, idle-suspension, and ceiling tests pass;
+`TestCeilingDispatchAdmissionSerializesRouteMutation` fails on Windows with and
+without this change.
 
 ## Risks
 
