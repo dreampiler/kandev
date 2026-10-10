@@ -3,6 +3,16 @@
 This is an implementation draft, not a merge-ready change. Tasks 01–07 are complete. Task 08 remains in progress.
 The user requested a draft PR on 2026-10-10 so a colleague can continue. This authorizes the handoff commit and push, superseding the earlier no-publication constraint. No acceptance limit is waived.
 
+## Shutdown handoff (2026-10-10)
+
+The user requested a pushed checkpoint within ten minutes before shutting down the machine. This is an incomplete implementation handoff. Task 08 stays in progress; do not signal workflow completion or mark the PR ready.
+
+Backend CI fixture fixes are published. The browser checkpoint correlates the actual new projected recovery submission before killing its runtime, preserves the unchanged frozen N binary with explicit mock-helper provenance, and keeps agent survival enabled only throughout the retained-runtime rollback case. Teardown returns to the current binary with survival disabled. Static lint and formatting pass. The rollback case still fails exact effect preservation: a terminal receipt captured as `block_resolved` with no completion timestamp later becomes `completed` on N reopen. Diagnose the snapshot's settlement boundary and submission/turn attribution before changing its equality assertion. Do not treat an idle session state as proof of full settlement.
+
+The complete desktop result and shutdown cleanup are recorded in Task 08. The final mobile matrix was not started because of the shutdown deadline. SQLite latency, storage/concurrency/conformance, final real PostgreSQL rollback/backup evidence, and Kubernetes CI diagnosis remain open.
+
+Selected immutable binaries, complete receipt-cache measurement samples, and CI/browser evidence are also preserved outside `/tmp` at `/root/.kandev/task-artifacts/backend-agent-delivery-retention-20261010/`, with `SHA256.json`. Copy this local directory to the colleague's machine; it is not a GitHub attachment. The full historical artifacts remain under `/tmp/kandev-retention-resume-20261009/`. Private runner scripts and credentials are not included in the durable copy.
+
 ## Start here
 
 Read [the manifest](plan.md), [Task 08](task-08-integration-and-storage.md), and the paired [requirements](../../specs/platform/requirements/backend-agent-delivery-retention.md) and [design](../../specs/platform/system-design/backend-agent-delivery-retention.md).

@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { expect, type Page } from "@playwright/test";
@@ -14,6 +14,31 @@ export function assertFrozenRetentionBinary(binary: string) {
   expect(createHash("sha256").update(readFileSync(binary)).digest("hex")).toBe(
     "3df1e310220f0a7588453c062f2fa90aa0a611dd7277cc77c76dd4f8bc3a0517",
   );
+}
+
+export function prepareFrozenRetentionRuntime(backend: BackendContext, frozenBinary: string) {
+  assertFrozenRetentionBinary(frozenBinary);
+  const runtimeDir = path.join(backend.tmpDir, `release-n-runtime-${randomUUID()}`);
+  const binary = path.join(runtimeDir, "kandev");
+  const syntheticHelper = path.resolve(__dirname, "../../../backend/bin/mock-agent");
+  mkdirSync(runtimeDir);
+  copyFileSync(frozenBinary, binary);
+  copyFileSync(syntheticHelper, path.join(runtimeDir, "mock-agent"));
+  chmodSync(binary, 0o755);
+  chmodSync(path.join(runtimeDir, "mock-agent"), 0o755);
+  assertFrozenRetentionBinary(binary);
+  return {
+    binary,
+    provenance: {
+      frozenBinary,
+      frozenSha256: createHash("sha256").update(readFileSync(binary)).digest("hex"),
+      syntheticHelper,
+      syntheticHelperSha256: createHash("sha256")
+        .update(readFileSync(syntheticHelper))
+        .digest("hex"),
+      syntheticHelperRole: "current E2E mock provider; Release N backend binary is unchanged",
+    },
+  };
 }
 
 export async function projectOrdinaryRetentionStream(backend: BackendContext, taskId: string) {
@@ -125,8 +150,12 @@ export function retentionJob(backend: BackendContext, sessionId: string) {
   }
 }
 
-export async function retireSavedDelivery(backend: BackendContext, sessionId: string) {
-  await backend.restart({ KANDEV_TASK_DELIVERY_RETENTION_INTERVAL: "10s" });
+export async function retireSavedDelivery(
+  backend: BackendContext,
+  sessionId: string,
+  restartOverrides: Record<string, string> = {},
+) {
+  await backend.restart({ ...restartOverrides, KANDEV_TASK_DELIVERY_RETENTION_INTERVAL: "10s" });
   try {
     await expect
       .poll(
@@ -147,12 +176,7 @@ export async function retireSavedDelivery(backend: BackendContext, sessionId: st
   }
 }
 
-export async function createPendingRetirementOnReleaseN(
-  page: Page,
-  api: ApiClient,
-  seed: SeedData,
-  backend: BackendContext,
-) {
+export async function prepareRetainedRetirementTask(page: Page, api: ApiClient, seed: SeedData) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
     "Release N deletion journal",
@@ -165,7 +189,16 @@ export async function createPendingRetirementOnReleaseN(
       start_agent: false,
     },
   );
-  await page.goto(`/t/${task.id}`);
+  const prepared = await api.launchSession({
+    task_id: task.id,
+    intent: "prepare",
+    agent_profile_id: seed.agentProfileId,
+    executor_profile_id: seed.worktreeExecutorProfileId,
+    launch_workspace: true,
+  });
+  expect(prepared.session_id).toBeTruthy();
+  const sessionId = prepared.session_id;
+  await page.goto(`/t/${task.id}?sessionId=${sessionId}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.sendMessageViaButton("/slow 1s");
@@ -174,7 +207,7 @@ export async function createPendingRetirementOnReleaseN(
   ).toBeVisible({ timeout: 60_000 });
   const primary = (await api.listTaskSessions(task.id)).sessions.find((row) => row.is_primary);
   if (!primary) throw new Error("Release N deletion task has no primary session");
-  const sessionId = primary.id;
+  expect(primary.id).toBe(sessionId);
   await expect
     .poll(
       async () =>
@@ -182,8 +215,71 @@ export async function createPendingRetirementOnReleaseN(
       { timeout: 30_000 },
     )
     .toBe("WAITING_FOR_INPUT");
+  return { taskId: task.id, sessionId };
+}
+
+function manualPromptEvidence(backend: BackendContext, sessionId: string) {
+  const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+  try {
+    return db
+      .prepare(
+        "SELECT s.id, s.state, (SELECT COUNT(*) FROM agent_delivery_inbox i JOIN agent_delivery_cursors c ON c.stream_id = i.stream_id AND c.session_id = i.session_id WHERE i.session_id = s.session_id AND i.submission_id = s.id AND i.event_type = 'message_chunk' AND i.projected_at IS NOT NULL AND i.sequence <= c.projected_sequence) AS projected_events FROM agent_delivery_submissions s WHERE s.session_id = ? ORDER BY s.id",
+      )
+      .all(sessionId);
+  } finally {
+    db.close();
+  }
+}
+
+export async function createPendingRetirementOnReleaseN(
+  page: Page,
+  api: ApiClient,
+  seed: SeedData,
+  fixture: {
+    backend: BackendContext;
+    retainedTask: { taskId: string; sessionId: string };
+  },
+) {
+  const { backend, retainedTask } = fixture;
+  const { taskId, sessionId } = retainedTask;
+  const previousIds = new Set(manualPromptEvidence(backend, sessionId).map((row) => row.id));
+  expect(previousIds.size).toBe(1);
+  await page.goto(`/t/${taskId}?sessionId=${sessionId}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
+  await session.sendMessageViaButton("/slow 2s");
+  await expect(
+    session.chat.getByText("Slow response complete after 2s.", { exact: false }),
+  ).toBeVisible({ timeout: 60_000 });
+  await expect
+    .poll(
+      () => {
+        const fresh = manualPromptEvidence(backend, sessionId).filter(
+          (row) => !previousIds.has(row.id),
+        );
+        return (
+          fresh.length === 1 &&
+          fresh[0].state === "completed" &&
+          Number(fresh[0].projected_events) > 0
+        );
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(true);
+  await expect
+    .poll(
+      async () =>
+        (await api.listTaskSessions(taskId)).sessions.find((row) => row.id === sessionId)?.state,
+      { timeout: 30_000 },
+    )
+    .toBe("WAITING_FOR_INPUT");
+  expect(
+    (await api.listSessionMessages(sessionId)).messages.filter(
+      (row) => row.author_type === "user" && row.content.trim() === "/slow 2s",
+    ),
+  ).toHaveLength(1);
   expect(retentionEvidence(backend, sessionId).hashes.length).toBeGreaterThan(0);
-  await api.deleteTask(task.id, { discardWorktreeChanges: true });
+  await api.deleteTask(taskId, { discardWorktreeChanges: true });
   const job = retentionJob(backend, sessionId);
   expect(job?.phase).toBe("pending");
   const successor = await api.createTask(seed.workspaceId, "Release N deterministic ID fence", {

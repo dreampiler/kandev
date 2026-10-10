@@ -17,12 +17,12 @@ export async function pruneSavedDelivery(
   api: ApiClient,
   seed: SeedData,
   backend: BackendContext,
-  profileId = seed.agentProfileId,
+  options: { profileId?: string; restartOverrides?: Record<string, string> } = {},
 ) {
   const task = await api.createTaskWithAgent(
     seed.workspaceId,
     "Delivery retention saved history",
-    profileId,
+    options.profileId ?? seed.agentProfileId,
     {
       workflow_id: seed.workflowId,
       workflow_step_id: seed.startStepId,
@@ -79,6 +79,7 @@ export async function pruneSavedDelivery(
     db.close();
   }
   await backend.restart({
+    ...options.restartOverrides,
     KANDEV_TASK_DELIVERY_RETENTION_INTERVAL: "10s",
     KANDEV_TASK_DELIVERY_RETENTION_REPLAY_AGE: "720h",
   });
@@ -104,6 +105,35 @@ export async function pruneSavedDelivery(
   return { task, session, sessionId: primary.id, output };
 }
 
+async function waitForProjectedRecoveryPrompt(
+  backend: BackendContext,
+  sessionId: string,
+  previousIds: Set<unknown>,
+) {
+  const newPrompts = () =>
+    retentionEvidence(backend, sessionId).prompts.filter((row) => !previousIds.has(row.id));
+  await expect.poll(newPrompts, { timeout: 30_000 }).toHaveLength(1);
+  const submissionId = newPrompts()[0].id;
+  await expect
+    .poll(
+      () => {
+        const db = new DatabaseSync(path.join(backend.tmpDir, "kandev.db"));
+        try {
+          const row = db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM agent_delivery_inbox i JOIN agent_delivery_cursors c ON c.stream_id = i.stream_id AND c.session_id = i.session_id JOIN agent_delivery_submissions s ON s.id = i.submission_id AND s.session_id = i.session_id WHERE i.session_id = ? AND i.submission_id = ? AND i.event_type = 'message_chunk' AND i.projected_at IS NOT NULL AND i.sequence <= c.projected_sequence AND s.state IN ('accepted', 'dispatching') AND s.fully_settled_at IS NULL",
+            )
+            .get(sessionId, submissionId) as { count: number };
+          return Number(row.count);
+        } finally {
+          db.close();
+        }
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThan(0);
+}
+
 export async function assertRetentionRecoveryControls(
   page: Page,
   api: ApiClient,
@@ -115,10 +145,9 @@ export async function assertRetentionRecoveryControls(
   const traffic = attachGatewayTrafficCapture(page);
   await page.reload();
   await session.waitForLoad();
+  const previousIds = new Set(retentionEvidence(backend, sessionId).prompts.map((row) => row.id));
   await session.sendMessageViaButton("/slow 120");
-  await expect(session.chat.getByText("Running slow response", { exact: false })).toBeVisible({
-    timeout: 30_000,
-  });
+  await waitForProjectedRecoveryPrompt(backend, sessionId, previousIds);
   const bootID = await api.getBackendBootID();
   await observeAgentRuntimeAvailability(page);
   const killed = await api.killLocalAgentRuntimeChild();
