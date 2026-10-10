@@ -242,6 +242,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		// Publish the negotiated mode before session/new or session/load can
 		// emit events on the already-connected updates stream.
 		execution.DeliveryMode = deliveryDecision.Mode
+		execution.deliveryNegotiation.Load().finish(nil)
 	}
 	sm.logger.Info("agentctl delivery capability negotiated",
 		zap.String("agent_type", agentConfig.ID()),
@@ -536,6 +537,14 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	runtimeConfigOptions map[string]string,
 	startModelPolicy StartModelPolicy,
 ) error {
+	negotiation := execution.beginDeliveryNegotiation()
+	defer negotiation.finish(ErrDurableAdoptionBlocked)
+	execution.deliveryBootstrap.Store(execution.ACPSessionID == "" && execution.DeliveryHarnessGeneration == 1)
+	defer func() {
+		if !execution.isSessionInitialized() {
+			execution.deliveryBootstrap.Store(false)
+		}
+	}()
 	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
 		return err
@@ -543,6 +552,11 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
+	}
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
@@ -605,13 +619,6 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
-
-	// Publish session created event
-	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
-			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
-		)
-	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)

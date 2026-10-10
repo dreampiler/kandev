@@ -140,6 +140,12 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+Backend delivery cleanup preserves saved conversation output on desktop and phones.
+It removes redundant transport payloads after safe projection and settlement.
+If an ACK was lost after cleanup, **Retry connection** uses the persisted cursor without resending the prompt.
+Uncertain work remains protected. **Stop** and the existing recovery actions remain available.
+See [delivery retention operations](operations.md#backend-delivery-retention) for expiry, deletion, and rollback limits.
+
 Kandev can replace the local agent runtime while the backend and browser
 connection stay active. This restores runtime service only. A session with an
 uncertain prompt outcome remains blocked until you resolve its recovery card.

@@ -148,3 +148,9 @@ Old ambiguous records fail closed. Preserve journals, native state, and user edi
 Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of metric labels.
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
 Executor redial, long-horizon triggers, detached MCP waiting/offline budgets, and richer remote-working UI remain follow-up work.
+
+## Pending backend retention extension
+
+[Backend retention](backend-agent-delivery-retention.md) adds proposed compact-evidence replay and authenticated projected-cursor ACK retry.
+It preserves this design's exact-submission terminal settlement and independent recovery causes.
+The [retention package](../../../plans/backend-agent-delivery-retention/plan.md) remains pending; prior reattachment results do not verify pruning.

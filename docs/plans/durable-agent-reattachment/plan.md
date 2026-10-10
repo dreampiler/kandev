@@ -146,3 +146,10 @@ Implementation checks passed on 2026-09-28:
 Tasks 01-05 are implemented sequentially with TDD, and each work order records its results. All edits remain in the worktree and uncommitted.
 
 Task 01's full process race suite still has the independently reported `TestWorkspaceTracker_StopsWhenGitBroken` goroutine-shutdown timeout; its durable producer, terminal-tail, and detach/reattach regressions pass. PostgreSQL and native Windows/macOS validation remain release gates and are not represented as passing.
+
+## Pending backend retention extension (2026-10-05)
+
+The [backend delivery retention package](../backend-agent-delivery-retention/plan.md) starts from verified `f2668750bf6a17792b58d423f6b5b99cfeabf78e`.
+Its eight work orders are pending and its specifications remain draft.
+This planning-only extension preserves all completed orders, existing results and environment-dependent gaps recorded here.
+It owns new payload/receipt cleanup, checkpoint replay and retention validation; historical recovery evidence is not retention acceptance.

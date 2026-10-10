@@ -128,3 +128,8 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - Survival of an erased executor volume or an unsupported shared filesystem.
 - Keeping agent processes alive after an executor intentionally terminates them.
 - Replacing backend SQL transcripts or the existing browser subscription contract.
+
+## Pending backend retention extension
+
+[Backend delivery retention](backend-agent-delivery-retention.md) defines proposed bounded transport cleanup while preserving this delivery contract.
+Its [work package](../../../plans/backend-agent-delivery-retention/plan.md) is draft with pending work orders. It does not change current implementation status.

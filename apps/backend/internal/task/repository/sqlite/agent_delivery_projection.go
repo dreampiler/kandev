@@ -52,6 +52,13 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	sessionIDs := make([]string, 0, len(events))
+	for _, event := range events {
+		sessionIDs = append(sessionIDs, event.SessionID)
+	}
+	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), sessionIDs, []string{streamID}, sharedCanonicalDeliverySession(events, effects)); err != nil {
+		return nil, err
+	}
 
 	var projectedSequence int64
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
@@ -96,7 +103,11 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if loadErr != nil {
 			return loadErr
 		}
-		if !sameAgentDeliveryEvent(&stored, event) {
+		matches, err := sameAgentDeliveryEvent(&stored, event)
+		if err != nil {
+			return err
+		}
+		if !matches {
 			return repoerrors.ErrAgentDeliveryEventConflict
 		}
 		if projectedAt.Valid {

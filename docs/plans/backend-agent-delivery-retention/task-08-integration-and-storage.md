@@ -1,0 +1,342 @@
+---
+id: "08-integration-and-storage"
+title: "Prove restart, cross-engine storage bounds and surface parity"
+status: in_progress
+wave: 8
+depends_on:
+  - 07-manual-maintenance-and-docs
+plan: "plan.md"
+requirements:
+  - REQ-PLATFORM-DELIVERY-RETENTION-002
+  - REQ-PLATFORM-DELIVERY-RETENTION-003
+  - REQ-PLATFORM-DELIVERY-RETENTION-004
+  - REQ-PLATFORM-DELIVERY-RETENTION-005
+  - REQ-PLATFORM-DELIVERY-RETENTION-006
+acceptance_criteria:
+  - AC-PLATFORM-DELIVERY-RETENTION-002.1
+  - AC-PLATFORM-DELIVERY-RETENTION-002.2
+  - AC-PLATFORM-DELIVERY-RETENTION-002.3
+  - AC-PLATFORM-DELIVERY-RETENTION-002.4
+  - AC-PLATFORM-DELIVERY-RETENTION-003.1
+  - AC-PLATFORM-DELIVERY-RETENTION-003.2
+  - AC-PLATFORM-DELIVERY-RETENTION-003.3
+  - AC-PLATFORM-DELIVERY-RETENTION-004.1
+  - AC-PLATFORM-DELIVERY-RETENTION-004.2
+  - AC-PLATFORM-DELIVERY-RETENTION-004.3
+  - AC-PLATFORM-DELIVERY-RETENTION-005.1
+  - AC-PLATFORM-DELIVERY-RETENTION-005.2
+  - AC-PLATFORM-DELIVERY-RETENTION-005.3
+  - AC-PLATFORM-DELIVERY-RETENTION-005.4
+  - AC-PLATFORM-DELIVERY-RETENTION-006.1
+  - AC-PLATFORM-DELIVERY-RETENTION-006.4
+  - AC-PLATFORM-DELIVERY-RETENTION-006.5
+system_design:
+  - ../../specs/platform/system-design/backend-agent-delivery-retention.md
+---
+
+# Task 08: Prove restart, cross-engine storage bounds and surface parity
+
+## Summary
+
+Provide final retention-specific integration and measured capacity evidence. Exercise real stream, database reopen and rendered history/recovery after pruning.
+
+## In scope
+
+- Add backend integration barriers for concurrent receive/projection/cleanup/deletion/owner replacement, lost ACKs and crash recovery with retained journal plus SQL.
+- Add million-event storage and query-plan fixtures on both engines; measure transport rows/bytes, canonical content, compact summaries, pinned backlog, WAL/dead tuples and post-maintenance disk use separately.
+- Add new desktop/mobile E2E retention scenarios using disposable fixtures and actual cleanup, rather than seeded pruned markers. Existing durable recovery files are regression gates.
+- Test rollback to the real release N reader/writer artifact on an N+1 pruned database, including hashes/checkpoints, pending purge jobs, deterministic ID admission, new event/prompt writes and forward upgrade. N has no collector. Pre-retention HEAD is a negative compatibility case, never a supported reader.
+- Record pre-retention baseline, new fenced writer with cleanup idle, and cleanup-active throughput/latency/allocations. Include every-event live-session/incarnation lookup and shared-lock cost in the combined p95 <=1.10x pre-retention target, plus concurrent replacement/deletion. Regressions keep this order pending.
+- Disable canonical `internal/system/toolretention` in disposable storage/history fixtures; assert effective config. Exercise independent SQLite holders past cancellation and real readers; report native BEGIN/SQL-work/pass/Stop durations separately.
+- After actual pruning, cover terminal-first RPC return, managed final-delete/recreation and existing provider capacity/transport continuation with fresh submission IDs. Cleanup grants no dispatch authority; uncertain tools, permissions and stale owners remain blocked.
+
+## Out of scope
+
+Implementation was authorized by the user on 2026-10-09.
+Agentctl journal policy, canonical-history expiry, new UI and feature flags are excluded.
+This order does not authorize commit, push or merge. The user authorized native subagents on 2026-10-10 for independent work within this order; the primary session owns integration and durable artifacts.
+
+## Acceptance
+
+- Both engines preserve byte-exact canonical history, once-only workflow/claim settlement and no prompt/tool resend across races, lost ACKs and all crash boundaries.
+- Retired eligible events/generic effects stay within the formula/window; protected gaps and canonical/summary growth are reported explicitly. Query plans and latency meet the plan thresholds.
+- Desktop and phone reload show full saved history, uncertainty and usable Stop/state-only retry; supported format-1 reader/writer recovery passes before compatibility is claimed.
+
+## TDD evidence
+
+Start each changed-logic scenario with a failing test against the pre-change behavior. Record Red, Green and refactor results.
+Use existing backend test helpers, fake clocks and deterministic barriers. Do not use sleeps to manufacture race order.
+Required new test groups: `TestDeliveryRetentionConcurrency`, `TestDeliveryRetentionStorage`, `TestDeliveryRetentionCompatibility`, `TestDeliveryRetentionIntegration`.
+Names are planned deliverables, not existing passing tests. Before using a -run selector, list tests and confirm every required group exists.
+The real repository and retained journal must prove state transitions where named; fakes do not prove database crash semantics.
+Read `.agents/skills/tdd/SKILL.md` and its `references/backend-tests.md` at implementation time.
+
+## Verification
+
+Run from repository root. Commands are implementation-time checks, not run during planning.
+
+```bash
+(cd apps/backend && go test -trimpath -race ./internal/task/repository/sqlite ./internal/agent/runtime/lifecycle ./internal/orchestrator -run 'TestDeliveryRetention(Concurrency|Storage|Compatibility|Integration)' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/repository/sqlite -run '^$' -bench '^BenchmarkDeliveryRetention' -benchmem -benchtime=3x -count=3)
+(cd apps/backend && go test -trimpath -race ./internal/persistence/storeconformance -count=1)
+(cd apps/backend && go run ./cmd/sqlguard ./internal)
+(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run 'TestCapacityContinuation|TestDeliveryCompletionAfterTerminalProjection|TestCompleteStreamGitSnapshot' -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/task/repository/sqlite -run 'TestManagedDeletionAdmission|TestSetSessionMetadataKeyIfJSONValue' -count=1)
+(cd apps/backend && golangci-lint run ./... --new-from-rev=d6cff57659ae5aea28e9457c587a8c9d70d0a130 --timeout=20m)
+(cd apps && pnpm install --frozen-lockfile)
+make build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package
+(cd apps/web && pnpm e2e:run --project chromium tests/session/delivery-retention.spec.ts tests/session/durable-reattachment.spec.ts tests/session/durable-stream-recovery.spec.ts tests/session/transient-turn-runtime-continuity.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-delivery-retention.spec.ts tests/session/mobile-durable-reattachment.spec.ts tests/session/mobile-durable-stream-recovery.spec.ts tests/session/mobile-transient-turn-runtime-continuity.spec.ts)
+python3 scripts/list-docs.py validate
+python3 scripts/lint-spec-files.py --all
+node docs/plans/backend-agent-delivery-retention/validate-package.cjs
+git diff --check
+```
+
+Before the Go integration, benchmark and conformance commands, enforce the environment prerequisites without printing their values:
+
+```bash
+: "${KANDEV_TEST_POSTGRES_DSN:?Set an isolated PostgreSQL test DSN}"
+: "${KANDEV_RETENTION_COMPAT_BINARY:?Set the path to a tested format-1 binary}"
+test -x "$KANDEV_RETENTION_COMPAT_BINARY"
+```
+
+Require these variables for real cross-engine and format-1 reader/writer evidence. Supply an isolated database and built compatible artifact before running; a missing variable/skip is a release gate. Never print the DSN. Browser tests run sequentially with the guarded projects and no worker overrides.
+For every environment-gated test, record executed and skipped subtests. A skip cannot complete the corresponding acceptance.
+The package helper checks structure independent of statuses, Results content and staging; it does not prove runtime behavior.
+The `mobile-chrome` project is verified at baseline in `apps/web/e2e/playwright.config.ts:84` (Pixel 5, mobile spec matcher).
+
+## Files likely touched
+
+- `apps/backend/internal/task/repository/sqlite/agent_delivery_retention_integration_test.go` (new)
+- `apps/backend/internal/task/repository/sqlite/agent_delivery_retention_bench_test.go` (new)
+- `apps/backend/internal/agent/runtime/lifecycle/durable_retention_integration_test.go` (new)
+- `apps/backend/internal/orchestrator/agent_delivery_retention_test.go` (new)
+- `apps/backend/internal/persistence/storeconformance/`
+- `apps/web/e2e/tests/session/delivery-retention.spec.ts` (new)
+- `apps/web/e2e/tests/session/mobile-delivery-retention.spec.ts` (new)
+
+Add focused `_test.go` files beside changed logic; split oversized tests rather than extending files past lint limits.
+Paths marked new are intended deliverables. Other directory references identify the existing integration boundary.
+
+## Dependencies
+
+Complete `07-manual-maintenance-and-docs` first. Execute sequentially in the primary session.
+
+## Inputs
+
+- [Requirements](../../specs/platform/requirements/backend-agent-delivery-retention.md).
+- [Design](../../specs/platform/system-design/backend-agent-delivery-retention.md); sections matching this scope.
+- [Plan](plan.md), including baseline, storage thresholds and engine gates.
+- Scoped `apps/backend/AGENTS.md`, existing delivery tests and nearby maintenance patterns.
+
+## Risks
+
+The storage fixture can be expensive: stream chunks in bounded batches and isolate its database. Timing assertions need controlled runners and recorded hardware; pinned backlog must not be mistaken for cleanup failure.
+
+## Parallelism
+
+`sequential` work-order execution. The user authorized separate storage/performance and browser/compatibility workers within this order on 2026-10-10.
+
+## Results
+
+Implementation remains in progress. Tasks 01-07 remain complete; the original planning-only receipt is historical.
+
+Current evidence at the rebased main base:
+
+- Backend, Linux helpers, E2E web and E2E plugin package build passed. Later production query changes require a fresh artifact set before browser execution.
+- Terminal compaction and prompt pruning after event retirement initially failed on SQLite and PostgreSQL; both now pass. A mismatched terminal-turn summary also failed on both engines before stricter turn/outcome and retained latest-terminal/workflow proof.
+- Active canonical grace failed on both engines for dispatching and interrupted-unknown submissions. Matching immutable identity and completed canonical effects now allow redundant output compaction while prompt/terminal evidence remains protected. The complete integration selector passed with race detection on SQLite and PostgreSQL (25.216s).
+- Retained-journal lifecycle checks passed with race detection (10.053s), including actual cleanup and SQL/journal reopen before lost-ACK recovery. The stronger live SQL execution/harness-owner fixture also passed (2.918s).
+- Managed deletion admission and structural metadata CAS race selectors passed on both engines (142.799s).
+- SQL source guard passed after bulk compaction. Catalog (369 decisions/1498 specifications), full specification lint, package structure/coverage (22/22 ACs) and whitespace checks passed at the current checkpoint.
+
+Restart continuation evidence:
+
+- Bounded orphan traversal failed first on SQLite: a one-candidate scan skipped all live identities and scheduled a later orphan. Session-leading indexed seeks now inspect bounded identities before ownership filtering. Fair cursor advancement, deletion and replacement selectors passed on SQLite and PostgreSQL with race detection (103.545s).
+- An independent SQLite subprocess held the native writer beyond cancellation. The real WAL reader progressed, no canceled batch mutations committed, Stop joined native entry settlement, and the writer pool admitted a later cleanup batch (race-enabled test passed in 3.740s). Separate native-entry, reader and Stop timing is recorded in the owned log.
+- Forced PostgreSQL connection replacement exposed lost test-schema scope. The test helper now supplies search_path at each connection startup; its replacement regression passed with race detection (1.241s). This fixes fixture isolation after genuine deadline cancellation, without altering product deadlines.
+- Restart changed the disposable PostgreSQL port. The initial resumed conformance run failed connection admission; it is not a pass. The full corrected race-enabled run passed on SQLite and PostgreSQL (565.964s), including populated previous-stable upgrade fixtures.
+- Terminal-first RPC completion failed after actual prompt pruning because the fallback required the removed prompt payload. The fallback now reads compact submission metadata; the orchestrator integration/capacity/terminal-first/Git-snapshot race selector passed (4.021s).
+- Actual browser and PostgreSQL native startup failed before pruning: generation-one bootstrap events arrived before the asynchronous initial SQL generation commit, closing the processor. Deterministic lifecycle RED preserves the same failure and proves foreign identities remain rejected. The fix buffers only explicit fresh bootstrap, publishes native identity before configuration, and requires committed authority before durable writes or ACK. Its full runtime validation remains pending.
+- Browser reset captured a typed nil worker before construction. Worker construction now precedes HTTP reset-handler registration; readiness still gates its start. Actual browser reset validation remains pending.
+- Fresh-bootstrap deterministic and broad lifecycle race checks passed (18.695s); final focused bootstrap rerun passed after the marker-clear assertion. Foreign identity and unmarked missing authority remain rejected. The broader suite skipped four provider cases without session-directory templates and the macOS-only Cursor smoke on this Linux host; those skips do not certify native Cursor behavior.
+- Real PostgreSQL backup/rollback/forward matrix passed (29.273s). A populated 699073-byte pre-pruning dump restored exact canonical/raw/checkpoint/uncertain/guard/job evidence. Actual cleanup retired a manual terminal prefix, compacted native output and pruned its prompt. Protected native bootstrap events intentionally retained retirement zero. Frozen N read the pruned database, completed a new native prompt/event writes, journaled deletion and refused retired-ID recreation; current forward upgrade completed a third native prompt. Exact old compact identity and once-only canonical completion counts survived. The frozen binary hash is unchanged.
+- Materialized bounded candidate CTEs eliminated repeated correlated proof evaluation. The meaningful query-plan regression failed first; race-enabled query-plan/recent-window/Integration/Crash/Bounds checks then passed on both engines (51.432s), including 10000-row active canonical compaction within unchanged batch deadlines.
+- The final independent SQLite holder check passed with race detection: native BEGIN/settlement 329.893 ms, canceled SQL work zero, concurrent WAL read 1.701 ms, Stop join 77.110 ms. No canceled mutation committed; later pool reuse passed. Worker lint refactor checks passed (1.046s), and workflow/no-resend checks passed (2.135s).
+- A retained frame arriving before capability negotiation failed the real restart probe. The deterministic regression now waits for negotiation without admitting unauthenticated data. Final bootstrap/negotiation race checks passed (1.144s); the actual Chromium settled-conversation restart probe passed (18.9s), including a second prompt in a new execution. Temporary diagnostics were removed.
+- PostgreSQL decorrelated bounded candidate proofs into lifetime effect/submission scans. Meaningful plan regressions first failed with 72000 effect rows and 12001 submissions. Correlated scalar probes now use indexes for at most 200 candidates. Terminal/latest/workflow plans also passed with 12000 unrelated historical rows. Focused both-engine race checks passed (45.928s and 24.791s); final proof plans passed (3.397s).
+- An inconsistent projected row above the contiguous cursor permitted payload pruning on both engines. The failing durable-row regression now passes with an explicit frontier predicate; retirement and payload pruning share that boundary.
+- Due-time raw discovery and separate compact-receipt progress passed schema/upgrade and bounded-page checks. The four additive format-1 columns are included in rollback snapshots. SQLite and PostgreSQL sustained the actual 20-events/second fixture over eight virtual minute intervals, with production batch deadlines and yields. The latest SQLite subtest passed (25.24s); PostgreSQL passed separately with race detection (30.201s), with zero failed/busy batches and oldest raw age 59 minutes. PostgreSQL steady-state evidence retains 70800 raw rows, 72499200 transport payload bytes and 70800 generic effects; its 350601216 database bytes and 115178 dead tuples are physical observations, while cluster-shared WAL is unavailable (-1).
+- Final `make build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package` passed after diagnostic removal. Catalog (369 decisions/1498 specifications), full spec lint, package audit (22/22 ACs, 65 links, 56 paths), SQL guard and whitespace checks passed at this checkpoint.
+- Final full `-race` store conformance passed on SQLite and PostgreSQL (307.603s), including populated previous-stable upgrades and the additive progress schema. The initial five-minute full-lint attempt timed out loading packages; an extended analysis run remains pending. Product cleanup deadlines and performance thresholds are unchanged.
+- The full desktop attempt passed three existing recovery cases and failed six cases. Native auto-start lacked a matching SQL submission; both-engine admission regressions reproduced missing proof and incorrectly permitted unresolved/storage-failure dispatch. Preparation now runs before provider start; GREEN and full browser reruns remain pending. Two browser assertion defects were also corrected: traffic capture must attach before socket creation, and compatible N startup may append authenticated metadata while preserving all old compact evidence.
+- The first paired 4500-sample SQLite comparison exceeded the unchanged latency gate: fenced idle p95 15.939 ms versus baseline 13.423 ms (1.187x), and active cleanup 23.955 ms (1.784x). All samples are retained. Host CPU/IO contention was substantial; neither result supplies a passing performance receipt. Query consolidation and a fresh controlled comparison remain pending.
+- The corresponding PostgreSQL comparison also failed: baseline p95 31.596 ms, fenced idle 38.319 ms (1.213x), and active cleanup 81.088 ms (2.566x). Actual active cleanup retired 48800/51400/53400 rows in the three runs while preserving eligible backlog, canonical bytes and the prompt summary. Command exit zero does not satisfy the latency acceptance gate.
+- Initial-dispatch GREEN passed all 12 SQLite/PostgreSQL cases with race detection: fresh and generation-three implicit identities, explicit identity, legacy delivery, unresolved peer, and SQL insertion failure. Durable proof existed before provider acceptance; failures sent no prompt and persisted the exact recovery block. Existing initial-launch regressions and executor binding also passed (orchestrator 10.853s, executor 1.496s), with no skipped cases.
+- Consolidated live-owner/submission validation preserves all predicates in one indexed query. Pre-lock discovery now reads four indexed identity fields, with full proofs and bounded payload reads reserved for locked reload. Source-plan RED proved repeated pre-lock proofs on both engines. Final race-enabled owner/concurrency, bounds, crash, preview, due/frontier, index, proof-plan and 10000-event recent-window checks passed on both engines (72.198s). The recent-window fixture now allows alternating receipt allocation while preserving every storage assertion and product budget. Fresh backend, Linux helper, E2E web and plugin-package builds passed with these changes and initial SQL preparation.
+- The immutable N witness covers retained-session recovery and new explicit-ID native prompt/event writes. Archived source/provenance indicates it inherited implicit preparation gaps: only explicit IDs installed pre-start preparation, while lifecycle derived implicit IDs and admission required their SQL rows; direct preparation also returned before protocol resolution when its ID was empty. These are source inferences, not measured N auto-start/retry failures. Keep the frozen artifact unchanged; shipping Release N must include initial and direct admission corrections. The rollback matrix does not certify those implicit paths in that historical witness.
+- The exact final native artifact (`701dbdac2d2f3b5ac926ae4ba297605e22e0891ff5763eebeb67029c75d197e6`) passed the real PostgreSQL matrix (35.599s, no skips). The populated 701385-byte mode-600 pre-pruning dump has SHA-256 `3aa0cd6201ba2e97b1f0828722aeea0a61cbaa1117aa6cf6cdaff597482db506`. Backup restore, compact prompt/native output, ordinary checkpoint retirement, all old/four additive state fields, N manual prompt/event writes, deletion journaling/retired-ID refusal, and current forward upgrade all passed; frozen N is unchanged.
+- A final five-minute whole-backend lint attempt reported zero issues but exited 4 at the analysis deadline; it is not a pass. The verification command now permits twenty minutes for package loading and analysis on this shared host. All configured analyses and the rebased comparison remain unchanged; cleanup deadlines and the latency target remain unchanged.
+- The extended whole-backend lint run completed with exit zero and zero issues. It includes initial SQL preparation, consolidated ownership validation and minimal discovery; later retry changes will require a fresh passing run.
+- The next complete desktop run passed six cases and failed three (8.7m). Pruning/history/replacement, transport recovery, capacity/model change, and completed-tool continuation passed. Automatic retry sent two native prompts but retained only the initial failed/fully-settled SQL submission and cursor 18, leaving completion blocked. Runtime evidence was captured before fixture disposal. The compatible SQLite fixture driver separately failed because its Go subprocess omitted the native `sqlite_fts5` build tag; the helper now uses and prewarms that exact tag. These failures require complete desktop/phone reruns after correction.
+- Actual retained-runtime retry producer tests failed all six durable SQLite/PostgreSQL cases before the shared correction (3.976s, no skips). Implicit direct dispatch now negotiates delivery first and prepares a fresh immutable SQL submission before provider acceptance. Explicit identities remain unchanged; legacy dispatch still uses its existing path. The eight-case GREEN run, including legacy controls, is pending during the serialized performance window.
+- The second paired SQLite comparison also failed the unchanged latency gate: baseline p95 4.956 ms, fenced idle 7.315 ms (1.476x), and active cleanup 11.594 ms (2.339x). Each state retains all 4500 samples. Minimal discovery and consolidated ownership do not supply a passing latency receipt; profiling and a later paired comparison remain required.
+- The second PostgreSQL comparison failed as well: baseline p95 18.481 ms, fenced idle 29.983 ms (1.622x), and active cleanup 53.183 ms (2.878x), with 4500 retained samples per state. Active cleanup retired 40600/34800/40000 of 100000 rows across the three runs and kept eligible backlog. All four second-window latency gates remain failed. Diagnostic profiles follow these measurements; profiled samples cannot supply final timing evidence.
+- Profiles exposed constrained benchmark pools: SQLite active foreground blocked 6.72s, including 6.28s in lag reads borrowing the writer and 0.45s in transaction entry. Production uses a separate four-connection WAL reader; PostgreSQL production shares a 25-open/five-idle pool, whereas the isolated fixture allowed one connection. Correct the same benchmark setup for baseline and current before a new comparison. Preserve earlier constrained-pool failures as stress observations; retain same-session locking, 100ms cleanup cadence, active backlog, all samples and the 1.10x gate. Normalized-payload allocation was 33.7% of SQLite idle allocated bytes; any hash refactor must preserve hash-v1 and corruption validation.
+- The required full backend/Linux-helper/E2E-web/plugin-package build passed after shared retry preparation and hash fast paths. Its native artifact SHA-256 is `88f5f6fa5098480eb3833f8d4e2324391c156292d31516d8beb24512256969b3`; frozen N still matches its Task 02 digest. The first both-engine hash/replay/crash/owner race regression passed (46.361s), and SQL guard passed. Final fast-path/adversarial checks, retry producer GREEN, production-pool paired benchmarks, browser suites and final-artifact rollback are pending.
+- Final hash fast-path, forged incoming hash and corrupt retained-receipt checks passed with both-engine replay/crash/admission/concurrency regressions under race detection (44.573s, exit zero). SQL guard passed. Production-pool baseline/current benchmark artifacts compiled with byte-identical fixture and startup-scope helper sources; profiled measurements are excluded from the next timing gate.
+- Corrected retry producer and broad direct-prompt GREEN passed with race detection: orchestrator 50.765s, executor 2.160s, 220 PASS lines, zero failures/skips/race warnings. Both engines executed all eight retry and twelve initial-admission cases. Two durable retries each had distinct immutable SQL identities and exact payload/hash before provider acceptance; original failed evidence stayed unchanged. Legacy retries dispatched twice without adding SQL submissions. Unresolved peers and SQL insertion failures dispatched nothing. Existing submission preparation, PromptTask, accepted-failure no-fresh-execution, transient/capacity/interruption continuation, initial launch and executor binding regressions passed. Earlier test-manager interface omissions are failed fixture attempts, not product passes; the six-case pre-correction semantic RED remains valid.
+- The first production-pool SQLite pair still failed: 4500 samples/state, baseline p95 12.252ms, idle 14.298ms (1.167x), active 14.104ms (1.151x). External CPU pressure rose from 7.9% to 67.8% between phase starts; this observation does not establish causality or waive the gate. PostgreSQL measurements from this window remain active. Future workload/ordering corrections require identical baseline/current setup and predeclared sample retention.
+- Source inspection found unequal starting history in those benchmark fixtures: current active seeded 100000 old events/effects and a 20-byte canonical sentinel, while baseline and idle bypassed seeding. The next fixture will share legacy-compatible history setup across all states, with baseline collector absent and current idle disabled. Predeclare baseline/idle/active interleaving for three repetitions, pool all 4500 samples per state, and preserve prior diagnostic failures. No fixture changes apply to the running window.
+- The completed PostgreSQL production-pool comparison also failed: baseline p95 41.100ms, idle 45.254ms (1.101054x), active 70.762ms (1.721687x), 4500 samples/state. The idle result exceeds 1.10 despite rounding to two decimal places. Active cleanup retired 44400/48200/45000 rows. All earlier samples remain preserved.
+- Shared legacy-compatible history setup now seeds the same 100000 old events/effects and 20-byte canonical sentinel in every benchmark state. Owner/retirement error-priority characterization passed on both engines before refactoring (2.466s). Durable admission now obtains owner and retirement booleans from one indexed statement, checks ownership first, and preserves the standalone legacy ledger check. Fresh full native/helper/web/plugin artifacts built successfully; focused race GREEN, full lint and equal-history interleaved timing remain pending.
+
+- Resume after the requested subagent pause confirmed the owner/retirement consolidation race checks passed (16.376s). The full artifact build passed with native SHA-256 `17e109cdb85e4236700664af3cfd1d73500c090f6b8b53df4c1fde542eb36d63`. Whole-backend lint completed with one cyclomatic-complexity finding in event reception (16 against the configured maximum 15); extraction and fresh validation are required. The equal-history timing window has not started. Browser and PostgreSQL workers remain held until timing drains. No test process was left running at the pause checkpoint.
+
+- The covered cursor identity/expired-frontier check was extracted without changing error order. Focused admission/hash/cursor/replay race checks, repository lint, and matched-history benchmark compilation passed. Whole-backend lint and required artifact builds remain running before timing. Public documentation validation passed 63 tests and 47 pages. Catalog (369 decisions/1498 specifications), full specification lint, package coverage (22/22 ACs, 65 links, 56 paths), and whitespace checks passed after the resume documentation updates.
+
+- The helper extraction passed focused race checks (12.795s), repository lint and compilation. The required full artifact build passed with native SHA-256 `d684ea00011aa10d540a26236491446374a4b121fd3e639d72d274f875b407ac`; frozen N is unchanged. Whole-backend lint passed with zero issues. All preparation commands drained before the interleaved equal-history latency window was authorized to start. The final PostgreSQL rollback matrix will execute inside the exact combined Task 08 race selector with every required environment supplied.
+
+- Equal-history interleaved SQLite comparison failed the unchanged latency gate with all 4500 samples per state: baseline p95 5299.694 microseconds, fenced idle 9224.732 (1.740616x), active cleanup 12616.508 (2.380611x). Active repetitions retired 6600/4800/4800 rows and retained 93400/95200/95200 raw backlog; canonical bytes remained 1536020. PostgreSQL repetitions remain running. These corrected-fixture results establish an unresolved foreground regression; command success does not complete performance acceptance.
+
+- The complete equal-history interleaved window drained successfully at the command level, but all four latency gates failed. PostgreSQL pooled p95 over all 4500 samples/state was 10716.455 microseconds baseline, 17436.389 fenced idle (1.627067x), and 33494.116 active (3.125485x). All active progress, remaining-backlog and canonical assertions passed on both engines. No source changed during the window (2026-10-10 16:26:22-16:32:10 UTC). Fresh matching profiles follow as diagnostics; churn, final browser and combined runtime/storage gates remain held for correction.
+
+- All six matching explanatory profiles drained successfully. SQLite foreground CPU was 1.58s baseline versus 1.73s fenced idle; receive CPU rose from 0.32s to 0.62s, and active cleanup introduced 800.5ms total native writer/pool wait. PostgreSQL foreground network traces were 13.62s idle versus 21.35s active; delivery-lock wait rose from 0.50s to 4.75s and commit time from 8.50s to 11.63s. These are diagnostic observations, not final timing evidence. A failing fresh/old-format index regression is being established before narrowing the due index to projected rows. Existing design already requires unpruned projected-row membership.
+
+- Corrected projected-index RED failed on both engines (4.365s) for broad fresh membership and missing upgrade/interruption handling. Atomic same-name repair now excludes unprojected rows from the due index. Final race GREEN passed (56.802s): fresh startup, the real N wide definition and older key layouts, six interruption rollback points, restart, N `CREATE IF NOT EXISTS`, unprojected protection, frontier/index seeking, PostgreSQL plans with 72000 effects, concurrency and hash/crash coverage. SQL guard passed after moving catalog inspection into the database dialect boundary; scoped lint passed with serialization after an external-runner collision. Benchmark compilation passed. The unchanged eighteen-command interleaved comparison started after all checks drained; all earlier failures remain recorded.
+
+- The projected-index interleaved SQLite rerun still failed with all 4500 samples/state: baseline p95 5303.431 microseconds, idle 8147.028 (1.536181x), active 14466.719 (2.727804x). The narrower index reduced idle absolute latency in this comparison, but does not meet acceptance. PostgreSQL is completing the same frozen window. Source-only analysis is mapping additional generic-receipt index writes before considering further changes.
+
+- The projected-index window completed at 16:48:25 UTC. PostgreSQL also failed with all 4500 samples/state: baseline p95 12050.196 microseconds, idle 15628.600 (1.296958x), active 31037.100 (2.575651x). All fixture correctness/progress/backlog assertions passed. The projected-row correction remains required by the reviewed design; it is not a passing latency receipt. Further index-write analysis must preserve frozen-reader type-prefix access and current bounded latest-terminal lookup even with many same-submission terminal receipts. Churn, million-event and complete browser gates remain pending.
+
+The original SQLite duplicate-subquery RED raw log was overwritten accidentally during later PostgreSQL plan work. Its earlier tool receipt remains; the missing raw file is not claimed as retained evidence.
+
+Open gates:
+
+- Meet the unchanged production-pool paired baseline/fenced/cleanup-active latency gate and measure concurrent owner replacement/deletion. Retain all failed comparisons and raw samples.
+- Complete actual million-event 1KiB/4KiB fixtures on both engines and the protected-gap variants, including canonical equality, reopen/manual compaction and logical/physical storage accounting. Indexed source/proof/orphan regressions and steady-state capacity already passed; deadline failures cannot supply capacity passes.
+- Run the complete desktop and phone suites against the current native artifact, including actual SQLite rollback and automatic retry settlement. Earlier partial smoke and recovery passes do not replace those suites.
+- Rerun the actual PostgreSQL backup/rollback/forward matrix on the final native artifact. Preserve the frozen witness and its explicit-ID scope.
+- Run the exact combined retention race selector, final whole-backend lint, package/catalog/specification checks and final status/whitespace inspection. Earlier corrected conformance and lint receipts remain recorded with their source boundaries.
+
+Exact logs and frozen artifacts are retained outside the worktree under `/tmp/kandev-retention-resume-20261009/`. No staging, commit, push, publication or workflow completion has occurred.
+
+
+Ownership-index correction evidence:
+
+- The first SQLite/PostgreSQL RED failed the required index definitions (5.187s). Over 100000 generic effects, PostgreSQL measured 18350080 bytes for the incrementally populated three-column ownership index versus 712704 bytes for the session/incarnation prefix. A later rebuilt wide control measured 10559488 bytes; build method changes physical size. These measurements do not establish a latency pass.
+- The second RED failed the missing atomic upgrade and crash boundaries (9.426s). SQLite returned the exact ordered owned keys across known and unknown incarnations. PostgreSQL selected a sequential scan for a forced-generic identity query when the ownership prefix was dominated by blank identities; index availability alone does not guarantee planner selection.
+- The first race-enabled GREEN passed both engines (18.844s), including eight upgrade/crash cases, restart, frozen-reader CREATE IF NOT EXISTS replay, and 100000 generic effects. With 1000 distinct owned identities, the actual forced-generic identity query used the same-name prefix index and returned one row; the guarded owned-key query used the sparse ordered index and returned ten rows. Terminal lookup remains unchanged. Broader deletion/orphan regressions, production purge plans and a fresh complete latency comparison remain pending.
+
+- The ownership-index broad race GREEN passed both engines (51.712s), covering schema repair, deletion/replacement, orphan admission and preview. Scoped lint and SQL source guard passed. Cluster-scoped WAL diagnostics for 10000 generic inbox/receipt inserts measured 37938304 bytes with the wide index and 28397312 bytes with the prefix; concurrent server work is included, so this is diagnostic evidence.
+- The ownership-index matched-history timing window completed with exit zero and all 4500 samples/state/engine retained. SQLite baseline p95 was 5872.379 microseconds, idle 5451.234 (0.9282837501x, pass), active 11148.144 (1.8984033558x, fail). PostgreSQL baseline was 15071.797 microseconds, idle 13461.634 (0.8931671519x, pass), active 26475.676 (1.7566369823x, fail). Actual cleanup progress, remaining eligible backlog and canonical content assertions passed. Both active latency gates remain open; the window does not complete this order.
+
+
+Bounded deletion-query correction:
+
+- The first purge-plan attempt failed because the fixture requested a payload below the helper's JSON envelope size. The next attempt blocked its observer behind the fixture's single writer connection and was stopped with SIGQUIT. These retained logs are fixture failures, not meaningful RED evidence. The observer now uses a second schema-scoped connection.
+- The corrected race RED failed in 16.342s. It observed the actual executed phase statement through PostgreSQL activity, rolled the phase back to a savepoint, and explained that same statement inside the writer transaction. The owned case examined 100010 unrelated generic receipts before returning ten keys; cursor attribution also failed. No copied production query is used as the test subject.
+- Separate owned and cursor-attributed deletion queries passed the first race GREEN (10.080s). The owned branch keeps unknown incarnations; the cursor branch retains the original OR scope, including legacy blank owners and differing explicit owners attributed to the retired stream. PostgreSQL bounds the stream lookup through a lateral limit. The first owned fixture examined twenty matching rows and the cursor fixture ten. Larger matching history, both-engine scope and deletion/orphan regressions are still running.
+
+- The expanded purge GREEN passed with race detection (60.576s), including 100000 matching effects plus 100000 unrelated generic receipts. The actual owned and cursor-attributed statements each read ten matching effects; deletion probed the ten selected keys. All four SQLite/PostgreSQL scope cases passed, preserving unrelated inbox/generic evidence and deleting unknown-incarnation or cursor-attributed effects under a three-row batch cap. Deletion, replacement and orphan regressions passed. Scoped repository lint and the SQL source guard passed with exit zero. The PostgreSQL two-cursor fixture legitimately used a tiny cursor-table scan; no effect-table scan through unrelated history remained.
+
+
+### Continued reload and cursor-bound evidence
+
+- The prepared-reload paired window completed with exit zero. All 4500 samples per state and engine remain retained. SQLite baseline p95 was 4955.691 microseconds, idle 5537.844 (1.1174716099x), and active 13296.756 (2.6831285486x). PostgreSQL baseline was 8656.681 microseconds, idle 16280.082 (1.8806378565x), and active 27281.411 (3.1514862336x). All four strict gates failed; framework, cleanup progress and remaining-backlog assertions passed. No threshold or sample-selection change follows these results.
+- A short comparative profile observed reload CPU fall from 0.09s to 0.05s, while total cleanup CPU rose from 0.40s to 0.53s and foreground pool wait rose from 0.96s to 1.03s. Batch activity differed, so this is diagnostic evidence only. It does not establish an overall benefit.
+- A fresh purge RED passed the fixture preconditions and failed in 15.282s. Both engines lacked bounded empty-cursor page progress. The actual PostgreSQL phase plan read 1001 cursors before finding ten attributed effects. Earlier effect-index probes were bounded, but empty cursor history still violated the work bound. Bounded cursor pages and atomic last-stream progress are now under GREEN validation, including failure rollback, reopen and a one-row budget.
+
+- Cursor-page GREEN passed both engines with race detection (56.267s), including the actual production plans, durable empty-page checkpoints, failure rollback, reopen, one-row budget, deletion/replacement/orphan and schema regressions. PostgreSQL selected ten empty cursors and made ten indexed effect probes under the ten-candidate cap; no lifetime cursor scan remained. The additive `(session_id, stream_id)` index and existing job `last_stream_id` support this seek. Cursor and deletion work share the original candidate budget. All cursors remain until the effect phase finishes. A further atomic deleted-effects/checkpoint rollback case hit a concurrent test-only compile mismatch in the new compaction-cache test; that worker corrected the mismatch. The root case will rerun. Final lint and the SQL guard remain pending.
+
+- The corrected atomic-effects/checkpoint case passed both engines with race detection (2.466s). Failure after progress rolls back both deleted effects and the cursor frontier; a canceled retry changes neither. Successful retry deletes two effects, saves the exhausted-page frontier, and keeps all three cursors. Scoped repository lint reports zero issues and the SQL source guard passes. Root runtime handles are drained.
+
+
+### Fixed compaction SQL evidence
+
+- Fixed-shape compaction RED failed on the one-row query and four arguments. Both hash and payload stages now use bounded 200-row NULL-padded statements prepared before writer entry. All three cached SQL statements publish together after successful preparation; fresh parameters and SQL proofs remain transaction-local. Hash and payload stages retain their order, affected-row checks and failure hooks. An intermediate test-only integer-type compile failure was corrected and retained. Focused race GREEN passed in 28.734s; expanded GREEN passed in 28.211s. Scoped lint reports zero issues; the SQL guard and benchmark compilation pass.
+- The paired window completed with exit zero and all 4500 samples per state and engine retained. SQLite baseline p95 was 4665.825 microseconds, idle 7258.274 (1.5556249967x), and active 10920.503 (2.3405299170x). PostgreSQL baseline was 8303.768 microseconds, idle 23234.076 (2.7980160332x), and active 48732.670 (5.8687417568x). All four strict gates failed. Actual cleanup, backlog and canonical assertions passed. An initial copied-baseline execute-permission failure occurred before any test ran; the corrected window is separately retained. No latency pass is claimed from SQL reuse.
+- Read-only cursor-purge audit found no concrete correctness gap in supported producers: owned rows and selected cursors share the candidate quota, saturated pages retain their frontier, and only fully exhausted pages advance it atomically. Same-session jobs serialize; blank and mixed incarnations preserve the original SID-wide attribution scope. This source audit supplements, rather than replaces, the executed checks.
+
+
+### Foreground reads and background work quantum
+
+- Actual SQLite authorizer RED rejected the extra whole-row receipt read before a fresh authenticated future-sequence event (0.233s). Receipt duplicates still require a read. The covered fast path uses optimistic INSERT only when a cursor exists and the sequence exceeds its received frontier. Owner checks, locks, cursor identity and expired-frontier checks remain first; conflicts independently validate stored hashes. Expanded SQLite/PostgreSQL race GREEN passed in 31.691s, including six out-of-order, corruption and missing-checkpoint cases. Scoped lint, SQL guard and benchmark compilation passed.
+- The 200-candidate control sustained 20 events/s on both engines (49.93s) with zero failed batches. Explicit 50-candidate worker batches failed the unchanged raw-age limit on both engines (73.54s): repeated quiet phases limited cleanup to about 800 events/minute, and oldest raw age reached 63 minutes. This is measured capacity RED, not a deadline or fixture failure.
+- Deterministic fairness RED reported seventeen orphan checks and sixteen retirement checks per pass instead of one (0.021s). A separate remaining-yield RED reported a 5.04s pass (0.021s). The worker now visits all phases, then requeues only phases that commit cleanup work; quiet phases return next pass. It ends before a full 100ms yield would exceed the remaining pass budget.
+- Productive-phase GREEN passed original 200-candidate and explicit 50-candidate steady-state fixtures on both engines, plus worker, readiness, shutdown, metrics and yield-budget checks. Original-control elapsed was 26.66s; 50-candidate capacity elapsed was 61.45s. Both smaller-batch fixtures preserved the 20events/s arrival rate over eight virtual minutes, reported zero failed/busy batches, and ended with oldest raw age 59 minutes. First passes stayed below five seconds and pruned 2050 SQLite/1900 PostgreSQL events; subsequent passes pruned 1200 events.
+- Effective-background-quantum RED failed default/150/200 ceilings before adding a 50-candidate event/prompt lease target (0.025s). Typed startup defaults and limits remain 200; lower operator ceilings still apply. Repository and offline defaults remain 200. Sample-limit reporting and the active benchmark consume the same effective production quantum. Final default-worker and explicit-50 capacity GREEN passed with race detection on both engines (repository 132.092s; worker 1.027s). Both eight-minute runs sustained 20 events/s with zero failed/busy batches and oldest raw age 59 minutes; productive passes respected the five-second budget. The effective-quantum cases, readiness, shutdown, metrics and yield-budget checks passed. Fresh lint/SQL guard/build/timing remain pending.
+
+- After the background-quantum documentation update, catalog validation passed (369 decisions/1498 specifications), full specification lint passed, and package audit passed (22/22 ACs, 65 links, 56 owned paths). Public documentation passed all 63 validator tests and all 47 published pages. Whitespace checks passed.
+
+- Final quantum-50 repository/worker lint completed with zero issues. SQL guard and fresh benchmark compilation passed. The serialized matched-history comparison started after these handles drained; native builds and browser/compatibility runtime checks remain held for its duration.
+
+- The quantum-50 matched-history window drained with exit zero (2026-10-10 18:12:01-18:16:22 UTC), preserving all 4500 samples per state and engine. SQLite baseline p95 was 4842.023 microseconds, idle 5456.917 (1.1269911357x), and active 9592.495 (1.9810924070x). PostgreSQL baseline was 8300.603 microseconds, idle 21070.487 (2.5384284732x), and active 16172.408 (1.9483413434x). All four strict latency gates failed; actual cleanup, remaining-backlog and canonical assertions passed. Smaller leases supply capacity evidence but do not complete foreground-latency acceptance. Diagnostic profiles follow separately.
+
+- Explicit 30-candidate characterization passed its raw-age assertions on both engines (repository 86.954s), but it is not a passing operational-bound receipt: one SQLite and three PostgreSQL passes recorded deadline failures, with measured durations slightly above five seconds. Default background target remains 50. The independent quantum-50 profile measured 300ms total foreground writer wait and about 100ms cleanup CPU for 1050 retired rows; normalization consumed about 30ms. Ten-millisecond CPU sampling limits precision, and profiled timings are excluded from acceptance.
+
+### Lock commands and payload normalization
+
+- Actual PostgreSQL command-count RED failed with four/six network commands (repository 1.048s); actual sorted lock-prefix barriers, cancellation/server release, successful retry and a replacement-owner refusal already passed. The first fixture attempt was stopped before tests because its one-connection pool could not support the barrier. An immediate cancellation observation also required bounded server-release polling; neither fixture defect supplies behavior RED.
+- Receive and canonical projection now acquire the same exclusive turn/session/stream locks through dependent one-row MATERIALIZED CTEs in one lock-only command. Sorted identities, namespaces and lock strength are unchanged. Authority reads remain separate: a waiting command's initial snapshot cannot prove current ownership. First actual PostgreSQL GREEN passed (2.267s), including order, cancellation and freshness. SQL guard passed; broader owner/inbox/canonical regressions remain running.
+- Decode-once characterization passed thirteen behavior cases before refactoring, and allocation RED reproduced compaction/preview overhead. Compaction and preview now reuse the typed decoded payload for normalization without changing hash-v1 framing, identity, lifecycle stripping, malformed-input or role/type guards. Fresh proofs, bytes, stored-hash validation and mutation failure hooks remain under the original locks. Race GREEN passed both engines (24.195s), with no skips and the literal pre-refactor producer hash unchanged. Allocation counts dropped from 77 to 53 for compaction and 125 to 52 for preview, against a 50-allocation single-hash reference. Repository lint reports zero issues; SQL guard passed. These mechanism checks do not replace the required latency comparison.
+
+- Broader actual owner/admission, inbox duplicate/conflict/replay, canonical chunk/batch/reasoning/gap and PostgreSQL executor-lock race checks passed (repository 7.328s). All root runtime handles drained before the next complete matched-history timing window. The candidate includes decode-once normalization, unchanged fifty-row background target and one-command ordered event locks; the baseline artifact remains unchanged.
+
+- The normalization/lock-command window completed with exit zero (2026-10-10 18:26:36-18:30:52 UTC), retaining all 4500 samples per state. SQLite baseline p95 was 4694.637 microseconds, idle 6498.810 (1.3843051124x), and active 6706.967 (1.4286444298x). PostgreSQL baseline was 7874.337 microseconds, idle 8746.438 (1.1107523084x), and active 19001.661 (2.4131124944x). All four strict gates failed, including the PostgreSQL idle ratio without rounding. Cleanup/backlog/canonical assertions passed; further diagnosis and bounded inbox/submission purge plans remain required.
+
+Scoped PostgreSQL barrier investigation: the paired design and proposed barrier ADR define shared event-only session barriers, with exclusive turn/stream locks and exclusive terminal, authority, unsafe-effect and prompt-selected paths. Actual public-operation RED coverage precedes implementation. Existing failed latency windows remain blockers.
+
+- Inbox/submission purge-plan RED passed scope fixtures but failed actual PostgreSQL statement plans (7.593s): each LIMIT 10 phase examined 100,010 rows. Ordering now follows the existing session/incarnation/stream-or-ID indexes. No index or orphan-discovery identity changed. GREEN passed (24.276s), with ten indexed candidates and ten primary-key probes, plus both-engine deletion/replacement/orphan race coverage. A test-constant lint correction reran the changed tests (10.196s); scoped lint and SQL guard passed.
+- Scoped-barrier baseline RED passed terminal and six unsafe supplied-effect exclusions plus authority/mutation controls, but blocked different-stream delivery and held exclusive modes for both event-only and prompt-selected sessions. A deletion fixture lacked an owning table; its setup is being corrected before GREEN. The earlier different-stream public Receive RED also independently passed its same-stream exclusion control. No shared-mode performance result is available yet.
+- Shared-mode document checks passed: 370 decisions, 1498 specifications, full spec lint, package coverage 22/22 ACs and 66 local links, and whitespace. The new barrier ADR remains proposed until actual mode/exclusion checks pass.
+
+- The explicit 30-row rate characterization exposed deadline cancellations in the last shortened batch lease. A simulated-clock RED then proved a real admission defect: a new batch started with only 104 ms left in its five-second pass. The worker now admits a batch only if its full 250 ms lease fits after the yield. Worker race GREEN passed (1.026s), preserving productive phase service, fairness, cancellation and shutdown. Default background quantum stays 50; real capacity must rerun after this admission change.
+- Historical paired SQLite idle profiles completed without overlapping task runtimes (18:44:34–18:44:47 UTC). They explain repeated preparation of two fixed owner-query shapes; they are not a performance-gate result. SQL-only caching is in progress with fresh post-lock ownership checks and original mismatch-before-retirement priority. The latest four failed latency ratios remain authoritative until a new complete controlled window passes.
+
+- Shared-barrier final behavior GREEN: all ten new top-level PostgreSQL tests (30 cases) passed with race detection. Actual public calls prove different-stream progress, same-stream exclusion, exact generic ownership admission, nine unsafe-effect/ownership fallbacks, terminal exclusion and false-Terminal refusal, nine authority/terminal/workflow/deletion/retirement controls, mixed prompt/event lock modes, sorted order and cancellation. The broad selector ran 85.989s with 142 passes and only an older private-helper fixture lacking pre-BEGIN SQL preparation. Its corrected FreshOwner-only rerun passed in 2.185s with fresh owner refusal before cursor access. Both receipts contain no skips or race warnings. The barrier ADR is accepted; latency remains unproved.
+- Two-shape owner-plan cache RED observed seven/unassociated and nine/associated native SQLite preparation reads on repeat admission (0.236s). Final race GREEN passed in 8.785s: no repeated preparation, changed owner still refused, both engines' cancellation/close/reopen, forced PostgreSQL connection replacement, native prepare/publication cancellation and Close races, duplicate publication, authenticated admission and corrected CTE fresh-owner checks. Only SQL plans are cached; each event reads fresh locked evidence. Scoped repository lint and SQL guard passed. Fresh benchmark artifact SHA-256: `3cabb1eb9ea02747829c6afac092d2afe0b1609134d08c72525ada5b32a8f763`. Baseline artifact is unchanged; timing waits for the real capacity run to drain.
+
+- Full-lease capacity race repeat passed in 216.350s on SQLite and real PostgreSQL. Default 50, explicit 50 and explicit 30 each sustained eight virtual minutes at 20 events/s using real 100 ms yields. All 48 minute snapshots had zero failed/busy batches; oldest raw age remained within grace plus two intervals. No skips or race warnings. This closes the prior shortened-lease deadline failures; default background quantum remains 50. No foreground latency waiver follows from capacity.
+
+- Shared-session/owner-cache controlled window completed 18:56:24–19:00:32 UTC with all 18 commands and data-preservation assertions passing, but all four strict latency gates failed. Every state/engine retained all 4500 samples. SQLite baseline/idle/active pooled p95: 4869.329/5452.843/8081.277 us; ratios 1.1198345809042682 and 1.6596284621556687. PostgreSQL: 8095.896/9335.780/16676.281 us; ratios 1.1531496946107016 and 2.0598437776374596. Active commands retired SQLite 1350/950/1000 and PostgreSQL 6250/7050/4950 receipts while retaining eligible backlog, canonical 1536020 bytes and one prompt summary. Runner exit zero does not close the gate. Logs, pressure and receipt are preserved under `benchmark-shared-owner-cache`; follow-up active profiles and actual SQL/lock plans are authorized without source edits.
+
+
+### Direct expired-prefix retirement follow-up
+
+- Active profiles drained successfully. Actual PostgreSQL lock samples showed shared event barriers and no captured blocked advisory requests; WAL waits dominated. SQLite foreground writer-pool wait accounted for about 8.7% of the profiled time. These diagnostic samples do not establish latency acceptance.
+- Requirements and checkpoint ADR permit checkpoint-backed absence for expired prefixes; hashes remain durable for replayable receipts above the checkpoint. The paired design and Task 03 now explicitly distinguish validated direct deletion from retained-receipt compaction. TDD implementation must keep strict contiguous eligibility, raw grace, row/byte bounds, independent corruption checks, completed generic receipts, atomic checkpoint/marker/progress, all existing failure boundaries and compact replay behind protected gaps. No new latency pass is claimed.
+
+
+Direct-retirement design checkpoint: catalog validation passed (370 decisions/1498 specifications), full specification lint passed, package structure/coverage passed (22/22 ACs, 66 links, 56 owned paths), and whitespace checks passed. Production direct-prefix implementation and measured gates remain pending.
+
+- Actual server-prepared generic compaction UPDATE plans passed subject validation and used exactly 50 primary-key probes, with no lifetime inbox scan. Hash UPDATE measured 0.976 ms and 103705 WAL bytes; payload UPDATE measured 0.716 ms and 40576 WAL bytes before deletion. These rollback-only diagnostic measurements support removing intermediate writes for the exact expired prefix. An earlier introspection query matched itself and yielded invalid zero-WAL results; those files are preserved as invalid and supply no evidence. Temporary diagnostic source was removed after saving valid plans externally.
+
+- Meaningful direct-prefix RED failed in 7.224s on all four SQLite/PostgreSQL legacy/hash-v1 trigger witnesses: cleanup rewrote expired sequence 1 before deleting it. All eight corruption/version/byte-count/raw-grace controls passed. Production partitioning now follows this RED; direct raw deletion will be limited to explicitly validated contiguous prefix keys, while retained receipts keep the existing compact/hash guards.
+
+- Current six changed browser files passed scoped ESLint and Prettier checks with exit zero, including the native FTS5 fixture and waits for actual checkpoint retirement plus prompt pruning. E2E is excluded from the web TypeScript project and has no separate tsconfig; these checks do not claim a browser runtime or whole-web typecheck pass. Frozen Release N hash and rebased HEAD were reverified; no staged or deleted tracked files.
+
+- Initial direct-prefix race GREEN passed in 6.769s on both engines: four legacy/hash-v1 trigger witnesses avoid intermediate UPDATEs, protected sequence 2 pins the frontier, and sequence 3 remains compact and replayable. All eight independent corruption/version/bytes/raw-grace controls pass. Existing crash/reopen, concurrent lock, bounds, duplicate/hash, replay and statement-cache regressions are running before source freeze and new timing.
+
+- Expanded direct-prefix race GREEN passed in 69.383s, including all scoped shared barriers, same-stream/exclusive authority and prompt exclusions, sorted cancellation, SQLite/PostgreSQL failure stages and reopen, replay, bounds, corruption/format and SQL-cache lifecycle. Scoped lint completed with zero issues; full SQL guard passed. A mixed compacted/raw-v0/raw-v1/recent-tail accounting regression and final compilation remain before the next full controlled latency window.
+
+- Final mixed-prefix accounting GREEN passed (7.920s): existing compact rows, raw legacy/hash-v1 rows and a recent protected tail retain correct pruning/retirement counters. Scoped lint and SQL guard passed; fresh benchmark compilation passed. Candidate SHA-256 `b3aa4ab3f7585f5c654a098b9cf77e751804f5170cf6d86e7ba1e3a40fad6585`; immutable baseline remains `3b21db2b295ac620ab7d3f61b6e82553c72aa1008843ec5566ae0c64cf08965e`. The exact 18-command interleaved comparison is now running under `benchmark-direct-prefix`, with frozen source and all 4500 samples per state retained. Root/browser/PostgreSQL runtime work stays held.
+
+- Direct-prefix full controlled window completed 19:22:02–19:26:25 UTC, exit zero and all 18 command/data assertions passing. All 4500 samples/state/engine remain retained. SQLite baseline/idle/active pooled p95: 4937.074/5488.608/6858.674 us; ratios 1.1117127270119913 and 1.3892183912981657 (both fail). PostgreSQL: 13641.301/11960.917/12082.905 us; ratios 0.8768164414816446 and 0.8857589902898558 (both pass). Actual retirement: SQLite 1250/900/1000, PostgreSQL 5200/6500/5700, with eligible backlog and canonical 1536020 bytes/one prompt preserved. This closes two gates for this candidate/window; overall acceptance remains open. All runtime handles drained. Production generic receipt factories omit session/incarnation fields; read-only analysis is checking whether sparse ownership membership can reduce remaining SQLite write cost while preserving bounded orphan/purge attribution.
+
+
+### Sparse ownership membership follow-up
+
+- Source and frozen-artifact inspection confirm production generic receipts have blank session/incarnation fields. Existing orphan identity queries already exclude blank session IDs through their seek boundary; making that predicate explicit permits sparse same-name identity membership without changing discovery scope. Owned unknown incarnations stay indexed; blank or differently owned cursor-attributed effects retain the stream path. The paired design now records nonempty identity/purge membership before production changes.
+- The earlier bare parameterized SID/incarnation identity-plan fixture was stronger than the frozen N contract and was incorrectly labelled as an N query. Actual N reads use primary-key, stream/type or typed terminal predicates and an admission OR-join. TDD will retain bounded current probes with explicit membership guards, compare actual N-shaped reads/admission against the full-index control, and avoid claiming a globally bounded N OR-join. Same-name full-two/full-three index repair must be atomic, failure/reopen safe, and unchanged by N CREATE IF NOT EXISTS. PostgreSQL latency passes remain candidate-specific; the next source requires a new complete comparison.
+
+- Sparse-membership meaningful RED failed in 6.874s on both engines: fresh indexes still include blank owners, full-two-key upgrade skips the three failure boundaries, and full-three-key repair recreates a full index. Repeated readiness and unchanged N additive DDL are included. A separate forced-generic actual orphan-query RED is running with an installed partial index and 10000 blank receipts; production predicates are still unchanged.
+
+- Actual forced-generic orphan-query RED failed in 0.807s with a fixture-installed sparse index: the production statement used a sequential scan through 10000 unrelated blank receipts. The correction now adds explicit guards to the three effects identity probes and final effects-existence branch, plus atomic same-name sparse repair. Focused race GREEN and actual N-shaped controls are pending; no formal timing started on this source.
+
+- Final sparse race GREEN passed in 17.769s, including cancellation after index DROP, actual reopen, fresh/old-two/old-three repair and artifact-shaped N controls. The legacy N admission OR-join scanned 10001 effects with both full and sparse indexes; typed recovery stayed indexed. A 10000-blank-receipt index measured 81920 versus 8192 bytes; actual rollback-only 1000 generic inserts produced 538236 versus 473464 WAL bytes. SQL guard and benchmark compilation passed. Sparse candidate SHA `e51980564038831fd0981a8112b888125fc5ab8d645dcaa906fe2b8ff61f89d9` has no formal latency result. The user now requests a draft PR for handoff; all final gates remain pending in [handoff](handoff.md).
+
+- Handoff full native/Linux-helper/E2E-web/plugin build passed on sparse source. Native SHA `818c856021b1280439043548f81e4da5a20968864d9550ea4dd77c8b46fe33f3`. Catalog (370 decisions/1498 specifications), full specification lint, package coverage (22/22 ACs, 68 links) and whitespace checks passed. Whole-backend lint is running before the user-authorized draft commit. Final runtime acceptance remains pending.
+
+- Handoff whole-backend lint passed with zero issues on final sparse source. All root build/lint handles are terminal. Normal commit hooks and draft publication follow the user's handoff request; runtime/storage/latency gates stay open.

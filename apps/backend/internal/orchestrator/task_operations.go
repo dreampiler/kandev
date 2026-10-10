@@ -1070,23 +1070,14 @@ func (s *Service) startCreatedSession(
 	); err != nil {
 		return nil, err
 	}
-	if options.deliverySubmissionID != "" {
+	if effectivePrompt != "" || len(attachments) > 0 || options.deliverySubmissionID != "" {
 		launchOptions.DeliverySubmissionID = options.deliverySubmissionID
 		launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID string) error {
-			_, admissionErr := s.prepareAgentDeliverySubmission(
-				admissionCtx,
-				session,
-				executionID,
-				effectivePrompt,
-				attachments,
-				promptTaskOptions{
-					deliveryProtocol:     options.deliveryProtocol,
-					deliverySubmissionID: options.deliverySubmissionID,
-					deliveryPayloadHash:  options.deliveryPayloadHash,
-					deliveryClaimUpdater: options.deliveryClaimUpdater,
-				},
-			)
-			return admissionErr
+			return s.prepareInitialAgentDeliverySubmission(admissionCtx, session, executionID,
+				effectivePrompt, attachments, promptTaskOptions{
+					deliveryProtocol: options.deliveryProtocol, deliverySubmissionID: options.deliverySubmissionID,
+					deliveryPayloadHash: options.deliveryPayloadHash, deliveryClaimUpdater: options.deliveryClaimUpdater,
+				})
 		}
 	}
 	if options.initialCreatePrompt && session.IsPassthrough {
