@@ -2683,9 +2683,11 @@ func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, task
 		// A failed resume only owns the newly opened local client and forward. The
 		// recorded Pod/PVC inventory remains the authority for a later retry or
 		// terminal cleanup, so never discard its durable row here.
+		m.cleanupPassthroughMCPConfig(execution)
 		m.executionStore.Remove(execution.ID)
 		return
 	}
+	m.cleanupPassthroughMCPConfig(execution)
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if !discardDurable || taskCleanupActive {
@@ -2727,6 +2729,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		client.Close()
 	}
 	execution.EndSessionSpan()
+	m.cleanupPassthroughMCPConfig(execution)
 }
 
 // rollbackRegisteredLaunch stops the runtime before removing either side of
