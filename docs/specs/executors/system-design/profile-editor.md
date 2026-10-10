@@ -22,6 +22,9 @@ pages retain their existing routes and behavior.
 | AC-EXECUTORS-PROFILE-EDITOR-001.5 | State and permissions |
 | AC-EXECUTORS-PROFILE-EDITOR-001.6 | Phone composition |
 | AC-EXECUTORS-PROFILE-EDITOR-001.8 through .12 | Partial-save script persistence |
+| AC-EXECUTORS-PROFILE-EDITOR-001.13 through .15 | Current catalogue publication |
+| AC-EXECUTORS-PROFILE-EDITOR-001.16 through .18 | Normal creation catalogue publication |
+| AC-EXECUTORS-PROFILE-EDITOR-001.19, .20 | Executor policy acknowledgement publication |
 
 ## Components and navigation
 
@@ -197,7 +200,270 @@ The repair changes no UI layout, copy, navigation, or touch behavior; backend
 integration evidence satisfies this data-only mobile boundary without new
 browser tests or frontend builds.
 
+## Current catalogue publication
+
+The normal `ProfileEditForm` branch of `ProfileEditPage` uses
+`useProfilePersistence` in `apps/web/app/settings/executors/[profileId]/page.tsx`.
+Successful save and remove acknowledgements publish over the current owning
+store catalogue. `setExecutors` replaces the whole `executors.items` array,
+so publication must retain unrelated changes received during transport.
+
+Obtain the owning store with `useAppStoreApi`. After `updateExecutorProfile`
+succeeds, read `appStore.getState().executors.items` immediately before the
+synchronous publication. Supply that current array to the existing
+`upsertExecutorProfile` in `profile-edit-page-chrome.tsx`. It already replaces
+only the acknowledged profile while retaining the matching current executor's
+metadata and other profiles. Retain the helper's existing missing-target
+fallback; this repair does not define save versus target-deletion ordering.
+Do not introduce another await between the current read and publication.
+The persistence callbacks no longer need a subscribed catalogue as their
+publication input; page ownership resolution remains subscribed as before.
+
+For the same hook's successful remove, read the current catalogue only after
+`beforeDelete` and `deleteExecutorProfile` finish. Map that current array and
+filter only the target profile from the matching executor. Preserve the existing
+navigation-blocker bypass, route, dialog, deleting state and failure handling.
+Implement this sibling correction only after independent page-level causal
+coverage proves the captured-map loss. Failed transport never reaches either
+publication path. Save serialization, payload, contributors, draft baselines,
+dirty tracking, success/error notifications and permissions retain their owners.
+
+### Consumers and compatibility
+
+`task-create-dialog-state.ts` subscribes to `executors.items`.
+`task-create-dialog-computed.ts` flattens those profiles and fills missing
+`executor_type` and `executor_name` from their owning executor, then calls the
+actual `useExecutorProfileOptions` in `task-create-dialog-options.tsx`.
+`task/new-subtask-dialog.tsx` uses the same catalogue and equivalent fallback
+projection before that options hook. Option availability continues to use
+current provider/capability gates; preserving a row does not make an ineligible
+profile selectable. `task/new-session-dialog.tsx` resolves its executor label
+from the catalogue and uses `useTaskExecutorProfile` for profile context; it
+does not expose the task-create executor options picker. This repair owns
+catalogue publication, not selection defaults or launch logic.
+
+`ProfileEditPage` dispatches `plugin_remote` to `PluginExecutorProfilePage` and
+`use-plugin-executor-profile-page.ts`. That path already reads its owning
+`appStore.getState()` for load/save/delete. `useKubernetesExecutorResource` in
+`hooks/domains/settings/use-kubernetes-settings.ts` also reads the current store
+for its connection create/update/remove publications. These are compatible
+patterns, not migration targets. Kubernetes profile editing still uses the
+normal form's existing combined contributor and administrator gate.
+
+### Verification and phone boundary
+
+Independently authored component integration tests mount the real page,
+`StateProvider`/`createAppStore`, `ToastProvider` and `SettingsSaveProvider`.
+Use controlled external `fetchJson` transport to hold acknowledgements, real
+form editing, the actual save coordinator, and real catalogue subscriptions.
+Only the external Monaco renderer may additionally be replaced for its absent
+DOM-environment visual capability. Do not replace internal forms, store actions,
+contributors, persistence, routing or the actual options hook.
+
+Publish later additions, updates, removals and matching-executor metadata/sibling
+changes through the real store while transport is pending; then settle and
+assert both the catalogue and options from actual `useExecutorProfileOptions`
+with the production fallback projection above. Include unchanged-catalogue
+success and rejection/draft/dirty/notification controls. Independently exercise
+real delete confirmation, successful navigation and rejection without invoking
+private callbacks. Unmount, settle held promises, restore navigation and drain
+owned timers on all exits.
+
+This is state/data normalization inside an existing component. Layout, touch,
+scroll, navigation structure, copy and viewport-dependent interaction do not
+change. The mobile-parity state/data exception permits these targeted component
+tests instead of new phone/browser tests or builds. No new persistence, schema,
+API, telemetry or arbitration boundary is introduced, so no new ADR is needed.
+
+## Normal creation catalogue publication
+
+`CreateProfilePage` at `/settings/executors/new/:type` dispatches `local`,
+`worktree`, `local_docker`, and `sprites` to `CreateProfileForm` and its
+`useCreateProfileSave` in `apps/web/app/settings/executors/new/[type]/page.tsx`.
+`EXECUTOR_TYPE_MAP` resolves their owners to `exec-local`, `exec-worktree`,
+`exec-local-docker`, and `exec-sprites`. Their common contributor uses the
+production `SettingsSaveProvider` coordinator. Keep payload construction,
+validation, build/secret prerequisites, permissions and contributor identity
+with their existing owners.
+
+The creation hook must not map a catalogue captured before
+`createExecutorProfile` completes. Because `setExecutors` replaces the array,
+that would erase a profile that the registered `executor.profile.created`
+handler published for another existing executor while the POST was pending.
+This is a client catalogue loss; the service does not delete the independent
+profile. Task-create and subtask options consume this same catalogue through
+the fallback projection and `useExecutorProfileOptions` described above.
+
+### Acknowledgement publication
+
+Acquire the owning store through `useAppStoreApi`. After the POST succeeds,
+read `store.getState().executors.items`, resolve the current executor by the
+captured `executorId`, and publish synchronously over that current catalogue.
+There must be no intervening await. Reuse the existing
+`upsertExecutorProfile` from `profile-edit-page-chrome.tsx`, passing the
+current owner rather than a pre-request executor snapshot. It preserves
+current metadata and siblings, replaces a matching target ID, and appends
+only when that target is absent. Guard an absent current owner: leave the
+catalogue unchanged rather than restoring the removed executor.
+Do not use the helper's missing-owner synthesis for this route.
+
+Remove the captured catalogue subscription from this hook's publication input
+and callback dependencies. Keep all form state and the shared contributor's
+revision tracking, `isDirty`, `canSave`, saving/error state, rejection
+propagation, navigation blocker bypass, and canonical destination intact.
+Creation does not gain the existing editor's draft baseline or discard policy.
+On failure, no acknowledgement publication or successful navigation occurs;
+live updates received during the pending request remain visible.
+
+### Event-before-response membership
+
+`Service.CreateExecutorProfile` persists the profile and calls
+`publishExecutorProfileEvent(..., events.ExecutorProfileCreated, profile)`
+before returning to `httpCreateProfile`, which then returns the profile DTO.
+WebSocket arrival can therefore precede HTTP arrival. The registered created
+handler appends to the current owner. A current-catalogue append in the
+creation hook would then introduce a second target membership. The selected
+upsert replaces the already published target by ID with the accepted response.
+Prove this order with the actual handler and API adapter in the page test,
+including an independent live choice in the same pending interval. Assert
+target membership and target option counts, not just a name's presence.
+
+This boundary covers a single creation notification delivered before its HTTP
+acknowledgement. It introduces no duplicate-event handling, notification-after-
+acknowledgement writer redesign, timestamp arbitration, generic cache, global
+revision, persistence, schema, API, or framework change. Same-owner sibling
+preservation requires independently authored causal page coverage before the
+repair can claim it. The earlier normal editor correction remains separate.
+
+### Caller and verification boundaries
+
+SSH and Remote Docker dispatch to their separate create pages, which read
+`store.getState()` after their executor/profile requests. Kubernetes dispatches
+to `KubernetesCreatePage` and its existing current-store resource hook. Plugin
+creation does not enter this normal form. Audit these callers without changing
+them. The four normal callers share the repaired hook; Docker build checks and
+Sprites secret/network configuration retain their current behavior.
+
+Independently author permanent component integration tests only after the later
+implementation release. Mount the real `CreateProfilePage`,
+`StateProvider`/`createAppStore`, `ToastProvider`, `SettingsSaveProvider`,
+`createExecutorProfile`, registered executor-profile WebSocket handlers, and
+actual `useExecutorProfileOptions`. Hold only external `fetchJson` transport;
+the external Monaco renderer/loader capability may be stubbed for the test
+environment. Do not mock the page, router, store, save contributor, API adapter,
+WebSocket handler, options hook, or internal form sections.
+
+First keep strict unchanged-catalogue creation and rejection controls. Then
+prove different-owner live creation loss with both current-store and actual-
+options soft assertions, zero unhandled errors, and accepted target success.
+Independently prove mixed different-owner additions/updates/removals and
+same-owner sibling/metadata changes. Include event-before-response uniqueness,
+rejection after a live update, and missing-owner non-resurrection controls.
+Assert production fallback metadata and eligibility as well as IDs and names.
+Settle all held promises and coordinator completions, unmount providers,
+restore history/navigation guards and clear owned timers on every exit.
+
+This repair changes only state/data publication inside the existing form.
+Composition, copy, touch behavior, scrolling, navigation structure and
+viewport-dependent interaction stay unchanged. The mobile-parity state/data
+exception permits targeted component integration evidence without new phone
+Playwright tests, UI sketches, or browser builds. Reassess that exception if
+implementation changes any of those surfaces. Existing store ownership and
+upsert semantics supply this correction; no new ADR is required.
+
+## Executor policy acknowledgement publication
+
+`ExecutorEditPage` and its `ExecutorEditForm` in
+`apps/web/app/settings/executor/[id]/page.tsx` own executor-wide MCP-policy
+editing. The shared `SettingsSaveProvider` snapshots the contributor and
+revision, then awaits its `handleSave`. A subscribed `executors.items` captured
+by that callback is not a safe publication base after transport: `setExecutors`
+replaces the whole array. Registered handlers in
+`apps/web/lib/ws/handlers/executor-profiles.ts` already apply created, updated,
+and deleted profile events over their current store. Republishing the captured
+array loses those independently received choices.
+
+Acquire the form's owning store with `useAppStoreApi`. After the existing
+`executor.update` request or `updateExecutorAction` resolves, read that store's
+current `executors.items` immediately before synchronous publication. Map only
+the matching accepted executor ID with the existing `{ ...item, ...updated }`
+merge. Leave all other current entries intact, and do not insert a missing
+executor. Remove the form's captured catalogue subscription as publication
+input. Keep `ExecutorEditPage`'s subscribed owner resolution and the distinct
+`DeleteExecutorSection` intact. Do not add an await between the read and write,
+a new store action, global singleton, revision scheme, or cache owner.
+
+### Response and draft boundaries
+
+The REST action calls PATCH `/api/v1/executors/:id` using its existing `fetch`;
+the WebSocket branch requests `executor.update`. Both registered backend update
+handlers use `dto.FromExecutor`, which includes accepted metadata/config but
+does not populate `profiles`. Only the executor-list path attaches profiles.
+The current-item merge therefore retains the matching executor's live profile
+membership. Keep the existing response contract and spread semantics rather
+than synthesizing a replacement profile list or changing an API adapter.
+Concurrent server writes to the saved executor's fields remain outside this
+client-publication contract.
+
+Keep the existing payload construction: captured executor config plus submitted
+`mcp_policy`, with `name` omitted for system executors. The accepted
+`updated.config?.mcp_policy ?? ""` remains the saved baseline. The raw current
+draft is not rewritten by success. Matching accepted/submitted policy clears
+dirty state; a newer draft or a differing normalized response retains the
+existing draft-versus-baseline dirty comparison. Discard restores the accepted
+baseline through the existing contributor. Transport rejection occurs before
+baseline/publication and propagates to the shared coordinator's failure state.
+This repair adds no normalization or navigation policy.
+
+### Immediate writers and consumers
+
+`ExecutorProfilesCard.refreshProfiles` awaits `listExecutorProfiles` and maps a
+captured catalogue; its create/delete callbacks invoke that separate refresh.
+Policy `handleSave` never invokes it, and there is no mount-time refresh.
+Neither that writer nor `DeleteExecutorSection.handleDelete` is a causal
+dependency of the qualified policy-save loss. They remain outside this package.
+An independently proved dependency would require a scope checkpoint before
+expanding production edits.
+
+Task-create and subtask subscriptions, fallback `executor_type`/`executor_name`
+projection, and actual `useExecutorProfileOptions` are described under
+[Current catalogue publication](#current-catalogue-publication). Reuse those
+real consumers for evidence; preserve their provider and capability gates.
+New-session labels remain a consumer, not a profile-picker repair target.
+
+### Verification and phone boundary
+
+Mount the real `ExecutorEditPage`, `StateProvider`/`createAppStore`, and
+`SettingsSaveProvider` with its real coordinator. Control only external REST
+`fetch` or the external WebSocket request boundary and the external Monaco
+renderer where required; preserve actual loader exports. Keep the page, forms,
+store actions, contributor, action adapter, connection selection, registered
+profile handlers, router, and actual options hook real. Capture the store from
+inside its provider and observe actual task-start options with the production
+fallback projection. Verify eligibility and current metadata, not names alone.
+
+Independently author deferred-transport regressions for changed-other-owner
+profile creation/update/deletion, whole-owner insertion/removal, and a mixed
+catalogue. Also cover current saved-owner profile membership, missing saved
+owner non-resurrection, unchanged success, submitted/accepted policy, normalized
+response, failure with live updates, in-flight draft edits, and separate live
+providers/stores. Controls prove transport is actually held and live changes
+are visible before settlement; causal assertions then check both catalogue
+and options after success. Settle held promises/coordinator work, unmount,
+restore connection/history/guards, and drain owned timers on all exits.
+
+This is state/data publication in an existing component, with unchanged layout,
+copy, touch behavior, scrolling, navigation and breakpoint behavior. The
+mobile-parity state/data exception permits real rendered component and task-start
+view-model evidence without browser/build/E2E runs or UI sketches. No new
+architecture or operational boundary warrants an ADR. Public executor and MCP
+guides retain the same configuration and user steps; this repair restores their
+existing behavior.
+
 ## Implementation plans
 
 - [Unified profile editor](../../../plans/executor-profile-editor-unification/plan.md)
 - [Preserve scripts during partial saves](../../../plans/executor-profile-script-preservation/plan.md)
+- [Preserve the current catalogue during profile mutations](../../../plans/executor-profile-catalogue-preservation/plan.md)
+- [Preserve choices during built-in profile creation](../../../plans/executor-profile-create-catalogue-preservation/plan.md)
+- [Preserve choices during executor policy saves](../../../plans/executor-policy-catalogue-preservation/plan.md)

@@ -851,19 +851,7 @@ func writeHostGHFake(t *testing.T, dir string) string {
 		t.Fatalf("create fake gh directory: %v", err)
 	}
 	if runtime.GOOS == "windows" {
-		ghPath := filepath.Join(dir, "gh.bat")
-		const script = "@echo off\r\n" +
-			"if \"%1\"==\"auth\" if \"%2\"==\"token\" exit /b 0\r\n" +
-			"if \"%1\"==\"auth\" if \"%2\"==\"git-credential\" (\r\n" +
-			"  echo username=x-access-token\r\n" +
-			"  echo password=host-token\r\n" +
-			"  exit /b 0\r\n" +
-			")\r\n" +
-			"exit /b 2\r\n"
-		if err := os.WriteFile(ghPath, []byte(script), 0o700); err != nil {
-			t.Fatalf("write fake gh: %v", err)
-		}
-		return ghPath
+		return writeHostGHFakeExecutable(t, dir)
 	}
 	ghPath := filepath.Join(dir, "gh")
 	const script = "#!/bin/sh\n" +
@@ -910,11 +898,15 @@ func isolatedGitEnvironment(t *testing.T, overrides map[string]string) []string 
 		}
 		envMap[key] = value
 	}
-	home := filepath.Join(t.TempDir(), "home")
+	home := t.TempDir()
+	globalConfig := filepath.Join(home, "empty-gitconfig")
+	if err := os.WriteFile(globalConfig, nil, 0o600); err != nil {
+		t.Fatalf("write empty global gitconfig: %v", err)
+	}
 	envMap["HOME"] = home
 	envMap["USERPROFILE"] = home
 	envMap["XDG_CONFIG_HOME"] = filepath.Join(home, "xdg")
-	envMap["GIT_CONFIG_GLOBAL"] = filepath.Join(home, "empty-gitconfig")
+	envMap["GIT_CONFIG_GLOBAL"] = globalConfig
 	envMap["PATH"] = "/usr/bin:/bin"
 	envMap["GIT_CONFIG_NOSYSTEM"] = "1"
 	for key, value := range overrides {

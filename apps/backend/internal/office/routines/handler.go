@@ -113,6 +113,8 @@ func respondInternalError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{jsonErrorKey: err.Error()})
 }
 
+// createRoutine creates a routine, and, when the request carries one, its
+// trigger in the same transaction, so a rejected trigger leaves no routine.
 func (h *Handler) createRoutine(c *gin.Context) {
 	var req CreateRoutineRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -258,6 +260,8 @@ func (h *Handler) listTriggers(c *gin.Context) {
 	c.JSON(http.StatusOK, TriggerListResponse{Triggers: triggers})
 }
 
+// createTrigger creates a standalone trigger on the routine named by the
+// path id.
 func (h *Handler) createTrigger(c *gin.Context) {
 	var req CreateTriggerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

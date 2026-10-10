@@ -2862,6 +2862,10 @@ type pendingSendNowClaimRepository interface {
 	DeletePendingSendNowClaim(context.Context, *SendNowClaim) error
 }
 
+type pendingSendNowClaimDeliveryRepository interface {
+	SetPendingSendNowClaimDelivery(context.Context, *SendNowClaim, string, string, string) error
+}
+
 // PendingSendNowClaimPersistenceAvailable reports whether ordinary claimed
 // prompts can be recovered after the owning process exits.
 func (s *Service) PendingSendNowClaimPersistenceAvailable() bool {
@@ -2911,6 +2915,32 @@ func (s *Service) DeletePendingSendNowClaim(ctx context.Context, claim *SendNowC
 	})
 }
 
+// SetPendingSendNowClaimDelivery records the negotiated protocol and immutable
+// submission hash before the replacement prompt reaches the harness.
+func (s *Service) SetPendingSendNowClaimDelivery(
+	ctx context.Context,
+	claim *SendNowClaim,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingSendNowClaimDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending Send Now claim delivery persistence unavailable")
+	}
+	if claim == nil {
+		return ErrSendNowClaimChanged
+	}
+	sessionID, err := sendNowClaimSessionID(claim)
+	if err != nil {
+		return err
+	}
+	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingSendNowClaimDelivery(admittedCtx, claim, protocol, submissionID, payloadHash)
+	})
+}
+
 // pendingQueueDispatchRepository is the settlement contract every repository
 // with durable dispatch claims implements. Widening it would silently disable
 // settlement for every other implementer, because each service method treats a
@@ -2928,6 +2958,10 @@ type pendingQueueDispatchRepository interface {
 // keeps the settlement it already had.
 type pendingQueueDispatchClaimRewriter interface {
 	RewritePendingQueueDispatchMessage(context.Context, *QueuedMessage) error
+}
+
+type pendingQueueDispatchDeliveryRepository interface {
+	SetPendingQueueDispatchDelivery(context.Context, *QueuedMessage, string, string, string) error
 }
 
 // PendingQueueDispatchPersistenceAvailable reports whether ordinary dequeues
@@ -2995,11 +3029,53 @@ func (s *Service) MarkPendingQueueDispatchAccepted(
 	})
 }
 
+// SetPendingQueueDispatchDelivery records the negotiated protocol and
+// immutable submission hash before the ordinary prompt reaches the harness.
+func (s *Service) SetPendingQueueDispatchDelivery(
+	ctx context.Context,
+	msg *QueuedMessage,
+	protocol, submissionID, payloadHash string,
+) error {
+	repo, ok := s.repo.(pendingQueueDispatchDeliveryRepository)
+	if !ok {
+		if protocol != DeliveryProtocolV1 {
+			return nil
+		}
+		return errors.New("pending queue dispatch delivery persistence unavailable")
+	}
+	if msg == nil {
+		return ErrQueueDispatchClaimChanged
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.SetPendingQueueDispatchDelivery(admittedCtx, msg, protocol, submissionID, payloadHash)
+	})
+}
+
 // DeletePendingQueueDispatch acknowledges the exact recovered or accepted
 // ordinary dispatch attempt carried by msg.
 func (s *Service) DeletePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
 	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
 		return s.deletePendingQueueDispatch(admittedCtx, msg)
+	})
+}
+
+// AcknowledgeDurablePendingQueueDispatch removes the exact pending claim only
+// after its matching retained submission has authoritative terminal evidence.
+// Ordinary dispatch recovery deliberately keeps this claim until then.
+func (s *Service) AcknowledgeDurablePendingQueueDispatch(ctx context.Context, msg *QueuedMessage) error {
+	if msg == nil {
+		return errors.New("queued message is nil")
+	}
+	protocol, submissionID, _ := msg.DeliverySubmission()
+	if protocol != DeliveryProtocolV1 || submissionID == "" {
+		return errors.New("durable queue claim identity is incomplete")
+	}
+	repo, ok := s.repo.(pendingQueueDispatchRepository)
+	if !ok {
+		return errors.New("pending queue dispatch persistence unavailable")
+	}
+	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		return repo.DeletePendingQueueDispatch(admittedCtx, msg)
 	})
 }
 

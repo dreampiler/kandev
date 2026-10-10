@@ -234,6 +234,9 @@ describe("RoutinesContent post-create refetch failure", () => {
 
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Routine created"));
     expect(toast.error).toHaveBeenCalledWith("Failed to load");
-    expect(createRoutineMock).toHaveBeenCalledWith(WORKSPACE_ID, expect.not.objectContaining({ trigger: expect.anything() }));
+    expect(createRoutineMock).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.not.objectContaining({ trigger: expect.anything() }),
+    );
   });
 });

@@ -124,11 +124,14 @@ func (m *Manager) reconcileActiveStreamTurnOutcome(execution *AgentExecution, pr
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	outcome, err := applier.fetchTurnOutcomeWithRetry(ctx, execution.standaloneInstanceID)
+	if !m.runtimeExecutionCurrent(execution) {
+		return errActiveStreamReattachIneligible
+	}
+	outcome, err := applier.fetchTurnOutcomeForEpoch(ctx, execution.standaloneInstanceID, execution.runtimeEpoch)
 	if err != nil || outcome == nil {
 		return err
 	}
-	if m.executionStore.ActivePromptGeneration(execution.ID) != promptGeneration {
+	if !m.runtimeExecutionCurrent(execution) || m.executionStore.ActivePromptGeneration(execution.ID) != promptGeneration {
 		return nil // A live terminal frame already settled this generation.
 	}
 	if outcome.Event.PromptGeneration != promptGeneration {
@@ -144,7 +147,10 @@ func (m *Manager) reconcileActiveStreamTurnOutcome(execution *AgentExecution, pr
 	if !applied {
 		return errActiveStreamReattachIneligible
 	}
-	if err := applier.ackTurnOutcome(ctx, execution.standaloneInstanceID, outcome.TurnID); err != nil {
+	if !m.runtimeExecutionCurrent(execution) {
+		return errActiveStreamReattachIneligible
+	}
+	if err := applier.ackTurnOutcomeForEpoch(ctx, execution.standaloneInstanceID, outcome.TurnID, execution.runtimeEpoch); err != nil {
 		m.logger.Warn("failed to acknowledge reattached turn outcome",
 			zap.String("execution_id", execution.ID), zap.Int64("turn_id", outcome.TurnID), zap.Error(err))
 	}

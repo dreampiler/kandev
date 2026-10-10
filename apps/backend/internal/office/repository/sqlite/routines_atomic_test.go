@@ -7,6 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 )
 
+// atomicRoutine builds a valid routine fixture for the atomic create tests.
 func atomicRoutine(workspaceID, name string) *models.Routine {
 	return &models.Routine{
 		WorkspaceID:       workspaceID,
