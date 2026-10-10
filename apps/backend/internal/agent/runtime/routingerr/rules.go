@@ -54,6 +54,7 @@ var providerRules = map[string][]rule{
 	"claude-acp": {
 		mustRule("claude.stderr.quota.v1", `(?im)^\s*(?:(?:Error|Internal\s+error|API\s+Error):\s*)?(?:anthropic_quota_exceeded\b|(?:your\s+)?credit\s+balance\s+is\s+too\s+low\b|insufficient\s+credits\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.session_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+session\s+limit\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("claude.stderr.weekly_limit.v1", `(?im)^\s*(?:(?:Internal\s+error|Error):\s*)?(?:you['’]ve|you\s+have)\s+hit\s+your\s+weekly\s+limit\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.rate.v1", claudeRateLimitSignature, CodeRateLimited, ConfHigh),
 		// A proxy can reject every account credential before it sends a request
 		// upstream. This is a hard credential condition; a retry or a switch
