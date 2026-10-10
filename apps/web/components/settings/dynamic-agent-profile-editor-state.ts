@@ -10,6 +10,7 @@ import { isDynamicUnclassifiedPolicyValid } from "@/components/settings/dynamic-
 import { updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { orderProfilesForSelection } from "@/lib/settings/agent-profile-selector-order";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { useSyncAgentsToStore } from "@/components/settings/agent-profile-page-state";
 import { isProfileRevisionNewer } from "@/components/settings/agent-profile-reconciliation";
@@ -199,7 +200,7 @@ export function useDynamicAgentProfileEditorState({
       settingsAgents.flatMap((item) =>
         item.name === "dynamic"
           ? []
-          : item.profiles
+          : orderProfilesForSelection(item.profiles)
               .filter(
                 (candidate) =>
                   candidate.kind !== "dynamic" &&
