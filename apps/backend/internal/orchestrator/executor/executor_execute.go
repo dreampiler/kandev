@@ -1697,6 +1697,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+	if errors.Is(createErr, models.ErrWorkspacePreparing) {
+		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.TaskID, session.ID, createErr, func() error {
+			return e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+		})
+	}
 	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 		if createErr == nil {
 			createErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
@@ -1784,6 +1789,37 @@ func (e *Executor) createPreparedSession(
 		}
 	}
 	return e.repo.CreateTaskSession(ctx, session)
+}
+
+// retryPreparedSessionAfterWorkspaceReady waits for a sibling session's
+// in-progress workspace materialization to finish, then retries the session
+// binding once. A launch that races another start for the same task's first
+// session is refused with ErrWorkspacePreparing while the winner materializes;
+// failing immediately strands the loser (an automation run is marked FAILED)
+// even though the workspace is about to become ready. The wait reuses the same
+// environment-state transition the failed-environment reclaim path uses, so it
+// never polls a fixed schedule. A workspace that fails or never becomes ready
+// returns the original error unchanged.
+func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
+	ctx context.Context,
+	taskID, sessionID string,
+	preparingErr error,
+	create func() error,
+) error {
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil || env.ID == "" {
+		return preparingErr
+	}
+	// Waiting on the environment this session already owns would wait on
+	// itself; anything not creating/ready/stopped (a failed row another launch
+	// is reclaiming) keeps the original refusal.
+	if env.MaterializationSessionID == sessionID {
+		return preparingErr
+	}
+	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
+		return preparingErr
+	}
+	return create()
 }
 
 // taskUsesDeferredEnvironmentInheritance keeps the handoff resolver
