@@ -180,4 +180,10 @@ func (s *Service) ceilingSweepTick(ctx context.Context, cause ceilingSweepCause)
 		s.sessionCeiling.expireStaleReservations()
 	}
 	s.drainDeferredCeilingLaunches(withCeilingSweepCause(ctx, cause))
+	// Reuse this pass as the runtime owner of the orphaned-starting-route
+	// reconcile: durable statuses that never became a pending wait have no
+	// timer of their own, so a route stranded after startup otherwise stays
+	// "starting" until the next process restart. The reconcile is a no-op
+	// while dynamic routing is disabled.
+	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 }

@@ -4023,6 +4023,9 @@ func (s *Service) retainFailedWorkflowDestination(
 	); err != nil {
 		return fmt.Errorf("terminalize retained workflow destination: %w", err)
 	}
+	// Terminalizing the destination abandons any route it still held as
+	// "starting"; release it so the claim cannot strand the task.
+	s.settleClaimedStartingRoute(ctx, destination)
 	s.releaseCeilingReservation(destination.ID)
 	s.logger.Warn("retained failed workflow destination for durable recovery",
 		zap.String("task_id", taskID),
@@ -4061,6 +4064,9 @@ func (s *Service) restoreWorkflowProfileSwitchSourcePrimary(ctx context.Context,
 // writing the caller's stale full row could resurrect a concurrently stopped
 // session.
 func (s *Service) completeAndStopSession(ctx context.Context, taskID string, session *models.TaskSession) {
+	// Release a route still claimed as "starting" before the session is
+	// completed so an abandoned claim cannot outlive its launch owner.
+	s.settleClaimedStartingRoute(ctx, session)
 	// Flip state to COMPLETED *before* stopping the agent. StopAgent fires an
 	// agent.completed event, and handleAgentCompleted's terminal-state guard
 	// only short-circuits when the session is already in a terminal state. If
