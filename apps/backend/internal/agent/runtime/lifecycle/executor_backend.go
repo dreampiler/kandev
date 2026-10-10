@@ -432,6 +432,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
 	MetadataKeyOriginalWorkspacePath:    true,
+	metadataKeyPassthroughMCPClaims:     true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -449,6 +450,11 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	// Project MCP ownership belongs to the execution that materialized the
+	// workspace file. It survives same-session recovery but must not be copied
+	// into a sibling session's launch request.
+	metadataKeyPassthroughMCPClaims: true,
+
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
 	MetadataKeyOfficeAgentProfileID:  true,
