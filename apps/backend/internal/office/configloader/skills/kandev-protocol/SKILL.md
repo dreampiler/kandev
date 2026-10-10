@@ -16,6 +16,21 @@ and coordinate with the orchestrator using the `$KANDEV_CLI` command-line tool.
 
 These are injected into your session automatically. Do not hardcode them.
 
+Inspect environment variable names only. Never dump all `KANDEV_*` values:
+they include `KANDEV_API_KEY`, `KANDEV_RUN_TOKEN`, and inherited health tokens.
+Do not print, log, copy into reports, or upload authentication values. The CLI
+uses them internally; the table below does not authorize a bulk value dump.
+
+For a diagnostic inventory in PowerShell:
+
+```powershell
+Get-ChildItem env:KANDEV_* | Select-Object -ExpandProperty Name
+```
+
+In Bash, `compgen -e | rg '^KANDEV_'` lists names without reading their values.
+Read the specific wake reason and parse the wake payload internally as described
+below. Print only the non-secret identifiers needed for the current operation.
+
 | Variable | Purpose |
 |----------|---------|
 | `KANDEV_CLI` | Path to the CLI binary -- use this for all orchestrator operations |
