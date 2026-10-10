@@ -24,6 +24,10 @@ const agentDeliveryOwnershipIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_d
 const agentDeliveryOwnedOrderedIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_owned_retirement
 	ON agent_delivery_effects(session_id, effect_key) WHERE session_id <> ''`
 
+const agentDeliveryUnprojectedIndexName = "idx_agent_delivery_inbox_unprojected"
+const agentDeliveryUnprojectedIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_delivery_inbox_unprojected
+	ON agent_delivery_inbox(stream_id, projected_at, sequence) WHERE projected_at IS NULL`
+
 type agentDeliveryRetentionColumn struct {
 	table      string
 	column     string
@@ -163,6 +167,9 @@ func (r *Repository) initAgentDeliveryRetentionSchema() error {
 		return err
 	}
 	if err := r.upgradeAgentDeliveryOwnershipIndex(); err != nil {
+		return err
+	}
+	if err := r.upgradeAgentDeliveryUnprojectedIndex(); err != nil {
 		return err
 	}
 	for _, index := range agentDeliveryRetentionIndexes {

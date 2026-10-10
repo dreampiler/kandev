@@ -12,12 +12,15 @@ The implementation includes authenticated replay, hash/checkpoint recovery, boun
 
 ## Latest change and evidence
 
+Work resumed after draft publication. The branch is rebased onto main `3fb026365239bbc893fa4a5272d926640c7ef1f9`; the PostgreSQL helper conflict is resolved. Latest change: the same-name unprojected replay index excludes projected history, repaired atomically at startup. Populated upgrade/cancellation/reopen and exact frozen-N generic-plan race GREEN passed on both engines (10.051s), plus broader affected regressions (77.265s). The complete pending-index comparison passed PostgreSQL and failed SQLite. Fixed receipt SELECT plan reuse now passes focused lifecycle (18.307s) and broad affected (64.996s) race checks, with fresh evidence preserved. Its complete original-runtime comparison passed PostgreSQL idle/active (0.888905x / 0.933549x) and failed SQLite idle/active (1.155385x / 1.317054x), with all 4500 samples per state retained. SQLite latency remains open. Task 08 preserves every previous failed window. Earlier artifact checksums/build receipts below are historical source boundaries.
+
+
 Sparse ownership indexes now exclude blank session IDs. Current orphan and final-existence probes explicitly state that predicate. Unknown owned incarnations and blank/mixed cursor-attributed effects retain their original deletion scope.
 
 Final focused race GREEN passed in 17.769s: fresh databases, old two/three-column repair, interruption/cancellation rollback, reopen, frozen-reader additive index DDL, and actual generic orphan query plans. Earlier focused GREEN passed in 23.385s. SQL guard and benchmark compilation passed.
 Actual frozen-reader typed recovery remains indexed. Its legacy OR admission query scans 10001 effects under both full and sparse controls; no bounded-reader claim is made for that query.
 
-The latest sparse candidate has NOT had a full controlled latency comparison. The preceding direct-prefix candidate retained all 4500 samples per state/engine:
+Historical direct-prefix comparison (superseded by the receipt-plan result above) retained all 4500 samples per state/engine:
 
 | Engine | Idle/baseline p95 | Active/baseline p95 | Limit |
 | --- | --- | --- | --- |
@@ -28,7 +31,7 @@ All 18 commands and data-preservation assertions passed in that window. Command 
 
 ## Remaining work, in order
 
-1. Measure the sparse candidate with the same predeclared baseline/idle/active interleaving, production pools, matched 100000-event history, and all 4500 samples. Resolve any remaining regression before calling Task 08 complete.
+1. Resolve the SQLite receipt-plan latency failures. Preserve the same predeclared baseline/idle/active interleaving, production pools, matched 100000-event history, and all 4500 samples in further comparisons. Resolve any remaining regression before calling Task 08 complete.
 2. Measure concurrent replacement/deletion. Run actual million-event 1KiB/4KiB and protected-gap fixtures on both engines, with logical/physical storage, canonical equality, reopen and maintenance evidence.
 3. Run the exact three-package retention race selector with all PostgreSQL/native/backup prerequisites. Allow a 90-minute overall Go test timeout for database-scale fixtures; retain the unchanged 250ms batch, five-second pass and 100ms yield limits.
 4. Repeat store conformance and the Task 08 orchestrator/managed-deletion selectors on final source.
@@ -56,6 +59,8 @@ Obtain the baseline artifact and matched fixture scripts from the existing works
 
 Native rollback tests require `KANDEV_RETENTION_CURRENT_BINARY`, `KANDEV_RETENTION_COMPAT_BINARY`, `KANDEV_RETENTION_ROLLBACK_POSTGRES_DSN`, `KANDEV_RETENTION_POSTGRES_CONTAINER`, and `KANDEV_RETENTION_BACKUP_OUTPUT`, in addition to `KANDEV_TEST_POSTGRES_DSN`. Verify each harness prerequisite and record skips as blockers. Never print credentials.
 
-Handoff native/helper/web/plugin build passed with `GOMAXPROCS=2 GOFLAGS='-p=2' make build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package`.
+Historical initial handoff native/helper/web/plugin build passed with `GOMAXPROCS=2 GOFLAGS='-p=2' make build-backend build-backend-linux-helpers build-web-e2e build-e2e-plugin-package`.
 Native SHA-256: `818c856021b1280439043548f81e4da5a20968864d9550ea4dd77c8b46fe33f3`.
 Whole-backend lint passed with zero issues using `golangci-lint run ./... --new-from-rev=d6cff57659ae5aea28e9457c587a8c9d70d0a130 --timeout=20m --allow-serial-runners`. Catalog (370 decisions/1498 specifications), full specification lint, package coverage (22/22 ACs, 68 links) and whitespace checks passed.
+
+Current rebased pending-index/receipt-plan native/helper/web/plugin build passed. Native SHA-256: `1d6b09b2a65dc1bb82b055a8cac29916688ebcc29e4162705a9ca8718aa3fe92`. Use this fresh artifact for remaining runtime checks. Whole-backend lint against refreshed main passed with zero issues; catalog, full specification lint, package audit and formatting pass. Runtime/storage/browser gates and SQLite latency remain open.

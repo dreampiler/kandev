@@ -59,6 +59,7 @@ type Repository struct {
 	agentDeliveryRetentionFailpoint func(string) error
 	agentDeliveryReloadStatements   agentDeliveryReloadStatementCache
 	agentDeliveryOwnerStatements    agentDeliveryOwnerStatementCache
+	agentDeliveryReceiptStatements  agentDeliveryReceiptStatementCache
 	// failUsageEventAttempts/failUsageEventErr are a test-only failpoint for
 	// CreateTaskUsageEvent's AC-32 transient-retry loop: while
 	// failUsageEventAttempts > 0, insertUsageEventAndRollup returns
@@ -318,7 +319,7 @@ func newRepositoryContext(ctx context.Context, writer, reader *sqlx.DB, log *log
 
 // Close closes the database connection
 func (r *Repository) Close() error {
-	statementErr := errors.Join(r.closeAgentDeliveryReloadStatement(), r.closeAgentDeliveryOwnerStatements())
+	statementErr := errors.Join(r.closeAgentDeliveryReloadStatement(), r.closeAgentDeliveryOwnerStatements(), r.closeAgentDeliveryReceiptStatement())
 	if !r.ownsDB {
 		return statementErr
 	}

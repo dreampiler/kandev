@@ -78,3 +78,38 @@ func (r *Repository) upgradeAgentDeliveryOwnershipIndex() error {
 	}
 	return nil
 }
+
+func (r *Repository) upgradeAgentDeliveryUnprojectedIndex() error {
+	ctx := r.migrationContext()
+	definition, err := db.IndexDefinitionContext(ctx, r.db, agentDeliveryUnprojectedIndexName)
+	if err != nil {
+		return fmt.Errorf("read agent delivery unprojected index definition: %w", err)
+	}
+	if strings.Contains(strings.ToLower(definition), "projected_at is null") {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin agent delivery unprojected index upgrade: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.failAgentDeliveryRetention("before_unprojected_index_upgrade"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP INDEX IF EXISTS idx_agent_delivery_inbox_unprojected`); err != nil {
+		return fmt.Errorf("drop old agent delivery unprojected index: %w", err)
+	}
+	if err := r.failAgentDeliveryRetention("after_unprojected_index_drop"); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, agentDeliveryUnprojectedIndexQuery); err != nil {
+		return fmt.Errorf("create agent delivery unprojected index: %w", err)
+	}
+	if err := r.failAgentDeliveryRetention("after_unprojected_index_create"); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit agent delivery unprojected index upgrade: %w", err)
+	}
+	return nil
+}

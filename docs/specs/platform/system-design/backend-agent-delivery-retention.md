@@ -225,11 +225,11 @@ The byte budget fits 1 MiB events.
 Skip over-budget legacy payloads with diagnostics rather than loading them repeatedly.
 Persist fair keyset/high-water progress across scans/jobs/restarts; wrap and revisit protected rows without starving other streams.
 No OFFSET, per-tick global COUNT, full JSON scan or entire-session submission reload.
-Discovery reads indexed row identities: due projection times for raw payloads, stream sequences for compact receipts. Locked reload evaluates all proofs and bounded payloads. Separate cursors and alternating priority share 200 candidates. Recent raw rows cannot skip newly due payloads.
+Discovery indexes due projection times for raw payloads and stream sequences for compact receipts. Locked reload evaluates proofs and bounded payloads. Separate cursors and alternating priority share 200 candidates. Recent rows cannot skip due payloads.
 
 Add indexes after additive migrations:
 
-- Inbox `(session_id, incarnation_id, stream_id, sequence)` for retirement; `(stream_id, projected_at, sequence)` already exists for projection.
+- Inbox `(session_id, incarnation_id, stream_id, sequence)` for retirement; `(stream_id, projected_at, sequence) WHERE projected_at IS NULL` for replay.
 - Sparse terminal frontier `(stream_id, sequence) WHERE terminal <> 0` avoids scanning nonterminal events to find an unresolved terminal.
 - Eligible payload scan `(projected_at, stream_id, sequence)` restricted to `payload_pruned_at IS NULL AND projected_at IS NOT NULL` on both engines.
 - Submission `(fully_settled_at, id)` for unpruned terminal payloads; `(session_id, incarnation_id, id)` for purge.
@@ -237,7 +237,7 @@ Add indexes after additive migrations:
 - Terminal lookup `(effect_type, submission_id, stream_id, sequence)` for current MAX and exact binding.
 - Cursors `(session_id, stream_id)` for bounded attribution; jobs `(phase, session_id, incarnation_id)` and unique identity.
 
-Check million-row plans on both engines. Hash once; update progress once per stream batch.
+Check million-row plans on both engines. Hash and update progress once per stream.
 MVCC/TOAST and WAL need ordinary maintenance; no worker VACUUM or full-table UPDATE.
 
 Transient lock/busy/serialization errors rollback and retry next pass with jittered cancellable backoff capped at five minutes.
@@ -248,7 +248,7 @@ Resume only after a valid repository readiness check or corrected data; retain a
 
 Schema remains required in both transport modes under the existing task owner, descriptor and conformance adapter.
 `initSchema` precedes `runMigrations`: new-column indexes follow ADD COLUMN. Use ADR 0027 error classifiers.
-Column, index and format readiness block worker and admission on migration failure. Repair prior wide definitions atomically under the same index name.
+Column, index and format readiness block worker and admission on migration failure. Repair prior full indexes atomically under the same name, including unprojected replay membership.
 
 Fresh DBs have format 1 and zero retired sequences. Upgrades add default-zero columns without destructive content backfill.
 Existing settlement proofs are unknown until normal reconciliation verifies them; age cannot invent `fully_settled_at`.

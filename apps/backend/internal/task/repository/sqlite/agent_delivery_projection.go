@@ -47,6 +47,9 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if len(events) == 0 {
 		return nil, nil
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err

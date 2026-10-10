@@ -238,6 +238,9 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 	if err := r.prepareAgentDeliveryOwnerStatement(ctx, event); err != nil {
 		return false, err
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return false, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -497,6 +500,9 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 	if event == nil {
 		return false, fmt.Errorf("event is required")
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return false, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -580,11 +586,19 @@ func (r *Repository) findAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, 
 	var stored models.AgentDeliveryEvent
 	var terminal int
 	var projectedAt, payloadPrunedAt sql.NullTime
-	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT session_id, incarnation_id, harness_generation, submission_id,
-		       event_type, payload, terminal, projected_at, content_hash, hash_version,
-		       payload_pruned_at, payload_bytes
-		FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`), streamID, sequence).Scan(
+	statement, err := r.agentDeliveryReceiptStatement()
+	if err != nil {
+		return models.AgentDeliveryEvent{}, sql.NullTime{}, false, err
+	}
+	var row *sqlx.Row
+	if statement == nil {
+		row = tx.QueryRowxContext(ctx, r.db.Rebind(agentDeliveryReceiptQuery), streamID, sequence)
+	} else {
+		bound := tx.StmtxContext(ctx, statement)
+		defer func() { _ = bound.Close() }()
+		row = bound.QueryRowxContext(ctx, streamID, sequence)
+	}
+	err = row.Scan(
 		&stored.SessionID, &stored.IncarnationID, &stored.HarnessGeneration,
 		&stored.SubmissionID, &stored.EventType, &stored.Payload, &terminal, &projectedAt,
 		&stored.ContentHash, &stored.HashVersion, &payloadPrunedAt, &stored.PayloadBytes)

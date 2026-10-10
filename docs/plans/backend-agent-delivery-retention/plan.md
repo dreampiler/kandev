@@ -292,13 +292,16 @@ The latest direct user request permits native subagents. Separate workers own st
 - [x] Reproduce retained-runtime retry admission failures and implement shared SQL preparation before implicit durable dispatch.
 - [x] Pass retry producer GREEN and fresh native/helper/web/plugin builds.
 - [ ] Complete desktop/mobile suites and final-artifact PostgreSQL rollback after the covered lint refactor.
-- [ ] Meet paired foreground latency, including idle fencing and actual active cleanup. The latest direct-prefix window passed PostgreSQL idle/active and failed both SQLite gates; earlier failures remain recorded. No threshold waiver is claimed.
+- [ ] Meet paired foreground latency, including idle fencing and actual active cleanup. The direct-prefix window passed PostgreSQL idle/active and failed both SQLite gates. The resumed sparse window with limited runtime parallelism failed all four gates; all samples remain recorded. No threshold waiver is claimed.
 - [x] Bound empty-cursor attribution pages and commit durable purge checkpoints; both-engine crash/reopen/one-row-budget and actual PostgreSQL plan checks pass.
 - [x] Pass productive-phase/yield-budget regressions and preceding 50-candidate background capacity on both engines with race detection; preserve the configured 200 ceiling and lower operator limits.
 - [x] Repeat real default and lower-limit capacity after full-lease pass admission and scoped event barriers; default/explicit 50 and explicit 30 pass on both engines with zero failed/busy batches.
 - [x] Complete fresh owner SQL-cache proof, lifecycle and connection-replacement checks; shared-barrier and authority regressions pass on that source.
 - [x] Validate direct expired-prefix retirement through trigger RED, both-engine crash/reopen/replay/barrier GREEN, mixed-format accounting and lint/SQL guard.
-- [ ] Measure direct-prefix latency on frozen source; fresh native/runtime/storage acceptance remains pending.
+- [x] Measure direct-prefix latency on frozen source; retain its two SQLite failures.
+- [x] Measure the partial pending-index candidate with the original production runtime settings; PostgreSQL passes and SQLite fails.
+- [x] Reduce fixed receipt SQL preparation overhead with TDD and measure frozen source; PostgreSQL passes and SQLite still fails.
+- [ ] Resolve SQLite latency and complete fresh native/runtime/storage acceptance.
 - [ ] Complete replacement/deletion measurements, million-event fixtures, the exact retention race selector and final lint/documentation checks.
 
 Task 08 remains in progress. Its Results section owns exact receipts, failed attempts and remaining gates.
@@ -310,3 +313,10 @@ Direct-retirement design checkpoint: catalog validation passed (370 decisions/14
 ## Draft PR handoff (2026-10-10)
 
 The user requested a pull request promptly for colleague handover. This supersedes the earlier no-stage/commit/push/publication constraint for a draft handoff. Task 08 remains in progress, with all open gates preserved. See [handoff](handoff.md) for the continuation order, latest source/evidence and external artifact requirements. Fresh full build/lint and normal hooks precede publication.
+
+
+## Resumed PR acceptance work
+
+The user requested continued implementation and verified pushes to [PR #4407](https://github.com/kdlbs/kandev/pull/4407). Draft status and all Task 08 limits remain. Rebased onto main `3fb026365239bbc893fa4a5272d926640c7ef1f9`; prior tested head remains in `retention-handoff-d857417`. The overlapping PostgreSQL isolation helpers now share main's robust DSN parser. Real replacement/DSN race checks passed (1.079s).
+
+Pending replay membership now excludes projected inbox rows. Meaningful both-engine RED preceded production changes. Populated failure/cancellation/rollback/reopen and exact frozen-reader generic-plan race GREEN passed (10.051s); broader replay/admission/hash/crash/direct-prefix/index regressions passed (77.265s). Scoped lint, SQL guard, catalog (373 decisions/1524 specs), full spec lint, 22/22 AC coverage and whitespace passed. The complete receipt-plan window passes PostgreSQL and fails SQLite; source stays frozen during each comparison. See Task 08 for all failed windows and their runtime settings.
