@@ -684,40 +684,18 @@ func (s *Service) recordWorkflowSourceBinding(
 	session *models.TaskSession,
 	entryIDs ...int64,
 ) error {
-	if step == nil || session == nil || step.AgentProfileID == "" || step.SessionTarget != nil {
+	binding, err := s.buildWorkflowSourceBinding(ctx, taskID, step, session, entryIDs...)
+	if err != nil {
+		return err
+	}
+	if binding == nil {
 		return nil
 	}
 	store, ok := s.repo.(workflowSessionBindingStore)
 	if !ok {
 		return nil
 	}
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("load task before workflow source binding: %w", err)
-	}
-	if task == nil || (task.WorkflowStepID != "" && task.WorkflowStepID != step.ID) {
-		return nil
-	}
-	effectiveProfileID := s.resolveStepAgentProfileForTask(ctx, task, step)
-	if effectiveProfileID == "" {
-		effectiveProfileID = step.AgentProfileID
-	}
-	updatedAt := task.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = time.Now().UTC()
-	}
-	operationID := workflowSourceBindingOperationID(
-		s.workflowEntryIdentity(ctx, taskID, entryIDs...),
-	)
-	accepted, err := store.UpsertWorkflowSessionBinding(ctx, &models.WorkflowSessionBinding{
-		TaskID:         taskID,
-		TargetKey:      workflowSessionBindingTargetKey(step.ID),
-		WorkflowID:     step.WorkflowID,
-		AgentProfileID: effectiveProfileID,
-		SessionID:      session.ID,
-		OperationID:    operationID,
-		UpdatedAt:      updatedAt,
-	})
+	accepted, err := store.UpsertWorkflowSessionBinding(ctx, binding)
 	if err != nil {
 		s.logger.Error("failed to persist workflow source session binding",
 			zap.String("task_id", taskID),
@@ -732,7 +710,7 @@ func (s *Service) recordWorkflowSourceBinding(
 			zap.String("task_id", taskID),
 			zap.String("step_id", step.ID),
 			zap.String("session_id", session.ID),
-			zap.String("operation_id", operationID))
+			zap.String("operation_id", binding.OperationID))
 	}
 	return nil
 }

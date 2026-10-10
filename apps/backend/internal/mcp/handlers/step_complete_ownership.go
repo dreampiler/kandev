@@ -5,9 +5,20 @@ import (
 	"errors"
 	"fmt"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+// StepCompleteSessionBindingResolver reports the session durably bound to a
+// task's workflow step. It is implemented by *orchestrator.Service and is the
+// authoritative owner record for step completion: a restart or substitution can
+// move the task off the session it entered the step with, leaving the primary
+// flag and the profile gate pointing at a replaced session.
+type StepCompleteSessionBindingResolver interface {
+	BoundWorkflowStepSession(ctx context.Context, taskID, workflowStepID string) (string, error)
+}
 
 // stepCompleteOwnership is the answer to one question: is the calling session
 // the session the orchestrator currently drives for the task's current
@@ -56,6 +67,19 @@ func (h *Handlers) resolveCurrentStepSessionOwnership(
 			),
 		}
 	}
+	// The durable step binding is the authoritative owner record. A restart or
+	// substitution can move the task off the session it entered the step with,
+	// so a caller that is the step's bound session owns the step even when it is
+	// no longer primary or runs a different profile than the step configured.
+	bound, bindErr := h.boundStepSessionMatches(ctx, session, task)
+	if bindErr != nil {
+		h.logger.Warn("step_complete: failed to read the current step's session binding",
+			zap.String("task_id", task.ID),
+			zap.String("step_id", task.WorkflowStepID),
+			zap.Error(bindErr))
+	} else if bound {
+		return stepCompleteOwnership{Owned: true, StepName: step.Name}
+	}
 	if !session.IsPrimary {
 		return stepCompleteOwnership{
 			StepName: step.Name,
@@ -85,6 +109,26 @@ func (h *Handlers) resolveCurrentStepSessionOwnership(
 }
 
 var errNoWorkflowController = errors.New("workflow controller is not wired")
+
+// boundStepSessionMatches reports whether the caller is the session the durable
+// step binding names as the current step's owner. It is a second best answer
+// (false, nil) when no resolver is wired or no binding has been recorded, so an
+// unwired or unbound handler falls back to the primary-and-profile rule instead
+// of changing behavior.
+func (h *Handlers) boundStepSessionMatches(
+	ctx context.Context,
+	session *models.TaskSession,
+	task *models.Task,
+) (bool, error) {
+	if h.stepCompleteBindingResolver == nil || session == nil {
+		return false, nil
+	}
+	boundSessionID, err := h.stepCompleteBindingResolver.BoundWorkflowStepSession(ctx, task.ID, task.WorkflowStepID)
+	if err != nil {
+		return false, err
+	}
+	return boundSessionID != "" && boundSessionID == session.ID, nil
+}
 
 func (h *Handlers) loadCurrentWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
 	if h.workflowCtrl == nil {
