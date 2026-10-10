@@ -86,10 +86,13 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	if err != nil || session == nil || session.RouteGeneration != state.Generation {
 		return
 	}
-	if !isOrphanableDynamicSessionState(session.State) && !s.dynamicStartingRouteIsStranded(ctx, session) {
+	if isOrphanableDynamicSessionState(session.State) || s.dynamicStartingRouteIsStranded(ctx, session) {
+		s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
 		return
 	}
-	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
+	if s.dynamicStartingRouteIsSuperseded(ctx, session) {
+		s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "superseded_starting_route")
+	}
 }
 
 // dynamicStartingRouteIsStranded reports whether a session parked in
@@ -109,8 +112,7 @@ func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *m
 	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
 		return false
 	}
-	_, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
-	return errors.Is(err, models.ErrExecutorRunningNotFound)
+	return s.dynamicStartingRouteHasNoLiveExecutor(ctx, session)
 }
 
 // isOrphanableDynamicSessionState reports whether a session's current state
@@ -129,6 +131,68 @@ func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *m
 // this reason and not because anything is actually stuck.
 func isOrphanableDynamicSessionState(state models.TaskSessionState) bool {
 	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateIdle
+}
+
+// dynamicStartingRouteIsSuperseded reports a session whose durable "starting"
+// route has been replaced by the task's current workflow-session route: the
+// recorded route now names a different destination, so this session will never
+// receive the launch that would carry its route to active. Session creation is
+// atomic with the route insert, so any session that can still launch already
+// has the task route naming it; a different destination therefore proves
+// supersession rather than an in-progress claim. The check is conservative on
+// purpose — it requires an abandoned session state, a session that no longer
+// owns primary, no live executor, and a recorded route with a real
+// destination — so a fresh claim, a session waiting on capacity, or a read
+// failure is left untouched.
+func (s *Service) dynamicStartingRouteIsSuperseded(ctx context.Context, session *models.TaskSession) bool {
+	if session == nil || session.IsPrimary || !isSupersededStartingRouteState(session.State) {
+		return false
+	}
+	if !s.dynamicStartingRouteHasNoLiveExecutor(ctx, session) {
+		return false
+	}
+	return s.workflowSessionRouteNamesDifferentDestination(ctx, session)
+}
+
+func isSupersededStartingRouteState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCreated, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Service) dynamicStartingRouteHasNoLiveExecutor(ctx context.Context, session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	_, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
+}
+
+func (s *Service) workflowSessionRouteNamesDifferentDestination(ctx context.Context, session *models.TaskSession) bool {
+	task, err := s.repo.GetTask(ctx, session.TaskID)
+	if err != nil || task == nil {
+		return false
+	}
+	route, ok := models.LoadWorkflowSessionRoute(task.Metadata)
+	if !ok || route.DestinationID == "" {
+		return false
+	}
+	return route.DestinationID != session.ID
+}
+
+// settleClaimedStartingRoute releases a session's still-"starting" durable
+// route at a session-end transition so a claimed route cannot outlive the
+// launch owner that would have carried it to active.
+// markDynamicRouteActionRequired only acts while the route is still starting or
+// retrying, so a healthy route is never touched.
+func (s *Service) settleClaimedStartingRoute(ctx context.Context, session *models.TaskSession) {
+	if session == nil || session.RouteGeneration <= 0 {
+		return
+	}
+	s.markDynamicRouteActionRequired(ctx, session.ID, session.RouteGeneration, "session_ended_with_starting_route")
 }
 
 func (s *Service) stopDynamicPolicyRecovery() {
