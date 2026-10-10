@@ -703,6 +703,7 @@ func (m *Manager) buildAgentCommandWithContext(
 	req *LaunchRequest,
 	profileInfo *AgentProfileInfo,
 	agentConfig agents.Agent,
+	runtime agentruntime.Runtime,
 	preferNative bool,
 ) (agentCommands, error) {
 	model := ""
@@ -724,7 +725,6 @@ func (m *Manager) buildAgentCommandWithContext(
 		model = req.ModelOverride
 	}
 	cliFlagTokens = appendRouteOverrideFlags(cliFlagTokens, req)
-	runtime := models.ExecutorType(req.ExecutorType).Runtime()
 	managedRuntimeOptions, err := m.resolveManagedRuntimeCommandOptions(ctx, runtime, agentConfig)
 	if err != nil {
 		return agentCommands{}, err
@@ -1966,7 +1966,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
 		}
 		preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execution.MetadataSnapshot())
-		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, preferNative)
+		cmds, err := m.buildAgentCommandWithContext(sharedCtx, req, profileInfo, agentConfig, execution.RuntimeName, preferNative)
 		if err != nil {
 			return nil, err
 		}
@@ -2405,7 +2405,7 @@ func (m *Manager) buildExecutionFromInstance(
 	// promoteWorkspaceExecution's call site rather than re-deriving from the
 	// requested ExecutorType.
 	preferNative := m.preferNativeBinary(agentConfig, execution.RuntimeName, execReq.Metadata)
-	cmds, err := m.buildAgentCommandWithContext(ctx, req, profileInfo, agentConfig, preferNative)
+	cmds, err := m.buildAgentCommandWithContext(ctx, req, profileInfo, agentConfig, execution.RuntimeName, preferNative)
 	if err != nil {
 		return nil, err
 	}
