@@ -696,6 +696,23 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		CREATE INDEX IF NOT EXISTS idx_task_message_send_operations_retention
 			ON task_message_send_operations(created_at)`)
 
+	// Multi-workspace overview read path (GET /api/v1/office/workspaces/aggregate).
+	// Its per-workspace activity and event reads filter every task by workspace
+	// plus is_ephemeral/origin/state and then join per-task session or turn rows
+	// by a time window. Without a covering index on that task predicate and a
+	// (task_id, started_at) / (state, updated_at) index on the joined tables,
+	// SQLite drives each read from the whole task set and fetches every
+	// candidate row, so one snapshot recompute reads ~190 MB on a large install.
+	// These indexes make the task predicate covering and the window seekable.
+	// Declared here rather than in the fresh schema because schema init is a
+	// no-op on an existing DB (see AGENTS.md "Schema & migrations").
+	_ = r.migrate.Apply("idx_tasks_workspace_scope",
+		`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_scope ON tasks(workspace_id, is_ephemeral, origin, state, id)`)
+	_ = r.migrate.Apply("idx_turns_task_started",
+		`CREATE INDEX IF NOT EXISTS idx_turns_task_started ON task_session_turns(task_id, started_at)`)
+	_ = r.migrate.Apply("idx_sessions_state_updated",
+		`CREATE INDEX IF NOT EXISTS idx_sessions_state_updated ON task_sessions(state, updated_at)`)
+
 	// Checked last so a failure on any required migration above --
 	// including this file's own marker_positions column -- fails startup
 	// instead of leaving a schema that allocateStepEntryIfPending can't write to.
