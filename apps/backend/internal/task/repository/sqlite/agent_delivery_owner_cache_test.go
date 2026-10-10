@@ -175,14 +175,11 @@ func TestDeliveryRetentionStorageOwnerStatementPublication(t *testing.T) {
 				t.Fatal("native preparation did not reach the owner SQL")
 			}
 			if closeDuringPrepare {
-				if err := repo.Close(); err != nil {
-					close(release)
-					t.Fatal(err)
-				}
+				closeRetentionOwnerDuringPreparation(t, repo, release)
 			} else {
 				cancel()
+				close(release)
 			}
-			close(release)
 			if err := <-done; err == nil || (!closeDuringPrepare && !errors.Is(err, context.Canceled)) {
 				t.Fatalf("interrupted native preparation must not publish: %v", err)
 			}
@@ -196,6 +193,41 @@ func TestDeliveryRetentionStorageOwnerStatementPublication(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func closeRetentionOwnerDuringPreparation(t *testing.T, repo *Repository, release chan struct{}) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- repo.Close() }()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		cache := &repo.agentDeliveryOwnerStatements
+		cache.mu.Lock()
+		closed := cache.closed
+		cache.mu.Unlock()
+		if closed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			close(release)
+			t.Fatal("repository close did not fence owner statement publication")
+		case <-ticker.C:
+		}
+	}
+	// Closing another cached plan can wait for the connection held by preparation.
+	close(release)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("repository close did not finish after native preparation was released")
 	}
 }
 

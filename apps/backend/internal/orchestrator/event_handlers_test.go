@@ -983,7 +983,7 @@ func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.
-func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string) {
+func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, workflowStepID string, queueIncarnationID ...string) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -1024,6 +1024,9 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 		State:     models.TaskSessionStateRunning,
 		StartedAt: now,
 		UpdatedAt: now,
+	}
+	if len(queueIncarnationID) == 1 {
+		session.QueueIncarnationID = queueIncarnationID[0]
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create task session: %v", err)

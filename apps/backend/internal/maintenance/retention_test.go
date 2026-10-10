@@ -159,8 +159,9 @@ func TestDeliveryRetentionMaintenance(t *testing.T) {
 		if retired != 3 {
 			t.Fatalf("retired cursor = %d, want 3", retired)
 		}
+		// Leave room past the retained live cursor to prove scan exhaustion.
 		noop, err := Run(context.Background(), homeDir, "sqlite", fixture.dbPath,
-			RunOptions{Execute: true, CandidateLimit: 1}, nil)
+			RunOptions{Execute: true, CandidateLimit: 2}, nil)
 		if err != nil {
 			t.Fatalf("repeat execute after cleanup: %v", err)
 		}

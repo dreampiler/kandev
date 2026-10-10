@@ -29,6 +29,8 @@ Historical direct-prefix comparison (superseded by the receipt-plan result above
 
 All 18 commands and data-preservation assertions passed in that window. Command success does not satisfy latency acceptance. Do not round away a failure, discard samples, or reuse a preceding candidate's pass for new source.
 
+CI fixture reconciliation now passes focused race checks for owner/receipt shutdown publication, audited configuration aliases, managed retirement admission/replacement, maintenance, and exact workflow settlement. Browser fixture corrections remain local and uncommitted while rollback validation is open. Recent desktop matrices pass eight cases and fail the frozen-N case. The PostgreSQL witness preserves the agent runtime; browser restarts still kill it. The next fixture correction must preserve the runtime across the rollback and return to baseline during teardown. Kubernetes compatibility CI reports cancelled-session failures with no established cause; keep those failures open. No production/native code changed in these CI fixture corrections.
+
 ## Remaining work, in order
 
 1. Resolve the SQLite receipt-plan latency failures. Preserve the same predeclared baseline/idle/active interleaving, production pools, matched 100000-event history, and all 4500 samples in further comparisons. Resolve any remaining regression before calling Task 08 complete.
@@ -51,7 +53,7 @@ Frozen Release N must remain unchanged:
 - SHA-256: `3df1e310220f0a7588453c062f2fa90aa0a611dd7277cc77c76dd4f8bc3a0517`.
 - Version: `v0.97.0-143-gd7a44e96ed-dirty`.
 
-This witness certifies retained-session recovery and explicit-ID manual prompt/event writes. Source inspection identified historical implicit auto-start/direct-retry preparation gaps. It does not certify every launch path; a shipping Release N needs those admission corrections. Do not replace the frozen witness with a current binary and claim an old-reader test.
+This witness certifies retained-session recovery with the agent runtime preserved across backend rollback, plus explicit-ID manual prompt/event writes. Source inspection identified historical implicit auto-start/direct-retry preparation gaps. It does not certify every launch path; a shipping Release N needs those admission corrections. Do not replace the frozen witness with a current binary and claim an old-reader test.
 
 The unchanged pre-retention benchmark artifact SHA-256 is `3b21db2b295ac620ab7d3f61b6e82553c72aa1008843ec5566ae0c64cf08965e`.
 The sparse benchmark artifact SHA-256 is `e51980564038831fd0981a8112b888125fc5ab8d645dcaa906fe2b8ff61f89d9`.
