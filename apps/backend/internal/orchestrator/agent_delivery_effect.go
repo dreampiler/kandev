@@ -310,7 +310,9 @@ func (s *Service) settleFailedDeliveryWorkflowOutcome(ctx context.Context, data 
 }
 
 func agentDeliveryEffectCarriesDeliveryIdentity(effect *models.AgentDeliveryEffect) bool {
-	return effect != nil && (effect.StreamID != "" || effect.Sequence != 0 || effect.SessionID != "" ||
+	// SessionID also scopes legacy workflow receipts. Journal-specific fields
+	// identify effects that require the complete durable delivery binding.
+	return effect != nil && (effect.StreamID != "" || effect.Sequence != 0 ||
 		effect.IncarnationID != "" || effect.HarnessGeneration != 0 || effect.SubmissionID != "")
 }
 
