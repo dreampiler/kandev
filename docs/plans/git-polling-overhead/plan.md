@@ -67,7 +67,7 @@ pair, which owns the capture and validation evidence reads.
 
 ## Work orders
 
-- [ ] [Task 01: Remember the resolved Git executable](task-01-remember-git-executable.md) (wave 1, no dependencies)
+- [x] [Task 01: Remember the resolved Git executable](task-01-remember-git-executable.md) (wave 1, no dependencies)
 - [ ] [Task 02: Resolve comparison refs in one Git process](task-02-batch-comparison-refs.md) (wave 1, no dependencies)
 
 ## Verification strategy

@@ -1,7 +1,7 @@
 ---
 id: "01-remember-git-executable"
 title: "Remember the resolved Git executable"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -34,7 +34,8 @@ process `PATH` is unchanged and the file still exists, instead of walking
    - `cmd.Args[0]` stays `git`; an unresolvable Git keeps the `git` name and
      the existing not-found error.
    Fixtures are empty placeholder files (`git.exe` on Windows, mode `0755`
-   elsewhere); they are resolved, never executed. Each test resets the memo.
+   elsewhere); they are resolved, never executed. Each test installs its own
+   temporary `PATH`, so no test hook resets the memo.
 2. Add a mutex-guarded memo of the resolved path and the `PATH` value it was
    resolved under. `GitExecutablePath` checks the remembered file with one
    `os.Stat`, resolves again on a `PATH` change or missing file, and clears the
@@ -78,4 +79,16 @@ Package-level state is shared by every test in the package; tests that change
 
 ## Results
 
-Pending implementation.
+Implemented on 2026-10-12 against `add376a2af`.
+
+- RED (baseline `git_command.go`, new tests): only
+  `TestNewGitCommandReusesResolvedGitUnderUnchangedPath` failed; the baseline
+  picked the new earlier candidate. The other three tests passed.
+- GREEN: the four `^Test(NewGitCommand|GitExecutablePath)` tests pass.
+- Neighbours: `TestPrepareGitCommandPreservesNilAndDuplicateEnvironment`,
+  `TestGitSSHCommandPreservation`, `TestGitCredentialHTTPSelectedScope`,
+  `TestProductionGitCommandsUseTheAdmissionSeam`, and `TestScanGoSource*` pass.
+  `TestGitFinalEnvironment` and `TestGitRunnersApplyFinalEnvironment` use a
+  POSIX shell fake `git` and fail on Windows with the baseline file as well;
+  they are not affected by this change.
+- `go build ./...` and `go vet ./internal/common/subproc/` pass.
