@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -107,6 +108,14 @@ const processDefaultExitGrace = 5 * time.Second
 const processGroupTerminateGrace = 2 * time.Second
 const processGroupPollInterval = 50 * time.Millisecond
 const processStderrDrainTimeout = time.Second
+
+// permissionResponseTimeout bounds how long handlePermissionRequest waits for a
+// backend response before failing the observed request explicitly. A request
+// that never receives a response must not strand its agent; on expiry the
+// pending request is settled as cancelled and the agent continues through its
+// normal cancellation path. It reuses the documented shared.Config default and
+// is a var so tests can shorten it.
+var permissionResponseTimeout = shared.DefaultPermissionTimeout
 
 // Manager manages the agent subprocess
 type Manager struct {
@@ -3024,7 +3033,17 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 	// Send notification to backend via updates channel
 	m.sendPermissionNotification(pending)
 
-	// Wait for response indefinitely - user may close and reopen the page
+	// Wait for the response with a finite bound: a request that is never
+	// answered must fail explicitly rather than strand the agent forever. A
+	// detached instance can still be reattached and resolved before the
+	// deadline, and instance lifecycle cancellation ends the wait immediately.
+	var lifetimeDone <-chan struct{}
+	if m.lifetimeCtx != nil {
+		lifetimeDone = m.lifetimeCtx.Done()
+	}
+	timer := time.NewTimer(permissionResponseTimeout)
+	defer timer.Stop()
+
 	select {
 	case resp := <-pending.ResponseCh:
 		m.logger.Info("received permission response",
@@ -3035,27 +3054,40 @@ func (m *Manager) handlePermissionRequest(ctx context.Context, req *adapter.Perm
 			m.sendPermissionCancelledNotification(pending)
 		}
 		return resp, nil
+	case <-timer.C:
+		m.logger.Warn("permission response wait timed out, failing request",
+			zap.String("pending_id", pendingID),
+			zap.Duration("timeout", permissionResponseTimeout))
+		return m.settlePermissionWait(pending), nil
+	case <-lifetimeDone:
+		m.logger.Warn("permission request cancelled by instance lifetime",
+			zap.String("pending_id", pendingID))
+		return m.settlePermissionWait(pending), nil
 	case <-ctx.Done():
 		m.logger.Warn("permission request context cancelled",
 			zap.String("pending_id", pendingID))
-		// Claim the terminal transition ourselves so a concurrent resolve/cancel/
-		// respond call that is already past the state check cannot also "win" and
-		// report success for a request this goroutine is about to stop listening on.
-		if _, err := m.consumePermission(pendingID, pending.RequestID, nil,
-			&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
-			// Someone else consumed it first; deliver whatever they sent instead of
-			// fabricating our own cancellation.
-			select {
-			case resp := <-pending.ResponseCh:
-				return resp, nil
-			default:
-				return &adapter.PermissionResponse{Cancelled: true}, nil
-			}
-		}
-		// Send cancellation notification so the backend can update the permission message status
-		m.sendPermissionCancelledNotification(pending)
-		return &adapter.PermissionResponse{Cancelled: true}, nil
+		return m.settlePermissionWait(pending), nil
 	}
+}
+
+// settlePermissionWait claims the terminal transition for a pending request
+// whose response wait ended without a delivery, so the agent observes an
+// explicit cancellation instead of a granted or fabricated decision. A
+// concurrent resolve/cancel/respond call that is already past the state check
+// must not also "win"; when one did, its response is delivered instead.
+func (m *Manager) settlePermissionWait(pending *PendingPermission) *adapter.PermissionResponse {
+	if _, err := m.consumePermission(pending.ID, pending.RequestID, nil,
+		&adapter.PermissionResponse{Cancelled: true}, streams.PermissionErrorStale); err != nil {
+		select {
+		case resp := <-pending.ResponseCh:
+			return resp
+		default:
+			return &adapter.PermissionResponse{Cancelled: true}
+		}
+	}
+	// Send cancellation notification so the backend can update the permission message status
+	m.sendPermissionCancelledNotification(pending)
+	return &adapter.PermissionResponse{Cancelled: true}
 }
 
 // autoApprovePermission answers a permission request by selecting the first
