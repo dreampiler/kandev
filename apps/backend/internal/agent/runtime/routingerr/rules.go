@@ -80,6 +80,10 @@ var providerRules = map[string][]rule{
 	},
 	"opencode-acp": {
 		mustRule("opencode.stderr.usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		// OpenCode Go reports its subscription limit through the ACP prompt
+		// error without a reset time. A correlated period usage-limit notice,
+		// when present, matches the rule above first and keeps its reset hint.
+		mustRule("opencode.acp.go_usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?go\s+usage\s+limit\s+exceeded\b`, CodeQuotaLimited, ConfHigh),
 		// Explicit credit exhaustion takes precedence over generic payment wording.
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
