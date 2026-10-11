@@ -106,9 +106,18 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_task_title?: string;
   sender_session_id?: string;
   sender_session_name?: string;
+  delivery_status?: string;
 };
 
-function senderTaskFromMetadata(metadata: UserMessageMetadata | undefined): SenderTaskInfo | null {
+function userMessageAttachments(metadata: UserMessageMetadata | undefined) {
+  const attachments = metadata?.attachments || [];
+  return {
+    imageAttachments: attachments.filter((attachment) => attachment.type === "image"),
+    fileAttachments: attachments.filter((attachment) => attachment.type === "resource"),
+  };
+}
+
+function userMessageSenderTask(metadata: UserMessageMetadata | undefined): SenderTaskInfo | null {
   if (!metadata?.sender_task_id) return null;
   return {
     id: metadata.sender_task_id,
@@ -118,28 +127,34 @@ function senderTaskFromMetadata(metadata: UserMessageMetadata | undefined): Send
   };
 }
 
+function userMessageMetadataFlags(
+  metadata: UserMessageMetadata | undefined,
+  hasContent: boolean,
+  hasAttachments: boolean,
+) {
+  return {
+    hasPlanMode: !!metadata?.plan_mode,
+    hasReviewComments: !!metadata?.has_review_comments,
+    hasHiddenPrompts: !!metadata?.has_hidden_prompts,
+    hasContent,
+    hasAttachments,
+    deliveryBlocked: metadata?.delivery_status === "blocked",
+  };
+}
+
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
-  const imageAttachments = (metadata?.attachments || []).filter((att) => att.type === "image");
-  const fileAttachments = (metadata?.attachments || []).filter((att) => att.type === "resource");
-  const contextFiles = metadata?.context_files || [];
-  const hasPlanMode = !!metadata?.plan_mode;
-  const hasReviewComments = !!metadata?.has_review_comments;
-  const hasHiddenPrompts = !!metadata?.has_hidden_prompts;
+  const { imageAttachments, fileAttachments } = userMessageAttachments(metadata);
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   const childStallAlerts = childStallAlertsFromMetadata(comment.metadata);
-  const senderTask = childStallAlerts.length === 0 ? senderTaskFromMetadata(metadata) : null;
+  const senderTask = childStallAlerts.length === 0 ? userMessageSenderTask(metadata) : null;
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {
     imageAttachments,
     fileAttachments,
-    contextFiles,
-    hasPlanMode,
-    hasReviewComments,
-    hasHiddenPrompts,
-    hasContent,
-    hasAttachments,
+    contextFiles: metadata?.context_files || [],
+    ...userMessageMetadataFlags(metadata, hasContent, hasAttachments),
     senderTask,
     workflowMessage,
     childStallAlerts,
@@ -153,6 +168,7 @@ function UserContextBadges({
   contextFiles,
   senderTask,
   workflowMessage,
+  deliveryBlocked,
 }: {
   destinationTaskId: string;
   hasPlanMode: boolean;
@@ -160,6 +176,7 @@ function UserContextBadges({
   contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
+  deliveryBlocked: boolean;
 }) {
   const { t } = useTranslation();
   if (
@@ -167,12 +184,22 @@ function UserContextBadges({
     !hasReviewComments &&
     contextFiles.length === 0 &&
     !senderTask &&
-    !workflowMessage
+    !workflowMessage &&
+    !deliveryBlocked
   )
     return null;
   return (
     <div className="flex justify-end gap-1.5 mb-1 flex-wrap">
       {workflowMessage && <WorkflowStepMessageBadge workflow={workflowMessage} />}
+      {deliveryBlocked && (
+        <span
+          role="status"
+          data-testid="user-message-delivery-blocked"
+          className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-700 dark:text-amber-300"
+        >
+          {t("task:deliveryMessageBlocked")}
+        </span>
+      )}
       {senderTask && <SenderTaskBadge sender={senderTask} destinationTaskId={destinationTaskId} />}
       {hasPlanMode && (
         <span className="inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-2 py-0.5 text-[10px] text-slate-400">
@@ -300,6 +327,7 @@ function UserMessageContent({
     senderTask,
     workflowMessage,
     childStallAlerts,
+    deliveryBlocked,
   } = parseUserMessageMetadata(comment);
 
   return (
@@ -312,6 +340,7 @@ function UserMessageContent({
           contextFiles={contextFiles}
           senderTask={senderTask}
           workflowMessage={workflowMessage}
+          deliveryBlocked={deliveryBlocked}
         />
         <ChildStallAlertSummary alerts={childStallAlerts} />
         <div

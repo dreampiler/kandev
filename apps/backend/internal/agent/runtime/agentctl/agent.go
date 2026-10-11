@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strconv"
 	"sync"
 	"time"
@@ -544,7 +545,7 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 // StreamUpdatesFrom opens the updates stream after a committed delivery
 // sequence. A zero cursor preserves the original first-connect behavior.
 func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent), mcpHandler MCPHandler, onDisconnect func(err error), after uint64) error {
-	streamCtx, cancel, err := c.RuntimeBoundContext(ctx)
+	attempt, streamCtx, err := c.beginUpdatesStreamDial(ctx)
 	if err != nil {
 		return err
 	}
@@ -554,17 +555,20 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 		route += "?after=" + strconv.FormatUint(after, 10)
 	}
 
-	dialCtx, cancelDial := context.WithTimeout(streamCtx, 15*time.Second)
-	conn, _, err := c.dialWebSocket(dialCtx, route, c.wsAuthHeaders())
+	dialCtx, cancelDial := context.WithTimeout(attempt.ctx, 15*time.Second)
+	conn, _, err := c.dialWebSocketWithConn(dialCtx, route, c.wsAuthHeaders(), func(conn net.Conn) error {
+		return c.registerUpdatesStreamDialConn(attempt, conn)
+	})
 	cancelDial()
 	if err != nil {
-		cancel()
+		c.retireUpdatesStreamDial(attempt)
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
-	c.mu.Lock()
-	c.agentStreamConn = conn
-	c.mu.Unlock()
+	cancel, err := c.completeUpdatesStreamDial(attempt, conn)
+	if err != nil {
+		return fmt.Errorf("failed to connect to updates stream: %w", err)
+	}
 	stage := newUpdateStreamStage()
 	stage.connected.Store(true)
 	c.updateStage.Store(stage)
@@ -976,14 +980,9 @@ func eventDataBool(data map[string]any, key string) bool {
 // CloseUpdatesStream closes the agent events stream connection.
 func (c *Client) CloseUpdatesStream() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.agentStreamConn != nil {
-		if err := c.agentStreamConn.Close(); err != nil {
-			c.logger.Debug("failed to close agent events stream", zap.Error(err))
-		}
-		c.agentStreamConn = nil
-	}
+	cleanup, conn := c.takeUpdatesStreamLocked()
+	c.mu.Unlock()
+	closeUpdatesStream(cleanup, conn)
 }
 
 // CancelResponse is the response from the agentctl cancel endpoint.
