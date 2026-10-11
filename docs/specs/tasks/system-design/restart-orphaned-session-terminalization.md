@@ -3,6 +3,7 @@ status: draft
 system: tasks
 requirements:
   - REQ-TASKS-RESTART-ORPHAN-SESSIONS-002
+  - REQ-TASKS-RESTART-ORPHAN-SESSIONS-003
 ---
 
 # Session recovery after backend interruption
@@ -72,6 +73,42 @@ STARTING entry alone does not. Follow the
 [warning design](interrupted-task-indicator.md) for publication, stale callbacks,
 and the shared sidebar/card renderer.
 
+## Interrupted automatic starts
+
+An automatic step start writes `SCHEDULING` before it creates or reuses a
+session. A restart in that window leaves a task in `SCHEDULING` that no startup
+pass lists: `reconcileTaskLifecycleTokens` lists durable tokens,
+`ReconcileQueuedTasks` lists workflow queue destinations, the ceiling sweep
+lists deferred-launch records, and `reconcileDependencyLaunchesOnStartup` lists
+pending dependency launches. The task keeps showing Scheduling with no owner.
+
+`reconcileSchedulingOrphansOnStartup` adds one pass over
+`ListSchedulingTasks` (non-archived, non-ephemeral, non-automation `SCHEDULING`
+tasks, oldest update first). It runs once, inside the existing background
+startup sweep and before `reconcileTaskLifecycleTokens`, so a task that a token
+still owns is skipped instead of being seen as orphaned between token clearing
+and session creation. `Service.Stop` already joins that sweep.
+
+A candidate is skipped when it has a workflow queue destination, any
+deferred-launch record, a lifecycle token, a recorded launch error, an Office
+owner, a step without `auto_start_agent`, or an unresolved dependency (`003.2`).
+For a remaining candidate:
+
+- With no active session, `autoStartTaskForStep` starts the step through the
+  ordinary automatic path, which applies ceiling, WIP, prompt, and session
+  serialization rules (`003.1`).
+- With a `WAITING_FOR_INPUT` or `IDLE` session and no user prompt history,
+  `processOnEnter` runs the current step's entry on that session, like a
+  same-step re-entry. `on_exit` does not run because the task never left the
+  step. The entry-dispatch guard still rejects a stale route (`003.3`).
+- With prompt history, the entry was already delivered, and only the task state
+  moves from `SCHEDULING` to `IN_PROGRESS` by compare-and-set (`003.3`).
+- A `CREATED`, `STARTING`, or `RUNNING` session means a launch is live and is
+  not touched (`003.3`, `003.4`).
+
+This pass does not resume interrupted conversations. A session that already
+accepted a prompt is never prompted again, so `002.2` and `002.3` still hold.
+
 ## UI and verification
 
 Reuse the current desktop chat and dedicated phone task layout. Show normal
@@ -82,6 +119,7 @@ for previews and the desktop/phone test matrix.
 | Requirement | Design sections |
 | --- | --- |
 | REQ-TASKS-RESTART-ORPHAN-SESSIONS-002 | Ownership and control flow; State and persistence; Focus and message delivery; UI and verification |
+| REQ-TASKS-RESTART-ORPHAN-SESSIONS-003 | Interrupted automatic starts |
 
 ## Related decision
 
