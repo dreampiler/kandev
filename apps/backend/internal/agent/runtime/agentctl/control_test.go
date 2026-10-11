@@ -540,6 +540,37 @@ func TestCreateInstance_SendsControlAuthToken(t *testing.T) {
 	}
 }
 
+// TestCreateInstance_CopiesClientUnderRotation is meaningful under -race:
+// credential rotation replaces the transport while creation copies the client.
+func TestCreateInstance_CopiesClientUnderRotation(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	t.Cleanup(srv.Close)
+	c := newTestControlClient(t, srv, WithControlAuthToken("initial-token"))
+
+	done := make(chan struct{})
+	rotated := make(chan struct{})
+	go func() {
+		defer close(rotated)
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				return
+			default:
+				c.SetAuthToken(fmt.Sprintf("token-%d", i))
+			}
+		}
+	}()
+	for range 20 {
+		if _, err := c.CreateInstance(context.Background(), &CreateInstanceRequest{WorkspacePath: "/w"}); err != nil {
+			close(done)
+			<-rotated
+			t.Fatalf("CreateInstance: %v", err)
+		}
+	}
+	close(done)
+	<-rotated
+}
+
 func TestDeleteInstance_UsesDeleteVerbWithIDInPath(t *testing.T) {
 	for _, status := range []int{http.StatusOK, http.StatusNoContent} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
