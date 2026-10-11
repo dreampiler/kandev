@@ -125,7 +125,7 @@ That case is the separate proposal below.
 This section is a proposal. It is separable from the rest of the design and can be removed without affecting empty turn ends.
 
 A post-start failure can reach the failure route before any output or effect without a complete provider diagnostic.
-Examples are a dropped peer, an agent process exit, or a generic prompt failure.
+Examples are a dropped peer or an agent process exit.
 The classifier maps it to `agent_runtime_error` with rule `phase.poststart.unknown`, and the terminal provider origin rejects that code.
 A candidate that keeps failing this way is therefore never advanced.
 
@@ -136,20 +136,20 @@ The `post_start_no_result` origin admits such a failure only when all of these h
 - the step is known and does not veto, and the candidate policy is enabled.
 
 The origin waives `DiagnosticComplete` and the provider-ID requirement. No other origin changes.
-Its identity is computed from the sanitized message per producer shape:
+Its identity depends on the producer shape of the message:
 
-| Producer shape | Recognition | Identity text |
-| --- | --- | --- |
-| Dropped peer | Exact fixed message | The fixed message |
-| Agent process exit | Message starts with the fixed exit prefix and an exit code | The prefix with the exit code; the stderr suffix is dropped |
-| Generic prompt or turn failure | Any other message | Sanitized, whitespace-collapsed, first 256 bytes at a UTF-8 boundary |
+| Producer shape | Producer | Recognition | Identity text |
+| --- | --- | --- | --- |
+| Dropped peer | `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Exact fixed message | The fixed message |
+| Agent process exit | `agentctl/server/process/manager.go:3433` | Fixed exit prefix and an exit code at the start | The prefix with the exit code. The stderr suffix is dropped |
 
-The fingerprint adds code, origin, phase, provider identity when present, and classifier rule.
-Only the fingerprint is persisted. A message that sanitizes to empty is not admitted.
+Any other message is not admitted and keeps manual recovery.
+That includes the async prompt failure in `agentctl/server/api/agent.go:1193` and the app-server turn failure in `agentctl/server/adapter/transport/codexappserver/adapter.go:649`.
+The fingerprint uses the existing identity fields: code, origin, phase, and the identity text. Only the fingerprint is persisted.
 
-This deliberately relaxes the matching-identity rule below for this one origin.
-Two failures whose messages differ only after the bounded identity text count as the same failure.
-The generic row is the broadest part. It is the only shape that covers prompt failures without a fixed form, and it can be dropped on its own.
+This is a producer-category exception, not diagnostic equivalence.
+Two process exits with the same exit code and different stderr share one identity, so they count as the same repeated failure.
+A different exit code starts a new count. Line numbers refer to the base commit of the package.
 The [decision amendment](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records why exact identity and manual recovery were not chosen.
 
 ## Matching identity

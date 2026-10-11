@@ -16,7 +16,8 @@ All other rules in this decision still apply, including the threshold, attempt d
 
 This amendment is a proposal and is separable from the one above.
 It adds the `post_start_no_result` origin for a post-start `agent_runtime_error` that the classifier leaves unknown and that arrives before any output or effect.
-For this origin only, identity uses a bounded, sanitized form of the message per producer shape, as the [design](../specs/agents/system-design/dynamic-unclassified-fallback.md#post-start-no-result-failures-contract-proposal) defines.
+For this origin only, identity is the fixed text of a known producer shape, as the [design](../specs/agents/system-design/dynamic-unclassified-fallback.md#post-start-no-result-failures-contract-proposal) defines.
+Process exits with the same exit code share one identity even when their stderr differs. Other messages keep manual recovery.
 Every other origin keeps the complete-diagnostic rule, the 1024-byte bound, and the redaction rule.
 The threshold range and the disabled default do not change.
 
