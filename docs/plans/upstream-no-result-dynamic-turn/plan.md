@@ -22,6 +22,7 @@ The agent system owns all of them because it owns candidate selection, route sta
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | planned |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | planned |
+| [Task 03](task-03-virtual-family-launch.md) | A launch that selects the virtual dynamic family fails with a generic empty-command error | none | planned |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
 
 ## Outcome coverage
@@ -120,6 +121,26 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 `TestWSRouteActionReportsNonDynamicProfileAsValidation` must fail on the base commit because the handler returns an internal error.
 
+## Task 03: virtual family at launch
+
+### Evidence and cause
+
+- `ErrVirtualProfile` (`apps/backend/internal/agent/runtime/lifecycle/profile_resolver.go`) is returned only during profile resolution.
+- Launch, workspace promotion, managed tool policy admission, restart, and execution preparation select the agent with `registry.Get` and accept the virtual family.
+- Command building then produces an empty command, and the session fails with the generic "agent command cannot be empty" error.
+- `agentNameForProfile` (`agent/runtime/dynamic_resolver.go`) returns the dynamic family name for a candidate without rejecting it.
+
+`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1`, `.12` and the [profile configuration rules](../../specs/agents/system-design/dynamic-agent-routing-01.md) define the contract.
+
+### Tests
+
+| AC suffix | Test file and test |
+| --- | --- |
+| 001.12 | `apps/backend/internal/agent/runtime/lifecycle/manager_launch_virtual_test.go`: `TestResolveLaunchableAgent_RejectsVirtualFamily`, `TestRestartAgentProcess_VirtualAgentFailsClosed` |
+| 001.12 | `apps/backend/internal/agent/runtime/dynamic_resolver_virtual_test.go`: `TestAgentNameForProfile_RejectsVirtualFamily` |
+
+`TestRestartAgentProcess_VirtualAgentFailsClosed` must fail on the base commit because the error does not match `ErrVirtualProfile`.
+
 ## Task 04: restart recovery portions (pending input)
 
 Two restart-recovery defects on the dynamic path are planned for this package: a recovered dynamic route that is never activated, and a recovery path that reports success when nothing was resumed.
@@ -136,6 +157,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 
 - [ ] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [ ] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
+- [ ] [Task 03: Fail closed when the virtual dynamic family reaches launch](task-03-virtual-family-launch.md)
 
 ## Verification results
 
