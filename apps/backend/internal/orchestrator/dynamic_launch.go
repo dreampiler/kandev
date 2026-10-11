@@ -940,7 +940,7 @@ func (s *Service) prepareUnclassifiedFailureEvidence(
 	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
-	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, classified, startupEvidence)
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -960,10 +960,14 @@ func (s *Service) unclassifiedFailureRouteEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
+	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) dynamicruntime.UnclassifiedFailureEvidence {
 	if startupEvidence != nil {
 		return *startupEvidence
+	}
+	if isPostStartUnknownFailure(classified) {
+		return s.unclassifiedPostStartEvidence(ctx, data, session, classified.Phase)
 	}
 	return s.unclassifiedPromptEvidence(ctx, data, session)
 }
