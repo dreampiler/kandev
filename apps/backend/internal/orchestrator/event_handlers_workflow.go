@@ -44,6 +44,7 @@ type turnCompletionCause string
 
 var (
 	errDeferredMoveAlreadyApplied           = errors.New("deferred move already applied")
+	errDeferredMoveSourceChanged            = errors.New("deferred move source changed")
 	errReusableSessionNoLongerActive        = errors.New("reusable session is no longer active")
 	errWorkflowAutoStartSessionTerminalized = errors.New("workflow auto-start session terminalized")
 	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
@@ -5082,34 +5083,20 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.Error(err))
 		return
 	}
-	fromStepID := task.WorkflowStepID
-	if fromStepID == move.WorkflowStepID {
-		var applyErr error
-		if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-			applyErr = s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID, record)
-		} else {
-			applyErr = s.workflowStore.markDeferredMoveAppliedUnfenced(ctx, taskID, move.MoveID)
-		}
-		if errors.Is(applyErr, errDeferredMoveAlreadyApplied) {
-			s.logger.Info("dropping already-applied pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-		} else if applyErr != nil {
-			s.logger.Error("failed to record pending move at current target",
-				zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(applyErr))
-			return
-		}
-		s.logger.Info("pending move target equals current step; skipping transition",
-			zap.String("task_id", taskID),
-			zap.String("step_id", fromStepID))
-		s.removePendingMoveHandoffPromptForSession(ctx, messagequeue.QueueSessionIdentity{
-			TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
-		}, move.MoveID)
-		_, _ = s.drainQueuedMessageForPromptableSessionForIdentity(ctx, messagequeue.QueueSessionIdentity{
-			TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
-		})
-		if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-			s.consumeUnfencedPendingMove(ctx, taskID, sessionID, record)
-		}
+	currentStepID := task.WorkflowStepID
+	// The move remembers the step it was requested from. Replaying against the
+	// current step instead would let a stale move overwrite a later move. A
+	// legacy row without the recorded source keeps the current-step behavior.
+	fromStepID := currentStepID
+	if move.FromStepID != "" {
+		fromStepID = move.FromStepID
+	}
+	if currentStepID == move.WorkflowStepID {
+		s.consumePendingMoveAtCurrentStep(ctx, taskID, sessionID, move, record, currentStepID)
+		return
+	}
+	if s.pendingMoveSuperseded(ctx, taskID, currentStepID, move) {
+		s.discardPendingMove(ctx, taskID, sessionID, move, record, "superseded")
 		return
 	}
 
@@ -5127,32 +5114,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 			zap.String("target_step_id", move.WorkflowStepID),
 			zap.String("step_workflow_id", targetStep.WorkflowID),
 			zap.String("move_workflow_id", move.WorkflowID))
-		if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-			if !s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID) {
-				return
-			}
-			if _, deleteErr := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, ""); deleteErr != nil {
-				s.logger.Warn("failed to discard invalid pending move",
-					zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(deleteErr))
-			}
-			return
-		}
-		identity := messagequeue.QueueSessionIdentity{
-			TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
-		}
-		entryID, listed := s.pendingMoveHandoffPromptIDForSession(ctx, identity, move.MoveID)
-		if !listed {
-			return
-		}
-		removed, deleteErr := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, entryID)
-		if deleteErr != nil {
-			s.logger.Warn("failed to discard invalid pending move",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(deleteErr))
-			return
-		}
-		if removed && entryID != "" {
-			s.publishQueueStatusEventForIdentity(ctx, identity)
-		}
+		s.discardPendingMove(ctx, taskID, sessionID, move, record, "invalid")
 		return
 	}
 
@@ -5194,6 +5156,12 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.removePendingMoveHandoffPromptForSession(deferredMoveCtx, messagequeue.QueueSessionIdentity{
 			TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
 		}, move.MoveID)
+		return
+	} else if errors.Is(transitionErr, errDeferredMoveSourceChanged) {
+		// A later move committed between the check above and the atomic write.
+		// The write rolled back without changing the task, so the pending row is
+		// still armed; drop it now.
+		s.discardPendingMove(deferredMoveCtx, taskID, sessionID, move, record, "superseded")
 		return
 	} else if transitionErr != nil {
 		s.logger.Error("failed to apply pending move transition",
@@ -5247,6 +5215,123 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		context.WithoutCancel(ctx), identity, freshSession,
 		fromStepID, move.WorkflowStepID, taskDescription, move.EntryOptions, transitionID,
 	)
+}
+
+// consumePendingMoveAtCurrentStep records a deferred move whose target equals
+// the task's current step. There is no transition to run, but the row and its
+// hand-off prompt must still be consumed and the session drained exactly as a
+// landed move would.
+func (s *Service) consumePendingMoveAtCurrentStep(
+	ctx context.Context,
+	taskID, sessionID string,
+	move *messagequeue.PendingMove,
+	record messagequeue.PendingMoveRecord,
+	currentStepID string,
+) {
+	var applyErr error
+	if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
+		applyErr = s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID, record)
+	} else {
+		applyErr = s.workflowStore.markDeferredMoveAppliedUnfenced(ctx, taskID, move.MoveID)
+	}
+	if errors.Is(applyErr, errDeferredMoveAlreadyApplied) {
+		s.logger.Info("dropping already-applied pending move at current target",
+			zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
+	} else if applyErr != nil {
+		s.logger.Error("failed to record pending move at current target",
+			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(applyErr))
+		return
+	}
+	s.logger.Info("pending move target equals current step; skipping transition",
+		zap.String("task_id", taskID),
+		zap.String("step_id", currentStepID))
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
+	}
+	s.removePendingMoveHandoffPromptForSession(ctx, identity, move.MoveID)
+	_, _ = s.drainQueuedMessageForPromptableSessionForIdentity(ctx, identity)
+	if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
+		s.consumeUnfencedPendingMove(ctx, taskID, sessionID, record)
+	}
+}
+
+// pendingMoveSuperseded reports whether a later move has changed the task's
+// step since the deferred move was requested. A step that differs from the
+// recorded source is superseded. A task that is back on the source step is
+// superseded when the transition ledger advanced, which tells "came back"
+// apart from "never moved". An unreadable ledger keeps the move, so an
+// uncertain check never drops a move that would otherwise apply.
+func (s *Service) pendingMoveSuperseded(
+	ctx context.Context,
+	taskID, currentStepID string,
+	move *messagequeue.PendingMove,
+) bool {
+	if move.FromStepID == "" {
+		return false
+	}
+	if currentStepID != move.FromStepID {
+		return true
+	}
+	if move.FromTransitionID == 0 {
+		return false
+	}
+	reader, ok := s.repo.(workflowStepTransitionReader)
+	if !ok {
+		return false
+	}
+	latest, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to read latest step transition for pending move; keeping move",
+			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
+		return false
+	}
+	return latest != move.FromTransitionID
+}
+
+// discardPendingMove removes a pending move that must not apply, together with
+// its correlated hand-off prompt. The compare-and-delete leaves a row that a
+// concurrent take or replace swapped out to its new owner.
+func (s *Service) discardPendingMove(
+	ctx context.Context,
+	taskID, sessionID string,
+	move *messagequeue.PendingMove,
+	record messagequeue.PendingMoveRecord,
+	reason string,
+) {
+	logFields := append(pendingMoveLogFields(sessionID, move, move.MoveID), zap.String("reason", reason))
+	if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
+		if !s.removePendingMoveHandoffPrompt(ctx, sessionID, taskID, move.MoveID) {
+			return
+		}
+		removed, deleteErr := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, "")
+		if deleteErr != nil {
+			s.logger.Warn("failed to discard pending move", append(logFields, zap.Error(deleteErr))...)
+			return
+		}
+		if removed {
+			s.logger.Info("discarded pending move", logFields...)
+		}
+		return
+	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
+	}
+	entryID, listed := s.pendingMoveHandoffPromptIDForSession(ctx, identity, move.MoveID)
+	if !listed {
+		return
+	}
+	removed, deleteErr := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, entryID)
+	if deleteErr != nil {
+		s.logger.Warn("failed to discard pending move", append(logFields, zap.Error(deleteErr))...)
+		return
+	}
+	if !removed {
+		return
+	}
+	s.logger.Info("discarded pending move", logFields...)
+	if entryID != "" {
+		s.publishQueueStatusEventForIdentity(ctx, identity)
+	}
 }
 
 func (s *Service) consumeUnfencedPendingMove(
