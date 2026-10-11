@@ -158,6 +158,8 @@ loopback-only regression policy also covers the launcher's Windows port-occupied
 which holds the probed port with a loopback listener, while production port probing and backend
 port ownership remain owned by the
 [port collision and backend ownership safety](../requirements/port-collision-safety.md) requirement.
+The task-process port allocator (`portutil.AllocatePort`) only needs a port number, so its probe
+binds `127.0.0.1:0` rather than a wildcard address, the same loopback availability signal.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases

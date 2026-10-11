@@ -82,6 +82,7 @@ listener would bind a non-loopback interface and prompt for Firewall access from
 | Task | Wave | Parallel-safe | Summary |
 | --- | --- | --- | --- |
 | [task-01-wildcard-port-probe](task-01-wildcard-port-probe.md) | 1 | no | Add failing regression test, implement connect+bind dual-stack `canBind`. |
+| [task-02-loopback-allocation-probe](task-02-loopback-allocation-probe.md) | 1 | no | Bind the task-process port allocation probe on loopback so it opens no firewall-visible listener. |
 
 ## Validation
 

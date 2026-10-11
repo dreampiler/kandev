@@ -29,7 +29,7 @@ func TestAllocatePortUniqueness(t *testing.T) {
 		}
 	}()
 	for i := 0; i < 10; i++ {
-		l, err := net.Listen("tcp", ":0")
+		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			t.Fatalf("Listen failed on iteration %d: %v", i, err)
 		}
