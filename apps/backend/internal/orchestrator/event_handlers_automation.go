@@ -477,6 +477,11 @@ func (s *Service) prepareAutomationTask(
 
 	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)
 	reasons.Repository = repoReason
+	// The automation dispatch owns this task's initial start. The marker is
+	// stamped before CreateTask runs its feeder pull, so the pull's task.moved
+	// auto-start cannot launch the same task first. Continuation reuses an
+	// existing task and returns above, so only a freshly created task is marked.
+	metadata[models.MetaKeyAutomationStartOwned] = true
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -945,7 +950,20 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 	s.autoStartAutomationTaskForRun(ctx, a, task, workflowStepID, "", automation.ThreadActionCreated, "")
 }
 
+// releaseAutomationStartOwnership removes the marker that reserved a new
+// automation task's initial start for the automation dispatch.
+func (s *Service) releaseAutomationStartOwnership(ctx context.Context, taskID string) {
+	if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutomationStartOwned); err != nil {
+		s.logger.Warn("failed to clear automation start ownership marker",
+			zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
+	// The start-ownership marker only keeps workflow auto-start from racing
+	// this dispatch. Once the dispatch resolves, a task left without a session
+	// (a failed or dropped start) auto-starts on a later move like any other.
+	defer s.releaseAutomationStartOwnership(ctx, task.ID)
 	var run *automationRunLaunch
 	if runID != "" {
 		run = &automationRunLaunch{RunID: runID, ThreadAction: action, ThreadReason: reason}

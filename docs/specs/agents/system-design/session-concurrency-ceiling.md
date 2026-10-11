@@ -219,6 +219,15 @@ the run is failed and the launched session is stopped, since no completion
 would settle the run; the task is kept. Workflow-step auto-start eligibility
 does not apply because the trigger is the start signal.
 
+A task an automation creates carries `automation_start_owned` from creation
+until the automation dispatch resolves. While the marker is set, workflow
+auto-start skips the task, including the `task.moved` of a feeder pull that
+`CreateTask` runs before it returns. The automation dispatch is then the task's
+only initial starter, so its start is never refused as a conflicting deferral or
+as a workspace that another start is still preparing. The dispatch removes the
+marker whatever its outcome, so a task left without a session auto-starts on a
+later move like any other task.
+
 The sweep drops a start whose run was deleted or is no longer `triggered`, such
 as a stopped, bound, failed, or startup-reconciled run, without launching. A run
 that closes between that check and the replay's dispatch is reported by the
