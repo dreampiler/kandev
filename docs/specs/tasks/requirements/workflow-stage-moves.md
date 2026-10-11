@@ -131,7 +131,10 @@ rejected move tells the agent how to correct the call.
 - **AC-TASKS-WORKFLOW-STAGE-MOVES-004.1:** When `move_task_kandev` requests a
   step change to a manual step with a non-empty `prompt` or `entry_options`,
   the system shall reject the call with a validation error that names the
-  missing agent recipient. It shall not record a pending move.
+  missing agent recipient, even when the task has a session that could receive
+  the hand-off. It shall not record a pending move. This agent-surface rule is
+  deliberately stricter than the `task.move` rule in
+  AC-TASKS-WORKFLOW-STAGE-MOVES-004.5.
 - **AC-TASKS-WORKFLOW-STAGE-MOVES-004.2:** When the destination step starts
   work on entry through `auto_start_agent`, `queue_run`,
   `queue_run_for_each_participant`, `run_code_review`, or a pull source, the
