@@ -141,15 +141,18 @@ Its identity depends on the producer shape of the message:
 | Producer shape | Producer | Recognition | Identity text |
 | --- | --- | --- | --- |
 | Agent process exit | `agentctl/server/process/manager.go:3433` | `Agent process exited with code N` at the start | That prefix with the exit code. The stderr suffix is dropped |
+| Generic prompt or turn failure | `agentctl/server/api/agent.go:1193`, `agentctl/server/adapter/transport/codexappserver/adapter.go:649` | Any other message | Sanitized, whitespace-collapsed, first 256 bytes at a UTF-8 boundary |
 
-Any other message is not admitted and keeps manual recovery.
+A message that sanitizes to empty is not admitted and keeps manual recovery.
 The dropped-peer message from `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` is already classified as `agent_transport_lost`, so it never reaches this origin.
-That includes the async prompt failure in `agentctl/server/api/agent.go:1193` and the app-server turn failure in `agentctl/server/adapter/transport/codexappserver/adapter.go:649`.
 The fingerprint uses the existing identity fields: code, origin, phase, and the identity text. Only the fingerprint is persisted.
 
 This is a producer-category exception, not diagnostic equivalence.
 Two process exits with the same exit code and different stderr share one identity, so they count as the same repeated failure.
-A different exit code starts a new count. Line numbers refer to the base commit of the package.
+A different exit code starts a new count.
+The generic row is a second, separable proposal. Two generic failures whose sanitized text agrees on the first 256 bytes share one identity even when their tails differ.
+The sanitizer masks credentials and long opaque tokens before the cut, so a message that differs only in such a token also shares an identity.
+Without the generic row, generic failures are not admitted and keep manual recovery. Line numbers refer to the base commit of the package.
 The [decision amendment](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records why exact identity and manual recovery were not chosen.
 
 ## Matching identity

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -62,13 +63,23 @@ func TestPostStartProcessExitDifferentCodesDoNotMatch(t *testing.T) {
 	}
 }
 
-func TestPostStartGenericFailureStaysManual(t *testing.T) {
+func TestPostStartGenericFailureCountsWithBoundedPrefix(t *testing.T) {
+	// Messages that agree on their first 256 sanitized bytes share one
+	// identity even when the tails differ.
+	prefix := "provider response header timeout: " + strings.Repeat("upstream gateway did not answer ", 10)
+	_, candidate, generation := failTwicePostStart(t, prefix+" request one", prefix+" request two")
+	if candidate != "candidate-b" || generation != 2 {
+		t.Fatalf("route after two generic failures with one prefix = %s/%d, want candidate-b/2", candidate, generation)
+	}
+}
+
+func TestPostStartGenericFailuresWithDifferentPrefixesDoNotMatch(t *testing.T) {
 	status, candidate, _ := failTwicePostStart(t,
 		"provider response header timeout after 30s",
-		"provider response header timeout after 30s",
+		"runtime execution error in tool sandbox",
 	)
 	if status != "action_required" || candidate != "candidate-a" {
-		t.Fatalf("route after two generic post-start failures = %s/%s, want action_required on candidate-a", status, candidate)
+		t.Fatalf("route after two different generic failures = %s/%s, want action_required on candidate-a", status, candidate)
 	}
 }
 
