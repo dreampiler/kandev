@@ -84,6 +84,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.backfillRoutineTriggerTimezones(); err != nil {
 		return err
 	}
+	if err := r.backfillSessionCeilingParkedRuns(); err != nil {
+		return err
+	}
 	return nil
 }
 
