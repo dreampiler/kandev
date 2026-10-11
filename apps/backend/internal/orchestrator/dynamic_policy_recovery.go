@@ -76,17 +76,27 @@ func (s *Service) reconcileOrphanedDynamicStartingRoutes(ctx context.Context) {
 		s.logger.Warn("failed to list starting dynamic route states", zap.Error(err))
 		return
 	}
+	// Only the first pass after boot may treat STARTING/IDLE as orphaned: no
+	// launch survives a restart, but the 20s runtime pass runs while launches
+	// are in flight (worktree creation and agent start can take minutes), and
+	// demoting such a claim to action_required strands a healthy session
+	// because the later MarkActive no longer applies.
+	startupPass := s.orphanedStartingRoutesStartupSwept.CompareAndSwap(false, true)
 	for _, state := range states {
-		s.reconcileOrphanedDynamicStartingRoute(ctx, state)
+		s.reconcileOrphanedDynamicStartingRoute(ctx, state, startupPass)
 	}
 }
 
-func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, state dynamicruntime.RouteState) {
+func (s *Service) reconcileOrphanedDynamicStartingRoute(
+	ctx context.Context,
+	state dynamicruntime.RouteState,
+	startupPass bool,
+) {
 	session, err := s.repo.GetTaskSession(ctx, state.SessionID)
 	if err != nil || session == nil || session.RouteGeneration != state.Generation {
 		return
 	}
-	if isOrphanableDynamicSessionState(session.State) || s.dynamicStartingRouteIsStranded(ctx, session) {
+	if startupPass && isOrphanableDynamicSessionState(session.State) || s.dynamicStartingRouteIsStranded(ctx, session) {
 		s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
 		return
 	}

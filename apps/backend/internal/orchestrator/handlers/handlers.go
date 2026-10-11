@@ -502,7 +502,7 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "idempotency_key is required for workspace inventory repair", nil)
 	}
 
-	resp, err := h.service.RecoverSessionWithOptions(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
+	resp, err := h.service.RecoverSessionWithContinuationFallback(ctx, req.TaskID, req.SessionID, req.Action, orchestrator.RecoverSessionOptions{
 		IdempotencyKey: strings.TrimSpace(req.IdempotencyKey),
 		SettingsPolicy: req.SettingsPolicy,
 		ErrorStamp:     req.ErrorStamp,

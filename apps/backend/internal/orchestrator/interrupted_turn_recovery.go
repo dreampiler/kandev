@@ -64,14 +64,27 @@ func resumeNeedsContextContinuation(err error) bool {
 	return reason == unknownPromptOutcome || reason == durableDeliveryUnresolvedReason
 }
 
-func (s *Service) recoverSessionWithContinuationFallback(
+// RecoverSessionWithContinuationFallback runs one operator recovery action.
+// A native resume refused only because the restart-interrupted turn's durable
+// delivery cannot be settled continues from history in the same request, so
+// the caller (recovery UI, external watchdog) does not need a second round
+// trip. Office tasks keep their scheduler-owned durable recovery, and a
+// refusal raised while a runtime is still live for the session is returned
+// unchanged so live work is never replaced.
+func (s *Service) RecoverSessionWithContinuationFallback(
 	ctx context.Context,
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
-	options.singleAttempt = true
 	resp, err := s.RecoverSessionWithOptions(ctx, taskID, sessionID, action, options)
 	if action != recoveryActionResume || !resumeNeedsContextContinuation(err) {
+		return resp, err
+	}
+	if !errors.Is(err, agentruntime.ErrDurableAdoptionBlocked) &&
+		s.agentManager != nil && s.agentManager.IsAgentRunningForSession(ctx, sessionID) {
+		return resp, err
+	}
+	if isOfficeTask, officeErr := s.lookupOfficeTask(ctx, taskID); officeErr != nil || isOfficeTask {
 		return resp, err
 	}
 	s.logger.Warn("native resume cannot settle the interrupted turn; continuing from history",
@@ -79,7 +92,7 @@ func (s *Service) recoverSessionWithContinuationFallback(
 		zap.String("session_id", sessionID),
 		zap.Error(err))
 	fallback, fallbackErr := s.RecoverSessionWithOptions(
-		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{singleAttempt: true},
+		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{},
 	)
 	if fallbackErr != nil {
 		return nil, errors.Join(err, fallbackErr)
@@ -119,7 +132,7 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), interruptedTurnAutoRecoveryTimeout)
 		defer cancel()
 		if _, err := s.RecoverSessionWithOptions(
-			recoveryCtx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{singleAttempt: true},
+			recoveryCtx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{},
 		); err != nil {
 			s.logger.Warn("automatic continue_from_history failed",
 				zap.String("task_id", taskID),

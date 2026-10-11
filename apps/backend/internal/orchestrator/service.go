@@ -770,6 +770,10 @@ type Service struct {
 	// restart-interrupted turns (one in flight per session, with a cooldown).
 	interruptedTurnAutoRecoveryMu sync.Mutex
 	interruptedTurnAutoRecovery   map[string]interruptedTurnAutoRecoveryState
+	// orphanedStartingRoutesStartupSwept marks that the boot pass of the
+	// orphaned-starting-route reconcile has run (STARTING/IDLE are only
+	// orphaned at boot; see reconcileOrphanedDynamicStartingRoutes).
+	orphanedStartingRoutesStartupSwept atomic.Bool
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 

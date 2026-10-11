@@ -1322,9 +1322,6 @@ type RecoverSessionOptions struct {
 	IdempotencyKey string
 	SettingsPolicy executor.ResumeSettingsPolicy
 	ErrorStamp     string
-	// singleAttempt runs exactly the requested action without the automatic
-	// continue_from_history fallback for a refused native resume.
-	singleAttempt bool
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1355,11 +1352,6 @@ func (s *Service) RecoverSessionWithOptions(
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
 ) (*LaunchSessionResponse, error) {
-	// A native resume refused only because the interrupted turn's durable
-	// delivery cannot be settled continues from history in the same request.
-	if action == recoveryActionResume && !options.singleAttempt {
-		return s.recoverSessionWithContinuationFallback(ctx, taskID, sessionID, action, options)
-	}
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
