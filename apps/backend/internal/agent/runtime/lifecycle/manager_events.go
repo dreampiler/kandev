@@ -1637,6 +1637,9 @@ func (m *Manager) handleAgentEventWithStartupGeneration(
 	startupGeneration uint64,
 ) {
 	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if agentEventBelongsToRetiredProcess(execution, event) {
+			return
+		}
 		event.AttemptID = attemptID
 		event.SessionSettingsSourceGeneration = startupGeneration
 		if !execution.isSessionInitialized() && event.PromptGeneration == 0 && event.Type == toolStatusComplete {
