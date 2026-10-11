@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,13 +114,20 @@ func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 		}
 		path := filepath.Join(backupDir, e.Name())
 		newest, err := newestModTime(path)
-		if err == nil && time.Since(newest) < staleBootStagingAge {
+		if err != nil {
+			// A directory, or an entry in it, that vanished while being
+			// inspected was removed by its owner or another sweep and needs
+			// nothing from this one.
+			if !errors.Is(err, os.ErrNotExist) && log != nil {
+				log.Warn("persistence: failed to inspect boot backup staging directory",
+					zap.String("path", path), zap.Error(err))
+			}
 			continue
 		}
-		if err == nil {
-			err = os.RemoveAll(path)
+		if time.Since(newest) < staleBootStagingAge {
+			continue
 		}
-		if err != nil && log != nil {
+		if err := os.RemoveAll(path); err != nil && log != nil {
 			log.Warn("persistence: failed to reclaim stale boot backup staging directory",
 				zap.String("path", path), zap.Error(err))
 		}
