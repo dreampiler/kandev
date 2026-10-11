@@ -316,7 +316,9 @@ type mockRepository struct {
 	executorsRunning     map[string]*models.ExecutorRunning
 	taskEnvironments     map[string]*models.TaskEnvironment
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
-	plans                map[string]*models.TaskPlan              // task_id → plan
+	// failMaterializationCalls records sessions whose claim release was requested.
+	failMaterializationCalls []string
+	plans                    map[string]*models.TaskPlan // task_id → plan
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -1515,6 +1517,17 @@ func (m *mockRepository) UpdateTaskEnvironment(_ context.Context, env *models.Ta
 	m.updateTaskEnvironmentCalls = append(m.updateTaskEnvironmentCalls, env)
 	m.taskEnvironments[env.ID] = env
 	return nil
+}
+func (m *mockRepository) FailTaskEnvironmentMaterialization(_ context.Context, sessionID string) (bool, error) {
+	m.failMaterializationCalls = append(m.failMaterializationCalls, sessionID)
+	for _, env := range m.taskEnvironments {
+		if env.Status == models.TaskEnvironmentStatusCreating && env.MaterializationSessionID == sessionID {
+			env.Status = models.TaskEnvironmentStatusFailed
+			env.MaterializationSessionID = ""
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()

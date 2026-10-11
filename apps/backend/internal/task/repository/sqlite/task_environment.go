@@ -388,6 +388,102 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 	return tx.Commit()
 }
 
+// reelectTaskEnvironmentMaterializationSQL hands an environment to a new
+// materialization owner. The WHERE clause is the guard: the row must still be
+// in the state and claim the caller read, and must hold no workspace path,
+// container, sandbox, or live repository inventory, so no physical workspace
+// changes hands. Stale container handles and secret references are cleared so
+// the new owner provisions fresh ones.
+const reelectTaskEnvironmentMaterializationSQL = `
+	UPDATE task_environments
+	SET status = ?, materialization_session_id = ?,
+		container_id = '', container_bootstrap_nonce_secret_id = '',
+		container_control_auth_token_secret_id = '', sandbox_id = '',
+		updated_at = ?
+	WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	  AND COALESCE(workspace_path, '') = ''
+	  AND COALESCE(container_id, '') = ''
+	  AND COALESCE(sandbox_id, '') = ''
+	  AND NOT EXISTS (
+		SELECT 1 FROM task_environment_repos
+		WHERE task_environment_id = task_environments.id AND deleted_at IS NULL
+	  )
+`
+
+// reelectTaskEnvironmentMaterializationTx makes sessionID the creating owner of
+// environmentID inside the caller's transaction. The caller holds the task
+// cleanup barrier and has passed the recovery-claim admission. It reports
+// false when the row changed since the caller read it or holds physical
+// workspace evidence.
+func (r *Repository) reelectTaskEnvironmentMaterializationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID string,
+	expectedStatus models.TaskEnvironmentStatus,
+	expectedOwnerID, sessionID string,
+) (bool, error) {
+	result, err := tx.ExecContext(ctx, r.db.Rebind(reelectTaskEnvironmentMaterializationSQL),
+		string(models.TaskEnvironmentStatusCreating), sessionID, r.nowUTC(),
+		environmentID, string(expectedStatus), expectedOwnerID)
+	if err != nil {
+		return false, fmt.Errorf("re-elect task environment materialization: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return changed > 0, nil
+}
+
+// FailTaskEnvironmentMaterialization stores failed for the creating
+// environment that sessionID still owns and clears its claim. It reports false
+// when the session owns no creating environment, including when another
+// session took the claim over, so a former owner cannot change the row.
+func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var environmentID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT id FROM task_environments WHERE status = ? AND materialization_session_id = ?
+	`), string(models.TaskEnvironmentStatusCreating), sessionID).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load owned task environment materialization: %w", err)
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_environments
+		SET status = ?, materialization_session_id = '', updated_at = ?
+		WHERE id = ? AND status = ? AND materialization_session_id = ?
+	`), string(models.TaskEnvironmentStatusFailed), r.nowUTC(),
+		environmentID, string(models.TaskEnvironmentStatusCreating), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("fail owned task environment materialization: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // PersistTaskEnvironmentTransition atomically updates an existing environment
 // and reconciles its repository inventory. A transition must not leave the old
 // executor attached to a partially replaced inventory when any write fails.
