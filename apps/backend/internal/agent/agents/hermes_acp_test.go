@@ -3,19 +3,30 @@ package agents
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
-const hermesACPCheckHelperEnv = "KANDEV_TEST_HERMES_ACP_CHECK"
+const (
+	hermesACPCheckHelperEnv = "KANDEV_TEST_HERMES_ACP_CHECK"
+	// hermesCheckCounterEnv points at the file the helper appends one marker
+	// byte to per invocation, so a test can assert how many times the check
+	// actually ran.
+	hermesCheckCounterEnv = "KANDEV_TEST_HERMES_COUNTER"
+	// hermesCheckSlowEnv is how long a slow helper mode stalls before exiting 0.
+	hermesCheckSlowEnv = "KANDEV_TEST_HERMES_SLOW_MS"
+)
 
 func TestMain(m *testing.M) {
 	switch os.Getenv(hermesACPCheckHelperEnv) {
@@ -26,9 +37,67 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	case "unavailable":
 		os.Exit(1)
+	case "counted-unavailable":
+		recordHermesCheckInvocation()
+		os.Exit(1)
+	case "timeout-then-available":
+		// Stalls only on the first invocation, so a caller that measures a
+		// second time sees the check succeed.
+		if recordHermesCheckInvocation() == 1 {
+			time.Sleep(hermesCheckSlowDuration())
+		}
+		os.Exit(0)
+	case "always-slow":
+		recordHermesCheckInvocation()
+		time.Sleep(hermesCheckSlowDuration())
+		os.Exit(0)
 	default:
 		os.Exit(m.Run())
 	}
+}
+
+// recordHermesCheckInvocation appends a marker byte and returns this
+// invocation's ordinal (1 for the first one). The write happens before any
+// stall so a helper killed by the caller's bound is still counted.
+func recordHermesCheckInvocation() int {
+	path := os.Getenv(hermesCheckCounterEnv)
+	ordinal := 1
+	// Count the existing markers rather than trusting the append-mode file
+	// offset, which is not positioned at the end on every platform.
+	if existing, err := os.ReadFile(path); err == nil {
+		ordinal = len(existing) + 1
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		os.Exit(3)
+	}
+	if _, err := f.Write([]byte{'x'}); err != nil {
+		_ = f.Close()
+		os.Exit(3)
+	}
+	// Closed before any os.Exit so the marker is on disk for the next run.
+	if err := f.Close(); err != nil {
+		os.Exit(3)
+	}
+	return ordinal
+}
+
+func hermesCheckSlowDuration() time.Duration {
+	ms, err := strconv.Atoi(os.Getenv(hermesCheckSlowEnv))
+	if err != nil || ms <= 0 {
+		ms = 2000
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+// hermesCheckInvocationCount reads how many times the helper ran.
+func hermesCheckInvocationCount(t *testing.T) int {
+	t.Helper()
+	info, err := os.Stat(os.Getenv(hermesCheckCounterEnv))
+	if err != nil {
+		t.Fatalf("stat helper counter: %v", err)
+	}
+	return int(info.Size())
 }
 
 func TestHermesACP_IDAndDisplay(t *testing.T) {
@@ -200,10 +269,163 @@ func installHermesACPCheckHelper(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), filename)
-	if err := os.Link(os.Args[0], path); err != nil {
-		t.Fatalf("link test helper binary: %v", err)
-	}
+	copyHermesCheckHelper(t, os.Args[0], path)
 	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// copyHermesCheckHelper copies the test binary to stand in for the agent
+// binary. A hard link would be cheaper, but on Windows the running image stays
+// locked for the lifetime of the test, so the framework's temp-dir cleanup
+// fails to unlink it.
+func copyHermesCheckHelper(t *testing.T, src, dst string) {
+	t.Helper()
+	in, err := os.Open(src)
+	if err != nil {
+		t.Fatalf("open test binary: %v", err)
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o700)
+	if err != nil {
+		_ = in.Close()
+		t.Fatalf("create helper copy: %v", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = in.Close()
+		_ = out.Close()
+		t.Fatalf("copy test binary: %v", err)
+	}
+	if err := out.Close(); err != nil {
+		_ = in.Close()
+		t.Fatalf("close helper copy: %v", err)
+	}
+	if err := in.Close(); err != nil {
+		t.Fatalf("close test binary: %v", err)
+	}
+}
+
+// useHermesCheckCounter gives a staged-measurement case a private counter file
+// and a stall long enough to blow the sub-second bounds used below.
+func useHermesCheckCounter(t *testing.T) {
+	t.Helper()
+	t.Setenv(hermesCheckCounterEnv, filepath.Join(t.TempDir(), "hermes-check-calls"))
+	t.Setenv(hermesCheckSlowEnv, "2000")
+}
+
+// hermesStagedCheckBounds both sit clear of the helper's 2s stall, so a bound
+// that elapses is a real timeout rather than a slow success. The first bound
+// also has to clear the cost of spawning the helper at all, which reaches a
+// few hundred milliseconds on a loaded Windows host.
+const (
+	hermesStagedFirst  = 800 * time.Millisecond
+	hermesStagedSecond = 1500 * time.Millisecond
+)
+
+// runHermesCheck drives withHermesACPCheck through Detect, as IsInstalled does.
+func runHermesCheck(t *testing.T, ctx context.Context) (*DiscoveryResult, error) {
+	t.Helper()
+	return Detect(ctx, withHermesACPCheck(hermesStagedFirst, hermesStagedSecond))
+}
+
+// TestHermesACP_RetriesOnlyATimedOutCheck covers the distinction that
+// detection turned on: a bound elapsing is inconclusive and worth measuring
+// again, while the check itself answering is a final answer. Without this,
+// a healthy Hermes was reported as not installed every time a concurrent
+// discovery sweep stretched its check past the shared bound.
+func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
+	installHermesACPCheckHelper(t)
+
+	t.Run("second measurement succeeds after a timeout", func(t *testing.T) {
+		useHermesCheckCounter(t)
+		t.Setenv(hermesACPCheckHelperEnv, "timeout-then-available")
+
+		result, err := runHermesCheck(t, context.Background())
+		if err != nil {
+			t.Fatalf("Detect error: %v", err)
+		}
+		if !result.Available {
+			t.Fatal("Available=false; a timed-out check that then succeeds must report installed")
+		}
+		if result.MatchedPath == "" {
+			t.Error("MatchedPath is empty for an available agent")
+		}
+		if got := hermesCheckInvocationCount(t); got != 2 {
+			t.Errorf("helper invocations = %d, want 2 (one timed-out, one retry)", got)
+		}
+	})
+
+	t.Run("both measurements time out", func(t *testing.T) {
+		useHermesCheckCounter(t)
+		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
+
+		result, err := runHermesCheck(t, context.Background())
+		if err != nil {
+			t.Fatalf("Detect error: %v", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true although neither measurement answered")
+		}
+		if got := hermesCheckInvocationCount(t); got != 2 {
+			t.Errorf("helper invocations = %d, want 2 (both bounds elapsed)", got)
+		}
+	})
+
+	t.Run("a nonzero exit is not retried", func(t *testing.T) {
+		useHermesCheckCounter(t)
+		t.Setenv(hermesACPCheckHelperEnv, "counted-unavailable")
+
+		result, err := runHermesCheck(t, context.Background())
+		if err != nil {
+			t.Fatalf("Detect error: %v", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true although hermes acp --check failed")
+		}
+		if got := hermesCheckInvocationCount(t); got != 1 {
+			t.Errorf("helper invocations = %d, want 1; a conclusive failure must not be retried", got)
+		}
+	})
+
+	t.Run("a slow check within the first bound is available", func(t *testing.T) {
+		useHermesCheckCounter(t)
+		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
+
+		result, err := Detect(context.Background(),
+			withHermesACPCheck(10*time.Second, 10*time.Second))
+		if err != nil {
+			t.Fatalf("Detect error: %v", err)
+		}
+		if !result.Available {
+			t.Fatal("Available=false although the check answered within the bound")
+		}
+		if got := hermesCheckInvocationCount(t); got != 1 {
+			t.Errorf("helper invocations = %d, want 1 (the first bound was sufficient)", got)
+		}
+	})
+
+	t.Run("returns cancellation from caller context", func(t *testing.T) {
+		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		result, err := runHermesCheck(t, ctx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Detect error = %v, want context.Canceled", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true with a cancelled context")
+		}
+	})
+
+	t.Run("a missing binary stays unavailable", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+
+		result, err := runHermesCheck(t, context.Background())
+		if err != nil {
+			t.Fatalf("Detect error: %v", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true without hermes on PATH; discovery must not imply install")
+		}
+	})
 }
 
 func TestHermesACP_LogosNonEmpty(t *testing.T) {

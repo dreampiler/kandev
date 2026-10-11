@@ -4,6 +4,7 @@ package agents
 import (
 	"context"
 	_ "embed"
+	"os/exec"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -17,6 +18,14 @@ var hermesLogoLight []byte
 var hermesLogoDark []byte
 
 const hermesBin = "hermes"
+
+// hermesCheckRetryTimeout bounds the second ACP check. `hermes acp --check`
+// resolves the ACP extra on every run and takes about 2s on an idle host, and
+// discovery runs every agent's IsInstalled concurrently, so the shared 5s
+// bound can elapse purely from that contention while the check is healthy.
+// commandCheckTimeout + hermesCheckRetryTimeout stays inside the 15s
+// detection sweep budget.
+const hermesCheckRetryTimeout = 8 * time.Second
 
 var (
 	_ Agent            = (*HermesACP)(nil)
@@ -69,7 +78,7 @@ func (a *HermesACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *HermesACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommandCheck(hermesBin, "acp", "--check"))
+	result, err := Detect(ctx, withHermesACPCheck(commandCheckTimeout, hermesCheckRetryTimeout))
 	if err != nil || !result.Available {
 		return result, err
 	}
@@ -78,6 +87,37 @@ func (a *HermesACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 		SupportsSessionResume: true,
 	}
 	return result, nil
+}
+
+// withHermesACPCheck checks the ACP extra, measuring once more only when the
+// first bound elapsed before the check answered. A missing binary and a nonzero
+// exit are conclusive on their own — re-running them would only add latency to
+// an install that is already known to be unusable.
+func withHermesACPCheck(first, second time.Duration) DetectOption {
+	return func(ctx context.Context) (bool, string, error) {
+		path, err := exec.LookPath(hermesBin)
+		if err != nil {
+			return false, "", nil
+		}
+		found, timedOut, err := runCommandCheck(ctx, path, first, "acp", "--check")
+		if err != nil {
+			return false, "", err
+		}
+		if found {
+			return true, path, nil
+		}
+		if !timedOut {
+			return false, "", nil
+		}
+		found, _, err = runCommandCheck(ctx, path, second, "acp", "--check")
+		if err != nil {
+			return false, "", err
+		}
+		if !found {
+			return false, "", nil
+		}
+		return true, path, nil
+	}
 }
 
 func (a *HermesACP) BuildCommand(_ CommandOptions) Command {
