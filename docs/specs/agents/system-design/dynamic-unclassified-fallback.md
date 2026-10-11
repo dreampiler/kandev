@@ -125,7 +125,7 @@ That case is the separate proposal below.
 This section is a proposal. It is separable from the rest of the design and can be removed without affecting empty turn ends.
 
 A post-start failure can reach the failure route before any output or effect without a complete provider diagnostic.
-Examples are a dropped peer or an agent process exit.
+An example is an agent process exit.
 The classifier maps it to `agent_runtime_error` with rule `phase.poststart.unknown`, and the terminal provider origin rejects that code.
 A candidate that keeps failing this way is therefore never advanced.
 
@@ -140,10 +140,10 @@ Its identity depends on the producer shape of the message:
 
 | Producer shape | Producer | Recognition | Identity text |
 | --- | --- | --- | --- |
-| Dropped peer | `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Exact fixed message | The fixed message |
-| Agent process exit | `agentctl/server/process/manager.go:3433` | Fixed exit prefix and an exit code at the start | The prefix with the exit code. The stderr suffix is dropped |
+| Agent process exit | `agentctl/server/process/manager.go:3433` | `Agent process exited with code N` at the start | That prefix with the exit code. The stderr suffix is dropped |
 
 Any other message is not admitted and keeps manual recovery.
+The dropped-peer message from `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` is already classified as `agent_transport_lost`, so it never reaches this origin.
 That includes the async prompt failure in `agentctl/server/api/agent.go:1193` and the app-server turn failure in `agentctl/server/adapter/transport/codexappserver/adapter.go:649`.
 The fingerprint uses the existing identity fields: code, origin, phase, and the identity text. Only the fingerprint is persisted.
 

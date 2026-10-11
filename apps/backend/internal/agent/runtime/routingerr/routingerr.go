@@ -323,6 +323,10 @@ func httpStatusToCode(status int) Code {
 	return ""
 }
 
+// PostStartUnknownRule is the classifier rule for a post-start failure that
+// matched no other rule.
+const PostStartUnknownRule = "phase.poststart.unknown"
+
 func classifyByPhase(in Input, excerpt string) *Error {
 	switch in.Phase {
 	case PhaseAuthCheck, PhaseProcessStart, PhaseSessionInit:
@@ -339,7 +343,7 @@ func classifyByPhase(in Input, excerpt string) *Error {
 		Code:           CodeAgentRuntime,
 		Confidence:     ConfLow,
 		Phase:          in.Phase,
-		ClassifierRule: "phase.poststart.unknown",
+		ClassifierRule: PostStartUnknownRule,
 		ExitCode:       in.ExitCode,
 		RawExcerpt:     excerpt,
 	}
