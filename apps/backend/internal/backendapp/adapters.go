@@ -1359,6 +1359,12 @@ func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Con
 	return w.svc.HasActiveSessionRecoveryForFailure(ctx, taskID, taskSessionID, failure)
 }
 
+// AutoRecoverBlockedPrompt forwards the restart-interrupted turn recovery
+// seam used when a recorded message is refused for session recovery.
+func (w *orchestratorWrapper) AutoRecoverBlockedPrompt(ctx context.Context, taskID, taskSessionID string, cause error) bool {
+	return w.svc.AutoRecoverBlockedPrompt(ctx, taskID, taskSessionID, cause)
+}
+
 // ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
 // provider acceptance for the handler's internal retry.
 func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
