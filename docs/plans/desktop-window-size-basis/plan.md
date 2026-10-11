@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: draft
+status: done
 requirements:
   - REQ-DESKTOP-DESKTOP-TAURI-APP-001
 system_design:
@@ -103,7 +103,24 @@ size, so there is no parity surface. The SPA and its responsive layouts are unch
 
 ## Work orders
 
-- [ ] [Task 01: Restore the saved frame size](task-01-restore-saved-frame-size.md)
+- [x] [Task 01: Restore the saved frame size](task-01-restore-saved-frame-size.md)
+
+## Verification results
+
+Implementation checks on 2026-10-12, from `apps/desktop/src-tauri` on Windows:
+
+- Before the conversion, with `client_size` returning the saved size: `cargo test --locked --lib window_state::`
+  failed 3 of 8 tests. Three restarts reached `1328x1017` instead of `1280x900`. The clamped window
+  reached `1936x1119` against a `1920x1080` monitor. An oversized frame returned `(10, 20)` instead
+  of `(1, 1)`. The frameless test passed, as intended, because it protects unchanged behavior.
+- After the conversion: `cargo test --locked --lib window_state::` passed, 8 tests.
+- `cargo fmt --all -- --check`: passed.
+- `cargo check --locked --features desktop-runtime --lib`: passed. Its one warning is an
+  unchanged `backend.rs` unused `mut`.
+- `python3 scripts/lint-spec-files.py --all`, `python3 scripts/list-docs.py validate`, and
+  `git diff --check`: passed.
+- Native acceptance on a decorated Windows or Linux window: pending. No desktop build was launched,
+  and the cross-scale-factor case is unverified.
 
 ## Risks
 

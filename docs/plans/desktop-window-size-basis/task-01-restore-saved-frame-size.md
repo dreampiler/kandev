@@ -1,7 +1,7 @@
 ---
 id: "01-restore-saved-frame-size"
 title: "Restore the saved frame size"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -86,3 +86,19 @@ None.
 - [Desktop app requirements](../../specs/desktop/requirements/desktop-tauri-app.md), criterion `.6`.
 - [Window state design](../../specs/desktop/system-design/desktop-tauri-app.md#window-state).
 - Evidence and probe results in [the plan](plan.md#evidence-and-root-cause).
+
+## Results
+
+Implemented `client_size` and the `desktop-runtime` `frame_size` measurement in
+`window_state.rs`. `restore` applies the converted client size. `last_normal`, position,
+maximized state, and display clamping keep their outer basis.
+
+Added `repeated_restarts_keep_the_saved_outer_size`,
+`clamped_bounds_still_fit_the_monitor_once_the_frame_is_added`,
+`frameless_windows_keep_the_saved_size`, and
+`a_frame_larger_than_the_saved_size_keeps_a_positive_size`. The first, second, and fourth failed
+while the applied size still equaled the saved size. They pass after the conversion. The results
+are recorded in [the plan](plan.md#verification-results).
+
+Native acceptance on a decorated window remains pending. The unit tests prove the size
+conversion, not the platform window.
