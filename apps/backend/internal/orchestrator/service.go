@@ -1546,6 +1546,9 @@ type Service struct {
 	// callback. Each entry retains the prompt and route identity that authorized
 	// the reset across prompt-evidence replacement.
 	pendingDynamicStreakResets sync.Map
+	// countedEmptyTurns records, per session, the execution and prompt
+	// generation whose empty end_turn was counted as an unclassified failure.
+	countedEmptyTurns sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by

@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: planned
+status: in_progress
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002
@@ -20,7 +20,7 @@ The agent system owns all of them because it owns candidate selection, route sta
 
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
-| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | planned, first |
+| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | candidate, membership under review |
 | [Task 03](task-03-virtual-family-launch.md) | A launch that selects the virtual dynamic family fails with a generic empty-command error | none | candidate, membership under review |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
@@ -39,7 +39,7 @@ That covers two shapes. This package preserves one of them and leaves the other 
 
 | Shape | Coverage | Reason |
 | --- | --- | --- |
-| Normal `end_turn` completion with no text, reasoning, or tool activity | Task 01 | Fits the design with a fixed, text-free identity. |
+| Normal `end_turn` completion with no text, reasoning, or tool activity | Task 01, implemented | Fits the design with a fixed, text-free identity. |
 | Post-start runtime error before any result, without a complete diagnostic | Unresolved | Conflicts with the current identity contract. See below. |
 
 ### Unresolved: post-start failures without a complete diagnostic
@@ -109,9 +109,8 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 | AC suffix | Test file and test |
 | --- | --- |
-| 002.6, .13 | `apps/backend/internal/agent/runtime/dynamic/unclassified_fallback_test.go`: `TestUnclassifiedEmptyTurnAdmission`, `TestUnclassifiedEmptyTurnFingerprint` |
-| 002.13 | `apps/backend/internal/agent/runtime/dynamic_resolver_test.go`: `TestUnclassifiedPolicyEnabled` |
-| 002.3-.5, .7, .13 | `apps/backend/internal/orchestrator/dynamic_unclassified_empty_turn_test.go`: `TestEmptyTurnCompletionCountsUnclassifiedFailure`, `TestEmptyTurnCompletionPreconditions`, `TestEmptyTurnCountSurvivesOwnCompletion` |
+| 002.6, .13 | `apps/backend/internal/agent/runtime/dynamic/unclassified_empty_turn_test.go`: `TestUnclassifiedEmptyTurnAdmission`, `TestUnclassifiedDiagnosticWaiverIsOriginScoped`, `TestUnclassifiedEmptyTurnFingerprint`, `TestCandidateUnclassifiedEnabled` |
+| 002.3-.5, .7, .13 | `apps/backend/internal/orchestrator/dynamic_unclassified_empty_turn_test.go`: `TestEmptyTurnCompletionCountsUnclassifiedFailure` (threshold, own-completion survival, successor), `TestEmptyTurnCompletionPreconditions` |
 
 `TestEmptyTurnCompletionCountsUnclassifiedFailure` must fail on the base commit because no route call is made at completion.
 
@@ -172,10 +171,19 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 
 ## Work orders
 
-- [ ] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
+- [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [ ] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 - [ ] [Task 03: Fail closed when the virtual dynamic family reaches launch](task-03-virtual-family-launch.md)
 
 ## Verification results
 
-Pending implementation.
+Task 01:
+
+- RED on the base commit: `TestEmptyTurnCompletionCountsUnclassifiedFailure` failed with "route after first empty turn = active/candidate-a/1, want action_required/candidate-a/1".
+- GREEN after the change: the same test passed.
+- Guard check: with the stop-reason, error, step-veto, and unknown-step checks removed, five `TestEmptyTurnCompletionPreconditions` cases failed. They passed with the checks restored.
+- `go test ./internal/agent/runtime/dynamic -count=1`: passed.
+- `go test ./internal/agent/runtime -run 'Resolver|Unclassified|Dynamic' -count=1`: passed.
+- `go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1`: passed (48 tests).
+- `go build ./...` and `go vet` on the three changed packages: passed.
+- Tasks 02 to 04 are not implemented.

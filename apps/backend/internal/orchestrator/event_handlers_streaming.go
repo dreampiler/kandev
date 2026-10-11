@@ -285,6 +285,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeTurnStarted:
 		s.persistNativeCodexTurnID(ctx, payload)
+		s.retireCountedEmptyTurn(sessionID)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -3288,6 +3289,11 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 		return
 	}
 
+	// A launched successor owns the turn, as on the error path.
+	if s.routeDynamicEmptyTurn(ctx, emptyTurnCompletionFromPayload(payload), session, streamGuard) {
+		return
+	}
+
 	s.persistCompleteStreamOutput(ctx, payload, session, completionTurnID)
 	s.completeTurnForStreamEvent(ctx, payload, completionTurnID)
 
@@ -3548,6 +3554,26 @@ func sessionStateString(session *models.TaskSession) string {
 		return ""
 	}
 	return string(session.State)
+}
+
+func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) emptyTurnCompletion {
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return emptyTurnCompletion{
+		data: watcher.AgentEventData{
+			TaskID:             payload.TaskID,
+			SessionID:          payload.SessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+		},
+		stopReason: extractStopReason(payload),
+		isError:    extractCompleteIsError(payload),
+	}
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.
