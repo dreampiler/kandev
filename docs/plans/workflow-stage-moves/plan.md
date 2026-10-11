@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-WORKFLOW-STAGE-MOVES-001
   - REQ-TASKS-WORKFLOW-STAGE-MOVES-002
