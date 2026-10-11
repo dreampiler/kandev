@@ -766,6 +766,10 @@ type Service struct {
 	// the diagnostic surface, so it is guarded rather than mutated in place.
 	runtimeFootprintMu         sync.Mutex
 	runtimeFootprintProjection RuntimeFootprintProjection
+	// interruptedTurnAutoRecovery guards automatic continue_from_history for
+	// restart-interrupted turns (one in flight per session, with a cooldown).
+	interruptedTurnAutoRecoveryMu sync.Mutex
+	interruptedTurnAutoRecovery   map[string]interruptedTurnAutoRecoveryState
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 

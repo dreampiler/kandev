@@ -2239,6 +2239,9 @@ func (s *Service) finishQueuedMessageExecution(
 		} else {
 			s.restoreQueuedMessage(ctx, queuedMsg)
 		}
+		// The retained entry is released after the automatic continuation
+		// settles the restart-interrupted turn (restorePendingQueueDispatchesForRecovery).
+		s.AutoRecoverBlockedPrompt(ctx, queuedMsg.TaskID, callerSessionID, err)
 		return
 	}
 	if err != nil {

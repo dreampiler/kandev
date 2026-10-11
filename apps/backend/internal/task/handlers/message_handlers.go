@@ -1695,6 +1695,12 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	}
 }
 
+// blockedPromptAutoRecoverer starts automatic recovery for a prompt refused
+// because a restart-interrupted turn left the session's delivery unsettled.
+type blockedPromptAutoRecoverer interface {
+	AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionID string, cause error) bool
+}
+
 // forwardMessageAsPrompt sends a user message to the agent as a prompt.
 // For CREATED sessions, it starts the agent; otherwise it prompts the running agent,
 // with automatic resume handling if the agent is not found.
@@ -1840,6 +1846,12 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	if err != nil {
 		if errors.Is(err, orchestrator.ErrSessionRecoveryRequired) {
 			h.markDeliveryMessageBlocked(ctx, deliverySubmissionID)
+			// A restart-interrupted turn blocks every prompt until history
+			// continuation; take that step automatically so this recorded
+			// message opens the next turn instead of waiting for an operator.
+			if recoverer, ok := h.orchestrator.(blockedPromptAutoRecoverer); ok {
+				recoverer.AutoRecoverBlockedPrompt(ctx, taskID, sessionID, err)
+			}
 			return
 		}
 		// Don't create a prompt error message if the agent itself reported the error.

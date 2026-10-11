@@ -3645,6 +3645,7 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 	seam4Res.consume()
 	persistBranchRecovery()
+	s.activateResumedDynamicRoute(resumeCtx, readySession)
 
 	// Owned initial submissions are written after provider acceptance so the
 	// transcript row can use the accepted turn identity. Ordinary resumes keep
@@ -3856,7 +3857,8 @@ func (s *Service) loadResumeSessionCandidate(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
-	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive {
+	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive &&
+		!s.explicitRecoveryOwnsStrandedStartingRoute(ctx, session, options) {
 		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
