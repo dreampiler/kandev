@@ -1079,9 +1079,9 @@ func (s *Service) startCreatedSession(
 	}
 	if effectivePrompt != "" || len(attachments) > 0 || options.deliverySubmissionID != "" {
 		launchOptions.DeliverySubmissionID = options.deliverySubmissionID
-		launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID string) error {
+		launchOptions.BeforeAgentStart = func(admissionCtx context.Context, executionID, dispatchPrompt string) error {
 			return s.prepareInitialAgentDeliverySubmission(admissionCtx, session, executionID,
-				effectivePrompt, attachments, promptTaskOptions{
+				dispatchPrompt, attachments, promptTaskOptions{
 					deliveryProtocol: options.deliveryProtocol, deliverySubmissionID: options.deliverySubmissionID,
 					deliveryPayloadHash: options.deliveryPayloadHash, deliveryClaimUpdater: options.deliveryClaimUpdater,
 				})

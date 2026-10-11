@@ -121,7 +121,7 @@ Pass execution/owner/session/incarnation/harness/stream/submission into shared S
 
 Connect updates before ACP initialization for MCP; buffer retained frames through capability negotiation. Generation-one bootstrap waits for SQL generation. Both waits are cancellable and capped at thirty seconds.
 Publish native identity before configuration; check owners before receipt, projection or ACK.
-Prepare SQL and bind initial IDs to the owner/generation launch handoff before dispatch; failures block dispatch. Retries use fresh immutable IDs.
+Admit the final handover prompt in SQL and bind its initial ID to the owner/generation; failures block dispatch. Retries use fresh immutable IDs.
 Persist the Kandev turn and task/session/execution/incarnation/harness/stream/submission before dispatch. Recovery requires matching SQL and peer proof; mismatches block adoption, absent bindings never invent a turn.
 Recovery and unmarked missing authority fail closed; events never create authority.
 
