@@ -1112,8 +1112,9 @@ func (s *Service) handleTaskQueuePromotedWithAutoStartOnCreateClaimed(ctx contex
 			entryStep = workflowmove.OverlayStep(targetStep, moveOptions)
 			s.clearWorkflowMovePending(ctx, task.ID)
 		}
+		entryID := s.queuePromotionEntryID(ctx, task.ID, data.StepTransitionID, queuePromotionToken)
 		go func() {
-			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, entryStep, task.Description, entryStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep, data.StepTransitionID); err != nil {
+			if err := s.finalizeStepEnter(context.WithoutCancel(ctx), task.ID, session.ID, entryStep, task.Description, entryStep.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent), sourceStep, entryID); err != nil {
 				s.restoreTaskLifecycleToken(context.WithoutCancel(ctx), task.ID, models.MetaKeyQueuePromotionPending, queuePromotionToken, "task.queue_promoted")
 				if autoStartOnCreateClaimed {
 					s.restoreAutoStartOnCreate(context.WithoutCancel(ctx), task.ID, "task.queue_promoted")

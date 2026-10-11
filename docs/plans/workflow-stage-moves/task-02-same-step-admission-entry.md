@@ -1,7 +1,7 @@
 ---
 id: "02-same-step-admission-entry"
 title: "Run the admitted entry once for same-step WIP queue admissions"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -54,9 +54,9 @@ newer entry's actions.
 
 ## Verification
 
-Add focused tests in
-`event_handlers_workflow_profile_session_policy_resolution_test.go` (or a
-sibling file) and a repository test for the pinned marker. Run them before the
+Add focused tests in a sibling of
+`event_handlers_workflow_profile_session_policy_resolution_test.go` that
+drive the repository promotion write and assert the pinned marker. Run them before the
 fix (expected to fail) and after it:
 
 ```bash
@@ -71,4 +71,9 @@ See In scope. Dependencies: none.
 
 ## Results
 
-Pending.
+- Tests: `TestHandleTaskQueuePromotedSameStepEntryReplacesPreviousStepRoute`
+  and `TestHandleTaskQueuePromotedSameStepIgnoresReentryAfterPromotion` in
+  `event_handlers_workflow_queue_promotion_entry_test.go`. Before the fix the
+  first kept the previous step's route (the entry never ran) and the second
+  found no pinned entry on the marker. Both pass after the fix, together with
+  the existing queue-promotion tests.
