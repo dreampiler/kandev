@@ -1,94 +1,129 @@
 ---
 created: 2026-10-12
-status: complete
+status: in_progress
 requirements:
   - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001
+  - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002
 system_design:
   - ../../specs/executors/system-design/agentctl-instance-create-deadline.md
 legacy_specs: []
 ---
 
-# Implementation plan: Agentctl instance creation deadline
+# Implementation plan: Agentctl instance creation deadline and concurrency
 
 ## Overview
 
-Give `ControlClient.CreateInstance` its own 120-second client deadline. All
-other control calls keep the existing 30-second deadline. Deliver the change and
-its tests in one sequential work order.
+Concurrent session starts can fail while the agentctl controller is still
+creating instances. Two sequential work orders address the two halves of the
+cause:
 
-No existing specification defines control-call deadlines. The new capability
-pair records the contract for this change.
+1. Give `ControlClient.CreateInstance` its own 120-second client deadline. All
+   other control calls keep the existing 30-second deadline.
+2. Run each creation's startup outside `instance.Manager.mu`, so concurrent
+   creations overlap instead of queueing. Ownership, abandonment cleanup, and
+   shutdown keep their guarantees.
+
+Each work order has its own commit, red check, and verification. No existing
+specification defines control-call deadlines or creation concurrency. The new
+capability pair records both contracts.
 
 ## Evidence and root cause
 
 `NewControlClient` in `internal/agent/runtime/agentctl/control.go` sets one
-30-second `http.Client.Timeout`, and `CreateInstance` uses that client.
+30-second `http.Client.Timeout`, and `CreateInstance` uses that client. Callers
+pass longer launch contexts, so the 30-second client timeout is the effective
+bound.
 
 The controller answers `POST /api/v1/instances` only after it starts the
 instance's process manager and workspace trackers.
-`instance.Manager.CreateInstance` serializes creation. Its existing comment
-records creation latency that climbed past 30 seconds under load.
-
-Callers pass longer launch contexts, so the 30-second client timeout is the
-effective bound. Concurrent session starts can fail while the controller is
-still making progress.
+`instance.Manager.CreateInstance` holds `mu` across that startup, so
+concurrent creations serialize. Its existing comment records creation latency
+that climbed from milliseconds past 30 seconds under load. Lookup, listing,
+and stop of other instances wait on the same lock.
 
 ## Scope
 
 ### In scope
 
 - A dedicated 120-second deadline for `ControlClient.CreateInstance`.
-- Tests for the creation deadline, the unchanged shared deadline, caller
-  cancellation, and credential propagation.
-- Durable requirements and design for the deadline contract.
+- Admission, startup, and publication phases in `Manager.CreateInstance`, with
+  startup outside `mu`.
+- Shutdown coordination for creations that passed admission.
+- Tests next to each changed package, and durable requirements and design.
 
 ### Out of scope
 
-- Controller-side creation serialization and abandoned-creation cleanup in
-  `internal/agentctl/server/instance`.
+- Making a single creation's startup faster.
 - Retry, backoff, or failure classification for instance creation.
 - Launch-phase deadlines, executor-specific creation logic, and task
   environment preparation.
-- A configurable deadline.
+- A configurable deadline or concurrency limit.
 
 ## Technical approach
 
+### Task 01: client deadline
+
 Add `createInstanceHTTPTimeout = 120 * time.Second` in `control.go`. In
 `CreateInstance`, copy `*c.httpClient`, set the copy's `Timeout`, and send the
-request through the copy.
+request through the copy. The copy shares the configured transport, so
+authentication and runtime binding are unchanged.
 
-The copy shares the configured transport, so authentication and runtime
-binding are unchanged. The request keeps the caller's context. The shared
-client and every other method are untouched.
+### Task 02: creation outside the manager lock
+
+Split `Manager.CreateInstance` into admission, startup, and publication as the
+[creation phases](../../specs/executors/system-design/agentctl-instance-create-deadline.md#creation-phases)
+describe. Keep the provisional bundle as the ID and port owner during startup.
+Start the HTTP server inside the publication critical section, so a refused
+creation never starts one.
+
+Add `activeCreations`, incremented under `mu` at admission. `Shutdown` waits on
+it before draining `abandonWG`, as the
+[shutdown design](../../specs/executors/system-design/agentctl-instance-create-deadline.md#shutdown)
+describes. Store the process manager on the bundle under `cleanupMu`.
+
+Move the instance override construction into a helper so `CreateInstance`
+stays within the Go function-length limits. Carry every current
+`CreateRequest` field into the overrides unchanged. Update the comments that
+describe creation as serialized under `mu` or bounded by a 30-second client.
 
 The [system design](../../specs/executors/system-design/agentctl-instance-create-deadline.md#known-limits)
-records what the longer deadline does not resolve.
+records what these changes do not resolve.
 
 ## Tests
 
 | Acceptance | Test evidence |
 | --- | --- |
 | 001.1 | New `TestCreateInstance_UsesLongerHTTPTimeout`: a stubbed transport observes a request deadline between 119 and 120 seconds |
-| 001.2 | Existing `TestNewControlClient_BuildsBaseURLFromHostAndPort` keeps the shared 30-second timeout |
+| 001.2 | Existing `TestNewControlClient_BuildsBaseURLFromHostAndPort`, and the shared-timeout check in `TestCreateInstance_UsesLongerHTTPTimeout` |
 | 001.3 | New `TestCreateInstance_CallerDeadlineStillApplies`: a short caller deadline ends creation with a wrapped `context.DeadlineExceeded` |
 | 001.4 | New `TestCreateInstance_SendsControlAuthToken`: a token-authenticated client's creation request carries the bearer credential |
+| 002.1 | New `TestConcurrentCreationsOverlapStartup`: four creations reach `afterTrackerStart` together |
+| 002.2 | New `TestCreateInstanceRejectsDuplicateIDDuringStartup`: a same-ID creation fails promptly while the first is held, and the first then succeeds |
+| 002.3 | Existing `TestCreateInstanceAbandonsWhenCallerGaveUp`, `TestCreateInstanceAbandonsAfterTrackerStartup`, `TestAbandonRetainsLeaseOnCleanupFailure`, and `TestShutdownRetriesFailedAbandon` |
+| 002.4 | New `TestShutdownWaitsForInProgressCreation`; existing `TestCreateInstanceRefusedAfterShutdown` |
+| 002.5 | New `TestOtherInstanceOperationsDoNotWaitForStartup`: lookup, listing, and stop of a published instance complete while another creation is held |
 
-The required red test is `TestCreateInstance_UsesLongerHTTPTimeout`. Before the
-change, the request deadline is about 30 seconds.
+Required red checks: `TestCreateInstance_UsesLongerHTTPTimeout` for task 01,
+and `TestConcurrentCreationsOverlapStartup` for task 02. On the unchanged
+manager, only one creation can reach the startup barrier. The duplicate-ID and
+other-instance tests also fail on the unchanged manager, because they wait on
+`mu`. The shutdown test is a preservation check and passes before and after.
 
 ## E2E tests
 
 No browser flow changes, so no Playwright test applies. The client tests use
-stubbed transports and `httptest` servers. They do not start agentctl or an
-agent.
+stubbed transports and `httptest` servers. The manager tests use the existing
+in-package seam, temporary workspaces, and ephemeral ports. They do not start
+an agent.
 
 ## Work orders
 
 - [x] [Task 01: Give instance creation its own deadline](task-01-instance-create-deadline.md)
+- [ ] [Task 02: Create instances without holding the manager lock across startup](task-02-create-outside-manager-lock.md)
 
 ## Verification results
 
-Implementation checks on 2026-10-12:
+Task 01 implementation checks on 2026-10-12:
 
 - The required red check, `TestCreateInstance_UsesLongerHTTPTimeout`, failed
   before the production change with `deadline had 30s remaining, want close to
@@ -100,8 +135,8 @@ Implementation checks on 2026-10-12:
   `python3 scripts/lint-spec-files.py --all`: passed.
 - Local `validateCoverage` preflight on the changed files: `covered`.
 
-The [work order](task-01-instance-create-deadline.md#results) records the
-details.
+The [task 01 work order](task-01-instance-create-deadline.md#results) records
+the details. Task 02 results are pending.
 
 ## Risks
 
@@ -109,9 +144,16 @@ details.
   Copy the client so the configured transport is shared.
 - Raising the shared timeout would lengthen failure detection for every control
   call. Change only `CreateInstance`.
-- The longer deadline can hide slow creation. Creation latency remains visible
-  through the controller's existing `agentctl_create_ready_ms` metric.
+- A creation published after `Shutdown` snapshots the maps would never stop.
+  Admission registers on `activeCreations` under `mu`, and `Shutdown` waits on
+  it first.
+- A server started before a refused publication would keep serving on an
+  unpublished instance. Start the server only during publication.
+- Overlapping startups run more tracker and git work at once. Startup work per
+  creation is unchanged, and `agentctl_create_ready_ms` still reports full
+  creation time.
 
 ## Documentation impact
 
-No user or operator setting changes. Public documentation is not required.
+No user or operator setting changes. Public documentation is not required. The
+`internal/agentctl/AGENTS.md` port-lease section remains accurate.
