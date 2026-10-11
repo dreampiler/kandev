@@ -75,6 +75,19 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
 		return response, err
 	}
+	// A step change that carries entry options must target a step that starts
+	// work on entry. Manual steps (for example Waiting, Blocked, or Done) park or
+	// complete the task, so one-shot instructions would be silently dropped.
+	// This agent surface rejects them even when the task has a session that the
+	// service could hand the options to; HTTP and WebSocket moves keep the
+	// service's session-or-auto-start rule. Rejecting before the
+	// deferred/immediate split keeps the deferred path from accepting an
+	// undeliverable hand-off it would later discard.
+	if req.EntryOptions != nil {
+		if err := h.validateEntryTargetStep(ctx, req.WorkflowStepID); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+	}
 
 	// entry_options are OPTIONAL — config-mode/admin moves don't always have an
 	// agent to hand off to. When supplied, one-shot instructions/reset/profile
@@ -348,6 +361,24 @@ func moveChange(fromStepID, toStepID string) workflowmove.MoveChange {
 	return workflowmove.MoveChangePositionOnly
 }
 
+// validateEntryTargetStep reports whether the target step can receive one-shot
+// entry options. A manual step (one that does not start work on entry) cannot,
+// so the caller is told to move without options. A missing workflow controller
+// or an unreadable step fails open, letting the normal move path report its own
+// canonical not-found or validation error.
+func (h *Handlers) validateEntryTargetStep(ctx context.Context, stepID string) error {
+	if h.workflowCtrl == nil {
+		return nil
+	}
+	resp, err := h.workflowCtrl.GetStep(ctx, stepID)
+	if err != nil || resp == nil || resp.Step == nil {
+		h.logger.Debug("move_task: could not read target step for entry-target check",
+			zap.String("workflow_step_id", stepID), zap.Error(err))
+		return nil
+	}
+	return workflowmove.ValidateEntryTarget(resp.Step)
+}
+
 // applyMoveTaskImmediate runs the move now, optionally queueing a hand-off
 // prompt on the (idle) primary session beforehand. Used when the source
 // session is idle, when there's no source session at all, or when no prompt
@@ -405,7 +436,8 @@ func classifyMoveTaskError(err error) string {
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
 		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
-		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) ||
+		errors.Is(err, workflowmove.ErrEntryTargetIsManual) {
 		return ws.ErrorCodeValidation
 	}
 	msg := strings.ToLower(err.Error())
@@ -424,14 +456,62 @@ func classifyMoveTaskError(err error) string {
 	}
 }
 
+// moveTaskErrorMessage returns the agent-facing text for a failed move. A
+// recognized reason is included so the caller can correct the call in one
+// step. Service errors that embed internal identifiers (for example a
+// WIP-limit step ID) map to fixed phrases, and any unrecognized error keeps the
+// generic text so raw service messages never reach the agent.
 func moveTaskErrorMessage(err error) string {
+	reason, known := moveTaskErrorReason(err)
 	switch classifyMoveTaskError(err) {
 	case ws.ErrorCodeConflict:
+		if known {
+			return "Move task conflicts with the current task or workflow state: " + reason
+		}
 		return "Move task conflicts with the current task or workflow state"
 	case ws.ErrorCodeValidation:
+		if known {
+			return reason
+		}
 		return "Invalid move_task request"
 	default:
 		return "Failed to move task"
+	}
+}
+
+// moveTaskErrorReason returns a stable, non-sensitive reason for a recognized
+// move error: a workflow move sentinel's own message, or a fixed phrase for a
+// known service error. known is false for anything else.
+func moveTaskErrorReason(err error) (reason string, known bool) {
+	if err == nil {
+		return "", false
+	}
+	for _, sentinel := range []error{
+		workflowmove.ErrMoveConflict,
+		workflowmove.ErrConflictingInstructions,
+		workflowmove.ErrEntryOptionsRequireStepChange,
+		workflowmove.ErrEntryOptionsUnsupported,
+		workflowmove.ErrEntryTargetUnavailable,
+		workflowmove.ErrEntryTargetIsManual,
+	} {
+		if errors.Is(err, sentinel) {
+			return sentinel.Error(), true
+		}
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "wip limit exceeded"):
+		return "the target workflow step's WIP limit is exceeded", true
+	case strings.Contains(msg, "active session"):
+		return "the task has an active session", true
+	case strings.Contains(msg, "archived tasks cannot be moved"):
+		return "archived tasks cannot be moved", true
+	case strings.Contains(msg, "different workspace"):
+		return "the target workflow is in a different workspace", true
+	case strings.Contains(msg, "does not belong to target workflow"):
+		return "the target workflow_step_id does not belong to the requested workflow_id", true
+	default:
+		return "", false
 	}
 }
 

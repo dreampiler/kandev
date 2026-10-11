@@ -1,7 +1,7 @@
 ---
 id: "04-reject-manual-step-hand-offs"
 title: "Reject move_task hand-offs to manual steps and surface move reasons"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -65,9 +65,9 @@ fix (expected to fail) and after it:
 
 ```bash
 cd apps/backend
-go test ./internal/mcp/handlers/ -run 'MoveTask' -count=1
-go test ./internal/workflow/move/ ./internal/workflow/models/ -run 'EntryTarget|RunsOnEntry' -count=1
-go test ./internal/mcp/server/ -run 'MoveTask|ToolDescription' -count=1
+go test ./internal/mcp/handlers/ -run 'MoveTask|DeferMoveTask' -count=1
+go test ./internal/workflow/move/ -run 'EntryTarget' -count=1
+go test ./internal/mcp/server/ -run 'MoveTask' -count=1
 ```
 
 ## Likely files
@@ -76,4 +76,19 @@ See In scope. Dependencies: none.
 
 ## Results
 
-Pending.
+- Before the fix, `TestHandleMoveTask_RejectsPromptForManualStep` accepted
+  and deferred the hand-off. `TestMoveTaskErrorMessage_SanitizesClassifiedErrors`
+  (updated WIP expectation) and
+  `TestMoveTaskErrorMessage_SurfacesKnownValidationSentinel` returned the
+  generic text, and `TestMoveTaskDescriptionsStateManualStepRule` found no
+  rule in either registration. All pass after the fix.
+  `TestHandleMoveTask_AcceptsPromptForStepThatStartsRunOnEntry` passes before
+  and after.
+- `TestValidateEntryTargetRejectsOnlyManualSteps` covers the new
+  `StepRunsOnEntry` and `ValidateEntryTarget` after the fix. It cannot run
+  before the fix because those functions did not exist.
+- `TestDeferMoveTask_AcceptsValidStep` now gives its destination an
+  `auto_start_agent` action, because a step without one is manual.
+- Contract choice: the agent surface rejects options for a manual step even
+  when a session exists. The public docs and the legacy move-override spec
+  state this, so maintainers can keep or drop it.
