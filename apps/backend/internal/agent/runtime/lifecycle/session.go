@@ -2492,7 +2492,7 @@ func matchesMissingProviderSession(encoded []byte, expectedSessionID, agentType 
 		return true
 	}
 	archivedDetail := "session " + expectedSessionID + missingProviderArchivedSessionSuffix
-	if agentType == "codex-acp" && projected.Code == jsonRPCInternalError &&
+	if agentType == codexACPAgentID && projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
 		(projected.Data.Details == archivedDetail || projected.Data.Details == archivedDetail+"." ||
 			strings.HasPrefix(projected.Data.Details, archivedDetail+". ")) {
