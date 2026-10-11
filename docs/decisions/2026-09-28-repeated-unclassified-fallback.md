@@ -12,6 +12,19 @@ It is admitted only when the candidate policy is enabled and the workflow step a
 Otherwise the completion keeps its existing behavior.
 All other rules in this decision still apply, including the threshold, attempt deduplication, resets, and fenced successor launch.
 
+## Proposed amendment: post-start no-result failures
+
+This amendment is a proposal and is separable from the one above.
+It adds the `post_start_no_result` origin for a post-start `agent_runtime_error` that the classifier leaves unknown and that arrives before any output or effect.
+For this origin only, identity uses a bounded, sanitized form of the message per producer shape, as the [design](../specs/agents/system-design/dynamic-unclassified-fallback.md#post-start-no-result-failures-contract-proposal) defines.
+Every other origin keeps the complete-diagnostic rule, the 1024-byte bound, and the redaction rule.
+The threshold range and the disabled default do not change.
+
+Alternatives:
+
+- Exact identity with producer attestation: the runtime error producers would need a new completeness proof, and messages with variable suffixes, such as process exit stderr, would still never match.
+- Manual recovery only: keeps the current boundary, but a candidate that keeps failing before any result is never advanced.
+
 ## Context
 
 [Issue #4015](https://github.com/kdlbs/kandev/issues/4015) proposes recovery from repeated unknown failures in task dynamic routing.
