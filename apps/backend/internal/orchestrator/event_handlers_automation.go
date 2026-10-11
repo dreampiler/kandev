@@ -9,6 +9,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -481,7 +482,6 @@ func (s *Service) prepareAutomationTask(
 	// stamped before CreateTask runs its feeder pull, so the pull's task.moved
 	// auto-start cannot launch the same task first. Continuation reuses an
 	// existing task and returns above, so only a freshly created task is marked.
-	metadata[models.MetaKeyAutomationStartOwned] = true
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -491,6 +491,8 @@ func (s *Service) prepareAutomationTask(
 		Repositories:   repositories,
 		Metadata:       metadata,
 		Origin:         taskOrigin,
+
+		AutomationStartOwned: true,
 	})
 	if err != nil {
 		return nil, nil, action, reasons, fmt.Errorf("create automation task: %w", err)
@@ -950,12 +952,53 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 	s.autoStartAutomationTaskForRun(ctx, a, task, workflowStepID, "", automation.ThreadActionCreated, "")
 }
 
+// automationStartOwnershipReleaseTimeout bounds the marker cleanup, which runs
+// on a context detached from the dispatch so a cancelled dispatch still
+// releases the start.
+const automationStartOwnershipReleaseTimeout = 10 * time.Second
+
 // releaseAutomationStartOwnership removes the marker that reserved a new
-// automation task's initial start for the automation dispatch.
+// automation task's initial start for the automation dispatch. A failed
+// removal is logged; startup reconciliation clears any marker left behind.
 func (s *Service) releaseAutomationStartOwnership(ctx context.Context, taskID string) {
-	if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutomationStartOwned); err != nil {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), automationStartOwnershipReleaseTimeout)
+	defer cancel()
+	removed, err := s.repo.RemoveTaskMetadataKey(releaseCtx, taskID, models.MetaKeyAutomationStartOwned)
+	if err != nil {
 		s.logger.Warn("failed to clear automation start ownership marker",
 			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if removed {
+		s.publishTaskUpdatedByID(releaseCtx, taskID)
+	}
+}
+
+// automationStartOwnershipLister finds tasks still carrying the automation
+// start-ownership marker, automation-origin tasks included.
+type automationStartOwnershipLister interface {
+	ListTasksWithAutomationStartOwned(ctx context.Context) ([]*models.Task, error)
+}
+
+// releaseAbandonedAutomationStartOwnership clears start-ownership markers left
+// by a process that stopped between creating an automation task and resolving
+// its dispatch. No dispatch survives a restart, and automation events are
+// subscribed only after startup reconciliation, so every marker found here is
+// abandoned.
+func (s *Service) releaseAbandonedAutomationStartOwnership(ctx context.Context) {
+	lister, ok := s.repo.(automationStartOwnershipLister)
+	if !ok {
+		return
+	}
+	owned, err := lister.ListTasksWithAutomationStartOwned(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list abandoned automation start ownership markers", zap.Error(err))
+		return
+	}
+	for _, task := range owned {
+		if task != nil {
+			s.releaseAutomationStartOwnership(ctx, task.ID)
+		}
 	}
 }
 

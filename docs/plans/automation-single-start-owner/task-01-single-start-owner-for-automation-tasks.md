@@ -26,7 +26,10 @@ creates, so a feeder pull's workflow auto-start cannot race it.
   marker's release before the change.
 - Stamp `automation_start_owned` on a newly created automation task.
 - Skip workflow auto-start for a task that carries the marker.
-- Remove the marker when the automation dispatch resolves.
+- Remove the marker when the automation dispatch resolves, publish
+  `task.updated`, and clear abandoned markers at startup.
+- Accept the marker only from the automation create path, never from request
+  metadata or an ordinary metadata update.
 - Record the single start owner in the session ceiling design.
 
 ## Out of scope
@@ -39,7 +42,11 @@ and UI changes.
 - An owned task on an auto-start step starts no workflow launch; an unmarked
   task on the same step launches.
 - A task the automation creates carries the marker when `CreateTask` runs.
-- After the automation dispatch resolves, the task no longer carries the marker.
+- After the automation dispatch resolves, even with a cancelled context, the
+  task no longer carries the marker and a `task.updated` is published.
+- Startup reconciliation clears a marker left by a stopped process.
+- Create request metadata and ordinary metadata updates cannot add or remove
+  the marker.
 - Existing deferred automation start tests pass.
 
 ## Verification
@@ -47,8 +54,8 @@ and UI changes.
 From the repository root:
 
 ```bash
-(cd apps/backend && go test ./internal/orchestrator -run 'Automation|AutoStart|TaskMoved|Feeder|WIP|Ceiling' -count=1)
-(cd apps/backend && go test ./internal/task/models ./internal/task/service -count=1)
+(cd apps/backend && go test -trimpath ./internal/orchestrator -run 'Automation|AutoStart|TaskMoved|Feeder|WIP|Ceiling' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/models ./internal/task/service -count=1)
 (cd apps/backend && go vet ./internal/orchestrator ./internal/task/...)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -59,6 +66,15 @@ git diff --check
 
 - apps/backend/internal/orchestrator/event_handlers_automation.go
 - apps/backend/internal/orchestrator/event_handlers_workflow.go
+- apps/backend/internal/orchestrator/event_handlers_github.go
+- apps/backend/internal/orchestrator/service.go
+- apps/backend/internal/backendapp/orchestrator.go
+- apps/backend/internal/task/service/service_requests.go
+- apps/backend/internal/task/service/service_task_metadata.go
+- apps/backend/internal/task/service/service_tasks.go
+- apps/backend/internal/task/models/task_metadata_update.go
+- apps/backend/internal/task/repository/sqlite/task.go
+- apps/backend/internal/task/repository/sqlite/task_metadata_merge.go
 - apps/backend/internal/orchestrator/event_handlers_workflow_automation_owned_start_test.go
 - apps/backend/internal/orchestrator/automation_ceiling_defer_test.go
 - apps/backend/internal/task/models/models.go

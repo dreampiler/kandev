@@ -1022,6 +1022,12 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		}
 		metadata[models.MetaKeyDeferredLaunch] = launch
 	}
+	if req.AutomationStartOwned {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.MetaKeyAutomationStartOwned] = true
+	}
 	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})

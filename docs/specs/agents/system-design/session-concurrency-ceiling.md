@@ -226,7 +226,10 @@ auto-start skips the task, including the `task.moved` of a feeder pull that
 only initial starter, so its start is never refused as a conflicting deferral or
 as a workspace that another start is still preparing. The dispatch removes the
 marker whatever its outcome, so a task left without a session auto-starts on a
-later move like any other task.
+later move like any other task. Only the automation create path can set the
+marker; create metadata and ordinary metadata updates cannot add or remove it.
+Startup reconciliation clears any marker a stopped process left behind, since no
+dispatch survives a restart.
 
 The sweep drops a start whose run was deleted or is no longer `triggered`, such
 as a stopped, bound, failed, or startup-reconciled run, without launching. A run

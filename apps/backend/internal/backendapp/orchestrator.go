@@ -799,6 +799,8 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Repositories:   repos,
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
+
+		AutomationStartOwned: req.AutomationStartOwned,
 	})
 	if err != nil {
 		return nil, err

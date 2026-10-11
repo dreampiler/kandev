@@ -135,6 +135,9 @@ type ReviewTaskRequest struct {
 	// Origin tags the task with a provenance label (see task/models.TaskOrigin*).
 	// Defaults to TaskOriginManual when empty.
 	Origin string
+	// AutomationStartOwned reserves the created task's initial start for the
+	// automation dispatch (see models.MetaKeyAutomationStartOwned).
+	AutomationStartOwned bool
 }
 
 // ReviewTaskRepository associates a repository with a review task.

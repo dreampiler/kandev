@@ -28,7 +28,9 @@ reports the gap.
 - Mark a task an automation creates as owned by the automation dispatch for its
   initial start.
 - Skip workflow auto-start for a task that carries the marker.
-- Remove the marker once the automation dispatch resolves.
+- Remove the marker once the automation dispatch resolves, and clear markers a
+  stopped process left behind at startup.
+- Accept the marker only from the automation create path.
 - Record the single start owner in the session ceiling design.
 
 ### Out of scope
@@ -39,14 +41,20 @@ reports the gap.
 
 ## Technical approach
 
-`prepareAutomationTask` stamps `automation_start_owned` in the metadata it
-passes to `CreateTask`, so the marker is present before the feeder pull
-publishes `task.moved`. `autoStartTaskForLoadedStep` returns before any launch
+`prepareAutomationTask` sets the internal `AutomationStartOwned` field of its
+create request, and `CreateTask` stamps `automation_start_owned` when it builds
+the task, so the marker is present before the feeder pull publishes
+`task.moved`. Ordinary create and metadata update requests can neither add nor
+remove the key, so a caller cannot keep its own task from auto-starting. `autoStartTaskForLoadedStep` returns before any launch
 when the marker is set, and discards an auto-start-on-create claim it holds.
 `autoStartAutomationTaskForRun` removes the marker when its dispatch returns,
 whether the start ran, was queued by the ceiling, or failed. A task left without
 a session, such as one whose queued start is later dropped, then auto-starts on
-a later move like any other task.
+a later move like any other task. The removal runs on a bounded context
+detached from the dispatch and publishes `task.updated`. Startup reconciliation
+lists marked tasks, automation-origin ones included, and clears every
+remaining marker before automation events are subscribed, since no dispatch
+survives a restart.
 
 ## Tests
 
@@ -59,8 +67,13 @@ task carries the marker.
 `automation_ceiling_defer_test.go` covers
 `TestAutomationStartDeferredByCeiling_ReleasesStartOwnership`: after a dispatch
 the ceiling queued, the task no longer carries the marker.
+`TestReleaseAutomationStartOwnershipPublishesTaskUpdate` and
+`TestStartupReleasesAbandonedAutomationStartOwnership` cover the release on a
+cancelled dispatch context, its `task.updated`, and the startup cleanup.
 `service_step_handoff_metadata_test.go` covers
-`TestProtectedTaskMetadataForCreatePreservesAutomationStartOwnership`.
+`TestProtectedTaskMetadataForCreateRejectsAutomationStartOwnership`,
+`TestBuildTaskStampsAutomationStartOwnershipOnlyFromInternalField`, and
+`TestUpdateTaskMetadataPreservesAutomationStartOwnership`.
 
 ## E2E tests
 
