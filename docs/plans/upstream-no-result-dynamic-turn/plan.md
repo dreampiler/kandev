@@ -54,7 +54,13 @@ Options for a later decision:
 | B. Normalized prefix | Admit with a sanitized, whitespace-collapsed, 256-byte error-type prefix as identity | Reverses the "no manufactured equality" and "no truncation" rules. Needs a new decision. |
 | C. Keep manual | No change | None. Repeated post-start failures still need manual recovery. |
 
-This package does not implement any option. A maintainer decision on the identity model is required before code.
+This item stays open. It is not dropped and is not delivered by Task 01.
+It needs two inputs before any code:
+
+- a mapping of the actual runtime error producers to the identity contract, including whether any of them can attest a complete diagnostic;
+- the prepared restart-recovery change in Task 04, because a false success result after an interrupted turn may change which post-start failures reach the route.
+
+After that, a maintainer decision on the identity model selects an option.
 
 ## Shared scope
 

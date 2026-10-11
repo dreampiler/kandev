@@ -116,6 +116,9 @@ The orchestrator records the counted execution ID and prompt generation for the 
 The later successful completion or process exit for that same turn consumes the record instead of clearing the streak.
 A new turn start retires the record, and the identity check prevents a later turn from consuming a stale one.
 
+This origin does not cover a post-start runtime failure that arrives before any result without a complete diagnostic.
+Such failures still stop for manual recovery. Their identity model is an open item in the [empty turn package](../../../plans/upstream-no-result-dynamic-turn/plan.md).
+
 ## Matching identity
 
 Count identical diagnostics, not merely identical classes or candidate IDs.
