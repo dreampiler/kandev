@@ -213,7 +213,7 @@ runs (routing additions)
   resolved_execution_profile_id string concrete profile that supplied the launch configuration
   current_route_attempt_seq  int    monotonically bumped by IncrementRouteAttemptSeq
   route_cycle_baseline_seq   int    seq floor for the current retry cycle; attempts at or below the baseline are NOT in the exclude-set
-  routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required
+  routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required | waiting_for_session_capacity
   earliest_retry_at          timestamp nullable; minimum auto-retry deadline across degraded routes
   scheduled_retry_at         timestamp next same-route retry or parked-run wake
 ```
