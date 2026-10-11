@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: planned
+status: done
 requirements:
   - REQ-TASKS-RESUME-PROMPT-QUEUE-002
   - REQ-TASKS-RESTART-ORPHAN-SESSIONS-003
@@ -126,7 +126,21 @@ is added.
 
 ## Verification results
 
-Not implemented yet.
+Each work order records its RED and GREEN tests. Every new test that asserts a
+fixed behavior fails on the current main branch, and the guard tests pass on
+both.
+
+- `go build ./...`, `go vet` of the changed packages, `sqlguard`, the
+  documentation catalog and specification checks, and a local run of the PR
+  documentation coverage evaluator on the changed files pass.
+- Some tests fail on Windows with and without this package:
+  `TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt`
+  (`\` path separators), and, intermittently,
+  `TestCancelActiveTaskSessionsByCandidatesRejectsNewActivityAndTurn` and
+  `TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress` (two writes
+  in one clock tick share `updated_at`).
+- Tests ran per package with `-run` filters; the whole backend suite was not
+  run.
 
 ## Risks
 
