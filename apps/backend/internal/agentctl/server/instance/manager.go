@@ -186,7 +186,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	if err != nil {
 		return nil, err
 	}
-	if err := m.publishInstance(inst, bundle, handler); err != nil {
+	if err := m.publishInstance(ctx, inst, bundle, handler); err != nil {
 		return nil, err
 	}
 	cleanupPending = false
@@ -339,12 +339,16 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 
 // publishInstance starts serving an admitted instance and makes it visible,
 // both under m.mu, so a published instance always has a running server and a
-// creation refused during shutdown never starts one.
-func (m *Manager) publishInstance(inst *Instance, bundle *provisionalInstance, handler http.Handler) error {
+// creation refused during shutdown, or whose caller gave up while it waited
+// for m.mu, never starts one.
+func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *provisionalInstance, handler http.Handler) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.shuttingDown {
 		return ErrManagerShuttingDown
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("create instance abandoned before publication: %w", err)
 	}
 	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
 	m.instances[inst.ID] = inst

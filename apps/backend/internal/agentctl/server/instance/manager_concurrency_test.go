@@ -2,6 +2,7 @@ package instance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -234,6 +235,61 @@ func TestShutdownWaitsForInProgressCreation(t *testing.T) {
 	mgr.portAlloc.mu.Unlock()
 	if reserved != 0 {
 		t.Errorf("after Shutdown: %d ports reserved, want 0", reserved)
+	}
+}
+
+// TestCreateInstanceNotPublishedWhenCancelledBeforePublication cancels the
+// caller after the post-startup context check, while the manager lock that
+// publication needs is held elsewhere.
+func TestCreateInstanceNotPublishedWhenCancelledBeforePublication(t *testing.T) {
+	mgr := newConcurrencyTestManager(t, 4)
+	handlerBuilt := make(chan struct{})
+	resume := make(chan struct{})
+	mgr.SetServerFactory(func(*config.InstanceConfig, *process.Manager, *logger.Logger) http.Handler {
+		close(handlerBuilt)
+		<-resume
+		return http.NotFoundHandler()
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	createErr := make(chan error, 1)
+	go func() {
+		_, err := mgr.CreateInstance(ctx, &CreateRequest{ID: "cancelled", WorkspacePath: t.TempDir()})
+		createErr <- err
+	}()
+	select {
+	case <-handlerBuilt:
+	case <-time.After(concurrencyTestWait):
+		close(resume)
+		t.Fatal("creation did not reach handler construction")
+	}
+
+	mgr.mu.Lock()
+	cancel()
+	close(resume)
+	time.Sleep(50 * time.Millisecond)
+	mgr.mu.Unlock()
+
+	select {
+	case err := <-createErr:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("error = %v, want wrapped context.Canceled", err)
+		}
+	case <-time.After(concurrencyTestWait):
+		t.Fatal("creation did not finish")
+	}
+	if _, ok := mgr.GetInstance("cancelled"); ok {
+		t.Fatal("instance was published after its caller gave up")
+	}
+	if !finishesWithin(func() { _ = mgr.Shutdown(context.Background()) }) {
+		t.Fatal("Shutdown did not finish")
+	}
+	mgr.portAlloc.mu.Lock()
+	reserved := len(mgr.portAlloc.allocated)
+	mgr.portAlloc.mu.Unlock()
+	if reserved != 0 {
+		t.Errorf("%d ports reserved after the cancelled creation was cleaned up, want 0", reserved)
 	}
 }
 
