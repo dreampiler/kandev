@@ -104,10 +104,11 @@ node scripts/validate-public-docs.mjs
   `pending_moves` column lists. The second change to land must merge both
   column sets. The two predicates are independent.
 - **Signal-gated timing:** order 3 delays an advance until the entry prompt is
-  delivered. A record that stays valid but undeliverable would hold the step.
-  The existing ceiling sweep delivers or retires bound records, so the hold
-  ends on the same schedule as the prompt. The work order covers the
-  delivered, superseded, and unbound cases.
+  delivered. Ceiling records have no age limit, so a hold ends only when the
+  destination turn ends, the task leaves the step, or the destination session
+  ends. A destination that stays running keeps the hold for that long. The
+  design records this limitation, and the work order tests the release
+  events.
 - **Agent surface narrowing:** order 4 rejects options to a manual step even
   when the task has an active session that the service path could use for a
   hand-off. This rejection is deliberate for agent callers only. The public

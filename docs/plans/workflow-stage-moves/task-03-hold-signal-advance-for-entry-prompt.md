@@ -1,7 +1,7 @@
 ---
 id: "03-hold-signal-advance-for-entry-prompt"
 title: "Hold a signal-gated advance until the step's entry prompt is delivered"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -68,4 +68,14 @@ See In scope. Dependencies: none.
 
 ## Results
 
-Pending.
+- Tests in `workflow_entry_before_advance_test.go`. Before the fix,
+  `TestValidateCeilingEntry_BoundEntryPromptOnRunningDestinationIsRetried` got
+  `ceilingEntrySuperseded` and
+  `TestPrepareEngineTurnCompletion_HoldsAdvanceWhileBoundEntryPromptPending`
+  advanced past the queued prompt. Both pass after the fix. The unbound,
+  superseded-destination, and release-event tests pass before and after, which
+  confirms the preserved paths.
+- The hold has no age limit. See "How a hold ends" in the system design.
+- `TestCeilingDispatchAdmissionSerializesRouteMutation` fails intermittently
+  on Windows at its claim-expiry time comparison, with and without this
+  change. It is excluded from this order's evidence.

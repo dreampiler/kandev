@@ -167,6 +167,25 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
    stays recorded on the session, so the advance can happen on a later
    completion after the prompt is delivered.
 
+### How a hold ends
+
+Ceiling records have no age limit. A retained record is re-evaluated by the
+ceiling sweep (`ceilingSweepInterval`, 20 seconds, plus release-driven
+wake-ups), and `ceilingEntryUnavailable` settles as a retry, not a drop. A hold
+therefore ends through one of these existing events:
+
+- The destination session leaves `STARTING` or `RUNNING`. The record becomes
+  valid and the next sweep delivers it when capacity allows.
+- The task leaves the step, or the destination session ends. The record
+  becomes superseded, the sweep drops it, and the gate no longer holds.
+
+Limitation: while the destination stays `STARTING` or `RUNNING`, the hold
+lasts as long as that session does. The task service's stall recovery can
+settle a stalled session that has no live execution, but a session with a
+live execution that never ends its turn keeps the hold. Each sweep in
+that window logs one replay-retry warning for the record, as it already does
+for other unavailable records. A user can end the hold by moving the task.
+
 ## Agent move target validation
 
 ### Components
