@@ -1,7 +1,7 @@
 ---
 id: "01-drop-superseded-deferred-moves"
 title: "Drop a deferred move superseded by a later move"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -86,4 +86,13 @@ See In scope. Dependencies: none.
 
 ## Results
 
-Pending.
+- `applyPendingMove` drops a superseded move through a shared
+  `discardPendingMove`, which the existing invalid-target drop now also uses.
+- Tests: `TestPendingMove_DropsMoveSupersededByLaterMove`,
+  `TestPendingMove_DropsMoveSupersededByLeaveAndReturn`,
+  `TestPendingMove_AppliesRecordedMoveWithoutLaterMove`,
+  `TestUpdateTaskWithWorkflowStepAdmissionForDeferredMoveRejectsLeaveAndReturn`,
+  and `TestDeferMoveTask_RecordsSourceStepAndTransition`. The first two, the
+  admission test, and the handler test failed on assertions before the fix and
+  pass after it. The moves are built from their persisted JSON shape, so the
+  same test source compiles before and after the new fields exist.
