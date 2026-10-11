@@ -102,6 +102,10 @@ func TestRecoveryRetriesWhenNewManualMoveAlreadyCompleted(t *testing.T) {
 	if err := repo.SetTaskMetadataKey(ctx, "manual-marker-completed-race", models.MetaKeyManualMoveLifecycleCompleted, true); err != nil {
 		t.Fatalf("seed completed marker: %v", err)
 	}
+	completedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET updated_at = ? WHERE id = ?`, completedAt, "manual-marker-completed-race"); err != nil {
+		t.Fatalf("seed prior completion generation: %v", err)
+	}
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.SetFeederPullReconciler(&countingFeederPullReconciler{})

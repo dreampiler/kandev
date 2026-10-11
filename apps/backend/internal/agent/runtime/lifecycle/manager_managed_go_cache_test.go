@@ -521,6 +521,9 @@ func TestManagedGoCachePromotionKeepsExecutionDecision(t *testing.T) {
 func TestManagedGoCacheCoalescedLaunchUsesOneDecision(t *testing.T) {
 	mgr, backend := newEnvironmentExecutionTestManager(t, nil)
 	mgr.dataDir = t.TempDir()
+	if path := mgr.resolveScratchWorkspace(context.Background(), managedCacheLaunchRequest("session-coalesced")); path == "" {
+		t.Fatal("prepare coalesced launch workspace")
+	}
 	var calls atomic.Int32
 	mgr.SetManagedGoCacheEnvironmentProvider(managedGoCacheProviderFunc(func(context.Context) (map[string]string, error) {
 		calls.Add(1)
