@@ -1,7 +1,7 @@
 ---
 id: "02-route-action-validation"
 title: "Report route actions on non-dynamic sessions as validation errors"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -41,7 +41,7 @@ Return a typed, named rejection for a route action on a session whose selected p
 
 ```bash
 cd apps/backend
-go test ./internal/backendapp -run 'RouteAction' -count=1
-go test ./internal/orchestrator/handlers -run 'RouteAction' -count=1
+go test ./internal/backendapp -run 'RouteAction|DynamicRoute' -count=1
+go test ./internal/orchestrator/handlers -run 'RouteAction|Ws' -count=1
 go build ./... && go vet ./internal/backendapp/... ./internal/orchestrator/...
 ```

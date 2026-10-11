@@ -20,13 +20,13 @@ The agent system owns all of them because it owns candidate selection and route 
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
-| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | member, not implemented |
+| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
 
 Staging:
 
 1. Task 01 is implemented first.
-2. Task 02 is a confirmed member. It is implemented after Task 01, in its own commit.
+2. Task 02 is implemented after Task 01, in its own commit.
 3. Task 04 is added when its prepared change is supplied.
 4. The package is submitted once, after every confirmed member is implemented.
 
@@ -183,7 +183,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 ## Work orders
 
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
-- [ ] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
+- [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 
 ## Verification results
 
@@ -196,4 +196,13 @@ Task 01:
 - `go test ./internal/agent/runtime -run 'Resolver|Unclassified|Dynamic' -count=1`: passed.
 - `go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1`: passed (48 tests).
 - `go build ./...` and `go vet` on the three changed packages: passed.
-- Tasks 02 to 04 are not implemented.
+
+Task 02:
+
+- RED with only the sentinel added: `TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile` failed with "error = route actions require a dynamic profile, want non-dynamic profile rejection". `TestWSRouteActionReportsNonDynamicProfileAsValidation` failed with "expected VALIDATION_ERROR, actual INTERNAL_ERROR".
+- GREEN after the change: both passed.
+- `go test ./internal/backendapp -run 'RouteAction|DynamicRoute' -count=1`: passed (8 tests).
+- `go test ./internal/orchestrator/handlers -run 'RouteAction|Ws' -count=1`: passed (60 tests).
+- `go build ./...` and `go vet` on the changed packages: passed.
+
+Task 04 and the open post-start item are not implemented.
