@@ -113,6 +113,11 @@ var agentDeliveryRetentionIndexes = []struct {
 		query: agentDeliveryOwnedOrderedIndexQuery,
 	},
 	{
+		name: "idx_agent_delivery_effects_pending",
+		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending
+			ON agent_delivery_effects(effect_type, created_at, stream_id, sequence)`,
+	},
+	{
 		name: "idx_agent_delivery_terminal_lookup",
 		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_terminal_lookup
 			ON agent_delivery_effects(effect_type, submission_id, stream_id, sequence)`,

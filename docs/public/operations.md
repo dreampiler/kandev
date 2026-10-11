@@ -519,6 +519,7 @@ Contiguous retirement checkpoints reject older events without applying them agai
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
 
 Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
+An open recovery block pauses automatic event payload cleanup and prefix retirement for its session incarnation.
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
