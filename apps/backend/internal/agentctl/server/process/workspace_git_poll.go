@@ -60,6 +60,9 @@ func (wt *WorkspaceTracker) pollGitChanges(ctx context.Context) {
 	for {
 		_, gitPoll, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(gitPoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("gitPoll", gitPoll)
+		}
 
 		select {
 		case <-ctx.Done():

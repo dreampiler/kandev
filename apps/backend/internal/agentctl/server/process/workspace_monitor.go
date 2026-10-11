@@ -105,6 +105,9 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	for {
 		filePoll, _, _ := wt.pollIntervals(wt.GetPollMode())
 		timer.Reset(filePoll)
+		if wt.pollTimerArmed != nil {
+			wt.pollTimerArmed("monitor", filePoll)
+		}
 
 		select {
 		case <-ctx.Done():

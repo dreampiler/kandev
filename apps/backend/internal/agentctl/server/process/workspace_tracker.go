@@ -219,6 +219,9 @@ type WorkspaceTracker struct {
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
 	gitStatusBetweenQueries func(context.Context)
+	// pollTimerArmed is an optional test hook invoked each time a polling loop
+	// arms its timer, with the loop name and interval. It is nil in production.
+	pollTimerArmed func(loop string, interval time.Duration)
 
 	// Control
 	stopCh          chan struct{}

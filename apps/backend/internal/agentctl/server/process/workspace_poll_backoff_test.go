@@ -191,32 +191,59 @@ func TestSlowPollBackoffLeavesFastAndPausedIntervals(t *testing.T) {
 }
 
 // TestSlowPollRunningLoopsConsumeBackoffResetWake complements the direct wake
-// check above: with both loops running in slow mode and lengthened intervals,
-// a same-mode push is received by each loop, which re-arms from pollIntervals
-// at the base interval without running a scan.
+// check above: with both loops running in slow mode, each loop first re-arms
+// its timer at the lengthened interval, and a same-mode push then makes each
+// loop re-arm at the base interval without running a scan.
 func TestSlowPollRunningLoopsConsumeBackoffResetWake(t *testing.T) {
 	wt, _ := newSlowPollTracker(t)
+	armed := make(chan pollTimerArm, 16)
+	wt.pollTimerArmed = func(loop string, interval time.Duration) {
+		armed <- pollTimerArm{loop: loop, interval: interval}
+	}
 	wt.Start(context.Background())
 	<-wt.initialScanDone
-	completedBefore, _ := wt.MonitorTickStats()
+	waitForPollTimerArms(t, armed, defaultSlowPollInterval)
 
 	wt.slowIdleMonitorTicks.Store(6)
 	wt.slowIdleGitPollTicks.Store(6)
-	wt.SetPollMode(PollModeSlow)
+	wt.wakePollLoops()
+	waitForPollTimerArms(t, armed, slowPollInterval(6))
+	scansBefore, _ := wt.MonitorTickStats()
 
-	deadline := time.Now().Add(5 * time.Second)
-	for len(wt.monitorModeChanged) != 0 || len(wt.gitPollModeChanged) != 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("running loops did not receive the wake: monitor=%d gitPoll=%d pending",
-				len(wt.monitorModeChanged), len(wt.gitPollModeChanged))
+	wt.SetPollMode(PollModeSlow)
+	waitForPollTimerArms(t, armed, defaultSlowPollInterval)
+
+	if scansAfter, _ := wt.MonitorTickStats(); scansAfter != scansBefore {
+		t.Fatalf("slow wake ran %d monitor scans, want none", scansAfter-scansBefore)
+	}
+	// The repository is unchanged, so a Git poll scan would advance its idle
+	// counter from the reset value.
+	if monitorIdle, gitIdle := wt.slowIdleMonitorTicks.Load(), wt.slowIdleGitPollTicks.Load(); monitorIdle != 0 || gitIdle != 0 {
+		t.Fatalf("idle counters after the wake = %d/%d, want 0/0 (a scan ran)", monitorIdle, gitIdle)
+	}
+}
+
+type pollTimerArm struct {
+	loop     string
+	interval time.Duration
+}
+
+// waitForPollTimerArms waits until both polling loops have armed their timer
+// at want, ignoring earlier arms at other intervals.
+func waitForPollTimerArms(t *testing.T, armed <-chan pollTimerArm, want time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	pending := map[string]bool{"monitor": true, "gitPoll": true}
+	for len(pending) > 0 {
+		select {
+		case arm := <-armed:
+			if arm.interval == want {
+				delete(pending, arm.loop)
+			}
+		case <-deadline.C:
+			t.Fatalf("loops %v did not arm their timer at %v", pending, want)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if filePoll, gitPoll := slowIntervals(wt); filePoll != defaultSlowPollInterval || gitPoll != defaultSlowPollInterval {
-		t.Fatalf("re-armed intervals = %v/%v, want %v", filePoll, gitPoll, defaultSlowPollInterval)
-	}
-	if completedAfter, _ := wt.MonitorTickStats(); completedAfter != completedBefore {
-		t.Fatalf("slow wake ran %d monitor scans, want none", completedAfter-completedBefore)
 	}
 }
 

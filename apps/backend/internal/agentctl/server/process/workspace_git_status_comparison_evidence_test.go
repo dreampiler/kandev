@@ -144,6 +144,7 @@ func TestBatchedRefOIDsRejectsOutputThatDoesNotMapToObjectIDs(t *testing.T) {
 		ok     bool
 	}{
 		{name: "one object ID per ref", output: oid + "\n" + oid + "\r\n", count: 2, ok: true},
+		{name: "carriage return on every line", output: oid + "\r\n" + oid + "\r\n", count: 2, ok: true},
 		{name: "truncated", output: oid + "\n", count: 2},
 		{name: "extra line", output: oid + "\n" + oid + "\n" + oid + "\n", count: 2},
 		{name: "echoed non-object line", output: oid + "\norigin/main^{commit}\n", count: 2},

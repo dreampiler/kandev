@@ -104,3 +104,9 @@ Implemented on 2026-10-12 against `add376a2af`.
   (`expected fast mode to emit notification before pausing`) with the baseline
   polling files as well, so it is an existing Windows failure.
 - `go build ./...` and `go vet ./internal/agentctl/server/process/` pass.
+- Review follow-up: the running-loop test now observes each loop arming its
+  timer through the nil-in-production `pollTimerArmed` hook: both loops arm at
+  the lengthened interval, then re-arm at 30 seconds after a same-mode push,
+  with no monitor scan and both idle counters still zero. With the same-mode
+  wake disabled it fails (`did not arm their timer at 30s`); it passes three
+  times under `-race`.
