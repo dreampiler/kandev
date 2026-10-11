@@ -65,9 +65,10 @@ that Task 01 adds one line to `internal/db/sqlguard/exemptions.json`.
   is documented SQLite behavior. A permanent test that writes more than 64 MiB
   would be slow, so the permanent test checks the per-connection setting and a
   one-off local probe checks truncation.
-- On Windows, a directory listing can report a stale modification time for a
-  file that is still open. The six-hour window, not the newest-child rule, is
-  the protection for a live backup there.
+- The sweep stats each path instead of trusting directory-listing metadata,
+  but a file system can still delay the modification time of a file that is
+  open for writing. The six-hour window, not the newest-entry rule, is the
+  protection for a live backup in that case.
 
 ## Verification strategy
 

@@ -10,6 +10,21 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
+)
+
+const (
+	// bootStagingDirPrefix names the private directory createPreMigrationBackup
+	// reserves before VACUUM INTO writes the staged backup into it.
+	bootStagingDirPrefix = ".kandev-backup-"
+
+	// staleBootStagingAge is how long a boot staging directory must show no
+	// modification before it counts as crash debris. The backups directory is
+	// shared by every database file in the same directory, so this window is
+	// what protects another process's backup that is still being written.
+	staleBootStagingAge = 6 * time.Hour
 )
 
 // snapshotPath returns the absolute path for a new backup file.
@@ -75,6 +90,64 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 	}
 	installed = true
 	return info.Size(), nil
+}
+
+// SweepStaleBootStaging removes boot backup staging directories that a process
+// left behind when it exited between MkdirTemp and the deferred cleanup. Such a
+// directory otherwise keeps a whole database copy on disk.
+//
+// Liveness is the newest modification time of the directory and its direct
+// entries, because a directory's own time does not change while VACUUM INTO
+// grows a file inside it. Only names with the boot staging prefix are matched,
+// so published backups and other staging directories are never removed. A
+// failure is logged and never returned: reclaiming debris must not fail boot
+// or backup creation.
+func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), bootStagingDirPrefix) {
+			continue
+		}
+		path := filepath.Join(backupDir, e.Name())
+		newest, err := newestModTime(path)
+		if err == nil && time.Since(newest) < staleBootStagingAge {
+			continue
+		}
+		if err == nil {
+			err = os.RemoveAll(path)
+		}
+		if err != nil && log != nil {
+			log.Warn("persistence: failed to reclaim stale boot backup staging directory",
+				zap.String("path", path), zap.Error(err))
+		}
+	}
+}
+
+// newestModTime returns the latest modification time among dir and its direct
+// entries. It stats each path rather than trusting directory-listing metadata.
+func newestModTime(dir string) (time.Time, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	newest := info.ModTime()
+	children, err := os.ReadDir(dir)
+	if err != nil {
+		return time.Time{}, err
+	}
+	for _, child := range children {
+		childInfo, err := os.Lstat(filepath.Join(dir, child.Name()))
+		if err != nil {
+			return time.Time{}, err
+		}
+		if childInfo.ModTime().After(newest) {
+			newest = childInfo.ModTime()
+		}
+	}
+	return newest, nil
 }
 
 // PruneBackups is the exported alias of pruneBackups, intended for callers

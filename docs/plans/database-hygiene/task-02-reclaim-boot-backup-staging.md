@@ -1,7 +1,7 @@
 ---
 id: "02-reclaim-boot-backup-staging"
 title: "Reclaim abandoned boot backup staging directories"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -72,4 +72,20 @@ startup progress steps.
 
 ## Results
 
-Not implemented yet.
+Implemented on 2026-10-12, verified on Windows 11 with Go 1.26.
+
+- Red: on the base commit, `TestProvideSQLiteReclaimsBootStagingWithoutBackup`
+  failed with `.kandev-backup-111 survived`, and
+  `TestCreate_SweepsStaleBootStaging` failed with `abandoned boot staging not
+  swept`.
+- Green: both pass, together with `TestSweepStaleBootStagingUsesNewestEntry`
+  (an old directory with a recent staged file stays),
+  `TestSweepStaleBootStagingToleratesMissingDirectory`, and the existing
+  `TestCreate_SweepsStaleTmpSidecar` and `TestCreate_PreservesRecentTmpSidecar`.
+- `TestProvide_TakesSnapshotOnUpgrade` still creates the upgrade backup through
+  the prefix constant. On Windows it stops at its POSIX `0600` mode assertion
+  (`snapshot mode = 0666`), which this change does not touch.
+- `go vet ./internal/persistence/... ./internal/system/backups/...` passes.
+- Limits: debris younger than six hours stays, including debris from a crash
+  just before the restart; a later boot or backup creation reclaims it. The
+  warning path for a failed removal has no automated test.
