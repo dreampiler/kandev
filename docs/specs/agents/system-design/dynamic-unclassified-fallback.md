@@ -65,6 +65,7 @@ Eligible origins are:
 - `unknown_provider_error` from an authoritative terminal provider result, before any output or effects.
 - `agent_runtime_error` from a proven agent process-start or session-initialization failure, before prompt dispatch.
 - `agent_runtime_error` at `prompt_send` from an empty normal turn end, as defined in [Empty turn ends](#empty-turn-ends).
+- `agent_runtime_error` at `prompt_send` from a post-start failure before any result, as proposed in [Post-start no-result failures](#post-start-no-result-failures-contract-proposal).
 
 A generic task launch error, a missing phase, or an arbitrary wrapped `errors.New` is not proven agent startup failure.
 The startup boundary must distinguish agent process/session initialization from executor, repository, and task preparation.
@@ -117,7 +118,39 @@ The later successful completion or process exit for that same turn consumes the 
 A new turn start retires the record, and the identity check prevents a later turn from consuming a stale one.
 
 This origin does not cover a post-start runtime failure that arrives before any result without a complete diagnostic.
-Such failures still stop for manual recovery. Their identity model is an open item in the [empty turn package](../../../plans/upstream-no-result-dynamic-turn/plan.md).
+That case is the separate proposal below.
+
+## Post-start no-result failures (contract proposal)
+
+This section is a proposal. It is separable from the rest of the design and can be removed without affecting empty turn ends.
+
+A post-start failure can reach the failure route before any output or effect without a complete provider diagnostic.
+Examples are a dropped peer, an agent process exit, or a generic prompt failure.
+The classifier maps it to `agent_runtime_error` with rule `phase.poststart.unknown`, and the terminal provider origin rejects that code.
+A candidate that keeps failing this way is therefore never advanced.
+
+The `post_start_no_result` origin admits such a failure only when all of these hold:
+
+- the classified code is `agent_runtime_error` with rule `phase.poststart.unknown` at `prompt_send`;
+- the prompt attempt is current, dynamic, task-scoped, and has known no-output and no-effect evidence;
+- the step is known and does not veto, and the candidate policy is enabled.
+
+The origin waives `DiagnosticComplete` and the provider-ID requirement. No other origin changes.
+Its identity is computed from the sanitized message per producer shape:
+
+| Producer shape | Recognition | Identity text |
+| --- | --- | --- |
+| Dropped peer | Exact fixed message | The fixed message |
+| Agent process exit | Message starts with the fixed exit prefix and an exit code | The prefix with the exit code; the stderr suffix is dropped |
+| Generic prompt or turn failure | Any other message | Sanitized, whitespace-collapsed, first 256 bytes at a UTF-8 boundary |
+
+The fingerprint adds code, origin, phase, provider identity when present, and classifier rule.
+Only the fingerprint is persisted. A message that sanitizes to empty is not admitted.
+
+This deliberately relaxes the matching-identity rule below for this one origin.
+Two failures whose messages differ only after the bounded identity text count as the same failure.
+The generic row is the broadest part. It is the only shape that covers prompt failures without a fixed form, and it can be dropped on its own.
+The [decision amendment](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records why exact identity and manual recovery were not chosen.
 
 ## Matching identity
 
