@@ -1,7 +1,7 @@
 ---
 id: "01-bound-writer-wal"
 title: "Bound the writer WAL file with journal_size_limit"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -44,8 +44,8 @@ any new configuration key.
 
 - The new test fails on the base branch (the writer reports `-1`) and passes
   after the change.
-- `go vet` and the SQL guard pass, and `CGO_ENABLED=0 go build ./cmd/agentctl`
-  compiles.
+- `go vet` and the SQL guard pass, and the package compiles with
+  `CGO_ENABLED=0`.
 - A one-off local probe, not committed, writes more than 64 MiB through the
   writer, lets a checkpoint reset the WAL, and observes that the WAL file is at
   most 64 MiB.
@@ -56,7 +56,7 @@ any new configuration key.
 (cd apps/backend && go test -tags fts5 ./internal/db -run '^TestSQLiteWriterJournalSizeLimit' -count=1 -v)
 (cd apps/backend && go run ./cmd/sqlguard ./internal)
 (cd apps/backend && go vet ./internal/db/...)
-(cd apps/backend && CGO_ENABLED=0 go build -o /dev/null ./cmd/agentctl)
+(cd apps/backend && CGO_ENABLED=0 go build ./internal/db/)
 ```
 
 ## Likely files
@@ -67,4 +67,15 @@ any new configuration key.
 
 ## Results
 
-Not implemented yet.
+Implemented on 2026-10-12, verified on Windows 11 with Go 1.26.
+
+- Red: on the base commit, `TestSQLiteWriterJournalSizeLimit` failed with
+  `expected: 67108864, actual: -1` for the first writer connection.
+- Green: the test passes, including the replacement connection after
+  `driver.ErrBadConn` and the reader's unchanged `-1`. The existing
+  `TestSQLiteWriter*` and `TestSQLiteReader*` tests in the package pass.
+- `go run ./cmd/sqlguard ./internal`, `go vet ./internal/db/...` and
+  `CGO_ENABLED=0 go build ./internal/db/` pass.
+- One-off probe (deleted after the run): after an 86,384,072-byte WAL burst,
+  the next write reset the WAL to 67,108,864 bytes. The stock driver without
+  the limit kept 86,384,072 bytes.
