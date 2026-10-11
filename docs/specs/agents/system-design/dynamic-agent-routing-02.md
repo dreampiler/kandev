@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-08
+updated: 2026-10-12
 owners:
   - cfl
 ---
@@ -115,6 +115,9 @@ require the current exclusive probe lease.
   the earliest known recovery time and remediation actions.
 - If a route action carries a stale generation, Kandev does not change route
   state and returns the authoritative route snapshot.
+- If a route action targets a session whose selected profile is not dynamic,
+  the orchestrator returns a typed sentinel error and the WebSocket handler maps
+  it to a validation error with that reason. No route or session state changes.
 - A failure is fenced to the route generation and candidate that produced it.
   The route records a successor before the predecessor's process is replaced,
   and a deferred successor launch leaves the predecessor serving the session.

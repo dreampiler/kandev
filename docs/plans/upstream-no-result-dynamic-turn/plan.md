@@ -21,6 +21,7 @@ The agent system owns all of them because it owns candidate selection, route sta
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | planned |
+| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | planned |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
 
 ## Outcome coverage
@@ -100,6 +101,25 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 `TestEmptyTurnCompletionCountsUnclassifiedFailure` must fail on the base commit because no route call is made at completion.
 
+## Task 02: route actions on non-dynamic sessions
+
+### Evidence and cause
+
+- `loadDynamicRouteActionSession` (`apps/backend/internal/backendapp/dynamic_routing.go`) rejects a concrete-profile session with an untyped `errors.New`.
+- `wsRouteAction` (`orchestrator/handlers/handlers.go`) recognizes only `ErrRouteActionActiveTurn`, so the rejection becomes `ErrorCodeInternalError` with the generic text "route action failed" and a warning log.
+- The client cannot tell a wrong-session request from a server fault.
+
+`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.11` and the [route action failure rules](../../specs/agents/system-design/dynamic-agent-routing-02.md) define the contract.
+
+### Tests
+
+| AC suffix | Test file and test |
+| --- | --- |
+| 001.11 | `apps/backend/internal/backendapp/dynamic_routing_test.go`: `TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile` |
+| 001.11 | `apps/backend/internal/orchestrator/handlers/handlers_test.go`: `TestWSRouteActionReportsNonDynamicProfileAsValidation` |
+
+`TestWSRouteActionReportsNonDynamicProfileAsValidation` must fail on the base commit because the handler returns an internal error.
+
 ## Task 04: restart recovery portions (pending input)
 
 Two restart-recovery defects on the dynamic path are planned for this package: a recovered dynamic route that is never activated, and a recovery path that reports success when nothing was resumed.
@@ -115,6 +135,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 ## Work orders
 
 - [ ] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
+- [ ] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 
 ## Verification results
 
