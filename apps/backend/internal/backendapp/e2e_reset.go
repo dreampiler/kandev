@@ -39,11 +39,6 @@ const (
 	e2eTaskCleanupPollInterval = 25 * time.Millisecond
 )
 
-type e2eRetentionWorker interface {
-	Start(context.Context) error
-	Stop()
-}
-
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
 func registerE2EResetRoutes(
@@ -57,8 +52,6 @@ func registerE2EResetRoutes(
 	eventBus bus.EventBus,
 	agentRuntimeAvailability *agentruntime.RuntimeOwner,
 	lifecycleMgr agentruntime.SessionExecutionControl,
-	retentionWorker e2eRetentionWorker,
-	appCtx context.Context,
 	log *logger.Logger,
 ) {
 	mockMode := os.Getenv("KANDEV_MOCK_AGENT")
@@ -73,7 +66,7 @@ func registerE2EResetRoutes(
 	if os.Getenv("KANDEV_E2E_MOCK") == "true" && lifecycleMgr != nil {
 		api.POST("/agent-runtime/disconnect-session-stream", handleE2EDisconnectSessionAgentStream(lifecycleMgr))
 	}
-	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, retentionWorker, appCtx, log))
+	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, coordinatorSvc, log))
 	if githubSvc != nil {
 		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
 	}
@@ -266,13 +259,9 @@ func handleE2EReset(
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
 	coordinatorSvc *coordinator.Service,
-	retentionWorker e2eRetentionWorker,
-	appCtx context.Context,
 	log *logger.Logger,
 ) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		resumeRetention := pauseDeliveryRetentionForReset(appCtx, retentionWorker, log)
-		defer resumeRetention()
 		workspaceID := c.Param("workspaceId")
 
 		// Optional: comma-separated workflow IDs to keep (e.g., the seeded workflow).
@@ -525,25 +514,6 @@ func handleE2EReset(
 			"deleted_gitlab_review_watches": gitLabReset.ReviewWatches,
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
-	}
-}
-
-func pauseDeliveryRetentionForReset(
-	appCtx context.Context,
-	worker e2eRetentionWorker,
-	log *logger.Logger,
-) func() {
-	if worker == nil {
-		return func() {}
-	}
-	worker.Stop()
-	return func() {
-		if appCtx == nil || appCtx.Err() != nil {
-			return
-		}
-		if err := worker.Start(appCtx); err != nil && log != nil {
-			log.Warn("e2e reset: failed to resume durable delivery retention", zap.Error(err))
-		}
 	}
 }
 

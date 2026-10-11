@@ -121,8 +121,7 @@ func TestPrepareEngineTurnCompletion_BlocksAdvanceWhileBoundEntryPromptPending(t
 	session, err := repo.GetTaskSession(ctx, "w086-guard-session")
 	require.NoError(t, err)
 
-	_, advanced := svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn)
-	require.True(t, advanced,
+	require.True(t, svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn),
 		"sanity: a signaled gate with no pending entry prompt must still advance")
 
 	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
@@ -143,8 +142,7 @@ func TestPrepareEngineTurnCompletion_BlocksAdvanceWhileBoundEntryPromptPending(t
 	}
 	require.NoError(t, repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)))
 
-	_, advanced = svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn)
-	require.False(t, advanced,
+	require.False(t, svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn),
 		"a valid queued entry prompt for this step must block the signal-gated advance until the prompt is delivered")
 	sessionAfter, err := repo.GetTaskSession(ctx, "w086-guard-session")
 	require.NoError(t, err)

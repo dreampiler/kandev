@@ -112,18 +112,7 @@ func (r *Repository) CreateHarnessSessionGeneration(ctx context.Context, generat
 	if generation.CommittedAt.IsZero() {
 		generation.CommittedAt = generation.CreatedAt
 	}
-	tx, err := r.db.BeginTxx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), generation.SessionID); err != nil {
-		return err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO harness_session_generations
 		(session_id, incarnation_id, generation, predecessor_generation, native_session_id,
 		 agent_type, adapter_version, original_workspace, current_workspace,
@@ -133,10 +122,8 @@ func (r *Repository) CreateHarnessSessionGeneration(ctx context.Context, generat
 		generation.PredecessorGeneration, generation.NativeSessionID, generation.AgentType,
 		generation.AdapterVersion, generation.OriginalWorkspace, generation.CurrentWorkspace,
 		generation.NativeStateReference, generation.CreationReason, generation.CreatedAt,
-		generation.CommittedAt); err != nil {
-		return err
-	}
-	return tx.Commit()
+		generation.CommittedAt)
+	return err
 }
 
 func (r *Repository) GetCurrentHarnessSessionGeneration(ctx context.Context, sessionID, incarnationID string) (*models.HarnessSessionGeneration, error) {
@@ -172,9 +159,6 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), generation.SessionID); err != nil {
-		return false, err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{generation.SessionID}, nil); err != nil {
 		return false, err
 	}
 	var current int64
@@ -343,14 +327,6 @@ func (r *Repository) UpsertSessionRecoveryBlock(ctx context.Context, block *mode
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if block.ConsumerReference == "agent_delivery" {
-		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), block.SessionID); err != nil {
-			return err
-		}
-		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{block.SessionID}, []string{block.DeliveryStreamID}); err != nil {
-			return err
-		}
-	}
 	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, block.SessionID); err != nil {
 		return err
 	}
@@ -529,35 +505,24 @@ func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*m
 }
 
 func (r *Repository) ResolveSessionRecoveryBlock(ctx context.Context, id, action string, resolvedAt time.Time) (bool, error) {
+	block, err := r.GetSessionRecoveryBlock(ctx, id)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var sessionID, streamID, consumerReference string
-	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT session_id, delivery_stream_id, consumer_reference
-		FROM session_recovery_blocks WHERE id = ?`), id).Scan(&sessionID, &streamID, &consumerReference)
-	if err == sql.ErrNoRows {
-		return false, tx.Commit()
-	}
-	if err != nil {
-		return false, err
-	}
-	if consumerReference == "agent_delivery" {
-		if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
-			return false, err
-		}
-		if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, []string{streamID}); err != nil {
-			return false, err
-		}
-	}
-	if err := r.advanceRecoverySessionRevisionTx(ctx, tx, sessionID); err != nil {
+	if err = r.advanceRecoverySessionRevisionTx(ctx, tx, block.SessionID); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE session_recovery_blocks SET state = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
-		WHERE id = ? AND state = ?`), models.RecoveryBlockResolved, action, resolvedAt, resolvedAt, id, models.RecoveryBlockOpen)
+  UPDATE session_recovery_blocks SET state = ?, authorized_action = ?, updated_at = ?, resolved_at = ?
+  WHERE id = ? AND state = ?`), models.RecoveryBlockResolved, action, resolvedAt, resolvedAt, id, models.RecoveryBlockOpen)
 	if err != nil {
 		return false, err
 	}

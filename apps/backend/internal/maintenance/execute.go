@@ -11,24 +11,14 @@ import (
 // retention category during a --execute run. Row counts only - never IDs
 // or content.
 type ExecutionResult struct {
-	DeletedGitSnapshots             int
-	DeletedPlanRevisions            int
-	DeletedMessagePayloads          int
-	DeletedDeliveryEventPayloads    int
-	DeletedSettledDeliveryPrompts   int
-	RetiredDeliveryEventReceipts    int
-	PurgedRetiredDeliveryRows       int
-	DeliveryOrphanJobsScheduled     int
-	DeliveryRetirementJobsCompleted int
-	DeliveryBatches                 int
-	Partial                         bool
+	DeletedGitSnapshots    int
+	DeletedPlanRevisions   int
+	DeletedMessagePayloads int
 }
 
 // TotalDeleted sums every category's deleted row count.
 func (e ExecutionResult) TotalDeleted() int {
-	return e.DeletedGitSnapshots + e.DeletedPlanRevisions + e.DeletedMessagePayloads +
-		e.DeletedDeliveryEventPayloads + e.DeletedSettledDeliveryPrompts +
-		e.RetiredDeliveryEventReceipts + e.PurgedRetiredDeliveryRows
+	return e.DeletedGitSnapshots + e.DeletedPlanRevisions + e.DeletedMessagePayloads
 }
 
 // executeDeleteChunkSize bounds each IN clause below SQLite's default

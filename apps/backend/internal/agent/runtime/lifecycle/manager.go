@@ -544,7 +544,6 @@ func NewManager(
 	// Set session manager dependencies for full orchestration
 	sessionManager.SetDependencies(eventPublisher, mgr.streamManager, executionStore, historyManager)
 	sessionManager.SetPromptStarter(mgr.BeginPrompt)
-	sessionManager.persistPromptTurnBinding = mgr.persistExecutorRunningResult
 	sessionManager.SetInitialPromptFailureHandler(mgr.handleInitialPromptFailure)
 
 	mgr.pollAggregator = newWorkspacePollAggregator(mgr)

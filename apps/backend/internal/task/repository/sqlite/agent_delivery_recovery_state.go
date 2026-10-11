@@ -34,12 +34,6 @@ func (r *Repository) UpsertAgentDeliveryRecovery(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), recovery.SessionID); err != nil {
-		return false, err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{recovery.SessionID}, []string{recovery.StreamID}); err != nil {
-		return false, err
-	}
 	owner, valid, err := r.lockAgentDeliveryRecoveryOwnerTx(ctx, tx, recovery)
 	if err != nil || !valid {
 		return false, err
@@ -319,12 +313,6 @@ func (r *Repository) ResolveAgentDeliveryRecovery(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), recovery.SessionID); err != nil {
-		return false, err
-	}
-	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{recovery.SessionID}, []string{recovery.StreamID}); err != nil {
-		return false, err
-	}
 	owner, valid, err := r.lockAgentDeliveryRecoveryOwnerTx(ctx, tx, recovery)
 	if err != nil || !valid {
 		return false, err

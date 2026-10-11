@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"strconv"
 	"testing"
 	"time"
 
@@ -20,7 +19,7 @@ import (
 func TestDeliveryTerminalSettlesMatchingBlock(t *testing.T) {
 	ctx := context.Background()
 	service, repo := newServiceWithRealRepo(t)
-	seedSession(t, repo, "task-delivery-settlement", "session-delivery-settlement", "", "session-delivery-settlement")
+	seedSession(t, repo, "task-delivery-settlement", "session-delivery-settlement", "step-1")
 	queue, queueDB := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
 	t.Cleanup(func() { _ = queueDB.Close() })
 	service.messageQueue = queue
@@ -96,7 +95,6 @@ func TestDeliveryTerminalSettlesMatchingBlock(t *testing.T) {
 	if _, err := repo.ProjectAgentDeliveryEvent(ctx, event, nil); err != nil {
 		t.Fatalf("project SQL inbox event: %v", err)
 	}
-	recordSettlementWorkflowOutcome(t, repo, ctx, *event)
 
 	if err := service.reconcileAgentDeliverySettlements(ctx, claim.SessionID); err != nil {
 		t.Fatalf("reconcile delivery terminal settlement: %v", err)
@@ -128,7 +126,7 @@ func TestDeliveryTerminalSettlesMatchingBlock(t *testing.T) {
 func TestDeliverySettlementRepairsAfterQueueClaimCleanup(t *testing.T) {
 	ctx := context.Background()
 	service, repo := newServiceWithRealRepo(t)
-	seedSession(t, repo, "task-delivery-claim-crash", "session-delivery-claim-crash", "", "session-delivery-claim-crash")
+	seedSession(t, repo, "task-delivery-claim-crash", "session-delivery-claim-crash", "step-1")
 	queue, queueDB := newWorkflowTransferQueue(t, t.TempDir()+"/queue.db")
 	t.Cleanup(func() { _ = queueDB.Close() })
 	service.messageQueue = queue
@@ -163,8 +161,6 @@ func TestDeliverySettlementRepairsAfterQueueClaimCleanup(t *testing.T) {
 	event := persistedTerminalEvent(claim.SessionID, claim.SessionID, 1, submissionID, dispatchAttemptID, "complete")
 	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
 
-	recordSettlementWorkflowOutcome(t, repo, ctx, event)
-
 	if settled, err := repo.SettleAgentDeliveryTerminal(ctx, event.StreamID, event.Sequence, models.DeliverySubmissionCompleted, time.Now().UTC()); err != nil || !settled {
 		t.Fatalf("settle SQL outcome before simulated crash = %v, %v", settled, err)
 	}
@@ -188,7 +184,7 @@ func TestDeliverySettlementRepairsAfterQueueClaimCleanup(t *testing.T) {
 func TestDeliverySettlementRetriesWhenQueueClaimChangesDuringAcknowledgement(t *testing.T) {
 	ctx := context.Background()
 	service, repo := newServiceWithRealRepo(t)
-	seedSession(t, repo, "task-delivery-claim-conflict", "session-delivery-claim-conflict", "", "session-delivery-claim-conflict")
+	seedSession(t, repo, "task-delivery-claim-conflict", "session-delivery-claim-conflict", "step-1")
 	queueDBRaw, err := sql.Open("sqlite3", t.TempDir()+"/queue.db")
 	if err != nil {
 		t.Fatal(err)
@@ -259,8 +255,6 @@ func TestDeliverySettlementRetriesWhenQueueClaimChangesDuringAcknowledgement(t *
 	}
 	event := persistedTerminalEvent(claim.SessionID, claim.SessionID, 1, submissionID, dispatchAttemptID, "complete")
 	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
-
-	recordSettlementWorkflowOutcome(t, repo, ctx, event)
 
 	if err := service.reconcileAgentDeliverySettlements(ctx, claim.SessionID); !errors.Is(err, messagequeue.ErrQueueDispatchClaimChanged) {
 		t.Fatalf("reconcile after changed queue claim = %v, want claim conflict", err)
@@ -468,31 +462,5 @@ func projectOrchestratorDeliveryEvent(
 	}
 	if _, err := repo.ProjectAgentDeliveryEvent(ctx, &event, nil); err != nil {
 		t.Fatalf("project terminal delivery event: %v", err)
-	}
-}
-
-func recordSettlementWorkflowOutcome(t *testing.T, repo *tasksqlite.Repository, ctx context.Context, event models.AgentDeliveryEvent) {
-	t.Helper()
-	terminal, err := repo.GetAgentDeliveryEffect(ctx, "agent_delivery.terminal:"+event.StreamID+":"+strconv.FormatInt(event.Sequence, 10))
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, err := repo.GetTaskSession(ctx, event.SessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err := repo.GetTask(ctx, session.TaskID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	outcome := *terminal
-	now := time.Now().UTC()
-	outcome.EffectKey = "workflow.on_turn_complete:" + terminal.TurnID
-	outcome.EffectType = "workflow.on_turn_complete"
-	outcome.State, outcome.Outcome = models.DeliveryEffectCompleted, "not_required"
-	outcome.TaskID, outcome.WorkflowID, outcome.WorkflowStepID = task.ID, task.WorkflowID, task.WorkflowStepID
-	outcome.CompletedAt = &now
-	if recorded, err := repo.RecordAgentDeliveryWorkflowOutcome(ctx, task.ID, &outcome); err != nil || !recorded {
-		t.Fatalf("record exact workflow outcome before full queue settlement: %t %v", recorded, err)
 	}
 }

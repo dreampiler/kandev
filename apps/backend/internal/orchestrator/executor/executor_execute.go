@@ -2394,7 +2394,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && req.BeforeAgentStart != nil {
-		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
+		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
 		}
@@ -3206,7 +3206,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		return nil, err
 	}
 	if request.BeforeAgentStart != nil {
-		if err := request.BeforeAgentStart(ctx, executionID, prompt); err != nil {
+		if err := request.BeforeAgentStart(ctx, executionID); err != nil {
 			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
 		}
 	}
