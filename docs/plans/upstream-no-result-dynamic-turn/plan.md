@@ -22,7 +22,7 @@ The agent system owns all of them because it owns candidate selection and route 
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
 | [Task 04](task-04-restart-recovery-route-activation.md) | A resumed route is never activated, and a blocked explicit recovery reports success | none | done |
-| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: fixed-shape post-start failures before any result are never counted | none | proposed, not implemented |
+| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: fixed-shape post-start failures before any result are never counted | none | candidate implemented, proposal not accepted |
 
 Staging:
 
@@ -92,7 +92,7 @@ The `error` events come from these producers:
 
 | Producer | Message shape | Diagnostic |
 | --- | --- | --- |
-| `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Fixed text: peer disconnected before response | None |
+| `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Fixed text: peer disconnected before response. Classified as `agent_transport_lost`, so it does not reach the open item | None |
 | `agentctl/server/adapter/transport/acp/adapter_prompt.go:256` | Retained ACP application error | Structured provider error |
 | `agentctl/server/adapter/transport/acp/adapter_prompt.go:310` | Cursor retriable provider error | Structured, already classified |
 | `agentctl/server/adapter/transport/acp/adapter_prompt.go:336` | Codex model capacity | Structured, already classified |
@@ -206,7 +206,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 - [x] [Task 04: Activate resumed dynamic routes and fail blocked explicit recoveries](task-04-restart-recovery-route-activation.md)
-- [ ] [Task 05: Contract proposal: count fixed-shape post-start no-result failures](task-05-post-start-no-result-proposal.md)
+- [x] [Task 05: Contract proposal: count fixed-shape post-start no-result failures](task-05-post-start-no-result-proposal.md) (candidate)
 
 ## Verification results
 
@@ -235,4 +235,14 @@ Task 04:
 - `go test ./internal/orchestrator -run 'Resume|Recover|DynamicRoute|ProcessStart|SessionOpen|Dynamic|LaunchSession' -count=1`: passed (414 tests).
 - `go build ./...` and `go vet ./internal/orchestrator`: passed.
 
-The open post-start item is not implemented in this commit range.
+Task 05 (candidate, proposal not accepted):
+
+- RED before the change: `TestPostStartProcessExitCountsUnclassifiedFailure` failed with "route after two code-1 exits = candidate-a/1, want candidate-b/2".
+- GREEN after the change: it passed, so two process exits with code 1 and different stderr advanced the candidate.
+- `TestPostStartProcessExitDifferentCodesDoNotMatch`, `TestPostStartGenericFailureStaysManual`, and `TestPostStartProcessExitAfterOutputIsNotCounted` pass.
+- `TestPostStartProcessExitIdentity` records the collision: the same exit code with different stderr gives one fingerprint.
+- `TestOtherOriginsKeepCompleteDiagnosticRule` and the existing `TestUnclassifiedFingerprintRequiresExactCompleteDiagnostic` pass.
+- `go test ./internal/agent/runtime/dynamic -count=1`: passed.
+- `go test ./internal/orchestrator -run 'PostStart|EmptyTurn|Unclassified|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1`: passed (54 tests).
+- `go test ./internal/agent/runtime/routingerr -count=1`: only `TestRemediateNpxCache_RemovesHashDirAndPreservesParent` failed. It fails the same way on the base commit on Windows (home path outside the npx cache root), so it is an existing failure.
+- `go build ./...` and `go vet` on the changed packages: passed.
