@@ -687,6 +687,11 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 		session.TaskEnvironmentID = envID
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
+	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusFailed:
+		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, envID, session.ID); err != nil {
+			return err
+		}
+		session.TaskEnvironmentID = envID
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
@@ -845,6 +850,11 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		}
 		if outcome != materializationClaimTakenOver {
 			return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+		}
+		session.TaskEnvironmentID = environmentID
+	case models.TaskEnvironmentStatusFailed:
+		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, environmentID, session.ID); err != nil {
+			return err
 		}
 		session.TaskEnvironmentID = environmentID
 	default:

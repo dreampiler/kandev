@@ -318,7 +318,11 @@ type mockRepository struct {
 	taskEnvironmentRepos map[string][]*models.TaskEnvironmentRepo // env_id → rows
 	// failMaterializationCalls records sessions whose claim release was requested.
 	failMaterializationCalls []string
-	plans                    map[string]*models.TaskPlan // task_id → plan
+	// reelectFailedCalls records environments whose re-election was requested;
+	// reelectFailedFunc, when set, replaces the default re-election outcome.
+	reelectFailedCalls []string
+	reelectFailedFunc  func(ctx context.Context, environmentID, sessionID string) (bool, error)
+	plans              map[string]*models.TaskPlan // task_id → plan
 
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
@@ -1528,6 +1532,21 @@ func (m *mockRepository) FailTaskEnvironmentMaterialization(_ context.Context, s
 		}
 	}
 	return false, nil
+}
+func (m *mockRepository) ReelectFailedTaskEnvironmentMaterialization(ctx context.Context, environmentID, sessionID string) (bool, error) {
+	m.reelectFailedCalls = append(m.reelectFailedCalls, environmentID)
+	if m.reelectFailedFunc != nil {
+		return m.reelectFailedFunc(ctx, environmentID, sessionID)
+	}
+	env := m.taskEnvironments[environmentID]
+	if env == nil || env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" ||
+		env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" ||
+		len(env.Repos) > 0 || len(m.taskEnvironmentRepos[environmentID]) > 0 {
+		return false, nil
+	}
+	env.Status = models.TaskEnvironmentStatusCreating
+	env.MaterializationSessionID = sessionID
+	return true, nil
 }
 func (m *mockRepository) SetTaskEnvironmentTaskDirNameIfEmpty(_ context.Context, environmentID, taskDirName string) (bool, error) {
 	m.mu.Lock()

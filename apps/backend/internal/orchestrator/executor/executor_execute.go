@@ -790,6 +790,70 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	}
 }
 
+// reelectFailedTaskEnvironmentForLaunch hands the task's own failed environment
+// to the launching session when it never created anything physical. A launch
+// that loses the re-election waits for the winner or adopts its published
+// workspace. An inherited environment, or one with workspace resources, keeps
+// failing closed.
+func (e *Executor) reelectFailedTaskEnvironmentForLaunch(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	env *models.TaskEnvironment,
+) (*models.TaskEnvironment, error) {
+	notAttachable := fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	reelector, ok := e.repo.(failedTaskEnvironmentReelector)
+	if !ok || env.TaskID != task.ID {
+		return nil, notAttachable
+	}
+	if taskEnvironmentHasWorkspaceResources(env) {
+		return nil, models.ErrTaskEnvironmentResetRequired
+	}
+	reelected, err := reelector.ReelectFailedTaskEnvironmentMaterialization(ctx, env.ID, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("re-elect failed task environment: %w", err)
+	}
+	fresh, err := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil || fresh == nil {
+		return nil, notAttachable
+	}
+	if reelected {
+		e.logger.Info("re-elected failed task environment for a fresh materialization",
+			zap.String("task_id", task.ID),
+			zap.String("task_environment_id", env.ID),
+			zap.String("session_id", session.ID))
+		return fresh, nil
+	}
+	switch fresh.Status {
+	case models.TaskEnvironmentStatusCreating:
+		if fresh.MaterializationSessionID == session.ID {
+			return fresh, nil
+		}
+		return e.waitForTaskEnvironmentReady(ctx, fresh.ID)
+	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
+		return fresh, nil
+	case models.TaskEnvironmentStatusFailed:
+		if taskEnvironmentHasWorkspaceResources(fresh) {
+			return nil, models.ErrTaskEnvironmentResetRequired
+		}
+	}
+	return nil, notAttachable
+}
+
+// taskEnvironmentHasWorkspaceResources reports physical workspace evidence on
+// an environment: a workspace path, container, sandbox, or live repository row.
+func taskEnvironmentHasWorkspaceResources(env *models.TaskEnvironment) bool {
+	if env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" {
+		return true
+	}
+	for _, repo := range env.Repos {
+		if repo != nil && repo.DeletedAt == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ReleaseTaskEnvironmentMaterialization stores failed for the creating task
 // environment that sessionID still owns, so a launch that gives up before the
 // workspace is ready does not leave its claim behind. Environments owned by
@@ -2000,7 +2064,10 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		existingEnv = readyEnv
 	}
 	if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusFailed {
-		return nil, fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+		existingEnv, err = e.reelectFailedTaskEnvironmentForLaunch(ctx, task, session, existingEnv)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
