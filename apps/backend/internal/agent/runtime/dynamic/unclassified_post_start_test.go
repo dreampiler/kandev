@@ -3,6 +3,7 @@ package dynamic
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
@@ -62,17 +63,54 @@ func TestPostStartProcessExitIdentity(t *testing.T) {
 	if err != nil || otherCode == first {
 		t.Fatalf("different exit code fingerprint = %q, %v; must differ", otherCode, err)
 	}
-	for name, message := range map[string]string{
-		"generic failure":   "provider response header timeout after 30s",
-		"embedded prefix":   "wrapped: Agent process exited with code 1",
-		"transport literal": "peer disconnected before response",
-		"empty":             "",
+	wrapped, err := fingerprint("prompt-4", "wrapped: Agent process exited with code 1")
+	if err != nil || wrapped == first {
+		t.Fatalf("embedded exit prefix fingerprint = %q, %v; must use the generic identity", wrapped, err)
+	}
+}
+
+func TestPostStartGenericMessagesReachTheOrigin(t *testing.T) {
+	for _, message := range []string{
+		"provider response header timeout: " + strings.Repeat("upstream gateway did not answer ", 10) + " request one",
+		"runtime execution error in tool sandbox",
 	} {
-		t.Run(name, func(t *testing.T) {
-			if _, err := fingerprint("prompt-4", message); err == nil {
-				t.Fatalf("%s produced a post-start identity", name)
-			}
-		})
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: message})
+		if classified.Code != routingerr.CodeAgentRuntime || classified.ClassifierRule != routingerr.PostStartUnknownRule {
+			t.Fatalf("message %.40q classified as %s/%s, want %s/%s", message,
+				classified.Code, classified.ClassifierRule, routingerr.CodeAgentRuntime, routingerr.PostStartUnknownRule)
+		}
+	}
+}
+
+func TestPostStartGenericIdentity(t *testing.T) {
+	prefix := "provider response header timeout: " + strings.Repeat("upstream gateway did not answer ", 10)
+	first, ok := postStartIdentity(prefix + " request one")
+	if !ok || len(first) != postStartGenericIdentityBytes {
+		t.Fatalf("generic identity = %q (%d bytes), %v; want a 256-byte prefix", first, len(first), ok)
+	}
+	// The tail beyond 256 bytes is dropped on purpose: different full
+	// diagnostics with one prefix share an identity.
+	if second, _ := postStartIdentity(prefix + " request two"); second != first {
+		t.Fatalf("same 256-byte prefix gave identity %q, want %q", second, first)
+	}
+	if other, _ := postStartIdentity("runtime execution error in tool sandbox"); other == first {
+		t.Fatal("a different generic failure shared the identity")
+	}
+	if spaced, _ := postStartIdentity("  provider\tfailed\n now "); spaced != "provider failed now" {
+		t.Fatalf("whitespace-collapsed identity = %q", spaced)
+	}
+	secret, _ := postStartIdentity("request failed: Authorization: Bearer abcdefghijklmnopqrstuvwxyz1234567890")
+	if strings.Contains(secret, "abcdefghijklmnopqrstuvwxyz1234567890") {
+		t.Fatalf("identity kept a credential: %q", secret)
+	}
+	multibyte, _ := postStartIdentity(strings.Repeat("é", 200))
+	if !utf8.ValidString(multibyte) || len(multibyte) > postStartGenericIdentityBytes {
+		t.Fatalf("multibyte identity is not a valid bounded prefix: %d bytes", len(multibyte))
+	}
+	for name, message := range map[string]string{"empty": "", "whitespace": " \t\n "} {
+		if _, ok := postStartIdentity(message); ok {
+			t.Fatalf("%s message produced a post-start identity", name)
+		}
 	}
 }
 
