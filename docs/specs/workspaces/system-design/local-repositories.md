@@ -2,7 +2,7 @@
 status: current
 system: workspaces
 created: 2026-08-27
-updated: 2026-10-12
+updated: 2026-10-06
 owners:
   - kandev
 requirements:
@@ -390,15 +390,10 @@ The target modes are:
 | State | File monitor | Git status |
 | --- | --- | --- |
 | Focused client | 2 seconds | 3 seconds |
-| Unfocused operation in flight | 30 seconds, idle backoff | 30 seconds, idle backoff |
+| Unfocused operation in flight | 30 seconds | 30 seconds |
 | Turn completes without a focused client | One final scan | One final scan |
 | No focused client and no operation in flight | Paused | Paused |
 | No mode push during the 60-second startup grace | One final scan, then paused | One final scan, then paused |
-
-Each slow loop counts consecutive completed scans that observed no change. Its
-waits after a change are 30, 30, 30, 60, 120, 240, then 300 seconds. A changed
-scan resets that loop; any mode push resets both loops and re-arms a lengthened
-timer at 30 seconds. Failed and skipped scans do not count.
 
 The lifecycle manager uses the activity lease as the operation signal. The
 `releaseActivity(executionActivityKey(...))` seam already identifies turn
