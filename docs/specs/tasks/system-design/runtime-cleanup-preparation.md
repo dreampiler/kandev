@@ -27,7 +27,9 @@ An absent checkout requires an exact local branch inspection in the parent
 repository. A surviving branch supplies its commit identity for later audits.
 A directory without checkout-local `.git` metadata counts as an absent
 checkout: Git would otherwise discover an enclosing repository and report its
-HEAD as this worktree's identity.
+HEAD as this worktree's identity. The HEAD inspection pins Git to that
+`.git`, so metadata removed after the presence check fails the inspection
+instead of reaching an enclosing repository.
 
 Only a successful inspection that finds no exact branch permits omission of
 that worktree's commit identity. Git exit 128, diagnostic text, cancellation,

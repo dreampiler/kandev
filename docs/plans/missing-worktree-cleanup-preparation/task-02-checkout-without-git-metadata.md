@@ -31,6 +31,9 @@ inspection from Task 01 applies.
   repository before the change.
 - Require checkout-local `.git` before reading HEAD, both before inspection and
   when the inspection fails.
+- Pin the HEAD inspection to the checkout's own `.git` (`GIT_DIR`), so `.git`
+  removed after the presence check cannot let Git reach an enclosing
+  repository.
 - Record the rule in the runtime cleanup preparation design.
 
 ## Out of scope
@@ -48,7 +51,7 @@ Branch inspection itself, cleanup audits, and other worktree states.
 From the repository root:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/worktree -run 'TestCaptureCleanupHeadOIDs' -count=1)
+(cd apps/backend && go test -trimpath ./internal/worktree -run 'TestCaptureCleanupHeadOIDs|TestRunCheckoutLocalGitInspect' -count=1)
 (cd apps/backend && go vet -trimpath ./internal/worktree)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
@@ -86,3 +89,8 @@ capture closed through the existing inspection-error classification.
 - GREEN: the new test passes; `TestCaptureCleanupHeadOIDs_PathRemovedDuringInspection`
   uses a shell-script fake `git` that deletes its working directory and fails on
   Windows with and without this change.
+- Review follow-up: without the `GIT_DIR` pin,
+  `TestRunCheckoutLocalGitInspect_DoesNotDiscoverEnclosingRepository` returned
+  the enclosing repository's HEAD for a directory without `.git`; with it the
+  inspection fails, and a linked worktree whose `.git` is a file still reports
+  its own HEAD.

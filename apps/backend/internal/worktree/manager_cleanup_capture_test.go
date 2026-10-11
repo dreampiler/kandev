@@ -476,3 +476,33 @@ func TestCaptureCleanupHeadOIDs_CheckoutWithoutGitMetadataUsesBranch(t *testing.
 		t.Fatalf("identity = %q, want the branch OID %q (enclosing repository HEAD is %q)", got["orphaned"], mainOID, enclosingOID)
 	}
 }
+
+// The presence check cannot stop an external actor from removing .git before
+// Git starts. The HEAD inspection itself must then fail rather than discover
+// the enclosing repository, so the caller falls back to the branch identity.
+func TestRunCheckoutLocalGitInspect_DoesNotDiscoverEnclosingRepository(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	mgr := newCaptureTestManager(t)
+
+	linked := filepath.Join(t.TempDir(), "linked")
+	runGit(t, repoPath, "worktree", "add", linked, "feature/pr-branch")
+	wantOID := strings.TrimSpace(runGit(t, linked, "rev-parse", "HEAD"))
+	output, err := mgr.runCheckoutLocalGitInspect(context.Background(), linked, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		t.Fatalf("linked worktree inspection failed: %v (%s)", err, output)
+	}
+	if got := strings.TrimSpace(output); got != wantOID {
+		t.Fatalf("linked worktree HEAD = %q, want %q", got, wantOID)
+	}
+
+	enclosing := initGitRepoForWorktreeTest(t)
+	enclosingOID := strings.TrimSpace(runGit(t, enclosing, "rev-parse", "HEAD"))
+	checkout := filepath.Join(enclosing, "metadata-removed")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output, err = mgr.runCheckoutLocalGitInspect(context.Background(), checkout, "rev-parse", "--verify", "HEAD^{commit}")
+	if err == nil {
+		t.Fatalf("inspection without checkout .git succeeded with %q (enclosing HEAD %q), want an error", strings.TrimSpace(output), enclosingOID)
+	}
+}
