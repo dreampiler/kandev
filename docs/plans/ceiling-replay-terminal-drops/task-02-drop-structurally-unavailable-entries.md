@@ -58,7 +58,7 @@ cd apps/backend && go test ./internal/orchestrator/ -run 'CeilingReplay|CeilingE
 - `apps/backend/internal/orchestrator/ceiling_replay.go`
 - `apps/backend/internal/orchestrator/workflow_session_target.go`
 - `apps/backend/internal/orchestrator/task_operations.go` (call-site signature)
-- `apps/backend/internal/orchestrator/ceiling_replay_test.go`
+- `apps/backend/internal/orchestrator/ceiling_entry_terminal_test.go`
 
 ## Results
 
