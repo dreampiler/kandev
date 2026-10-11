@@ -158,8 +158,8 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         retention = "github.com/kandev/kandev/internal/task/repository/sqlite"
         for packages, expected in (
             (["github.com/kandev/kandev/internal/orchestrator"], "10m"),
-            ([retention], "90m"),
-            ([retention, "github.com/kandev/kandev/internal/db"], "90m"),
+            ([retention], "120m"),
+            ([retention, "github.com/kandev/kandev/internal/db"], "120m"),
             ([retention + "/other"], "10m"),
         ):
             with self.subTest(packages=packages):

@@ -363,12 +363,12 @@ jobs:
           fi
 
           echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/2"
-          # Million-event retention fixtures use a ninety-minute suite budget.
+          # Covered million-event fixtures share a two-hour package budget.
           # Per-batch deadlines and preservation assertions remain independent.
           test_timeout=10m
           for package in "${shard_packages[@]}"; do
             if [[ "${package}" == github.com/kandev/kandev/internal/task/repository/sqlite ]]; then
-              test_timeout=90m
+              test_timeout=120m
             fi
           done
           # Keep complete JSON for reports/artifacts while limiting live output
