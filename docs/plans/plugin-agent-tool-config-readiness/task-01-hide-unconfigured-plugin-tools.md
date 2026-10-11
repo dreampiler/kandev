@@ -1,7 +1,7 @@
 ---
 id: "01-hide-unconfigured-plugin-tools"
 title: "Hide tools of plugins with unset required config"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

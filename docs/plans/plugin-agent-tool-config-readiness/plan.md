@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: in_progress
+status: done
 requirements:
   - REQ-PLUGINS-AGENT-TOOLS-001
 system_design:
