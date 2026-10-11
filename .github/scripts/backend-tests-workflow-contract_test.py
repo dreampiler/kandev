@@ -2,6 +2,8 @@
 """Contract tests for persistence gates and bounded backend test summaries."""
 
 import re
+import shlex
+import subprocess
 from pathlib import Path
 import unittest
 
@@ -110,10 +112,29 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("if: matrix.suite == 'native'", step)
         self.assertIn("TestRuntimeObservationRunsWindowsCommandShimWithSpaces", step)
 
-    def test_linux_sharded_tests_use_go_default_package_timeout(self) -> None:
+    def test_linux_shards_allow_scale_budget_only_with_retention_package(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
         self.assertIn("go test \\", test_step)
-        self.assertNotIn("-timeout", test_step)
+        self.assertIn('-timeout="${test_timeout}"', test_step)
+        selection = test_step.partition("          test_timeout=")[2].partition(
+            "          # Keep complete JSON"
+        )[0]
+        self.assertTrue(selection)
+        selection = "test_timeout=" + selection
+        retention = "github.com/kandev/kandev/internal/task/repository/sqlite"
+        for packages, expected in (
+            (["github.com/kandev/kandev/internal/orchestrator"], "10m"),
+            ([retention], "90m"),
+            ([retention, "github.com/kandev/kandev/internal/db"], "90m"),
+            ([retention + "/other"], "10m"),
+        ):
+            with self.subTest(packages=packages):
+                script = "shard_packages=(" + " ".join(map(shlex.quote, packages)) + ")\n"
+                script += selection + '\nprintf "%s" "$test_timeout"\n'
+                result = subprocess.run(
+                    ["bash", "-euc", script], check=True, capture_output=True, text=True
+                )
+                self.assertEqual(result.stdout, expected)
 
     def test_base_image_mirrors_postgres_18_at_the_same_digest(self) -> None:
         self.assertIn("POSTGRES_18_DIGEST: " + POSTGRES_18_DIGEST, self.base_image_workflow)
