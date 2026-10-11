@@ -341,6 +341,12 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	}
 	inserted, err := repository.ReceiveAgentDeliveryEvent(ctx, deliveryEvent, 0)
 	if err != nil {
+		// A sequence at or below the retired prefix was already projected and
+		// acknowledged before its retained payload was removed. Treat the replay
+		// as already handled: never re-insert or re-project it.
+		if errors.Is(err, repoerrors.ErrAgentDeliveryReplayExpired) {
+			return false, nil
+		}
 		return false, err
 	}
 	if inserted {

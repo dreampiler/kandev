@@ -62,6 +62,7 @@ func (r *Repository) initAgentDeliverySchema() error {
 			harness_generation BIGINT NOT NULL,
 			received_sequence BIGINT NOT NULL DEFAULT 0,
 			projected_sequence BIGINT NOT NULL DEFAULT 0,
+			retired_sequence BIGINT NOT NULL DEFAULT 0,
 			remote_high_water BIGINT NOT NULL DEFAULT 0,
 			updated_at TIMESTAMP NOT NULL
 		);
@@ -81,6 +82,8 @@ func (r *Repository) initAgentDeliverySchema() error {
 			turn_id TEXT NOT NULL DEFAULT '',
 			outcome TEXT NOT NULL DEFAULT ''
 		);
+		CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending
+			ON agent_delivery_effects(effect_type, created_at, stream_id, sequence);
 	`, blob, blob))
 	return err
 }
@@ -223,11 +226,20 @@ func (r *Repository) ReceiveAgentDeliveryEvent(ctx context.Context, event *model
 }
 
 func (r *Repository) receiveAgentDeliveryEventTx(ctx context.Context, tx *sqlx.Tx, event *models.AgentDeliveryEvent, remoteHighWater int64) (int64, error) {
-	inserted, err := r.insertAgentDeliveryEventTx(ctx, tx, event)
+	cursor, err := r.loadOrCreateAgentDeliveryCursorTx(ctx, tx, event)
 	if err != nil {
 		return 0, err
 	}
-	cursor, err := r.loadOrCreateAgentDeliveryCursorTx(ctx, tx, event)
+	// A sequence at or below the retired prefix had its retained evidence
+	// removed. It is expired, never new work: do not re-insert or re-project.
+	retired, err := retiredSequenceTx(ctx, tx, r.db.Rebind, event.StreamID)
+	if err != nil {
+		return 0, err
+	}
+	if event.Sequence <= retired {
+		return 0, repoerrors.ErrAgentDeliveryReplayExpired
+	}
+	inserted, err := r.insertAgentDeliveryEventTx(ctx, tx, event)
 	if err != nil {
 		return 0, err
 	}
@@ -328,6 +340,21 @@ func advanceReceivedCursorTx(ctx context.Context, tx *sqlx.Tx, rebind func(strin
 	}
 }
 
+// retiredSequenceTx reads the highest contiguous retired sequence for a stream.
+// A missing cursor row means nothing has been retired yet (zero).
+func retiredSequenceTx(ctx context.Context, tx *sqlx.Tx, rebind func(string) string, streamID string) (int64, error) {
+	var retired int64
+	err := tx.QueryRowxContext(ctx, rebind(`
+		SELECT retired_sequence FROM agent_delivery_cursors WHERE stream_id = ?`), streamID).Scan(&retired)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return retired, nil
+}
+
 func (r *Repository) GetAgentDeliveryCursor(ctx context.Context, streamID string) (*models.AgentDeliveryCursor, error) {
 	row := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT stream_id, session_id, incarnation_id, harness_generation,
@@ -368,6 +395,13 @@ func (r *Repository) ProjectAgentDeliveryEvent(ctx context.Context, event *model
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	retired, err := retiredSequenceTx(ctx, tx, r.db.Rebind, event.StreamID)
+	if err != nil {
+		return false, err
+	}
+	if event.Sequence <= retired {
+		return false, repoerrors.ErrAgentDeliveryReplayExpired
+	}
 	stored, projectedAt, err := r.loadAgentDeliveryEventTx(ctx, tx, event.StreamID, event.Sequence)
 	if err != nil {
 		return false, err

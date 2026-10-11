@@ -96,6 +96,8 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"agent_delivery_effects.submission_id", `ALTER TABLE agent_delivery_effects ADD COLUMN submission_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.turn_id", `ALTER TABLE agent_delivery_effects ADD COLUMN turn_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.outcome", `ALTER TABLE agent_delivery_effects ADD COLUMN outcome TEXT NOT NULL DEFAULT ''`},
+		{"agent_delivery_cursors.retired_sequence", `ALTER TABLE agent_delivery_cursors ADD COLUMN retired_sequence BIGINT NOT NULL DEFAULT 0`},
+		{"idx_agent_delivery_effects_pending", `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending ON agent_delivery_effects(effect_type, created_at, stream_id, sequence)`},
 	} {
 		if err := r.migrate.Apply(migration.name, migration.query); err != nil {
 			return fmt.Errorf("apply migration %q: %w", migration.name, err)

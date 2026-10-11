@@ -59,6 +59,13 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 		streamID).Scan(&projectedSequence); err != nil {
 		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
 	}
+	retired, err := retiredSequenceTx(ctx, tx, r.db.Rebind, streamID)
+	if err != nil {
+		return nil, err
+	}
+	if events[0].Sequence <= retired {
+		return nil, repoerrors.ErrAgentDeliveryReplayExpired
+	}
 	appendMessages := make([]bool, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
 		ctx, tx, events, effects, appendMessages, projectedSequence,
