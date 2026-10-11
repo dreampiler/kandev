@@ -20,7 +20,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const durableDeliveryUnresolvedReason = "unresolved_durable_work"
+const (
+	durableDeliveryUnresolvedReason  = "unresolved_durable_work"
+	durableDeliveryStorageNotDurable = "storage_not_durable"
+)
 
 type durableDeliveryCapabilityReader = agentruntime.DurableDeliveryCapabilityReader
 
@@ -151,7 +154,7 @@ func (s *Service) deliveryCapabilityForExecution(
 		}, false
 	}
 	peerVersion := capability.Version
-	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == "storage_not_durable" {
+	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == durableDeliveryStorageNotDurable {
 		// Supported peers without retained storage use legacy delivery;
 		// unresolved work still blocks that negotiation.
 		peerVersion = 0

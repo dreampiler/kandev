@@ -18,10 +18,10 @@ func TestPrepareAgentDeliverySubmissionSupportedNonDurablePeer(t *testing.T) {
 		unresolved bool
 		wantBlock  string
 	}{
-		{name: "supported_no_retained_volume", version: journal.CurrentVersion, reason: "storage_not_durable"},
-		{name: "existing_durable_protocol", version: journal.CurrentVersion, reason: "storage_not_durable", protocol: messagequeue.DeliveryProtocolV1, wantBlock: "legacy_peer"},
-		{name: "unresolved_no_retained_volume", version: journal.CurrentVersion, reason: "storage_not_durable", unresolved: true, wantBlock: durableDeliveryUnresolvedReason},
-		{name: "future_version", version: journal.CurrentVersion + 1, reason: "storage_not_durable", wantBlock: "incompatible_delivery_version"},
+		{name: "supported_no_retained_volume", version: journal.CurrentVersion, reason: durableDeliveryStorageNotDurable},
+		{name: "existing_durable_protocol", version: journal.CurrentVersion, reason: durableDeliveryStorageNotDurable, protocol: messagequeue.DeliveryProtocolV1, wantBlock: "legacy_peer"},
+		{name: "unresolved_no_retained_volume", version: journal.CurrentVersion, reason: durableDeliveryStorageNotDurable, unresolved: true, wantBlock: durableDeliveryUnresolvedReason},
+		{name: "future_version", version: journal.CurrentVersion + 1, reason: durableDeliveryStorageNotDurable, wantBlock: "incompatible_delivery_version"},
 		{name: "journal_lost", version: journal.CurrentVersion, reason: "journal_lost", wantBlock: "incompatible_delivery_version"},
 		{name: "storage_unavailable", version: journal.CurrentVersion, reason: "storage_unavailable", wantBlock: "incompatible_delivery_version"},
 	} {
