@@ -46,6 +46,18 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			reason: RestoreReasonUnknown,
 		},
 		{
+			name: "Codex archived saved session",
+			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
+				`"data":{"details":"session saved-session is archived. Run ` + "`codex unarchive saved-session`" + ` to unarchive it first."}}`,
+			reason: RestoreReasonNativeStateMissing,
+		},
+		{
+			name: "Codex archived different session",
+			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
+				`"data":{"details":"session another-session is archived."}}`,
+			reason: RestoreReasonUnknown,
+		},
+		{
 			name:    "unstructured missing rollout phrase",
 			message: "internal error: no rollout found for thread id saved-session",
 			reason:  RestoreReasonUnknown,
