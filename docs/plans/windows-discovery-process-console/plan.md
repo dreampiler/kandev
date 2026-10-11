@@ -56,28 +56,35 @@ updater. No argv, env, dir, pipe, wait, or cancellation semantics change.
 ## Delivery order
 
 1. [Task 01: Hide discovery subprocess console windows](task-01-hide-discovery-subprocess-console.md)
+2. [Task 02: Isolated dev/mock discovery side effects](task-02-isolated-mock-discovery-side-effects.md)
 
-## Registered follow-up (W100, separate atomic work orders)
+## Registered follow-up and delivery notes
 
-This plan delivers the console contract (task 01). Two W100 items are registered
-separately because they are a different contract or a different repository owner;
-the assigned worktree is a single branch, so they are not mixed into the console
-PR.
+Task 01 and task 02 are delivered together on the W100 worktree branch, because
+the platform assigned a single task worktree/branch and one review/merge path;
+splitting them across independent branches would risk losing the second, which
+the controller explicitly warned against. Task 01 is runtime agent code; task 02
+is the isolated-scripts mock selection.
 
-- [Task 02: Isolated dev/mock discovery side effects](task-02-isolated-mock-discovery-side-effects.md)
-  — the isolated dev/mock instance sets an isolated `LOCALAPPDATA`/`USERPROFILE`
-  but inherits the real `PATH` and, with `KANDEV_MOCK_AGENT=true`, loads real
-  agents and runs real vendor discovery/version probes. A vendor CLI's own
-  self-installer can then write the real user `PATH`/registry. Kandev has no
-  Hermes auto-install code; the mutation, if any, is the vendor CLI's, triggered
-  by running it. Owner: isolated-scripts. Must not disable production discovery.
 - External handoff — Core_Manager prompt `.ps1` rule. In the Core_Manager
   `kandev-prompts` original source, a `.ps1` must always be invoked as
   `powershell -NoProfile -ExecutionPolicy Bypass -File <script>`, never a bare
   extension path/file association, alongside the existing dev-isolated-only rule.
   This worktree cannot edit Core_Manager or live prompts; tracked here and
   executed by the existing Operations/Core_Manager owner via
-  source PR -> `cm_promote` -> assembled active-prompt readback.
+  source PR -> `cm_promote` -> assembled active-prompt readback. The assembled
+  readback receipt is still pending and must stay visible until it lands.
+
+### Approved-entry prerequisite (task 02 demonstration)
+
+The canonical `scripts/dev-isolated.ps1` refuses a binary under
+`%USERPROFILE%\.kandev`; the assigned W100 worktree lives at
+`C:\Users\dream\.kandev\tasks\...`, so the script refuses to launch from it. The
+end-to-end isolated run therefore needs an approved entry from a checkout/binary
+location outside `.kandev` (or the existing Operations owner). It is reported,
+not bypassed. The mock-selection change itself is unit-verified and the
+"skip real discovery" contract is the existing `KANDEV_MOCK_AGENT=only`
+registry/discovery behavior.
 
 ## Results
 

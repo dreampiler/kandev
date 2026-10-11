@@ -1,7 +1,7 @@
 ---
 id: "02-isolated-mock-discovery-side-effects"
 title: "Isolated dev/mock discovery side effects"
-status: registered
+status: active
 wave: 2
 depends_on: []
 plan: "plan.md"
@@ -67,4 +67,23 @@ production discovery or the user's configuration.
 
 ## Results
 
-- Not started; registered from W100 scope additions.
+- Implemented: `scripts/isolated-instance.psm1` `Get-IsolatedMockAgentMode`
+  (defaults `only`, `-RealAgents` returns `true`); `scripts/dev-isolated.ps1`
+  gains a `-RealAgents` switch and passes the helper result as
+  `KANDEV_MOCK_AGENT`. Requirement `REQ-LAUNCHER-ISOLATED-SCRIPTS-002` added.
+- Unit-verified: `scripts/tests/isolated-instance.Tests.ps1` asserts the default
+  is `only` and `-RealAgents` is `true`; the full PowerShell suite passes with a
+  clean TEMP (this environment's `%TEMP%` contains a stray `.git`, unrelated to
+  this change, which trips the existing home guard).
+- End-to-end isolated run: BLOCKED by an approved-entry prerequisite. The
+  canonical `scripts/dev-isolated.ps1` refuses a binary under
+  `%USERPROFILE%\.kandev`, and this W100 worktree lives at
+  `C:\Users\dream\.kandev\tasks\...`; the script refused, and no bypass was
+  attempted. The requested one before/after user-`PATH` comparison was not
+  meaningfully performed because no isolated instance launched. Needs an
+  approved entry from outside `.kandev` (or the Operations owner).
+
+## Non-goals / known gaps
+
+- The Unix `scripts/dev-isolated` helper keeps its current `KANDEV_MOCK_AGENT=true`
+  default; this work order scoped the change to the observed Windows helper.
