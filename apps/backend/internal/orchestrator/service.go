@@ -3415,7 +3415,8 @@ func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 	}
 	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
 
-	// Run the startup lifecycle sweep (reconcileTaskLifecycleTokens, then
+	// Run the startup lifecycle sweep (reconcileSchedulingOrphansOnStartup,
+	// reconcileTaskLifecycleTokens, then
 	// reconcileDependencyLaunchesOnStartup — sequenced so an
 	// admitted-by-promotion task is already eligible for the dependency sweep
 	// when reconcileTaskLifecycleTokens returns normally) in the background,
@@ -3621,6 +3622,11 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 	s.lifecycleSweepMu.Unlock()
 	go func() {
 		defer s.lifecycleSweepWorkers.Done()
+		// Restart interrupted automatic starts before the durable-token sweep:
+		// a task a token still owns is skipped here, while a token the sweep
+		// clears would otherwise leave the task looking orphaned until its
+		// detached launch created a session.
+		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
 	}()

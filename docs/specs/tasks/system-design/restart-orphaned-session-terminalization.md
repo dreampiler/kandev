@@ -100,7 +100,9 @@ For a remaining candidate:
 - With a `WAITING_FOR_INPUT` or `IDLE` session and no user prompt history,
   `processOnEnter` runs the current step's entry on that session, like a
   same-step re-entry. `on_exit` does not run because the task never left the
-  step. The entry-dispatch guard still rejects a stale route (`003.3`).
+  step. The entry-dispatch guard still rejects a stale route (`003.3`). The
+  entry runs detached, like the launch above, so a slow resume does not hold
+  the lifecycle-token pass behind it.
 - With prompt history, the entry was already delivered, and only the task state
   moves from `SCHEDULING` to `IN_PROGRESS` by compare-and-set (`003.3`).
 - A `CREATED`, `STARTING`, or `RUNNING` session means a launch is live and is

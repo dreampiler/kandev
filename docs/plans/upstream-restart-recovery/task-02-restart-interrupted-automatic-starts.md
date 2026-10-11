@@ -1,7 +1,7 @@
 ---
 id: "02-restart-interrupted-automatic-starts"
 title: "Restart interrupted automatic starts"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -69,6 +69,14 @@ From the repository root:
 
 ## Results
 
-Not implemented yet. On the current main branch, a probe that runs every
-existing startup pass leaves such a task in `SCHEDULING` with no launch and no
-session.
+- Tests: `TestListSchedulingTasksReturnsOnlyActiveSchedulingTasks` (repository)
+  and six `TestSchedulingOrphan*` tests that drive `startLifecycleSweepAsync`.
+- RED: with the current main `service.go` in place, the four positive tests
+  fail on their assertions (no restart, no ceiling deferral, state not
+  repaired, idle session not resumed); the guard tests pass. The repository
+  test cannot compile before `ListSchedulingTasks` exists.
+- GREEN: all seven tests pass, and the `LifecycleSweep|Startup|ReconcileDependency|LifecycleToken`
+  group passes.
+- Change from the original design: the step entry for an idle session runs
+  detached. Running it inline held the whole startup sweep while it waited for
+  agent readiness; the test now checks that the sweep returns first.
