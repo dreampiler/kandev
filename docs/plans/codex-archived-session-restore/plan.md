@@ -38,7 +38,9 @@ unavailable.
 ## Technical approach
 
 `matchesMissingProviderSession` accepts a `-32603 Internal error` whose details
-start with `session <expected id> is archived`. The session ID must match, as
+contain the complete `session <expected id> is archived` statement, optionally
+followed by a period and guidance. This shape is limited to `codex-acp`.
+The session ID must match, as
 for the other shapes, so an archived response for another session stays
 unknown. `newRestoreRequiredError` then reports `native_state_missing`, which
 allows explicit context continuation; nothing starts a replacement session on
@@ -66,7 +68,14 @@ changes require browser coverage.
 
 ## Verification results
 
-The archived cases failed on the original classifier and pass with the change.
+The contributor's archived cases passed in hosted Linux lifecycle tests.
+Review remediation adds provider isolation and complete-statement matching.
+`TestRestoreCoordinatorArchivedEvidencePreservesIdentity` reproduces the
+non-Codex and word-lookalike failures before remediation and passes afterward
+in a contained narrow harness using exact classifier, policy, and coordinator
+source. External ACP, model, telemetry, and routing boundaries are faked;
+this proof does not establish real transport, repository, journal, or race
+behavior. Full lifecycle and CI validation remains a hosted delivery gate.
 
 ## Risks
 

@@ -26,6 +26,7 @@ blocking as unknown.
 - Add classifier and load-failure cases for the archived response before the
   change.
 - Match the archived detail when it names the expected session.
+- Limit the archived shape to Codex and reject word lookalikes.
 - Record the Codex evidence in the harness session continuity design.
 
 ## Out of scope
@@ -36,6 +37,8 @@ Unarchiving in Codex, a dedicated restore reason, and UI changes.
 
 - An archived response for the loaded session is classified as
   `native_state_missing`, as a typed error and as JSON text.
+- An archived response from a non-Codex provider, or an archived-word
+  lookalike, stays unknown and preserves the native identity.
 - The same response for another session, or an internal error that names the
   session without saying it is archived, stays unknown.
 - Existing restore classification tests pass.
@@ -83,3 +86,9 @@ continuation instead of a blocked restore.
 - RED: on the original classifier, the archived cases were not recognized and
   the load failure was classified as unknown.
 - GREEN: the new cases and the existing restore classification tests pass.
+- Review remediation: the coordinator regression fails for custom, Auggie,
+  and unknown providers and for word lookalikes before the fix. It passes
+  after the fix in a contained exact-source narrow harness, together with
+  existing classifier and coordinator tests. Boundary fakes do not prove
+  repository, transport, journal, caller, or race behavior. Hosted CI owns
+  full real-package verification; no broad local package build was run.

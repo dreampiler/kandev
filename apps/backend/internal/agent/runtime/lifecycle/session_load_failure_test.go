@@ -46,13 +46,15 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			reason: RestoreReasonUnknown,
 		},
 		{
-			name: "Codex archived saved session",
+			name:    "Codex archived saved session",
+			agentID: "codex-acp",
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"session saved-session is archived. Run ` + "`codex unarchive saved-session`" + ` to unarchive it first."}}`,
 			reason: RestoreReasonNativeStateMissing,
 		},
 		{
-			name: "Codex archived different session",
+			name:    "Codex archived different session",
+			agentID: "codex-acp",
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"session another-session is archived."}}`,
 			reason: RestoreReasonUnknown,
