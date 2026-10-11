@@ -209,13 +209,13 @@ func (r *Repository) loadAgentDeliveryRetirementCandidateTx(
 	ctx context.Context, tx *sqlx.Tx, streamID string, sequence int64,
 ) (agentDeliveryRetirementCandidate, error) {
 	var projectedAt sql.NullTime
-	var submissionID string
+	var sessionID, incarnationID, submissionID string
 	var terminal int
 	var payload []byte
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT projected_at, submission_id, terminal, payload
+		SELECT projected_at, session_id, incarnation_id, submission_id, terminal, payload
 		FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`), streamID, sequence).Scan(
-		&projectedAt, &submissionID, &terminal, &payload)
+		&projectedAt, &sessionID, &incarnationID, &submissionID, &terminal, &payload)
 	if err != nil {
 		return agentDeliveryRetirementCandidate{}, err
 	}
@@ -225,20 +225,31 @@ func (r *Repository) loadAgentDeliveryRetirementCandidateTx(
 	}
 	if projectedAt.Valid {
 		candidate.projectedAt = projectedAt.Time
-		candidate.settled = r.retirementDependencySettledTx(ctx, tx, submissionID, terminal != 0)
+		candidate.settled = r.retirementDependencySettledTx(ctx, tx, sessionID, incarnationID, submissionID, terminal != 0)
 	}
 	return candidate, nil
 }
 
 // retirementDependencySettledTx reports whether a projected inbox row's
-// protected dependencies have finished. Rows without a submission identity
-// (session metadata, pre-submission transport events) are eligible; rows that
-// reference a submission require the submission to be settled and no open
-// delivery recovery block to still need the evidence. Any read failure is
-// treated as unsettled (fail closed) so an unproven row is never removed.
+// protected dependencies have finished. Any open delivery recovery block on the
+// row's session/incarnation protects all of that session's rows. Rows without a
+// submission identity (session metadata, pre-submission transport events) are
+// otherwise eligible; rows that reference a submission also require the
+// submission to be settled. Any read failure is treated as unsettled (fail
+// closed) so an unproven row is never removed.
 func (r *Repository) retirementDependencySettledTx(
-	ctx context.Context, tx *sqlx.Tx, submissionID string, terminal bool,
+	ctx context.Context, tx *sqlx.Tx, sessionID, incarnationID, submissionID string, terminal bool,
 ) bool {
+	var open int
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM session_recovery_blocks
+		WHERE session_id = ? AND incarnation_id = ? AND state = ?`),
+		sessionID, incarnationID, models.RecoveryBlockOpen).Scan(&open); err != nil {
+		return false
+	}
+	if open != 0 {
+		return false
+	}
 	if submissionID == "" {
 		// A terminal without a submission identity cannot be proven settled.
 		return !terminal
@@ -251,17 +262,10 @@ func (r *Repository) retirementDependencySettledTx(
 		// surviving terminal evidence no longer has a protected dependency.
 		return true
 	}
-	if err != nil || !isSettledDeliverySubmissionState(state) {
+	if err != nil {
 		return false
 	}
-	var open int
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT COUNT(*) FROM session_recovery_blocks
-		WHERE delivery_submission_id = ? AND state = ?`),
-		submissionID, models.RecoveryBlockOpen).Scan(&open); err != nil {
-		return false
-	}
-	return open == 0
+	return isSettledDeliverySubmissionState(state)
 }
 
 func isSettledDeliverySubmissionState(state models.DeliverySubmissionState) bool {
