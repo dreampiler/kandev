@@ -116,15 +116,13 @@ Do not change old duplicate semantics accidentally when replacing byte compariso
 
 ## Replay and ACK recovery
 
-Before checkpoint access, authenticate instance/environment owner generation, then validate live session, incarnation, registered harness and exact stream.
-Only existing historical-owner policy admits historical replay; it cannot mutate current runtime state.
-Lifecycle carries typed execution/owner/session/incarnation/harness/stream/submission identity into the shared SQL admission lock. Payload identity or hashes cannot authorize ownership.
-Valid transfer preserves original submission owner generation/hash.
+Authenticate instance/environment owner generation, session, incarnation, registered harness and exact stream before checkpoints. Historical replay follows owner policy without runtime mutation.
+Pass execution/owner/session/incarnation/harness/stream/submission into shared SQL admission. Payloads/hashes confer no authority. Keep submission owner generation/hash.
 
-Startup connects updates before ACP initialization for MCP, buffering retained frames until capability negotiation completes.
-Fresh generation-one bootstrap also waits for its initial SQL generation; both waits have thirty-second cancellation-aware bounds.
-Publish native identity before configuration layers. Require full owner checks before receipt, projection or ACK.
-Prepare SQL and bind initial IDs to the owner/generation launch handoff before dispatch. Failure blocks dispatch; direct retries receive fresh immutable IDs.
+Connect updates before ACP initialization for MCP; buffer retained frames through capability negotiation. Generation-one bootstrap waits for SQL generation. Both waits are cancellable and capped at thirty seconds.
+Publish native identity before configuration; check owners before receipt, projection or ACK.
+Prepare SQL and bind initial IDs to the owner/generation launch handoff before dispatch; failures block dispatch. Retries use fresh immutable IDs.
+Persist the Kandev turn and task/session/execution/incarnation/harness/stream/submission before dispatch. Recovery requires matching SQL and peer proof; mismatches block adoption, absent bindings never invent a turn.
 Recovery and unmarked missing authority fail closed; events never create authority.
 
 Within one serialized receive transaction, apply this order:

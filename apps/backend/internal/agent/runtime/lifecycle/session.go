@@ -64,15 +64,16 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger               *logger.Logger
-	eventPublisher       *EventPublisher
-	streamManager        *StreamManager
-	executionStore       *ExecutionStore
-	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(failure InitialPromptFailure)
-	historyManager       *SessionHistoryManager
-	attachmentReader     AttachmentReader
-	stopCh               <-chan struct{} // For graceful shutdown coordination
+	logger                   *logger.Logger
+	eventPublisher           *EventPublisher
+	streamManager            *StreamManager
+	executionStore           *ExecutionStore
+	promptStarter            func(executionID string) (uint64, error)
+	persistPromptTurnBinding func(context.Context, *AgentExecution) error
+	initialPromptFailure     func(failure InitialPromptFailure)
+	historyManager           *SessionHistoryManager
+	attachmentReader         AttachmentReader
+	stopCh                   <-chan struct{} // For graceful shutdown coordination
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -1952,11 +1953,15 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
-	if sm.beforePromptDispatchHook != nil {
-		sm.beforePromptDispatchHook()
-	}
 	if callbacks.deliverySubmissionID != "" {
 		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))
+	}
+	if err := sm.persistDurablePromptTurnBinding(preparedCtx, execution, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		return nil, err
+	}
+	if sm.beforePromptDispatchHook != nil {
+		sm.beforePromptDispatchHook()
 	}
 	if err := sm.triggerPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
