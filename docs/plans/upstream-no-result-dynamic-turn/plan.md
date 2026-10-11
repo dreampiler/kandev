@@ -20,10 +20,17 @@ The agent system owns all of them because it owns candidate selection, route sta
 
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
-| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | planned |
-| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | planned |
-| [Task 03](task-03-virtual-family-launch.md) | A launch that selects the virtual dynamic family fails with a generic empty-command error | none | planned |
+| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | planned, first |
+| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | candidate, membership under review |
+| [Task 03](task-03-virtual-family-launch.md) | A launch that selects the virtual dynamic family fails with a generic empty-command error | none | candidate, membership under review |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
+
+Staging:
+
+1. Task 01 is implemented first.
+2. Tasks 02 and 03 are candidates. Their cause and source overlap are assessed here, but they are not implemented until their membership is confirmed.
+3. Task 04 is added when its prepared change is supplied.
+4. The package is submitted once, after every confirmed member is implemented.
 
 ## Outcome coverage
 
@@ -127,6 +134,8 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 `TestWSRouteActionReportsNonDynamicProfileAsValidation` must fail on the base commit because the handler returns an internal error.
 
+Source assessment: the candidate change touches `backendapp/dynamic_routing.go`, `orchestrator/handlers/handlers.go`, `orchestrator/service.go`, and their tests. It applies to the base without conflicts. It shares only `orchestrator/service.go` with Task 01, in a different declaration block.
+
 ## Task 03: virtual family at launch
 
 ### Evidence and cause
@@ -146,6 +155,8 @@ The completion handler skips its ordinary follow-up only when a successor was la
 | 001.12 | `apps/backend/internal/agent/runtime/dynamic_resolver_virtual_test.go`: `TestAgentNameForProfile_RejectsVirtualFamily` |
 
 `TestRestartAgentProcess_VirtualAgentFailsClosed` must fail on the base commit because the error does not match `ErrVirtualProfile`.
+
+Source assessment: the candidate change touches `agent/runtime/dynamic_resolver.go`, `lifecycle/manager_profile.go`, `manager_launch.go`, `manager_execution.go`, and their tests. It applies to the base without conflicts. It shares only `agent/runtime/dynamic_resolver.go` with Task 01, in a different function.
 
 ## Task 04: restart recovery portions (pending input)
 
