@@ -49,10 +49,14 @@ the deleted destination ID.
 ## Tests
 
 `workflow_session_target_test.go` covers
-`TestLoadRecordedWorkflowSessionRouteAllowsFreshFallbackFromDeletedDestination`:
-AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.6. It replaces the test that pinned the
-rejection. `TestLoadRecordedWorkflowSessionRouteKeepsDestinationLoadFailureFatal`
-keeps a repository failure fatal.
+`TestLoadRecordedWorkflowSessionRouteAllowsFreshFallbackFromDeletedDestination`
+and `TestPrepareExplicitWorkflowSessionReplacesDeletedRouteDestinationOnce`:
+AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.6. The first replaces the test that
+pinned the rejection, for prepared and committed routes. The second starts the
+step entry again and checks that the route records the replacement and that a
+retry reuses it without another session.
+`TestLoadRecordedWorkflowSessionRouteKeepsDestinationLoadFailureFatal` keeps a
+repository failure fatal.
 
 ## E2E tests
 

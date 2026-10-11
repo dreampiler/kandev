@@ -35,6 +35,8 @@ Mismatched destinations, clearing the route on session delete, and UI changes.
 
 - A recorded route whose destination was deleted loads without error and
   without a session, so the caller allocates a fresh one.
+- Starting the step entry again records the replacement in the route, and a
+  retry of the same entry reuses it, for prepared and committed routes.
 - A repository failure while loading the destination still fails the entry.
 - Existing route, session target, and profile switch tests pass.
 
