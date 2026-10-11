@@ -180,7 +180,10 @@ export async function assertRetentionRecoveryControls(
       ),
     )
     .toBe(true);
-  await expect(banner.getByTestId("session-recovery-error")).toBeVisible({ timeout: 30_000 });
+  await expect(banner.getByTestId("delivery-recovery-result")).toHaveText(
+    "Recovery is blocked. Resolve the recovery issue before retrying.",
+    { timeout: 30_000 },
+  );
   expect(
     traffic.frames.filter((frame) => frame.direction === "sent" && frame.action === "message.add"),
   ).toHaveLength(promptCount);
