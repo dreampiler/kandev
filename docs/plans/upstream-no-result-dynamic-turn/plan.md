@@ -22,13 +22,15 @@ The agent system owns all of them because it owns candidate selection and route 
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
 | [Task 04](task-04-restart-recovery-route-activation.md) | A resumed route is never activated, and a blocked explicit recovery reports success | none | done |
+| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: post-start failures before any result are never counted | none | proposed, not implemented |
 
 Staging:
 
 1. Task 01 is implemented first.
 2. Task 02 is implemented after Task 01, in its own commit.
 3. Task 04 is implemented after Task 02, in its own commit.
-4. The package is submitted once, after every confirmed member is implemented.
+4. Task 05 is the last, separable contract proposal. It is implemented only after the proposal is accepted for implementation, and after Task 04.
+5. The package is submitted once, after every confirmed member is implemented.
 
 ## Outcome coverage
 
@@ -38,7 +40,7 @@ That covers two shapes. This package preserves one of them and leaves the other 
 | Shape | Coverage | Reason |
 | --- | --- | --- |
 | Normal `end_turn` completion with no text, reasoning, or tool activity | Task 01, implemented | Fits the design with a fixed, text-free identity. |
-| Post-start runtime error before any result, without a complete diagnostic | Unresolved | Conflicts with the current identity contract. See below. |
+| Post-start runtime error before any result, without a complete diagnostic | Task 05, proposed | Conflicts with the current identity contract. See below. |
 
 ### Unresolved: post-start failures without a complete diagnostic
 
@@ -62,13 +64,14 @@ Options for a later decision:
 This item stays open. It is not dropped and is not delivered by Task 01.
 It needs two inputs before any code:
 
-- a mapping of the actual runtime error producers to the identity contract, including whether any of them can attest a complete diagnostic;
+- a mapping of the actual runtime error producers to the identity contract, including whether any of them can attest a complete diagnostic (recorded in the producer map below);
 - the prepared restart-recovery change in Task 04, because a false success result after an interrupted turn may change which post-start failures reach the route.
 
 Task 04 is now implemented. A blocked explicit recovery returns its error to the caller, not to the failure route, so it adds no post-start failures. Activating a resumed route lets later prompt failures of that route reach the failure route with an active status instead of being suppressed, so they meet the existing origin checks unchanged.
 
 After that, a maintainer decision on the identity model selects an option.
-Option B is the direction under review. If it goes ahead, it lands as the last, separable commit of this package, framed as a contract proposal.
+Option B is the direction under review. [Task 05](task-05-post-start-no-result-proposal.md) holds its contract proposal as the last, separable part of this package.
+If the proposal is rejected, only Task 05 and its contract text are removed. The original goal then remains unmet for post-start failures.
 That commit amends the decision for this one origin only, records why A and C were not chosen, and normalizes only the fixed producer shapes listed below.
 Its tests must show that other unclassified codes, the 1024-byte and redaction rules, the threshold, and the opt-in default are unchanged.
 `Closes #4325` covers Task 01 only.
@@ -203,6 +206,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 - [x] [Task 04: Activate resumed dynamic routes and fail blocked explicit recoveries](task-04-restart-recovery-route-activation.md)
+- [ ] [Task 05: Contract proposal: count post-start no-result failures](task-05-post-start-no-result-proposal.md)
 
 ## Verification results
 
