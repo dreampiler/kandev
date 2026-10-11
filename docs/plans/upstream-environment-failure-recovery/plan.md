@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: in-progress
+status: done
 requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 system_design:
@@ -124,11 +124,22 @@ points with existing test doubles. No browser scenario is added.
 ## Work orders
 
 - [x] [Task 01: Release and take over abandoned creating claims](task-01-release-abandoned-creating-claims.md)
-- [ ] [Task 02: Re-elect failed unmaterialized environments and point the rest at reset](task-02-reelect-failed-environments.md)
+- [x] [Task 02: Re-elect failed unmaterialized environments and point the rest at reset](task-02-reelect-failed-environments.md)
 
 ## Verification results
 
-Pending implementation.
+Both work orders record their RED and GREEN tests.
+
+- Some tests fail on Windows with and without this package and are excluded
+  below:
+  - in `executor`, 22 Kubernetes resume and workspace inventory repair or
+    attestation tests;
+  - in `sqlite`, `TestUpdateEnvironmentWritesMutableFieldsAndReportsMissing`.
+- All other tests pass in the related `sqlite`, `executor`, `orchestrator`,
+  and `mcp/handlers` groups.
+- `go vet`, `golangci-lint --new-from-rev`, `go build ./...`, the
+  documentation catalog and specification checks, and the local
+  `pr-docs.cjs` coverage check of the changed files pass.
 
 ## Risks
 

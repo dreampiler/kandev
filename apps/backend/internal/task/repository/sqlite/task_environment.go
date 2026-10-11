@@ -435,6 +435,82 @@ func (r *Repository) reelectTaskEnvironmentMaterializationTx(
 	return changed > 0, nil
 }
 
+// reelectFailedWorkspaceMaterializationTx makes sessionID the owner of a failed
+// environment that never created anything physical, inside a binding
+// transaction that holds the task cleanup barrier. A concurrent binding that
+// re-elected it first yields workspace_preparing; a failed environment that
+// holds workspace resources requires a reset.
+func (r *Repository) reelectFailedWorkspaceMaterializationTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	environmentID, sessionID string,
+) error {
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return err
+	}
+	reelected, err := r.reelectTaskEnvironmentMaterializationTx(
+		ctx, tx, environmentID, models.TaskEnvironmentStatusFailed, "", sessionID,
+	)
+	if err != nil || reelected {
+		return err
+	}
+	var status string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT status FROM task_environments WHERE id = ?`), environmentID).Scan(&status); err != nil {
+		return fmt.Errorf("reload failed workspace materialization: %w", err)
+	}
+	switch models.TaskEnvironmentStatus(status) {
+	case models.TaskEnvironmentStatusCreating:
+		return fmt.Errorf("%w: retry after the workspace materialization completes", models.ErrWorkspacePreparing)
+	case models.TaskEnvironmentStatusFailed:
+		return models.ErrTaskEnvironmentResetRequired
+	default:
+		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+}
+
+// ReelectFailedTaskEnvironmentMaterialization makes sessionID the owner of a
+// failed environment that never created anything physical, so the launch of a
+// session already bound to it runs full preparation. It reports false when the
+// row is no longer failed, has an owner, or holds workspace resources.
+func (r *Repository) ReelectFailedTaskEnvironmentMaterialization(
+	ctx context.Context,
+	environmentID, sessionID string,
+) (bool, error) {
+	if environmentID == "" || sessionID == "" {
+		return false, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var taskID string
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("load failed task environment owner: %w", err)
+	}
+	if err := r.taskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
+	}
+	reelected, err := r.reelectTaskEnvironmentMaterializationTx(
+		ctx, tx, environmentID, models.TaskEnvironmentStatusFailed, "", sessionID,
+	)
+	if err != nil || !reelected {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // FailTaskEnvironmentMaterialization stores failed for the creating
 // environment that sessionID still owns and clears its claim. It reports false
 // when the session owns no creating environment, including when another

@@ -1,7 +1,7 @@
 ---
 id: "02-reelect-failed-environments"
 title: "Re-elect failed unmaterialized environments and point the rest at reset"
-status: planned
+status: done
 wave: 2
 depends_on:
   - "01-release-abandoned-creating-claims"
@@ -110,4 +110,34 @@ git diff --check
 
 ## Results
 
-Pending implementation.
+- RED on the code after work order 01:
+  - `TestWorkspaceBindingReelectsFailedEnvironmentWithoutEvidence` and
+    `TestWorkspaceBindingConcurrentFailedReelectionHasOneOwner` failed with
+    `existing task environment is not attachable`, and
+    `TestSharedGroupBindingReelectsFailedGroupEnvironment` with
+    `shared workspace is not attachable`.
+  - `TestLaunchPreparedSessionRematerializesOwnFailedEnvironment` failed with
+    `existing task environment is not attachable`.
+  - `TestHandleSpawnSession_FailedEnvironmentWithResourcesPointsToReset` got
+    the retry guidance `restore the task workspace, then retry`.
+  - The tests that use `models.ErrTaskEnvironmentResetRequired` or
+    `ReelectFailedTaskEnvironmentMaterialization` did not compile, because
+    neither existed.
+- GREEN: all of these pass, together with the guards:
+  - a failed row with a worktree or workspace path stays unchanged;
+  - an inherited environment is refused without reset guidance;
+  - a lost launch race adopts or waits for the winner;
+  - re-election refuses during task cleanup and while a recovery claim is
+    held.
+- Related packages:
+  - The `sqlite` tests matching
+    `Workspace|Environment|Binding|SharedGroup|Materializ|TakesOver|TakeOver|Claim|Reelect`
+    pass, except `TestUpdateEnvironmentWritesMutableFieldsAndReportsMissing`.
+  - The `executor` tests matching
+    `Launch|Environment|Materializ|Workspace|PersistTask|PrepareSession|Reelect`
+    pass, except the same 22 Windows failures as in work order 01.
+  - The `orchestrator` tests matching
+    `StartTask|QuickChat|LaunchFailure|Environment` and every
+    `TestHandleSpawnSession` test pass.
+- `go vet` on the changed packages and `golangci-lint` with
+  `--new-from-rev` on them report nothing. `go build -trimpath ./...` passes.
