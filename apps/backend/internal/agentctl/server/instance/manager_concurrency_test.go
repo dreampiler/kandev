@@ -51,7 +51,8 @@ func bindablePortRange(t *testing.T, size int) int {
 }
 
 // newConcurrencyTestManager returns a manager whose instances answer 200 OK and
-// which is shut down when the test ends.
+// which is shut down when the test ends. The shutdown is bounded so a stuck
+// creation fails the test instead of hanging the package.
 func newConcurrencyTestManager(t *testing.T, ports int) *Manager {
 	t.Helper()
 	base := bindablePortRange(t, ports)
@@ -59,7 +60,11 @@ func newConcurrencyTestManager(t *testing.T, ports int) *Manager {
 		Ports:    config.PortConfig{Base: base, Max: base + ports - 1},
 		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
 	}, newTestLogger(t))
-	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
+	t.Cleanup(func() {
+		if !finishesWithin(func() { _ = mgr.Shutdown(context.Background()) }) {
+			t.Error("Shutdown did not finish during cleanup")
+		}
+	})
 	mgr.SetServerFactory(func(*config.InstanceConfig, *process.Manager, *logger.Logger) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
@@ -118,6 +123,17 @@ func finishesWithin(fn func()) bool {
 	}
 }
 
+// receiveWithin returns the next value from ch, or false after the bound.
+func receiveWithin[T any](ch <-chan T) (T, bool) {
+	select {
+	case v := <-ch:
+		return v, true
+	case <-time.After(concurrencyTestWait):
+		var zero T
+		return zero, false
+	}
+}
+
 func TestConcurrentCreationsOverlapStartup(t *testing.T) {
 	const concurrent = 4
 	mgr := newConcurrencyTestManager(t, concurrent+4)
@@ -130,7 +146,7 @@ func TestConcurrentCreationsOverlapStartup(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			resps[i], errs[i] = mgr.CreateInstance(context.Background(), &CreateRequest{
+			resps[i], errs[i] = mgr.CreateInstance(t.Context(), &CreateRequest{
 				ID:            fmt.Sprintf("concurrent-%d", i),
 				WorkspacePath: t.TempDir(),
 			})
@@ -139,7 +155,9 @@ func TestConcurrentCreationsOverlapStartup(t *testing.T) {
 
 	overlapped := gate.waitReached(concurrent)
 	gate.open()
-	wg.Wait()
+	if !finishesWithin(wg.Wait) {
+		t.Fatal("creations did not finish after the gate opened")
+	}
 	if !overlapped {
 		t.Fatalf("fewer than %d creations reached the end of startup together", concurrent)
 	}
@@ -166,7 +184,7 @@ func TestCreateInstanceRejectsDuplicateIDDuringStartup(t *testing.T) {
 
 	firstErr := make(chan error, 1)
 	go func() {
-		_, err := mgr.CreateInstance(context.Background(), &CreateRequest{ID: "dup", WorkspacePath: t.TempDir()})
+		_, err := mgr.CreateInstance(t.Context(), &CreateRequest{ID: "dup", WorkspacePath: t.TempDir()})
 		firstErr <- err
 	}()
 	if !gate.waitReached(1) {
@@ -175,7 +193,7 @@ func TestCreateInstanceRejectsDuplicateIDDuringStartup(t *testing.T) {
 
 	var dupErr error
 	prompt := finishesWithin(func() {
-		_, dupErr = mgr.CreateInstance(context.Background(), &CreateRequest{ID: "dup", WorkspacePath: t.TempDir()})
+		_, dupErr = mgr.CreateInstance(t.Context(), &CreateRequest{ID: "dup", WorkspacePath: t.TempDir()})
 	})
 	gate.open()
 	if !prompt {
@@ -184,7 +202,9 @@ func TestCreateInstanceRejectsDuplicateIDDuringStartup(t *testing.T) {
 	if dupErr == nil {
 		t.Fatal("duplicate creation succeeded while the first owned the ID")
 	}
-	if err := <-firstErr; err != nil {
+	if err, ok := receiveWithin(firstErr); !ok {
+		t.Fatal("first creation did not finish")
+	} else if err != nil {
 		t.Fatalf("first creation: %v", err)
 	}
 	if _, ok := mgr.GetInstance("dup"); !ok {
@@ -199,7 +219,7 @@ func TestShutdownWaitsForInProgressCreation(t *testing.T) {
 	createDone := make(chan struct{})
 	go func() {
 		defer close(createDone)
-		_, _ = mgr.CreateInstance(context.Background(), &CreateRequest{ID: "inflight", WorkspacePath: t.TempDir()})
+		_, _ = mgr.CreateInstance(t.Context(), &CreateRequest{ID: "inflight", WorkspacePath: t.TempDir()})
 	}()
 	if !gate.waitReached(1) {
 		t.Fatal("creation did not reach the end of startup")
@@ -222,7 +242,9 @@ func TestShutdownWaitsForInProgressCreation(t *testing.T) {
 	case <-time.After(concurrencyTestWait):
 		t.Fatal("Shutdown did not finish after the creation was released")
 	}
-	<-createDone
+	if _, ok := receiveWithin(createDone); !ok {
+		t.Fatal("creation did not finish after Shutdown")
+	}
 
 	mgr.mu.RLock()
 	published, provisional := len(mgr.instances), len(mgr.provisional)
@@ -295,14 +317,14 @@ func TestCreateInstanceNotPublishedWhenCancelledBeforePublication(t *testing.T) 
 
 func TestOtherInstanceOperationsDoNotWaitForStartup(t *testing.T) {
 	mgr := newConcurrencyTestManager(t, 4)
-	if _, err := mgr.CreateInstance(context.Background(), &CreateRequest{ID: "other", WorkspacePath: t.TempDir()}); err != nil {
+	if _, err := mgr.CreateInstance(t.Context(), &CreateRequest{ID: "other", WorkspacePath: t.TempDir()}); err != nil {
 		t.Fatalf("create other instance: %v", err)
 	}
 	gate := holdStartup(t, mgr)
 
 	slowErr := make(chan error, 1)
 	go func() {
-		_, err := mgr.CreateInstance(context.Background(), &CreateRequest{ID: "slow", WorkspacePath: t.TempDir()})
+		_, err := mgr.CreateInstance(t.Context(), &CreateRequest{ID: "slow", WorkspacePath: t.TempDir()})
 		slowErr <- err
 	}()
 	if !gate.waitReached(1) {
@@ -324,7 +346,9 @@ func TestOtherInstanceOperationsDoNotWaitForStartup(t *testing.T) {
 	if !found || listed != 1 || stopErr != nil {
 		t.Errorf("found=%v listed=%d stopErr=%v; want true, 1, nil", found, listed, stopErr)
 	}
-	if err := <-slowErr; err != nil {
+	if err, ok := receiveWithin(slowErr); !ok {
+		t.Fatal("slow creation did not finish")
+	} else if err != nil {
 		t.Fatalf("slow creation: %v", err)
 	}
 }
