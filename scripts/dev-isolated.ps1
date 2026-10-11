@@ -13,6 +13,11 @@
   waits for health, writes a pidfile, and prints the URLs, log paths, and the
   exact teardown command.
 
+  By default the isolated instance loads only the mock agent
+  (KANDEV_MOCK_AGENT=only), so it does not execute real provider discovery
+  probes that a vendor self-installer could turn into host PATH/registry
+  changes. Pass -RealAgents to load real agents alongside the mock agent.
+
   A running kandev instance needs more than the `kandev` binary: the backend
   spawns `agentctl` to create executions, and the dev/mock profile launches
   `mock-agent`. This script ensures all of those exist before launching.
@@ -45,6 +50,11 @@
   Run `make install` (backend deps + pnpm install + playwright browsers) before
   building/launching, for clean checkouts. Requires Git Bash on Windows.
 
+.PARAMETER RealAgents
+  Load real inference agents alongside the mock agent (KANDEV_MOCK_AGENT=true)
+  instead of the default mock-only isolation (KANDEV_MOCK_AGENT=only). Use only
+  when the isolated instance deliberately needs to exercise real vendor CLIs.
+
 .PARAMETER CopyDb
   Seed the isolated DB from an existing kandev.db (copied, never the original)
   instead of starting empty.
@@ -74,6 +84,7 @@ param(
   [switch]$Web,
   [switch]$NoBuild,
   [switch]$Install,
+  [switch]$RealAgents,
   [string]$CopyDb,
   [int]$Timeout = 60,
   [int]$BackendPort,
@@ -391,7 +402,8 @@ $WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 # KANDEV_DEBUG_DEV_MODE=true selects the `dev` profile (mock agent, pprof,
 # feature flags) from profiles.yaml. We also force mock providers so the
 # isolated instance needs no real GitHub/agents, and bind to loopback to avoid
-# Windows Firewall prompts.
+# Windows Firewall prompts. KANDEV_MOCK_AGENT defaults to `only` (mock agent
+# alone, no real-agent discovery) unless -RealAgents opts in.
 # cmd /c with internal file redirection keeps the backend and its children
 # (agentctl, mock-agent) writing to files. Start-Process without -Redirect*
 # uses ShellExecute (its own hidden console), so cmd.exe does not inherit the
@@ -420,7 +432,7 @@ $backendOverrides = [ordered]@{
   'AGENTCTL_INSTANCE_PORT_BASE'   = "$AgentctlRangeBase"
   'AGENTCTL_INSTANCE_PORT_MAX'    = "$AgentctlRangeMax"
   'KANDEV_DEBUG_DEV_MODE'         = 'true'
-  'KANDEV_MOCK_AGENT'             = 'true'
+  'KANDEV_MOCK_AGENT'             = Get-IsolatedMockAgentMode -RealAgents:$RealAgents
   'KANDEV_MOCK_GITHUB'            = 'true'
   'KANDEV_MOCK_JIRA'              = 'true'
   'KANDEV_MOCK_LINEAR'            = 'true'

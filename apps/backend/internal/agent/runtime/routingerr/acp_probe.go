@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 // CommandResolver returns the argv to spawn for a given provider id. The
@@ -87,11 +88,19 @@ func (p *ACPProbe) Probe(ctx context.Context, in ProbeInput) *Error {
 		})
 	}
 
-	cmd := exec.CommandContext(pCtx, argv[0], argv[1:]...)
+	cmd := probeCommand(pCtx, argv)
 	if len(env) > 0 {
 		cmd.Env = mergeEnv(env)
 	}
 	return p.runProbe(pCtx, cmd, in)
+}
+
+// probeCommand builds the ephemeral provider ACP probe. On Windows it starts
+// without a visible console window.
+func probeCommand(ctx context.Context, argv []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	winproc.HideConsoleWindow(cmd)
+	return cmd
 }
 
 // runProbe drives the subprocess lifecycle: spawn → send initialize →

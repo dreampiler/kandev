@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 // Runner starts host processes. Tests provide a fake; production uses
@@ -37,13 +39,21 @@ var ErrNotInstalled = errors.New("host cli executable is not available")
 // ExecRunner runs real host processes.
 type ExecRunner struct{}
 
+// execRunnerCommand builds a host CLI command with the shared wait delay. On
+// Windows it starts without a visible console window.
+func execRunnerCommand(ctx context.Context, argv []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.WaitDelay = time.Second
+	winproc.HideConsoleWindow(cmd)
+	return cmd
+}
+
 // Output implements Runner.
 func (ExecRunner) Output(ctx context.Context, argv []string) (string, error) {
 	if len(argv) == 0 {
 		return "", errors.New("host cli command is empty")
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.WaitDelay = time.Second
+	cmd := execRunnerCommand(ctx, argv)
 	out := &boundedOutput{}
 	cmd.Stdout, cmd.Stderr = out, out
 	err := cmd.Run()
@@ -76,8 +86,7 @@ func (ExecRunner) Start(ctx context.Context, argv []string) (Process, error) {
 	if len(argv) == 0 {
 		return nil, errors.New("host cli command is empty")
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.WaitDelay = time.Second
+	cmd := execRunnerCommand(ctx, argv)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err

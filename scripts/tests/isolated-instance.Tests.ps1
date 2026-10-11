@@ -51,6 +51,11 @@ New-Item -ItemType Directory -Path $productionHome, $customProductionHome, $repo
 New-Item -ItemType File -Path (Join-Path $repoRoot '.git') -Force | Out-Null
 
 try {
+  Assert-True ((Get-IsolatedMockAgentMode) -eq 'only') `
+    'The isolated mock default must be mock-only so real-agent discovery is skipped.'
+  Assert-True ((Get-IsolatedMockAgentMode -RealAgents) -eq 'true') `
+    'The -RealAgents opt-in must select real-agent-alongside-mock mode.'
+
   $safeHome = Join-Path $profileRoot '.kandev-test-safe'
   New-Item -ItemType Directory -Path $safeHome -Force | Out-Null
   $resolved = Resolve-SafeIsolatedHome -Path $safeHome -ProfileRoot $profileRoot `

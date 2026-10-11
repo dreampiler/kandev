@@ -80,3 +80,21 @@ live instance, production data, or any state outside the isolated home.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-001.9:** Windows CI shall run PowerShell tests
   for live-home boundaries, junction paths, inherited environment isolation,
   and restoration of the caller environment.
+
+### REQ-LAUNCHER-ISOLATED-SCRIPTS-002: Safe mock selection for the isolated dev/mock instance
+
+**Intent:** The isolated dev/mock helper is launched without a willingness to
+install or configure real provider CLIs, so its default mock selection must not
+execute real provider discovery probes that a vendor self-installer could turn
+into host changes (user PATH or registry).
+
+#### Acceptance criteria
+
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-002.1:** By default the isolated instance shall
+  load only the mock agent (`KANDEV_MOCK_AGENT=only`), so real-agent discovery
+  and provider probes are skipped.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-002.2:** An explicit `-RealAgents` opt-in shall
+  load real agents alongside the mock agent for a developer who deliberately
+  wants real vendor CLIs in the isolated instance.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-002.3:** The helper shall not change the host
+  user PATH, registry, file associations, or provider installation state.

@@ -3,6 +3,7 @@ status: current
 system: launcher
 requirements:
   - REQ-LAUNCHER-ISOLATED-SCRIPTS-001
+  - REQ-LAUNCHER-ISOLATED-SCRIPTS-002
 ---
 
 # Isolated instance script system design
@@ -24,6 +25,7 @@ The helpers are Windows-only and PowerShell 5.1 compatible; they depend on
 | Requirement | Design section |
 | --- | --- |
 | `REQ-LAUNCHER-ISOLATED-SCRIPTS-001` | [Port selection](#port-selection), [Home isolation](#home-isolation), [Child environment](#child-environment), [Loopback binding](#loopback-binding), [Teardown](#teardown) |
+| `REQ-LAUNCHER-ISOLATED-SCRIPTS-002` | [Mock selection](#mock-selection) |
 
 ## Components and responsibilities
 
@@ -79,8 +81,17 @@ receives only its selected backend URL and development settings as application
 configuration. Both children use the isolated home for application data and
 the per-launch run directory for temporary files.
 
-## Loopback binding
+## Mock selection
 
+`Get-IsolatedMockAgentMode` selects the `KANDEV_MOCK_AGENT` value the isolated
+backend receives. It defaults to `only`, so the registry loads the mock agent
+alone and the discovery sweep never executes a real vendor CLI; `-RealAgents`
+opts into `true` (real agents alongside the mock agent). This keeps the isolated
+dev/mock entrypoint from running vendor discovery probes that could install or
+reconfigure tooling in the host user environment. It changes only the isolated
+child's mock selection, never production discovery or host configuration.
+
+## Loopback binding
 The backend, its agentctl child, and the Vite dev server bind `127.0.0.1` by
 default. The launcher passes `AGENTCTL_LISTEN_HOST=127.0.0.1` explicitly so an
 older backend/agentctl build cannot expose the control port. The web host is a

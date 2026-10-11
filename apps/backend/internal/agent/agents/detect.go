@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os/exec"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 const commandCheckTimeout = 5 * time.Second
@@ -44,6 +46,14 @@ func WithCommandCheck(name string, args ...string) DetectOption {
 	}
 }
 
+// commandCheckCommand builds a discovery capability-check command. On Windows
+// it starts without a visible console window.
+func commandCheckCommand(ctx context.Context, path string, args []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, path, args...)
+	winproc.HideConsoleWindow(cmd)
+	return cmd
+}
+
 // runCommandCheck runs a capability check bounded by timeout. It separates the
 // two ways a check can fail: the command answering with a nonzero exit, and
 // the bound elapsing before the command answered. Only a caller cancellation
@@ -52,7 +62,7 @@ func WithCommandCheck(name string, args ...string) DetectOption {
 func runCommandCheck(ctx context.Context, path string, timeout time.Duration, args ...string) (found, timedOut bool, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if runErr := exec.CommandContext(checkCtx, path, args...).Run(); runErr != nil {
+	if runErr := commandCheckCommand(checkCtx, path, args).Run(); runErr != nil {
 		if ctx.Err() != nil {
 			return false, false, ctx.Err()
 		}

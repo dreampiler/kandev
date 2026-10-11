@@ -136,6 +136,15 @@ function Assert-SafeIsolatedHomePaths {
   }
 }
 
+function Get-IsolatedMockAgentMode {
+  param([switch]$RealAgents)
+  # The isolated dev/mock instance must not run real provider discovery probes,
+  # which a vendor CLI self-installer can turn into host PATH/registry changes.
+  # Default to mock-only; opt into real-agent-alongside-mock explicitly.
+  if ($RealAgents) { return 'true' }
+  return 'only'
+}
+
 function New-KandevIsolatedChildEnvironment {
   param(
     [Parameter(Mandatory = $true)][string]$BinaryDirectory,
@@ -203,4 +212,4 @@ function Invoke-WithIsolatedEnvironment {
   }
 }
 
-Export-ModuleMember -Function Resolve-SafeIsolatedHome, Assert-SafeIsolatedHomePaths, New-KandevIsolatedChildEnvironment, Invoke-WithIsolatedEnvironment
+Export-ModuleMember -Function Resolve-SafeIsolatedHome, Assert-SafeIsolatedHomePaths, Get-IsolatedMockAgentMode, New-KandevIsolatedChildEnvironment, Invoke-WithIsolatedEnvironment

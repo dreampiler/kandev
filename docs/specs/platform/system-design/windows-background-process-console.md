@@ -3,6 +3,7 @@ status: current
 system: platform
 requirements:
   - REQ-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001
+  - REQ-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002
 ---
 
 # Windows Background Process Console System Design
@@ -21,6 +22,7 @@ attached to a console.
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001` | [Console inheritance](#console-inheritance), [Process attributes](#process-attributes), [Excluded process paths](#excluded-process-paths) |
+| `REQ-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002` | [Discovery subprocesses](#discovery-subprocesses), [Process attributes](#process-attributes), [Excluded process paths](#excluded-process-paths) |
 
 ## Console inheritance
 
@@ -62,6 +64,12 @@ visibility for a backend started from a terminal.
 | `internal/agentctl/server/process` | `setProcGroup`, `setManagedProcGroup`, `setAgentProcGroup` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, plus `CREATE_SUSPENDED` for managed processes (scripts, piped commands, code-server) and agents |
 | `internal/agent/runtime/agentctl/launcher` | `buildSysProcAttr` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP` |
 | `internal/agent/acpdbg`, `internal/agent/codexdbg` | `configureProcessTree` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED` |
+| `internal/common/winproc` | `HideConsoleWindow` | Caller fields preserved, `HideWindow`, `CREATE_NEW_PROCESS_GROUP` |
+| `internal/agent/agents` | `commandCheckCommand`, `openCodeVersionCommand`, `openCodeNPMCacheCommand` | via `winproc.HideConsoleWindow` |
+| `internal/agent/hostcli` | `execRunnerCommand` (used by `Output` and `Start`) | via `winproc.HideConsoleWindow` |
+| `internal/agent/hostutility` | `hostNPMConfigCommand` | via `winproc.HideConsoleWindow` |
+| `internal/agent/usage` | `antigravityUsageCommand` | `SysProcAttr` from `hideWindowSysProcAttr` |
+| `internal/agent/runtime/routingerr` | `probeCommand` | via `winproc.HideConsoleWindow` |
 
 `prepareGitLifecycleCommand` and `prepareNativeMCPProcess` reject a caller
 that sets `CREATE_NEW_CONSOLE` before the process starts. This preserves the
@@ -88,6 +96,27 @@ parent regression test checks that the managed helper and its default console
 descendant use the same hidden console window; it does not claim that every
 helper exits gracefully.
 
+## Discovery subprocesses
+
+Discovery subprocesses run once and exit. They configure their command with
+`winproc.HideConsoleWindow`, which preserves caller fields, sets `HideWindow`
+and `CREATE_NEW_PROCESS_GROUP`, and never sets `CREATE_NO_WINDOW`. They then use
+the command's existing `Run`, `Output`, `CombinedOutput`, or `Start` path. The
+same reasoning as [console inheritance](#console-inheritance) applies: a `.cmd`
+or `.bat` shim's default console descendant inherits the hidden console.
+
+Setting only `HideWindow` is safe for these one-shot commands because they do
+not read `SysProcAttr` after start and do not attach a Job Object. Their
+context deadline, output capture, and exit-code handling are unchanged.
+
+`AntigravityUsageClient.FetchUsage` runs the Antigravity CLI (`agy`). That CLI
+documents a background self-updater with the environment opt-out
+`AGY_CLI_DISABLE_AUTO_UPDATE=true` (Antigravity CLI troubleshooting). Kandev's
+usage read sets that opt-out on the child environment so the probe does not
+start or leave the updater running. Kandev does not invoke `agy --version`; the
+version surface is the vendor CLI's own, and this design only governs the
+processes Kandev starts.
+
 ## Excluded process paths
 
 - `internal/agentctl/server/shell` prepares the embedded shell for
@@ -101,7 +130,10 @@ helper exits gracefully.
 - Commands started without process attributes inherit the console of the
   process that starts them. These include `gh`, `glab`, external editor
   launches, plugin processes, and the `taskkill` and `tasklist` calls that
-  agentctl and the CLI launcher make.
+  agentctl and the CLI launcher make. Discovery subprocesses are no longer in
+  this list; see [Discovery subprocesses](#discovery-subprocesses).
+- Install and update jobs, interactive login, and the isolated dev or mock
+  instance's decision about whether to execute real vendor CLIs at all.
 
 ## Verification
 
