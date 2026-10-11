@@ -478,7 +478,9 @@ test.describe("mobile: dirty managed clone relocation", () => {
     });
     await fixture.session.recoveryResumeButton().click();
 
-    const recoveryCard = fixture.session.activeChat().getByTestId("session-recovery-card");
+    const recoveryCard = testPage
+      .getByRole("main")
+      .locator('[data-testid="session-recovery-card"]:visible');
     await expect(recoveryCard).toContainText("local changes", { timeout: 30_000 });
     const relocate = recoveryCard.getByTestId("managed-clone-relocate-button");
     await expect(relocate).toBeVisible({ timeout: 30_000 });
