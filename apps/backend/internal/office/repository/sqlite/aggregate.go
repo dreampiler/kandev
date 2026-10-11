@@ -34,7 +34,7 @@ func (r *Repository) QueryWorkspaceTaskBreakdowns(ctx context.Context, workspace
 			SELECT workspace_id, COALESCE(state,'') as state, COUNT(*) as count
 			FROM tasks
 			WHERE workspace_id IN (` + strings.Join(placeholders, ",") + `)
-			  AND is_ephemeral = 0` + andNotAutomationOrigin + `
+			  AND is_ephemeral = 0` + andNotAutomationExecutionOrigin + `
 			  AND archived_at IS NULL
 			GROUP BY workspace_id, state
 		`

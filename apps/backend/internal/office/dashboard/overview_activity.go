@@ -31,6 +31,10 @@ func (s *DashboardService) fillWorkspaceActivity(
 	if err != nil {
 		return err
 	}
+	automation, err := s.overviewReader.ListOverviewAutomationCounts(ctx, ids, since)
+	if err != nil {
+		return err
+	}
 	rows, err := s.overviewReader.ListOverviewFailureBuckets(ctx, ids, since)
 	if err != nil {
 		return err
@@ -49,6 +53,7 @@ func (s *DashboardService) fillWorkspaceActivity(
 			SessionsFailed:  c.SessionsFailed,
 			AgentTurns:      c.AgentTurns,
 			StepMoves:       c.StepMoves,
+			Automation:      automation[entry.WorkspaceID],
 			FailureBuckets:  buckets[entry.WorkspaceID],
 			FailureSamples:  samples[entry.WorkspaceID],
 		}

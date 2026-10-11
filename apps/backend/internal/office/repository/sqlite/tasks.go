@@ -32,6 +32,20 @@ const (
 	andNotAutomationOriginT = " AND " + notAutomationOriginT
 )
 
+// Automation executions are hidden from the human-facing count aggregates by
+// their whole origin set: both the hidden per-run tasks (automation_run) and
+// the visible normal tasks an automation creates (automation_task). Task-list
+// reads keep the run-only predicate above, so a visible automation task is
+// still listed; the counts exclude both.
+const automationExecutionOriginsSQL = `'` + taskmodels.TaskOriginAutomationRun +
+	`','` + taskmodels.TaskOriginAutomationTask + `'`
+
+const (
+	notAutomationExecutionOriginT    = `COALESCE(t.origin, '') NOT IN (` + automationExecutionOriginsSQL + `)`
+	andNotAutomationExecutionOrigin  = ` AND COALESCE(origin, '') NOT IN (` + automationExecutionOriginsSQL + `)`
+	andNotAutomationExecutionOriginT = " AND " + notAutomationExecutionOriginT
+)
+
 // systemTasksJoin is the JOIN onto the workflows table used by every
 // task list/search query that needs to know whether a task lives in a
 // kandev-managed system workflow (coordination, future routines).

@@ -210,6 +210,7 @@ func (r *Repository) ListProjectsWithCounts(
 	                 COALESCE(SUM(CASE WHEN t.state = 'BLOCKED' THEN 1 ELSE 0 END), 0) AS blocked
 	          FROM office_projects p
 	          LEFT JOIN tasks t ON t.project_id = p.id
+	              AND t.is_ephemeral = 0` + andNotAutomationExecutionOriginT + `
 	          WHERE p.id IN (` + strings.Join(placeholders, ",") + `)
 	          GROUP BY p.id`
 	var rows []projectCountsRow

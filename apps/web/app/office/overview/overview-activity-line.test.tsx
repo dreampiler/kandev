@@ -13,6 +13,7 @@ function activity(samples: { kind: string; count: number }[]): OverviewWorkspace
     sessions_failed: 2,
     agent_turns: 0,
     step_moves: 0,
+    automation: 3,
     failure_buckets: [
       { code: "no_response", count: 1 },
       { code: "limit", count: 0 },
@@ -23,8 +24,13 @@ function activity(samples: { kind: string; count: number }[]): OverviewWorkspace
   };
 }
 
-describe("overview activity failure samples", () => {
+describe("overview activity line", () => {
   afterEach(cleanup);
+
+  it("shows the automation figure separately from the human-work totals", () => {
+    render(<OverviewActivityLine activity={activity([])} />);
+    expect(screen.getByTestId("overview-activity-automation").textContent).toBe("3");
+  });
 
   it("shows the agent's own first line verbatim instead of clipping it", () => {
     render(<OverviewActivityLine activity={activity([{ kind: longKind, count: 2 }])} />);
