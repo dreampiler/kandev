@@ -200,7 +200,9 @@ func (wt *WorkspaceTracker) monitorTick(ctx context.Context, lastState *workspac
 		return false
 	}
 	*consecutiveFailures = 0
-	if currentState.changed(*lastState) {
+	changed := currentState.changed(*lastState)
+	noteSlowPollIdle(&wt.slowIdleMonitorTicks, changed)
+	if changed {
 		*lastState = currentState
 		wt.logger.Debug("workspace state changed, updating")
 
