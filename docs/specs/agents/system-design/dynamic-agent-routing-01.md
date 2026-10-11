@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-06
 owners:
   - cfl
 ---
@@ -128,11 +128,6 @@ its work through complete existing agent profiles.
   `dynamic` and display name Dynamic. It cannot be disabled or uninstalled,
   does not expose a CLI command, and is not probed as a concrete inference
   agent. Profiles created under it have kind `dynamic`.
-- The virtual family owns no subprocess. The lifecycle manager's shared
-  registry-selection helper rejects it with `ErrVirtualProfile` for launch,
-  relaunch, workspace promotion, and execution preparation, before command
-  building. Route resolution rejects a candidate whose agent is the dynamic
-  family with the same error.
 - Agent settings can create a dynamic profile with a user-defined name,
   description, icon, and availability scope.
 - A dynamic profile references existing concrete agent profiles. It never
