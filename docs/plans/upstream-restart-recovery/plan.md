@@ -90,9 +90,11 @@ adds `bestPrimarySessionCandidate` in a new `primary_session_candidate.go`.
 `promoteNextPrimaryAfterRemoval` passes `false`. Existing fixtures that set the
 flag through the full-row write switch to `SetSessionPrimary`.
 
-Work order 04 moves the step read in `autoStartTaskForStep` before the
-deferred-launch call and adds `retainDeferredLaunch` to
-`autoStartTaskForLoadedStep`. The other callers pass `false`.
+Work order 04 makes `autoStartTaskForLoadedStep` keep the deferred-launch
+record for `task.moved` into a step without automatic start, which covers both
+`handleTaskMoved` and `autoStartTaskForStep`. `autoStartTaskForStep` defers its
+early deferred-launch call for `task.moved` until the step is known, and keeps
+it when the step read fails.
 
 ## Tests
 
@@ -120,7 +122,7 @@ is added.
 - [x] [Task 01: Keep queued messages after an expired runtime wait](task-01-requeue-expired-runtime-wait.md)
 - [x] [Task 02: Restart interrupted automatic starts](task-02-restart-interrupted-automatic-starts.md)
 - [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md)
-- [ ] [Task 04: Keep the deferred start on an agentless step](task-04-agentless-step-deferred-start.md)
+- [x] [Task 04: Keep the deferred start on an agentless step](task-04-agentless-step-deferred-start.md)
 
 ## Verification results
 

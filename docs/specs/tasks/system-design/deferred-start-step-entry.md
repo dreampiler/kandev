@@ -23,38 +23,38 @@ own deferred records' replay.
 
 ## Components and responsibilities
 
-- `autoStartTaskForStep` in `orchestrator/event_handlers_workflow.go` handles
-  automatic starts for `task.moved` and the watcher.
+- `handleTaskMoved` in `orchestrator/event_handlers_workflow.go` starts a moved
+  task without a session through `autoStartTaskForLoadedStep` with the
+  destination step it already loaded.
+- `autoStartTaskForStep` handles automatic starts that only know the step ID,
+  including `task.moved` fallbacks, dependency resolution, and the watcher.
 - `autoStartTaskForLoadedStep` settles auto-start-on-create tokens, consumes the
   deferred record through `launchDeferredTask`, and checks the step's
   `auto_start_agent` action.
 
 ## Data and contracts
 
-`autoStartTaskForLoadedStep` gains a `retainDeferredLaunch` argument. When it is
-`true`, the function does not call `launchDeferredTask`. Every existing caller
-passes `false`.
+No signature or record format changes. The decision depends only on the event
+name and the loaded step.
 
 ## Control flow
 
 `autoStartTaskForStep` called `launchDeferredTask` before reading the
-destination step, and `autoStartTaskForLoadedStep` called it again before its
-own `auto_start_agent` check. A move into a hold step therefore launched the
-record and removed it.
+destination step, and `autoStartTaskForLoadedStep` called it before its own
+`auto_start_agent` check. A move into a hold step therefore launched the
+record and removed it, on both paths.
 
-`autoStartTaskForStep` now reads the step first:
+`autoStartTaskForLoadedStep` now skips `launchDeferredTask` for `task.moved`
+into a step without `auto_start_agent`. Tokens are still settled, the skipped
+start is logged, and the record stays (`001.1`). An entry into an agent step
+consumes it as before (`001.2`).
 
-- For `task.moved` into a step without `auto_start_agent`, it calls
-  `autoStartTaskForLoadedStep` with `retainDeferredLaunch=true`. Tokens are
-  settled and the skipped start is logged, and the record stays (`001.1`).
-- Otherwise it calls `launchDeferredTask` and then `autoStartTaskForLoadedStep`
-  as before, so the next agent step consumes the record (`001.2`).
-- When the step read fails, it still calls `launchDeferredTask` before it
-  returns, because a failed read is no evidence that the step has no agent
-  (`001.3`).
-
-Queue promotion, dependency resolution, and creation call
-`autoStartTaskForLoadedStep` with `false` and keep their behavior (`001.3`).
+`autoStartTaskForStep` no longer calls `launchDeferredTask` before the step
+read for `task.moved`; `autoStartTaskForLoadedStep` decides instead. When the
+step read fails, it still calls `launchDeferredTask` before it returns,
+because a failed read is no evidence that the step has no agent (`001.3`).
+Other events keep the early call, and queue promotion, dependency resolution,
+and creation keep their behavior (`001.3`).
 
 ## Failure and recovery
 
