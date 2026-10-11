@@ -20,13 +20,13 @@ The agent system owns all of them because it owns candidate selection and route 
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
-| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | candidate, membership under review |
+| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | member, not implemented |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
 
 Staging:
 
 1. Task 01 is implemented first.
-2. Task 02 is a candidate. Its cause and source overlap are assessed here, but it is not implemented until its membership is confirmed.
+2. Task 02 is a confirmed member. It is implemented after Task 01, in its own commit.
 3. Task 04 is added when its prepared change is supplied.
 4. The package is submitted once, after every confirmed member is implemented.
 
@@ -66,6 +66,36 @@ It needs two inputs before any code:
 - the prepared restart-recovery change in Task 04, because a false success result after an interrupted turn may change which post-start failures reach the route.
 
 After that, a maintainer decision on the identity model selects an option.
+Option B is the direction under review. If it goes ahead, it lands as the last, separable commit of this package, framed as a contract proposal.
+That commit amends the decision for this one origin only, records why A and C were not chosen, and normalizes only the fixed producer shapes listed below.
+Its tests must show that other unclassified codes, the 1024-byte and redaction rules, the threshold, and the opt-in default are unchanged.
+`Closes #4325` covers Task 01 only.
+
+#### Producer map
+
+Pre-result dynamic failures reach the failure route from two orchestrator entry points:
+
+- `handleAgentErrorEvent` (`orchestrator/event_handlers_streaming.go:521`) for stream `error` events.
+- `handleAgentFailedLocked` (`orchestrator/event_handlers_agent.go:2942`) for lifecycle agent failures.
+
+Both call `classifyKanbanFailure` (`orchestrator/event_handlers_transient_messages.go:206`).
+For a dynamic attempt with known no-output and no-effect evidence the phase is `prompt_send`.
+A message that matches no rule becomes `agent_runtime_error` through `phase.poststart.unknown` (`agent/runtime/routingerr/routingerr.go:338-345`).
+That failure fails the terminal provider origin's code check and stops for manual recovery.
+
+The `error` events come from these producers:
+
+| Producer | Message shape | Diagnostic |
+| --- | --- | --- |
+| `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Fixed text: peer disconnected before response | None |
+| `agentctl/server/adapter/transport/acp/adapter_prompt.go:256` | Retained ACP application error | Structured provider error |
+| `agentctl/server/adapter/transport/acp/adapter_prompt.go:310` | Cursor retriable provider error | Structured, already classified |
+| `agentctl/server/adapter/transport/acp/adapter_prompt.go:336` | Codex model capacity | Structured, already classified |
+| `agentctl/server/api/agent.go:1193` | Async prompt failure: the error text, or the provider message when one exists | Structured only when a provider error was recognized |
+| `agentctl/server/process/manager.go:3433` | `Agent process exited with code N`, followed by recent stderr lines | None. The stderr suffix varies |
+| `agentctl/server/adapter/transport/codexappserver/adapter.go:649` | Turn failure message from the app server | None |
+
+Line numbers refer to the base commit of this package. The rows without a complete diagnostic are the candidates for the open item.
 
 ## Shared scope
 
