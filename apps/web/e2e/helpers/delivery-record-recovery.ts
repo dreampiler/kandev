@@ -104,7 +104,7 @@ export async function createDeliveryRecordRecoverySession(
         task_id: task.id,
         agent_profile_id: profile.id,
         executor_profile_id: seedData.worktreeExecutorProfileId,
-        intent: "prepare",
+        intent: "start",
         launch_workspace: true,
       })
     : await apiClient.seedTaskSession(task.id, {
@@ -119,6 +119,11 @@ export async function createDeliveryRecordRecoverySession(
         timeout: 60_000,
       })
       .toBe("ready");
+    await expect
+      .poll(async () => (await apiClient.getTaskSession(seeded.session_id)).session.state, {
+        timeout: 30_000,
+      })
+      .toBe("WAITING_FOR_INPUT");
     await apiClient.stopSession({ session_id: seeded.session_id, force: true });
   }
   let action: FixtureAction = "seed";
@@ -325,9 +330,16 @@ async function retryIncompleteRecovery(
   await expect(page.getByTestId("interrupted-session-continuation")).toHaveCount(0);
 }
 
-async function recoverySnapshot(apiClient: ApiClient, taskId: string, sessionId: string) {
-  const { sessions } = await apiClient.listTaskSessions(taskId);
-  const session = sessions.find((candidate) => candidate.id === sessionId);
+async function recoverySession(apiClient: ApiClient, taskId: string, sessionId: string) {
+  const { session } = await apiClient.getTaskSession(sessionId);
+  if (session.id !== sessionId || session.task_id !== taskId) {
+    throw new Error(`task ${taskId} no longer has session ${sessionId}`);
+  }
+  return session;
+}
+
+export async function recoverySnapshot(apiClient: ApiClient, taskId: string, sessionId: string) {
+  const session = await recoverySession(apiClient, taskId, sessionId);
   const recovery = session?.metadata?.agent_delivery_recovery as { revision?: number } | undefined;
   const { messages } = await apiClient.listSessionMessages(sessionId);
   return {
@@ -352,10 +364,9 @@ export async function exerciseLiveDeliveryRecordBlock({
     "Live delivery recovery",
     { unblocked: true },
   );
-  const { sessions } = await apiClient.listTaskSessions(broken.task.id);
-  const initial = sessions.find((candidate) => candidate.id === broken.sessionId);
-  expect(initial?.metadata?.last_agent_error).toBeUndefined();
-  expect(initial?.metadata?.agent_delivery_recovery).toBeUndefined();
+  const initial = await recoverySession(apiClient, broken.task.id, broken.sessionId);
+  expect(initial.metadata?.last_agent_error ?? null).toBeNull();
+  expect(initial.metadata?.agent_delivery_recovery ?? null).toBeNull();
   expect(initial?.session_recovery_blocks ?? []).toEqual([]);
   const traffic = attachGatewayTrafficCapture(page);
   await page.goto(`/t/${broken.task.id}`);
