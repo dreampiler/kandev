@@ -1,7 +1,7 @@
 ---
 id: "01-instance-create-deadline"
 title: "Give instance creation its own deadline"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -129,4 +129,19 @@ None. All work stays sequential.
 
 ## Results
 
-Not started.
+Completed on 2026-10-12. `ControlClient.CreateInstance` sends its request
+through a per-call copy of the shared `http.Client` with
+`createInstanceHTTPTimeout`, 120 seconds. The copy shares the configured
+transport. The shared client keeps its 30-second timeout for every other
+control call.
+
+Before the production change, `TestCreateInstance_UsesLongerHTTPTimeout`
+failed with `deadline had 30s remaining, want close to 2m0s`. It now passes and
+also checks that the shared timeout stays at 30 seconds.
+`TestCreateInstance_CallerDeadlineStillApplies` and
+`TestCreateInstance_SendsControlAuthToken` passed before and after the change,
+confirming that caller deadlines and credentials are preserved.
+
+The package tests, build, vet, specification validation and lint, and the
+documentation coverage preflight passed. The tests used stubbed transports and
+`httptest` servers only.

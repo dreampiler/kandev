@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: planned
+status: complete
 requirements:
   - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001
 system_design:
@@ -84,7 +84,24 @@ agent.
 
 ## Work orders
 
-- [ ] [Task 01: Give instance creation its own deadline](task-01-instance-create-deadline.md)
+- [x] [Task 01: Give instance creation its own deadline](task-01-instance-create-deadline.md)
+
+## Verification results
+
+Implementation checks on 2026-10-12:
+
+- The required red check, `TestCreateInstance_UsesLongerHTTPTimeout`, failed
+  before the production change with `deadline had 30s remaining, want close to
+  2m0s`. The caller-deadline and credential tests passed before and after the
+  change.
+- `go test ./internal/agent/runtime/agentctl/... -count=1`: passed.
+- `go build` and `go vet` for `./internal/agent/runtime/agentctl/...`: passed.
+- `python3 scripts/list-docs.py validate` and
+  `python3 scripts/lint-spec-files.py --all`: passed.
+- Local `validateCoverage` preflight on the changed files: `covered`.
+
+The [work order](task-01-instance-create-deadline.md#results) records the
+details.
 
 ## Risks
 
