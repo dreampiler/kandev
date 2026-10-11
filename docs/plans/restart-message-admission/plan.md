@@ -74,16 +74,30 @@ and are reported rather than dropped:
 - Incident-time build: unconfirmed. The 16:53:17 KST incident preceded the
   17:16 rollback and the 17:18:41 restart, so the later confirmed pre-#3598
   running instance cannot prove the incident's build or cause.
-- Actual end-to-end real-entry outcome: an accepted message producing exactly
-  one actual turn with continuity in an isolated real backend was not run. The
-  restart here is service-level (a real on-disk SQLite repository and a fresh
-  orchestrator `Service`), not a running isolated backend.
+- Actual end-to-end real-entry outcome: attempted, not completed. This session
+  built the base binaries (`make -C apps/backend build`: `kandev.exe`,
+  `agentctl.exe`, `mock-agent.exe`) and launched an isolated real backend on
+  `127.0.0.1:48931` with an isolated home and DB under the system temp root
+  (dev mode plus mock agent), intending to drive the real WebSocket
+  `task.message.add` entry and assert exactly one turn. The attempt reached
+  backend startup; first-boot agent discovery is slow, and the run was aborted
+  before the message entry completed, so no accepted-message-to-turn result
+  exists. `scripts/dev-isolated.ps1` could not be used because its safety guard
+  treats this worktree path (`C:\Users\dream\.kandev\tasks\...`) as an
+  operational Kandev home.
+  Impact: the real-entry outcome remains unproved; the base-side service-level
+  evidence stands.
+  Resume condition and next actor: a follow-on run that starts the isolated
+  backend with an equivalent env (own home, DB, and port), waits for `/ready`,
+  creates a task and session through a real entry, and sends `task.message.add`
+  over WS to assert one turn. No operating DB, process, or credential is used.
 - Two-lineage WO-01 baseline comparison: not performed. No execution on the
   pre-#3598 lineage was run, so no incident reproduction exists on lineage (a).
 
-Source and next actor: this author session for the service-level evidence; a
-follow-on task with an isolated real backend on both lineages for the real-entry
-and two-lineage outcomes. The original work order remains open for those items.
+Source and next actor: this author session for the service-level evidence and
+the recorded attempt; a follow-on task with an isolated real backend on both
+lineages for the real-entry and two-lineage outcomes. The original work order
+remains open for those items.
 
 ## Verification
 
