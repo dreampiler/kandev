@@ -138,6 +138,14 @@ establish a new canonical worktree before this admission check. It holds its own
 environment claim and leaves admission read-only. A failed relocation cannot
 make an invalid checkout ready.
 
+A session binding that loses the materializer election is refused with
+`workspace_preparing`, which names the elected environment. For a shared group
+that environment belongs to another member task. Session preparation waits for
+that environment with the same bounded wait the launch path uses for a creating
+sibling, then retries the binding once. A failed environment, a wait that ends
+without readiness, or an environment owned by the same session keeps the
+original refusal, so no session or workspace is created.
+
 The lifecycle manager retains a defense-in-depth guard: if a repo-backed
 `WorkspaceInfo` reaches execution creation without the validated-environment
 marker and exact selected environment identity, it refuses to create the

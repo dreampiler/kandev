@@ -1585,6 +1585,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+	if errors.Is(createErr, models.ErrWorkspacePreparing) {
+		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.ID, createErr, func() error {
+			return e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+		})
+	}
 	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
 		if createErr == nil {
 			createErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
@@ -2175,6 +2180,35 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		}
 	}
 	return execution, finalizeErr
+}
+
+// retryPreparedSessionAfterWorkspaceReady waits for the environment another
+// session is materializing, then retries the session binding once. Two starts
+// for the same task's first session, or for members of one shared workspace
+// group, race the workspace election; the loser is refused with
+// ErrWorkspacePreparing while the winner materializes. Failing it immediately
+// fails a run whose workspace is about to become ready. The refusal names the
+// elected environment, which for a shared group belongs to another member task.
+// An environment this session owns, or one that fails or never becomes ready,
+// keeps the original refusal.
+func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
+	ctx context.Context,
+	sessionID string,
+	preparingErr error,
+	create func() error,
+) error {
+	var preparing *models.WorkspacePreparingError
+	if !errors.As(preparingErr, &preparing) || preparing.EnvironmentID == "" {
+		return preparingErr
+	}
+	env, err := e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
+	if err != nil || env == nil || env.MaterializationSessionID == sessionID {
+		return preparingErr
+	}
+	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
+		return preparingErr
+	}
+	return create()
 }
 
 func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
