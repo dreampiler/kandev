@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -102,7 +104,7 @@ func (s *DashboardService) GetInboxCount(ctx context.Context, wsID string) (int,
 	if err != nil {
 		return 0, err
 	}
-	errors, err := s.repo.ListActivityEntriesByAction(ctx, wsID, "agent.error", 50)
+	failureCount, err := s.countFailureInboxItems(ctx, wsID)
 	if err != nil {
 		return 0, err
 	}
@@ -114,7 +116,38 @@ func (s *DashboardService) GetInboxCount(ctx context.Context, wsID string) (int,
 	if items, rerr := s.inboxTaskReviewRequests(ctx, wsID, ""); rerr == nil {
 		reviewCount = len(items)
 	}
-	return pending + len(alerts) + len(errors) + permCount + reviewCount, nil
+	return pending + len(alerts) + failureCount + permCount + reviewCount, nil
+}
+
+// countFailureInboxItems counts the computed failed-run and agent-error
+// items the inbox list renders, so the badge and the list cannot disagree
+// about what is unresolved (AC-OFFICE-ERROR-CLEAR-002.5).
+func (s *DashboardService) countFailureInboxItems(ctx context.Context, wsID string) (int, error) {
+	runFailed, err := s.inboxAgentRunFailedItems(ctx, wsID)
+	if err != nil {
+		return 0, err
+	}
+	agentErrors, err := s.inboxAgentErrorItems(ctx, wsID)
+	if err != nil {
+		return 0, err
+	}
+	return len(runFailed) + len(agentErrors), nil
+}
+
+// failureResolvedBySuccess reports whether a later successful run in the
+// same (agent, task) scope clears the failure. A read error is logged and
+// treated as unresolved, so a broken read never hides a failure
+// (AC-OFFICE-ERROR-CLEAR-002.4).
+func (s *DashboardService) failureResolvedBySuccess(
+	ctx context.Context, agentID, taskID string, failedAt time.Time,
+) bool {
+	resolved, err := s.repo.HasSuccessfulRunAfter(ctx, agentID, taskID, failedAt)
+	if err != nil {
+		s.logger.Warn("inbox failure success check failed; keeping failure visible",
+			zap.String("agent_id", agentID), zap.Error(err))
+		return false
+	}
+	return resolved
 }
 
 func (s *DashboardService) inboxApprovalItems(ctx context.Context, wsID string) ([]*models.InboxItem, error) {
@@ -182,23 +215,31 @@ func (s *DashboardService) listBudgetInboxEntries(
 }
 
 func (s *DashboardService) inboxAgentErrorItems(ctx context.Context, wsID string) ([]*models.InboxItem, error) {
-	entries, err := s.repo.ListActivityEntriesByAction(ctx, wsID, "agent.error", 20)
+	rows, err := s.repo.ListAgentErrorInboxRows(ctx, wsID, dashboardUserID)
 	if err != nil {
 		return nil, err
 	}
-	items := make([]*models.InboxItem, 0, len(entries))
-	for _, e := range entries {
-		item := &models.InboxItem{
-			ID:          e.ID,
+	items := make([]*models.InboxItem, 0, len(rows))
+	for _, r := range rows {
+		if s.failureResolvedBySuccess(ctx, r.AgentProfileID, r.TaskID, r.FailedAt) {
+			continue
+		}
+		items = append(items, &models.InboxItem{
+			ID:          r.EntryID,
 			Type:        "agent_error",
 			Title:       "Agent error",
-			Description: e.Details,
+			Description: r.Details,
 			Status:      "active",
-			EntityID:    e.TargetID,
-			EntityType:  string(e.TargetType),
-			CreatedAt:   e.CreatedAt,
-		}
-		items = append(items, item)
+			EntityID:    r.AgentProfileID,
+			EntityType:  "agent",
+			Payload: map[string]interface{}{
+				"agent_profile_id": r.AgentProfileID,
+				"agent_name":       r.AgentName,
+				"run_id":           r.RunID,
+				"task_id":          r.TaskID,
+			},
+			CreatedAt: r.FailedAt,
+		})
 	}
 	return items, nil
 }
@@ -228,6 +269,9 @@ func (s *DashboardService) inboxAgentRunFailedItems(
 	}
 	items := make([]*models.InboxItem, 0, len(rows))
 	for _, r := range rows {
+		if s.failureResolvedBySuccess(ctx, r.AgentProfileID, r.TaskID, r.FailedAt) {
+			continue
+		}
 		items = append(items, &models.InboxItem{
 			ID:          r.ItemID,
 			Type:        inboxAgentRunFailedType,

@@ -243,4 +243,21 @@ describe("AgentsSection error badge", () => {
 
     expect(screen.getByText("3 errors")).toBeTruthy();
   });
+
+  it("counts agent_error items under the same unresolved-failure criterion", () => {
+    state.office.agentProfilesByWorkspaceId = {
+      [defaultWorkspaceId]: [
+        createAgentProfile({ id: "agent-1", workspace: defaultWorkspaceId, name: "Alfa" }),
+      ],
+    };
+    state.office.inboxItemsByWorkspaceId = {
+      [defaultWorkspaceId]: [
+        { type: "agent_run_failed", payload: { agent_profile_id: agentProfileId("agent-1") } },
+        { type: "agent_error", payload: { agent_profile_id: agentProfileId("agent-1") } },
+      ],
+    };
+    render(<AgentsSection collapsed={false} />);
+
+    expect(screen.getByText("2 errors")).toBeTruthy();
+  });
 });

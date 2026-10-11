@@ -32,6 +32,20 @@ func (r *Repository) CreateActivityEntry(ctx context.Context, entry *models.Acti
 	return err
 }
 
+// GetActivityEntry fetches a single activity entry by id. Returns
+// sql.ErrNoRows when no entry exists.
+func (r *Repository) GetActivityEntry(
+	ctx context.Context, id string,
+) (*models.ActivityEntry, error) {
+	var entry models.ActivityEntry
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT * FROM office_activity_log WHERE id = ?`), id).StructScan(&entry)
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
+}
+
 // ListTasksTouchedByRun returns the distinct task ids the agent
 // acted on during a given run, sourced from the activity log via the
 // run_id column. Used by the run detail page's Tasks Touched table.

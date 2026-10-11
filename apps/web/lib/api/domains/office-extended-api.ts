@@ -708,10 +708,11 @@ export * from "./office-routing-api";
  * per-task entry and re-queues a run for that (task, agent). For
  * `agent_paused_after_failures`, unpauses the agent, resets the
  * counter, and re-queues runs for all affected tasks whose current
- * assignee is still this agent.
+ * assignee is still this agent. For `agent_error`, dismisses the
+ * single error entry without re-queuing anything.
  */
 export function dismissInboxItem(
-  kind: "agent_run_failed" | "agent_paused_after_failures",
+  kind: "agent_run_failed" | "agent_paused_after_failures" | "agent_error",
   itemId: string,
   options?: ApiRequestOptions,
 ) {
