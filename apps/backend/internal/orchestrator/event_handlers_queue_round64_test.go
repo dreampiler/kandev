@@ -158,6 +158,72 @@ func TestQueuedMessageExecutionError_RequeuesSeam3Refusal(t *testing.T) {
 	}
 }
 
+// reserveQueuedExecutionErrorMessage queues and reserves one agent message so a
+// test can hand it to handleQueuedMessageExecutionError like a failed dispatch.
+func reserveQueuedExecutionErrorMessage(
+	t *testing.T, queue *messagequeue.Service, sessionID, taskID string,
+) (*messagequeue.QueuedMessage, *messagequeue.QueuedMessage) {
+	t.Helper()
+	ctx := context.Background()
+	queued, err := queue.QueueMessage(ctx, sessionID, taskID, "keep me", "", messagequeue.QueuedByAgent, false, nil)
+	if err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+	reserved, dispatched, autoRun := queue.ReserveQueuedWithAutoRun(ctx, queued.SessionID)
+	if !autoRun || !dispatched || reserved == nil {
+		t.Fatalf("reserve message: auto_run=%t dispatched=%t message=%v", autoRun, dispatched, reserved)
+	}
+	return queued, reserved
+}
+
+// AC-TASKS-RESUME-PROMPT-QUEUE-002.1: a dispatch that failed because a bounded
+// wait for the session runtime expired keeps the message at the queue head.
+func TestQueuedMessageExecutionError_RequeuesExpiredRuntimeWait(t *testing.T) {
+	ctx := context.Background()
+	repo := messagequeue.NewMemoryRepository()
+	queue := messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger())
+	svc := &Service{messageQueue: queue, logger: testLogger()}
+	queued, reserved := reserveQueuedExecutionErrorMessage(t, queue, "session-wait-expired", "task-wait-expired")
+
+	// The same classification promptTask applies when a joined resume attempt
+	// outlives its wait.
+	waitErr := svc.classifyEnsureSessionRunningFailureForPrompt(
+		ctx, queued.TaskID, queued.SessionID, "keep me", "", false, nil, false,
+		promptTaskOptions{}, context.DeadlineExceeded,
+	)
+	svc.handleQueuedMessageExecutionError(ctx, queued.SessionID, reserved, nil, false, false, waitErr)
+
+	entries, err := repo.ListBySession(ctx, queued.SessionID)
+	if err != nil {
+		t.Fatalf("list requeued messages: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != queued.ID || entries[0].IsReservedInFlight() {
+		t.Fatalf("expired runtime wait left %d queue entries, want one unreserved original message", len(entries))
+	}
+}
+
+// AC-TASKS-RESUME-PROMPT-QUEUE-002.3: a failure that is not retryable keeps its
+// existing disposition and does not stay at the queue head.
+func TestQueuedMessageExecutionError_DropsNonRetryableFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := messagequeue.NewMemoryRepository()
+	queue := messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger())
+	svc := &Service{messageQueue: queue, logger: testLogger()}
+	queued, reserved := reserveQueuedExecutionErrorMessage(t, queue, "session-permanent", "task-permanent")
+
+	svc.handleQueuedMessageExecutionError(
+		ctx, queued.SessionID, reserved, nil, false, false, errors.New("provider rejected the prompt"),
+	)
+
+	entries, err := repo.ListBySession(ctx, queued.SessionID)
+	if err != nil {
+		t.Fatalf("list queued messages: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("non-retryable failure left %d queue entries, want none", len(entries))
+	}
+}
+
 func TestReuseSessionRestoresPrimaryWhenQueueTransferFails(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -1,7 +1,7 @@
 ---
 id: "01-requeue-expired-runtime-wait"
 title: "Keep queued messages after an expired runtime wait"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -56,5 +56,11 @@ From the repository root:
 
 ## Results
 
-Not implemented yet. On the current main branch, a probe with this fixture
-leaves zero queue entries after the failure.
+- RED before the fix: `TestQueuedMessageExecutionError_RequeuesExpiredRuntimeWait`
+  failed with "expired runtime wait left 0 queue entries".
+- GREEN after the fix: both new tests and
+  `TestQueuedMessageExecutionError_RequeuesSeam3Refusal` pass.
+- The broader `-run 'Queued|Queue|RuntimeUnavailable|Deadline'` group passes
+  except `TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt`,
+  which also fails without this change on Windows because the attachment path
+  uses `\` separators.
