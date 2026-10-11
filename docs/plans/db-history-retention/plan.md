@@ -229,3 +229,56 @@ Verification run:
   and `go vet` -> clean; `gofmt -l` -> clean.
 - `pnpm run i18n:check`, `pnpm run typecheck`, `pnpm run lint` -> pass.
 - `pnpm exec vitest run components/settings/system` -> 34 files, 309 tests pass.
+
+## Isolated actual API readback
+
+Run outside the operational home because `scripts/dev-isolated.ps1:111` treats
+`%USERPROFILE%\.kandev` as an operational root and refuses the assigned worktree
+(which lives under it). A throwaway worktree at the same commit was created at
+`D:\260720_Ai_Workspace_Tools\kandev-wt-w099`, the instance was launched there
+with the canonical script, and the worktree was removed afterward.
+
+Commands (from `D:\260720_Ai_Workspace_Tools\kandev-wt-w099`):
+
+```powershell
+git worktree add --detach D:\260720_Ai_Workspace_Tools\kandev-wt-w099 feature/kandev-w-099-kandev-m4a
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dev-isolated.ps1 -Timeout 150
+# backend http://127.0.0.1:48429, KANDEV_HOME C:\Users\dream\.kandev-test-48429-c02d0c1e
+```
+
+Effective policy read from the real API (`GET /api/v1/system/database/archived-data-retention`)
+before any save: `enabled=false, archived_age=14, cleanup_age=7, supported=true`.
+This records the actual effective message window as 14 days; the package's
+saved-record preservation is an operator-input distinction, not the outcome.
+
+After seeding one finished, one archived, and one live task (a 15-day-inactive
+CONVERSATION each with an 8 KB tool payload) via the isolated DB, the run was
+driven entirely through the HTTP API:
+
+```powershell
+# PUT base {enabled:true, archived_age:{days:14}, cleanup_age:{days:7}, revision:0, backup_choice:"skip"}
+# poll GET base until last_run is present
+```
+
+Result (`last_run`): `kind=cleanup, state=succeeded, complete=true`,
+`messages: rows=2, eligible=2, reduced=2, bytes=15656, total_bytes=16190`,
+`archived_cutoff=<now-14d>`, `cleanup_cutoff=<now-7d>`, `next_due_at=<+24h>`.
+
+DB readback after the pass:
+
+| message | before | after | `payload_retention` | payload present |
+| --- | --- | --- | --- | --- |
+| `m-fin` (finished) | 8095 B | 267 B | yes | no |
+| `m-arch` (archived) | 8095 B | 267 B | yes | no |
+| `m-live` (active) | 8095 B | 8095 B | no | yes |
+
+The pass reduced the finished and archived conversations through the real API,
+reported a stored-byte reduction, and left the active task untouched.
+
+Teardown: `kandev-kill.ps1 -Pidfile <pidfile> -Yes` stopped the backend; the
+`kandev-test-48429-...\AppData\Local\hermes\bin` entry the run added was removed
+from the user PATH; `git worktree remove` returned the throwaway worktree.
+
+This is the code-level/original outcome. The installed readback (an existing
+saved record whose window is set to 14 days, then a pass on real data) is a
+separate operator deployment input.
