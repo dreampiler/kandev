@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/common/winproc"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -202,13 +203,22 @@ func (a *OpenCodeACP) detectManagedRuntime(
 	}, nil
 }
 
+// openCodeNPMCacheCommand builds the npm cache-root probe used by managed
+// OpenCode runtime discovery. On Windows it starts without a visible console
+// window.
+func openCodeNPMCacheCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "npm", "config", "get", "cache")
+	winproc.HideConsoleWindow(cmd)
+	return cmd
+}
+
 func openCodeManagedRuntimeCached(ctx context.Context, spec ManagedNPMRuntimeSpec, version string) (bool, error) {
 	if _, err := exec.LookPath("npm"); err != nil {
 		return false, nil
 	}
 	cacheCtx, cancel := context.WithTimeout(ctx, commandCheckTimeout)
 	defer cancel()
-	output, err := exec.CommandContext(cacheCtx, "npm", "config", "get", "cache").Output()
+	output, err := openCodeNPMCacheCommand(cacheCtx).Output()
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, ctx.Err()

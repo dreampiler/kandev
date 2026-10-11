@@ -30,6 +30,10 @@ console descendants inherit the hidden console.
   agentctl, an agent, script, utility, or code-server editor process started
   by agentctl, a Cursor native MCP command, or the agent process tree of the
   ACP and Codex debug tools.
+- **Discovery subprocess:** A one-shot console process that the backend
+  starts to read a vendor CLI's version, capability, model catalogue, or
+  usage, outside the managed-helper lifecycle. It runs and exits; Kandev
+  observes only its output and exit code.
 - **Console window:** A terminal window that Windows shows on the desktop for
   a console process.
 
@@ -59,12 +63,49 @@ console windows over my work.
   helper runs without a visible console window, it shall keep a console handle
   so that default console descendants inherit the hidden console.
 
+### REQ-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002: Start discovery subprocesses without console windows
+
+**Intent:** Periodic and on-demand discovery must not open console windows on
+the user's desktop, because it runs without any user action. A discovery
+subprocess that also launches a vendor self-updater must not leave the updater
+running from a Kandev probe.
+
+**User story:** As a Windows user, I want Kandev's version, capability, model,
+and usage reads to stay off the screen, so discovery does not flash or stack
+console windows over my work.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002.1:** When the backend starts a
+  discovery subprocess on Windows, the system shall start it without a console
+  window, even when the backend process has no console.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002.2:** When a discovery subprocess
+  runs without a visible console window, the system shall still pass its input,
+  capture its stdout/stderr, and observe its exit code.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002.3:** Cancelling or timing out a
+  discovery subprocess shall keep its existing behavior: context cancellation
+  and bounded timeouts are unchanged, and a failed or timed-out check is still
+  reported as unavailable or inconclusive exactly as before.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002.4:** A hidden discovery
+  subprocess shall keep a console handle so a `.cmd` or `.bat` shim's default
+  console descendants inherit the hidden console.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-002.5:** A discovery subprocess for a
+  vendor CLI that documents an environment opt-out from its background
+  self-updater shall run with that opt-out set, so the probe does not start or
+  leave a vendor updater running.
+
 ## Out of scope
 
 - Interactive terminals that run on a pseudo console.
 - Processes that the CLI launcher supervises. They keep the launcher's console.
-- Other commands that Kandev starts outside the managed helper lifecycle,
-  such as the `gh` and `glab` helpers, external editor launches, and plugin
-  processes.
+- Install and update jobs, interactive login, and processes the CLI launcher
+  supervises.
+- Background commands that Kandev starts with no process attributes and that
+  are not discovery subprocesses, such as the `gh` and `glab` helpers, external
+  editor launches, and plugin processes.
+- Whether an isolated dev or mock Kandev instance executes real vendor CLIs at
+  all. That is a discovery-side-effect contract, owned separately; this
+  requirement only governs the console behavior of the subprocesses that are
+  started.
 - The desktop shell's own console and how the desktop shell starts the
   launcher.

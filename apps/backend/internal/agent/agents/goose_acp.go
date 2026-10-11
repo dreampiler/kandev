@@ -97,7 +97,7 @@ func detectGoose(ctx context.Context) (bool, string, error) {
 
 	checkCtx, cancel := context.WithTimeout(ctx, commandCheckTimeout)
 	defer cancel()
-	output, err := exec.CommandContext(checkCtx, path, "acp", "--help").CombinedOutput()
+	output, err := commandCheckCommand(checkCtx, path, []string{"acp", "--help"}).CombinedOutput()
 	if err != nil {
 		if ctx.Err() != nil {
 			return false, "", ctx.Err()

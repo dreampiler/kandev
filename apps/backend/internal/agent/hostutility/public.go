@@ -17,6 +17,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/acpprovider"
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 // ExecuteProfilePrompt resolves a complete profile snapshot at call start
@@ -355,7 +356,7 @@ func (m *Manager) ProbeIsolatedWithCommand(
 }
 
 func hostNPMConfig(ctx context.Context, key string) (string, error) {
-	command := exec.CommandContext(ctx, "npm", "config", "get", key)
+	command := hostNPMConfigCommand(ctx, key)
 	output, err := command.Output()
 	if err != nil {
 		return "", err
@@ -365,6 +366,14 @@ func hostNPMConfig(ctx context.Context, key string) (string, error) {
 		return "", fmt.Errorf("npm returned an empty %s path", key)
 	}
 	return value, nil
+}
+
+// hostNPMConfigCommand builds the npm config probe. On Windows it starts
+// without a visible console window.
+func hostNPMConfigCommand(ctx context.Context, key string) *exec.Cmd {
+	command := exec.CommandContext(ctx, "npm", "config", "get", key)
+	winproc.HideConsoleWindow(command)
+	return command
 }
 
 // AcquireRuntimeMaintenance waits for any in-flight utility process for this
