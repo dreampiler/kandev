@@ -1,7 +1,7 @@
 ---
 id: "01-drop-invalid-launch-replays"
 title: "Drop invalid launch replays"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -68,4 +68,12 @@ cd apps/backend && go test ./internal/office/service/ -run 'HandleRunFailure|Ret
 
 ## Results
 
-Not implemented yet.
+- `ceiling_replay_launch_invalid_test.go` replays a queued workflow start whose
+  launch fails `validate agent command:`. Before the change the first sweep
+  kept the record for the next sweep; now it is dropped, the second sweep does
+  not launch, and the task has one failed session.
+- The same file keeps a transient launch failure and checks that the warning
+  carries the error and detail. Before the change the warning had no error.
+- `retry_validation_failure_test.go` escalates an Office run whose launch fails
+  command validation. Before the change the run was re-queued with a retry.
+- Existing replay tests now read the outcome from `ceilingReplayResult`.
