@@ -119,7 +119,7 @@ Do not change old duplicate semantics accidentally when replacing byte compariso
 Authenticate instance/environment owner generation, session, incarnation, registered harness and exact stream before checkpoints. Historical replay follows owner policy without runtime mutation.
 Pass execution/owner/session/incarnation/harness/stream/submission into shared SQL admission. Payloads/hashes confer no authority. Keep submission owner generation/hash.
 
-Connect updates before ACP initialization for MCP; buffer retained frames through capability negotiation. Generation-one bootstrap waits for SQL generation. Both waits are cancellable and capped at thirty seconds.
+Connect updates before ACP for MCP. Buffer retained frames until negotiation and SQL commit for generation one or an explicit interrupted-native successor. Cancellable waits cap at thirty seconds.
 Publish native identity before configuration; check owners before receipt, projection or ACK.
 Admit the final handover prompt in SQL and bind its initial ID to the owner/generation; failures block dispatch. Retries use fresh immutable IDs.
 Persist the Kandev turn and task/session/execution/incarnation/harness/stream/submission before dispatch. Recovery requires matching SQL and peer proof; mismatches block adoption, absent bindings never invent a turn.

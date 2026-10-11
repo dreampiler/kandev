@@ -564,7 +564,7 @@ func deliveryHarnessGeneration(
 	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
 ) (*models.HarnessSessionGeneration, error) {
 	if execution == nil || !execution.deliveryBootstrap.Load() {
-		return reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
+		return awaitSilentRestoreGeneration(ctx, execution, reader, sessionID, incarnationID)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
