@@ -251,17 +251,22 @@ type OverviewFailureBucket struct {
 }
 
 // OverviewWorkspaceActivity is the project-statistics block for one workspace:
-// five period totals plus the failure breakdown the owner asked to be able to
-// expand. WindowHours is the period actually applied, so the client labels the
-// numbers with the backend's answer rather than its own guess.
+// five period totals over human work, a separate automation total, and the
+// failure breakdown the owner asked to be able to expand. WindowHours is the
+// period actually applied, so the client labels the numbers with the backend's
+// answer rather than its own guess.
 type OverviewWorkspaceActivity struct {
-	WindowHours     int                     `json:"window_hours"`
-	Completed       int                     `json:"completed"`
-	SessionsStarted int                     `json:"sessions_started"`
-	SessionsFailed  int                     `json:"sessions_failed"`
-	AgentTurns      int                     `json:"agent_turns"`
-	StepMoves       int                     `json:"step_moves"`
-	FailureBuckets  []OverviewFailureBucket `json:"failure_buckets,omitempty"`
+	WindowHours     int `json:"window_hours"`
+	Completed       int `json:"completed"`
+	SessionsStarted int `json:"sessions_started"`
+	SessionsFailed  int `json:"sessions_failed"`
+	AgentTurns      int `json:"agent_turns"`
+	StepMoves       int `json:"step_moves"`
+	// Automation is the separate figure the card shows beside its default
+	// totals: automation-execution tasks created in the same window. It is kept
+	// out of the totals above so the default figures read as human work.
+	Automation     int                     `json:"automation"`
+	FailureBuckets []OverviewFailureBucket `json:"failure_buckets,omitempty"`
 	// FailureSamples carries the agent's own first-line errors behind the
 	// buckets, the same verbatim text the model card already shows, so the
 	// breakdown answers "why" with something more specific than the bucket.

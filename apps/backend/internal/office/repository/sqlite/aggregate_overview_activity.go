@@ -92,7 +92,7 @@ func (r *Repository) ListOverviewWorkspaceActivity(
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
 		WHERE t.workspace_id IN (%s)
-		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		  AND t.is_ephemeral = 0`+andNotAutomationExecutionOriginT+`
 		  AND s.started_at >= ?
 		GROUP BY t.workspace_id`, since)
 	if err != nil {
@@ -110,7 +110,7 @@ func (r *Repository) ListOverviewWorkspaceActivity(
 		FROM task_session_turns tn
 		JOIN tasks t ON t.id = tn.task_id
 		WHERE t.workspace_id IN (%s)
-		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		  AND t.is_ephemeral = 0`+andNotAutomationExecutionOriginT+`
 		  AND tn.started_at >= ?
 		GROUP BY t.workspace_id`, since)
 	if err != nil {
@@ -127,7 +127,7 @@ func (r *Repository) ListOverviewWorkspaceActivity(
 		FROM task_step_transitions tr
 		JOIN tasks t ON t.id = tr.task_id
 		WHERE t.workspace_id IN (%s)
-		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		  AND t.is_ephemeral = 0`+andNotAutomationExecutionOriginT+`
 		  AND COALESCE(tr.trigger, '') <> 'task_created'
 		  AND tr.occurred_at >= ?
 		GROUP BY t.workspace_id`, since)
@@ -146,7 +146,7 @@ func (r *Repository) ListOverviewWorkspaceActivity(
 		JOIN task_step_transitions tr ON tr.task_id = t.id
 		JOIN workflow_steps ws ON ws.id = tr.to_workflow_step_id
 		WHERE t.workspace_id IN (%s)
-		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		  AND t.is_ephemeral = 0`+andNotAutomationExecutionOriginT+`
 		  AND t.state = 'COMPLETED'
 		  AND ws.complete_task_on_enter = 1
 		  AND tr.occurred_at >= ?
@@ -159,6 +159,40 @@ func (r *Repository) ListOverviewWorkspaceActivity(
 		c.WorkspaceID = row.WorkspaceID
 		c.Completed = row.Count
 		out[row.WorkspaceID] = c
+	}
+	return out, nil
+}
+
+// ListOverviewAutomationCounts returns, per workspace, how many
+// automation-execution tasks were created since `since`. It is the separate
+// figure a card shows beside its default task counts, read over the same
+// workspace set and window the counts beside it use, so the split is honest
+// about the same scope.
+func (r *Repository) ListOverviewAutomationCounts(
+	ctx context.Context, workspaceIDs []string, since time.Time,
+) (map[string]int, error) {
+	out := make(map[string]int, len(workspaceIDs))
+	for _, batch := range workspaceIDBatches(workspaceIDs) {
+		placeholders, args := placeholdersFor(batch)
+		args = append(args, since)
+		var rows []struct {
+			WorkspaceID string `db:"workspace_id"`
+			Count       int    `db:"cnt"`
+		}
+		query := `
+			SELECT workspace_id, COUNT(*) AS cnt
+			FROM tasks
+			WHERE workspace_id IN (` + strings.Join(placeholders, ",") + `)
+			  AND is_ephemeral = 0
+			  AND COALESCE(origin, '') IN (` + automationExecutionOriginsSQL + `)
+			  AND created_at >= ?
+			GROUP BY workspace_id`
+		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			out[row.WorkspaceID] = row.Count
+		}
 	}
 	return out, nil
 }
@@ -187,7 +221,7 @@ func (r *Repository) ListOverviewFailureBuckets(
 		FROM task_sessions s
 		JOIN tasks t ON t.id = s.task_id
 		WHERE t.workspace_id IN (%s)
-		  AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		  AND t.is_ephemeral = 0`+andNotAutomationExecutionOriginT+`
 		  AND s.state = 'FAILED'
 		  AND s.started_at >= ?
 		GROUP BY t.workspace_id, bucket, SUBSTR(COALESCE(s.error_message, ''), 1, 300)`, since)

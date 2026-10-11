@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/db/dialect"
-	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // Read-only overview queries for the multi-workspace aggregate
@@ -168,7 +167,7 @@ func (r *Repository) ListOverviewOpenTasks(ctx context.Context, workspaceIDs []s
 			FROM tasks t
 			LEFT JOIN workflow_steps ws ON ws.id = t.workflow_step_id
 			WHERE t.workspace_id IN (` + strings.Join(placeholders, ",") + `)
-			  AND t.is_ephemeral = 0` + andNotAutomationOrigin + `
+			  AND t.is_ephemeral = 0` + andNotAutomationExecutionOrigin + `
 			  AND t.archived_at IS NULL
 			  AND COALESCE(t.state, '') NOT IN ('COMPLETED', 'CANCELLED')
 		`
@@ -365,7 +364,7 @@ func (r *Repository) ListOverviewCompleted(
 				GROUP BY tr.task_id
 			) completed ON completed.task_id = t.id
 			WHERE t.workspace_id IN (` + strings.Join(placeholders, ",") + `)
-			  AND t.is_ephemeral = 0` + andNotAutomationOrigin + `
+			  AND t.is_ephemeral = 0` + andNotAutomationExecutionOrigin + `
 			  AND t.state = 'COMPLETED'
 		`
 		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
@@ -491,8 +490,10 @@ func (r *Repository) ListOverviewPendingApprovals(
 	return out, nil
 }
 
-// ListOverviewAutomationTasks returns automation-created tasks since `since`,
-// newest first, up to limit.
+// ListOverviewAutomationTasks returns the automation-execution tasks created
+// since `since`, newest first, up to limit. Both origins count: the hidden
+// per-run tasks (automation_run) and the visible normal tasks an automation
+// creates (automation_task), matching the origin set the count aggregates hide.
 func (r *Repository) ListOverviewAutomationTasks(
 	ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 ) ([]*OverviewAutomationTaskRow, error) {
@@ -505,7 +506,7 @@ func (r *Repository) ListOverviewAutomationTasks(
 			COALESCE(` + dialect.JSONExtract(r.ro.DriverName(), "metadata", "automation_id") + `, '') AS automation_id
 			FROM tasks
 			WHERE workspace_id IN (` + strings.Join(placeholders, ",") + `)
-			  AND COALESCE(origin, '') = '` + taskmodels.TaskOriginAutomationRun + `' AND created_at >= ?
+			  AND COALESCE(origin, '') IN (` + automationExecutionOriginsSQL + `) AND created_at >= ?
 			ORDER BY created_at DESC LIMIT ?`
 		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
 			return nil, err
@@ -552,7 +553,7 @@ func (r *Repository) ListOverviewCreatedTasks(
 			FROM tasks t
 			LEFT JOIN tasks p ON p.id = t.parent_id
 			WHERE t.workspace_id IN (` + strings.Join(placeholders, ",") + `)
-			  AND t.is_ephemeral = 0` + andNotAutomationOriginT + `
+			  AND t.is_ephemeral = 0` + andNotAutomationExecutionOriginT + `
 			  AND t.created_at >= ?
 			ORDER BY t.created_at DESC LIMIT ?`
 		if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), args...); err != nil {
