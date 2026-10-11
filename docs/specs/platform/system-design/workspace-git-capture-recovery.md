@@ -50,7 +50,8 @@ The basic retry does not reset the enrichment correction budget or create a seco
 Each attempt reads comparison evidence twice: once while capturing and once while validating.
 Each read resolves the base, ahead/behind, remote-head, and comparison references to commit object IDs.
 Apply the existing reference allowlist first; an empty or unsafe reference yields an empty value without running Git.
-Resolve the remaining distinct references with one `git rev-parse <ref>^{commit}...` process.
+A single remaining reference keeps the existing `rev-parse --verify` call.
+Resolve two or more distinct references with one `git rev-parse <ref>^{commit}...` process.
 Accept the batch only when Git exits zero and returns exactly one object-ID line per argument.
 Otherwise resolve each reference with the existing `rev-parse --verify` path.
 That fallback also covers a missing reference, a truncated result, and an echoed argument that only looks like an object ID.
