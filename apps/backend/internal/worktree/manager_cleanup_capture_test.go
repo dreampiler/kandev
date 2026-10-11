@@ -430,3 +430,49 @@ func newCaptureTestManager(t *testing.T) *Manager {
 	}
 	return mgr
 }
+
+// A checkout directory that survives without its .git file must not let Git
+// discover an ancestor repository: the archive identity comes from the
+// worktree's branch, not from whatever repository encloses the directory.
+func TestCaptureCleanupHeadOIDs_CheckoutWithoutGitMetadataUsesBranch(t *testing.T) {
+	repoPath := initGitRepoForWorktreeTest(t)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	branch := "feature/orphaned-checkout"
+	runGit(t, repoPath, "branch", branch, "main")
+	mainOID := strings.TrimSpace(runGit(t, repoPath, "rev-parse", "main"))
+
+	enclosing := initGitRepoForWorktreeTest(t)
+	if err := os.WriteFile(filepath.Join(enclosing, "other.txt"), []byte("other\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, enclosing, "add", "other.txt")
+	runGit(t, enclosing, "commit", "-m", "enclosing repository commit")
+	enclosingOID := strings.TrimSpace(runGit(t, enclosing, "rev-parse", "HEAD"))
+	if enclosingOID == mainOID {
+		t.Fatal("test repositories must have distinct HEADs")
+	}
+
+	checkout := filepath.Join(enclosing, "orphaned-checkout")
+	if err := os.MkdirAll(checkout, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, "work.txt"), []byte("work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := mgr.CaptureCleanupHeadOIDs(context.Background(), []*Worktree{{
+		ID:             "orphaned",
+		RepositoryPath: repoPath,
+		Path:           checkout,
+		Branch:         branch,
+	}})
+	if err != nil {
+		t.Fatalf("CaptureCleanupHeadOIDs() unexpected error: %v", err)
+	}
+	if got["orphaned"] != mainOID {
+		t.Fatalf("identity = %q, want the branch OID %q (enclosing repository HEAD is %q)", got["orphaned"], mainOID, enclosingOID)
+	}
+}
