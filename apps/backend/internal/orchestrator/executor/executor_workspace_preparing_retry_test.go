@@ -17,8 +17,9 @@ import (
 // refused as a lost election and later calls succeed.
 type workspacePreparingRepo struct {
 	*mockRepository
-	onBinding func(call int) error
-	calls     int
+	onBinding      func(call int) error
+	calls          int
+	sharedGroupIDs []string
 }
 
 func (r *workspacePreparingRepo) CreateTaskSessionWithWorkspaceBinding(
@@ -33,6 +34,13 @@ func (r *workspacePreparingRepo) CreateTaskSessionWithWorkspaceBinding(
 	return r.CreateTaskSession(ctx, session)
 }
 
+func (r *workspacePreparingRepo) CreateTaskSessionWithSharedGroupWorkspaceBinding(
+	ctx context.Context, session *models.TaskSession, candidate *models.TaskEnvironment, groupID string,
+) error {
+	r.sharedGroupIDs = append(r.sharedGroupIDs, groupID)
+	return r.CreateTaskSessionWithWorkspaceBinding(ctx, session, candidate)
+}
+
 func preparingRefusal(environmentID string) error {
 	return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the workspace launch completes"}
 }
@@ -42,13 +50,21 @@ func preparingRefusal(environmentID string) error {
 // the run. The shared-group case uses an environment owned by another member
 // task, which a lookup by the launching task would not find.
 func TestPrepareSessionRetriesAfterWorkspacePreparing(t *testing.T) {
+	sharedGroup := map[string]interface{}{
+		"workspace": map[string]interface{}{"mode": "shared_group", "group_id": "group-retry"},
+	}
 	for _, tc := range []struct {
-		name     string
-		envTask  string
-		loseTask string
+		name       string
+		envTask    string
+		loseTask   string
+		metadata   map[string]interface{}
+		wantGroups []string
 	}{
 		{name: "same task", envTask: "task-retry", loseTask: "task-retry"},
-		{name: "shared group member", envTask: "task-group-winner", loseTask: "task-group-loser"},
+		{
+			name: "shared group member", envTask: "task-group-winner", loseTask: "task-group-loser",
+			metadata: sharedGroup, wantGroups: []string{"group-retry", "group-retry"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &workspacePreparingRepo{mockRepository: newMockRepository()}
@@ -76,12 +92,13 @@ func TestPrepareSessionRetriesAfterWorkspacePreparing(t *testing.T) {
 			}
 
 			exec := newTestExecutor(t, &mockAgentManager{}, repo)
-			task := &v1.Task{ID: tc.loseTask, WorkspaceID: "ws-retry", Title: "t", Description: "d"}
+			task := &v1.Task{ID: tc.loseTask, WorkspaceID: "ws-retry", Title: "t", Description: "d", Metadata: tc.metadata}
 
 			sessionID, err := exec.PrepareSession(context.Background(), task, "profile-1", "executor-1", "", "")
 			require.NoError(t, err)
 			require.NotEmpty(t, sessionID)
 			require.Equal(t, 2, repo.calls, "the binding must be retried once after the workspace becomes ready")
+			require.Equal(t, tc.wantGroups, repo.sharedGroupIDs, "a shared-group member must bind through the group binder")
 			require.GreaterOrEqual(t, lookups, 2, "the retry must wait for the environment to leave creating")
 			require.NotNil(t, repo.sessions[sessionID])
 		})
@@ -177,4 +194,51 @@ func TestRetryPreparedSessionAfterWorkspaceReadyTimesOut(t *testing.T) {
 	)
 	require.ErrorIs(t, err, models.ErrWorkspacePreparing)
 	require.False(t, created, "a workspace that never becomes ready must not be retried")
+}
+
+// Both starts saw no session and planned to become the task's first, primary
+// session. The election winner creates that session while the loser waits, so
+// the loser's retry must leave the winner primary and must not claim the
+// first-session origin.
+func TestPrepareSessionRetryKeepsTheWinnerPrimary(t *testing.T) {
+	repo := &workspacePreparingRepo{mockRepository: newMockRepository()}
+	env := &models.TaskEnvironment{
+		ID:                       "env-primary",
+		TaskID:                   "task-primary",
+		Status:                   models.TaskEnvironmentStatusCreating,
+		MaterializationSessionID: "winner-session",
+	}
+	repo.taskEnvironments[env.ID] = env
+	winner := &models.TaskSession{
+		ID: "winner-session", TaskID: "task-primary", IsPrimary: true,
+		Metadata: map[string]interface{}{models.SessionMetaKeyOrigin: models.SessionOriginTaskInitial},
+	}
+	lookups := 0
+	repo.getTaskEnvironmentFunc = func(ctx context.Context, id string) (*models.TaskEnvironment, error) {
+		lookups++
+		if lookups == 2 {
+			require.NoError(t, repo.CreateTaskSession(ctx, winner))
+			env.Status = models.TaskEnvironmentStatusReady
+		}
+		return env, nil
+	}
+	repo.onBinding = func(call int) error {
+		if call == 1 {
+			return preparingRefusal(env.ID)
+		}
+		return nil
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{ID: "task-primary", WorkspaceID: "ws-primary", Title: "t", Description: "d"}
+
+	sessionID, err := exec.PrepareSession(context.Background(), task, "profile-1", "executor-1", "", "")
+	require.NoError(t, err)
+	loser := repo.sessions[sessionID]
+	require.NotNil(t, loser)
+	require.False(t, loser.IsPrimary, "the retried session must not take the primary flag")
+	require.True(t, repo.sessions[winner.ID].IsPrimary, "the winner must stay primary")
+	require.NotContains(t, repo.setSessionPrimaryCalls, sessionID)
+	_, hasOrigin := loser.Metadata[models.SessionMetaKeyOrigin]
+	require.False(t, hasOrigin, "the retried session must not claim the first-session origin")
 }

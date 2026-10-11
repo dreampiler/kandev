@@ -42,15 +42,18 @@ environment being materialized. The repository returns it from the task-local
 and shared-group binders with the existing messages. `prepareSessionAttempt`
 calls `retryPreparedSessionAfterWorkspaceReady` for a preparing refusal: it
 loads the named environment, skips one this session materializes, waits with
-the existing `waitForTaskEnvironmentReady`, and retries the binding once. A
+the existing `waitForTaskEnvironmentReady`, and retries the binding once.
+Before the retry it re-reads the task's sessions, so a session the winner
+created meanwhile keeps the first-session origin and the primary flag. A
 failed environment or a wait that ends without readiness returns the original
 refusal.
 
 ## Tests
 
 `executor_workspace_preparing_retry_test.go` covers the retry, including a
-shared-group environment owned by another member task, the failed and timed-out
-waits, a self-owned environment, and refusals that are not retried.
+shared-group member that binds through the group binder, a winner session that
+must stay primary, the failed and timed-out waits, a self-owned environment, and
+refusals that are not retried.
 `task_environment_test.go` checks that the task-local and shared-group refusals
 name the elected environment. AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-001.4.
 

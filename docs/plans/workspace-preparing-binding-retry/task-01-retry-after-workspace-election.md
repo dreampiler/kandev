@@ -39,6 +39,8 @@ The election itself, the materialization timeout, and other refusals.
   this session materializes keeps the original refusal, without creating a
   session or workspace.
 - Other binding refusals are not retried.
+- A session the winner created while the loser waited stays primary and keeps
+  the first-session origin.
 
 ## Verification
 

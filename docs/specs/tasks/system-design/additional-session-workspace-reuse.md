@@ -142,7 +142,9 @@ A session binding that loses the materializer election is refused with
 `workspace_preparing`, which names the elected environment. For a shared group
 that environment belongs to another member task. Session preparation waits for
 that environment with the same bounded wait the launch path uses for a creating
-sibling, then retries the binding once. A failed environment, a wait that ends
+sibling, then retries the binding once. Before the retry it re-reads the task's
+sessions: a session the winner created meanwhile keeps the first-session origin
+and the primary flag. A failed environment, a wait that ends
 without readiness, or an environment owned by the same session keeps the
 original refusal, so no session or workspace is created.
 
