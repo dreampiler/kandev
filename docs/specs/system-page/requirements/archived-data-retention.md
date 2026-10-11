@@ -11,14 +11,21 @@ owners:
 ## Overview
 
 Administrators can reduce installed storage by shrinking data that belongs to
-finished work: the tool progress detail inside transcripts of archived tasks, and
-the operational snapshot stored on completed resource-cleanup jobs. System-page
-owns this maintenance policy and its Data & Logs settings surface.
+finished work: the tool progress detail inside transcripts of finished or
+archived tasks, and the operational snapshot stored on completed resource-cleanup
+jobs. System-page owns this maintenance policy and its Data & Logs settings
+surface.
 
 This policy governs two targets with independent windows. It does not replace the
 existing tool-payload policy, which remains the inactivity-based policy over
 active-task conversation history and keeps its own setting, revision, and approved
 state. See [Tool Payload Retention](tool-payload-retention.md).
+
+The transcript target is broadened by the [DB History Retention
+capability](db-history-retention.md): eligibility moves from archived tasks to
+finished or archived tasks, and the initial message window becomes 14 days.
+DB History Retention owns the broadened target contract; this document retains
+the removal, preservation, and governance invariants that both documents share.
 
 Both targets ship **disabled**. Cleanup remains disabled until an administrator
 completes the preparation choice.
@@ -54,8 +61,8 @@ with the history I give up.
   `/settings/system/data-storage` shall expose an independent archived-data
   policy, disabled by default, including on upgrades.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-001.2:** Administrators shall select a
-  whole-day window for each target independently. The initial values are 30 days
-  of archived history and 7 days of finished cleanup. Valid values are 1-3650
+  whole-day window for each target independently. The initial values are 14 days
+  of message history and 7 days of finished cleanup. Valid values are 1-3650
   days. Invalid input shall save nothing.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-001.3:** Eligibility shall use the
   archived timestamp for transcripts and the completion timestamp for cleanup
@@ -73,13 +80,16 @@ with the history I give up.
   result is a stored-byte reduction and not a file-size reduction, and shall
   point at the separate compaction action.
 
-### REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002: Archived transcript detail
+### REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002: Message history detail
 
-**Intent:** Reclaim archived conversation volume without damaging history.
+**Intent:** Reclaim finished conversation volume without damaging history. The
+eligibility scope of this target is the finished-or-archived message-metadata
+target of [DB History Retention REQ-001](db-history-retention.md); this
+requirement states the removal and preservation invariants that scope shares.
 
 **User story:** As an administrator, I want tool progress detail removed from
-long-archived transcripts, so that old conversations stop dominating storage while
-the conversation itself stays readable.
+finished or archived transcripts, so that old conversations stop dominating
+storage while the conversation itself stays readable.
 
 #### Acceptance criteria
 
@@ -89,14 +99,15 @@ the conversation itself stays readable.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.2:** Cleanup shall preserve message
   rows, content, identity, ordering, type, and timestamps. Only `metadata` shall
   shrink.
-- **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.3:** A task unarchived between
-  selection and commit shall not be modified. A task inside the window shall not
-  be selected.
-- **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.4:** Because the archived target is
-  a safety net for tasks the inactivity policy declines, a nonterminal session, a
-  pending question, or a queued workflow admission on an archived task shall not
-  by itself block this target. The archived timestamp is its only gate, and the
-  existing inactivity policy keeps its own protections unchanged.
+- **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.3:** A task that becomes active
+  between selection and commit shall not be modified. A task inside the window
+  shall not be selected.
+- **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.4:** An archived task is gated on
+  `archived_at` alone, so a nonterminal session, a pending question, or a queued
+  workflow admission on an archived task shall not by itself block this target. A
+  finished (non-archived) task is additionally gated on the inactivity contract.
+  The existing inactivity tool-payload policy keeps its own protections
+  unchanged.
 - **AC-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002.5:** Removed details shall not
   reappear after delayed updates, replay, or task resumption. Conversations shall
   show an explicit removed-payload state.
@@ -194,5 +205,6 @@ pass, so that the policy cannot quietly consume the database or the writer.
 ## Related documents
 
 - [System design](../system-design/archived-data-retention.md)
+- [DB History Retention requirements](db-history-retention.md)
 - [Tool Payload Retention requirements](tool-payload-retention.md)
 - [Tool Payload Retention system design](../system-design/tool-payload-retention.md)
