@@ -33,7 +33,7 @@ export function ProviderAccountGroup({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const label = t(accountKindKey(group.kind));
+  const label = t(`office:${accountKindKey(group.kind)}`);
   return (
     <div className="rounded-md border border-border p-3 text-sm" data-testid="overview-account">
       <button
