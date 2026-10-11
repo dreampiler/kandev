@@ -920,6 +920,7 @@ type Service struct {
 	// during shutdown before the repositories and runtime are torn down.
 	silentRestoreMu           sync.Mutex
 	silentRestoreCancel       context.CancelFunc
+	silentRestoreWake         chan struct{}
 	silentRestoreWorkers      sync.WaitGroup
 	silentRestoreStopped      bool
 	silentRestoreOwnerContext silentRestoreOwnerContextResolver
@@ -3541,6 +3542,7 @@ func (s *Service) subscribeStartupEvents() {
 
 	// Invalidate the compiled-step cache when workflow steps change.
 	s.subscribeWorkflowStepCacheEvents()
+	s.subscribeRuntimeRecoveryEvents()
 }
 
 func (s *Service) startBackgroundRecovery(ctx context.Context) {

@@ -19,6 +19,14 @@ It is deliberately a sibling of, not an extension of, the
 inactivity-based over live task history, this one is age-based over data that
 already belongs to finished work.
 
+The [DB History Retention design](db-history-retention.md) broadens this
+capability's transcript target from archived-only to finished-or-archived and
+moves its initial window from 30 to 14 days. It does not add a record or a card:
+it extends this policy's `archived_data_retention` record and its settings card in
+place. This document retains the record, cleanup-snapshot, and governance design;
+the broadened message-eligibility contract is stated in the DB History Retention
+design.
+
 The Database tab of `DataLogsSettings` mounts `ArchivedDataRetentionCard` beside
 `ToolPayloadRetentionCard`. The card owns its own policy and save contributor
 `system:archived-data-retention` and reuses the existing status/draft
@@ -45,7 +53,7 @@ design keeps them from diverging:
 | Requirement | Design sections |
 | --- | --- |
 | REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-001 | Policy, Eligibility, Analysis |
-| REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002 | Archived transcript target |
+| REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-002 | Message history target |
 | REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-003 | Cleanup-job snapshot target |
 | REQ-SYSTEM-PAGE-ARCHIVED-DATA-RETENTION-004 | Governance, Scheduling, Settings surface |
 
@@ -68,7 +76,8 @@ restore, reset, or compaction owns the writer.
 ## Policy
 
 `Policy` carries `Enabled`, `ArchivedAge`, `CleanupAge`, and `Revision`. Both
-ages are whole days in `1..3650`. Defaults are 30 and 7 days with `Enabled`
+ages are whole days in `1..3650`. Defaults are 14 days (the message-metadata
+window, broadened from 30 by DB History Retention) and 7 days with `Enabled`
 false. `Cutoff` returns `now - days` in UTC and is inclusive, so a row exactly at
 the boundary is in scope for the pass.
 
@@ -106,16 +115,19 @@ frame, restated only where the second target required it:
 - `Cancel` stops a pass at its next batch boundary. Cancelling a backup
   invalidates the approval so a late backup cannot arm cleanup.
 
-## Archived transcript target
+## Message history target
 
-Selection walks `tasks` by `archived_at IS NOT NULL` under a captured upper
-task id, then that task's sessions, then each session's messages by `rowid`
-under a captured upper rowid. Both upper cursors are captured when the pass
-starts, so rows created mid-pass are not walked.
+The target's eligibility is defined by the [DB History Retention
+design](db-history-retention.md): the union of archived tasks (`ArchivedTaskEligible`)
+and finished tasks (`PayloadTaskEligible` at the same cutoff). Selection walks
+`tasks` under a captured upper task id, then that task's sessions, then each
+session's messages by `rowid` under a captured upper rowid. Both upper cursors
+are captured when the pass starts, so rows created mid-pass are not walked.
 
 `ArchivedTaskEligible` re-reads `archived_at` for the current task; a task
 unarchived since selection fails the check and is skipped with
-`protected_tasks`. Timestamps are compared through SQLite date functions because
+`protected_tasks`. The finished path re-reads the inactivity contract inside the
+writer transaction. Timestamps are compared through SQLite date functions because
 legacy rows can carry textual UTC offsets that break lexical ordering, and the
 function refuses any non-SQLite driver before that comparison runs.
 
@@ -188,8 +200,9 @@ backup disposal runs in this capability.
 target, the preparation and pass state, and the next scheduled check. Its save
 contributor is `system:archived-data-retention`. All copy goes through `t()` in
 every catalog, including the Traditional Chinese pair through the existing
-hant conversion script. Copy states the stored-byte reduction rather than a
-file-size reduction, and points at the separate compaction action.
+hant conversion script. Copy names the message window as covering finished or
+archived tasks, states the stored-byte reduction rather than a file-size
+reduction, and points at the separate compaction action.
 
 Read-only users see status and cannot analyze, save, or start a pass. A failed
 status read reports that current status is unavailable while retaining the last
@@ -198,5 +211,6 @@ known analysis, matching the existing card.
 ## Related documents
 
 - [Requirements](../requirements/archived-data-retention.md)
+- [DB History Retention design](db-history-retention.md)
 - [Tool Payload Retention system design](tool-payload-retention.md)
 - [Settings storage pages design](system-data-storage-pages.md)

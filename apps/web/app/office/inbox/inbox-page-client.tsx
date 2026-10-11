@@ -156,7 +156,8 @@ export function InboxPageClient({
           (i.type === "approval" && i.status === "pending") ||
           i.type === "task_review_request" ||
           i.type === "agent_run_failed" ||
-          i.type === "agent_paused_after_failures",
+          i.type === "agent_paused_after_failures" ||
+          i.type === "agent_error",
       );
     } else if (tab === "recent") {
       items = items.slice(0, 20);

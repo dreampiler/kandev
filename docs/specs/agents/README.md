@@ -45,6 +45,7 @@ session-activity authority remain with Tasks and Platform.
 - [Dynamic Agent Routing](requirements/dynamic-agent-routing.md)
 - [Dynamic Provider Model Options](requirements/dynamic-provider-options.md)
 - [External Agent Permission Resolution](requirements/external-permission-resolution.md)
+- [Pending Permission Lookup Bounds](requirements/pending-permission-lookup-bounds.md)
 - [Agent Git permission boundary](requirements/git-operations-permission-boundary.md)
 - [Agent Creation Governance](requirements/governance.md)
 - [Granular Agent Permissions](requirements/granular-permissions.md)
@@ -103,6 +104,7 @@ session-activity authority remain with Tasks and Platform.
 - [Profile-backed Utility Agents](system-design/utility-agent-profiles.md)
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
+- [Pending Permission Lookup Bounds](system-design/pending-permission-lookup-bounds.md)
 
 ## Migration record
 

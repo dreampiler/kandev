@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
 )
+
+// antigravityDisableAutoUpdateEnv is the vendor's documented opt-out from the
+// Antigravity CLI background self-updater. It is set only on the child process
+// environment so a usage probe does not start or leave the updater running.
+const antigravityDisableAutoUpdateEnv = "AGY_CLI_DISABLE_AUTO_UPDATE"
 
 // AntigravityUsageClient reads the local Antigravity CLI's quota report.
 type AntigravityUsageClient struct{}
@@ -18,11 +24,21 @@ func NewAntigravityUsageClient() *AntigravityUsageClient {
 	return &AntigravityUsageClient{}
 }
 
+// antigravityUsageCommand builds the agy usage probe. On Windows it starts
+// without a visible console window, and it disables the vendor's background
+// self-updater for the child process.
+func antigravityUsageCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "agy", "-p", "/usage", "--output-format", "json")
+	cmd.SysProcAttr = hideWindowSysProcAttr()
+	cmd.Env = append(os.Environ(), antigravityDisableAutoUpdateEnv+"=true")
+	return cmd
+}
+
 // FetchUsage implements ProviderUsageClient without starting a model turn.
 func (c *AntigravityUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "agy", "-p", "/usage", "--output-format", "json").Output()
+	output, err := antigravityUsageCommand(ctx).Output()
 	if err != nil {
 		return nil, fmt.Errorf("antigravity usage: run agy: %w", err)
 	}

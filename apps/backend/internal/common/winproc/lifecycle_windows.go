@@ -313,3 +313,20 @@ func IsTaskkillMissing(msg string) bool {
 		strings.Contains(lower, "not be found") ||
 		strings.Contains(lower, "no running instance")
 }
+
+// HideConsoleWindow marks a one-shot child console process so Windows starts it
+// without showing a new console window. It preserves fields the caller already
+// set and keeps the child attached to a console, so a .cmd or .bat shim's
+// default console descendants inherit the hidden console. Windows also applies
+// the hidden show state to a GUI program's first window, so callers must pass
+// console processes only.
+func HideConsoleWindow(cmd *exec.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= syscall.CREATE_NEW_PROCESS_GROUP
+}

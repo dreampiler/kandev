@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // reserveAndDispatchQueueHead reserves the FIFO head for identity and dispatches
@@ -17,6 +18,14 @@ import (
 func (s *Service) reserveAndDispatchQueueHead(
 	ctx context.Context,
 	identity messagequeue.QueueSessionIdentity,
+) (bool, bool, error) {
+	return s.reserveAndDispatchQueueHeadWithCompletion(ctx, identity, nil)
+}
+
+func (s *Service) reserveAndDispatchQueueHeadWithCompletion(
+	ctx context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	completionEffect *models.AgentDeliveryEffect,
 ) (bool, bool, error) {
 	batch, autoRun, err := s.messageQueue.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
 	if err != nil || !autoRun {
@@ -30,6 +39,17 @@ func (s *Service) reserveAndDispatchQueueHead(
 	}
 	if len(batch) == 0 {
 		return false, autoRun, nil
+	}
+	if completionEffect != nil {
+		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, batch[0])
+		if hasInput && inputErr == nil {
+			if err := s.settleQueuedDeliveryPredecessor(ctx, identity.TaskID, identity.SessionID, completionEffect); err != nil {
+				s.logger.Warn("failed to settle delivery before queued successor",
+					zap.String("session_id", identity.SessionID), zap.Error(err))
+				s.requeuePeerReportBatch(ctx, identity, batch)
+				return false, true, err
+			}
+		}
 	}
 	if len(batch) == 1 {
 		return s.dispatchTakenQueuedMessageForSession(ctx, identity, batch[0], true), true, nil

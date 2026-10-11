@@ -139,9 +139,9 @@ export function InboxItemRow({ item, onApprove, onReject, onChanged }: Props) {
           </Button>
         </div>
       )}
-      {(item.type === "agent_run_failed" || item.type === "agent_paused_after_failures") && (
-        <MarkFixedButton item={item} onChanged={onChanged} />
-      )}
+      {(item.type === "agent_run_failed" ||
+        item.type === "agent_paused_after_failures" ||
+        item.type === "agent_error") && <MarkFixedButton item={item} onChanged={onChanged} />}
       {item.type === "provider_degraded" && (
         <ProviderDegradedActions item={item} onChanged={onChanged} />
       )}
@@ -199,7 +199,11 @@ function MarkFixedButton({ item, onChanged }: { item: InboxItem; onChanged?: () 
   const [busy, setBusy] = useState(false);
   const handleClick = async () => {
     if (busy) return;
-    if (item.type !== "agent_run_failed" && item.type !== "agent_paused_after_failures") {
+    if (
+      item.type !== "agent_run_failed" &&
+      item.type !== "agent_paused_after_failures" &&
+      item.type !== "agent_error"
+    ) {
       return;
     }
     setBusy(true);

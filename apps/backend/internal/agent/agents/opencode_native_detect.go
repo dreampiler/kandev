@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/kandev/kandev/internal/agent/managedruntime"
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 // opencodeNativeVersionTimeout bounds one `opencode --version` run.
@@ -182,8 +183,16 @@ func isExecutableNotFound(err error) bool {
 	return errors.Is(err, exec.ErrNotFound)
 }
 
+// openCodeVersionCommand builds the native OpenCode version probe. On Windows
+// it starts without a visible console window.
+func openCodeVersionCommand(ctx context.Context, path string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, path, "--version")
+	winproc.HideConsoleWindow(cmd)
+	return cmd
+}
+
 func runOpenCodeVersion(ctx context.Context, path string) ([]byte, error) {
-	return exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	return openCodeVersionCommand(ctx, path).CombinedOutput()
 }
 
 func sleepContext(ctx context.Context, wait time.Duration) error {
