@@ -1,7 +1,7 @@
 ---
 id: "01-empty-turn-unclassified-failure"
 title: "Count empty normal turn ends as unclassified failures"
-status: planned
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -27,10 +27,11 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 - Write `TestEmptyTurnCompletionCountsUnclassifiedFailure` first and confirm that it fails on the base commit.
 - `apps/backend/internal/agent/runtime/dynamic/types.go`: add the origin; waive `DiagnosticComplete` and provider ID only for it; match `agent_runtime_error` at `prompt_send`.
 - `apps/backend/internal/agent/runtime/dynamic/unclassified_fingerprint.go`: fixed, versioned fingerprint for the origin.
-- `apps/backend/internal/agent/runtime/dynamic_resolver.go`: report whether a concrete candidate has an enabled policy with a threshold from 2 through 10.
-- `apps/backend/internal/orchestrator/dynamic_launch.go`: build empty turn evidence and route it, returning whether a successor was launched.
-- `apps/backend/internal/orchestrator/event_handlers_streaming.go`: call the producer before the ordinary completion follow-up; retire the counted-turn record at turn start.
-- `apps/backend/internal/orchestrator/dynamic_evidence.go` and `service.go`: counted-turn record keyed by session, execution ID, and prompt generation; consume it in the completion-clear path.
+- `apps/backend/internal/agent/runtime/dynamic/engine.go`: `CandidateUnclassifiedEnabled` reuses the engine's threshold rule.
+- `apps/backend/internal/agent/runtime/dynamic_resolver.go`: `UnclassifiedPolicyEnabled` loads the logical profile and reports whether the concrete candidate's policy is enabled.
+- `apps/backend/internal/orchestrator/dynamic_empty_turn.go`: the producer, its evidence, and the counted-turn record keyed by session, execution ID, and prompt generation.
+- `apps/backend/internal/orchestrator/event_handlers_streaming.go`: call the producer while the stream guard is held, before the ordinary completion follow-up; retire the counted-turn record at turn start.
+- `apps/backend/internal/orchestrator/dynamic_evidence.go` and `service.go`: consume the counted-turn record in the completion-clear path; hold the record map.
 - Public sentence in `docs/public/agents-and-profiles.md`.
 
 ## Out of scope
@@ -51,9 +52,9 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 
 ```bash
 cd apps/backend
-go test ./internal/agent/runtime/dynamic -run 'Unclassified' -count=1
-go test ./internal/agent/runtime -run 'Unclassified' -count=1
-go test ./internal/orchestrator -run 'EmptyTurn|Unclassified' -count=1
+go test ./internal/agent/runtime/dynamic -count=1
+go test ./internal/agent/runtime -run 'Resolver|Unclassified|Dynamic' -count=1
+go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1
 go build ./... && go vet ./internal/agent/runtime/... ./internal/orchestrator/...
 ```
 
