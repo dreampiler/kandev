@@ -111,7 +111,20 @@ Maps to `AC-OFFICE-ERROR-CLEAR-002.5`.
 
 ## Results
 
-Pending implementation.
+Implemented and verified. PR dreampiler/kandev#227, head `e938540dc5`.
+
+- Backend: `agent_error` dismiss kind with conservative identity match (404 on
+  no match); `MarkAgentErrorFixed`; `ListAgentErrorInboxRows`; and
+  `HasSuccessfulRunAfter`, applied to both `agent_run_failed` and `agent_error`;
+  `GetInboxCount` now counts the computed failure items.
+- Frontend: Mark-fixed control for `agent_error`, "mine" eligibility, extended
+  dismiss kind, and both failure kinds counted in the sidebar badge.
+- Verification: new backend unit tests and frontend Vitest tests pass;
+  `go build ./...`, `go vet`, `golangci-lint --new-from-rev` (0 issues),
+  `pnpm typecheck`, targeted `vitest`, `eslint`, `i18n:check`, and spec lints
+  pass. Three pre-existing time-sensitive office tests fail on the base commit
+  too (recorded as existing failures).
+- Remaining inputs: none for this work order.
 
 ## Dependencies
 
