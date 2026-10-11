@@ -1,11 +1,13 @@
 package dashboard
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/office/models"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 )
 
 // -- Inbox, Activity, Runs --
@@ -69,6 +71,15 @@ func (h *Handler) dismissInboxItem(c *gin.Context) {
 		}
 	case "agent_paused_after_failures":
 		if err := h.svc.MarkFixedHandler().MarkAgentPausedFixed(ctx, dashboardUserID, req.ItemID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	case "agent_error":
+		if err := h.svc.MarkFixedHandler().MarkAgentErrorFixed(ctx, dashboardUserID, req.ItemID); err != nil {
+			if errors.Is(err, officeservice.ErrInboxItemNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

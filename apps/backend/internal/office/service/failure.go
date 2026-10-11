@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,11 +23,19 @@ import (
 const (
 	InboxKindAgentRunFailed        = "agent_run_failed"
 	InboxKindAgentPausedAfterFails = "agent_paused_after_failures"
-	autoPauseReasonPrefix          = "Auto-paused:"
+	// InboxKindAgentError is the dismiss kind for a single agent.error
+	// activity row. Its item_id is the activity entry id.
+	InboxKindAgentError   = "agent_error"
+	autoPauseReasonPrefix = "Auto-paused:"
 	// RunReasonManualResumeAfterFailure aliases shared's canonical
 	// declaration (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
 	RunReasonManualResumeAfterFailure = shared.RunReasonManualResumeAfterFailure
 )
+
+// ErrInboxItemNotFound signals that a dismissal target identity does not
+// match a stored inbox source row. The HTTP layer maps it to 404 so a
+// caller can tell a dismissal from a request that dismissed nothing.
+var ErrInboxItemNotFound = errors.New("inbox item not found")
 
 // officeLegacyTransientMaxRetries bounds how many times a classified-transient
 // post-start failure on the legacy (HandleAgentFailure) path is retried
@@ -362,6 +371,32 @@ func (s *Service) MarkAgentRunFailedFixed(
 		return fmt.Errorf("requeue run: %w", err)
 	}
 	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentRunFailed, runID); err != nil {
+		return fmt.Errorf("dismiss: %w", err)
+	}
+	return nil
+}
+
+// MarkAgentErrorFixed records an inbox dismissal for one agent.error
+// activity entry. Unlike a failed run, the entry names an already-terminal
+// escalation, so nothing is requeued: only the computed display row is
+// dismissed and the activity row is left intact. The identity must match a
+// stored agent.error entry; an unmatched identity dismisses nothing and
+// returns ErrInboxItemNotFound so a stale or forged identity cannot clear an
+// unrelated entry.
+func (s *Service) MarkAgentErrorFixed(
+	ctx context.Context, userID, entryID string,
+) error {
+	entry, err := s.repo.GetActivityEntry(ctx, entryID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: agent error %s", ErrInboxItemNotFound, entryID)
+		}
+		return fmt.Errorf("load agent error entry: %w", err)
+	}
+	if entry.Action != models.ActivityAction("agent.error") {
+		return fmt.Errorf("%w: entry %s is %q", ErrInboxItemNotFound, entryID, entry.Action)
+	}
+	if err := s.repo.DismissInboxItem(ctx, userID, InboxKindAgentError, entryID); err != nil {
 		return fmt.Errorf("dismiss: %w", err)
 	}
 	return nil

@@ -64,6 +64,8 @@ type Repository interface {
 	ListPendingApprovals(ctx context.Context, workspaceID string) ([]*models.Approval, error)
 	ListRuns(ctx context.Context, workspaceID string) ([]*models.Run, error)
 	SearchTasks(ctx context.Context, workspaceID, query string, limit int) ([]*sqlite.TaskSearchResult, error)
+	ListAgentErrorInboxRows(ctx context.Context, workspaceID, userID string) ([]*sqlite.AgentErrorInboxRow, error)
+	HasSuccessfulRunAfter(ctx context.Context, agentID, taskID string, after time.Time) (bool, error)
 	ListActivityEntriesByType(ctx context.Context, workspaceID, filterType string, limit int) ([]*models.ActivityEntry, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID string, includeSystem bool) ([]*sqlite.TaskRow, error)
 	ListTasksFiltered(ctx context.Context, workspaceID string, opts sqlite.ListTasksOptions) (*sqlite.ListTasksFilteredResult, error)
@@ -278,6 +280,7 @@ type FailureInboxSource interface {
 type MarkFixedHandler interface {
 	MarkAgentRunFailedFixed(ctx context.Context, userID, runID string) error
 	MarkAgentPausedFixed(ctx context.Context, userID, agentID string) error
+	MarkAgentErrorFixed(ctx context.Context, userID, entryID string) error
 }
 
 // TaskReactivityChange is a slim, dashboard-package view of the change

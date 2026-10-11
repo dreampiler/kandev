@@ -414,6 +414,114 @@ func (r *Repository) ListFailedRunsForInbox(
 	return out, rows.Err()
 }
 
+// AgentErrorInboxRow is a flat view of one agent.error activity entry with
+// its agent and originating run resolved. TaskID is the run's task_id
+// (empty for a taskless run). Success-based clearing is applied by the
+// caller through HasSuccessfulRunAfter so the unresolved-failure criterion
+// lives in one place.
+type AgentErrorInboxRow struct {
+	EntryID        string    `db:"entry_id"`
+	AgentProfileID string    `db:"agent_profile_id"`
+	AgentName      string    `db:"agent_name"`
+	RunID          string    `db:"run_id"`
+	TaskID         string    `db:"task_id"`
+	Details        string    `db:"details"`
+	FailedAtRaw    string    `db:"failed_at"`
+	FailedAt       time.Time `db:"-"`
+}
+
+// ListAgentErrorInboxRows returns agent.error activity entries for a
+// workspace that the given user (or the auto-dismiss sentinel) has not
+// dismissed. Rows resolved by a later successful run are not filtered here;
+// the caller applies HasSuccessfulRunAfter so one criterion governs both
+// failure surfaces.
+func (r *Repository) ListAgentErrorInboxRows(
+	ctx context.Context, workspaceID, userID string,
+) ([]*AgentErrorInboxRow, error) {
+	driver := r.ro.DriverName()
+	taskExpr := dialect.JSONExtract(driver, "payload", "task_id")
+	taskType := dialect.JSONTypeIsString(driver, "payload", "task_id")
+	scopeExpr := fmt.Sprintf("CASE WHEN %s THEN %s ELSE '' END", taskType, taskExpr)
+	query := fmt.Sprintf(`
+		SELECT e.id AS entry_id,
+		       e.target_id AS agent_profile_id,
+		       COALESCE(a.name, '') AS agent_name,
+		       COALESCE(e.run_id, '') AS run_id,
+		       COALESCE(%s, '') AS task_id,
+		       e.details,
+		       e.created_at AS failed_at
+		FROM office_activity_log e
+		LEFT JOIN agent_profiles a ON a.id = e.target_id
+		LEFT JOIN runs f ON f.id = e.run_id
+		WHERE e.workspace_id = ?
+		  AND e.action = 'agent.error'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM office_inbox_dismissals d
+		    WHERE d.item_kind = 'agent_error'
+		      AND d.item_id = e.id
+		      AND d.user_id IN (?, '_auto')
+		  )
+		ORDER BY e.created_at DESC
+		LIMIT 200
+	`, scopeExpr)
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*AgentErrorInboxRow
+	for rows.Next() {
+		var row AgentErrorInboxRow
+		if err := rows.StructScan(&row); err != nil {
+			return nil, err
+		}
+		row.FailedAt = parseSqliteTime(row.FailedAtRaw)
+		out = append(out, &row)
+	}
+	return out, rows.Err()
+}
+
+// HasSuccessfulRunAfter reports whether a successful run (status
+// 'finished') exists in the same (agent, task) scope strictly newer than
+// after. An empty taskID selects the taskless scope, a run whose payload
+// carries no task_id. The task comparison is guarded to string-typed
+// payloads so a stored numeric task_id can never textually match a task
+// string. A zero or empty scope returns false: an unreadable failure
+// instant must never be treated as resolved.
+func (r *Repository) HasSuccessfulRunAfter(
+	ctx context.Context, agentID, taskID string, after time.Time,
+) (bool, error) {
+	if agentID == "" || after.IsZero() {
+		return false, nil
+	}
+	driver := r.ro.DriverName()
+	taskExpr := dialect.JSONExtract(driver, "payload", "task_id")
+	taskType := dialect.JSONTypeIsString(driver, "payload", "task_id")
+	taskNotNull := dialect.JSONExtractIsNotNull(driver, "payload", "task_id")
+	scope := fmt.Sprintf(
+		"((? <> '' AND %s AND %s = ?) OR (? = '' AND NOT (%s)))",
+		taskType, taskExpr, taskNotNull,
+	)
+	query := fmt.Sprintf(`
+		SELECT 1 FROM runs
+		WHERE agent_profile_id = ?
+		  AND status = 'finished'
+		  AND COALESCE(finished_at, requested_at) > ?
+		  AND %s
+		LIMIT 1
+	`, scope)
+	var found int
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query),
+		agentID, after, taskID, taskID, taskID).Scan(&found)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // parseSqliteTime parses the various string formats SQLite stores
 // TIMESTAMP values in (RFC3339, with or without timezone, with or
 // without nanoseconds). Falls back to zero time on parse failure

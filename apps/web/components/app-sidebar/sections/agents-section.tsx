@@ -13,7 +13,7 @@ import {
 } from "@/lib/state/slices/office/selectors";
 import { useInOffice } from "@/hooks/use-in-office";
 import { cn } from "@/lib/utils";
-import type { AgentProfile } from "@/lib/state/slices/office/types";
+import type { AgentProfile, InboxItem } from "@/lib/state/slices/office/types";
 import { selectActiveSessionsForAgent } from "@/lib/state/slices/session/selectors";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { AgentStatusDot } from "@/app/office/agents/components/agent-status-dot";
@@ -98,6 +98,16 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
   );
 }
 
+// isUnresolvedFailureForAgent mirrors the server's failure surfaces: both
+// `agent_run_failed` and `agent_error` items carry `agent_profile_id`, so the
+// sidebar badge counts them under the same criterion as the inbox.
+function isUnresolvedFailureForAgent(item: InboxItem, agentId: string): boolean {
+  if (item.type !== "agent_run_failed" && item.type !== "agent_error") return false;
+  const payloadAgent =
+    typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";
+  return payloadAgent === agentId;
+}
+
 function AgentRow({ agent }: { agent: AgentProfile }) {
   const { t } = useTranslation();
   const pathname = usePathname();
@@ -105,12 +115,10 @@ function AgentRow({ agent }: { agent: AgentProfile }) {
   const isActive = pathname === href;
   const liveCount = useAppStore((s) => selectActiveSessionsForAgent(s, agent.id));
   const errorCount = useAppStore((s) =>
-    selectOfficeInboxItems(s).reduce((acc, item) => {
-      if (item.type !== "agent_run_failed") return acc;
-      const payloadAgent =
-        typeof item.payload?.agent_profile_id === "string" ? item.payload.agent_profile_id : "";
-      return payloadAgent === agent.id ? acc + 1 : acc;
-    }, 0),
+    selectOfficeInboxItems(s).reduce(
+      (acc, item) => (isUnresolvedFailureForAgent(item, agent.id) ? acc + 1 : acc),
+      0,
+    ),
   );
   const isAutoPaused = (agent.pauseReason ?? "").startsWith("Auto-paused:");
 
