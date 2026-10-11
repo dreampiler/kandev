@@ -35,7 +35,8 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 
 ## Out of scope
 
-- Post-start error origins, catalogue changes, new codes, UI, runtime flags, and E2E tests.
+- Post-start runtime failures without a complete diagnostic. They are an open item in the [plan](plan.md#unresolved-post-start-failures-without-a-complete-diagnostic), not resolved by this work order.
+- Catalogue changes, new codes, UI, runtime flags, and E2E tests.
 - Task-environment recovery, lifecycle launch builders, provider usage rules, and agent control clients.
 
 ## Acceptance
