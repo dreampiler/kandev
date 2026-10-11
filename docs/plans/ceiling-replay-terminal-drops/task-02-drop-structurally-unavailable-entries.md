@@ -1,7 +1,7 @@
 ---
 id: "02-drop-structurally-unavailable-entries"
 title: "Drop structurally unavailable entries"
-status: planned
+status: done
 wave: 2
 depends_on:
   - "01-drop-invalid-launch-replays"
@@ -62,4 +62,15 @@ cd apps/backend && go test ./internal/orchestrator/ -run 'CeilingReplay|CeilingE
 
 ## Results
 
-Not implemented yet.
+- `ceiling_entry_terminal_test.go` covers the sweep and the drop reasons.
+  Before the change a sessionless legacy `start` that the sweep could not bind,
+  and an underivable binding, were kept on every sweep; now they are dropped as
+  superseded without a launch.
+- A failed step read, during validation or binding derivation, still keeps the
+  record.
+- A failed transition read during validation used to fall back to the creation
+  identity, so a valid record looked superseded and was dropped. It is now kept
+  for a later sweep.
+- `readValidCeilingDeferredLaunch`, Send Now, and the claimed binding check
+  already treat any non-valid disposition as not pending, so the new
+  disposition needs no change there.

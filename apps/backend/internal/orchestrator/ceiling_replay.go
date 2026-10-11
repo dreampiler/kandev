@@ -201,7 +201,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 		return
 	}
 	if disposition, detail, _ := s.validateCeilingEntry(ctx, currentTask, claim.deferral); disposition != ceilingEntryValid {
-		if disposition == ceilingEntrySuperseded {
+		if disposition == ceilingEntrySuperseded || disposition == ceilingEntryPermanentlyUnavailable {
 			s.dropCeilingDeferral(ctx, currentTask, sessionIDFromCeilingPayload(claim.deferral), claim.deferral,
 				ceilingReasonSuperseded, detail)
 		}
@@ -300,6 +300,11 @@ func (s *Service) evaluateCeilingDropReasons(
 		// entry is obsolete. Preserve the record for a later sweep.
 		return "", "", false
 	} else if disposition == ceilingEntrySuperseded {
+		return ceilingReasonSuperseded, detail, true
+	} else if disposition == ceilingEntryPermanentlyUnavailable {
+		// The queued entry is structurally unable to start. Drop it with the
+		// same terminal disposition as a superseded entry so it stops
+		// consuming a replay attempt on every sweep.
 		return ceilingReasonSuperseded, detail, true
 	} else if disposition == ceilingEntryUnavailable {
 		// Read uncertainty is not a terminal disposition. Keep the durable
@@ -473,7 +478,7 @@ func (s *Service) loadCeilingReplayTask(ctx context.Context, taskID string, defe
 	if validationErr != nil || disposition == ceilingEntryUnavailable {
 		return nil, ceilingReplayFailedResult(validationErr, "workflow entry ownership unavailable: "+detail)
 	}
-	if disposition == ceilingEntrySuperseded {
+	if disposition == ceilingEntrySuperseded || disposition == ceilingEntryPermanentlyUnavailable {
 		return nil, ceilingReplaySupersededResult()
 	}
 	return current, ceilingReplaySucceededResult()
