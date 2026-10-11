@@ -74,11 +74,34 @@ func hashUnclassifiedFingerprint(input unclassifiedFingerprintInput) (string, er
 // of the identity, so exits with the same code and different stderr match.
 var processExitPrefix = regexp.MustCompile(`^Agent process exited with code -?[0-9]+`)
 
-// postStartIdentity returns the identity text of a known post-start producer
-// shape. Any other message has no identity and is not admitted.
+// postStartGenericIdentityBytes bounds the identity of a post-start failure
+// without a fixed producer shape.
+const postStartGenericIdentityBytes = 256
+
+// postStartIdentity returns the identity text of a post-start failure. A
+// process exit keeps only its prefix and exit code. Any other message is
+// sanitized, whitespace-collapsed, and cut to its first 256 bytes, so
+// messages that agree on that prefix share one identity even when their tails
+// differ. A message that sanitizes to empty has no identity.
 func postStartIdentity(message string) (string, bool) {
-	if prefix := processExitPrefix.FindString(strings.TrimSpace(message)); prefix != "" {
+	trimmed := strings.TrimSpace(message)
+	if prefix := processExitPrefix.FindString(trimmed); prefix != "" {
 		return prefix, true
 	}
-	return "", false
+	collapsed := strings.Join(strings.Fields(routingerr.SanitizeFullUnbounded(trimmed)), " ")
+	if collapsed == "" {
+		return "", false
+	}
+	return truncateUTF8(collapsed, postStartGenericIdentityBytes), true
+}
+
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
