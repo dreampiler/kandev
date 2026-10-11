@@ -161,3 +161,13 @@ Two failures are independent of this change. On Windows hosts,
 a POSIX shell script. Under `-race` on Windows,
 `TestCreateInstanceDoesNotWaitForComparisonTarget` exceeds its timing bound; it
 fails the same way with the unchanged manager and passes without `-race`.
+
+PR review follow-up: `publishInstance` now re-checks the caller's context under
+`mu`, after the shutdown check, so a caller that gives up while publication
+waits for the lock leaves the instance unpublished and the abandonment path
+releases its port. `TestCreateInstanceNotPublishedWhenCancelledBeforePublication`
+holds `mu` and cancels the caller after the post-startup check; before the fix
+the creation returned no error and published the instance, and after the fix it
+returns a wrapped `context.Canceled` with no published instance or reserved
+port. The concurrency tests now bound every completion wait and their cleanup
+shutdown, and run their creations on the test context.

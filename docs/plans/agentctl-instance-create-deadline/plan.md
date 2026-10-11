@@ -96,10 +96,10 @@ records what these changes do not resolve.
 | 001.1 | New `TestCreateInstance_UsesLongerHTTPTimeout`: a stubbed transport observes a request deadline between 119 and 120 seconds |
 | 001.2 | Existing `TestNewControlClient_BuildsBaseURLFromHostAndPort`, and the shared-timeout check in `TestCreateInstance_UsesLongerHTTPTimeout` |
 | 001.3 | New `TestCreateInstance_CallerDeadlineStillApplies`: a short caller deadline ends creation with a wrapped `context.DeadlineExceeded` |
-| 001.4 | New `TestCreateInstance_SendsControlAuthToken`: a token-authenticated client's creation request carries the bearer credential |
+| 001.4 | New `TestCreateInstance_SendsControlAuthToken`: a token-authenticated client's creation request carries the bearer credential; new `TestCreateInstance_CopiesClientUnderRotation` under `-race`: concurrent credential rotation does not race the client copy |
 | 002.1 | New `TestConcurrentCreationsOverlapStartup`: four creations reach `afterTrackerStart` together |
 | 002.2 | New `TestCreateInstanceRejectsDuplicateIDDuringStartup`: a same-ID creation fails promptly while the first is held, and the first then succeeds |
-| 002.3 | Existing `TestCreateInstanceAbandonsWhenCallerGaveUp`, `TestCreateInstanceAbandonsAfterTrackerStartup`, `TestAbandonRetainsLeaseOnCleanupFailure`, and `TestShutdownRetriesFailedAbandon` |
+| 002.3 | Existing `TestCreateInstanceAbandonsWhenCallerGaveUp`, `TestCreateInstanceAbandonsAfterTrackerStartup`, `TestAbandonRetainsLeaseOnCleanupFailure`, and `TestShutdownRetriesFailedAbandon`; new `TestCreateInstanceNotPublishedWhenCancelledBeforePublication` |
 | 002.4 | New `TestShutdownWaitsForInProgressCreation`; existing `TestCreateInstanceRefusedAfterShutdown` |
 | 002.5 | New `TestOtherInstanceOperationsDoNotWaitForStartup`: lookup, listing, and stop of a published instance complete while another creation is held |
 
@@ -150,6 +150,24 @@ Task 02 implementation checks on 2026-10-12:
 - `go build ./internal/agentctl/...`, `go build ./cmd/agentctl`, and
   `go vet ./internal/agentctl/server/instance`: passed.
 - Local `validateCoverage` preflight on the changed files: `covered`.
+
+PR review follow-up on 2026-10-12:
+
+- `ControlClient.CreateInstance` copies the shared client under `c.mu`.
+  `TestCreateInstance_CopiesClientUnderRotation` reported a data race under
+  `-race` without the lock and passes with it.
+- `publishInstance` re-checks the caller's context under `mu`.
+  `TestCreateInstanceNotPublishedWhenCancelledBeforePublication` failed before
+  the fix with a published instance and a nil error, and passes after it.
+- The concurrency tests bound every completion wait and their cleanup
+  shutdown, and their creations use the test context.
+- The design lists environment validation under admission, and the
+  requirement and design documents use their accepted statuses.
+- `go test ./internal/agent/runtime/agentctl/... -count=1`,
+  `go test ./internal/agentctl/server/instance -count=1` (apart from the
+  Windows-only failure noted above), the race-enabled creation, abandonment,
+  shutdown, and stop tests, `go vet` for both packages, and the
+  documentation preflight passed.
 
 The work orders for [task 01](task-01-instance-create-deadline.md#results) and
 [task 02](task-02-create-outside-manager-lock.md#results) record the details.

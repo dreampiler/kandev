@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001
@@ -51,8 +51,10 @@ Callers bound creation with longer contexts. The lifecycle launch phase uses
 
 The copy shares the configured `Transport`. The bearer credential
 (`authTransport`) and the runtime binding guard (`runtimeBindingTransport`)
-therefore apply exactly as they do for other control calls. A copy made per
-call observes the transport that is installed at that time.
+therefore apply exactly as they do for other control calls. The copy is taken
+under the client's `mu`, the lock `SetAuthToken` holds when it installs a new
+transport, so a copy made per call observes the transport installed at that
+time without racing credential rotation.
 
 The client's shared `http.Client` keeps its 30-second `Timeout`. All other
 control methods continue to use it. A fixed constant is sufficient. No
@@ -70,25 +72,29 @@ unchanged.
 
 ## Creation phases
 
-`Manager.CreateInstance` runs in three phases.
+`Manager.CreateInstance` validates the requested protocol, then runs in three
+phases.
 
-1. **Admission, under `mu`.** Validate the protocol, refuse during shutdown or
-   for a caller whose context is already done, reject an ID that is published
-   or provisional, reserve a port and listener, and register the
+1. **Admission, under `mu`.** Refuse during shutdown or for a caller whose
+   context is already done, collect and validate the agent environment
+   (`config.CollectAgentEnvWithError`), reject an ID that is published or
+   provisional, reserve a port and listener, and register the
    `provisionalInstance`. Admission increments `activeCreations` while it still
-   holds `mu`.
-2. **Startup, without `mu`.** Collect the agent environment, build the instance
-   configuration and `process.Manager`, prepare comparison targets, start the
-   workspace trackers, re-check the caller's context, and build the HTTP
-   handler. The provisional bundle keeps the ID and port exclusive during this
-   phase.
-3. **Publication, under `mu`.** Refuse if shutdown has begun. Otherwise start
-   the HTTP server on the reserved listener, move the instance from
-   `provisional` to `instances`, and record `CreateReadyMillis`.
+   holds `mu`. An invalid environment therefore fails before any port is
+   reserved.
+2. **Startup, without `mu`.** Build the instance configuration and
+   `process.Manager`, prepare comparison targets, start the workspace trackers,
+   re-check the caller's context, and build the HTTP handler. The provisional
+   bundle keeps the ID and port exclusive during this phase.
+3. **Publication, under `mu`.** Refuse if shutdown has begun or if the caller's
+   context is done; the caller can give up while publication waits for `mu`.
+   Otherwise start the HTTP server on the reserved listener and move the
+   instance from `provisional` to `instances`. `CreateReadyMillis` is recorded
+   after publication.
 
 The HTTP server starts inside the publication critical section. A published
-instance therefore always has a server, and a refused creation never starts
-one. Starting the server only launches its serve goroutine, so `mu` is held
+instance therefore always has a server, and a refused or abandoned creation
+never starts one. Starting the server only launches its serve goroutine, so `mu` is held
 briefly.
 
 Any failure or refusal after admission keeps the existing abandonment path. A
@@ -143,8 +149,9 @@ Client tests stay alongside `ControlClient` in
   30-second timeout (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001.2`).
 - A shorter caller deadline fails creation with a wrapped
   `context.DeadlineExceeded` (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001.3`).
-- A token-authenticated creation request carries the bearer credential
-  (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001.4`).
+- A token-authenticated creation request carries the bearer credential, and a
+  race-enabled run with concurrent credential rotation reports no race on the
+  client copy (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001.4`).
 
 Manager tests stay in `internal/agentctl/server/instance`. They use the
 `afterTrackerStart` seam to hold creations at the end of startup:
@@ -154,7 +161,9 @@ Manager tests stay in `internal/agentctl/server/instance`. They use the
 - A same-ID creation is rejected while the first is held in startup
   (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.2`).
 - Existing abandonment tests cover a caller that gives up before or during
-  startup, failed cleanup, and retry (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.3`).
+  startup, failed cleanup, and retry. A caller cancelled while publication
+  waits for `mu` leaves no published instance or reserved port
+  (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.3`).
 - Shutdown started while a creation is held does not return until the creation
   ends, and leaves no published instance or reserved port
   (`AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.4`).

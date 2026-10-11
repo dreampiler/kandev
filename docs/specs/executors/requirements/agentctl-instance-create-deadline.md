@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: executors
 created: 2026-10-12
 owners:
@@ -73,7 +73,7 @@ other instances, and every creation still ends published or fully cleaned up.
   waiting for the first creation's startup. Each in-progress creation shall
   hold its own port.
 - **AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.3:** When the caller gives up
-  before or during startup, the controller shall not publish the instance. It
+  before the instance is published, the controller shall not publish it. It
   shall release the instance's listener, process resources, and port, or retain
   them for a later cleanup retry when cleanup fails.
 - **AC-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002.4:** When controller shutdown

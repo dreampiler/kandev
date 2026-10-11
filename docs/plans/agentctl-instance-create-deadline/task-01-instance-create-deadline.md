@@ -145,3 +145,10 @@ confirming that caller deadlines and credentials are preserved.
 The package tests, build, vet, specification validation and lint, and the
 documentation coverage preflight passed. The tests used stubbed transports and
 `httptest` servers only.
+
+PR review follow-up: the per-call copy of the shared client is taken under
+`c.mu`, the lock `SetAuthToken` holds when it replaces the transport.
+`TestCreateInstance_CopiesClientUnderRotation` rotates the credential while
+creating instances; under `-race` it reported a data race without the lock and
+passes with it. The same unlocked reads in other control methods are unchanged
+and outside this work order.
