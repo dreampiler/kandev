@@ -84,6 +84,8 @@ func (r *Repository) initAgentDeliverySchema() error {
 		);
 		CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending
 			ON agent_delivery_effects(effect_type, created_at, stream_id, sequence);
+		CREATE INDEX IF NOT EXISTS idx_agent_delivery_terminal_lookup
+			ON agent_delivery_effects(effect_type, submission_id, stream_id, sequence);
 	`, blob, blob))
 	return err
 }
