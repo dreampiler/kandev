@@ -138,6 +138,9 @@ func (m *ControlServer) setupRoutes() {
 	// A dedicated collection path, not /instances/footprint: the router cannot
 	// resolve a static segment beside the :id wildcard.
 	api.GET("/runtime-footprint", m.handleListInstanceFootprints)
+	api.POST("/delivery/retained", m.handleRetainedDelivery)
+	api.POST("/delivery/retained/evidence", m.handleRetainedReconstructionEvidence)
+	api.POST("/delivery/retained/submission", m.handleRetainedReconstructionSubmission)
 	api.GET("/instances/:id", m.handleGetInstance)
 	api.DELETE("/instances/:id", m.handleDeleteInstance)
 	api.GET("/instances/:id/turn-outcome", m.handleGetTurnOutcome)

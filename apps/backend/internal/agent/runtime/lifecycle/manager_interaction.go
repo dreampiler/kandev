@@ -1319,8 +1319,39 @@ func (m *Manager) StopAgent(ctx context.Context, executionID string, force bool)
 
 // StopAgentWithReason stops an agent execution and passes a semantic reason to runtime teardown.
 func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, reason string, force bool) error {
+	var pendingRecovery *remoteRecoveryRetry
+	var attemptDone <-chan struct{}
+	if reason == StopReasonBackendShutdown || reason == StopReasonRecoverableAgentFailure {
+		pendingRecovery = m.remoteRecoveryForExecution(executionID)
+	} else {
+		pendingRecovery, attemptDone = m.requestPendingRemoteRecoveryStop(executionID, reason, force)
+	}
+	if attemptDone != nil {
+		select {
+		case <-attemptDone:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
+		if pendingRecovery != nil {
+			if reason == StopReasonBackendShutdown {
+				return nil
+			}
+			if !m.beginRemoteRecovery(pendingRecovery) {
+				return errors.New("pending remote recovery is already being reconciled")
+			}
+			defer m.finishRemoteRecoveryAttempt(pendingRecovery)
+			stopped, err := m.stopPendingRemoteRecovery(ctx, pendingRecovery, reason, force)
+			if err != nil {
+				return err
+			}
+			if stopped {
+				m.completeRemoteRecovery(pendingRecovery)
+			}
+			return nil
+		}
 		if handled, err := m.stopPersistedKubernetesExecution(ctx, executionID, reason, force); handled {
 			return err
 		}
@@ -1344,6 +1375,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	if pendingRecovery != nil && pendingRecovery.record.SessionID != execution.SessionID {
+		return fmt.Errorf("execution %q no longer owns the pending remote recovery", executionID)
 	}
 	execution.stopRequested.Store(true)
 	if m.streamManager != nil {
@@ -1381,7 +1415,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// backend process owns, so it dies with the backend regardless, and
 	// detaching would leave an executors_running row claiming a live agent
 	// with no agent.stopped published. See isPassthroughExecution.
-	if reason == StopReasonBackendShutdown && execution.RuntimeName == executor.NamePluginRemote {
+	if reason == StopReasonBackendShutdown && isRemoteRecoveryBackendShutdown(execution.RuntimeName) {
 		return m.detachAgentExecution(executionID, execution)
 	}
 	if m.agentSurvivalEnabled && reason == StopReasonBackendShutdown &&
@@ -1450,6 +1484,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.RemoveExecution(executionID)
 	if execution.Owner.Kind != ExecutionOwnerRun && !preservePassthroughConversation {
 		m.deleteExecutorRunning(ctx, executionInventorySessionID(execution), execution.ID)
+	}
+	if pendingRecovery != nil {
+		m.completeRemoteRecovery(pendingRecovery)
 	}
 	m.clearRemoteStatus(execution.SessionID)
 
@@ -1560,6 +1597,9 @@ func (m *Manager) stopExecutionAgentctl(
 
 // StopBySessionID stops the agent for a specific session
 func (m *Manager) StopBySessionID(ctx context.Context, sessionID string, force bool) error {
+	if pending := m.pendingRemoteRecoveryForSession(sessionID); pending != nil && pending.record != nil {
+		return m.StopAgent(ctx, pending.record.AgentExecutionID, force)
+	}
 	execution, exists := m.executionStore.GetBySessionID(sessionID)
 	if !exists {
 		return fmt.Errorf("no agent running for session %q", sessionID)

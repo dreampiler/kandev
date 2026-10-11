@@ -326,6 +326,10 @@ var _ interface {
 	SnapshotRuntimeFootprint(ctx context.Context) agentruntime.RuntimeFootprintSnapshot
 } = (*lifecycleAdapter)(nil)
 var _ runtimeapi.DurableDeliveryCapabilityReader = (*lifecycleAdapter)(nil)
+var _ interface {
+	InspectDeliveryRecordEvidence(context.Context, runtimeapi.DeliveryRecordEvidenceRequest) (*runtimeapi.DeliveryRecordEvidence, error)
+	ReadDeliveryRecordSubmission(context.Context, runtimeapi.DeliveryRecordSubmissionRequest) (*runtimeapi.DeliveryRecordSubmission, error)
+} = (*lifecycleAdapter)(nil)
 
 // SnapshotRuntimeFootprint forwards one live-footprint observation to the
 // lifecycle manager. The adapter is what the orchestrator holds as its agent
@@ -464,6 +468,11 @@ func buildLifecycleLaunchRequest(
 		TaskScope:                     req.TaskScope,
 		SessionSettingsPolicy:         lifecycleSessionSettingsPolicy(req.SessionSettingsPolicy),
 		RequiredNativeConversationID:  req.RequiredNativeConversationID,
+		InterruptedSubmissionID:       req.InterruptedSubmissionID,
+		InterruptedStreamID:           req.InterruptedStreamID,
+		InterruptedHarnessGeneration:  req.InterruptedHarnessGeneration,
+		CandidateExecutionID:          req.CandidateExecutionID,
+		OnExecutionAllocated:          req.OnExecutionAllocated,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
@@ -475,6 +484,7 @@ func buildLifecycleLaunchRequest(
 		AgentProfileID:                officeProfileID,
 		ExecutionProfileID:            req.AgentProfileID,
 		StartAgent:                    req.StartAgent,
+		SuppressBootStatusMessage:     req.SuppressBootStatusMessage,
 		TurnID:                        req.TurnID,
 		WorkspacePath:                 workspacePath,
 		OriginalWorkspacePath:         req.OriginalWorkspacePath,
@@ -1033,6 +1043,27 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
+	ctx context.Context,
+	identity lifecycle.AgentDeliveryRecoveryIdentity,
+) lifecycle.DeliveryReconciliationResult {
+	return a.mgr.RecoverAgentPromptStreamWithIdentity(ctx, identity)
+}
+
+func (a *lifecycleAdapter) InspectDeliveryRecordEvidence(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordEvidenceRequest,
+) (*runtimeapi.DeliveryRecordEvidence, error) {
+	return a.mgr.InspectDeliveryRecordEvidence(ctx, request)
+}
+
+func (a *lifecycleAdapter) ReadDeliveryRecordSubmission(
+	ctx context.Context,
+	request runtimeapi.DeliveryRecordSubmissionRequest,
+) (*runtimeapi.DeliveryRecordSubmission, error) {
+	return a.mgr.ReadDeliveryRecordSubmission(ctx, request)
+}
+
 func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
 	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
 }
@@ -1176,6 +1207,12 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 // and this lookup must never lazily create an execution.
 func (a *lifecycleAdapter) HasLiveExecution(sessionID string) bool {
 	return a.mgr.HasLiveAgentExecution(sessionID)
+}
+
+// HasPendingRemoteRecovery reports whether the exact remote execution owner
+// still has retryable lifecycle recovery pending.
+func (a *lifecycleAdapter) HasPendingRemoteRecovery(sessionID, executionID string) bool {
+	return a.mgr.HasPendingRemoteRecovery(sessionID, executionID)
 }
 
 // GetGitLog retrieves the git log for a session from baseCommit to HEAD.
