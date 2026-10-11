@@ -279,7 +279,7 @@ func (s *Service) startOperation(ctx context.Context, q sqlx.QueryerContext, r *
 	if err := scanGet(ctx, q, &schemaVersion, `PRAGMA schema_version`); err != nil {
 		return err
 	}
-	upperTask, err := tasksqlite.ArchiveUpperTaskID(ctx, q)
+	upperTask, err := tasksqlite.HistoryUpperTaskID(ctx, q)
 	if err != nil {
 		return err
 	}

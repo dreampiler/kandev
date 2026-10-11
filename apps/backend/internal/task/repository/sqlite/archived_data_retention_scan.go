@@ -42,6 +42,48 @@ func ArchivedTaskEligible(ctx context.Context, q sqlx.QueryerContext, driverName
 	return eligible, nil
 }
 
+// HistoryTaskEligible reports whether a task may have its message metadata
+// reduced. A task is eligible when it is archived at or before the cutoff, or
+// when it is finished under the existing inactivity contract at the cutoff.
+func HistoryTaskEligible(ctx context.Context, q sqlx.QueryerContext, driverName, taskID string, cutoff time.Time) (bool, error) {
+	archived, err := ArchivedTaskEligible(ctx, q, driverName, taskID, cutoff)
+	if err != nil || archived {
+		return archived, err
+	}
+	return FinishedTaskEligible(ctx, q, taskID, cutoff)
+}
+
+// FinishedTaskEligible reports whether a task is finished: its state is terminal
+// (COMPLETED, FAILED, or CANCELLED) and it satisfies the existing inactivity
+// contract at the cutoff. A nonterminal task is never finished-eligible.
+func FinishedTaskEligible(ctx context.Context, q sqlx.QueryerContext, taskID string, cutoff time.Time) (bool, error) {
+	terminal, err := terminalTaskState(ctx, q, taskID)
+	if err != nil || !terminal {
+		return false, err
+	}
+	return PayloadTaskEligible(ctx, q, taskID, cutoff)
+}
+
+func terminalTaskState(ctx context.Context, q sqlx.QueryerContext, taskID string) (bool, error) {
+	var terminal bool
+	stmt, cancel := context.WithTimeout(ctx, archivedEligibilityBudget)
+	defer cancel()
+	err := sqlx.GetContext(stmt, q, &terminal, terminalTaskStateSQL, taskID)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return false, fmt.Errorf("%w: %w", ErrArchivedTaskEligibilityBudget, err)
+		}
+		return false, err
+	}
+	return terminal, nil
+}
+
+// terminalTaskStateSQL is the finished-task gate. Only a terminal task state
+// qualifies for the finished path, so a quiescent but nonterminal task is not
+// reduced through it.
+var terminalTaskStateSQL = `SELECT EXISTS(SELECT 1 FROM tasks
+ WHERE id=? AND state IN ('COMPLETED','FAILED','CANCELLED'))`
+
 // SucceededCleanupJobEligible reports whether a cleanup job may have its
 // snapshot reduced. Only a terminal success qualifies; every other state,
 // including a missing or unreadable completion timestamp, is retained.
@@ -96,19 +138,23 @@ type ArchivedMessageRow struct {
 	Bytes int64  `db:"bytes"`
 }
 
-// NextArchivedTaskID returns the next archived task after the cursor, bounded by
-// the captured upper cursor taken when the pass started.
-func NextArchivedTaskID(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
+// NextHistoryTaskID returns the next candidate task after the cursor, bounded by
+// the captured upper cursor. A task is a candidate when it is archived or its
+// state is terminal, so the message target walks finished and archived tasks in
+// one keyset.
+func NextHistoryTaskID(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
 	var id string
 	err := sqlx.GetContext(ctx, q, &id, `SELECT id FROM tasks
-	 WHERE archived_at IS NOT NULL AND id>? AND id<=? ORDER BY id LIMIT 1`, after, upper)
+	 WHERE (archived_at IS NOT NULL OR state IN ('COMPLETED','FAILED','CANCELLED'))
+	 AND id>? AND id<=? ORDER BY id LIMIT 1`, after, upper)
 	return id, err
 }
 
-// ArchiveUpperTaskID captures the highest archived task id for this pass.
-func ArchiveUpperTaskID(ctx context.Context, q sqlx.QueryerContext) (string, error) {
+// HistoryUpperTaskID captures the highest candidate task id for this pass.
+func HistoryUpperTaskID(ctx context.Context, q sqlx.QueryerContext) (string, error) {
 	var id string
-	err := sqlx.GetContext(ctx, q, &id, `SELECT COALESCE(MAX(id),'') FROM tasks WHERE archived_at IS NOT NULL`)
+	err := sqlx.GetContext(ctx, q, &id, `SELECT COALESCE(MAX(id),'') FROM tasks
+	 WHERE archived_at IS NOT NULL OR state IN ('COMPLETED','FAILED','CANCELLED')`)
 	return id, err
 }
 

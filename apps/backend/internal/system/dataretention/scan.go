@@ -132,14 +132,15 @@ func (s *Service) scanMessageBatch(ctx context.Context, q sqlx.QueryerContext, r
 	return changed, nil
 }
 
-// advanceMessageCursor resolves the next archived task, session and message page
-// to read. It reports false when it skipped a task or session instead of
-// producing a page, and moves the pass to the cleanup phase once no archived
-// task remains below the captured upper cursor.
+// advanceMessageCursor resolves the next candidate task, session and message
+// page to read. A candidate is a finished or archived task. It reports false
+// when it skipped a task or session instead of producing a page, and moves the
+// pass to the cleanup phase once no candidate remains below the captured upper
+// cursor.
 func (s *Service) advanceMessageCursor(ctx context.Context, q sqlx.QueryerContext, r *record, validated *string) (bool, error) {
 	p := &r.Progress
 	if p.Task == "" {
-		id, err := s.nextArchivedTask(ctx, q, p.TaskAfter, p.UpperTask)
+		id, err := s.nextHistoryTask(ctx, q, p.TaskAfter, p.UpperTask)
 		if err != nil {
 			return false, err
 		}
@@ -151,7 +152,7 @@ func (s *Service) advanceMessageCursor(ctx context.Context, q sqlx.QueryerContex
 		p.Task = id
 	}
 	if *validated != p.Task {
-		eligible, err := s.archivedTaskEligible(ctx, q, r, p.Task)
+		eligible, err := s.historyTaskEligible(ctx, q, r, p.Task)
 		if err != nil {
 			return false, err
 		}
@@ -167,17 +168,17 @@ func (s *Service) advanceMessageCursor(ctx context.Context, q sqlx.QueryerContex
 	return true, nil
 }
 
-func (s *Service) nextArchivedTask(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
-	id, err := tasksqlite.NextArchivedTaskID(ctx, q, after, upper)
+func (s *Service) nextHistoryTask(ctx context.Context, q sqlx.QueryerContext, after, upper string) (string, error) {
+	id, err := tasksqlite.NextHistoryTaskID(ctx, q, after, upper)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}
 	return id, err
 }
 
-func (s *Service) archivedTaskEligible(ctx context.Context, q sqlx.QueryerContext, r *record, taskID string) (bool, error) {
-	eligible, err := tasksqlite.ArchivedTaskEligible(ctx, q, s.driverName(), taskID, r.Operation.ArchivedCutoff)
-	if errors.Is(err, tasksqlite.ErrArchivedTaskEligibilityBudget) {
+func (s *Service) historyTaskEligible(ctx context.Context, q sqlx.QueryerContext, r *record, taskID string) (bool, error) {
+	eligible, err := tasksqlite.HistoryTaskEligible(ctx, q, s.driverName(), taskID, r.Operation.ArchivedCutoff)
+	if errors.Is(err, tasksqlite.ErrArchivedTaskEligibilityBudget) || errors.Is(err, tasksqlite.ErrPayloadEligibilityBudget) {
 		r.Operation.Skipped[skipEligibilityBudget]++
 		finishMessageTask(&r.Progress)
 		return false, nil
@@ -252,7 +253,7 @@ func (s *Service) consumeMessagePage(ctx context.Context, q sqlx.QueryerContext,
 // reduceMessage shares the tool payload reducer with the existing policy, so
 // both paths write the identical removal marker and the second is a no-op on a
 // row the first already handled. Eligibility is re-read inside the writer
-// transaction so a task unarchived mid-pass keeps its payload.
+// transaction so a task that becomes active mid-pass keeps its payload.
 func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *record, row tasksqlite.ArchivedMessageRow, mutate bool) (string, error) {
 	raw, err := tasksqlite.ArchivedMessageMetadata(ctx, q, row.RowID, row.ID)
 	if err != nil {
@@ -278,7 +279,7 @@ func (s *Service) reduceMessage(ctx context.Context, q sqlx.QueryerContext, r *r
 	if !ok {
 		return "", errWriterRequired
 	}
-	eligible, err := tasksqlite.ArchivedTaskEligible(ctx, tx, s.driverName(), r.Progress.Task, r.Operation.ArchivedCutoff)
+	eligible, err := tasksqlite.HistoryTaskEligible(ctx, tx, s.driverName(), r.Progress.Task, r.Operation.ArchivedCutoff)
 	if err != nil || !eligible {
 		return "", err
 	}
