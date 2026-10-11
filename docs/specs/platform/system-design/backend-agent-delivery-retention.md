@@ -124,7 +124,7 @@ Valid transfer preserves original submission owner generation/hash.
 Startup connects updates before ACP initialization for MCP, buffering retained frames until capability negotiation completes.
 Fresh generation-one bootstrap also waits for its initial SQL generation; both waits have thirty-second cancellation-aware bounds.
 Publish native identity before configuration layers. Require full owner checks before receipt, projection or ACK.
-Prepare SQL before durable dispatch. Initial IDs match lifecycle owner/generation; direct retries receive fresh immutable IDs. Preparation failure blocks dispatch.
+Prepare SQL and bind initial IDs to the owner/generation launch handoff before dispatch. Failure blocks dispatch; direct retries receive fresh immutable IDs.
 Recovery and unmarked missing authority fail closed; events never create authority.
 
 Within one serialized receive transaction, apply this order:

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -21,12 +22,16 @@ import (
 type retentionInitialPromptManager struct {
 	*durableDeliveryTestAgentManager
 	boundID string
+	bindErr error
 }
 
 func (m *retentionInitialPromptManager) SetInitialDeliverySubmissionID(_ context.Context, _, id string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.bindErr != nil {
+		return m.bindErr
+	}
 	m.boundID = id
-	m.mu.Unlock()
 	return nil
 }
 
@@ -39,7 +44,7 @@ type retentionInitialPromptObservation struct {
 
 func TestDeliveryRetentionInitialPromptAdmission(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
-		for _, scenario := range []string{"fresh", "generation_3", "explicit_identity", "legacy", durableDeliveryStorageNotDurable, "unresolved_peer", "storage_failure"} {
+		for _, scenario := range []string{"fresh", "generation_3", "explicit_identity", "legacy", durableDeliveryStorageNotDurable, "unresolved_peer", "storage_failure", "binding_failure"} {
 			t.Run(engine+"/"+scenario, func(t *testing.T) {
 				assertRetentionInitialPromptAdmission(t, engine, scenario)
 			})
@@ -79,6 +84,9 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 	if scenario == "storage_failure" {
 		installRetentionInitialPromptFailure(t, repo, engine, expectedID)
 	}
+	if scenario == "binding_failure" {
+		manager.bindErr = errors.New("initial identity handoff unavailable")
+	}
 	observations := make(chan retentionInitialPromptObservation, 1)
 	manager.startAgentProcessFunc = func(ctx context.Context, id string) error {
 		manager.mu.Lock()
@@ -106,7 +114,7 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 	} else {
 		execution, err = service.StartCreatedSession(t.Context(), taskID, sessionID, "profile-1", "/capacity-after-tools", false, false, true, nil, nil)
 	}
-	if scenario == "unresolved_peer" || scenario == "storage_failure" {
+	if scenario == "unresolved_peer" || scenario == "storage_failure" || scenario == "binding_failure" {
 		require.ErrorIs(t, err, ErrSessionRecoveryRequired, "unprepared durable initial prompt must fail before provider dispatch")
 		manager.mu.Lock()
 		starts := len(manager.startAgentProcessCalls)
@@ -122,7 +130,13 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		}
 		submissions, readErr := repo.ListAgentDeliverySubmissions(t.Context(), sessionID)
 		require.NoError(t, readErr)
-		require.Empty(t, submissions)
+		if scenario == "binding_failure" {
+			require.Len(t, submissions, 1)
+			require.Equal(t, expectedID, submissions[0].ID)
+			require.Equal(t, models.DeliverySubmissionDispatching, submissions[0].State)
+		} else {
+			require.Empty(t, submissions)
+		}
 		return
 	}
 	require.NoError(t, err)
@@ -157,6 +171,8 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		require.Equal(t, journal.SubmissionHash(observed.submission.Payload), observed.submission.PayloadHash)
 		if scenario == "explicit_identity" {
 			require.Equal(t, "explicit-initial-message", observed.boundID)
+		} else {
+			require.Equal(t, expectedID, observed.boundID, "generated canonical identity must be bound before native initial dispatch")
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("initial provider dispatch was not observed")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -16,7 +17,8 @@ func (s *Service) prepareInitialAgentDeliverySubmission(
 	attachments []v1.MessageAttachment,
 	options promptTaskOptions,
 ) error {
-	if options.deliverySubmissionID == "" {
+	generatedIdentity := options.deliverySubmissionID == ""
+	if generatedIdentity {
 		protocol, err := s.resolveDeliveryProtocol(ctx, session.ID, executionID, options.deliveryProtocol)
 		if err != nil {
 			return err
@@ -37,6 +39,18 @@ func (s *Service) prepareInitialAgentDeliverySubmission(
 		options.deliveryProtocol = protocol
 		options.expectedDeliveryGeneration = generation
 	}
-	_, err := s.prepareAgentDeliverySubmission(ctx, session, executionID, prompt, attachments, options)
-	return err
+	submission, err := s.prepareAgentDeliverySubmission(ctx, session, executionID, prompt, attachments, options)
+	if err != nil || submission == nil || !generatedIdentity {
+		return err
+	}
+	// Bind the generated SQL identity before lifecycle validates the initial
+	// launch handoff. Explicit first-message IDs are already bound by executor.
+	setter, ok := s.agentManager.(executor.InitialDeliverySubmissionIDSetter)
+	if !ok {
+		return s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed", submission)
+	}
+	if err := setter.SetInitialDeliverySubmissionID(ctx, executionID, submission.id); err != nil {
+		return s.deliveryRecoveryError(ctx, session.ID, "backend_delivery_admission_failed", submission)
+	}
+	return nil
 }
