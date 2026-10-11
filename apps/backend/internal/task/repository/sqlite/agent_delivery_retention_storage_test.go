@@ -220,6 +220,11 @@ type retentionStorageRepository interface {
 
 func runRetentionStorageBatch(t *testing.T, repo retentionStorageRepository, batchRows int) (models.AgentDeliveryRetentionBatchResult, int) {
 	t.Helper()
+	return runRetentionStorageBatchWithCursor(t, repo, batchRows, "", 0)
+}
+
+func runRetentionStorageBatchWithCursor(t *testing.T, repo retentionStorageRepository, batchRows int, streamID string, retiredBefore int64) (models.AgentDeliveryRetentionBatchResult, int) {
+	t.Helper()
 	var lastErr error
 	for retries := 0; retries < 3; retries++ {
 		result, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{MaxCandidates: batchRows})
@@ -231,6 +236,15 @@ func runRetentionStorageBatch(t *testing.T, repo retentionStorageRepository, bat
 		}
 		lastErr = err
 		// A deadline may hide a committed transaction's acknowledgement.
+		if streamID != "" {
+			cursor, readErr := repo.GetAgentDeliveryCursor(context.Background(), streamID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if cursor.RetiredSequence > retiredBefore {
+				return result, retries + 1
+			}
+		}
 		timer := time.NewTimer(100 * time.Millisecond)
 		<-timer.C
 	}
@@ -244,7 +258,7 @@ func runRetentionStorageAccountedBatch(t *testing.T, repo retentionStorageReposi
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, retries := runRetentionStorageBatch(t, repo, batchRows)
+	result, retries := runRetentionStorageBatchWithCursor(t, repo, batchRows, event.StreamID, before.RetiredSequence)
 	after, err := repo.GetAgentDeliveryCursor(context.Background(), event.StreamID)
 	if err != nil {
 		t.Fatal(err)
