@@ -3,6 +3,7 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -107,12 +108,25 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 
 // Remove removes an agent execution from all tracking maps.
 func (s *ExecutionStore) Remove(executionID string) {
+	execution := s.removeFromIndexes(executionID)
+	if execution == nil {
+		return
+	}
+	// Clear per-execution runtime state after releasing the registry lock. The
+	// execution is already absent from every index, so no lookup can observe it,
+	// and a held runtimeEnvMu no longer extends the shared write hold.
+	execution.clearRuntimeEnvironment()
+}
+
+// removeFromIndexes deletes executionID from every index under the write lock
+// and returns the removed execution, or nil when it was not tracked.
+func (s *ExecutionStore) removeFromIndexes(executionID string) *AgentExecution {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	execution, exists := s.executions[executionID]
 	if !exists {
-		return
+		return nil
 	}
 
 	// Remove from secondary indexes
@@ -122,11 +136,11 @@ func (s *ExecutionStore) Remove(executionID string) {
 	if execution.ContainerID != "" {
 		delete(s.byContainer, execution.ContainerID)
 	}
-	execution.clearRuntimeEnvironment()
 
 	// Remove from primary map
 	delete(s.executions, executionID)
 	agentActiveRuntimes.Set(int64(len(s.executions)))
+	return execution
 }
 
 // Get returns an agent execution by its ID.
@@ -150,6 +164,26 @@ func (s *ExecutionStore) GetBySessionID(sessionID string) (*AgentExecution, bool
 
 	execution, exists := s.executions[executionID]
 	return execution, exists
+}
+
+// GetBySessionIDContext returns the agent execution associated with sessionID,
+// waiting no longer than ctx for the registry read lease. Unlike GetBySessionID
+// it fails closed with the context error when shared state is held, so a caller
+// with a deadline (a pending permission operation during another session's
+// cancel escalation) can bound acquisition instead of blocking indefinitely.
+func (s *ExecutionStore) GetBySessionIDContext(ctx context.Context, sessionID string) (*AgentExecution, bool, error) {
+	if err := waitForLease(ctx, s.mu.TryRLock); err != nil {
+		return nil, false, err
+	}
+	defer s.mu.RUnlock()
+
+	executionID, exists := s.bySession[sessionID]
+	if !exists {
+		return nil, false, nil
+	}
+
+	execution, exists := s.executions[executionID]
+	return execution, exists, nil
 }
 
 // OwnsPromptGeneration reports whether executionID and generation still own

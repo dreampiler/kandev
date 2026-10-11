@@ -28,6 +28,10 @@ const (
 	freshSessionModelStateWait      = 2 * time.Second
 	freshSessionModelStatePoll      = 10 * time.Millisecond
 	resetAgentContextRequestTimeout = 10 * time.Second
+	// pendingPermissionRequestTimeout bounds the whole pending-permission
+	// operation: execution lookup, agentctl-client acquisition, and the
+	// provider call share this one deadline.
+	pendingPermissionRequestTimeout = 30 * time.Second
 )
 
 // WasSessionInitialized reports whether the execution completed ACP session setup.
@@ -3080,51 +3084,78 @@ func (m *Manager) RespondToPermissionBySessionID(sessionID, pendingID, optionID 
 }
 
 // ListPendingPermissionsBySessionID reads safe live snapshots from the current
-// execution for a task session. It never starts or resumes an execution.
+// execution for a task session. It never starts or resumes an execution. One
+// request context bounds execution lookup, client acquisition, and the provider
+// call, so another session's cancel escalation cannot block past the deadline.
 func (m *Manager) ListPendingPermissionsBySessionID(ctx context.Context, sessionID string) ([]streams.PendingAgentPermission, error) {
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	requestCtx, cancel := context.WithTimeout(ctx, pendingPermissionRequestTimeout)
+	defer cancel()
+
+	execution, exists, err := m.executionStore.GetBySessionIDContext(requestCtx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("look up execution for session %s: %w", sessionID, err)
+	}
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
+	client, releaseClient, err := execution.AcquireAgentCtlClientContext(requestCtx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire agentctl client for session %s: %w", sessionID, err)
+	}
 	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	return client.ListPendingPermissions(requestCtx)
 }
 
 // ResolvePermissionBySessionID selects one exact option on one exact request
-// generation in the current execution.
+// generation in the current execution. One request context bounds execution
+// lookup, client acquisition, and the provider call.
 func (m *Manager) ResolvePermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID, optionID string) (*streams.PermissionResolveResponse, error) {
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	requestCtx, cancel := context.WithTimeout(ctx, pendingPermissionRequestTimeout)
+	defer cancel()
+
+	execution, exists, err := m.executionStore.GetBySessionIDContext(requestCtx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("look up execution for session %s: %w", sessionID, err)
+	}
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
+	client, releaseClient, err := execution.AcquireAgentCtlClientContext(requestCtx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire agentctl client for session %s: %w", sessionID, err)
+	}
 	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	return client.ResolvePermission(requestCtx, requestID, pendingID, optionID)
 }
 
+// CancelPermissionBySessionID dismisses one exact live request generation in the
+// current execution. One request context bounds execution lookup, client
+// acquisition, and the provider call.
 func (m *Manager) CancelPermissionBySessionID(ctx context.Context, sessionID, requestID, pendingID string) (*streams.PermissionCancelResponse, error) {
-	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	requestCtx, cancel := context.WithTimeout(ctx, pendingPermissionRequestTimeout)
+	defer cancel()
+
+	execution, exists, err := m.executionStore.GetBySessionIDContext(requestCtx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("look up execution for session %s: %w", sessionID, err)
+	}
 	if !exists {
 		return nil, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 	}
-	client, releaseClient := execution.AcquireAgentCtlClient()
+	client, releaseClient, err := execution.AcquireAgentCtlClientContext(requestCtx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire agentctl client for session %s: %w", sessionID, err)
+	}
 	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agent execution has no agentctl client: %s", execution.ID)
 	}
-	requestCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	return client.CancelPermission(requestCtx, requestID, pendingID)
 }
 
