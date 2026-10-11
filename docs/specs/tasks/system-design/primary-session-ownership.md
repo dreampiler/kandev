@@ -52,8 +52,9 @@ skips the excluded and terminal sessions and, with `activeOnly`, sessions that
 are not active. It ranks the rest:
 
 1. A session whose `agent_profile_id` equals the effective profile of the
-   task's current step. A task without a step, an unreadable step, or a step
-   without its own profile treats every session as matching.
+   task's current step: the step's own profile, a task override, or the
+   workflow default. A task without a step, an unreadable step, or no
+   resolvable profile treats every session as matching.
 2. Any other session.
 3. A session with a valid `workflow_parking` marker, last.
 

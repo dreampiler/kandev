@@ -6014,28 +6014,14 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 }
 
 // promoteNextPrimaryAfterRemoval picks the best remaining session as primary
-// after a session is deleted. Prefers RUNNING > active > any remaining.
+// after a session is deleted. Any nonterminal session is eligible; the shared
+// selector prefers the current step's profile and ranks a parked session last.
 func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil || len(sessions) == 0 {
 		return
 	}
-	var candidate string
-	for _, sess := range sessions {
-		if sess.ID == deletedSessionID {
-			continue
-		}
-		if sess.State == models.TaskSessionStateRunning {
-			candidate = sess.ID
-			break
-		}
-		if candidate == "" {
-			candidate = sess.ID
-		} else if isActiveSessionState(sess.State) {
-			// Prefer active over terminal
-			candidate = sess.ID
-		}
-	}
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary after delete",

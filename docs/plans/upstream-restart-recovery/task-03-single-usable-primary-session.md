@@ -1,7 +1,7 @@
 ---
 id: "03-single-usable-primary-session"
 title: "Keep one usable primary session"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -65,6 +65,20 @@ From the repository root:
 
 ## Results
 
-Not implemented yet. On the current main branch, probes show two primaries
-after a stale write, a parked running session promoted over a starting one, and
-a completed session promoted after a deletion.
+- RED before the fix: `TestUpdateTaskSessionKeepsPrimaryFromStaleCopy` found
+  two primaries; `TestPrimaryPromotionAfterStopSkipsParkedSession`,
+  `TestPrimaryPromotionAfterStopPrefersCurrentStepProfile`, and
+  `TestPrimaryPromotionAfterRemovalSkipsTerminalSession` picked the parked,
+  other-profile, and completed sessions. The two guard tests passed.
+- GREEN after the fix: all six tests pass.
+- Two fixtures set the primary flag through the full-row write and now call
+  `SetSessionPrimary`: `TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails`
+  and `newPreparedPromptFixture`. Every test in the orchestrator files that
+  write `IsPrimary` before `UpdateTaskSession`, and the `mcp/handlers`
+  message tests, pass.
+- Production code changes the flag only through `SetSessionPrimary*`; the
+  three places that assign `IsPrimary` do so after that call.
+- In `sqlite`, `TestCancelActiveTaskSessionsByCandidatesRejectsNewActivityAndTurn`
+  and `TestUpdateTaskSessionIfCurrentSnapshotRejectsSameStateProgress` fail
+  intermittently on Windows with and without this change (4 of 8 runs on
+  main): two writes inside one clock tick get the same `updated_at`.

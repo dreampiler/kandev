@@ -119,7 +119,7 @@ is added.
 
 - [x] [Task 01: Keep queued messages after an expired runtime wait](task-01-requeue-expired-runtime-wait.md)
 - [x] [Task 02: Restart interrupted automatic starts](task-02-restart-interrupted-automatic-starts.md)
-- [ ] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md)
+- [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md)
 - [ ] [Task 04: Keep the deferred start on an agentless step](task-04-agentless-step-deferred-start.md)
 
 ## Verification results

@@ -2129,6 +2129,15 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
+	// is_primary is never promoted here: the conditional write only releases
+	// an owned flag for a snapshot-guarded write whose copy says non-primary
+	// and keeps the stored selection otherwise, so a full-row write carrying a
+	// copy read before a promotion cannot make the demoted session primary
+	// again and leave the task with two primaries. Promotion and demotion
+	// still belong to the task-scoped SetSessionPrimary transactions. No
+	// unique index backs the column, so that single-writer guard is load
+	// bearing.
+
 	// agent_profile_id is stored as NULL when empty. No unique index
 	// constrains (task_id, agent_profile_id) at this UPDATE path — office
 	// session-uniqueness enforcement lives only in CreateOfficeTaskSession's
