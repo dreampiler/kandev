@@ -1,7 +1,7 @@
 ---
 id: "03-record-retention-preparation-failure"
 title: "Record why a tool-payload retention backup preparation failed"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -68,4 +68,18 @@ verification path.
 
 ## Results
 
-Not implemented yet.
+Implemented on 2026-10-12, verified on Windows 11 with Go 1.26.
+
+- Red: on the base commit, `TestPreparationFailureRecordsCause` (then
+  asserting only on the status JSON and the raw settings row) failed with
+  `stored record keeps the failure cause`: the row held only `backup_failed`.
+- Green: `TestPreparationFailureRecordsCause` now also checks the `Options.Log`
+  call and `record.PreparationDetail`; it passes with
+  `TestDisableClearsPreparationDetail`, `TestLimitPreparationDetail` (a
+  three-byte rune at the limit is not split) and the existing
+  `TestPreparationGatesInitialCleanup`. The last two new tests use new symbols,
+  so they have no runtime Red on the base commit.
+- The status JSON for a failed preparation still contains only the
+  `backup_failed` code.
+- `go vet ./internal/system/toolretention/... ./internal/system` and
+  `go build ./...` pass.
