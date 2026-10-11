@@ -166,7 +166,7 @@ Source assessment: the candidate change touches `backendapp/dynamic_routing.go`,
 ## Task 03: moved
 
 The work order for a launch that selects the virtual dynamic family moved to a separate change about launch-time agent and command resolution, because it edits the same launch code.
-This package no longer changes that contract or code.
+That change is [#4412](https://github.com/kdlbs/kandev/pull/4412). This package no longer changes that contract or code.
 
 ## Task 04: restart recovery portions (pending input)
 
