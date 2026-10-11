@@ -1121,6 +1121,25 @@ func (ae *AgentExecution) AcquireAgentCtlClient() (*agentctl.Client, func()) {
 	return client, ae.agentctlLifecycleMu.RUnlock
 }
 
+// AcquireAgentCtlClientContext pins the current client like
+// AcquireAgentCtlClient, but waits no longer than ctx for the client read lease.
+// It fails closed with the context error instead of blocking indefinitely, so a
+// caller with a deadline is not held while a terminal stop owns the write side.
+func (ae *AgentExecution) AcquireAgentCtlClientContext(ctx context.Context) (*agentctl.Client, func(), error) {
+	if ae == nil {
+		return nil, func() {}, nil
+	}
+	if err := waitForLease(ctx, ae.agentctlLifecycleMu.TryRLock); err != nil {
+		return nil, func() {}, err
+	}
+	client := ae.currentAgentCtlClient()
+	if client == nil {
+		ae.agentctlLifecycleMu.RUnlock()
+		return nil, func() {}, nil
+	}
+	return client, ae.agentctlLifecycleMu.RUnlock, nil
+}
+
 // withAgentCtlClient keeps a workspace callback scoped to the client that
 // opened its stream. Holding the read lease through callback publication
 // fences it against a concurrent client replacement or detach.

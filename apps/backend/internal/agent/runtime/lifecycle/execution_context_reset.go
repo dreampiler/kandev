@@ -18,9 +18,12 @@ var errContextResetInProgress = errors.New("agent context reset is in progress")
 
 const maxContextResetEvents = 64
 
-const contextResetLeasePoll = 10 * time.Millisecond
+const leasePollInterval = 10 * time.Millisecond
 
-func waitForContextResetLease(ctx context.Context, try func() bool) error {
+// waitForLease polls a non-blocking lock attempt until it succeeds or ctx is
+// done. It deliberately never starts a goroutine, so a caller that times out
+// cannot leave background work that later mutates state.
+func waitForLease(ctx context.Context, try func() bool) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -31,7 +34,7 @@ func waitForContextResetLease(ctx context.Context, try func() bool) error {
 		if try() {
 			return nil
 		}
-		timer := time.NewTimer(contextResetLeasePoll)
+		timer := time.NewTimer(leasePollInterval)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -41,6 +44,10 @@ func waitForContextResetLease(ctx context.Context, try func() bool) error {
 		case <-timer.C:
 		}
 	}
+}
+
+func waitForContextResetLease(ctx context.Context, try func() bool) error {
+	return waitForLease(ctx, try)
 }
 
 func (e *AgentExecution) acquireContextResetOperation(ctx context.Context) (func(), error) {
