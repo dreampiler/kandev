@@ -36,12 +36,12 @@ func TestDeliveryRetentionStorage(t *testing.T) {
 				var prunedBytes int64
 				var retries int
 				for batch := 0; batch < count/batchRows+10; batch++ {
-					result, retryCount := runRetentionStorageBatch(t, repo, batchRows)
+					result, retryCount, removedBytes := runRetentionStorageAccountedBatch(t, repo, events[0], payloadSize, batchRows)
 					retries += retryCount
 					if result.Candidates > batchRows || result.PayloadBytesRead > 4<<20 {
 						t.Fatalf("batch exceeded work budget: %+v", result)
 					}
-					prunedBytes += result.PayloadBytesPruned
+					prunedBytes += removedBytes
 					cursor, err := repo.GetAgentDeliveryCursor(ctx, events[0].StreamID)
 					if err != nil {
 						t.Fatal(err)
@@ -213,7 +213,12 @@ func TestDeliveryRetentionStorageTerminalPlan(t *testing.T) {
 	}
 }
 
-func runRetentionStorageBatch(t *testing.T, repo *Repository, batchRows int) (models.AgentDeliveryRetentionBatchResult, int) {
+type retentionStorageRepository interface {
+	RunAgentDeliveryRetentionBatch(context.Context, models.AgentDeliveryRetentionBatchOptions) (models.AgentDeliveryRetentionBatchResult, error)
+	GetAgentDeliveryCursor(context.Context, string) (*models.AgentDeliveryCursor, error)
+}
+
+func runRetentionStorageBatch(t *testing.T, repo retentionStorageRepository, batchRows int) (models.AgentDeliveryRetentionBatchResult, int) {
 	t.Helper()
 	var lastErr error
 	for retries := 0; retries < 3; retries++ {
@@ -225,12 +230,42 @@ func runRetentionStorageBatch(t *testing.T, repo *Repository, batchRows int) (mo
 			t.Fatal(err)
 		}
 		lastErr = err
-		// Model the production worker's cancellable between-batch schedule after rollback.
+		// A deadline may hide a committed transaction's acknowledgement.
 		timer := time.NewTimer(100 * time.Millisecond)
 		<-timer.C
 	}
 	t.Fatalf("retention did not make progress after three bounded deadline retries: %v", lastErr)
 	return models.AgentDeliveryRetentionBatchResult{}, 0
+}
+
+func runRetentionStorageAccountedBatch(t *testing.T, repo retentionStorageRepository, event *models.AgentDeliveryEvent, payloadSize, batchRows int) (models.AgentDeliveryRetentionBatchResult, int, int64) {
+	t.Helper()
+	before, err := repo.GetAgentDeliveryCursor(context.Background(), event.StreamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, retries := runRetentionStorageBatch(t, repo, batchRows)
+	after, err := repo.GetAgentDeliveryCursor(context.Background(), event.StreamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := after.RetiredSequence - before.RetiredSequence
+	if retired < 0 || retired > int64((retries+1)*batchRows) {
+		t.Fatalf("retirement exceeded bounded attempts: before=%d after=%d retries=%d", before.RetiredSequence, after.RetiredSequence, retries)
+	}
+	// The seeded stream has one original envelope followed by equal-size raw
+	// payloads. Its committed prefix measures removal even if COMMIT timed out.
+	removedBytes := retired * int64(payloadSize)
+	if before.RetiredSequence == 0 && retired > 0 {
+		removedBytes += int64(len(event.Payload) - payloadSize)
+	}
+	if result.PayloadBytesPruned > removedBytes || (retries == 0 && result.PayloadBytesPruned != removedBytes) {
+		t.Fatalf("acknowledged bytes=%d durable removed bytes=%d retries=%d", result.PayloadBytesPruned, removedBytes, retries)
+	}
+	if result.PayloadBytesPruned != removedBytes {
+		t.Logf("commit acknowledgement lost: durable_removed_bytes=%d acknowledged_bytes=%d deadline_retries=%d", removedBytes, result.PayloadBytesPruned, retries)
+	}
+	return result, retries, removedBytes
 }
 
 func TestDeliveryRetentionStorageProtectedGap(t *testing.T) {

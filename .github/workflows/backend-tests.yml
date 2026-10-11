@@ -600,7 +600,10 @@ jobs:
           POSTGRES_USER: kandev
           POSTGRES_PASSWORD: kandev
           POSTGRES_DB: kandev_admin
+        # PostgreSQL parallel checks of million-row fixtures exceed Docker
+        # default shared memory even after logical row retirement.
         options: >-
+          --shm-size=256m
           --health-cmd "pg_isready -U kandev -d kandev_admin"
           --health-interval 5s
           --health-timeout 5s
@@ -660,7 +663,11 @@ jobs:
             ./internal/workflowsync
             ./internal/worktree
           )
-          go test -v -race -timeout 90m "${POSTGRES_PACKAGES[@]}"
+          # SQLite million-event fixtures run in test_shards. Keep all other
+          # SQLite cases and every PostgreSQL case in this persistence gate.
+          go test -v -race -timeout 90m \
+            -skip '^TestDeliveryRetentionStorage(ProtectedGap)?$/SQLite$' \
+            "${POSTGRES_PACKAGES[@]}"
 
   sidebar-resources:
     name: Sidebar resource bounds (${{ matrix.mode }})
