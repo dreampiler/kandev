@@ -418,3 +418,21 @@ describe("overview last-24-hours kind filter", () => {
     expect(remaining[0].textContent).toContain("New task");
   });
 });
+
+describe("overview provider account title", () => {
+  afterEach(cleanup);
+
+  it("shows the account kind as its translated name, not the translation key", () => {
+    render(
+      <OverviewModels
+        models={[{ ...modelItems[0], account_id: "openai" }]}
+        blocked={[]}
+        circuits={[]}
+        circuitsKnown
+      />,
+    );
+    const account = screen.getByTestId("overview-account");
+    expect(within(account).getByText("OpenAI")).toBeTruthy();
+    expect(within(account).queryByText("overviewAccountOpenai")).toBeNull();
+  });
+});
