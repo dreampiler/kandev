@@ -1,7 +1,7 @@
 ---
 id: "02-create-outside-manager-lock"
 title: "Create instances without holding the manager lock across startup"
-status: planned
+status: done
 wave: 2
 depends_on:
   - "01-instance-create-deadline"
@@ -98,6 +98,8 @@ order and the manager files added to the path lists.
 - `apps/backend/internal/agentctl/server/instance/manager.go`
 - `apps/backend/internal/agentctl/server/instance/manager_concurrency_test.go`
   (new)
+- `apps/backend/internal/agentctl/server/instance/manager_abandon_test.go`
+  (comment only)
 - `docs/plans/agentctl-instance-create-deadline/plan.md`
 - `docs/plans/agentctl-instance-create-deadline/task-02-create-outside-manager-lock.md`
 
@@ -133,4 +135,29 @@ commit.
 
 ## Results
 
-Not started.
+Completed on 2026-10-12. `Manager.CreateInstance` now runs `admitCreate` and
+`publishInstance` under `mu`, and `startInstance` without it. The HTTP server
+starts inside `publishInstance`. Admission counts the creation on
+`activeCreations`, and `Shutdown` waits on it before draining `abandonWG`.
+Environment validation stays in admission, before any port is reserved. Every
+current `CreateRequest` field is carried into the instance overrides. The
+existing abandonment test comment no longer describes creation as serialized.
+
+Red checks on the unchanged manager: `TestConcurrentCreationsOverlapStartup`
+failed with `fewer than 4 creations reached the end of startup together`,
+`TestCreateInstanceRejectsDuplicateIDDuringStartup` with `duplicate creation
+waited for the first creation's startup`, and
+`TestOtherInstanceOperationsDoNotWaitForStartup` with `operations on another
+instance waited for a creation's startup`.
+`TestShutdownWaitsForInProgressCreation` passed before and after, as a
+preservation check.
+
+After the change, the four new tests passed. The race-enabled run over the
+creation, abandonment, shutdown, and stop tests passed. The package build, the
+`cmd/agentctl` build, and vet passed.
+
+Two failures are independent of this change. On Windows hosts,
+`TestBuildMcpServerConfigs_DropsMissingStdioCommand` fails because it executes
+a POSIX shell script. Under `-race` on Windows,
+`TestCreateInstanceDoesNotWaitForComparisonTarget` exceeds its timing bound; it
+fails the same way with the unchanged manager and passes without `-race`.

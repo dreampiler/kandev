@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: in_progress
+status: complete
 requirements:
   - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-001
   - REQ-EXECUTORS-AGENTCTL-CREATE-DEADLINE-002
@@ -119,7 +119,7 @@ an agent.
 ## Work orders
 
 - [x] [Task 01: Give instance creation its own deadline](task-01-instance-create-deadline.md)
-- [ ] [Task 02: Create instances without holding the manager lock across startup](task-02-create-outside-manager-lock.md)
+- [x] [Task 02: Create instances without holding the manager lock across startup](task-02-create-outside-manager-lock.md)
 
 ## Verification results
 
@@ -135,8 +135,24 @@ Task 01 implementation checks on 2026-10-12:
   `python3 scripts/lint-spec-files.py --all`: passed.
 - Local `validateCoverage` preflight on the changed files: `covered`.
 
-The [task 01 work order](task-01-instance-create-deadline.md#results) records
-the details. Task 02 results are pending.
+Task 02 implementation checks on 2026-10-12:
+
+- Before the production change, `TestConcurrentCreationsOverlapStartup`,
+  `TestCreateInstanceRejectsDuplicateIDDuringStartup`, and
+  `TestOtherInstanceOperationsDoNotWaitForStartup` failed because each waited
+  on `mu`. `TestShutdownWaitsForInProgressCreation` passed before and after.
+- After the change, the four new tests passed. `go test -race` over the
+  creation, abandonment, shutdown, and stop tests passed with no race reports.
+- `go test ./internal/agentctl/server/instance -count=1` passed except
+  `TestBuildMcpServerConfigs_DropsMissingStdioCommand`, which needs a POSIX
+  shell script to be executable and fails on Windows hosts independently of
+  this change.
+- `go build ./internal/agentctl/...`, `go build ./cmd/agentctl`, and
+  `go vet ./internal/agentctl/server/instance`: passed.
+- Local `validateCoverage` preflight on the changed files: `covered`.
+
+The work orders for [task 01](task-01-instance-create-deadline.md#results) and
+[task 02](task-02-create-outside-manager-lock.md#results) record the details.
 
 ## Risks
 
