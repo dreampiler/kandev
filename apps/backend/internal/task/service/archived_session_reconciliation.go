@@ -62,6 +62,7 @@ func (s *Service) StartSessionReconciliationLoop(ctx context.Context) {
 				s.runOrphanedSessionReconciliation(ctx)
 				s.runActiveSessionSweep(ctx, now)
 				s.runCreatingEnvironmentReconciliation(ctx, now)
+				s.runAgentDeliveryRetentionSweep(ctx, now)
 			}
 		}
 	}()

@@ -95,3 +95,17 @@ type AgentDeliveryEffect struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	CompletedAt       *time.Time `json:"completed_at,omitempty"`
 }
+
+// AgentDeliveryRetirementBudget bounds one retirement pass: how many streams to
+// visit and the maximum number of rows to remove in the pass.
+type AgentDeliveryRetirementBudget struct {
+	Streams int
+	Rows    int
+}
+
+// AgentDeliveryRetirementResult reports the work one retirement pass committed.
+type AgentDeliveryRetirementResult struct {
+	StreamsVisited int
+	RowsRemoved    int64
+	BytesRemoved   int64
+}
