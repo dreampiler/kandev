@@ -87,10 +87,26 @@ capture closed through the existing inspection-error classification.
 - RED: before the change, `TestCaptureCleanupHeadOIDs_CheckoutWithoutGitMetadataUsesBranch`
   recorded the enclosing repository's HEAD.
 - GREEN: the new test passes; `TestCaptureCleanupHeadOIDs_PathRemovedDuringInspection`
-  uses a shell-script fake `git` that deletes its working directory and fails on
-  Windows with and without this change.
+  uses a shell-script fake `git` that deletes its working directory. The author
+  reported Windows failures with and without this change; this review did not
+  independently execute that fixture on Windows. No required CI failure is
+  waived on that report.
 - Review follow-up: without the `GIT_DIR` pin,
   `TestRunCheckoutLocalGitInspect_DoesNotDiscoverEnclosingRepository` returned
   the enclosing repository's HEAD for a directory without `.git`; with it the
   inspection fails, and a linked worktree whose `.git` is a file still reports
   its own HEAD.
+
+- Maintainer review: pin `GIT_DIR` relative to the Git command's checkout
+  directory, so both absolute and relative recorded checkout paths work. The
+  relative-path regression covers ordinary repositories and linked worktrees.
+- A deterministic subprocess test removes only the linked checkout's `.git`
+  after the presence check, leaves the directory inside a distinct enclosing
+  repository, and checks that capture falls back to the worktree branch. This
+  shell-script fixture runs on POSIX; it does not establish Windows behavior.
+- Maintainer verification: contained copied-function proofs passed for the
+  merged source, including the relative-path and deterministic metadata-removal
+  regressions. These proofs use documented Manager, store, classifier, and
+  subprocess-admission fakes; hosted CI supplies real-package verification.
+- Protected-main static documentation validators passed for the merged tree:
+  `scripts/list-docs.py validate` and `scripts/lint-spec-files.py --all`.

@@ -384,7 +384,7 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 // before Git starts, the inspection fails instead of discovering an enclosing
 // repository and returning its HEAD as this worktree's identity.
 func (m *Manager) runCheckoutLocalGitInspect(ctx context.Context, path string, args ...string) (string, error) {
-	gitDir := "GIT_DIR=" + filepath.Join(path, ".git")
+	gitDir := "GIT_DIR=.git"
 	return m.runBoundedGitInspectWithEnvironment(ctx, path, func(env []string) []string {
 		return append(env, gitDir)
 	}, args...)
