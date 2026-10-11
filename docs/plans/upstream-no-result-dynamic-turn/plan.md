@@ -22,7 +22,7 @@ The agent system owns all of them because it owns candidate selection and route 
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
 | [Task 04](task-04-restart-recovery-route-activation.md) | A resumed route is never activated, and a blocked explicit recovery reports success | none | done |
-| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: post-start failures before any result are never counted | none | proposed, not implemented |
+| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: fixed-shape post-start failures before any result are never counted | none | proposed, not implemented |
 
 Staging:
 
@@ -206,7 +206,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
 - [x] [Task 04: Activate resumed dynamic routes and fail blocked explicit recoveries](task-04-restart-recovery-route-activation.md)
-- [ ] [Task 05: Contract proposal: count post-start no-result failures](task-05-post-start-no-result-proposal.md)
+- [ ] [Task 05: Contract proposal: count fixed-shape post-start no-result failures](task-05-post-start-no-result-proposal.md)
 
 ## Verification results
 

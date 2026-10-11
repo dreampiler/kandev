@@ -1,6 +1,6 @@
 ---
 id: "05-post-start-no-result-proposal"
-title: "Contract proposal: count post-start no-result failures"
+title: "Contract proposal: count fixed-shape post-start no-result failures"
 status: pending
 wave: 3
 depends_on:
@@ -14,18 +14,18 @@ acceptance_criteria:
 system_design:
   - ../../specs/agents/system-design/dynamic-unclassified-fallback.md
 ---
-# Task 05: Contract proposal: count post-start no-result failures
+# Task 05: Contract proposal: count fixed-shape post-start no-result failures
 
 ## Summary
 
-Admit post-start `agent_runtime_error` failures before any result as the `post_start_no_result` origin, with a bounded identity per producer shape.
+Admit the dropped-peer and process-exit post-start failures before any result as the `post_start_no_result` origin, with a fixed identity per producer shape.
 This is the last, separable part of the package. Rejecting it removes this work order and its contract text only.
 
 ## In scope
 
 - Write `TestPostStartNoResultCountsUnclassifiedFailure` first and confirm that it fails on the base commit.
 - `apps/backend/internal/agent/runtime/dynamic/types.go`: add the origin; waive `DiagnosticComplete` and provider ID only for it; match `agent_runtime_error` at `prompt_send` with rule `phase.poststart.unknown`.
-- `apps/backend/internal/agent/runtime/dynamic/unclassified_fingerprint.go`: identity text per producer shape, sanitized before bounding; fingerprint with classifier rule.
+- `apps/backend/internal/agent/runtime/dynamic/unclassified_fingerprint.go`: identity text for the two fixed producer shapes; any other message is not admitted.
 - `apps/backend/internal/orchestrator/dynamic_launch.go`: build post-start evidence for that classified failure instead of terminal provider evidence.
 
 ## Out of scope
@@ -35,7 +35,8 @@ This is the last, separable part of the package. Rejecting it removes this work 
 
 ## Acceptance
 
-- The three producer shapes produce stable identities: repeated drops match, process exits with the same code match regardless of stderr, and generic failures match on their bounded prefix.
+- Repeated dropped-peer failures match. Process exits with the same code match regardless of stderr, and a different code does not match.
+- A generic prompt or turn failure is not admitted and keeps manual recovery.
 - A failure after output or effects, a vetoed or unknown step, or a disabled policy is not counted.
 - Terminal provider and startup origins still reject an incomplete diagnostic or a missing provider.
 - An oversized or redacted diagnostic still fails for those origins.
