@@ -20,9 +20,11 @@ An operator reported that after a backend restart, a message to an
 execution-less eligible session did not start a turn: the message was stored
 but no turn ran for more than two minutes, the session showed a `starting`
 route state, and recovery reported `unresolved_durable_work` / an unavailable
-native resume. Operations later confirmed the running instance was the
-deliberate rollback `c8bcf5e293-hotfix/start`, which predates the durable
-agent session continuity work (#3598).
+native resume. The incident-time build is unconfirmed: the incident was
+reported at 16:53:17 KST, before the 17:16 rollback and the 17:18:41 restart.
+The later running instance (present after 17:18:41 KST) is a deliberate
+pre-#3598 rollback (`c8bcf5e293-hotfix/start`), but a later instance's build
+does not establish the incident's build or cause.
 
 On fork main (base `6a6d3d76df`, which contains #3598 plus #4380, #4384, and
 #4403) the required behavior is already implemented and regression-tested, so
@@ -46,10 +48,11 @@ The behavior is owned by existing criteria and needs no new requirement:
   the explicit continuation action; retain the previous native identifier and
   block prompt dispatch until recovery succeeds.
 
-## Reported behavior vs. reproduced behavior
+## Reported behavior vs. behavior on this base
 
-The reported evidence was observed on the pre-#3598 rollback. It is not
-reproducible on this base:
+The incident-time build is unconfirmed and the incident was not reproduced on
+any lineage (see "Unproved by this package" below). The table records only what
+this base does; it is not evidence of the incident's cause:
 
 | Claim (report-only) | Finding on this base |
 | --- | --- |
@@ -62,6 +65,25 @@ The reported claim that every `starting` session is orphaned is not supported
 by this base: the resume-safety invariant repairs rather than prunes a
 resumable/dead row (`pruneOrRepairExecutorRow`, `RowMustBePreserved`), so a
 message reaches the durable row.
+
+## Unproved by this package
+
+These items from the original request were not performed or not established,
+and are reported rather than dropped:
+
+- Incident-time build: unconfirmed. The 16:53:17 KST incident preceded the
+  17:16 rollback and the 17:18:41 restart, so the later confirmed pre-#3598
+  running instance cannot prove the incident's build or cause.
+- Actual end-to-end real-entry outcome: an accepted message producing exactly
+  one actual turn with continuity in an isolated real backend was not run. The
+  restart here is service-level (a real on-disk SQLite repository and a fresh
+  orchestrator `Service`), not a running isolated backend.
+- Two-lineage WO-01 baseline comparison: not performed. No execution on the
+  pre-#3598 lineage was run, so no incident reproduction exists on lineage (a).
+
+Source and next actor: this author session for the service-level evidence; a
+follow-on task with an isolated real backend on both lineages for the real-entry
+and two-lineage outcomes. The original work order remains open for those items.
 
 ## Verification
 
@@ -85,15 +107,19 @@ package contains documentation only.
 
 ## Outcome
 
-No production or permanent-test change. The existing implementation satisfies
-the observable result on fork main.
+No production or permanent-test change. On this base the existing
+implementation satisfies the restored-conversation-then-ordinary-admission
+path covered by the focused tests. The incident-time build and the actual
+real-entry and two-lineage outcomes remain unproved (see "Unproved by this
+package").
 
 ## Remaining inputs (not this task)
 
-- Operations owns deployment and rollback decisions. The operational
-  remediation is to run a lineage at or after #3598 rather than the
-  `c8bcf5e293-hotfix/start` rollback. This task does not redeploy or mutate the
-  operating instance, database, or processes.
+- Operations deliberately runs the old `c8` lineage during its own mock-agent
+  upstream/fork causal bisect. This package does not request a redeploy,
+  replacement, or any override of that choice; whether to run a lineage at or
+  after #3598 is Operations' decision. This task does not redeploy or mutate
+  the operating instance, database, or processes.
 - A pre-#3598 build genuinely lacks automatic restart recovery; that is the
   expected behavior of that lineage, not a defect on this base.
 

@@ -17,16 +17,20 @@ and reuse the existing fix if it does.
 
 - Base worktree head: `6a6d3d76df1d2ca299f9774cd4f3223b8f94421b` (fork `main`,
   clean tree). Contains #3598 plus #4380, #4384, and #4403.
-- Reported evidence is from the pre-#3598 rollback
-  `c8bcf5e293-hotfix/start` and is treated as report-only, not as a contract.
+- The incident-time build is unconfirmed: the 16:53:17 KST incident preceded
+  the 17:16 rollback and the 17:18:41 restart. Only the later running instance
+  is confirmed as the deliberate pre-#3598 rollback
+  `c8bcf5e293-hotfix/start`. Reported evidence is treated as report-only, not
+  as a contract, and is not attributed to a lineage by this work order.
 
 ## Method
 
 Read the admission and recovery path, then run the base's focused restart and
 message-admission tests. No network, no operating DB, no operating process, and
-no server were started; the restart is simulated by constructing a fresh
-orchestrator `Service` over an on-disk SQLite repository, which is the
-repository's established restart-reproduction shape.
+no server were started; the base's restart path is exercised by constructing a
+fresh orchestrator `Service` over an on-disk SQLite repository (the
+repository's established restart test shape). This does not reproduce the
+incident and does not run any pre-#3598 lineage.
 
 Key seams read:
 
@@ -72,6 +76,11 @@ All exit code 0. Toolchain: go1.26.0 (mise.toml).
 
 ## Result
 
-Verified. The base satisfies the observable result; the existing fix is reused
-and no production or permanent-test change is made. See `plan.md` for the
-finding and the operational remaining input.
+Verified for the base's covered path: the base satisfies the
+restored-conversation-then-ordinary-admission behavior exercised by the focused
+tests, and the existing fix is reused; no production or permanent-test change
+is made. Not established by this work order: the incident-time build, an
+actual accepted-message to one-actual-turn run in an isolated real backend,
+and any two-lineage (pre-#3598) comparison. No execution on the pre-#3598
+lineage was performed, so no incident reproduction exists here. See `plan.md`
+"Unproved by this package" for source and next actor.
