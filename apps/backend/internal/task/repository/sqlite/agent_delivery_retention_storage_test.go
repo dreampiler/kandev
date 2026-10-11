@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/task/deliveryretention"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -21,7 +22,7 @@ func TestDeliveryRetentionStorage(t *testing.T) {
 				repo, events := seedRetentionBoundsStream(t, engine, "storage", 1, 0)
 				ctx := context.Background()
 				assertRetentionStorageToolPolicy(t, repo)
-				const count = 1_000_000
+				const count, batchRows = 1_000_000, deliveryretention.BackgroundBatchRows
 				seedRetentionStorageRows(t, repo, events[0], count, payloadSize)
 				assertRetentionMillionLiveOrphanPhase(t, repo)
 				if engine == "SQLite" {
@@ -34,10 +35,10 @@ func TestDeliveryRetentionStorage(t *testing.T) {
 				started := time.Now()
 				var prunedBytes int64
 				var retries int
-				for batch := 0; batch < count/200+10; batch++ {
-					result, retryCount := runRetentionStorageBatch(t, repo)
+				for batch := 0; batch < count/batchRows+10; batch++ {
+					result, retryCount := runRetentionStorageBatch(t, repo, batchRows)
 					retries += retryCount
-					if result.Candidates > 200 || result.PayloadBytesRead > 4<<20 {
+					if result.Candidates > batchRows || result.PayloadBytesRead > 4<<20 {
 						t.Fatalf("batch exceeded work budget: %+v", result)
 					}
 					prunedBytes += result.PayloadBytesPruned
@@ -48,7 +49,7 @@ func TestDeliveryRetentionStorage(t *testing.T) {
 					if cursor.RetiredSequence == count {
 						break
 					}
-					if batch == count/200+9 {
+					if batch == count/batchRows+9 {
 						t.Fatalf("million-event stream did not drain: %+v", cursor)
 					}
 				}
@@ -212,11 +213,11 @@ func TestDeliveryRetentionStorageTerminalPlan(t *testing.T) {
 	}
 }
 
-func runRetentionStorageBatch(t *testing.T, repo *Repository) (models.AgentDeliveryRetentionBatchResult, int) {
+func runRetentionStorageBatch(t *testing.T, repo *Repository, batchRows int) (models.AgentDeliveryRetentionBatchResult, int) {
 	t.Helper()
 	var lastErr error
 	for retries := 0; retries < 3; retries++ {
-		result, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{})
+		result, err := repo.RunAgentDeliveryRetentionBatch(context.Background(), models.AgentDeliveryRetentionBatchOptions{MaxCandidates: batchRows})
 		if err == nil {
 			return result, retries
 		}
@@ -237,14 +238,14 @@ func TestDeliveryRetentionStorageProtectedGap(t *testing.T) {
 		t.Run(engine, func(t *testing.T) {
 			repo, events := seedRetentionBoundsStream(t, engine, "storage-gap", 1, 0)
 			assertRetentionStorageToolPolicy(t, repo)
-			const count, gap = 1_000_000, 500_000
+			const count, gap, batchRows = 1_000_000, 500_000, deliveryretention.BackgroundBatchRows
 			seedRetentionStorageRows(t, repo, events[0], count, 1024)
 			before := retentionCanonicalContent(t, repo, events[0].SessionID)
 			if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE agent_delivery_inbox SET terminal=1,event_type='complete',payload=?,content_hash='',hash_version=0,payload_bytes=0 WHERE stream_id=? AND sequence=?`), []byte(`{"type":"complete"}`), events[0].StreamID, gap); err != nil {
 				t.Fatal(err)
 			}
-			for batch := 0; batch < count/200+1; batch++ {
-				runRetentionStorageBatch(t, repo)
+			for batch := 0; batch < count/batchRows+1; batch++ {
+				runRetentionStorageBatch(t, repo, batchRows)
 			}
 			cursor, err := repo.GetAgentDeliveryCursor(context.Background(), events[0].StreamID)
 			if err != nil || cursor.RetiredSequence != gap-1 {

@@ -69,7 +69,7 @@ func TestDeliveryRetentionStorageRecentWindow(t *testing.T) {
 func sweepRetentionStorageWindow(t *testing.T, repo *Repository, count int) {
 	t.Helper()
 	for batch := 0; batch < count/100+2; batch++ {
-		runRetentionStorageBatch(t, repo)
+		runRetentionStorageBatch(t, repo, agentDeliveryRetentionCandidateLimit)
 	}
 }
 

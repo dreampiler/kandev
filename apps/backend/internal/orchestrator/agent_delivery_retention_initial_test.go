@@ -39,7 +39,7 @@ type retentionInitialPromptObservation struct {
 
 func TestDeliveryRetentionInitialPromptAdmission(t *testing.T) {
 	for _, engine := range []string{"SQLite", "Postgres"} {
-		for _, scenario := range []string{"fresh", "generation_3", "explicit_identity", "legacy", "unresolved_peer", "storage_failure"} {
+		for _, scenario := range []string{"fresh", "generation_3", "explicit_identity", "legacy", "storage_not_durable", "unresolved_peer", "storage_failure"} {
 			t.Run(engine+"/"+scenario, func(t *testing.T) {
 				assertRetentionInitialPromptAdmission(t, engine, scenario)
 			})
@@ -72,6 +72,10 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		advertised:       scenario != "legacy",
 		capability:       agentruntime.DurableDeliveryCapability{Version: journal.CurrentVersion, Durable: true, Unresolved: scenario == "unresolved_peer"},
 	}}
+	if scenario == "storage_not_durable" {
+		manager.capability.Durable = false
+		manager.capability.Reason = "storage_not_durable"
+	}
 	if scenario == "storage_failure" {
 		installRetentionInitialPromptFailure(t, repo, engine, expectedID)
 	}
@@ -129,7 +133,7 @@ func assertRetentionInitialPromptAdmission(t *testing.T, engine, scenario string
 		starts := len(manager.startAgentProcessCalls)
 		manager.mu.Unlock()
 		require.Equal(t, 1, starts, "initial launch must dispatch exactly one provider prompt")
-		if scenario == "legacy" {
+		if scenario == "legacy" || scenario == "storage_not_durable" {
 			require.Error(t, observed.err)
 			require.Nil(t, observed.submission, "legacy launch must not create durable SQL state")
 			require.Contains(t, observed.prompt, "/capacity-after-tools")

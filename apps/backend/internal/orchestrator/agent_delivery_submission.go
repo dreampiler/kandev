@@ -150,12 +150,18 @@ func (s *Service) deliveryCapabilityForExecution(
 			Reason: "legacy_peer",
 		}, false
 	}
+	peerVersion := capability.Version
+	if peerVersion == journal.CurrentVersion && !capability.Durable && capability.Reason == "storage_not_durable" {
+		// Supported peers without retained storage use legacy delivery;
+		// unresolved work still blocks that negotiation.
+		peerVersion = 0
+	}
 	return agentruntime.NegotiateDurableDelivery(
 		journal.StorageCapability{
 			Version: journal.CurrentVersion,
 			Durable: true,
 		},
-		capability.Version,
+		peerVersion,
 		capability.Durable,
 		capability.Unresolved,
 	), true
