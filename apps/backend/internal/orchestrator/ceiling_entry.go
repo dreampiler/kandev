@@ -822,6 +822,15 @@ func (s *Service) validateCeilingDestination(
 	// claimed RUNNING; the task-owned route and session identity remain guarded.
 	if checkDestinationState {
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+			// A record that carries its workflow-entry binding is the step
+			// entry's own prompt waiting for capacity, not a retargeted
+			// successor. Dropping it as superseded would lose the entry prompt
+			// and let the step advance on a later completion signal without
+			// its own turn. Keep it for a later pass. An unbound record keeps
+			// the superseded disposition.
+			if binding.Valid() {
+				return ceilingEntryUnavailable
+			}
 			return ceilingEntrySuperseded
 		}
 	}
