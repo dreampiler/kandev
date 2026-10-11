@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"testing"
 
 	"go.uber.org/goleak"
@@ -30,6 +31,13 @@ func runAPITestVscodeFixture() {
 	if address == "" {
 		fmt.Fprintln(os.Stderr, "VS Code fixture: missing --bind-addr")
 		os.Exit(2)
+	}
+	// A wildcard test listener prompts for Windows Firewall access from each
+	// temporary test binary; the fixture only needs a reachable bind address.
+	if runtime.GOOS == "windows" {
+		if host, port, err := net.SplitHostPort(address); err == nil && (host == "" || host == "0.0.0.0" || host == "::" || host == "[::]") {
+			address = net.JoinHostPort("127.0.0.1", port)
+		}
 	}
 	listener, err := net.Listen("tcp", address)
 	if err != nil {
