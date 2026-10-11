@@ -6,7 +6,6 @@ requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-002
 system_design:
   - ../../specs/agents/system-design/dynamic-unclassified-fallback.md
-  - ../../specs/agents/system-design/dynamic-agent-routing-01.md
   - ../../specs/agents/system-design/dynamic-agent-routing-02.md
 legacy_specs: []
 ---
@@ -16,19 +15,18 @@ legacy_specs: []
 
 This package groups small, independent defects on the dynamic routing path.
 Each work order has its own cause, tests, and commit, so a reviewer can accept or drop one without the others.
-The agent system owns all of them because it owns candidate selection, route state, and the virtual dynamic family.
+The agent system owns all of them because it owns candidate selection and route state.
 
 | Work order | Defect | Issue | Status |
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | candidate, membership under review |
-| [Task 03](task-03-virtual-family-launch.md) | A launch that selects the virtual dynamic family fails with a generic empty-command error | none | candidate, membership under review |
 | Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
 
 Staging:
 
 1. Task 01 is implemented first.
-2. Tasks 02 and 03 are candidates. Their cause and source overlap are assessed here, but they are not implemented until their membership is confirmed.
+2. Task 02 is a candidate. Its cause and source overlap are assessed here, but it is not implemented until its membership is confirmed.
 3. Task 04 is added when its prepared change is supplied.
 4. The package is submitted once, after every confirmed member is implemented.
 
@@ -135,27 +133,10 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 Source assessment: the candidate change touches `backendapp/dynamic_routing.go`, `orchestrator/handlers/handlers.go`, `orchestrator/service.go`, and their tests. It applies to the base without conflicts. It shares only `orchestrator/service.go` with Task 01, in a different declaration block.
 
-## Task 03: virtual family at launch
+## Task 03: moved
 
-### Evidence and cause
-
-- `ErrVirtualProfile` (`apps/backend/internal/agent/runtime/lifecycle/profile_resolver.go`) is returned only during profile resolution.
-- Launch, workspace promotion, managed tool policy admission, restart, and execution preparation select the agent with `registry.Get` and accept the virtual family.
-- Command building then produces an empty command, and the session fails with the generic "agent command cannot be empty" error.
-- `agentNameForProfile` (`agent/runtime/dynamic_resolver.go`) returns the dynamic family name for a candidate without rejecting it.
-
-`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1`, `.12` and the [profile configuration rules](../../specs/agents/system-design/dynamic-agent-routing-01.md) define the contract.
-
-### Tests
-
-| AC suffix | Test file and test |
-| --- | --- |
-| 001.12 | `apps/backend/internal/agent/runtime/lifecycle/manager_launch_virtual_test.go`: `TestResolveLaunchableAgent_RejectsVirtualFamily`, `TestRestartAgentProcess_VirtualAgentFailsClosed` |
-| 001.12 | `apps/backend/internal/agent/runtime/dynamic_resolver_virtual_test.go`: `TestAgentNameForProfile_RejectsVirtualFamily` |
-
-`TestRestartAgentProcess_VirtualAgentFailsClosed` must fail on the base commit because the error does not match `ErrVirtualProfile`.
-
-Source assessment: the candidate change touches `agent/runtime/dynamic_resolver.go`, `lifecycle/manager_profile.go`, `manager_launch.go`, `manager_execution.go`, and their tests. It applies to the base without conflicts. It shares only `agent/runtime/dynamic_resolver.go` with Task 01, in a different function.
+The work order for a launch that selects the virtual dynamic family moved to a separate change about launch-time agent and command resolution, because it edits the same launch code.
+This package no longer changes that contract or code.
 
 ## Task 04: restart recovery portions (pending input)
 
@@ -173,7 +154,6 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [ ] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
-- [ ] [Task 03: Fail closed when the virtual dynamic family reaches launch](task-03-virtual-family-launch.md)
 
 ## Verification results
 
