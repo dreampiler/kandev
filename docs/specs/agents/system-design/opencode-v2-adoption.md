@@ -56,6 +56,7 @@ A future major requires a separate reviewed adoption policy; package identity al
 
 Add a resolved runtime value carrying trusted package, effective version, source, and command arguments.
 Resolve it before building commands; do not mutate the registry's singleton agent per request.
+Resolve it for the runtime the execution resolved, not the requested executor type, so it matches the native-binary preference for the same launch.
 Pass this value through the current `CommandOptions` and runtime-selection seams as needed.
 Other agents retain their existing fixed-package resolution.
 
