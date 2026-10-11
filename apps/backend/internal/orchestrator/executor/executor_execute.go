@@ -767,6 +767,20 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 	if env == nil || env.Status != models.TaskEnvironmentStatusCreating || env.MaterializationSessionID != sessionID {
 		return
 	}
+	if releaser, ok := e.repo.(taskEnvironmentMaterializationReleaser); ok {
+		released, err := releaser.FailTaskEnvironmentMaterialization(ctx, sessionID)
+		if err != nil {
+			e.logger.Warn("failed to mark workspace materialization failed",
+				zap.String("task_environment_id", env.ID),
+				zap.Error(err))
+			return
+		}
+		if released {
+			env.Status = models.TaskEnvironmentStatusFailed
+			env.MaterializationSessionID = ""
+		}
+		return
+	}
 	env.Status = models.TaskEnvironmentStatusFailed
 	env.MaterializationSessionID = ""
 	if err := e.repo.UpdateTaskEnvironment(ctx, env); err != nil {
@@ -774,6 +788,40 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 			zap.String("task_environment_id", env.ID),
 			zap.Error(err))
 	}
+}
+
+// ReleaseTaskEnvironmentMaterialization stores failed for the creating task
+// environment that sessionID still owns, so a launch that gives up before the
+// workspace is ready does not leave its claim behind. Environments owned by
+// another session are left alone.
+func (e *Executor) ReleaseTaskEnvironmentMaterialization(ctx context.Context, taskID, sessionID string) {
+	if taskID == "" || sessionID == "" || e.repo == nil {
+		return
+	}
+	if releaser, ok := e.repo.(taskEnvironmentMaterializationReleaser); ok {
+		released, err := releaser.FailTaskEnvironmentMaterialization(ctx, sessionID)
+		if err != nil {
+			e.logger.Warn("failed to release task environment materialization claim",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return
+		}
+		if released {
+			e.logger.Info("released task environment materialization claim after the launch gave up",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+		}
+		return
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to load task environment to release its materialization claim",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID)
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
@@ -1815,7 +1863,20 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 // subprocess is not started and the session state remains CREATED.
 // When opts.StartAgent is true and the workspace was already launched (AgentExecutionID set), only the
 // agent subprocess is started.
+// An error releases the session's own creating task environment, except when
+// another launch of the session is already running or a superseding resume
+// cancelled this one.
 func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
+	execution, err := e.launchPreparedSession(ctx, task, sessionID, opts)
+	if err != nil && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
+		(!isCancellableResumeContext(ctx) || ctx.Err() == nil) {
+		e.ReleaseTaskEnvironmentMaterialization(context.WithoutCancel(ctx), task.ID, sessionID)
+	}
+	return execution, err
+}
+
+//nolint:cyclop,funlen,gocognit,maintidx // Session launch keeps its validation sequence in one function.
+func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, sessionID string, opts LaunchOptions) (*TaskExecution, error) {
 	agentProfileID := opts.AgentProfileID
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
@@ -2118,14 +2179,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if err == nil {
 			err = errors.New("agent launch returned no response")
 		}
-		if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID {
-			existingEnv.Status = models.TaskEnvironmentStatusFailed
-			existingEnv.MaterializationSessionID = ""
-			if updateErr := e.repo.UpdateTaskEnvironment(launchCtx, existingEnv); updateErr != nil {
-				e.logger.Warn("failed to mark workspace materialization failed",
-					zap.String("task_id", task.ID), zap.String("task_environment_id", existingEnv.ID), zap.Error(updateErr))
-			}
-		}
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
@@ -3307,6 +3361,8 @@ func (e *Executor) persistTaskEnvironment(
 	// the source of truth for the update.
 	launchEnvID, launchEnvExecutorType := "", ""
 	launchHadEnvironment := existingEnv != nil
+	launchOwnedMaterialization := existingEnv != nil &&
+		existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID
 	if existingEnv != nil {
 		launchEnvID = existingEnv.ID
 		launchEnvExecutorType = existingEnv.ExecutorType
@@ -3321,6 +3377,10 @@ func (e *Executor) persistTaskEnvironment(
 		}
 		if !launchHadEnvironment && fresh.ExecutorType != "" && fresh.ExecutorType != req.ExecutorType {
 			return fmt.Errorf("%w: task environment was claimed by executor %q before this launch completed", models.ErrWorkspaceReuseUnsafe, fresh.ExecutorType)
+		}
+		if launchOwnedMaterialization &&
+			(fresh.Status != models.TaskEnvironmentStatusCreating || fresh.MaterializationSessionID != session.ID) {
+			return fmt.Errorf("%w: task environment materialization passed to another session during this launch", models.ErrWorkspaceReuseUnsafe)
 		}
 		existingEnv = fresh
 	}
