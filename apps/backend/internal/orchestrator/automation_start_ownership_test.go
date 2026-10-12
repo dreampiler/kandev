@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -25,6 +26,65 @@ func TestAutomationStartOwnershipReleasePreservesSuccessor(t *testing.T) {
 	require.Empty(t, publisher.updatedTaskIDs)
 	require.True(t, svc.releaseAutomationStartOwnership(ctx, "owned-task", "successor"))
 	require.Equal(t, []string{"owned-task"}, publisher.updatedTaskIDs)
+}
+
+func TestStaleAutomationDispatchCannotReconcileSuccessorOwner(t *testing.T) {
+	ctx := context.Background()
+	base := setupAutomationRetentionFixture(t)
+	seedAutomationTask(t, base.repo, "successor-task", models.TaskOriginAutomationTask, false)
+	a := &automation.Automation{ID: "successor-auto", WorkspaceID: "ws-successor-task", Name: "Successor", Enabled: true}
+	require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+	original := &automation.AutomationRun{ID: "original-run", AutomationID: a.ID, TaskID: "successor-task", Status: automation.RunStatusFailed}
+	successor := &automation.AutomationRun{ID: "successor-run", AutomationID: a.ID, TaskID: "successor-task", SessionID: "successor-session", TurnID: "successor-turn", Status: automation.RunStatusTaskCreated}
+	require.NoError(t, base.autoStore.CreateRun(ctx, original))
+	require.NoError(t, base.autoStore.CreateRun(ctx, successor))
+	require.NoError(t, base.repo.SetTaskMetadataKey(ctx, "successor-task", models.MetaKeyAutomationStartOwned, successor.ID))
+	svc := createTestService(base.repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(base.autoSvc)
+	task, err := base.repo.GetTask(ctx, "successor-task")
+	require.NoError(t, err)
+	require.False(t, svc.autoStartAutomationTaskForRun(ctx, a, task, "", original.ID, automation.ThreadActionCreated, "stale", true, nil))
+	current, err := base.repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, successor.ID, current.Metadata[models.MetaKeyAutomationStartOwned])
+}
+
+type ownershipQueueDispatcher struct {
+	*automation.Service
+}
+
+func (s *ownershipQueueDispatcher) DispatchRun(_ context.Context, _ string, _ automation.ThreadAction, _ string, dispatch func() (automation.RunDispatch, error)) error {
+	_, err := dispatch()
+	return err
+}
+
+func TestQueuedAutomationCompletionReconcilesOnlyItsRun(t *testing.T) {
+	for _, owner := range []string{"original-run", "successor-run"} {
+		t.Run(owner, func(t *testing.T) {
+			ctx := context.Background()
+			base := setupAutomationRetentionFixture(t)
+			seedAutomationTask(t, base.repo, "queued-task", models.TaskOriginAutomationTask, false)
+			a := &automation.Automation{ID: "queued-auto", WorkspaceID: "ws-queued-task", Name: "Queued", Enabled: true}
+			require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+			for _, id := range []string{"original-run", "successor-run"} {
+				require.NoError(t, base.autoStore.CreateRun(ctx, &automation.AutomationRun{ID: id, AutomationID: a.ID, TaskID: "queued-task", SessionID: id + "-session", TurnID: id + "-turn", Status: automation.RunStatusTaskCreated}))
+			}
+			require.NoError(t, base.repo.SetTaskMetadataKey(ctx, "queued-task", models.MetaKeyAutomationStartOwned, owner))
+			svc := createTestService(base.repo, newMockStepGetter(), newMockTaskRepo())
+			svc.SetAutomationService(&ownershipQueueDispatcher{Service: base.autoSvc})
+			execution := &executor.TaskExecution{TaskID: "queued-task", SessionID: "original-run-session", TurnID: "original-run-turn"}
+			actual, err := svc.startQueuedAutomationRun(ctx, "queued-task", &automationRunLaunch{RunID: "original-run"}, func() (*executor.TaskExecution, error) { return execution, nil })
+			require.NoError(t, err)
+			require.Same(t, execution, actual)
+			task, err := base.repo.GetTask(ctx, "queued-task")
+			require.NoError(t, err)
+			if owner == "original-run" {
+				require.False(t, models.AutomationStartOwned(task.Metadata))
+			} else {
+				require.Equal(t, owner, task.Metadata[models.MetaKeyAutomationStartOwned])
+			}
+		})
+	}
 }
 
 func TestAutomationInitialStartRequiresDefinitiveExactEvidence(t *testing.T) {

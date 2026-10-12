@@ -84,6 +84,13 @@ func (s *Service) reconcileAutomationStartOwnership(ctx context.Context, task *m
 	return s.releaseAutomationStartOwnership(ctx, task.ID, owner)
 }
 
+// Dispatch completion can reconcile only its immutable run identity.
+func (s *Service) reconcileAutomationStartOwnershipForRun(ctx context.Context, taskID, runID string) bool {
+	return s.reconcileAutomationStartOwnership(ctx, &models.Task{
+		ID: taskID, Metadata: map[string]interface{}{models.MetaKeyAutomationStartOwned: runID},
+	})
+}
+
 // A dropped queue record never admitted its launch. Other terminal paths do not supply this evidence.
 func (s *Service) releaseDroppedAutomationStartOwnership(ctx context.Context, task *models.Task, runID string) {
 	binding, ok := s.automationService.(automationRunBinding)

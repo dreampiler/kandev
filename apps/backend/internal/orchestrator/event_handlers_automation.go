@@ -1648,11 +1648,12 @@ func (s *Service) autoStartAutomationTaskForRun(
 	operation *automation.RetryOperation,
 ) (bound bool) {
 	owner, _ := task.Metadata[models.MetaKeyAutomationStartOwned].(string)
+	taskID := task.ID
 	defer func() {
 		if bound && runID == "" {
-			s.releaseAutomationStartOwnership(ctx, task.ID, owner)
-		} else {
-			s.reconcileAutomationStartOwnership(ctx, task)
+			s.releaseAutomationStartOwnership(ctx, taskID, owner)
+		} else if runID != "" && owner == runID {
+			s.reconcileAutomationStartOwnershipForRun(ctx, taskID, runID)
 		}
 	}()
 	var run *automationRunLaunch

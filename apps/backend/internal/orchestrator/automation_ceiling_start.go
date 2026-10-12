@@ -79,9 +79,7 @@ func (s *Service) startQueuedAutomationRun(
 		return automationRunDispatchFor(taskID, execution, startErr)
 	})
 	if err == nil {
-		if task, readErr := s.repo.GetTask(ctx, taskID); readErr == nil {
-			s.reconcileAutomationStartOwnership(ctx, task)
-		}
+		s.reconcileAutomationStartOwnershipForRun(ctx, taskID, run.RunID)
 	}
 	switch {
 	case errors.Is(err, automation.ErrRunDeferred):
