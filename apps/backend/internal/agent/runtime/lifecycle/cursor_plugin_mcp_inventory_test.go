@@ -35,7 +35,7 @@ func TestCursorMCPDisableInheritanceUsesTrustedPrimaryRepository(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			cursorHome := filepath.Join(home, ".cursor")
 			pluginDir := filepath.Join(cursorHome, "plugins", "local", "harness")
 			require.NoError(t, os.MkdirAll(pluginDir, 0o700))
@@ -108,7 +108,7 @@ func TestCursorMCPImportsInjectedNativeInventoryForACPAndTerminal(t *testing.T) 
 	for _, mode := range []string{"acp", "terminal"} {
 		t.Run(mode, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			cursorHome := filepath.Join(home, ".cursor")
 			writeCursorNativeCachePlugin(t, cursorHome, selectedRevision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 			disabledRoot := filepath.Join(cursorHome, "plugins", "cache", "cursor-public", "harness", disabledRevision)
@@ -168,7 +168,7 @@ func TestCursorMCPImportsInjectedNativeInventoryForACPAndTerminal(t *testing.T) 
 
 func TestCursorMCPSelectedProfileImportsOnlyExactNativeIdentities(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	pluginDir := filepath.Join(cursorHome, "plugins", "local", "Harness")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o700))
@@ -192,7 +192,7 @@ func TestCursorMCPSelectedProfileImportsOnlyExactNativeIdentities(t *testing.T) 
 
 func TestCursorMCPPreparationApprovesFinalOwnedIdentityWithRuntimeContext(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	pluginDir := filepath.Join(cursorHome, "plugins", "local", "Harness")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o700))
@@ -270,7 +270,7 @@ func cloneLifecycleStringMap(source map[string]string) map[string]string {
 
 func TestCursorMCPInventoryFailureKeepsExplicitLocalAndGlobalDefinitions(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	require.NoError(t, os.MkdirAll(filepath.Join(cursorHome, "plugins", "local", "local-plugin"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(cursorHome, "plugins", "local", "local-plugin", "mcp.json"),
@@ -303,7 +303,7 @@ func TestCursorMCPInventoryFailureKeepsExplicitLocalAndGlobalDefinitions(t *test
 
 func TestCursorMCPUnavailableDisableContextPreservesExplicitConfiguration(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	require.NoError(t, os.MkdirAll(filepath.Join(cursorHome, "plugins", "local", "local-plugin"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(cursorHome, "plugins", "local", "local-plugin", "mcp.json"),
@@ -338,7 +338,7 @@ func TestCursorMCPNewerPreparationFencesDeferredInventory(t *testing.T) {
 	const oldRevision = "1111111111111111111111111111111111111111"
 	const newRevision = "2222222222222222222222222222222222222222"
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	writeCursorNativeCachePlugin(t, cursorHome, oldRevision, `{"mcpServers":{"old":{"url":"https://old.example/mcp"}}}`)
 	writeCursorNativeCachePlugin(t, cursorHome, newRevision, `{"mcpServers":{"new":{"url":"https://new.example/mcp"}}}`)
@@ -395,7 +395,7 @@ func TestCursorMCPNewerPreparationFencesDeferredInventory(t *testing.T) {
 func TestCursorMCPRechecksWorkspacePathAfterInventory(t *testing.T) {
 	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	writeCursorNativeCachePlugin(t, cursorHome, revision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 	workspace := t.TempDir()
@@ -428,7 +428,7 @@ func TestCursorMCPRechecksWorkspacePathAfterInventory(t *testing.T) {
 func TestCursorMCPContextCancellationDoesNotPublishInventory(t *testing.T) {
 	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	writeCursorNativeCachePlugin(t, cursorHome, revision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 	mgr := newTestManager(t)
@@ -459,7 +459,7 @@ func TestCursorMCPAuthAndImportPreferencesAreIndependent(t *testing.T) {
 		for _, importEnabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("auth_%v_import_%v", authEnabled, importEnabled), func(t *testing.T) {
 				home := t.TempDir()
-				t.Setenv("HOME", home)
+				setTestUserHome(t, home)
 				cursorHome := filepath.Join(home, ".cursor")
 				writeCursorNativeCachePlugin(t, cursorHome, revision, `{"mcpServers":{"atlassian":{"url":"https://selected.example/mcp"}}}`)
 				credentialSource := filepath.Join(cursorHome, "projects", "credential-source")
@@ -516,7 +516,7 @@ func TestCursorMCPInventoryIsSkippedForIneligibleLaunches(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			mgr := newTestManager(t)
 			var calls atomic.Int32
 			mgr.cursorInventoryLoader = func(context.Context) (mcpconfig.CursorNativeInventory, error) {

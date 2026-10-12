@@ -688,7 +688,7 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 
 func TestManager_RestartAgentProcessAppliesCursorAuthPreference(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	cursorHome := filepath.Join(home, ".cursor")
 	projects := filepath.Join(cursorHome, "projects")
@@ -740,7 +740,7 @@ func TestManager_RestartAgentProcessAppliesCursorAuthPreference(t *testing.T) {
 
 func TestManager_PromptOnRunningCursorSessionKeepsLoadedAuthLink(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	cursorHome := filepath.Join(home, ".cursor")
 	projects := filepath.Join(cursorHome, "projects")

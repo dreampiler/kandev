@@ -133,7 +133,9 @@ func (r *AgentctlResolver) ResolveRemoteBinaryContext(ctx context.Context, platf
 				r.logger.Debug("using agentctl from env var", zap.String("env", envName), zap.String("path", envPath), zap.String("remote_platform", platform.String()))
 				return envPath, nil
 			}
-			return "", fmt.Errorf("%s=%q does not exist or is not a file", envName, envPath)
+			// %q would double every backslash in a Windows path and hide the
+			// path the operator actually configured.
+			return "", fmt.Errorf("%s=\"%s\" does not exist or is not a file", envName, envPath)
 		}
 	}
 
