@@ -177,6 +177,7 @@ func (r *ProfileExecutionResolver) resourceCandidate(ctx context.Context, execut
 			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
 		)
 	}
+	candidate.AccountKey = candidateAccountKey(candidate.BindingKey, profile, candidate.ModelID)
 	candidates := []dynamic.Candidate{candidate}
 	r.applyResourceLimits(ctx, candidates)
 	return candidates[0], true
@@ -197,7 +198,7 @@ func (r *ProfileExecutionResolver) CandidateSuspension(
 }
 
 // RecordResourceSuccess clears the suspension history of a concrete profile
-// whose attempt produced real output.
+// whose turn completed without a provider error.
 func (r *ProfileExecutionResolver) RecordResourceSuccess(ctx context.Context, executionProfileID string) {
 	candidate, ok := r.resourceCandidate(ctx, executionProfileID)
 	if !ok {

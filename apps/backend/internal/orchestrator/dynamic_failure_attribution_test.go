@@ -93,9 +93,9 @@ func TestDynamicFailureOfSupersededCandidateDoesNotChargeCurrentCandidate(t *tes
 }
 
 // The route claimed sol while the claude execution kept serving the session.
-// Claude's first real output is claude's success: it must clear claude's strike
-// history and leave sol's untouched, although the prompt began after the route
-// already named sol.
+// Claude's cleanly completed turn is claude's success: it must clear claude's
+// strike history and leave sol's untouched, although the prompt began after the
+// route already named sol.
 func TestDynamicOutputSuccessBelongsToTheExecutionsOwnProfile(t *testing.T) {
 	ctx := context.Background()
 	const (
@@ -134,8 +134,9 @@ func TestDynamicOutputSuccessBelongsToTheExecutionsOwnProfile(t *testing.T) {
 	circuits.Open(claudeKey, now.Add(-time.Minute), routingerr.CodeRateLimited)
 	circuits.Open(solKey, now.Add(-time.Minute), routingerr.CodeRateLimited)
 	svc.beginPromptAttempt(sessionID, executionID, 1, true)
+	svc.observePromptAttempt(sessionID, executionID, 1, true, false)
 
-	svc.recordDynamicResourceOutput(ctx, sessionID, executionID, claude, 1)
+	svc.recordDynamicResourceTurnSuccess(ctx, sessionID, executionID, claude, 1)
 
 	if got := circuits.Inspect(claudeKey, now); got.Strikes != 0 || got.State != dynamicruntime.ResourceAvailable {
 		t.Fatalf("claude after its own output = %#v, want cleared", got)

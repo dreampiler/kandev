@@ -20,6 +20,10 @@ const recoveryDispositionExhausted = "exhausted"
 const failureKindProviderInterrupted = "provider_interrupted"
 const continuationRefusalMissingEvidence = "missing_evidence"
 
+// continuationRefusalDynamicRoute marks a dynamic route attempt, which the
+// same-model continuation does not serve.
+const continuationRefusalDynamicRoute = "dynamic_route_attempt"
+
 type continuationPolicy string
 
 const (
@@ -99,6 +103,12 @@ func (s *Service) capacityContinuationFailureHasEvidence(data watcher.AgentEvent
 }
 
 func (s *Service) continuationRefusalReason(ctx context.Context, data watcher.AgentEventData) string {
+	if data.DynamicRouteAttempt {
+		// A dynamic attempt recovers through its route, never through this
+		// same-model continuation, so the refusal names that rather than
+		// reporting the evidence this path never collects for it as missing.
+		return continuationRefusalDynamicRoute
+	}
 	classified := classifyKanbanFailure(data)
 	if classified != nil && classified.Code == routingerr.CodeModelCapacity {
 		return s.capacityContinuationRefusalReason(ctx, data)

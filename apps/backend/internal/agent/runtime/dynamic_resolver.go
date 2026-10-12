@@ -1033,7 +1033,37 @@ func (r *ProfileExecutionResolver) resolveDynamicCandidate(
 			),
 		)
 	}
+	if candidate.Enabled && !remoteExecution {
+		candidate.AccountKey = candidateAccountKey(candidate.BindingKey, concrete, candidate.ModelID)
+	}
 	return candidate, nil
+}
+
+// candidateAccountKey names the account a local candidate's path reaches. A
+// binding resolved from a real credential already is that account. A profile
+// with no credential of its own falls back to a profile-scoped binding, so
+// its account is the agent plus the model's provider: every OpenCode Zen
+// profile on this host shares one account, and OpenCode Go another.
+func candidateAccountKey(bindingKey string, concrete *agentsettingsmodels.AgentProfile, modelID string) string {
+	if concrete == nil || bindingKey == "" {
+		return ""
+	}
+	if !profileFallbackBinding(bindingKey) {
+		return bindingKey
+	}
+	agentID := strings.TrimSpace(concrete.AgentID)
+	if agentID == "" {
+		return ""
+	}
+	return dynamic.ResourceKey(dynamic.ScopeCredential,
+		"account:"+agentID+"|"+dynamic.ProviderOf(modelID))
+}
+
+// profileFallbackBinding reports whether a binding key is the profile-scoped
+// fallback used when no credential identity could be proven.
+func profileFallbackBinding(bindingKey string) bool {
+	return strings.HasPrefix(bindingKey, string(dynamic.ScopeProfile)+":") ||
+		strings.HasPrefix(bindingKey, string(dynamic.ScopeCredential)+":"+string(dynamic.ScopeProfile)+":")
 }
 
 // decodeDynamicRoutePolicy splits the stored document into the failure-policy
