@@ -183,11 +183,24 @@ func (p *ChildStallProducer) runPass(ctx context.Context) {
 		return
 	}
 	stats := childStallPassStats{}
+	holders := map[string]string{}
 	for _, turn := range turns {
 		if ctx.Err() != nil {
 			return
 		}
 		p.processTurn(ctx, turn, now, &stats)
+		if start, ok := models.LoadChildStallStart(turn.Metadata); ok {
+			if state, ok := models.LoadChildStallState(turn.Metadata); ok &&
+				state.QueueID != "" && state.ParentSessionID != "" {
+				holders[state.ParentSessionID] = start.ParentTaskID
+			}
+		}
+	}
+	for sessionID, parentTaskID := range holders {
+		if ctx.Err() != nil {
+			return
+		}
+		p.pruneNoticeSession(ctx, parentTaskID, sessionID)
 	}
 	stats.publish(now)
 }
@@ -198,6 +211,10 @@ func (p *ChildStallProducer) processTurn(ctx context.Context, turn *models.Turn,
 		return
 	}
 	state, _ := models.LoadChildStallState(turn.Metadata)
+	if state.State == childStallStateDelivered {
+		p.reconcileDelivered(ctx, turn, start, state, now, stats)
+		return
+	}
 	if state.State == childStallStateFailed ||
 		(state.NextAttemptAt != nil && now.Before(*state.NextAttemptAt)) {
 		stats.observePending(turn)
@@ -274,6 +291,15 @@ func (p *ChildStallProducer) persist(
 		p.log.Warn("failed to persist child stall state",
 			zap.String("turn_id", turn.ID), zap.String("state", state.State), zap.Error(err))
 		return false
+	}
+	// Mirror the committed state onto the in-memory turn so the same pass can
+	// collect the session holding the notice without a second read.
+	if turn.Metadata == nil {
+		turn.Metadata = map[string]interface{}{}
+	}
+	turn.Metadata[models.TurnMetaKeyChildStall] = state.ToMap()
+	if resolved {
+		turn.Metadata[models.TurnMetaKeyChildStallResolved] = true
 	}
 	return true
 }

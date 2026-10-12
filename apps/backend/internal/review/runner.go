@@ -86,6 +86,15 @@ type RunRequest struct {
 	// that requested this run, when triggered by the run_code_review
 	// step-entry action. Empty for manual/MCP-triggered runs.
 	EntryID string
+	// Origin is the concrete execution that wrote the changes, when known. The
+	// workflow-step path sets it so the reviewer is never the origin's own model
+	// or profile. Nil leaves the explicit precedence path unchanged when
+	// OriginRequired is false.
+	Origin *OriginIdentity
+	// OriginRequired marks a caller (the workflow-step path) that must exclude a
+	// known origin. With it set, a nil Origin fails closed with ErrAgentUnavailable
+	// instead of reviewing with an unprovable writer model.
+	OriginRequired bool
 }
 
 // Runner orchestrates review passes.
@@ -191,6 +200,16 @@ func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	return run, err
 }
 
+// resolveIdentity picks the reviewer. A workflow-step caller that requires an
+// origin fails closed when its writer identity is unknown, so an unreadable
+// origin never becomes a same-model review.
+func (r *Runner) resolveIdentity(ctx context.Context, req RunRequest) (ReviewerIdentity, error) {
+	if req.OriginRequired {
+		return r.resolver.ResolveRequiredOrigin(ctx, req.AgentProfileID, req.Origin)
+	}
+	return r.resolver.ResolveExcluding(ctx, req.AgentProfileID, req.Origin)
+}
+
 // launch does the work of Launch and additionally returns a channel closed when
 // the pass finishes, so a synchronous caller can wait for its own run instead of
 // every run in the process.
@@ -252,7 +271,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	// Resolve the reviewer and read the diff before creating a run row: both
 	// "no capable agent" and "nothing to review" are conditions the user should
 	// see immediately, and neither deserves a failed run in the history.
-	identity, err := r.resolver.Resolve(ctx, req.AgentProfileID)
+	identity, err := r.resolveIdentity(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}

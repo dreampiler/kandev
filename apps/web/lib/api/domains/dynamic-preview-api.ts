@@ -33,7 +33,7 @@ export type DynamicPreviewCandidate = {
    */
   suspension_state?: "waiting" | "probing" | "expired";
   suspended_until?: string;
-  suspension_scope?: "model" | "credential" | "provider";
+  suspension_scope?: "model" | "credential" | "provider" | "profile";
   suspension_source?: "failure" | "manual";
 };
 

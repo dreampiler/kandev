@@ -69,8 +69,11 @@ func (e *Engine) SuspensionFor(candidate Candidate, now time.Time) CandidateSusp
 			continue
 		}
 		scope := SuspensionScopeCredential
-		if key == candidate.ModelKey {
+		switch key {
+		case candidate.ModelKey:
 			scope = SuspensionScopeModel
+		case candidate.accountBlockKey():
+			scope = SuspensionScopeProfile
 		}
 		next := CandidateSuspension{
 			State: status.State, Until: status.Until, Scope: scope,

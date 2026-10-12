@@ -103,8 +103,9 @@ func TestDeliveryRetentionEvents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run retention batch: %v", err)
 			}
-			if result.Candidates != 5 || result.EventPayloadsPruned != 2 || result.EventRowsRetired != 1 {
-				t.Fatalf("retention result = %+v, want five projected candidates, two payloads pruned, one event retired", result)
+			// Discovery skips the permission_request state event, which the proof never compacts.
+			if result.Candidates != 4 || result.EventPayloadsPruned != 2 || result.EventRowsRetired != 1 {
+				t.Fatalf("retention result = %+v, want four projected output candidates, two payloads pruned, one event retired", result)
 			}
 
 			var payload []byte

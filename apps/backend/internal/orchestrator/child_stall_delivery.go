@@ -165,7 +165,9 @@ func (p *ChildStallProducer) markDelivered(
 	if queued != nil {
 		state.QueueID = queued.ID
 	}
-	p.persist(ctx, turn, state, true, now)
+	// A delivered candidate stays scannable while its notice is pending, so a
+	// later pass can keep the notice on the parent's current promptable primary.
+	p.persist(ctx, turn, state, false, now)
 	recordChildStallOutcome(childStallStateDelivered)
 	recordChildStallCause(string(decision.Cause))
 	lag := time.Duration(0)

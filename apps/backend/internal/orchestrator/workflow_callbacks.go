@@ -316,6 +316,8 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
 		EntryID:        in.EntryID,
+		Origin:         c.svc.reviewOriginIdentity(ctx, in.State.SessionID),
+		OriginRequired: true,
 	})
 	if err != nil {
 		c.svc.logger.Warn("workflow step code review did not start",
@@ -324,6 +326,32 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 			zap.Error(err))
 	}
 	return engine.ActionResult{}, nil
+}
+
+// reviewOriginIdentity reads the entering session's concrete execution identity
+// so the reviewer is never the writer's own profile or model. A nil result means
+// the writer could not be identified; because the caller marks OriginRequired,
+// resolution then fails closed (review_agent_unavailable) instead of reviewing
+// with a model it cannot prove distinct. Step entry itself is unaffected.
+func (s *Service) reviewOriginIdentity(ctx context.Context, sessionID string) *review.OriginIdentity {
+	if sessionID == "" || s.repo == nil {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			s.logger.Warn("review origin identity unavailable",
+				zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return nil
+	}
+	if session.AgentProfileID == "" && session.ExecutionProfileID == "" {
+		return nil
+	}
+	return &review.OriginIdentity{
+		ProfileID:          session.AgentProfileID,
+		ExecutionProfileID: session.ExecutionProfileID,
+	}
 }
 
 // setWorkflowDataCallback writes key/value data into the workflow data bag.

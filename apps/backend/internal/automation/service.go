@@ -99,7 +99,8 @@ const (
 
 // AutomationRunEvidence is the read-only evidence restart reconciliation needs
 // for one exact bound run: whether the turn is still live and, when it is not,
-// the exact turn's durably recorded outcome.
+// the exact turn's durably recorded outcome. A run that is not live and has no
+// recorded outcome is not treated as failed.
 type AutomationRunEvidence struct {
 	Live    bool
 	Outcome AutomationTurnOutcome
@@ -1105,8 +1106,10 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 		switch evidence.Outcome {
 		case AutomationTurnOutcomeSucceeded:
 			s.reconcileOpenRunSucceeded(ctx, run)
-		case AutomationTurnOutcomeFailed, AutomationTurnOutcomeCancelled:
-			s.reconcileOpenRunFailed(ctx, run, evidence.Outcome)
+		case AutomationTurnOutcomeFailed:
+			s.reconcileOpenRunFailed(ctx, run, "automation turn recorded failed after backend recovery")
+		case AutomationTurnOutcomeCancelled:
+			s.reconcileOpenRunFailed(ctx, run, "automation turn recorded cancelled after backend recovery")
 		default:
 			s.logger.Warn("automation run has no recorded exact-turn outcome; leaving it open",
 				zap.String("run_id", run.ID), zap.String("task_id", run.TaskID), zap.String("turn_id", run.TurnID))
@@ -1126,14 +1129,9 @@ func (s *Service) reconcileOpenRunSucceeded(ctx context.Context, run *Automation
 	run.Status = RunStatusSucceeded
 }
 
-// reconcileOpenRunFailed settles an open bound run whose exact turn durably
-// completed failed or cancelled, and settles its generated task through the
-// failed-run boundary.
-func (s *Service) reconcileOpenRunFailed(ctx context.Context, run *AutomationRun, outcome AutomationTurnOutcome) {
-	msg := "automation turn recorded failed after backend recovery"
-	if outcome == AutomationTurnOutcomeCancelled {
-		msg = "automation turn recorded cancelled after backend recovery"
-	}
+// reconcileOpenRunFailed settles an open bound run and its generated task
+// through the failed-run boundary.
+func (s *Service) reconcileOpenRunFailed(ctx context.Context, run *AutomationRun, msg string) {
 	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, msg); err != nil {
 		s.logger.Warn("failed to reconcile failed automation run", zap.String("run_id", run.ID), zap.Error(err))
 		return

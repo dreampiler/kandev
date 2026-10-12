@@ -42,10 +42,12 @@ func (s *Service) pruneStaleChildStallAlerts(ctx context.Context, identity messa
 		if keep {
 			continue
 		}
-		if _, removed, takeErr := s.messageQueue.TakeQueuedEntryForSession(ctx, identity, entry.ID); takeErr != nil {
+		result, removeErr := s.messageQueue.RemoveEntryForSession(ctx, identity, entry.ID)
+		switch {
+		case removeErr != nil && !errors.Is(removeErr, messagequeue.ErrEntryNotFound):
 			s.logger.Warn("failed to remove stale child stall alert",
-				zap.String("session_id", identity.SessionID), zap.String("queue_id", entry.ID), zap.Error(takeErr))
-		} else if removed {
+				zap.String("session_id", identity.SessionID), zap.String("queue_id", entry.ID), zap.Error(removeErr))
+		case result != nil && len(result.Removed) > 0:
 			recordChildStallOutcome(reason)
 			s.publishQueueStatusEventForIdentity(ctx, identity)
 		}

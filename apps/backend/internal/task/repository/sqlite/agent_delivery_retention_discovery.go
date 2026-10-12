@@ -51,8 +51,14 @@ func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context,
 	return combined, wrapped, nil
 }
 
+// Session-state events (capabilities, modes, MCP attachments, context windows)
+// can never compact or retire; the locked proof rejects them by type. Skipping
+// them in discovery keeps that permanent residue from consuming every bounded
+// page on each frontier wrap. The list mirrors the proof's event-type gate.
+const agentDeliveryCompactableEventTypeFilter = `i.event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')`
+
 func agentDeliveryCompactionCandidateQuery(progress agentDeliveryRetentionProgress, limit int, cutoff time.Time) (string, []any) {
-	filters := []string{"i.payload_pruned_at IS NULL", "i.projected_at IS NOT NULL", "i.projected_at <= ?"}
+	filters := []string{"i.payload_pruned_at IS NULL", "i.projected_at IS NOT NULL", "i.projected_at <= ?", agentDeliveryCompactableEventTypeFilter}
 	args := []any{cutoff}
 	if progress.lastCompactionAt.Valid {
 		filters = append(filters, "(i.projected_at,i.stream_id,i.sequence) > (?,?,?)")
@@ -213,4 +219,27 @@ func compactionCandidateAfter(candidate, previous *agentDeliveryRetentionCandida
 		return candidate.projectedAt.Time.After(previous.projectedAt.Time)
 	}
 	return candidate.event.StreamID > previous.event.StreamID || (candidate.event.StreamID == previous.event.StreamID && candidate.event.Sequence > previous.event.Sequence)
+}
+
+// Only increasing persisted frontiers justify continuing a protected-only phase.
+// Wrapping or changing sweep preference alone cannot keep a pass repeating.
+func agentDeliveryDiscoveryAdvanced(previous agentDeliveryRetentionProgress, candidates []agentDeliveryRetentionCandidate, prompts []agentDeliveryPromptRetentionCandidate, receiptWrapped bool) bool {
+	next := previous
+	advanceAgentDeliveryEventRetentionProgress(&next, candidates, receiptWrapped)
+	if next.lastStreamID > previous.lastStreamID || (next.lastStreamID == previous.lastStreamID && next.lastSequence > previous.lastSequence) {
+		return true
+	}
+	if len(prompts) > 0 && prompts[len(prompts)-1].submissionID > previous.lastSubmissionID {
+		return true
+	}
+	if !next.lastCompactionAt.Valid {
+		return false
+	}
+	if !previous.lastCompactionAt.Valid {
+		return true
+	}
+	return next.lastCompactionAt.Time.After(previous.lastCompactionAt.Time) ||
+		(next.lastCompactionAt.Time.Equal(previous.lastCompactionAt.Time) &&
+			(next.lastCompactionStreamID > previous.lastCompactionStreamID ||
+				(next.lastCompactionStreamID == previous.lastCompactionStreamID && next.lastCompactionSequence > previous.lastCompactionSequence)))
 }
