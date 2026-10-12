@@ -21,13 +21,13 @@ The agent system owns all of them because it owns candidate selection and route 
 | --- | --- | --- | --- |
 | [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
 | [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
-| Task 04 | Restart recovery portions: missing route activation and a false success result | none | pending input |
+| [Task 04](task-04-restart-recovery-route-activation.md) | A resumed route is never activated, and a blocked explicit recovery reports success | none | done |
 
 Staging:
 
 1. Task 01 is implemented first.
 2. Task 02 is implemented after Task 01, in its own commit.
-3. Task 04 is added when its prepared change is supplied.
+3. Task 04 is implemented after Task 02, in its own commit.
 4. The package is submitted once, after every confirmed member is implemented.
 
 ## Outcome coverage
@@ -64,6 +64,8 @@ It needs two inputs before any code:
 
 - a mapping of the actual runtime error producers to the identity contract, including whether any of them can attest a complete diagnostic;
 - the prepared restart-recovery change in Task 04, because a false success result after an interrupted turn may change which post-start failures reach the route.
+
+Task 04 is now implemented. A blocked explicit recovery returns its error to the caller, not to the failure route, so it adds no post-start failures. Activating a resumed route lets later prompt failures of that route reach the failure route with an active status instead of being suppressed, so they meet the existing origin checks unchanged.
 
 After that, a maintainer decision on the identity model selects an option.
 Option B is the direction under review. If it goes ahead, it lands as the last, separable commit of this package, framed as a contract proposal.
@@ -168,13 +170,29 @@ Source assessment: the candidate change touches `backendapp/dynamic_routing.go`,
 The work order for a launch that selects the virtual dynamic family moved to a separate change about launch-time agent and command resolution, because it edits the same launch code.
 That change is [#4412](https://github.com/kdlbs/kandev/pull/4412). This package no longer changes that contract or code.
 
-## Task 04: restart recovery portions (pending input)
+## Task 04: restart recovery route activation
 
-Two restart-recovery defects on the dynamic path are planned for this package: a recovered dynamic route that is never activated, and a recovery path that reports success when nothing was resumed.
-Their prepared change, cause, and tests have not been supplied yet.
-This package does not assume any existing branch or patch is equivalent.
-The work order will be added with its own requirement mapping when the prepared change arrives.
-Expected overlap: `orchestrator/dynamic_launch.go`, `orchestrator/service.go`, and `orchestrator/handlers/handlers.go`.
+### Evidence and cause
+
+- A resume re-claims the persisted route as `starting` and settles the session to WAITING_FOR_INPUT before the process-start callback runs.
+- `handleAgentProcessStarted` (`orchestrator/dynamic_launch.go`) marks the route active only for STARTING and RUNNING sessions, so a resumed route stays `starting`.
+- `loadResumeSessionCandidate` (`orchestrator/task_operations.go`) rejects every non-active route as `dynamic_route_pending`, including a stranded `starting` route with no live runtime.
+- `launchResume` (`orchestrator/session_launch.go`) turns that rejection into a success response even for an explicit recovery action, so its caller proceeds against a missing execution.
+
+`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12`, `.13` and the [failure rules](../../specs/agents/system-design/dynamic-agent-routing-02.md) define the contract.
+
+### Source
+
+The change ports items 3 and 4 of the restart-recovery fix prepared in the fork (dreampiler/kandev #229, head `7fd7cc4bae`). Items 1 and 2 of that change add an automatic `continue_from_history` fallback, and item 5 changes a fork-only reconcile; neither is part of this package.
+
+### Tests
+
+| AC suffix | Test file and test |
+| --- | --- |
+| 001.12 | `apps/backend/internal/orchestrator/dynamic_restart_recovery_test.go`: `TestHandleAgentProcessStartedActivatesRouteWaitingForInput`, `TestActivateResumedDynamicRouteMarksClaimedRouteActive` |
+| 001.13 | `apps/backend/internal/orchestrator/dynamic_restart_recovery_test.go`: `TestExplicitRecoveryReclaimsStrandedStartingRoute`, `TestLaunchResumeRecoveryActionReportsBlockedRouteAsError` |
+
+All four must fail on the base commit.
 
 ## E2E tests
 
@@ -184,6 +202,7 @@ None. The changes have no rendered surface. Existing dynamic routing E2E scenari
 
 - [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
 - [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
+- [x] [Task 04: Activate resumed dynamic routes and fail blocked explicit recoveries](task-04-restart-recovery-route-activation.md)
 
 ## Verification results
 
@@ -205,4 +224,11 @@ Task 02:
 - `go test ./internal/orchestrator/handlers -run 'RouteAction|Ws' -count=1`: passed (60 tests).
 - `go build ./...` and `go vet` on the changed packages: passed.
 
-Task 04 and the open post-start item are not implemented.
+Task 04:
+
+- RED on the base commit, with only an empty `activateResumedDynamicRoute`: the process-start and resume-ready tests left the route `starting`; the explicit recovery guard returned `dynamic_route_pending` for a stranded `starting` route; the explicit recovery returned a success response with activation reason `dynamic_route_pending`. The guard cases for a passive resume, a live owner, and `action_required` already held.
+- GREEN after the change: all four tests passed.
+- `go test ./internal/orchestrator -run 'Resume|Recover|DynamicRoute|ProcessStart|SessionOpen|Dynamic|LaunchSession' -count=1`: passed (414 tests).
+- `go build ./...` and `go vet ./internal/orchestrator`: passed.
+
+The open post-start item is not implemented in this commit range.
