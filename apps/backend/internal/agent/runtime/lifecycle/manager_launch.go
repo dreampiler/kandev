@@ -101,7 +101,7 @@ func (m *Manager) validateManagedToolPolicyAdmission(ctx context.Context, req *L
 	}
 	agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
 	if err != nil {
-		return fmt.Errorf("%w: %v", ErrManagedToolPolicyUnsupported, err)
+		return fmt.Errorf("%w: %w", ErrManagedToolPolicyUnsupported, err)
 	}
 	return validateManagedToolPolicyProvider(profileContext, agentTypeName, agentConfig.Runtime())
 }
@@ -809,6 +809,9 @@ func (m *Manager) resolveOpenCodeCommandOptions(
 		return options, nil
 	}
 	native, found, err := agents.DetectOpenCodeNativeRuntime(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", errors.Join(ctxErr, err))
+	}
 	if err != nil {
 		return m.fallbackOpenCodeCommandOptions(err, selected, options)
 	}
@@ -829,11 +832,8 @@ func (m *Manager) fallbackOpenCodeCommandOptions(
 	selected agents.OpenCodeRuntimeResolution,
 	options agents.CommandOptions,
 ) (agents.CommandOptions, error) {
-	if agents.IsUnsupportedOpenCodeMajorError(probeErr) {
-		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
-	}
-	if _, argErr := agents.OpenCodeACPArgsForVersion(selected.Version); argErr != nil {
-		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", probeErr)
+	if err := validateNativeOpenCodeProbeFallback(probeErr, selected.Version); err != nil {
+		return agents.CommandOptions{}, fmt.Errorf("detect native OpenCode runtime: %w", err)
 	}
 	m.logger.Warn("native OpenCode version probe failed; using the selected runtime version",
 		zap.String("selected_version", selected.Version),
@@ -1874,15 +1874,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 		return execution, launchErr
 	}
-	value, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
-		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionStarting)
-		if acquireErr != nil {
-			return nil, acquireErr
-		}
-		defer activityLease.Release()
-		activityLease.SetKind(activity.KindExecutionPreparing)
-		return m.launchInternal(sharedCtx, req)
-	})
+	value, err := m.coalesceSessionLaunch(ctx, req)
 	if err != nil {
 		return nil, err
 	}

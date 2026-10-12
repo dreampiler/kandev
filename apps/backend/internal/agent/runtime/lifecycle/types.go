@@ -83,6 +83,10 @@ type AgentExecution struct {
 	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
 	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
 	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	// Fresh native startup buffers delivery until its initial SQL generation exists.
+	deliveryBootstrap          atomic.Bool
+	deliveryNegotiation        atomic.Pointer[deliveryNegotiationGate]
+	deliveryStreamConnectError atomic.Pointer[deliveryStreamFailure]
 	// DeliveryMode records the recovery protocol selected for this execution.
 	// It is set before an adopted execution is published so admission and stream
 	// replay cannot observe an undiscovered peer as legacy.
@@ -349,7 +353,7 @@ type AgentExecution struct {
 	// model-switch launches. Lifecycle sends the initial prompt asynchronously,
 	// so they must be captured before startup begins and consumed once that
 	// prompt is accepted or fails before acceptance.
-	initialPromptAdmissionCallback  func() error
+	initialPromptAdmissionCallback  func(context.Context, string, []v1.MessageAttachment) error
 	initialPromptDispatchCallback   func()
 	initialPromptFailureCallback    func()
 	initialPromptDispatchCallbackMu sync.Mutex
@@ -527,7 +531,7 @@ func (e *AgentExecution) setSessionInitialized(value bool) {
 }
 
 func (e *AgentExecution) setInitialPromptDispatchCallbacks(
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) {
 	e.initialPromptDispatchCallbackMu.Lock()
@@ -537,7 +541,7 @@ func (e *AgentExecution) setInitialPromptDispatchCallbacks(
 	e.initialPromptDispatchCallbackMu.Unlock()
 }
 
-func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func() error, func(), func()) {
+func (e *AgentExecution) takeInitialPromptDispatchCallbacks() (func(context.Context, string, []v1.MessageAttachment) error, func(), func()) {
 	e.initialPromptDispatchCallbackMu.Lock()
 	beforeAdmission := e.initialPromptAdmissionCallback
 	onDispatched := e.initialPromptDispatchCallback

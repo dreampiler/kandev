@@ -573,8 +573,9 @@ type LaunchAgentRequest struct {
 	// startup does not create a lifecycle-only transcript turn.
 	SuppressBootStatusMessage bool
 	// BeforeAgentStart runs inside the executor before it starts the harness.
+	// It receives the final prompt after handover context is composed.
 	// The callback is never forwarded into the runtime request.
-	BeforeAgentStart      func(context.Context, string) error
+	BeforeAgentStart      func(context.Context, string, string) error
 	ModelOverride         string              // If set, use this model instead of the profile's model
 	ExecutorType          string              // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig        map[string]string   // Executor config (docker_host, git_token, etc.)
@@ -739,9 +740,9 @@ type LaunchOptions struct {
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string
-	// BeforeAgentStart admits durable first-prompt state after the execution
-	// exists and before any harness prompt can be dispatched.
-	BeforeAgentStart func(context.Context, string) error
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
+	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
 	// process is started. Callers use this boundary to bind turn-scoped
@@ -752,7 +753,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string

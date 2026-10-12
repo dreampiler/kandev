@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { GatewayTrafficFrame } from "./ws-traffic";
 
-type SessionRecord = Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"][number];
+type SessionRecord = Awaited<ReturnType<ApiClient["getTaskSession"]>>["session"];
 
 export type SilentRestartSnapshot = {
   sessionId: string;
@@ -30,9 +30,10 @@ function nativeSessionId(session: SessionRecord): string {
 }
 
 async function getSession(api: ApiClient, taskId: string, sessionId: string) {
-  const { sessions } = await api.listTaskSessions(taskId);
-  const session = sessions.find((candidate) => candidate.id === sessionId);
-  if (!session) throw new Error(`task ${taskId} no longer has session ${sessionId}`);
+  const { session } = await api.getTaskSession(sessionId);
+  if (session.id !== sessionId || session.task_id !== taskId) {
+    throw new Error(`task ${taskId} no longer has session ${sessionId}`);
+  }
   return session;
 }
 
@@ -69,6 +70,27 @@ export async function expectSilentRestartRestoration(
   snapshot: SilentRestartSnapshot,
   traffic: readonly GatewayTrafficFrame[],
 ): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const restored = await getSession(api, taskId, snapshot.sessionId);
+        const recovery = restored.metadata?.agent_delivery_recovery as
+          | { phase?: unknown }
+          | undefined;
+        return {
+          phase: typeof recovery?.phase === "string" ? recovery.phase : "",
+          executionReplaced:
+            Boolean(restored.agent_execution_id) &&
+            restored.agent_execution_id !== snapshot.agentExecutionId,
+        };
+      },
+      {
+        timeout: 60_000,
+        message: "session delivery recovery was not durably committed after process loss",
+      },
+    )
+    .toEqual({ phase: "restored", executionReplaced: true });
+
   await expectRestartConversationIdentity({
     page,
     api,
@@ -78,22 +100,6 @@ export async function expectSilentRestartRestoration(
     expectedState: "WAITING_FOR_INPUT",
     executionDisposition: "replaced",
   });
-
-  await expect
-    .poll(
-      async () => {
-        const restored = await getSession(api, taskId, snapshot.sessionId);
-        const recovery = restored.metadata?.agent_delivery_recovery as
-          | { phase?: unknown }
-          | undefined;
-        return typeof recovery?.phase === "string" ? recovery.phase : "";
-      },
-      {
-        timeout: 60_000,
-        message: "session delivery recovery was not durably committed after backend restart",
-      },
-    )
-    .toBe("restored");
 
   for (const testId of ["failed-session-banner", "delivery-recovery-result"]) {
     await expect(page.getByTestId(testId)).toHaveCount(0);

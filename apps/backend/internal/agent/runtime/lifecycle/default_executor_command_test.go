@@ -33,7 +33,7 @@ func TestBuildExecutionUsesResolvedStandaloneForNativeOpenCode(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := append([]string{"opencode"}, nativeArgs...)
-	for _, executorType := range []string{"", string(models.ExecutorTypeLocal), string(models.ExecutorTypeLocalDocker)} {
+	for _, executorType := range []string{"", "unknown", string(models.ExecutorTypeLocal), string(models.ExecutorTypeLocalDocker)} {
 		t.Run("requested_"+executorType, func(t *testing.T) {
 			execution, err := manager.buildExecutionFromInstance(context.Background(),
 				&LaunchRequest{ExecutorType: executorType},
@@ -44,6 +44,32 @@ func TestBuildExecutionUsesResolvedStandaloneForNativeOpenCode(t *testing.T) {
 			}
 			if execution.RuntimeName != agentruntime.RuntimeStandalone || !reflect.DeepEqual(execution.AgentArgs, want) {
 				t.Fatalf("runtime=%s args=%q, want standalone native v1 command %q", execution.RuntimeName, execution.AgentArgs, want)
+			}
+		})
+	}
+}
+
+func TestPromoteWorkspaceExecutionUsesResolvedStandaloneForNativeOpenCode(t *testing.T) {
+	writeNativeOpenCodeVersionFixture(t, "1.18.32")
+	for _, requested := range []string{"", "unknown", string(models.ExecutorTypeLocal), string(models.ExecutorTypeLocalDocker)} {
+		t.Run("requested_"+requested, func(t *testing.T) {
+			m := newTestManager(t)
+			m.profileResolver = nil
+			m.SetManagedRuntimeSelectionStore(nativeOpenCodeAdmissionManager("1.18.32").managedRuntimeSelections)
+			execution := &AgentExecution{
+				ID: "workspace-execution", TaskID: "task-1", SessionID: "session-1",
+				RuntimeName: agentruntime.RuntimeStandalone, WorkspacePath: t.TempDir(),
+			}
+			req := &LaunchRequest{
+				TaskID: execution.TaskID, SessionID: execution.SessionID,
+				AgentProfileID: agents.OpenCodeACPAgentID, ExecutorType: requested,
+				IsPassthrough: true,
+			}
+			if err := m.promoteWorkspaceExecution(context.Background(), execution, req); err != nil {
+				t.Fatalf("promote resolved standalone execution: %v", err)
+			}
+			if want := []string{"opencode", "acp", "--print-logs"}; !reflect.DeepEqual(execution.AgentArgs, want) {
+				t.Fatalf("promoted command = %q, want %q", execution.AgentArgs, want)
 			}
 		})
 	}

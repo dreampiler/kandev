@@ -107,9 +107,13 @@ The version check boots the CLI's JavaScript runtime, so concurrent launches can
 Each run is bounded at 10 seconds. A failed, timed-out, or unreadable run is retried twice (after 300 ms and 1 s).
 A successful detection is remembered per executable path for 10 minutes; when a later check still fails after
 its retries, that recent detection is used instead of blocking the launch. When no recent detection exists, a
-launch still proceeds with the selected runtime's known version, because the ACP arguments are identical across
-a family's supported majors; only an unsupported major stays fail-closed. An unsupported major clears the
-remembered detection and is never retried; a missing executable is reported as absent, as before.
+launch may proceed with the selected runtime's supported stable version while its caller context remains live,
+because the ACP arguments are identical across supported majors. Both ACP and interactive command resolution
+reject an unusable selected version, caller cancellation, and caller deadline expiry. A probe attempt's own
+timeout may fall back while the caller remains live. An unsupported major replaces the remembered supported
+detection with rejection evidence and is never retried in that detection. Later transient failures retain
+that rejection and their own error identity; a fresh supported observation replaces it. A missing executable
+is reported as absent, as before.
 The final diagnostic marks a deadline kill and quotes at most 200 characters of the output, with the user's
 home directory replaced by `~`.
 Managed v2 never returns to native preference when PATH changes.

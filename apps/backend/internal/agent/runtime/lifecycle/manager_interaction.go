@@ -112,7 +112,7 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 // StartAgentProcess.
 func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
@@ -202,7 +202,7 @@ func (m *Manager) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return m.PromptAgentWithAdmissionCallbackAndSubmissionID(
@@ -218,7 +218,7 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -2554,13 +2554,16 @@ func (m *Manager) markReadyEventForExecution(
 	var payload AgentEventPayload
 	var updated *AgentExecution
 	var alreadyReady bool
-	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+	// The payload snapshots promptTurnID, so take promptLifecycleMu before the
+	// store lock. Reading it under the store lock deadlocks against a
+	// concurrent completion claim and blocks every session's store access.
+	if err := m.executionStore.WithPromptLifecycleLock(executionID, func(execution *AgentExecution) {
 		if execution.Status == v1.AgentStatusReady {
 			alreadyReady = true
 			return
 		}
 		execution.Status = v1.AgentStatusReady
-		payload = newAgentEventPayload(execution)
+		payload = newAgentEventPayloadPromptLocked(execution)
 		payload.AttemptID = attemptID
 		updated = execution
 	}); err != nil {
@@ -2638,6 +2641,7 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 	attemptID string,
+	terminalEvents ...*agentctlclient.AgentEvent,
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
@@ -2660,6 +2664,9 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 	// subprocess is not an agent failure. Treat the terminal error as a benign
 	// stop so the session stays resumable and the UI shows no red error banner.
 	if (exitCode != 0 || errorMessage != "") && m.IsShuttingDown() {
+		if len(terminalEvents) > 0 && terminalEvents[0] != nil {
+			return m.markStoppedDuringShutdownForEvent(execution, exitCode, errorMessage, terminalEvents[0])
+		}
 		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage, turnID)
 	}
 	if (exitCode != 0 || errorMessage != "") && isUninitializedStartupExecution(execution) {
@@ -2707,9 +2714,15 @@ func (m *Manager) markCompletedWithTurnIDAndAttempt(
 		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
 	}
 	if eventType == events.AgentFailed {
-		m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
-			WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
-		)
+		if len(terminalEvents) > 0 && terminalEvents[0] != nil {
+			m.eventPublisher.publishAgentEventWithTerminalEvent(
+				WithResumeAttemptID(context.Background(), attemptID), eventType, execution, terminalEvents[0], failureEvidence,
+			)
+		} else {
+			m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
+				WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
+			)
+		}
 		return nil
 	}
 	m.eventPublisher.publishAgentEventWithTurnID(
@@ -2773,6 +2786,7 @@ func (m *Manager) preparePromptErrorCompletion(
 		payload := cloneTerminalAgentEventPayload(
 			newAgentEventPayloadWithTurnIDAndEvidence(current, event.TurnID, failureEvidence),
 		)
+		copyDeliveryTerminalIdentity(&payload, event)
 		if event.AttemptID != "" {
 			payload.AttemptID = event.AttemptID
 		}
@@ -2881,6 +2895,31 @@ func isTerminalStatus(status v1.AgentStatus) bool {
 func (m *Manager) markStoppedDuringShutdown(
 	execution *AgentExecution, exitCode int, errorMessage string, turnIDs ...string,
 ) error {
+	turnID := ""
+	if len(turnIDs) > 0 {
+		turnID = turnIDs[0]
+	}
+	return m.markStoppedDuringShutdownWithTerminalEvent(execution, exitCode, errorMessage, turnID, nil)
+}
+
+func (m *Manager) markStoppedDuringShutdownForEvent(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	terminal *agentctlclient.AgentEvent,
+) error {
+	if terminal == nil {
+		return m.markStoppedDuringShutdown(execution, exitCode, errorMessage)
+	}
+	return m.markStoppedDuringShutdownWithTerminalEvent(execution, exitCode, errorMessage, terminal.TurnID, terminal)
+}
+
+func (m *Manager) markStoppedDuringShutdownWithTerminalEvent(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage, turnID string,
+	terminal *agentctlclient.AgentEvent,
+) error {
 	applied := false
 	err := m.executionStore.WithLock(execution.ID, func(exec *AgentExecution) {
 		if isTerminalStatus(exec.Status) {
@@ -2911,11 +2950,11 @@ func (m *Manager) markStoppedDuringShutdown(
 	m.persistExecutorRunning(context.Background(), execution)
 	m.releaseActivity(executionActivityKey(execution.ID))
 
-	turnID := ""
-	if len(turnIDs) > 0 {
-		turnID = turnIDs[0]
+	if terminal != nil {
+		m.eventPublisher.publishAgentEventWithTerminalEvent(context.Background(), events.AgentStopped, execution, terminal, nil)
+	} else {
+		m.eventPublisher.publishAgentEventWithTurnID(context.Background(), events.AgentStopped, execution, turnID)
 	}
-	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), events.AgentStopped, execution, turnID)
 
 	return nil
 }

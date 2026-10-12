@@ -74,3 +74,19 @@ On the original command builder, the cases with no executor type and with
 
 A caller that resolved a different backend than requested now gets that
 backend's command; this matches the runtime the process actually starts on.
+
+## PR review remediation
+
+The integrated change retains current main's prepared delivery, run generation,
+control ownership, held-resume lease, and prompt materialization boundaries.
+Native ACP and interactive resolution preserve caller cancellation and deadline
+errors; only a probe attempt timeout under a live caller may fall back.
+A transient failure cannot erase an unsupported-major observation or permit
+an unusable selected version. Workspace promotion also has explicit coverage
+for empty, unknown, local, and local-Docker requests resolved to standalone.
+
+Contained focused proofs reproduced the failures before remediation and passed
+afterward using exact source fragments, the real detector and SemVer parser,
+and explicit storage, registry, family-spec, and logging fakes. These proofs
+do not certify the full packages. Complete Backend, Frontend, E2E, and static
+verification of the delivered exact head remains a hosted CI delivery gate.

@@ -1518,6 +1518,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	// metadata for repo-less tasks where the user picked a starting folder.
 	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != task.ID {
+			return "", errors.New("reserved launch belongs to another task")
+		}
+		sessionID = identity.SessionID
+	}
 	now := time.Now().UTC()
 	session := &models.TaskSession{
 		ID:                            sessionID,
@@ -2138,7 +2144,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 	if startAgent && req.BeforeAgentStart != nil {
-		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID); err != nil {
+		if err := req.BeforeAgentStart(launchCtx, resp.AgentExecutionID, req.TaskDescription); err != nil {
 			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
 			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
 		}
@@ -2874,7 +2880,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
-	beforeInitialPromptDispatch func(string) error,
+	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
@@ -2942,12 +2948,6 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
 	}
-	if request.BeforeAgentStart != nil {
-		if err := request.BeforeAgentStart(ctx, executionID); err != nil {
-			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
-		}
-	}
-
 	// Lazy workspace restoration creates an execution without an agent command.
 	// Preserve the request's description, environment, and MCP mode above, then
 	// route it through LaunchAgent so lifecycle.Launch can promote the execution
@@ -2955,6 +2955,12 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	// subprocess is started.
 	if !e.agentManager.IsAgentCommandConfigured(executionID) {
 		return nil, ErrAgentCommandMissing
+	}
+
+	if request.BeforeAgentStart != nil {
+		if err := request.BeforeAgentStart(ctx, executionID, prompt); err != nil {
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
 	}
 
 	// Transition session to STARTING

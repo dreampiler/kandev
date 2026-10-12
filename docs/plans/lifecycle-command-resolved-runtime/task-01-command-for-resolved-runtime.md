@@ -82,3 +82,11 @@ command.
   with `agent command cannot be empty`, and a `local_docker` request resolved
   to standalone got the managed `npx` command; `local` already passed.
 - GREEN: the new test and the existing command tests pass.
+
+### PR review verification
+
+The request matrix now includes an unknown executor type. A separate workspace
+promotion regression uses the resolved standalone runtime with empty, unknown,
+local, and local-Docker requests and checks the native ACP argv. This full
+lifecycle regression is assigned to hosted Backend CI; no broad local
+lifecycle package rebuild is claimed.

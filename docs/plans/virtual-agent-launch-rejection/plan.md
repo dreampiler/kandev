@@ -70,3 +70,14 @@ The new tests failed without the launch-time rejection and pass with it.
 
 Low: a launch that already failed with an empty command now fails earlier with
 the typed error.
+
+### PR review verification
+
+Managed-policy admission now wraps both the policy rejection and the underlying
+virtual-family error, preserving errors.Is for each identity. The focused
+regression fails before this correction and passes afterward; missing agents
+remain policy errors without a virtual-family identity. The contained proof
+uses exact admission/lookup source and explicit registry and policy boundary
+fakes. Full lifecycle and routing package verification remains a hosted CI
+delivery gate; historical author results above do not certify the integrated
+head.

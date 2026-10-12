@@ -94,3 +94,21 @@ remains fail-closed.
   launch even though the native binary was selected and its version known.
 - GREEN: the fallback tests and the detection-answer test pass; an unsupported
   major and an unusable selected version still fail closed.
+
+### PR review remediation and verification
+
+Both production callers now check the parent context after detection. They
+share fallback admission for supported selected versions and preserve wrapped
+probe/cancellation errors. The detector retains unsupported-major evidence
+per executable path through subsequent transient failures until a fresh
+supported observation replaces it; a probe attempt timeout under a live
+caller remains eligible for fallback.
+
+Contained focused proofs failed before these changes for revoked caller
+contexts, invalid interactive selections, and lost unsupported-major evidence.
+They pass after remediation, including positive native v1/v2 fallbacks,
+unsupported-major rejection, per-attempt timeout eligibility, and original
+error identity. The local proof module uses exact source fragments and explicit
+boundary fakes; full package tests, lint, build, Frontend and E2E verification
+remain hosted CI delivery gates. Original author verification above is
+historical and does not prove the current integrated candidate.

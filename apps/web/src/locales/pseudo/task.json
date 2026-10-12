@@ -2715,6 +2715,8 @@
   "sortAscending": "Àśćēńďĩńĝ",
   "sortMatchingFirst": "Ḿàţćĥĩńĝ ƒĩŕśţ",
   "sortRuleColor": "Ćōĺōŕ ƒōŕ śōŕţ ƒĩēĺď {{position}}",
+  "sessionRuntimeCleanupFailedTitle": "Ŕēśũḿē ćōũĺď ńōţ ƒĩńĩśĥ",
+  "sessionRuntimeCleanupFailedBody": "Ţĥē ƥŕēvĩōũś ŕũńţĩḿē ćōũĺď ńōţ ƀē śţōƥƥēď. Ćĥēćķ ēxēćũţōŕ ćōńńēćţĩvĩţŷ, ţĥēń ŕēţŕŷ Ŕēśũḿē.",
   "deliveryRecoveryAttached": "Ćōńńēćţĩōń ŕēśţōŕēď. Ţĥē ƥŕēvĩōũś ƥŕōḿƥţ ŵàś ńōţ ŕēśēńţ.",
   "deliveryRecoverySettled": "Śàvēď ōũţƥũţ ŵàś śŷńćĥŕōńĩźēď àńď ţĥē ƥŕōḿƥţ ōũţćōḿē ŵàś ŕēćōvēŕēď.",
   "deliveryRecoveryUncertain": "Ţĥē ƥŕēvĩōũś ƥŕōḿƥţ ōũţćōḿē ĩś śţĩĺĺ ũńķńōŵń. Ŕēvĩēŵ ţĥē ŕēţàĩńēď ćĥàńĝēś ƀēƒōŕē ćōńţĩńũĩńĝ.",
@@ -2728,5 +2730,10 @@
   "deliveryRecoveryStoragePressure": "Śàvēď ōũţƥũţ ńēēďś śŷńćĥŕōńĩźàţĩōń. Ţĥē àĝēńţ ƥŕōćēśś ĥàś ńōţ ƀēēń ćōńƒĩŕḿēď śţōƥƥēď.",
   "deliveryMessageBlocked": "Ďēĺĩvēŕŷ ĩś ƀĺōćķēď ŵĥĩĺē śēśśĩōń ŕēćōvēŕŷ ĩś ƥēńďĩńĝ.",
   "deliveryRecoveryIdentityIncomplete": "Ţĥē ŕēćōŕď ŵàś ŕēśţōŕēď, ƀũţ ţĥē ōŕĩĝĩńàĺ ƥŕōćēśś ĩďēńţĩţŷ ĩś ḿĩśśĩńĝ. Ćōńţĩńũĩńĝ śţàŷś ƀĺōćķēď.",
-  "deliveryRecoveryAmbiguousEvidence": "Ḿōŕē ţĥàń ōńē śàvēď ƥŕōḿƥţ ćōũĺď ōŵń ţĥĩś ďēĺĩvēŕŷ. Ŕēćōvēŕŷ ŕēḿàĩńś ƀĺōćķēď."
+  "deliveryRecoveryAmbiguousEvidence": "Ḿōŕē ţĥàń ōńē śàvēď ƥŕōḿƥţ ćōũĺď ōŵń ţĥĩś ďēĺĩvēŕŷ. Ŕēćōvēŕŷ ŕēḿàĩńś ƀĺōćķēď.",
+  "deliveryHistoryGapTitle": "Ēàŕĺĩēŕ ōũţƥũţ ĩś ũńàvàĩĺàƀĺē.",
+  "deliveryHistoryGapBody": "Ŕēśũḿē ţĥē ēxĩśţĩńĝ ćōńvēŕśàţĩōń. Ţĥē ĩńţēŕŕũƥţēď ƥŕōḿƥţ ōũţćōḿē ŕēḿàĩńś ũńķńōŵń.",
+  "deliveryHistoryGapArchived": "Śōḿē ēàŕĺĩēŕ ōũţƥũţ ĩś ũńàvàĩĺàƀĺē. Ţĥē ĩńţēŕŕũƥţēď ƥŕōḿƥţ ōũţćōḿē ŕēḿàĩńś ũńķńōŵń.",
+  "deliveryHistoryGapUnsupported": "Ţĥĩś ŕũńţĩḿē ćàńńōţ śàƒēĺŷ ŕēćōvēŕ ţĥē ḿĩśśĩńĝ ōũţƥũţ. Ũƥďàţē ţĥē ŕũńţĩḿē àńď ţŕŷ Ŕēśũḿē àĝàĩń.",
+  "deliveryHistoryGapRange": "Ḿĩśśĩńĝ ōũţƥũţ ēvēńţś: {{first}} ţō {{last}}."
 }
