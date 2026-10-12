@@ -2153,6 +2153,14 @@ func (s *Service) SetCanvasesEnabled(enabled bool) {
 	}
 }
 
+// SetOfficeCrossWorkspaceLookup forwards the Office cross-workspace access
+// setting to the executor's MCP profile builder.
+func (s *Service) SetOfficeCrossWorkspaceLookup(lookup executor.OfficeCrossWorkspaceLookup) {
+	if s.executor != nil {
+		s.executor.SetOfficeCrossWorkspaceLookup(lookup)
+	}
+}
+
 // SetCoordinatorLookup forwards the coordinator lookup to the executor's
 // fail-closed coordinator-session-start check. Guarded by the caller on the
 // coordinator feature flag (docs/specs/coordinator/system-design/copilot.md#fail-closed).

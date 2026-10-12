@@ -238,7 +238,31 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	if allowTitleTool && surface == mcpprofile.SurfaceKanbanTask && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		capabilities = append(capabilities, mcpprofile.CapabilityTaskTitle)
 	}
+	capabilities = append(capabilities, e.officeCrossWorkspaceCapabilities(ctx, surface, task.WorkspaceID)...)
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
+}
+
+// officeCrossWorkspaceCapabilities returns the Office cross-workspace MCP
+// capabilities for a task session: the read and message tools for an Office
+// task whose workspace turned the setting on, and the handoff report tool for
+// a Kanban task whose workspace such an Office workspace reaches.
+func (e *Executor) officeCrossWorkspaceCapabilities(
+	ctx context.Context, surface mcpprofile.Surface, workspaceID string,
+) []mcpprofile.Capability {
+	if e == nil || e.officeCrossWorkspace == nil || workspaceID == "" {
+		return nil
+	}
+	switch surface {
+	case mcpprofile.SurfaceOfficeTask:
+		if e.officeCrossWorkspace.Enabled(ctx, workspaceID) {
+			return []mcpprofile.Capability{mcpprofile.CapabilityOfficeCrossWorkspace}
+		}
+	case mcpprofile.SurfaceKanbanTask:
+		if e.officeCrossWorkspace.ReceivesHandoffReports(ctx, workspaceID) {
+			return []mcpprofile.Capability{mcpprofile.CapabilityOfficeHandoffReport}
+		}
+	}
+	return nil
 }
 
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will

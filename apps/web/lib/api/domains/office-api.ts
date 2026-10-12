@@ -92,6 +92,7 @@ export type {
   ImportFromFSResult,
   GitStatusData,
   WorkspaceSettingsData,
+  CrossWorkspaceAccessData,
   TaskDecisionDTO,
 } from "./office-extended-api";
 

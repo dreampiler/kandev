@@ -384,6 +384,11 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+
+	// Optional Office cross-workspace access setting (SetOfficeCrossWorkspace).
+	// nil leaves the Office surface confined to its own workspace and Kanban
+	// messages to Office tasks on their session path.
+	officeCrossWorkspace OfficeCrossWorkspace
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -599,6 +604,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+	d.RegisterFunc(ws.ActionMCPReportToHandoffSource, h.handleReportToHandoffSource)
 	if h.coordinatorSvc != nil {
 		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
@@ -3004,6 +3010,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to look up target task: "+err.Error(), nil)
+	}
+
+	if resp := h.deliverToOfficeTask(ctx, msg, senderTask, targetTask, req.Prompt, req.ReplyToQuestionID); resp != nil {
+		return resp, nil
 	}
 
 	parentReply, err := h.validateParentQuestionReply(ctx, req.ReplyToQuestionID, req.TaskID, senderTask, targetTask)

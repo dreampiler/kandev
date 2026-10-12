@@ -1109,6 +1109,11 @@ type Executor struct {
 	logger            *logger.Logger
 	canvasesEnabled   bool
 
+	// officeCrossWorkspace adds the Office cross-workspace MCP capabilities
+	// to task profiles whose workspace takes part in the opt-in setting. nil
+	// (the default) adds none.
+	officeCrossWorkspace OfficeCrossWorkspaceLookup
+
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
 	// coordinator-session-start check in resolveTaskSessionMCPMode/Profile
@@ -1491,6 +1496,24 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// OfficeCrossWorkspaceLookup reports a workspace's part in the Office
+// cross-workspace access setting when a session's MCP profile is built. The
+// backend re-decides reach on every tool call; this only decides which tools
+// a session advertises.
+type OfficeCrossWorkspaceLookup interface {
+	// Enabled reports whether an Office workspace turned the setting on.
+	Enabled(ctx context.Context, workspaceID string) bool
+	// ReceivesHandoffReports reports whether an Office workspace with the
+	// setting on reaches workspaceID.
+	ReceivesHandoffReports(ctx context.Context, workspaceID string) bool
+}
+
+// SetOfficeCrossWorkspaceLookup wires the Office cross-workspace access
+// setting into task MCP profiles.
+func (e *Executor) SetOfficeCrossWorkspaceLookup(lookup OfficeCrossWorkspaceLookup) {
+	e.officeCrossWorkspace = lookup
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

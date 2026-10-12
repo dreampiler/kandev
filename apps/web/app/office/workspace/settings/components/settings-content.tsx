@@ -13,7 +13,6 @@ import Image from "@/components/routing/app-image";
 import { IconUpload, IconDeviceFloppy } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
 import { Input } from "@kandev/ui/input";
-import { Switch } from "@kandev/ui/switch";
 import { Button } from "@kandev/ui/button";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -22,47 +21,12 @@ import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import type { AppState } from "@/lib/state/store";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { ConfigSection } from "./config-section";
+import { SectionHeader, SettingCard, ToggleRow } from "./settings-primitives";
+import { CrossWorkspaceSection } from "./cross-workspace-section";
 import { DangerZoneSection } from "./danger-zone-section";
 import { GitSection } from "./git-section";
 import { OfficeConfigSyncSection } from "./office-config-sync-section";
 import { useTranslation } from "react-i18next";
-
-function SectionHeader({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-3 mb-3">
-      <h2 className="text-[10px] font-medium uppercase tracking-widest font-mono text-muted-foreground/60 shrink-0">
-        {children}
-      </h2>
-      <div className="h-px bg-border flex-1" />
-    </div>
-  );
-}
-
-function SettingCard({ children }: { children: React.ReactNode }) {
-  return <div className="rounded-lg border border-border p-4 space-y-4">{children}</div>;
-}
-
-function ToggleRow({
-  label,
-  description,
-  checked,
-  onCheckedChange,
-}: {
-  label: string;
-  description?: string;
-  checked: boolean;
-  onCheckedChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div>
-        <p className="text-sm">{label}</p>
-        {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
-      </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} className="cursor-pointer" />
-    </div>
-  );
-}
 
 function AppearanceSection({
   name,
@@ -622,6 +586,15 @@ export function SettingsContent() {
           onSave={s.handleSavePermissions}
         />
       </div>
+
+      {activeWorkspace && (
+        <div>
+          <SectionHeader>{t("office:crossWorkspaceAccess")}</SectionHeader>
+          <SettingCard>
+            <CrossWorkspaceSection workspaceId={activeWorkspace.id} workspaces={workspaces.items} />
+          </SettingCard>
+        </div>
+      )}
 
       <div>
         <SectionHeader>{t("office:recovery")}</SectionHeader>

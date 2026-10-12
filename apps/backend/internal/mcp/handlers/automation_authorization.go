@@ -29,6 +29,10 @@ func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFun
 		if guarded != nil {
 			return guarded, err
 		}
+		guarded, replacement, err = d.handlers.authorizeOfficeCrossWorkspaceRequest(ctx, replacement)
+		if guarded != nil {
+			return guarded, err
+		}
 		return handler(ctx, replacement)
 	})
 }
