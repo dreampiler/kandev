@@ -272,5 +272,6 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	if !prepared.skipAcknowledgement {
 		sm.scheduleDurableDeliveryAck(execution, client, event)
 	}
+	sm.compactSupersededToolUpdates(delivery, prepared)
 	return nil
 }
