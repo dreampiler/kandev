@@ -33,7 +33,7 @@ func (a portableConfigTestAgent) PortableConfig() *agents.PortableConfig { retur
 
 func TestUploadPortableConfigBundlesCopiesSelectedFilesWithPrivateMode(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	writeFile(t, home, ".agent/settings.json", []byte("settings"))
 	writeFile(t, home, ".agent/optional.json", []byte("optional"))
 
@@ -66,7 +66,7 @@ func TestUploadPortableConfigBundlesCopiesSelectedFilesWithPrivateMode(t *testin
 
 func TestUploadPortableConfigBundlesRejectsUnsafeAndOversizedFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	writeFile(t, home, ".agent/link.json", []byte("link"))
 	if err := os.Symlink(filepath.Join(home, ".agent", "link.json"), filepath.Join(home, ".agent", "symlink.json")); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
@@ -97,7 +97,7 @@ func TestUploadPortableConfigBundlesRejectsUnsafeAndOversizedFiles(t *testing.T)
 
 func TestUploadPortableConfigBundlesWarnsAndContinuesForMissingFiles(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	writeFile(t, home, ".agent/present.json", []byte("present"))
 	ag := portableConfigTestAgent{
 		Agent: agents.NewMockAgent(),
@@ -144,7 +144,7 @@ func TestReadPortableConfigFileRejectsPathReplacement(t *testing.T) {
 
 func TestUploadPortableConfigBundlesRejectsSymlinkedDestinations(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	writeFile(t, home, ".agent/settings.json", []byte("settings"))
 
 	for _, tc := range []struct {

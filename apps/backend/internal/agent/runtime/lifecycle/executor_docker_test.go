@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1019,17 +1020,31 @@ func TestContainerBuildEnvVarsRejectsMalformedIndexedGitConfig(t *testing.T) {
 }
 
 func TestLocalPathFromCloneURL(t *testing.T) {
-	tests := []struct {
+	type row struct {
 		name string
 		raw  string
 		want string
-	}{
-		{name: "file URL", raw: "file:///tmp/e2e-docker-remote.git", want: "/tmp/e2e-docker-remote.git"},
-		{name: "escaped file URL", raw: "file:///tmp/repo%20remote.git", want: "/tmp/repo remote.git"},
-		{name: "localhost file URL", raw: "file://localhost/tmp/repo.git", want: "/tmp/repo.git"},
-		{name: "plain absolute path", raw: "/tmp/repo.git", want: "/tmp/repo.git"},
+	}
+	tests := []row{
 		{name: "https URL", raw: "https://github.com/org/repo.git", want: ""},
 		{name: "remote file host", raw: "file://server/tmp/repo.git", want: ""},
+	}
+	if runtime.GOOS == "windows" {
+		// A Windows file URL carries the drive in its path ("/C:/repo.git").
+		tests = append(tests,
+			row{name: "file URL", raw: "file:///C:/e2e-docker-remote.git", want: `C:\e2e-docker-remote.git`},
+			row{name: "escaped file URL", raw: "file:///C:/repo%20remote.git", want: `C:\repo remote.git`},
+			row{name: "localhost file URL", raw: "file://localhost/C:/repo.git", want: `C:\repo.git`},
+			row{name: "plain absolute path", raw: `C:\repo.git`, want: `C:\repo.git`},
+			row{name: "file URL without drive", raw: "file:///repo.git", want: ""},
+		)
+	} else {
+		tests = append(tests,
+			row{name: "file URL", raw: "file:///tmp/e2e-docker-remote.git", want: "/tmp/e2e-docker-remote.git"},
+			row{name: "escaped file URL", raw: "file:///tmp/repo%20remote.git", want: "/tmp/repo remote.git"},
+			row{name: "localhost file URL", raw: "file://localhost/tmp/repo.git", want: "/tmp/repo.git"},
+			row{name: "plain absolute path", raw: "/tmp/repo.git", want: "/tmp/repo.git"},
+		)
 	}
 
 	for _, tt := range tests {

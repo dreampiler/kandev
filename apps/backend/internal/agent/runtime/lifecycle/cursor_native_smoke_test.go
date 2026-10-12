@@ -122,7 +122,7 @@ func newCursorNativeSmokeContext(t *testing.T, binary, accountToken string) *cur
 
 	home := t.TempDir()
 	t.Cleanup(func() { requireNoCursorNativeSmokeAccountTokenOnDisk(t, home, accountToken) })
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	fixture := newCursorNativeSmokeFixture(t)
 	writeCursorNativeSmokeInputs(t, home, workspace, fixture.server.URL)

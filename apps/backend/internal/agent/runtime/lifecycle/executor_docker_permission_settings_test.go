@@ -19,7 +19,7 @@ func TestDockerSessionSeedDoesNotApplyPermissionModeToSettings(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			sourceDir := filepath.Join(home, ".claude")
 			require.NoError(t, os.MkdirAll(sourceDir, 0o700))
 			const source = `{"model":"opus","permissions":{"defaultMode":"default"},"env":{"SELECTED":"value"},"hooks":{"PreToolUse":[{"command":"sentinel-hook"}]}}`
