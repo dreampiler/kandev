@@ -163,6 +163,17 @@ unknown or changed owner, or locked or corrupt journal does not start a
 replacement conversation. The session keeps its safe recovery controls, such
 as **Stop**, while other eligible sessions can recover independently.
 
+A new message or pending queue work can continue an interrupted primary from
+saved Kandev history, including a failed session whose old runtime termination
+could not be proved on Windows. This requires a classified interrupted-delivery
+recovery block or a classified delivery-related startup refusal, and no live
+runtime. It uses a new native conversation, preserves
+the logical agent profile, and never resends the instruction with an unknown
+outcome. Completed, cancelled, and unrelated failed sessions do not restart this
+way. Automatic primary promotion uses only the newest active session with the
+same logical profile that also matches the current workflow step; otherwise
+the primary and its queue retain their recovery owner.
+
 **Stop** remains available while Retry is pending. The card reports a failed
 Stop request or an unconfirmed cancellation. Retry reconnects and reconciles
 the saved delivery state; it does not create a new instruction.

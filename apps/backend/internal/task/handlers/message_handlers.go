@@ -850,7 +850,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	steer := h.orchestrator != nil &&
 		h.orchestrator.SteerEligible(sessionResp.Session.ID, sessionResp.Session.State)
 	if !steer {
-		if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
+		if wsErr := h.errorForMessageSession(ctx, msg, req.TaskID, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
 			return wsErr, nil
 		}
 	}
@@ -1344,6 +1344,22 @@ func (h *MessageHandlers) enrichWorkspaceRecovery(
 	dto.EnrichWorkspaceRecovery(projection, operation, runnerLive)
 }
 
+type failedSessionAutoRecoveryEligibility interface {
+	CanAutoRecoverFailedSession(context.Context, string, string) bool
+}
+
+func (h *MessageHandlers) errorForMessageSession(
+	ctx context.Context, msg *ws.Message, taskID, sessionID string, state models.TaskSessionState,
+) *ws.Message {
+	if state == models.TaskSessionStateFailed {
+		if recovery, ok := h.orchestrator.(failedSessionAutoRecoveryEligibility); ok &&
+			recovery.CanAutoRecoverFailedSession(ctx, taskID, sessionID) {
+			return nil
+		}
+	}
+	return h.errorForBlockedMessageSession(msg, sessionID, state)
+}
+
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
 	switch state {
 	case models.TaskSessionStateRunning:
@@ -1514,7 +1530,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
 		return resp, nil
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
+	if wsErr := h.errorForMessageSession(ctx, msg, sessionDTO.TaskID, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
 		}

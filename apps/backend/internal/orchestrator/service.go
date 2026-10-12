@@ -4443,7 +4443,8 @@ func (s *Service) QueueUserPrompt(
 		if err != nil {
 			return fmt.Errorf("load session before queueing user prompt: %w", err)
 		}
-		if session == nil || isTerminalSessionState(session.State) {
+		if session == nil || (isTerminalSessionState(session.State) &&
+			!s.CanAutoRecoverFailedSession(admittedCtx, taskID, sessionID)) {
 			return ErrSessionNotPromptable
 		}
 		if _, err := s.messageQueue.QueueMessageWithMetadata(
