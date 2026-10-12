@@ -36,9 +36,10 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
-	// strikes counts consecutive suspensions. Only a recorded success clears
-	// it, so a probe launch that starts but then hits the limit again still
-	// moves the next suspension up its ladder.
+	// strikes counts consecutive suspensions. Only a turn that completed
+	// without a provider error clears it, so a probe launch that starts, or a
+	// turn that streams output and then fails, still moves the next suspension
+	// up its ladder.
 	strikes int
 }
 
@@ -161,10 +162,11 @@ func (r *CircuitRegistry) NextStrike(key string) int {
 	return entry.strikes + 1
 }
 
-// RecordSuccess clears the strike count after the resource produced real
-// output. An expired or probing circuit closes as well, because the output is
-// stronger evidence than the probe launch. A circuit whose block is still
-// running stays open: a concurrent failure reopened it after this output.
+// RecordSuccess clears the strike count after a turn on the resource completed
+// without a provider error. An expired or probing circuit closes as well,
+// because a completed turn is stronger evidence than the probe launch. A
+// circuit whose block is still running stays open: a concurrent failure
+// reopened it after this turn.
 func (r *CircuitRegistry) RecordSuccess(key string) {
 	if key == "" {
 		return

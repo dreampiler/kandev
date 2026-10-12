@@ -1294,6 +1294,11 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeld(ctx)
+	// The successor replaces this session's own failed attempt, which has
+	// usually left the counted population by now (its session is no longer
+	// starting or running), so the ceiling hands its unit over instead of
+	// refusing the replacement.
+	ctx = withReplacesFailedDynamicAttempt(ctx)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return

@@ -44,6 +44,13 @@ type Candidate struct {
 	// for models whose provider meters each model separately, and usage-limit
 	// failures then pause this key instead of BindingKey.
 	ModelKey string
+	// AccountKey identifies the account this candidate's path reaches: every
+	// model of the same provider through the same agent and credential. An
+	// account-wide limit (a spent subscription or credit) pauses this key, so
+	// sibling profiles of the account cannot spend the same exhausted allowance
+	// in turn. Empty means the account is not resolved, and BindingKey stands
+	// for it.
+	AccountKey string
 	// SuspendedUntil is an operator-entered block covering this candidate's
 	// provider. The candidate is not selectable before it.
 	SuspendedUntil time.Time

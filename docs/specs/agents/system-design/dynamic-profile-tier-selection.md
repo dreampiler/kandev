@@ -182,14 +182,46 @@ manual windows override it, and a manual window may count the whole account.
 A provider-exhausted window without a usable span scores at the elapsed floor.
 Without a reading, free plus explicitly no window yields zero pace and
 subscription/metered without usable windows stays unknown. Circuit eligibility is checked before ranking,
-including free candidates. The existing Kandev one-minute or trusted-reset
-backoff remains; no external escalating-backoff policy is imported.
+including free candidates. A reset instant the provider states always wins.
+
+How far and how long a failure suspends a resource follows its cause, not its
+code alone. One table (`failureCauseRules` in `dynamic/failure_scope.go`) maps
+the classifier rule, the code and the candidate's path (the provider prefix of
+its model ID) to a cause, and `failureCausePolicies` gives each cause its scope
+and duration. The same notice can mean different causes on different paths:
+OpenCode Zen's "Rate limit exceeded. Please try again later" is a free daily
+allowance and waits for the next 00:00 UTC, while an unmatched rate limit keeps
+the ladders below. A newly collected signature is one classifier rule plus one
+row in that table.
+
+| Cause | Scope | Duration |
+|---|---|---|
+| Account allowance (credit, subscription period, Claude/Codex limits, quota notice) | every model of the path's account | stated reset, else stated renewal day, else the paid ladder |
+| OpenCode Go usage limit | every paid model of the Go account | 5h, 24h, 7d |
+| Free daily allowance (Zen try-later, OpenRouter `limit_rpd/<model>`) | this model on this path | next 00:00 UTC |
+| OpenRouter `free-models-per-day` | every free model of the account | next 00:00 UTC |
+| Other rate or quota limit | model for model-metered providers, binding otherwise | free ladder or paid ladder (unchanged) |
+| Shared upstream pool limited | this model on this path | 5m, 15m, 30m, 1h; after eight strikes the next 00:00 UTC |
+| Model withdrawn (Not Found, no endpoints, model unavailable) | this model on this path | 24h |
+| Account setting excludes the model | this model on this path | 6h, 24h |
+| Intermittent endpoint ("Endpoint is unavailable") | this model on this path | 1m, 2m, 5m, 10m, 15m |
+| Model host slow or failing (header timeout, 5xx) | this model on this path; on every path when another path failed within 15 minutes | 5m, 15m, 30m |
+| Network | this model on this path | 2m, 5m |
+| Credential | the binding | 1m |
+| Other unavailable, overloaded or at capacity | this model on this path | 1m, 5m, 15m, 30m, 1h |
+| Local runtime (OpenCode service failure) | nothing | none |
+
+A failure whose cause can reach the model on every path (a model host, or an
+unrecognized unavailable notice) also keeps the same model's other paths out of
+the successor search it starts; a path-bound cause leaves them in. The strike
+count resets when a turn completes without a provider error, not on the first
+output, so a model that streams and then fails keeps climbing its ladder.
 
 Usage limits of providers that meter each model (OpenCode Go, free
 models) suspend only that model; OpenCode Go blocks without a known reset use
-2h, 2h, 2h, 24h and then the next monthly reset, and real output clears the
-count. A fully consumed observed usage window or an operator-entered provider
-block supplies a known end. Free models are never covered by a provider block.
+2h, 2h, 2h, 24h and then the next monthly reset. A fully consumed observed
+usage window or an operator-entered provider block supplies a known end. Free
+models are never covered by a provider block.
 
 A model is free when its route declares the cost class `free`, when its model
 ID carries a free marker, or when the price list its own provider publishes

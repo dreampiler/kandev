@@ -87,6 +87,13 @@ const (
 	// operator reading a card or a log line can tell a full instance from a
 	// queue ordering decision.
 	ceilingReasonDeferredPrecedes = "ceiling_deferred_precedes"
+	// ceilingReasonReplacementHandOff admits the automatic successor of a
+	// session's own failed dynamic attempt after that attempt already left the
+	// counted population. The successor takes the place of the process that
+	// just ended, so the population returns to where it stood before the
+	// failure instead of growing; refusing it only strands the route in
+	// "starting" until manual recovery.
+	ceilingReasonReplacementHandOff = "ceiling_replacement_hand_off"
 )
 
 // deferredPrecedenceState is the closed set describing why a queued launch
@@ -153,6 +160,9 @@ type admissionRequest struct {
 	// only classification input; an empty value is read as worker.
 	agentProfileID  string
 	yieldToDeferred func(context.Context, ceilingClass) deferredPrecedence
+	// replacesFailedAttempt marks the automatic successor launched for the
+	// same session's own failed dynamic attempt. It is set only by that seam.
+	replacesFailedAttempt bool
 }
 
 // admissionDecision is the controller's answer.
@@ -838,6 +848,9 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
 	rowClass, isCounted := counted[req.sessionID]
+	if req.sessionID != "" && !isCounted && req.replacesFailedAttempt && origin == launchOriginAutomatic {
+		return c.replacementHandOffLocked(req, origin, class, counted)
+	}
 	if req.sessionID == "" || !isCounted {
 		return c.decideLocked(ctx, req, origin, class, counted)
 	}
@@ -860,6 +873,34 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	c.reservations[req.sessionID] = &ceilingReservation{
 		sessionID: req.sessionID, class: class, takenAt: c.now(),
 	}
+	c.logDecision(req, origin, decision)
+	return decision
+}
+
+// replacementHandOffLocked admits the automatic successor of a session whose
+// failed dynamic attempt already left the counted population. A session that
+// is already reserved keeps its reservation; otherwise the session takes one
+// reservation in its own lane, which is the unit its failed attempt released.
+func (c *sessionCeilingController) replacementHandOffLocked(
+	req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
+) admissionDecision {
+	decision := admissionDecision{
+		admitted:        true,
+		handedOff:       true,
+		reservationKey:  req.sessionID,
+		ceiling:         c.ceiling,
+		class:           class,
+		classCeiling:    c.classCeilingLocked(class),
+		reasonCode:      ceilingReasonReplacementHandOff,
+		populationKnown: true,
+	}
+	if _, held := c.reservations[req.sessionID]; !held {
+		c.reservations[req.sessionID] = &ceilingReservation{
+			sessionID: req.sessionID, class: class, takenAt: c.now(),
+		}
+	}
+	decision.population = c.populationLocked(counted)
+	decision.classPopulation = c.classPopulationLocked(counted, class)
 	c.logDecision(req, origin, decision)
 	return decision
 }

@@ -70,6 +70,13 @@ type Engine struct {
 	// manual recovery may reclaim it only when this map does not contain the
 	// same generation.
 	retryClaims map[string]int64
+	// hostMu guards hostFailures. It is separate from mu because failures are
+	// recorded both with and without the engine lock held.
+	hostMu sync.Mutex
+	// hostFailures remembers, per model identity, when each path last reported
+	// a model-host failure, so a second path failing inside the window
+	// suspends the model on every path.
+	hostFailures map[string]map[string]time.Time
 }
 
 func NewEngine(options ...EngineOption) *Engine {
@@ -170,13 +177,14 @@ func (e *Engine) selectAfterFailure(
 	profile Profile,
 	expectedGeneration int64,
 	failedCandidateID string,
+	excluded []string,
 	reason string,
 ) (RouteDecision, error) {
 	return e.selectWithPlan(ctx, sessionID, profile, expectedGeneration,
 		func(state RouteState, exists bool) selectionPlan {
 			chain := selectionChainFor(state, exists, profile)
 			return ResolveFallbackSelection(profile, failedCandidateID, "", chain,
-				e.eligibilityFor(profile, ""))
+				e.eligibilityFor(profile, "")).excluding(excluded)
 		}, reason)
 }
 
@@ -392,16 +400,43 @@ func (e *Engine) admitCandidate(candidate Candidate, sessionID string, generatio
 	return true
 }
 
-// resourceKeys lists the circuits that gate a candidate.
+// resourceKeys lists the circuits that gate a candidate: its binding, this
+// model on this path, its account and account tier, and this model on every
+// path. A failure opens only the keys its cause reaches (failureTargets), but
+// every one of them gates selection and every one is cleared by a clean turn.
 func (c Candidate) resourceKeys() []string {
-	keys := make([]string, 0, 2)
-	if c.BindingKey != "" {
-		keys = append(keys, c.BindingKey)
-	}
-	if c.ModelKey != "" && c.ModelKey != c.BindingKey {
-		keys = append(keys, c.ModelKey)
+	keys := make([]string, 0, 6)
+	seen := make(map[string]bool, 6)
+	for _, key := range []string{
+		c.BindingKey, c.ModelKey, c.pathModelKey(),
+		c.AccountKey, c.accountTierKey(), c.modelIdentityKey(),
+	} {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		keys = append(keys, key)
 	}
 	return keys
+}
+
+// candidateBlockedNow reports, without claiming any probe lease, whether a
+// candidate cannot be selected now: it is disabled, under an operator block, or
+// one of its circuits is still running or is being probed by another
+// selection. An expired circuit leaves it eligible; only the candidate that
+// wins the ranking claims its probe, so a successor search never holds leases
+// on candidates it does not launch.
+func (e *Engine) candidateBlockedNow(candidate Candidate, now time.Time) bool {
+	if !candidate.Enabled || candidate.SuspendedUntil.After(now) {
+		return true
+	}
+	for _, key := range candidate.resourceKeys() {
+		switch e.circuits.Inspect(key, now).State {
+		case ResourceWaiting, ResourceProbing:
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteState, bool, error) {
@@ -421,16 +456,6 @@ func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteSt
 }
 
 const probeLeaseDuration = 30 * time.Second
-
-func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
-	if !candidate.Enabled || candidate.ID == excludeProfileID {
-		return false
-	}
-	if preferredProfileID != "" && candidate.ID != preferredProfileID {
-		return false
-	}
-	return e.admitCandidate(candidate, sessionID, generation, now)
-}
 
 func probeKey(sessionID string, generation int64, candidateID string) string {
 	return sessionID + ":" + fmt.Sprint(generation) + ":" + candidateID
@@ -591,7 +616,12 @@ func (e *Engine) ApplyFailureContext(
 	case ActionRetrySame:
 		return e.selectContext(ctx, sessionID, profile, expectedGeneration, "", currentCandidateID, "retry")
 	case ActionTryNext:
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "try_next")
+		excluded := failureExclusions(profile, currentCandidateID, failure)
+		return e.selectWithPlan(ctx, sessionID, profile, expectedGeneration,
+			func(RouteState, bool) selectionPlan {
+				return ResolveSelection(profile, currentCandidateID, "", e.eligibilityFor(profile, "")).
+					excluding(excluded)
+			}, "try_next")
 	default:
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
@@ -828,17 +858,18 @@ func (e *Engine) unclassifiedSuccessor(
 		if candidate.ID == currentCandidateID {
 			continue
 		}
-		if e.candidateSelectable(candidate, state.SessionID, generation, "", "", now) {
-			continue
+		if e.candidateBlockedNow(candidate, now) {
+			ineligible[candidate.ID] = IneligibleCircuit
 		}
-		ineligible[candidate.ID] = IneligibleCircuit
 	}
 	chain, err := decodeSelectionChain(state.PolicyStateJSON)
 	if err != nil {
 		return tierSelection{}, false
 	}
 	resolved := ResolveFallbackSelection(profile, currentCandidateID, "", chain, ineligible)
-	winner := resolved.firstSelectable(scores.at(now), nil)
+	winner := resolved.firstSelectable(scores.at(now), func(candidate Candidate) bool {
+		return e.claimProbe(candidate, state.SessionID, generation, now)
+	})
 	return winner.withPlan(resolved), winner.ok
 }
 
@@ -1037,7 +1068,8 @@ func (e *Engine) applyPolicyFailure(
 		// Tier direction and the durable chain decide the successor. The failed
 		// candidate is the one the direction is measured from.
 		decision, err := e.selectAfterFailure(
-			ctx, sessionID, profile, expectedGeneration, currentCandidateID, "policy_skip",
+			ctx, sessionID, profile, expectedGeneration, currentCandidateID,
+			failureExclusions(profile, currentCandidateID, failure), "policy_skip",
 		)
 		if err != nil {
 			return RouteDecision{}, err
@@ -1563,6 +1595,11 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
 }
 
+// openCircuitForFailure suspends what the failure's cause reaches, for as long
+// as the cause says (see failureCauseRules and failureCausePolicies). A
+// model-host cause that another path of the same model also reported within
+// the window suspends the model on every path. A repeat failure inside a
+// running block never shortens it.
 func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, candidateID string, failure *routingerr.Error) {
 	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
 		return
@@ -1571,17 +1608,16 @@ func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, can
 	if !ok {
 		return
 	}
-	key := suspensionTarget(candidate, failure.Code)
-	if key == "" {
-		return
-	}
+	policy := policyForFailure(candidate, failure)
 	now := e.now()
-	until := e.suspensionUntil(ctx, candidate, failure, e.circuits.NextStrike(key), now)
-	// A repeat failure inside a running block never shortens it.
-	if running := e.circuits.Inspect(key, now); running.State == ResourceWaiting && running.Until.After(until) {
-		until = running.Until
+	for _, key := range failureTargets(candidate, failure, policy) {
+		e.openCircuit(ctx, key, candidate, failure, policy, now)
 	}
-	e.circuits.Open(key, until, failure.Code)
+	if policy.crossPathWindow > 0 && e.noteCrossPathFailure(candidate, policy.crossPathWindow, now) {
+		if key := candidate.modelIdentityKey(); key != "" {
+			e.openCircuit(ctx, key, candidate, failure, policy, now)
+		}
+	}
 }
 
 const circuitBackoff = time.Minute
