@@ -37,7 +37,8 @@ version.
 ### Out of scope
 
 - How the backend is resolved from the request.
-- Native version probing and its retries.
+- The version probe's own retry and cache policy; the transient-probe launch
+  fallback is [Task 02](task-02-transient-probe-fallback.md).
 
 ## Technical approach
 
@@ -62,6 +63,7 @@ UI changes require browser coverage.
 ## Work orders
 
 - [x] [Task 01: Command for the resolved runtime](task-01-command-for-resolved-runtime.md)
+- [x] [Task 02: Transient probe fallback for native OpenCode launches](task-02-transient-probe-fallback.md)
 
 ## Verification results
 

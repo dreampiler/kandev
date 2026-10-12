@@ -102,11 +102,13 @@ For native source, `selected_version` is absent. A bounded local version check d
 observed native version is a status projection, not a promise that Kandev controls that executable.
 If a user independently updates native v1 to v2, dispatch using its observed supported major and retain the
 same session/home. Report the actual version and offer managed v2 adoption. Do not replace the binary.
-An unknown major or failed detection blocks that launch with a diagnostic; do not guess arguments.
+An unknown major or a missing executable blocks that launch with a diagnostic; do not guess arguments.
 The version check boots the CLI's JavaScript runtime, so concurrent launches can make a healthy run slow.
 Each run is bounded at 10 seconds. A failed, timed-out, or unreadable run is retried twice (after 300 ms and 1 s).
 A successful detection is remembered per executable path for 10 minutes; when a later check still fails after
-its retries, that recent detection is used instead of blocking the launch. An unsupported major clears the
+its retries, that recent detection is used instead of blocking the launch. When no recent detection exists, a
+launch still proceeds with the selected runtime's known version, because the ACP arguments are identical across
+a family's supported majors; only an unsupported major stays fail-closed. An unsupported major clears the
 remembered detection and is never retried; a missing executable is reported as absent, as before.
 The final diagnostic marks a deadline kill and quotes at most 200 characters of the output, with the user's
 home directory replaced by `~`.
