@@ -104,16 +104,19 @@ func (d *openCodeNativeDetector) detect(ctx context.Context) (OpenCodeNativeRunt
 			return OpenCodeNativeRuntime{}, true, err
 		}
 		detected, err := d.detectOnce(ctx, path)
+		var unsupported *unsupportedOpenCodeMajorError
+		isUnsupported := errors.As(err, &unsupported)
+		if isUnsupported {
+			d.rememberUnsupported(path, unsupported)
+		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return OpenCodeNativeRuntime{}, true, ctxErr
+			return OpenCodeNativeRuntime{}, true, errors.Join(ctxErr, err)
 		}
 		if err == nil {
 			d.remember(path, detected)
 			return detected, true, nil
 		}
-		var unsupported *unsupportedOpenCodeMajorError
-		if errors.As(err, &unsupported) {
-			d.rememberUnsupported(path, unsupported)
+		if isUnsupported {
 			return OpenCodeNativeRuntime{}, true, err
 		}
 		if attempt >= len(d.backoff) {

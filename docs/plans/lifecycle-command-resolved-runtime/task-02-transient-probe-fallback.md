@@ -112,3 +112,8 @@ error identity. The local proof module uses exact source fragments and explicit
 boundary fakes; full package tests, lint, build, Frontend and E2E verification
 remain hosted CI delivery gates. Original author verification above is
 historical and does not prove the current integrated candidate.
+
+Cancellation concurrent with an unsupported-major observation preserves both
+error identities and the rejection evidence, so a later transient failure
+cannot reuse an older supported detection. The deterministic detector-seam
+regression fails before this correction and passes afterward.
