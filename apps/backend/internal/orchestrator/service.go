@@ -770,6 +770,11 @@ type Service struct {
 	// restart-interrupted turns (one in flight per session, with a cooldown).
 	interruptedTurnAutoRecoveryMu sync.Mutex
 	interruptedTurnAutoRecovery   map[string]interruptedTurnAutoRecoveryState
+	// routeActionContinuations records a manual route action whose successor
+	// launch was handed to continue_from_history because a restart-interrupted
+	// turn still blocks the session (sessionID -> taskID). ApplyRouteAction runs
+	// the continuation after releasing the route-action lock.
+	routeActionContinuations sync.Map
 	// orphanedStartingRoutesStartupSwept marks that the boot pass of the
 	// orphaned-starting-route reconcile has run (STARTING/IDLE are only
 	// orphaned at boot; see reconcileOrphanedDynamicStartingRoutes).
@@ -1747,6 +1752,13 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	result, err := s.applyRouteActionUnderLock(ctx, request)
+	// A successor launch handed to continue_from_history runs after the
+	// route-action lock is released: the resume it performs takes that lock.
+	return s.finishRouteActionContinuation(ctx, request.SessionID, result, err)
+}
+
+func (s *Service) applyRouteActionUnderLock(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
 	releaseRouteAction := s.acquireRouteActionOperationLock(request.SessionID)
 	defer releaseRouteAction()
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
@@ -1792,7 +1804,7 @@ func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, session
 	if err != nil && !isNoActiveTurnError(err) {
 		return fmt.Errorf("check active turn for route action: %w", err)
 	}
-	if activeTurn != nil {
+	if activeTurn != nil && !s.settleOrphanTurnForRouteAction(ctx, sessionID) {
 		return ErrRouteActionActiveTurn
 	}
 	return nil

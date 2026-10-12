@@ -719,6 +719,23 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	return r.executionFromDecisionWithRecovery(ctx, state.LogicalProfileID, sessionID, decision)
 }
 
+// ReclaimActionRequiredRoute lets an explicit session recovery action own a
+// route parked at action_required on its persisted candidate. It returns
+// false without changing anything when the route is not parked there.
+func (r *ProfileExecutionResolver) ReclaimActionRequiredRoute(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) (bool, error) {
+	if r == nil || r.engine == nil || sessionID == "" || expectedGeneration <= 0 {
+		return false, nil
+	}
+	if !r.enabled.Load() {
+		return false, ErrDynamicRoutingDisabled
+	}
+	return r.engine.ReclaimActionRequired(ctx, sessionID, expectedGeneration)
+}
+
 // MarkRouteRecoveryActionRequired returns a claimed "retrying" route to
 // manual recovery after its resumed launch failed.
 func (r *ProfileExecutionResolver) MarkRouteRecoveryActionRequired(

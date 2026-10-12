@@ -1547,6 +1547,38 @@ func (e *Engine) MarkRecoveryActionRequired(ctx context.Context, sessionID strin
 	return err
 }
 
+// ReclaimActionRequired hands a manual-recovery route back to its persisted
+// candidate as "starting" for an explicit session recovery action. It is the
+// "explicit retry" edge of action_required on the same candidate: generation
+// and status fenced, it never selects another candidate, and a route without
+// a persisted candidate stays in manual recovery. The caller owns the launch;
+// MarkActive or MarkActionRequired settles the claim afterwards.
+func (e *Engine) ReclaimActionRequired(ctx context.Context, sessionID string, expectedGeneration int64) (bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	state, exists, err := e.loadStateLocked(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, ErrRouteStateNotFound
+	}
+	if state.Generation != expectedGeneration {
+		return false, ErrStaleGeneration
+	}
+	if state.Status != routeStatusActionRequired || state.ExecutionProfileID == "" {
+		return false, nil
+	}
+	state.Status = routeStatusStarting
+	state.UpdatedAt = e.now()
+	if err := e.persistExpectedStatus(ctx, expectedGeneration, routeStatusActionRequired, state); err != nil {
+		return false, err
+	}
+	e.states[sessionID] = state
+	delete(e.retryClaims, sessionID)
+	return true, nil
+}
+
 func (e *Engine) resumePending(
 	ctx context.Context,
 	sessionID string,

@@ -1354,7 +1354,7 @@ func (s *Service) RecoverSessionWithOptions(
 	ctx context.Context,
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
-) (*LaunchSessionResponse, error) {
+) (_ *LaunchSessionResponse, err error) {
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
@@ -1460,6 +1460,18 @@ func (s *Service) RecoverSessionWithOptions(
 			}
 		}
 		return nil, normalizeRecoverSessionError(err)
+	}
+
+	// An explicit recovery owns a dynamic route a restart left parked at
+	// action_required: the recovery block this action settles can only be
+	// settled here, so refusing the route as dynamic_route_pending would leave
+	// the session with no admissible recovery path.
+	if generation, reclaimed := s.reclaimActionRequiredRouteForRecovery(launchCtx, sessionID, action); reclaimed {
+		defer func() {
+			if err != nil {
+				s.restoreRouteAfterFailedRecovery(ctx, sessionID, generation)
+			}
+		}()
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{

@@ -1497,6 +1497,13 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	// A restart-interrupted turn still blocks this session: re-sending the last
+	// prompt would repeat a prompt whose outcome is unknown and is refused by the
+	// recovery block anyway. Continue from history on the claimed candidate.
+	if origin == launchOriginManual && s.handOffRouteActionToContinuation(ctx, session) {
+		succeeded = true
+		return nil
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
