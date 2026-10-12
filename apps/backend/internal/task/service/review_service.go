@@ -168,6 +168,8 @@ func (s *ReviewService) MarkRunRunning(ctx context.Context, runID string) (*mode
 
 // CompleteRunRequest carries the accounting a finished run reports.
 type CompleteRunRequest struct {
+	AgentID         string
+	Model           string
 	RunID           string
 	Summary         string
 	FindingCount    int
@@ -186,6 +188,9 @@ type CompleteRunRequest struct {
 func (s *ReviewService) CompleteRun(ctx context.Context, req CompleteRunRequest) (*models.TaskReviewRun, error) {
 	now := time.Now().UTC()
 	return s.mutateRunIfLive(ctx, req.RunID, func(run *models.TaskReviewRun) {
+		if req.AgentID != "" {
+			run.AgentID, run.Model = req.AgentID, req.Model
+		}
 		run.Status = models.ReviewRunCompleted
 		run.Summary = req.Summary
 		run.FindingCount = req.FindingCount
