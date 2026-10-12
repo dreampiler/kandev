@@ -37,7 +37,7 @@ It does not implement chat, terminal, files, Git, or another agent protocol.
 | REQ-EXECUTORS-PLUGIN-005 | Plugin lifecycle |
 | REQ-EXECUTORS-PLUGIN-006 | Effective capabilities and expiry |
 | REQ-EXECUTORS-PLUGIN-007 | User interfaces |
-| REQ-EXECUTORS-PORT-COLLISION-SAFETY-001 | Bootstrap and reverse connectivity (Windows test listeners only) |
+| REQ-EXECUTORS-PORT-COLLISION-SAFETY-001 | Bootstrap and reverse connectivity (loopback probe for Windows test listeners and the task-process port allocator) |
 
 ## Registration and profiles
 
@@ -153,7 +153,7 @@ Use a fake non-loopback address and controlled transport in unit tests, not a pr
 On Windows the fixture's own unit tests advertise a loopback address
 (`KANDEV_PLUGIN_FIXTURE_TEST_LOOPBACK=1`) so the ephemeral test binary binds loopback instead of
 a non-loopback interface and does not request Firewall access. The fixture's default advertised
-address and listener are unchanged outside tests. This mapping is scoped to test listeners: the
+address and listener are unchanged outside tests. This mapping is scoped to the loopback probe: the
 loopback-only regression policy also covers the launcher's Windows port-occupied regression test,
 which holds the probed port with a loopback listener, while production port probing and backend
 port ownership remain owned by the
