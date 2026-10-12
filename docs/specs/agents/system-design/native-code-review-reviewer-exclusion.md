@@ -19,14 +19,23 @@ lookups it already uses.
 
 ## Candidate order and the dynamic router
 
-The review subsystem has no dynamic routing tiers: its reviewer candidates are
-the configured precedence chain (explicit step profile, enabled `code-review`
-utility agent/profile, user default utility profile), and that is the "configured
-candidate order" this change must preserve. Exclusion removes only exact origin
-matches in place, so every remaining candidate keeps its position and
-eligibility, and no dynamic-engine import or parallel routing path is added. The
-task's own dynamic profile routing (the writer's launch) is untouched by this
-change; the writer still runs under its configured candidate order.
+The review subsystem's reviewer candidates are the configured precedence chain
+(explicit step profile, enabled `code-review` utility agent/profile, user default
+utility profile), and that is the "configured candidate order" this change must
+preserve. Exclusion removes only exact origin matches in place, so every
+remaining candidate keeps its position and eligibility. The task's own dynamic
+profile routing (the writer's launch) is untouched by this change; the writer
+still runs under its configured candidate order.
+
+A position in that chain may name a **dynamic profile**, which has no model of
+its own. The resolver then asks that profile's own route for its current choice
+(`review.DynamicRouteSelector`, implemented in `internal/backendapp` over the
+read-only dynamic selection preview the settings editor uses): the saved
+candidate order, tier ranking and route health (open circuits, provider limits,
+account blocks) are the route's, and nothing is claimed or written. The review
+only marks rows ineligible in place — disabled rows, rows matching the origin,
+and rows that cannot run a structured review — so no selection rule is added.
+When no row remains, that position is passed over exactly like an origin match.
 
 ## Requirement mapping
 
@@ -37,18 +46,26 @@ change; the writer still runs under its configured candidate order.
 ## Components and responsibilities
 
 - **Workflow callback (`internal/orchestrator/workflow_callbacks.go`)** — when a
-  step enters with `run_code_review`, reads the entering session's
-  `AgentProfileID` and `ExecutionProfileID` and passes them on the run request as
-  the origin identity, marking the origin required. A failed or absent read sends
-  a nil origin with the requirement set, so resolution fails closed; step entry
-  itself is never blocked.
+  step enters with `run_code_review`, identifies the writer session and passes
+  its `AgentProfileID` and `ExecutionProfileID` on the run request as the origin
+  identity, marking the origin required. `run_code_review` runs from the
+  ledger-owned `Engine.DispatchStepEntry`, whose state carries no session, so the
+  writer is: the engine-state session when one is supplied; otherwise the session
+  that initiated the committed step change (the attribution the ledger row
+  records — the session whose turn completed, or the task's agent moving itself),
+  when it belongs to the task; otherwise the task's primary session (manual
+  move, WIP pull, another task's coordinator moving the card). An unreadable
+  named session, no identifiable session, or a writer without profile identity
+  sends a nil origin with the requirement set, so resolution fails closed; step
+  entry itself is never blocked.
 - **Review runner (`internal/review/runner.go`)** — carries the origin identity
   on `RunRequest` and hands it to resolution. It creates no run row when
   resolution fails closed.
 - **Review resolver (`internal/review/resolver.go`)** — walks the existing
   candidate order (explicit step profile, then the enabled `code-review` utility
   agent/profile, then the user default utility profile) and returns the first
-  candidate that is not the origin execution.
+  candidate that is not the origin execution, resolving a dynamic profile at any
+  position to a concrete candidate through its route first.
 - **Built-in YAML loader (`apps/backend/config/workflows/loader.go`)** — accepts
   `run_code_review` in the `on_enter` allow-list and validates its optional
   `agent_profile_id` config as a string.
@@ -74,10 +91,12 @@ change; the writer still runs under its configured candidate order.
 ## Control flow
 
 1. The engine fires the `run_code_review` on-enter action on step entry.
-2. The callback reads the entering session and builds the origin identity.
+2. The callback identifies the writer session (see the callback component) and
+   builds the origin identity.
 3. The runner asks the resolver to resolve a reviewer, passing the origin.
 4. The resolver builds the exclusion set (profile IDs plus the origin's
-   agent/model), then walks the candidate order, skipping matches in place.
+   agent/model), then walks the candidate order, skipping matches in place; a
+   dynamic profile is first resolved through its route with matches skipped.
 5. The first remaining candidate runs the review; the run records that reviewer's
    agent and model as before.
 
