@@ -107,8 +107,45 @@ func TestDeliveryRetentionStorageDiscoveryPlan(t *testing.T) {
 	progress := agentDeliveryRetentionProgress{lastCompactionAt: sql.NullTime{Time: events[0].ReceivedAt, Valid: true}, lastCompactionStreamID: events[0].StreamID, lastCompactionSequence: 1000}
 	query, args := agentDeliveryCompactionCandidateQuery(progress, 200, repo.nowUTC().Add(-time.Hour))
 	assertRetentionDiscoveryIndex(t, repo, query, args, "idx_agent_delivery_inbox_retention_eligible")
-	query, args = agentDeliveryReceiptCandidateQuery(events[0].StreamID, 1000, 200)
-	assertRetentionDiscoveryIndex(t, repo, query, args, "idx_agent_delivery_inbox_retention_receipts")
+	query, args = agentDeliveryRetirementPageQuery(events[0].StreamID, 1000, 2000, 200)
+	assertRetentionDiscoverySearch(t, repo, query, args, "i")
+	query, args = agentDeliveryRetirementHeadQuery(events[0].StreamID, 1000, 200,
+		agentDeliveryReplayWindow{ageCutoff: repo.nowUTC().Add(-24 * time.Hour), events: 10000})
+	assertRetentionDiscoverySearch(t, repo, query, args, "head")
+}
+
+// assertRetentionDiscoverySearch requires every inbox access under alias to be
+// a bounded index seek: retirement discovery must never scan the inbox.
+func assertRetentionDiscoverySearch(t *testing.T, repo *Repository, query string, args []any, alias string) {
+	t.Helper()
+	rows, err := repo.db.Query("EXPLAIN QUERY PLAN "+query, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	searched := false
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+		if strings.HasPrefix(detail, "SCAN "+alias+" ") || detail == "SCAN "+alias {
+			t.Fatalf("retirement discovery scans the inbox: %v", plan)
+		}
+		if strings.HasPrefix(detail, "SEARCH "+alias+" ") {
+			searched = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !searched {
+		t.Fatalf("retirement discovery must seek the inbox by stream and sequence: %v", plan)
+	}
+	t.Logf("retirement discovery plan (%s): %v", alias, plan)
 }
 
 func TestDeliveryRetentionStoragePostgresDiscoveryPlan(t *testing.T) {

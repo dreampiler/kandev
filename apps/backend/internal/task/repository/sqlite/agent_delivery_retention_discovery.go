@@ -16,7 +16,15 @@ const (
 	agentDeliveryRetentionPhaseReceipts   = "receipts"
 )
 
-func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context, tx *sqlx.Tx, progress agentDeliveryRetentionProgress, limit int, cutoff time.Time) ([]agentDeliveryRetentionCandidate, bool, error) {
+// agentDeliveryReplayWindow is the replay window a retirement checkpoint must
+// already have left: rows projected at or before ageCutoff, or at least events
+// sequences behind the projected cursor.
+type agentDeliveryReplayWindow struct {
+	ageCutoff time.Time
+	events    int
+}
+
+func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context, tx *sqlx.Tx, progress agentDeliveryRetentionProgress, limit int, cutoff time.Time, replay agentDeliveryReplayWindow) ([]agentDeliveryRetentionCandidate, bool, error) {
 	if limit <= 0 {
 		return nil, false, nil
 	}
@@ -31,10 +39,10 @@ func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context,
 	if compactionFirst {
 		compact, err = r.selectAgentDeliveryCompactionCandidates(ctx, tx, progress, firstLimit, cutoff)
 		if err == nil {
-			receipts, wrapped, err = r.selectAgentDeliveryReceiptCandidates(ctx, tx, progress, limit-len(compact))
+			receipts, wrapped, err = r.selectAgentDeliveryReceiptCandidates(ctx, tx, progress, limit-len(compact), replay)
 		}
 	} else {
-		receipts, wrapped, err = r.selectAgentDeliveryReceiptCandidates(ctx, tx, progress, firstLimit)
+		receipts, wrapped, err = r.selectAgentDeliveryReceiptCandidates(ctx, tx, progress, firstLimit, replay)
 		if err == nil {
 			compact, err = r.selectAgentDeliveryCompactionCandidates(ctx, tx, progress, limit-len(receipts), cutoff)
 		}
@@ -51,11 +59,11 @@ func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context,
 	return combined, wrapped, nil
 }
 
-// Session-state events (capabilities, modes, MCP attachments, context windows)
-// can never compact or retire; the locked proof rejects them by type. Skipping
-// them in discovery keeps that permanent residue from consuming every bounded
-// page on each frontier wrap. The list mirrors the proof's event-type gate.
-const agentDeliveryCompactableEventTypeFilter = `i.event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')`
+// Unknown event types can never compact or retire; the locked proof rejects
+// them by type. Skipping them in discovery keeps that permanent residue from
+// consuming every bounded page on each frontier wrap. The list is the proof's
+// own known-type classifier, including projected session-state events.
+var agentDeliveryCompactableEventTypeFilter = `i.event_type IN (` + agentDeliveryRetentionKnownTypesSQL + `)`
 
 func agentDeliveryCompactionCandidateQuery(progress agentDeliveryRetentionProgress, limit int, cutoff time.Time) (string, []any) {
 	filters := []string{"i.payload_pruned_at IS NULL", "i.projected_at IS NOT NULL", "i.projected_at <= ?", agentDeliveryCompactableEventTypeFilter}
@@ -83,28 +91,119 @@ func (r *Repository) selectAgentDeliveryCompactionCandidates(ctx context.Context
 	return candidates, err
 }
 
-func agentDeliveryReceiptCandidateQuery(lastStreamID string, lastSequence int64, limit int) (string, []any) {
-	filters := []string{"i.payload_pruned_at IS NOT NULL"}
+// Receipt discovery feeds prefix retirement, which can only remove the
+// contiguous run that starts right after a stream's retired_sequence. It
+// therefore visits retirement heads instead of every compacted row: a stream
+// qualifies only when its head row is compacted and already outside the replay
+// window, and each visit pages forward from that head. Compacted rows inside
+// the replay window are not rescanned, so the frontier no longer spends whole
+// passes walking receipts that cannot retire yet.
+//
+// The persisted (last_stream_id, last_sequence) frontier keeps its meaning as
+// the last visited receipt. A stream stays eligible while its checkpoint
+// reached that receipt (its page retired completely); a stream that stopped at
+// a protected row waits for the next wrap.
+func agentDeliveryRetirementHeadQuery(lastStreamID string, lastSequence int64, limit int, replay agentDeliveryReplayWindow) (string, []any) {
+	// The cursor table drives the scan in stream order; the head probe is a
+	// correlated primary-key seek so no plan can walk the compacted inbox.
+	query := `SELECT c.stream_id, c.retired_sequence, c.projected_sequence
+	 FROM agent_delivery_cursors c
+	 WHERE c.projected_sequence > c.retired_sequence`
 	var args []any
 	if lastStreamID != "" {
-		filters = append(filters, "(i.stream_id,i.sequence) > (?,?)")
-		args = append(args, lastStreamID, lastSequence)
+		query += ` AND (c.stream_id > ? OR (c.stream_id = ? AND c.retired_sequence >= ?))`
+		args = append(args, lastStreamID, lastStreamID, lastSequence)
 	}
-	return agentDeliveryDiscoveryQuery(filters, args, limit, "i.stream_id,i.sequence")
+	query += ` AND EXISTS (
+	  SELECT 1 FROM agent_delivery_inbox head
+	  WHERE head.stream_id = c.stream_id AND head.sequence = c.retired_sequence + 1
+	   AND head.payload_pruned_at IS NOT NULL
+	   AND (head.sequence <= c.projected_sequence - ? OR head.projected_at <= ?))
+	 ORDER BY c.stream_id LIMIT ?`
+	return query, append(args, int64(replay.events), replay.ageCutoff, limit)
 }
 
-func (r *Repository) selectAgentDeliveryReceiptCandidates(ctx context.Context, tx *sqlx.Tx, progress agentDeliveryRetentionProgress, limit int) ([]agentDeliveryRetentionCandidate, bool, error) {
+// agentDeliveryRetirementPageQuery reads compacted rows forward from one
+// retirement head through a primary-key range bounded by the projected cursor.
+func agentDeliveryRetirementPageQuery(streamID string, retiredSequence, projectedSequence int64, limit int) (string, []any) {
+	query := `SELECT i.stream_id,i.sequence,i.session_id,i.projected_at
+	 FROM agent_delivery_inbox i
+	 WHERE i.stream_id = ? AND i.sequence > ? AND i.sequence <= ? AND i.payload_pruned_at IS NOT NULL
+	 ORDER BY i.sequence LIMIT ?`
+	return query, []any{streamID, retiredSequence, projectedSequence, limit}
+}
+
+type agentDeliveryRetirementHead struct {
+	streamID          string
+	retiredSequence   int64
+	projectedSequence int64
+}
+
+func (r *Repository) selectAgentDeliveryReceiptCandidates(ctx context.Context, tx *sqlx.Tx, progress agentDeliveryRetentionProgress, limit int, replay agentDeliveryReplayWindow) ([]agentDeliveryRetentionCandidate, bool, error) {
 	if limit <= 0 {
 		return nil, false, nil
 	}
-	query, args := agentDeliveryReceiptCandidateQuery(progress.lastStreamID, progress.lastSequence, limit)
-	candidates, err := r.scanAgentDeliveryDiscoveryCandidates(ctx, tx, query, args)
+	candidates, err := r.selectAgentDeliveryRetirementPages(ctx, tx, progress.lastStreamID, progress.lastSequence, limit, replay)
 	if err != nil || len(candidates) > 0 || progress.lastStreamID == "" {
 		return candidates, false, err
 	}
-	query, args = agentDeliveryReceiptCandidateQuery("", 0, limit)
-	candidates, err = r.scanAgentDeliveryDiscoveryCandidates(ctx, tx, query, args)
+	candidates, err = r.selectAgentDeliveryRetirementPages(ctx, tx, "", 0, limit, replay)
 	return candidates, true, err
+}
+
+func (r *Repository) selectAgentDeliveryRetirementPages(ctx context.Context, tx *sqlx.Tx, lastStreamID string, lastSequence int64, limit int, replay agentDeliveryReplayWindow) ([]agentDeliveryRetentionCandidate, error) {
+	heads, err := r.scanAgentDeliveryRetirementHeads(ctx, tx, lastStreamID, lastSequence, limit, replay)
+	if err != nil {
+		return nil, err
+	}
+	var candidates []agentDeliveryRetentionCandidate
+	for _, head := range heads {
+		remaining := limit - len(candidates)
+		if remaining <= 0 {
+			break
+		}
+		query, args := agentDeliveryRetirementPageQuery(head.streamID, head.retiredSequence, head.projectedSequence, remaining)
+		page, err := r.scanAgentDeliveryDiscoveryCandidates(ctx, tx, query, args)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, contiguousAgentDeliveryRetirementPage(page, head.retiredSequence)...)
+	}
+	return candidates, nil
+}
+
+func (r *Repository) scanAgentDeliveryRetirementHeads(ctx context.Context, tx *sqlx.Tx, lastStreamID string, lastSequence int64, limit int, replay agentDeliveryReplayWindow) ([]agentDeliveryRetirementHead, error) {
+	query, args := agentDeliveryRetirementHeadQuery(lastStreamID, lastSequence, limit, replay)
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return nil, fmt.Errorf("scan agent delivery retirement heads: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var heads []agentDeliveryRetirementHead
+	for rows.Next() {
+		var head agentDeliveryRetirementHead
+		if err := rows.Scan(&head.streamID, &head.retiredSequence, &head.projectedSequence); err != nil {
+			return nil, fmt.Errorf("scan agent delivery retirement head: %w", err)
+		}
+		heads = append(heads, head)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agent delivery retirement heads: %w", err)
+	}
+	return heads, nil
+}
+
+// contiguousAgentDeliveryRetirementPage keeps the gap-free run after the
+// checkpoint. A raw row interrupts it; compaction discovery owns that row.
+func contiguousAgentDeliveryRetirementPage(page []agentDeliveryRetentionCandidate, retiredSequence int64) []agentDeliveryRetentionCandidate {
+	next := retiredSequence + 1
+	for index, candidate := range page {
+		if candidate.event.Sequence != next {
+			return page[:index]
+		}
+		next++
+	}
+	return page
 }
 
 func agentDeliveryDiscoveryQuery(filters []string, args []any, limit int, order string) (string, []any) {

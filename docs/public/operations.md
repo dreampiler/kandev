@@ -545,7 +545,9 @@ Contiguous retirement checkpoints reject older events without applying them agai
 A lost ACK uses the persisted projected cursor. Cleanup never resends a prompt or a tool action.
 
 Unprojected events, uncertain prompts, pending claims, and incomplete terminal or workflow settlement remain protected.
-An open recovery block pauses automatic event payload cleanup and prefix retirement for its session incarnation.
+An open recovery block pauses automatic event payload cleanup and prefix retirement for its session incarnation
+while that session is live and current. Once the session is completed, failed or cancelled, or a newer primary
+session of the task replaced it, the block stays open as the session's recovery fence but no longer pins its delivery rows.
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
@@ -553,7 +555,12 @@ Cleanup starts after the first normal interval, which defaults to one minute.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
 Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, with a 100 ms pause between batches. Frontier wrap alone does not repeat a phase. A pass starts no further batch after five seconds.
 When a pass runs out of time while it still removes at least as many candidates as it skips as protected, or removes work despite a transient batch deadline, the next pass starts after five seconds instead of the interval.
-Passes that only advance discovery through protected candidates wait the normal interval. Discovery skips session-state events, which are never compacted.
+Passes that only advance discovery through protected candidates wait the normal interval.
+Projected session-state events (capabilities, modes, models, MCP attachment, context window, permission notices,
+turn markers, usage and background-work updates) compact and retire like projected output. Discovery skips
+unclassified event types, which stay intact and stop retirement for their stream.
+Retirement discovery visits each stream's oldest unretired row and continues only where that row has left the
+replay window, so compact receipts inside the window are not rescanned.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.
