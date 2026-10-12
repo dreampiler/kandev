@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -82,10 +83,33 @@ type RunStopper interface {
 	StopAutomationRun(ctx context.Context, taskID, sessionID, turnID string) (bool, error)
 }
 
+// AutomationTurnOutcome is the closed set of authoritative outcomes an
+// automation run's exact turn can durably carry. AutomationTurnOutcomeUnknown
+// means the outcome is not recorded or cannot be trusted, and the run stays
+// open. It is not a run status: only the automation completion producer writes
+// it and only restart reconciliation reads it.
+type AutomationTurnOutcome string
+
+const (
+	AutomationTurnOutcomeUnknown   AutomationTurnOutcome = ""
+	AutomationTurnOutcomeSucceeded AutomationTurnOutcome = taskmodels.TurnAutomationOutcomeSucceeded
+	AutomationTurnOutcomeFailed    AutomationTurnOutcome = taskmodels.TurnAutomationOutcomeFailed
+	AutomationTurnOutcomeCancelled AutomationTurnOutcome = taskmodels.TurnAutomationOutcomeCancelled
+)
+
+// AutomationRunEvidence is the read-only evidence restart reconciliation needs
+// for one exact bound run: whether the turn is still live and, when it is not,
+// the exact turn's durably recorded outcome.
+type AutomationRunEvidence struct {
+	Live    bool
+	Outcome AutomationTurnOutcome
+}
+
 // RunLivenessChecker answers whether an exact bound turn is still live or
-// blocked. Errors fail closed and leave the run open for a later retry.
+// blocked and returns the exact turn's recorded outcome when it is not. Errors
+// fail closed and leave the run open for a later retry.
 type RunLivenessChecker interface {
-	AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error)
+	AutomationRunEvidence(ctx context.Context, taskID, sessionID, turnID string) (AutomationRunEvidence, error)
 }
 
 // RunDispatch is the exact identity returned after an agent turn is accepted.
@@ -1070,21 +1094,52 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 		if s.runLiveness == nil {
 			continue
 		}
-		live, checkErr := s.runLiveness.AutomationRunLive(ctx, run.TaskID, run.SessionID, run.TurnID)
+		evidence, checkErr := s.runLiveness.AutomationRunEvidence(ctx, run.TaskID, run.SessionID, run.TurnID)
 		if checkErr != nil {
-			s.logger.Warn("failed to inspect automation run liveness", zap.String("run_id", run.ID), zap.Error(checkErr))
+			s.logger.Warn("failed to inspect automation run evidence", zap.String("run_id", run.ID), zap.Error(checkErr))
 			continue
 		}
-		if !live {
-			if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "automation turn was stale after backend recovery"); err != nil {
-				s.logger.Warn("failed to reconcile stale automation run", zap.String("run_id", run.ID), zap.Error(err))
-			} else {
-				run.Status = RunStatusFailed
-				s.settleFailedRunTask(ctx, run)
-			}
+		if evidence.Live {
+			continue
+		}
+		switch evidence.Outcome {
+		case AutomationTurnOutcomeSucceeded:
+			s.reconcileOpenRunSucceeded(ctx, run)
+		case AutomationTurnOutcomeFailed, AutomationTurnOutcomeCancelled:
+			s.reconcileOpenRunFailed(ctx, run, evidence.Outcome)
+		default:
+			s.logger.Warn("automation run has no recorded exact-turn outcome; leaving it open",
+				zap.String("run_id", run.ID), zap.String("task_id", run.TaskID), zap.String("turn_id", run.TurnID))
 		}
 	}
 	return nil
+}
+
+// reconcileOpenRunSucceeded settles an open bound run whose exact turn the
+// completion handler durably recorded as successful. A successful run's
+// generated task is left in place: it stays repliable by design.
+func (s *Service) reconcileOpenRunSucceeded(ctx context.Context, run *AutomationRun) {
+	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusSucceeded, ""); err != nil {
+		s.logger.Warn("failed to reconcile completed automation run", zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	run.Status = RunStatusSucceeded
+}
+
+// reconcileOpenRunFailed settles an open bound run whose exact turn durably
+// completed failed or cancelled, and settles its generated task through the
+// failed-run boundary.
+func (s *Service) reconcileOpenRunFailed(ctx context.Context, run *AutomationRun, outcome AutomationTurnOutcome) {
+	msg := "automation turn recorded failed after backend recovery"
+	if outcome == AutomationTurnOutcomeCancelled {
+		msg = "automation turn recorded cancelled after backend recovery"
+	}
+	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, msg); err != nil {
+		s.logger.Warn("failed to reconcile failed automation run", zap.String("run_id", run.ID), zap.Error(err))
+		return
+	}
+	run.Status = RunStatusFailed
+	s.settleFailedRunTask(ctx, run)
 }
 
 // ReconcileCleanupJobs retries hidden-task cleanup left after automation

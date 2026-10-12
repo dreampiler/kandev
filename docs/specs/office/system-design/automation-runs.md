@@ -192,15 +192,20 @@ the failure stays visible in the feed.
 
 **Exact-turn outcome for restart settlement.** Restart recovery cannot classify an open bound run
 from liveness alone: a session parked after a completed turn is not live, so `WAITING_FOR_INPUT`,
-`FAILED`, and `CANCELLED` all read as "not live". The turn row is the durable record
-(`task_session_turns.completed_at`), but completion is not outcome: `CompleteTurn` writes `now`,
-while `AbandonTurn` and provider interruption write `started_at`, and a cancelled turn completes
-without a failure marker. The outcome is therefore recorded on the exact turn when the completion
-handler decides it, before the run write, as turn metadata that reconciliation reads back:
-`succeeded`, `failed`, or `cancelled`. Reconciliation settles `succeeded` as succeeded and
-`failed` / `cancelled` as failed, and leaves a run whose exact-turn outcome is not recorded (a
-legacy turn or an unresolved path) open rather than guessing. This cannot rewrite a proven success
-as failed and cannot mask a pending, deferred, or uncertain delivery effect.
+`FAILED`, and `CANCELLED` all read as "not live", and a not-live turn with no recorded outcome is
+not proof of failure. The turn row is the durable record (`task_session_turns.completed_at`), but
+completion is not outcome: `CompleteTurn` writes `now`, while `AbandonTurn` and provider
+interruption write `started_at`, and a cancelled turn completes without a failure marker. The
+outcome is therefore recorded on the exact turn when the completion handler decides it, before the
+run write, as turn metadata that reconciliation reads back: `succeeded`, `failed`, or `cancelled`.
+Reconciliation matches the run's task, session, and turn identity against the turn's own binding
+before settling, settles `succeeded` as succeeded and `failed` / `cancelled` (or existing
+authoritative negative evidence: an `error_terminated` or `interrupted` turn) as failed, and leaves
+a run whose exact-turn outcome is not authoritative — a legacy turn, an abandoned or resumed turn,
+a read failure, a malformed or conflicting marker, or no marker — open rather than guessing. A
+recorded outcome is never overwritten, the managed-conversation and webhook protections and any
+pending, deferred, or uncertain delivery ownership are evaluated first, and a settled success
+cannot be rewritten as failed.
 
 ## API surface
 

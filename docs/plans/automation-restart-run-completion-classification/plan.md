@@ -27,10 +27,9 @@ Source: `internal/automation/service.go:1036-1088` (`ReconcileOpenRuns`),
 
 ## Status
 
-Design settled; **source not implemented.** The owning clauses
-(`AC-OFFICE-AUTOMATION-CONTINUITY-003.7` and the system-design section) are written.
-Source changes await the parent controller's explicit scoped implementation
-handoff.
+Source implemented on this task's worktree; owner review is the PR. The owning
+clauses (`AC-OFFICE-AUTOMATION-CONTINUITY-003.7` and the system-design section) are
+written before the source, per the plan/work-order checkpoint.
 
 ## Scope
 
@@ -69,6 +68,12 @@ Reuse the existing exact-turn metadata seam:
   - `Unknown` (no recorded outcome, or a read error) → leave open and log once per
     startup pass; the next restart re-evaluates. A pending/deferred/uncertain
     delivery effect keeps the run open.
+
+The seam matches the run's task/session/turn identity against the turn's own
+binding, treats existing authoritative negative evidence (`error_terminated` /
+`interrupted`) as failure, and never overwrites a recorded outcome. The
+managed-conversation and webhook protections and the unbound path keep their
+existing order ahead of any run settlement.
 
 A new bounded turn-metadata key constant lives beside
 `models.TurnMetaKeyErrorTerminated` (`internal/task/models/models.go:836-842`).

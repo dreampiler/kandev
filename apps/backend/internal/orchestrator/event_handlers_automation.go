@@ -87,16 +87,86 @@ func (s *Service) StopAutomationRun(ctx context.Context, taskID, sessionID, turn
 	return s.stopTaskSessionForCoordinator(ctx, taskID, sessionID)
 }
 
-// AutomationRunLive is the conservative liveness check used during startup
-// recovery. A session that is still starting/running, an exact open turn, or a
-// live permission blocker remains open. Missing runtime state is not enough to
-// keep a parked/stale binding open forever.
-func (s *Service) AutomationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
+// AutomationRunEvidence is the read-only evidence restart reconciliation uses
+// for one exact bound run. It reports whether the turn is still live or blocked
+// and, when it is not, the exact turn's durably recorded outcome. Missing
+// runtime state is not enough to keep a parked/stale binding open forever, and a
+// missing or untrusted outcome is reported unknown so the caller leaves the run
+// open rather than guessing.
+func (s *Service) AutomationRunEvidence(ctx context.Context, taskID, sessionID, turnID string) (automation.AutomationRunEvidence, error) {
 	live, err := s.automationRunLive(ctx, taskID, sessionID, turnID)
 	if automationRunExecutionGone(err) {
-		return false, nil
+		live, err = false, nil
 	}
-	return live, err
+	if err != nil {
+		return automation.AutomationRunEvidence{}, err
+	}
+	evidence := automation.AutomationRunEvidence{Live: live}
+	if live {
+		return evidence, nil
+	}
+	outcome, outcomeErr := s.automationTurnRecordedOutcome(ctx, taskID, sessionID, turnID)
+	if outcomeErr != nil {
+		return automation.AutomationRunEvidence{}, outcomeErr
+	}
+	evidence.Outcome = outcome
+	return evidence, nil
+}
+
+// automationTurnRecordedOutcome reads the exact turn's durable outcome, only
+// when the turn row's own task/session binding matches the run's; mismatched
+// evidence never settles a run. A missing row, a missing or malformed marker, or
+// a read failure reports unknown.
+func (s *Service) automationTurnRecordedOutcome(ctx context.Context, taskID, sessionID, turnID string) (automation.AutomationTurnOutcome, error) {
+	if turnID == "" || s.turnService == nil {
+		return automation.AutomationTurnOutcomeUnknown, nil
+	}
+	turn, err := s.turnService.GetTurn(ctx, turnID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return automation.AutomationTurnOutcomeUnknown, nil
+	}
+	if err != nil {
+		return automation.AutomationTurnOutcomeUnknown, err
+	}
+	if turn == nil || turn.TaskID != taskID || turn.TaskSessionID != sessionID {
+		return automation.AutomationTurnOutcomeUnknown, nil
+	}
+	return automationOutcomeFromTurnMetadata(turn.Metadata), nil
+}
+
+// automationOutcomeFromTurnMetadata maps the exact turn's metadata to the closed
+// outcome set. Existing negative evidence (an error-terminated or interrupted
+// turn) stays authoritative over a recorded success, and an absent, malformed,
+// or unrecognized value reports unknown.
+func automationOutcomeFromTurnMetadata(metadata map[string]interface{}) automation.AutomationTurnOutcome {
+	if turnMetadataBool(metadata, models.TurnMetaKeyErrorTerminated) || turnMetadataBool(metadata, "interrupted") {
+		return automation.AutomationTurnOutcomeFailed
+	}
+	raw, ok := metadata[models.TurnMetaKeyAutomationRunOutcome]
+	if !ok {
+		return automation.AutomationTurnOutcomeUnknown
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return automation.AutomationTurnOutcomeUnknown
+	}
+	switch automation.AutomationTurnOutcome(value) {
+	case automation.AutomationTurnOutcomeSucceeded,
+		automation.AutomationTurnOutcomeFailed,
+		automation.AutomationTurnOutcomeCancelled:
+		return automation.AutomationTurnOutcome(value)
+	default:
+		return automation.AutomationTurnOutcomeUnknown
+	}
+}
+
+func turnMetadataBool(metadata map[string]interface{}, key string) bool {
+	value, ok := metadata[key]
+	if !ok {
+		return false
+	}
+	flag, ok := value.(bool)
+	return ok && flag
 }
 
 func (s *Service) automationRunLive(ctx context.Context, taskID, sessionID, turnID string) (bool, error) {
@@ -1447,7 +1517,7 @@ func (s *Service) handleAutomationTurnCompleteForTurn(
 		nextState = models.TaskSessionStateFailed
 	}
 	s.updateTaskSessionState(ctx, taskID, sessionID, nextState, errMsg, false, session)
-	s.markAutomationRunTerminalForTurn(ctx, taskID, sessionID, turnID, success, errMsg)
+	s.markAutomationRunTerminalForTurn(ctx, taskID, sessionID, turnID, success, cancelled, errMsg)
 	s.stopAutomationAgent(ctx, taskID, sessionID, session)
 	// The worktree is deliberately left in place: the files a run writes are
 	// usually the point of running it, and an agent that ends by asking a
@@ -1459,14 +1529,9 @@ func (s *Service) handleVisibleAutomationTurnComplete(
 	ctx context.Context, taskID, sessionID, turnID, stopReason string, isError bool, errMsg string,
 ) bool {
 	if turnID != "" {
-		s.markAutomationRunTerminalForTurn(
-			ctx,
-			taskID,
-			sessionID,
-			turnID,
-			!isError && stopReason != agentEventError && stopReason != stopReasonCancelled,
-			errMsg,
-		)
+		cancelled := stopReason == stopReasonCancelled
+		success := !isError && stopReason != agentEventError && !cancelled
+		s.markAutomationRunTerminalForTurn(ctx, taskID, sessionID, turnID, success, cancelled, errMsg)
 	}
 	return false
 }
@@ -1505,7 +1570,7 @@ func (s *Service) finalizeAutomationRun(ctx context.Context, taskID string, succ
 		if turnErr != nil || turn == nil {
 			return
 		}
-		s.markAutomationRunTerminalForTurn(ctx, taskID, session.ID, turn.ID, success, errMsg)
+		s.markAutomationRunTerminalForTurn(ctx, taskID, session.ID, turn.ID, success, false, errMsg)
 		return
 	}
 
@@ -1533,7 +1598,13 @@ func (s *Service) markAutomationRunTerminal(ctx context.Context, taskID string, 
 	s.pruneAutomationRunWorktrees(ctx, taskID)
 }
 
-func (s *Service) markAutomationRunTerminalForTurn(ctx context.Context, taskID, sessionID, turnID string, success bool, errMsg string) {
+func (s *Service) markAutomationRunTerminalForTurn(ctx context.Context, taskID, sessionID, turnID string, success, cancelled bool, errMsg string) {
+	if turnID != "" {
+		// Record the exact turn's outcome before the run's terminal row, so a
+		// crash between the two leaves restart reconciliation durable evidence
+		// instead of forcing it to infer success from completion or session state.
+		s.recordAutomationTurnOutcome(ctx, sessionID, turnID, automationTurnOutcome(success, cancelled))
+	}
 	if turnID == "" {
 		s.markAutomationRunTerminal(ctx, taskID, success, errMsg)
 		return
@@ -1550,6 +1621,40 @@ func (s *Service) markAutomationRunTerminalForTurn(ctx context.Context, taskID, 
 	if err := binding.MarkRunTerminalByBinding(ctx, taskID, sessionID, turnID, status, errMsg); err != nil {
 		s.logger.Warn("failed to update automation run by exact turn binding",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+	}
+}
+
+// automationTurnOutcome maps the completion decision to the closed outcome set
+// persisted on the exact turn.
+func automationTurnOutcome(success, cancelled bool) string {
+	switch {
+	case cancelled:
+		return models.TurnAutomationOutcomeCancelled
+	case success:
+		return models.TurnAutomationOutcomeSucceeded
+	default:
+		return models.TurnAutomationOutcomeFailed
+	}
+}
+
+// recordAutomationTurnOutcome persists the exact turn's authoritative outcome.
+// The first recorded outcome wins: an already recorded value is never
+// overwritten, so a later or conflicting producer cannot rewrite history. The
+// write is best-effort and never fails the run settlement that follows it.
+func (s *Service) recordAutomationTurnOutcome(ctx context.Context, sessionID, turnID, outcome string) {
+	if turnID == "" || outcome == "" || s.turnService == nil {
+		return
+	}
+	if turn, err := s.turnService.GetTurn(ctx, turnID); err == nil && turn != nil {
+		if _, exists := turn.Metadata[models.TurnMetaKeyAutomationRunOutcome]; exists {
+			return
+		}
+	}
+	if err := s.turnService.PatchTurnMetadata(ctx, sessionID, turnID, map[string]interface{}{
+		models.TurnMetaKeyAutomationRunOutcome: outcome,
+	}); err != nil {
+		s.logger.Warn("failed to persist automation turn outcome",
+			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
 	}
 }
 

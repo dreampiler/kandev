@@ -841,6 +841,21 @@ const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 // turn.
 const TurnMetaKeyErrorTerminated = "error_terminated"
 
+// TurnMetaKeyAutomationRunOutcome records the authoritative outcome the
+// automation completion handler decided for this exact turn. It is written
+// before the run's terminal row and read back by restart reconciliation, so the
+// run's outcome is never inferred from completion, session state, or transcript.
+const TurnMetaKeyAutomationRunOutcome = "automation_run_outcome"
+
+// TurnAutomationOutcome* are the closed set of values for
+// TurnMetaKeyAutomationRunOutcome. Any other stored value is treated as
+// unknown by reconciliation.
+const (
+	TurnAutomationOutcomeSucceeded = "succeeded"
+	TurnAutomationOutcomeFailed    = "failed"
+	TurnAutomationOutcomeCancelled = "cancelled"
+)
+
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
 // unless dispatch ambiguity was recorded; publication clears the marker, while

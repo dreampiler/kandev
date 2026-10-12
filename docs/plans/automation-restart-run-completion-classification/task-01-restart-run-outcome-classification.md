@@ -86,5 +86,18 @@ None. Unit A is merged.
 
 ## Results
 
-Not yet implemented. Source awaits the parent controller's explicit scoped
-implementation handoff.
+- `internal/task/models/models.go`: `TurnMetaKeyAutomationRunOutcome` and the
+  closed `TurnAutomationOutcome*` value set.
+- `internal/orchestrator/event_handlers_automation.go`: the completion/retained
+  producers record the exact turn's outcome via `PatchTurnMetadata`
+  (`recordAutomationTurnOutcome`, first-write-wins) before the run terminal write;
+  `AutomationRunEvidence` reads it back, matching the run's task/session/turn
+  binding and treating `error_terminated` / `interrupted` as authoritative
+  failure.
+- `internal/automation/service.go`: the `RunLivenessChecker` seam is widened to
+  `AutomationRunEvidence`; `ReconcileOpenRuns` settles succeeded / failed /
+  cancelled from the recorded outcome and leaves an unknown outcome open.
+- Tests: `internal/automation/service_run_terminal_test.go` (classification),
+  `internal/automation/service_failed_run_task_settlement_test.go` (succeeded run
+  keeps its task), and `internal/orchestrator/automation_run_outcome_test.go`
+  (mapping, binding match, read failure, first-write-wins).

@@ -119,13 +119,19 @@ each scheduled firing independently selectable and controllable.
   `STARTING` / `RUNNING` session.
 - **AC-OFFICE-AUTOMATION-CONTINUITY-003.7:** Startup and dispatch recovery shall
   settle an open bound run from the exact turn's durably recorded outcome, not
-  from the "not live now" observation alone. A turn proven successful shall not
-  be recorded failed. A turn durably completed failed or cancelled shall be
-  recorded failed. When the exact turn's outcome is not durably recorded — a
-  legacy turn or an unresolved path — the run shall be left open and surfaced by
-  the existing startup reconciliation rather than guessed. A run shall not be
-  failed while a pending, deferred, or uncertain delivery effect holds it, and an
-  unreadable outcome shall leave the run open for a later pass.
+  from the "not live now" observation alone; a turn that is not live and has no
+  recorded outcome shall not be treated as failed. A turn the completion handler
+  proved successful shall be settled succeeded. A turn the handler proved failed
+  or cancelled, and existing authoritative negative evidence (an error-terminated
+  or interrupted turn), shall be settled failed. When the exact turn's outcome is
+  not authoritative — a legacy turn, an abandoned or resumed turn, a read
+  failure, a malformed or conflicting marker, or no marker — the run shall be left
+  open and surfaced by the existing startup reconciliation rather than inferred
+  from completion, session state, or transcript. The run's task, session, and turn
+  identity shall match the turn's own binding before any settlement, and a
+  recorded outcome shall not be overwritten. Pending, deferred, or uncertain
+  delivery ownership, the managed-conversation protection, and the webhook
+  protection shall be evaluated before any settlement.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-004: Constrain coordinator authority
 
