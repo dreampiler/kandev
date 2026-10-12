@@ -931,7 +931,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		}
 	}
 
-	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, checkoutMode, worktreePath, branchName, startPoint, baseRef)
+	worktreeID, branchName, err := m.addFreshWorktreeForBranch(ctx, checkoutMode, worktreePath, branchName, startPoint, baseRef)
 	if err != nil {
 		return nil, err
 	}
@@ -1025,6 +1025,9 @@ func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
 
 	taskDir := filepath.Dir(worktreePath)
 	if err := m.validateTaskDir(taskDir); err != nil {
+		return "", err
+	}
+	if err := m.ensureTaskDirNotOwnedByAnotherTask(taskDir, req); err != nil {
 		return "", err
 	}
 	if err := os.MkdirAll(taskDir, 0755); err != nil {
