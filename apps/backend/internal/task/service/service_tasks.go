@@ -77,6 +77,11 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
 
+// ErrTaskActiveSessions is returned by ArchiveTaskIfIdle when the target task
+// still holds a live agent session. It is a refusal, not a failure: the caller
+// must leave the task alone rather than terminate a session that went live.
+var ErrTaskActiveSessions = errors.New("task has active sessions")
+
 // ErrAutoTitlePromptRequired is returned when auto-title creation has neither
 // a prompt nor a usable provisional title.
 var ErrAutoTitlePromptRequired = errors.New("description or title is required when auto_title is enabled")
@@ -2325,6 +2330,19 @@ func (s *Service) RestoreTaskMessageRollback(
 	return &restoredTask, true, nil
 }
 
+// archiveRefuseActiveSessionsKey carries ArchiveTaskIfIdle's guard through the
+// shared ArchiveTask body without changing that method's widely-used signature.
+type archiveRefuseActiveSessionsKey struct{}
+
+// ArchiveTaskIfIdle archives a task only when it currently holds no live agent
+// session, refusing with ErrTaskActiveSessions otherwise. Unlike ArchiveTask it
+// never stops a session, so a settlement that raced a reply cannot terminate
+// the agent that just went live: the same read ArchiveTask uses to choose
+// which sessions to stop is the read that decides the refusal.
+func (s *Service) ArchiveTaskIfIdle(ctx context.Context, id string) error {
+	return s.ArchiveTask(context.WithValue(ctx, archiveRefuseActiveSessionsKey{}, true), id)
+}
+
 // ArchiveTask archives a task by setting its archived_at timestamp.
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.
@@ -2357,6 +2375,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(archiveCtx, id)
 	if err != nil {
 		return fmt.Errorf("list active task sessions for archive: %w", err)
+	}
+	if refuse, _ := archiveCtx.Value(archiveRefuseActiveSessionsKey{}).(bool); refuse && len(activeSessions) > 0 {
+		return fmt.Errorf("%w: %s", ErrTaskActiveSessions, id)
 	}
 	if s.executionStopper != nil {
 		stopTargets, err = s.buildStopTargets(archiveCtx, id, activeSessions)
