@@ -81,3 +81,33 @@ without this change.
 
 A focus resume refused by a full ceiling now waits for capacity like other
 automatic starts instead of resuming immediately.
+
+## Maintainer integration and verification
+
+Integrated protected main, preserving immutable retry payload ownership,
+route-before-lifecycle lock order, early recovery admission, and safe Resume
+cleanup projection. The idle-focus queue bypass now validates the service,
+held claim, exact task and session, resume kind, automatic origin and idle
+provenance option. It renews the matching durable claim and checks route
+admission; renewal rejects a different persisted owner as well as a replaced
+or expired lease. Final provider admission remains in place.
+
+Added package regressions for missing, foreign, released, expired, replaced,
+and wrong-kind claims, route changes, absence of a manual override, and dropping
+a queued completed focus resume after idle provenance is lost. The completed
+replay keeps both resume permissions.
+
+A contained stdlib harness using the production dispatch, renewal and deferral
+parser/equivalence functions reproduced the task-only authorization gap and
+passed all 12 cases after remediation with `go test -trimpath -race -count=1`.
+Its repository CAS and route validation are explicit fake boundaries. It is
+focused proof only; full real package/caller verification is delegated to the
+exact-head hosted Backend, Frontend and E2E suites. Local full orchestrator and
+lifecycle rebuilds are intentionally excluded by the contributor containment
+scope. Full hosted results are retained in the external delivery receipt.
+
+Desktop and phone use the same session-focus launch service and backend
+admission. This change does not alter rendered composition, navigation, touch
+controls or copy; existing session-resumption unit tests and mobile workflow
+session-focus E2E cover those entry points. Public behavior is clarified in
+`docs/public/agents-and-profiles.md` (explanation).

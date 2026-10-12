@@ -90,6 +90,14 @@ func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
 	if resumed || execution != nil {
 		t.Fatalf("saturated focus resumed: execution=%v resumed=%v, want none", execution != nil, resumed)
 	}
+	session, err := f.svc.repo.GetTaskSession(ctx, "session-focus-ceiling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := session.Metadata[ceilingManualOverrideMetadataKey]; present {
+		t.Fatal("passive focus recorded a manual override")
+	}
+
 }
 
 // A completed idle-suspended session deferred by focus keeps its focus resume
@@ -98,6 +106,7 @@ func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
 func TestFocusTaskSessionDeferredCompletedResumeReplaysAfterCapacityFrees(t *testing.T) {
 	ctx := context.Background()
 	f := newFocusCeilingFixture(t, "task-focus-completed", "session-focus-completed", models.TaskSessionStateCompleted)
+	acceptIdleFocusLaunch(t, f)
 
 	if _, _, resumed, err := f.svc.focusTaskSession(ctx, "task-focus-completed", "session-focus-completed"); err != nil || resumed {
 		t.Fatalf("saturated focus: resumed=%v err=%v, want deferred", resumed, err)
@@ -109,7 +118,36 @@ func TestFocusTaskSessionDeferredCompletedResumeReplaysAfterCapacityFrees(t *tes
 
 	f.svc.sessionCeiling.release(f.occupierKey)
 	f.svc.retryOneDeferredCeilingLaunch(ctx, &models.Task{ID: "task-focus-completed"})
+	f.svc.retryOneDeferredCeilingLaunch(ctx, &models.Task{ID: "task-focus-completed"})
 	if n := f.launchCalls.Load(); n != 1 {
 		t.Fatalf("replayed completed focus resume launched %d agents, want 1", n)
+	}
+	record, _, err := f.svc.repo.GetTaskDeferredLaunch(ctx, "task-focus-completed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := models.ReadCeilingDeferral(record); err == nil {
+		t.Fatal("accepted focus resume remained queued")
+	}
+}
+
+func acceptIdleFocusLaunch(t *testing.T, f focusCeilingFixture) {
+	t.Helper()
+	agent := f.svc.agentManager.(*mockAgentManager)
+	agent.launchAgentFunc = func(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		f.launchCalls.Add(1)
+		if req.ACPSessionID != "same-conversation-token" {
+			t.Errorf("resume changed the native conversation: %q", req.ACPSessionID)
+		}
+		session, err := f.svc.repo.GetTaskSession(ctx, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		session.UpdatedAt = time.Now().UTC()
+		if err := f.svc.repo.UpdateTaskSession(ctx, session); err != nil {
+			return nil, err
+		}
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-focus-accepted"}, nil
 	}
 }

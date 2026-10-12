@@ -14,11 +14,18 @@ func withCeilingDispatchClaim(ctx context.Context, claim *ceilingDeferredLaunchC
 	return context.WithValue(ctx, ceilingDispatchClaimContextKey{}, claim)
 }
 
-// ceilingDispatchClaimOwnsTask reports whether ctx is replaying taskID's
-// claimed deferred launch.
-func ceilingDispatchClaimOwnsTask(ctx context.Context, taskID string) bool {
+// ceilingDispatchClaimOwnsIdleResume validates the exact queued idle resume
+// and renews its durable lease before it can bypass passive queue admission.
+func (s *Service) ceilingDispatchClaimOwnsIdleResume(ctx context.Context, taskID, sessionID string) bool {
 	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
-	return claim != nil && claim.taskID == taskID
+	if claim == nil || claim.svc != s || !claim.held || claim.taskID != taskID ||
+		claim.deferral.Kind != models.CeilingLaunchResume ||
+		claim.deferral.Origin != string(launchOriginAutomatic) ||
+		stringField(claim.deferral.Payload, metaKeySessionID) != sessionID ||
+		!boolField(claim.deferral.Payload, resumePayloadIdleProvenanceKey) {
+		return false
+	}
+	return s.admitCeilingDispatch(ctx, taskID) == nil
 }
 
 // admitCeilingDispatch orders final route validation and renewal of the exact
@@ -71,7 +78,7 @@ func (s *Service) renewCeilingDispatchClaim(ctx context.Context, claim *ceilingD
 		}
 		details, exists := models.ReadCeilingLaunchClaimDetails(record)
 		now := time.Now().UTC()
-		if !equivalent || !exists || details.ID != claim.id || details.Expired(now) {
+		if !equivalent || !exists || details.ID != claim.id || details.Owner != claim.owner || details.Expired(now) {
 			return ErrCeilingLaunchClaimed
 		}
 		updated := cloneCeilingRecord(record)
