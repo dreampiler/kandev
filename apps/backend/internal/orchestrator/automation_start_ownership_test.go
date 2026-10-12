@@ -2,12 +2,14 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,6 +53,53 @@ func TestStaleAutomationDispatchCannotReconcileSuccessorOwner(t *testing.T) {
 
 type ownershipQueueDispatcher struct {
 	*automation.Service
+}
+
+type ownershipUnreadableSessionsRepository struct {
+	*sqliterepo.Repository
+}
+
+func (r *ownershipUnreadableSessionsRepository) ListTaskSessions(context.Context, string) ([]*models.TaskSession, error) {
+	return nil, errors.New("session evidence unavailable")
+}
+
+func TestDroppedLegacyInitialStartRequiresNoSessionEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		state      models.TaskSessionState
+		unreadable bool
+		owned      bool
+	}{
+		{name: "never admitted"},
+		{name: "unbound live session", state: models.TaskSessionStateRunning, owned: true},
+		{name: "cancelled state without stop proof", state: models.TaskSessionStateCancelled, owned: true},
+		{name: "session read uncertainty", unreadable: true, owned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			base := setupAutomationRetentionFixture(t)
+			seedAutomationTask(t, base.repo, "dropped-task", models.TaskOriginAutomationTask, false)
+			a := &automation.Automation{ID: "dropped-auto", WorkspaceID: "ws-dropped-task", Name: "Dropped", Enabled: true}
+			require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+			run := &automation.AutomationRun{ID: "dropped-run", AutomationID: a.ID, TaskID: "dropped-task", Status: automation.RunStatusFailed}
+			require.NoError(t, base.autoStore.CreateRun(ctx, run))
+			require.NoError(t, base.repo.SetTaskMetadataKey(ctx, run.TaskID, models.MetaKeyAutomationStartOwned, run.ID))
+			if tc.state != "" {
+				require.NoError(t, base.repo.CreateTaskSession(ctx, &models.TaskSession{ID: "unbound-session", TaskID: run.TaskID, State: tc.state, AgentExecutionID: "unconfirmed-execution"}))
+			}
+			svc := createTestService(base.repo, newMockStepGetter(), newMockTaskRepo())
+			svc.SetAutomationService(base.autoSvc)
+			if tc.unreadable {
+				svc.repo = &ownershipUnreadableSessionsRepository{Repository: base.repo}
+			}
+			task, err := base.repo.GetTask(ctx, run.TaskID)
+			require.NoError(t, err)
+			svc.releaseDroppedAutomationStartOwnership(ctx, task, run.ID)
+			current, err := base.repo.GetTask(ctx, run.TaskID)
+			require.NoError(t, err)
+			require.Equal(t, tc.owned, models.AutomationStartOwned(current.Metadata))
+		})
+	}
 }
 
 func (s *ownershipQueueDispatcher) DispatchRun(_ context.Context, _ string, _ automation.ThreadAction, _ string, dispatch func() (automation.RunDispatch, error)) error {

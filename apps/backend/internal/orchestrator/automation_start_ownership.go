@@ -91,7 +91,8 @@ func (s *Service) reconcileAutomationStartOwnershipForRun(ctx context.Context, t
 	})
 }
 
-// A dropped queue record never admitted its launch. Other terminal paths do not supply this evidence.
+// Legacy drop cleanup requires absence of persisted session evidence.
+// A session row can precede run binding, and its state alone cannot prove termination.
 func (s *Service) releaseDroppedAutomationStartOwnership(ctx context.Context, task *models.Task, runID string) {
 	binding, ok := s.automationService.(automationRunBinding)
 	owner, _ := task.Metadata[models.MetaKeyAutomationStartOwned].(string)
@@ -103,6 +104,10 @@ func (s *Service) releaseDroppedAutomationStartOwnership(ctx context.Context, ta
 		return
 	}
 	if run.RetryGroupID == "" && run.Status == automation.RunStatusFailed && run.SessionID == "" && run.TurnID == "" {
+		sessions, err := s.repo.ListTaskSessions(ctx, task.ID)
+		if err != nil || len(sessions) != 0 {
+			return
+		}
 		s.releaseAutomationStartOwnership(ctx, task.ID, owner)
 		return
 	}

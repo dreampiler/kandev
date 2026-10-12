@@ -242,7 +242,10 @@ cannot set or remove the marker.
 Release compares the captured owner through the existing metadata CAS boundary
 and publishes `task.updated` on removal, using a bounded detached context.
 A queued dispatch keeps its marker until exact replay admission or a definitive
-queue drop. Legacy bound session/turn evidence can release the initial fence;
+queue drop. A failed unbound legacy run can release on a drop only when its
+task has no session rows. Session creation can precede run binding; existing
+rows or an uncertain session read retain ownership, regardless of session
+state. Legacy bound session/turn evidence can release the initial fence;
 a durable retry keeps it until its matching run is terminal and its immutable
 run/generation/task/session/turn/submission launch is confirmed stopped. Generic
 retry and recovery fences continue to apply independently.

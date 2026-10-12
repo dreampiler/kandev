@@ -42,7 +42,9 @@ Existing failed-stop/no-replacement and generic retry/recovery fences are retain
 - Queued dispatch remains owned; a definitive drop releases its exact marker.
 - Restart and lease age cannot release unresolved ownership across instances.
 - Stale cleanup cannot clear a successor, and successful release publishes once.
-- Missing/read-uncertain ownership and failed Stop remain fenced.
+- Missing/read-uncertain ownership and failed Stop remain fenced. A dropped
+  unbound legacy run also retains ownership if a session exists or its session
+  read is uncertain; session state alone cannot prove provider termination.
 - Continuations preserve original task/session identity and marker.
 - Registered wire callers and ordinary metadata writes cannot inject or erase it.
 
