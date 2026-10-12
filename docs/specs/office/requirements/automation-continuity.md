@@ -108,6 +108,15 @@ each scheduled firing independently selectable and controllable.
   the rendered run title, while a resumed shared task shall keep its existing
   title. Exported YAML shall include only the continuation policy and shall
   exclude runtime pointers, bindings, titles, and MCP authority.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-003.6:** When a run reaches persisted
+  terminal `failed`, the service shall archive the hidden `automation_run` task
+  it generated, idempotently and without stopping a live agent session, so the
+  task does not remain open. The run row, its `error_message`, and its
+  transcript shall be preserved and the run shall stay visible as `failed`. The
+  service shall not archive a `triggered` / `task_created` (open) or `succeeded`
+  run, an uncertain-delivery run, a visible `automation_task`, a task referenced
+  by another run or the automation's continuation pointer, or a task with a
+  `STARTING` / `RUNNING` session.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-004: Constrain coordinator authority
 

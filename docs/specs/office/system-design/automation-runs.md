@@ -177,6 +177,19 @@ Terminal status transitions address the run ID or exact session/turn binding. A 
 same reusable session has no AutomationRun binding and therefore cannot complete, fail, or rewrite a
 scheduled run.
 
+**Failed-run task settlement.** A run that reaches persisted terminal `failed` settles the hidden
+task it generated, so a failed firing does not leave `CREATED`, `SCHEDULING`, `IN_PROGRESS`, or
+`REVIEW` work open forever. Settling happens at the failure boundaries that terminalize the run
+(dispatch failure, stale or unbound restart reconciliation, an exact-run stop, and the orchestrator
+turn-failure path) and again in one startup reconciliation that finishes any settlement a crash or
+shutdown dropped between the run write and the task archive. It is idempotent and guarded: only the
+hidden `automation_run` origin is settled, never a visible `automation_task`; a task referenced by
+another run, the automation's continuation pointer, or a foreign automation is skipped; and a task
+still holding a `STARTING` / `RUNNING` session is refused rather than stopped, so a user reply that
+raced the failure keeps its work. Only the task row is archived. The run row, its `error_message`,
+and its transcript are never touched, and the persisted `failed` status remains authoritative, so
+the failure stays visible in the feed.
+
 ## API surface
 
 Five actions. The detail view reads one automation's runs and its summary; the
@@ -284,6 +297,8 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | A user stops a running reused turn | The action addresses its stored run/session/turn identity, cancels that exact turn, and marks only that run failed. |
 | A user stops an open run whose bound turn already ended | The exact open run becomes failed and releases its concurrency slot. The stale stop result does not become not-found. No successor turn is touched. |
 | Restart recovery cannot find the bound execution, task, or session | Typed runtime, executor, SQL, task, and session not-found errors normalize to not live and the exact open run becomes failed. A transient inspection error leaves the run open for a later retry. |
+| A run reaches persisted terminal `failed` | Its generated hidden task is archived idempotently; the run stays `failed` with its message and transcript. A visible `automation_task`, a referenced or continuation task, an open or uncertain-delivery run, a succeeded run, and a task with a live session are left untouched. |
+| Settlement crashes or is dropped between the run write and the task archive | The next startup reconciliation archives the still-unarchived generated task; a repeated settlement of an already-archived task is a no-op. |
 
 ## Scenarios
 

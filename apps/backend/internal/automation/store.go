@@ -985,6 +985,54 @@ func (s *Store) ListAllOpenRuns(ctx context.Context) ([]*AutomationRun, error) {
 	return runs, err
 }
 
+// GetLatestFailedRunByTask returns the most recent run for a task that reached
+// persisted terminal failed, or nil when the task has no failed run. It is the
+// lookup behind the task-keyed settlement boundaries, which settle a run by its
+// exact turn or by task ID rather than by run ID.
+func (s *Store) GetLatestFailedRunByTask(ctx context.Context, taskID string) (*AutomationRun, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	var run AutomationRun
+	err := s.ro.GetContext(ctx, &run, s.ro.Rebind(`
+		SELECT * FROM automation_runs
+		WHERE task_id = ? AND status = ?
+		ORDER BY created_at DESC, id DESC LIMIT 1`),
+		taskID, string(RunStatusFailed))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	return &run, nil
+}
+
+// ListUnarchivedFailedRuns is the startup-settlement view: persisted terminal
+// failed runs whose generated task still exists and is not archived. A run with
+// no task, a task already gone, or a task already archived is excluded, so the
+// pass is bounded to work that is actually outstanding. Falls back to no rows
+// when the tasks table is absent (isolated automation-only tests).
+func (s *Store) ListUnarchivedFailedRuns(ctx context.Context) ([]*AutomationRun, error) {
+	var runs []*AutomationRun
+	err := s.ro.SelectContext(ctx, &runs, s.ro.Rebind(`
+		SELECT ar.* FROM automation_runs ar
+		JOIN tasks t ON t.id = ar.task_id
+		WHERE ar.status = ? AND ar.task_id != '' AND t.archived_at IS NULL
+		ORDER BY ar.created_at ASC, ar.id ASC`), string(RunStatusFailed))
+	if db.IsMissingTableError(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, run := range runs {
+		run.TriggerData = json.RawMessage(run.TriggerDataJSON)
+	}
+	return runs, nil
+}
+
 // DeleteAutomationWithCleanup captures every task owned only by the
 // automation, inserts one durable cleanup job per task, and removes the
 // automation and its cascading references in one transaction. The caller must

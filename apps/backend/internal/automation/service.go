@@ -143,6 +143,26 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, id string) error
 }
 
+// ErrTaskAlreadyArchived signals the generated task was already archived, so
+// the failed-run settlement is idempotently complete.
+var ErrTaskAlreadyArchived = errors.New("automation: generated task already archived")
+
+// ErrTaskActiveSessions signals the generated task still holds a live agent
+// session. The settlement leaves it alone rather than stopping it.
+var ErrTaskActiveSessions = errors.New("automation: generated task has active sessions")
+
+// TaskArchiver archives a generated automation-run task once its run is
+// definitively failed. Satisfied by *taskservice.Service; injected to avoid a
+// cyclic import, like TaskDeleter.
+//
+// Implementations must refuse rather than stop a live agent session: a
+// settlement that raced a user reply into the same task must never terminate
+// the agent that just went live, so ArchiveTaskIfIdle returns
+// ErrTaskActiveSessions instead of stopping it.
+type TaskArchiver interface {
+	ArchiveTaskIfIdle(ctx context.Context, id string) error
+}
+
 // WorkflowLocator resolves the workspace a workflow belongs to. Satisfied by
 // the task service; injected to avoid a cyclic import, like TaskDeleter.
 //
@@ -203,8 +223,9 @@ type Service struct {
 	store            *Store
 	eventBus         bus.EventBus
 	logger           *logger.Logger
-	taskDeleter      TaskDeleter // optional; nil-safe
-	runStopper       RunStopper  // optional; wired by the orchestrator composition
+	taskDeleter      TaskDeleter  // optional; nil-safe
+	taskArchiver     TaskArchiver // optional; nil-safe
+	runStopper       RunStopper   // optional; wired by the orchestrator composition
 	runLiveness      RunLivenessChecker
 	// workflowLocator gates workflow ownership. Optional: when nil (isolated
 	// tests) ownership is not enforced.
@@ -263,14 +284,26 @@ type Service struct {
 	// TaskDeleter — orphaning the task. Entries are never removed: growth is
 	// bounded by the number of distinct automation IDs (~160 B per entry).
 	runLocks sync.Map // automationID (string) -> *sync.Mutex
+
+	// failedSettleCh carries failed runs whose generated task still needs
+	// settlement. A dedicated worker drains it so a failure observed under an
+	// orchestrator lock never archives a task inline. The channel is never
+	// closed; a full buffer drops the enqueue and leaves the task to startup
+	// reconciliation.
+	failedSettleCh chan *AutomationRun
 }
+
+// failedSettleQueueSize bounds how many failed runs wait for the settlement
+// worker before an enqueue is dropped to startup reconciliation.
+const failedSettleQueueSize = 128
 
 // NewService creates a new automation service.
 func NewService(store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		store:    store,
-		eventBus: eventBus,
-		logger:   log,
+		store:          store,
+		eventBus:       eventBus,
+		logger:         log,
+		failedSettleCh: make(chan *AutomationRun, failedSettleQueueSize),
 	}
 }
 
@@ -283,6 +316,13 @@ func (s *Service) Store() *Store {
 // Optional: when nil, run deletion skips task teardown.
 func (s *Service) SetTaskDeleter(d TaskDeleter) {
 	s.taskDeleter = d
+}
+
+// SetTaskArchiver wires the guarded archive used to settle the generated task
+// of a definitively failed run. Optional: when nil, failed runs settle their
+// task through startup reconciliation only.
+func (s *Service) SetTaskArchiver(a TaskArchiver) {
+	s.taskArchiver = a
 }
 
 // SetRunStopper wires exact automation-turn cancellation. It is kept as a
@@ -1021,6 +1061,9 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 		if run.TaskID == "" || run.SessionID == "" || run.TurnID == "" {
 			if err := s.store.MarkRunTerminal(ctx, run.ID, "", "", RunStatusFailed, "backend stopped before the automation turn was bound"); err != nil {
 				s.logger.Warn("failed to reconcile unbound automation run", zap.String("run_id", run.ID), zap.Error(err))
+			} else {
+				run.Status = RunStatusFailed
+				s.settleFailedRunTask(ctx, run)
 			}
 			continue
 		}
@@ -1035,6 +1078,9 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 		if !live {
 			if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, "automation turn was stale after backend recovery"); err != nil {
 				s.logger.Warn("failed to reconcile stale automation run", zap.String("run_id", run.ID), zap.Error(err))
+			} else {
+				run.Status = RunStatusFailed
+				s.settleFailedRunTask(ctx, run)
 			}
 		}
 	}
@@ -1109,6 +1155,7 @@ func (s *Service) StopRun(ctx context.Context, automationID, runID string) (*Aut
 	}
 	run.Status = RunStatusFailed
 	run.ErrorMessage = "stopped by user"
+	s.enqueueFailedRunTaskSettlement(run)
 	return run, nil
 }
 
@@ -1451,6 +1498,7 @@ func (s *Service) markDispatchFailed(ctx context.Context, runID string, dispatch
 	if err := s.store.MarkRunTerminal(ctx, runID, "", "", RunStatusFailed, dispatchErr.Error()); err != nil {
 		return fmt.Errorf("%w (mark run failed: %v)", dispatchErr, err)
 	}
+	s.settleFailedRunTaskByID(ctx, runID)
 	return dispatchErr
 }
 
@@ -1942,18 +1990,34 @@ func (s *Service) BindRun(ctx context.Context, runID, taskID, sessionID, turnID 
 }
 
 func (s *Service) MarkRunTerminal(ctx context.Context, runID, sessionID, turnID string, status RunStatus, errMsg string) error {
-	return s.store.MarkRunTerminal(ctx, runID, sessionID, turnID, status, errMsg)
+	if err := s.store.MarkRunTerminal(ctx, runID, sessionID, turnID, status, errMsg); err != nil {
+		return err
+	}
+	if status == RunStatusFailed {
+		s.settleFailedRunTaskByID(ctx, runID)
+	}
+	return nil
 }
 
 func (s *Service) MarkRunTerminalByBinding(ctx context.Context, taskID, sessionID, turnID string, status RunStatus, errMsg string) error {
-	return s.store.MarkRunTerminalByBinding(ctx, taskID, sessionID, turnID, status, errMsg)
+	if err := s.store.MarkRunTerminalByBinding(ctx, taskID, sessionID, turnID, status, errMsg); err != nil {
+		return err
+	}
+	if status == RunStatusFailed {
+		s.settleFailedRunTaskForTask(ctx, taskID)
+	}
+	return nil
 }
 
 // MarkRunFailedByTaskID transitions a still-pending run (task_created) into
 // the failed state. Used when something downstream of task creation aborts
 // the run, e.g. a permission prompt an automation run can't answer.
 func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
-	return s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg)
+	if err := s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg); err != nil {
+		return err
+	}
+	s.settleFailedRunTaskForTask(ctx, taskID)
+	return nil
 }
 
 // MarkDeferredRunFailedByTaskID closes an unbound run after its queued task is deleted.
