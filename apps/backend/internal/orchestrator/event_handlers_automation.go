@@ -1026,12 +1026,7 @@ func (s *Service) prepareAutomationTask(
 	if err := s.verifyRetryTaskOperation(ctx, evt, operations...); err != nil {
 		return nil, nil, action, reasons, err
 	}
-	// The automation dispatch owns this task's initial start. Stamping it here,
-	// before CreateTask runs its feeder pull, keeps the pull's task.moved
-	// auto-start from launching the same task a second time (the double-start
-	// that fails the run). Continuation reuses an existing task and returns
-	// above, so only a freshly created task is marked.
-	metadata[models.MetaKeyAutomationStartOwned] = true
+	// The internal create fields reserve initial start ownership before feeder pull.
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, &ReviewTaskRequest{
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
@@ -1041,7 +1036,10 @@ func (s *Service) prepareAutomationTask(
 		Repositories:   repositories,
 		Metadata:       metadata,
 		Origin:         taskOrigin,
-		ExternalID:     evt.RetryExternalID,
+
+		AutomationStartOwned: true,
+		AutomationStartOwner: evt.RunID,
+		ExternalID:           evt.RetryExternalID,
 	})
 	if err != nil {
 		return nil, nil, action, reasons, fmt.Errorf("create automation task: %w", err)
@@ -1142,7 +1140,7 @@ func (s *Service) refreshAutomationContinuationMetadataWithSnapshot(
 func orderedAutomationContinuationMetadataKeys(metadata map[string]interface{}) []string {
 	keys := make([]string, 0, len(metadata))
 	for key := range metadata {
-		if key == models.MetaKeyDeferredLaunch || key == models.MetaKeyAutomationTargetTaskID {
+		if key == models.MetaKeyDeferredLaunch || key == models.MetaKeyAutomationTargetTaskID || key == models.MetaKeyAutomationStartOwned {
 			continue
 		}
 		keys = append(keys, key)
@@ -1724,7 +1722,16 @@ func (s *Service) autoStartAutomationTaskForRun(
 	reason string,
 	preserveTaskOnFailure bool,
 	operation *automation.RetryOperation,
-) bool {
+) (bound bool) {
+	owner, _ := task.Metadata[models.MetaKeyAutomationStartOwned].(string)
+	taskID := task.ID
+	defer func() {
+		if bound && runID == "" {
+			s.releaseAutomationStartOwnership(ctx, taskID, owner)
+		} else if runID != "" && owner == runID {
+			s.reconcileAutomationStartOwnershipForRun(ctx, taskID, runID)
+		}
+	}()
 	var run *automationRunLaunch
 	if runID != "" {
 		run = &automationRunLaunch{RunID: runID, ThreadAction: action, ThreadReason: reason}

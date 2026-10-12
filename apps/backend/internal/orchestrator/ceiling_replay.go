@@ -529,6 +529,9 @@ func (s *Service) dropCeilingDeferral(
 	}
 
 	s.clearCeilingDeferredRecord(ctx, task.ID, deferral)
+	if run := automationRunFromCeilingPayload(deferral.Payload); run != nil {
+		s.releaseDroppedAutomationStartOwnership(ctx, task, run.RunID)
+	}
 	s.publishTaskUpdatedByID(ctx, task.ID)
 }
 
