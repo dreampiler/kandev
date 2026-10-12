@@ -1138,6 +1138,10 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 		if evidence.Live {
 			continue
 		}
+		if run.RetryGroupID != "" {
+			s.reconcileOpenRetryRun(ctx, run, evidence.Outcome)
+			continue
+		}
 		switch evidence.Outcome {
 		case AutomationTurnOutcomeSucceeded:
 			s.reconcileOpenRunSucceeded(ctx, run)
@@ -1155,15 +1159,8 @@ func (s *Service) ReconcileOpenRuns(ctx context.Context) error {
 
 // reconcileOpenRunSucceeded settles an open bound run whose exact turn the
 // completion handler durably recorded as successful. A successful run's
-// generated task is left in place: it stays repliable by design. A retry-group
-// run settles through the retry group's own success boundary.
+// generated task is left in place: it stays repliable by design.
 func (s *Service) reconcileOpenRunSucceeded(ctx context.Context, run *AutomationRun) {
-	if run.RetryGroupID != "" {
-		if err := s.MarkAutomationRetrySucceeded(ctx, run.ID, run.RetryGroupGeneration); err != nil {
-			s.logger.Warn("failed to reconcile completed automation retry", zap.String("run_id", run.ID), zap.Error(err))
-		}
-		return
-	}
 	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusSucceeded, ""); err != nil {
 		s.logger.Warn("failed to reconcile completed automation run", zap.String("run_id", run.ID), zap.Error(err))
 		return
@@ -1172,13 +1169,8 @@ func (s *Service) reconcileOpenRunSucceeded(ctx context.Context, run *Automation
 }
 
 // reconcileOpenRunFailed settles an open bound run and its generated task
-// through the failed-run boundary. A retry-group run is finalized through the
-// retry group, which decides between another attempt and terminal failure.
+// through the failed-run boundary.
 func (s *Service) reconcileOpenRunFailed(ctx context.Context, run *AutomationRun, msg string) {
-	if run.RetryGroupID != "" {
-		s.reconcileOpenRetryRunFailed(ctx, run, msg)
-		return
-	}
 	if err := s.store.MarkRunTerminal(ctx, run.ID, run.SessionID, run.TurnID, RunStatusFailed, msg); err != nil {
 		s.logger.Warn("failed to reconcile failed automation run", zap.String("run_id", run.ID), zap.Error(err))
 		return
@@ -1187,9 +1179,24 @@ func (s *Service) reconcileOpenRunFailed(ctx context.Context, run *AutomationRun
 	s.settleFailedRunTask(ctx, run)
 }
 
-// reconcileOpenRetryRunFailed finalizes a retry-group run whose exact turn
-// recorded a failure. Unresolved retry acceptance stays visible and owned.
-func (s *Service) reconcileOpenRetryRunFailed(ctx context.Context, run *AutomationRun, msg string) {
+// reconcileOpenRetryRun settles a bound retry-group run whose exact turn is
+// no longer live. A recorded success settles through the retry group's success
+// boundary. Anything else goes through the retry group's failure boundary,
+// which requires definitive terminal evidence before it schedules another
+// attempt and otherwise keeps the run open with unresolved acceptance.
+func (s *Service) reconcileOpenRetryRun(ctx context.Context, run *AutomationRun, outcome AutomationTurnOutcome) {
+	msg := "automation turn was stale after backend recovery"
+	switch outcome {
+	case AutomationTurnOutcomeSucceeded:
+		if err := s.MarkAutomationRetrySucceeded(ctx, run.ID, run.RetryGroupGeneration); err != nil {
+			s.logger.Warn("failed to reconcile completed automation retry", zap.String("run_id", run.ID), zap.Error(err))
+		}
+		return
+	case AutomationTurnOutcomeFailed:
+		msg = "automation turn recorded failed after backend recovery"
+	case AutomationTurnOutcomeCancelled:
+		msg = "automation turn recorded cancelled after backend recovery"
+	}
 	_, finalizeErr := s.FinalizeAutomationRetryFailure(
 		ctx, run.ID, run.RetryGroupGeneration, errors.New(msg), "completion",
 	)
