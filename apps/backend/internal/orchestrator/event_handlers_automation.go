@@ -2346,7 +2346,7 @@ func (s *Service) markAutomationRunTerminalForTurnOutcome(ctx context.Context, t
 	s.markAutomationRunTerminalForTurn(ctx, taskID, sessionID, turnID, success, errMsg)
 }
 
-//nolint:nestif // Exact session and turn matching must remain in one fence.
+//nolint:nestif,gocognit,cyclop // Exact session and turn matching must remain in one fence.
 func (s *Service) markAutomationRunTerminalForTurn(ctx context.Context, taskID, sessionID, turnID string, success bool, errMsg string) {
 	binding, ok := s.automationService.(automationRunBinding)
 	if !ok {
