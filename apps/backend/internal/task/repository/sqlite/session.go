@@ -112,6 +112,9 @@ func stampTurnDefaults(turn *models.Turn) {
 // dispatched without a user message (auto-start, workflow on_enter) must
 // reset the clock even though no message row exists yet.
 func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecutor, turn *models.Turn) error {
+	if err := r.authorizeManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
+		return err
+	}
 	metadataJSON := "{}"
 	if turn.Metadata != nil {
 		metadataBytes, err := json.Marshal(turn.Metadata)
@@ -125,6 +128,9 @@ func (r *Repository) insertTurnRow(ctx context.Context, execer taskSessionExecut
 		INSERT INTO task_session_turns (id, task_session_id, task_id, execution_profile_id, route_generation, started_at, completed_at, metadata, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), turn.ID, turn.TaskSessionID, turn.TaskID, turn.ExecutionProfileID, turn.RouteGeneration, turn.StartedAt, turn.CompletedAt, metadataJSON, turn.CreatedAt, turn.UpdatedAt); err != nil {
+		return err
+	}
+	if err := r.clearManualCreation(ctx, execer, "turn", turn.ID, turn.TaskID); err != nil {
 		return err
 	}
 	_, err := execer.ExecContext(ctx, r.db.Rebind(`
@@ -1087,6 +1093,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		}
 	}
 
+	if err := r.authorizeManualCreation(ctx, exec, "session", session.ID, session.TaskID); err != nil {
+		return err
+	}
 	metadataJSON, err := json.Marshal(models.SessionMetadataForWrite(session.Metadata))
 	if err != nil {
 		return fmt.Errorf("failed to serialize agent session metadata: %w", err)
@@ -1140,7 +1149,10 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
-	return err
+	if err != nil {
+		return err
+	}
+	return r.clearManualCreation(ctx, exec, "session", session.ID, session.TaskID)
 }
 
 // verifyTaskRunnerResolutionTx rejects a session built from a task snapshot

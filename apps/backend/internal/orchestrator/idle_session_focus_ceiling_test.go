@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,16 +12,22 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// A focus-driven idle-suspension resume is passive inspection, not an explicit
-// execution request, so it must be admitted against the session ceiling. With
-// the worker lane saturated, focusing a parked session must not launch a second
-// agent; a manual-origin resume would have bypassed the ceiling and resurrected
-// every parked session after a restart.
-func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
+// focusCeilingFixture is an idle-suspended session whose only ceiling slot is
+// held by an unrelated in-flight launch. Agent launches fail and are counted,
+// so a resume that reaches the executor returns promptly instead of waiting
+// for an agent that never becomes ready.
+type focusCeilingFixture struct {
+	svc         *Service
+	launchCalls *atomic.Int32
+	occupierKey string
+}
+
+func newFocusCeilingFixture(t *testing.T, taskID, sessionID string, state models.TaskSessionState) focusCeilingFixture {
+	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task-focus-ceiling", "session-focus-ceiling", models.TaskSessionStateWaitingForInput)
-	session, err := repo.GetTaskSession(ctx, "session-focus-ceiling")
+	seedTaskAndSession(t, repo, taskID, sessionID, state)
+	session, err := repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +37,8 @@ func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-		ID: "session-focus-ceiling", SessionID: "session-focus-ceiling", TaskID: "task-focus-ceiling",
-		AgentExecutionID: "execution-focus-ceiling", Status: models.ExecutorRunningStatusStopped,
+		ID: sessionID, SessionID: sessionID, TaskID: taskID,
+		AgentExecutionID: "execution-" + sessionID, Status: models.ExecutorRunningStatusStopped,
 		IdleSuspensionState: models.ExecutorIdleSuspensionSuspended,
 		ExecutorID:          "executor-local", Resumable: true, ResumeToken: "same-conversation-token",
 		CreatedAt: now, UpdatedAt: now,
@@ -39,40 +46,109 @@ func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
 		t.Fatalf("upsert idle-suspended runtime: %v", err)
 	}
 
-	launchCalls := 0
+	launchCalls := &atomic.Int32{}
 	agentMgr := &mockAgentManager{
 		repoForExecutionLookup: repo,
 		isAgentReadyFn:         func(context.Context, string) bool { return true },
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-			launchCalls++
-			return &executor.LaunchAgentResponse{AgentExecutionID: "execution-focus-resumed"}, nil
+			launchCalls.Add(1)
+			return nil, errors.New("test launch refused")
 		},
 	}
 	taskRepo := newMockTaskRepo()
-	taskRepo.tasks["task-focus-ceiling"] = &v1.Task{ID: "task-focus-ceiling", State: v1.TaskStateInProgress}
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: v1.TaskStateInProgress}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 	svc.turnService = &inactiveTurnService{}
-	svc.SetLSPLeaseLifecycle(&activeLSPLeaseForTest{sessionID: "session-focus-ceiling"})
+	svc.SetLSPLeaseLifecycle(&activeLSPLeaseForTest{sessionID: sessionID})
 
-	// Saturate the single worker slot with an unrelated in-flight launch.
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
-	if decision := svc.sessionCeiling.admit(ctx, admissionRequest{
+	decision := svc.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: "task-occupier", sessionID: "session-occupier",
-		origin: launchOriginAutomatic, seam: "test", agentProfileID: claudeACPProviderID,
-	}); !decision.admitted {
+		origin: launchOriginAutomatic, seam: "test",
+	})
+	if !decision.admitted {
 		t.Fatalf("occupier admission = %+v, want admitted", decision)
 	}
+	return focusCeilingFixture{svc: svc, launchCalls: launchCalls, occupierKey: decision.reservationKey}
+}
 
-	execution, _, resumed, err := svc.focusTaskSession(ctx, "task-focus-ceiling", "session-focus-ceiling")
+// A focus-driven idle-suspension resume is passive inspection, not an explicit
+// execution request, so it must be admitted against the session ceiling. With
+// the ceiling saturated, focusing a parked session must not launch an agent.
+func TestFocusTaskSessionIdleSuspensionResumeRespectsCeiling(t *testing.T) {
+	ctx := context.Background()
+	f := newFocusCeilingFixture(t, "task-focus-ceiling", "session-focus-ceiling", models.TaskSessionStateWaitingForInput)
+
+	execution, _, resumed, err := f.svc.focusTaskSession(ctx, "task-focus-ceiling", "session-focus-ceiling")
+	if n := f.launchCalls.Load(); n != 0 {
+		t.Fatalf("saturated focus launched %d agents, want 0", n)
+	}
 	if err != nil {
 		t.Fatalf("focusTaskSession: %v", err)
 	}
 	if resumed || execution != nil {
 		t.Fatalf("saturated focus resumed: execution=%v resumed=%v, want none", execution != nil, resumed)
 	}
-	if launchCalls != 0 {
-		t.Fatalf("saturated focus launched %d agents, want 0", launchCalls)
+	session, err := f.svc.repo.GetTaskSession(ctx, "session-focus-ceiling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := session.Metadata[ceilingManualOverrideMetadataKey]; present {
+		t.Fatal("passive focus recorded a manual override")
+	}
+
+}
+
+// A completed idle-suspended session deferred by focus keeps its focus resume
+// permission in the deferral, so the replay reaches the executor once capacity
+// frees instead of rejecting the completed session.
+func TestFocusTaskSessionDeferredCompletedResumeReplaysAfterCapacityFrees(t *testing.T) {
+	ctx := context.Background()
+	f := newFocusCeilingFixture(t, "task-focus-completed", "session-focus-completed", models.TaskSessionStateCompleted)
+	acceptIdleFocusLaunch(t, f)
+
+	if _, _, resumed, err := f.svc.focusTaskSession(ctx, "task-focus-completed", "session-focus-completed"); err != nil || resumed {
+		t.Fatalf("saturated focus: resumed=%v err=%v, want deferred", resumed, err)
+	}
+	record := deferredLaunchOf(t, f.svc, "task-focus-completed")
+	if record[models.CeilingLaunchKindKey] != string(models.CeilingLaunchResume) {
+		t.Fatalf("focus did not record a deferred resume: %+v", record)
+	}
+
+	f.svc.sessionCeiling.release(f.occupierKey)
+	f.svc.retryOneDeferredCeilingLaunch(ctx, &models.Task{ID: "task-focus-completed"}, nil)
+	f.svc.retryOneDeferredCeilingLaunch(ctx, &models.Task{ID: "task-focus-completed"}, nil)
+	if n := f.launchCalls.Load(); n != 1 {
+		t.Fatalf("replayed completed focus resume launched %d agents, want 1", n)
+	}
+	record, _, err := f.svc.repo.GetTaskDeferredLaunch(ctx, "task-focus-completed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := models.ReadCeilingDeferral(record); err == nil {
+		t.Fatal("accepted focus resume remained queued")
+	}
+}
+
+func acceptIdleFocusLaunch(t *testing.T, f focusCeilingFixture) {
+	t.Helper()
+	agent := f.svc.agentManager.(*mockAgentManager)
+	agent.launchAgentFunc = func(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		f.launchCalls.Add(1)
+		if req.ACPSessionID != "same-conversation-token" {
+			t.Errorf("resume changed the native conversation: %q", req.ACPSessionID)
+		}
+		session, err := f.svc.repo.GetTaskSession(ctx, req.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		session.State = models.TaskSessionStateWaitingForInput
+		session.UpdatedAt = time.Now().UTC()
+		if err := f.svc.repo.UpdateTaskSession(ctx, session); err != nil {
+			return nil, err
+		}
+		return &executor.LaunchAgentResponse{AgentExecutionID: "execution-focus-accepted"}, nil
 	}
 }
 
