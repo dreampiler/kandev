@@ -16,6 +16,7 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 // inferenceTestAgent is an agent whose inference support is controlled by the
@@ -28,6 +29,8 @@ type inferenceTestAgent struct {
 	config       *agents.InferenceConfig
 	stripEnv     []string
 	providerSpec *agents.OpenAICompatibleProviderSpec
+	runtimeEnv   map[string]string
+	requiredEnv  []string
 }
 
 func (a *inferenceTestAgent) OpenAICompatibleProvider() *agents.OpenAICompatibleProviderSpec {
@@ -41,7 +44,7 @@ func (a *inferenceTestAgent) DisplayName() string { return a.id + "-display" }
 func (a *inferenceTestAgent) InferenceConfig() *agents.InferenceConfig { return a.config }
 
 func (a *inferenceTestAgent) Runtime() *agents.RuntimeConfig {
-	return &agents.RuntimeConfig{StripEnv: a.stripEnv}
+	return &agents.RuntimeConfig{StripEnv: a.stripEnv, Env: a.runtimeEnv, RequiredEnv: a.requiredEnv}
 }
 
 func (a *inferenceTestAgent) IsInstalled(context.Context) (*agents.DiscoveryResult, error) {
@@ -324,6 +327,12 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 			},
 		}}, newInferenceAgent("inference-ok", true, true))
 
+		harness.manager.secretStore = newInMemorySecretStore()
+		if err := harness.manager.secretStore.Create(t.Context(), &secrets.SecretWithValue{
+			Secret: secrets.Secret{ID: "secret-1", Name: "test"}, Value: "synthetic-secret",
+		}); err != nil {
+			t.Fatal(err)
+		}
 		resp, err := harness.manager.ExecuteInferenceProfilePrompt(t.Context(), "session-1", "profile-1", "hello")
 		if err != nil {
 			t.Fatalf("ExecuteInferenceProfilePrompt: %v", err)
@@ -354,8 +363,8 @@ func TestManagerExecuteInferenceProfilePrompt(t *testing.T) {
 		if got.InferenceConfig.Env["PROFILE_VAR"] != "profile-value" {
 			t.Fatalf("Env = %+v, want the plain profile var", got.InferenceConfig.Env)
 		}
-		if _, leaked := got.InferenceConfig.Env["SECRET_VAR"]; leaked {
-			t.Fatalf("secret-backed env vars must not be inlined: %+v", got.InferenceConfig.Env)
+		if got.InferenceConfig.Env["SECRET_VAR"] != "synthetic-secret" {
+			t.Fatal("secret-backed env var was not resolved for the child")
 		}
 		if _, present := got.InferenceConfig.Env[""]; present {
 			t.Fatalf("blank env keys must be dropped: %+v", got.InferenceConfig.Env)

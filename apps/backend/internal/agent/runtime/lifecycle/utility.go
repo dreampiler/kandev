@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -98,14 +97,14 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	}
 	ia, ok := m.registry.GetInferenceAgent(agentName)
 	if !ok {
-		return nil, fmt.Errorf("agent %q does not support inference", agentName)
+		return nil, fmt.Errorf("%w: agent %q does not support inference", utility.ErrLaunchUnavailable, agentName)
 	}
 	if agentConfig, ok := ia.(agents.Agent); !ok || !agentConfig.Enabled() {
-		return nil, fmt.Errorf("agent %q is disabled or unavailable", agentName)
+		return nil, fmt.Errorf("%w: agent %q is disabled or unavailable", utility.ErrLaunchUnavailable, agentName)
 	}
 	cfg := ia.InferenceConfig()
 	if cfg == nil || !cfg.Supported {
-		return nil, fmt.Errorf("agent %q inference not supported", agentName)
+		return nil, fmt.Errorf("%w: agent %q inference not supported", utility.ErrLaunchUnavailable, agentName)
 	}
 	agentConfig, _ := ia.(agents.Agent)
 	execution, err := m.GetOrEnsureExecution(ctx, sessionID)
@@ -122,25 +121,20 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
-	flags, err := cliflags.Resolve(profile.CLIFlags)
+	flags, prefix, err := m.resolveProfileLaunchTokens(profile)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
+		return nil, fmt.Errorf("%w: %w", utility.ErrLaunchUnavailable, err)
 	}
-	var prefix []string
-	if profile.CommandPrefix != "" {
-		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
-			return nil, err
-		}
-		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
-		if err != nil {
-			return nil, err
-		}
+	env, err := m.ResolveUtilityEnvironment(ctx, agentName, profile.EnvVars)
+	if err != nil {
+		return nil, err
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+	if env == nil {
+		env = make(map[string]string)
+	}
+	command, err := m.resolveUtilityCommand(ctx, agentName, execution.RuntimeName, execution.MetadataSnapshot())
+	if err != nil {
+		return nil, err
 	}
 	if providerKey != "" && providerKeyEnvVar != "" {
 		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins
@@ -151,7 +145,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		AutoApprovePermissions: &autoApprove,
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
-			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
+			Command:  command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
 			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},

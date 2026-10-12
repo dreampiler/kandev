@@ -439,7 +439,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	}
 
 	plan := PlanBatches(files, r.budgetBytes)
-	accumulated, err := r.reviewBatches(ctx, plan, identity, req.SessionID, promptCtx)
+	accumulated, identity, err := r.reviewWithLaunchFallback(ctx, plan, identity, req, promptCtx)
 	if err != nil {
 		return r.fail(ctx, runID, err, started)
 	}
@@ -471,6 +471,8 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	}
 
 	_, err = r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
+		AgentID:         identity.AgentID,
+		Model:           identity.Model,
 		RunID:           runID,
 		Summary:         summary,
 		FindingCount:    len(inputs),

@@ -101,6 +101,9 @@ func (f *fakeStore) CompleteRun(_ context.Context, req taskservice.CompleteRunRe
 	run := f.runs[req.RunID]
 	if run != nil {
 		run.Status = models.ReviewRunCompleted
+		if req.AgentID != "" {
+			run.AgentID, run.Model = req.AgentID, req.Model
+		}
 	}
 	return run, nil
 }

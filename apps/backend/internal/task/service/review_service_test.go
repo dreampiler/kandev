@@ -101,6 +101,7 @@ func TestReviewService_RunLifecycleTransitions(t *testing.T) {
 
 	completed, err := svc.CompleteRun(ctx, CompleteRunRequest{
 		RunID: run.ID, Summary: "done", FindingCount: 2, FileCount: 3, RepositoryCount: 1, DurationMs: 900,
+		AgentID: "claude-acp", Model: "opus",
 	})
 	if err != nil {
 		t.Fatalf("CompleteRun: %v", err)
@@ -110,6 +111,10 @@ func TestReviewService_RunLifecycleTransitions(t *testing.T) {
 	}
 	if completed.FindingCount != 2 || completed.Summary != "done" {
 		t.Fatalf("counts not persisted: %+v", completed)
+	}
+	stored, err := repo.GetTaskReviewRun(ctx, run.ID)
+	if err != nil || stored.AgentID != "claude-acp" || stored.Model != "opus" {
+		t.Fatal("completion did not persist the successful reviewer identity")
 	}
 
 	after, err := svc.ActiveRun(ctx, "task-2")
