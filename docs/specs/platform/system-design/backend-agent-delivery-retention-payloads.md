@@ -112,6 +112,14 @@ progress, removed payload bytes and a bounded backlog sample. A protected-only s
 does not prove the database-wide eligible backlog is empty. Do not add identity labels
 or print payloads. Any new progress fields must be structural and bounded.
 
+Sustained inflow can exceed one five-second pass per minute. A pass that runs out of time
+while its removals still outnumber protected candidates, or that commits cleanup despite a
+transient batch deadline, resets backoff and starts the next pass after five seconds instead
+of the normal interval. Discovery-only or protected-dominated passes keep the interval, and a
+pass without committed cleanup keeps the jittered backoff. Payload discovery selects only the
+event types the locked proof can compact, so session-state events do not fill bounded pages
+on every frontier wrap.
+
 ## Transactions and interruptions
 
 Recheck exact event/effect/cursor proofs after the existing sorted session and stream

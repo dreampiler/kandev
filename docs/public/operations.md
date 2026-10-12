@@ -552,6 +552,8 @@ Protected backlog and canonical history can continue to grow. Retention is not a
 Cleanup starts after the first normal interval, which defaults to one minute.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
 Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, with a 100 ms pause between batches. Frontier wrap alone does not repeat a phase. A pass starts no further batch after five seconds.
+When a pass runs out of time while it still removes at least as many candidates as it skips as protected, or removes work despite a transient batch deadline, the next pass starts after five seconds instead of the interval.
+Passes that only advance discovery through protected candidates wait the normal interval. Discovery skips session-state events, which are never compacted.
 SQLite native writer admission can wait through its existing five-second busy timeout after cancellation.
 Stop joins that work before database closure. The 250 ms deadline is not a wall-clock completion promise during contention.
 Startup [configuration](configuration.md#backend-delivery-retention) controls grace, replay limits, cadence, and batch size.

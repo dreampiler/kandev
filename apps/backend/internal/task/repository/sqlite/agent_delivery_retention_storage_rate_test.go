@@ -78,6 +78,7 @@ func runRetentionStorageSteadyRate(t *testing.T, engine string, batchRows int) {
 		advanceRetentionStorageHighWater(t, repo, event.StreamID, initial+minute*1200)
 		fireWorkerTimer(t, timers, time.Minute)
 		snapshot := finishRetentionStorageWorkerPass(t, timers, snapshots)
+		snapshot = finishRetentionStorageCatchUp(t, timers, snapshots, snapshot)
 		var oldest time.Time
 		if err := repo.db.QueryRow(repo.db.Rebind(`SELECT projected_at FROM agent_delivery_inbox WHERE stream_id=? AND payload_pruned_at IS NULL ORDER BY projected_at LIMIT 1`), event.StreamID).Scan(&oldest); err != nil {
 			t.Fatal(err)
@@ -120,6 +121,35 @@ func (r retentionStorageRateRepository) RunAgentDeliveryRetirementBatch(ctx cont
 	return result, err
 }
 
+// retentionStorageCatchUpDelay mirrors the worker's catch-up cadence after a
+// pass that ran out of time while still committing cleanup.
+const retentionStorageCatchUpDelay = 5 * time.Second
+
+// finishRetentionStorageCatchUp runs catch-up passes at the same virtual minute
+// until the worker returns to its normal one-minute cadence.
+func finishRetentionStorageCatchUp(t *testing.T, timers chan workerTimer, snapshots <-chan deliveryretention.Snapshot, last deliveryretention.Snapshot) deliveryretention.Snapshot {
+	t.Helper()
+	for passes := 0; passes < 20; passes++ {
+		var timer workerTimer
+		select {
+		case timer = <-timers:
+		case <-time.After(10 * time.Second):
+			t.Fatal("worker did not schedule its next pass")
+		}
+		if timer.delay != retentionStorageCatchUpDelay {
+			timers <- timer
+			return last
+		}
+		if !last.BacklogRemaining && last.FailedBatches == 0 {
+			t.Fatalf("catch-up pass scheduled without remaining backlog: %+v", last)
+		}
+		timer.fire <- time.Now()
+		last = finishRetentionStorageWorkerPass(t, timers, snapshots)
+	}
+	t.Fatal("catch-up passes did not drain the steady-state backlog")
+	return last
+}
+
 func finishRetentionStorageWorkerPass(t *testing.T, timers chan workerTimer, snapshots <-chan deliveryretention.Snapshot) deliveryretention.Snapshot {
 	t.Helper()
 	guard := time.NewTimer(10 * time.Second)
@@ -129,7 +159,7 @@ func finishRetentionStorageWorkerPass(t *testing.T, timers chan workerTimer, sna
 		case snapshot := <-snapshots:
 			return snapshot
 		case timer := <-timers:
-			if timer.delay == time.Minute {
+			if timer.delay == time.Minute || timer.delay == retentionStorageCatchUpDelay {
 				timers <- timer
 				return receiveWorkerSnapshot(t, snapshots)
 			}
