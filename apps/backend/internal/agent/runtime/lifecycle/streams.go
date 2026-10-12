@@ -236,6 +236,9 @@ func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *Agent
 	connected := client.HasAgentStream()
 	releaseClient()
 	if !connected {
+		if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+			return err
+		}
 		return errors.New("agent updates stream did not connect")
 	}
 	return nil
@@ -416,15 +419,8 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	if streamID == "" {
 		streamID = execution.SessionID
 	}
-	after, cursorErr := sm.deliveryReplayCursor(ctx, delivery, streamID)
-	if execution.DeliveryMode == DurableDeliveryV1 && delivery != nil {
-		status, statusErr := client.GetDeliveryStatus(ctx, streamID)
-		if statusErr != nil {
-			cursorErr = fmt.Errorf("read authenticated delivery descriptor: %w", statusErr)
-		} else {
-			after, cursorErr = authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
-		}
-	}
+	after, cursorErr := sm.initialDeliveryReplayCursor(ctx, execution, delivery, client, streamID)
+	execution.recordDeliveryStreamFailure(startupGeneration, cursorErr)
 	if cursorErr != nil {
 		sm.logger.Error("failed to load durable delivery replay cursor",
 			zap.String("instance_id", execution.ID),
@@ -442,6 +438,11 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
+	processor.stopTransport = func() {
+		if execution.ownsUpdateStream(streamGeneration) {
+			client.CloseUpdatesStream()
+		}
+	}
 	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
 		if !execution.ownsUpdateStream(streamGeneration) {
 			return
@@ -457,6 +458,7 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		sm.handleUpdateStreamDisconnect(ctx, execution, client, processor, startupGeneration, streamGeneration, disconnectErr)
 	}, after)
+	execution.recordDeliveryStreamFailure(startupGeneration, err)
 	if err != nil {
 		_ = processor.close()
 	}

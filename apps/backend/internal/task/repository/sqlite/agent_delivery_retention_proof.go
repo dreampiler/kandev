@@ -58,10 +58,18 @@ const agentDeliveryRetainedTerminalProofSQL = `EXISTS (
   )
 )`
 
+// Fork guard: any open recovery block preserves event evidence for its session
+// incarnation. Every event payload path must carry it, including the
+// independent-output branch that skips the settled-submission proof.
+const agentDeliveryOpenRecoveryBlockGuardSQL = `NOT EXISTS (
+  SELECT 1 FROM session_recovery_blocks blocked
+  WHERE blocked.session_id = source.session_id
+   AND blocked.incarnation_id = source.incarnation_id AND blocked.state = 'open'
+ )`
+
 // Known canonical output is redundant after its generic effect commits, even
 // while the prompt is active. Prompt and terminal settlement remain separate.
 // A scalar identity probe keeps PostgreSQL from hashing lifetime submissions.
-// Any open recovery block preserves event evidence for its session incarnation.
 const agentDeliveryRetainedSubmissionProofSQL = `((submission_id = '' OR (
  SELECT 1 FROM agent_delivery_submissions settled
  WHERE settled.id = source.submission_id AND settled.session_id = source.session_id
@@ -69,15 +77,12 @@ const agentDeliveryRetainedSubmissionProofSQL = `((submission_id = '' OR (
   AND settled.state IN ('prepared', 'dispatching', 'accepted', 'interrupted_unknown', 'completed', 'failed', 'cancelled')
  LIMIT 1
 ) IS NOT NULL)
- AND NOT EXISTS (
-  SELECT 1 FROM session_recovery_blocks blocked
-  WHERE blocked.session_id = source.session_id
-   AND blocked.incarnation_id = source.incarnation_id AND blocked.state = 'open'
- ))`
+ AND ` + agentDeliveryOpenRecoveryBlockGuardSQL + `)`
 
 func retentionCandidateProofQuery(query string) string {
 	query = strings.ReplaceAll(query, "/* unsettled terminal */", "NOT "+agentDeliveryRetainedTerminalProofSQL)
 	query = strings.ReplaceAll(query, "/* settled event */", agentDeliveryRetainedSubmissionProofSQL)
+	query = strings.ReplaceAll(query, "/* no open recovery block */", agentDeliveryOpenRecoveryBlockGuardSQL)
 	return query
 }
 

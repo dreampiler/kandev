@@ -127,7 +127,7 @@ func TestIsMissingProviderSessionErrRequiresMatchingStructuredEvidence(t *testin
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := isMissingProviderSessionErr(test.err, "saved-session"); got != test.want {
+			if got := isMissingProviderSessionErr(test.err, "saved-session", "codex-acp"); got != test.want {
 				t.Fatalf("isMissingProviderSessionErr() = %t, want %t", got, test.want)
 			}
 		})
