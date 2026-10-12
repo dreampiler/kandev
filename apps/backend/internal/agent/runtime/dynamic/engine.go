@@ -394,14 +394,40 @@ func (e *Engine) admitCandidate(candidate Candidate, sessionID string, generatio
 
 // resourceKeys lists the circuits that gate a candidate.
 func (c Candidate) resourceKeys() []string {
-	keys := make([]string, 0, 2)
+	keys := make([]string, 0, 3)
 	if c.BindingKey != "" {
 		keys = append(keys, c.BindingKey)
 	}
 	if c.ModelKey != "" && c.ModelKey != c.BindingKey {
 		keys = append(keys, c.ModelKey)
 	}
+	if key := c.accountBlockKey(); key != "" {
+		keys = append(keys, key)
+	}
 	return keys
+}
+
+// accountBlockKey is the circuit that holds this execution profile after its
+// provider account was restricted.
+func (c Candidate) accountBlockKey() string {
+	return accountBlockKey(c.ID)
+}
+
+func accountBlockKey(executionProfileID string) string {
+	if executionProfileID == "" {
+		return ""
+	}
+	return ResourceKey(ScopeAccountBlock, executionProfileID)
+}
+
+// ReleaseAccountBlock closes the owner-release hold of one execution profile
+// and reports whether a hold was closed. Credential, model, and other
+// profiles' circuits are never read or changed.
+func (e *Engine) ReleaseAccountBlock(executionProfileID string) (bool, error) {
+	if e == nil || e.circuits == nil {
+		return false, nil
+	}
+	return e.circuits.ReleaseHold(accountBlockKey(executionProfileID))
 }
 
 func (e *Engine) loadStateLocked(ctx context.Context, sessionID string) (RouteState, bool, error) {
@@ -536,14 +562,20 @@ func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.
 
 func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
-		return actionForRules(candidate.Rules, code)
+		action := actionForRules(candidate.Rules, code)
+		if action == ActionRetrySame && routingerr.HoldsUntilRelease(code) {
+			// A held candidate cannot serve the retry, so the legacy retry
+			// moves on to the next candidate instead.
+			return ActionTryNext
+		}
+		return action
 	}
 	class := routingerr.ClassForCode(code)
 	policy, ok := candidate.Policies.PolicyFor(class)
 	if !ok {
 		return ActionStop
 	}
-	if policy.Retry.Enabled {
+	if policy.Retry.Enabled && !routingerr.HoldsUntilRelease(code) {
 		return ActionRetrySame
 	}
 	if policy.OnExhausted == routingpolicy.OutcomeSkip {
@@ -1564,7 +1596,18 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 }
 
 func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, candidateID string, failure *routingerr.Error) {
-	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
+	if failure == nil || e.circuits == nil {
+		return
+	}
+	if routingerr.HoldsUntilRelease(failure.Code) {
+		// The restriction belongs to this execution profile's account; its
+		// credential binding and model stay available to sibling profiles.
+		if candidate, ok := candidateByID(profile, candidateID); ok {
+			e.circuits.Hold(candidate.accountBlockKey(), failure.Code)
+		}
+		return
+	}
+	if !qualifiesForCircuit(failure.Code) {
 		return
 	}
 	candidate, ok := candidateByID(profile, candidateID)

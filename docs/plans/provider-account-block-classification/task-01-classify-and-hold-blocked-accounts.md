@@ -1,7 +1,7 @@
 ---
 id: "01-classify-and-hold-blocked-accounts"
 title: "Classify and hold blocked provider accounts"
-status: in_progress
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"

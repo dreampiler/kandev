@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: in_progress
+status: completed
 requirements:
   - REQ-AGENTS-PROVIDER-ACCOUNT-BLOCK-001
 system_design:
@@ -44,8 +44,12 @@ The [requirements](../../specs/agents/requirements/provider-account-block-classi
 
 ## Work orders
 
-- [ ] [Task 01: Classify and hold blocked provider accounts](task-01-classify-and-hold-blocked-accounts.md)
+- [x] [Task 01: Classify and hold blocked provider accounts](task-01-classify-and-hold-blocked-accounts.md)
 
 ## Verification results
 
-Pending implementation.
+- RED on the base commit: the observed diagnostic classified as `agent_runtime_error` with rule `phase.poststart.unknown`; a hard policy with reset-wait enabled returned `waiting_for_reset`; a post-output `account_blocked` failure left the failing profile selectable.
+- GREEN: `routingerr` (excluding the existing Windows-only `TestRemediateNpxCache_RemovesHashDirAndPreservesParent`), `routingpolicy`, and `dynamic` packages; `runtime`, `orchestrator`, `settings/handlers`, `settings/controller`, and `backendapp` with dynamic, preview, release, and permission filters.
+- Disabling the held-circuit predicate fails six hold and release tests.
+- `go build ./...` and `go vet` on the changed packages pass.
+- Not verified here: a live provider restriction on an installed runtime, and the preview UI text for a hold without an end time.

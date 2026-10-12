@@ -21,6 +21,9 @@ const (
 	// SuspensionScopeProvider pauses every paid model of one provider. Only an
 	// operator-entered block uses it.
 	SuspensionScopeProvider SuspensionScope = "provider"
+	// SuspensionScopeProfile holds one execution profile whose provider account
+	// was restricted, until its owner releases it.
+	SuspensionScopeProfile SuspensionScope = "profile"
 )
 
 // SuspensionSource tells whether a suspension came from a routing failure or
