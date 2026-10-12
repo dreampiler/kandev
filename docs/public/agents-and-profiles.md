@@ -598,6 +598,20 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
+A provider account restriction is different: when a provider reports
+`403 Forbidden` with `user_blocked` or "Your access has been restricted",
+Kandev classifies it as `account_blocked`. It never retries or waits on that
+candidate, applies the candidate's hard-error **Skip candidate** or **Stop for
+manual recovery** outcome, and holds only the failing execution profile. Other
+profiles, including profiles that share its credentials, and the candidate
+order are unchanged. The hold has no expiry or health probe and survives a
+restart; enabling, disabling, or editing the profile does not release it. After
+the account owner resolves the restriction with the provider, release the
+profile with `POST /api/v1/agent-profiles/:id/account-block/release`. The
+response reports `released: true` when a hold was closed and `false` when there
+was none. The settings preview shows a held profile as suspended without an end
+time.
+
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another

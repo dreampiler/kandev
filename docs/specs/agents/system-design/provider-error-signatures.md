@@ -59,6 +59,13 @@ active (paid) Claude [Pro|Max|Team|Enterprise] subscription", "subscription
 expired / is required / is inactive / not active", and "no active
 subscription".
 
+Account-block signature (provider-neutral, `provider.account_blocked.v1`): a
+line that opens with `Error from provider <name>: 403 Forbidden`, optionally
+after an error label and an opening JSON `message` field, and carries
+`user_blocked` or "Your access has been restricted" on the same line. The
+[account-block design](provider-account-block-classification.md) owns the
+rule and the held circuit it opens.
+
 Rule order and confidence are unchanged, so a provider signature that matched
 before still yields the same code, confidence, and flags. Text that matched
 only through a topic word now falls through to the next rule, the

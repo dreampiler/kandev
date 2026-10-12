@@ -1507,6 +1507,9 @@ func startGatewayAndServe(
 		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
 	}
 	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
+	if services.DynamicProfileResolver != nil {
+		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+	}
 	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
 	agentSettingsController.SetProviderLimitService(newProviderLimitService(
 		repos.Task, repos.AgentSettings,
