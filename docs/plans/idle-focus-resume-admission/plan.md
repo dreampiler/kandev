@@ -68,14 +68,14 @@ Only the agent manager is simulated. No rendered UI changes require browser cove
 
 - [x] [Task 01: Admit focus resume as automatic](task-01-admit-focus-resume-as-automatic.md)
 
-## Verification results
+## Historical contributor verification results
 
 The new test failed on the original code (one agent launched past the ceiling)
 and passed after the change. The completed-session replay test launched no
 agent before the deferred record kept the focus resume permission and passes
-with the change. Existing focus, idle-suspension, and ceiling tests pass;
-`TestCeilingDispatchAdmissionSerializesRouteMutation` fails on Windows with and
-without this change.
+with the change. Existing focus, idle-suspension, and ceiling tests passed on that contributor
+baseline. Its reported Windows dispatch-serialization failures predate the
+maintainer current-main integration and are not current verification results.
 
 ## Risks
 
@@ -119,3 +119,14 @@ idle suspension returns the superseded-provenance outcome. An extracted-source
 shortcut regression failed with nonretryable provenance loss before this fix
 and passes under the race detector afterward. Real replay/settlement package
 regressions cover all three lease-loss variants in hosted Backend CI.
+
+Hosted real-package verification found one fixture error in the lost-provenance
+regression: `UpsertExecutorRunning` intentionally preserves a suspension marker,
+so it cannot clear that marker for the test. The fixture now uses the guarded
+`CompareAndSetExecutorRunningIdleSuspension` transition over the exact execution
+and observed row timestamp, then asserts readback before replay. No production
+budget or assertion is relaxed. Completed replay, exact claim/lease retention,
+route serialization, cancellation and immutable retry regressions passed in
+that run. The full corrected exact-head suites remain the final delivery gate.
+The unrelated protected terminal-environment fix is included in this same
+necessary fixture-remediation integration batch.

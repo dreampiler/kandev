@@ -119,9 +119,22 @@ func TestDeferredIdleFocusResumeDropsLostProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running.IdleSuspensionState = models.ExecutorIdleSuspensionNone
-	if err := f.svc.repo.UpsertExecutorRunning(ctx, running); err != nil {
+	cas, ok := f.svc.repo.(idleSuspensionStateCAS)
+	if !ok {
+		t.Fatal("repository does not support idle suspension transitions")
+	}
+	if err := cas.CompareAndSetExecutorRunningIdleSuspension(
+		ctx, running.SessionID, running.AgentExecutionID, running.UpdatedAt,
+		models.ExecutorIdleSuspensionSuspended, models.ExecutorIdleSuspensionNone,
+	); err != nil {
 		t.Fatal(err)
+	}
+	currentRunning, err := f.svc.repo.GetExecutorRunningBySessionID(ctx, running.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentRunning.IdleSuspensionState != models.ExecutorIdleSuspensionNone {
+		t.Fatal("fixture did not clear idle-suspension provenance")
 	}
 	f.svc.sessionCeiling.release(f.occupierKey)
 	f.svc.retryOneDeferredCeilingLaunch(ctx, &models.Task{ID: "focus-unparked-task"})

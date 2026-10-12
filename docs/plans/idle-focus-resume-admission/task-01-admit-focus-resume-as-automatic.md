@@ -83,15 +83,15 @@ record, the record is dropped as superseded instead of retried.
 - REQ-AGENTS-SESSION-CEILING-001 and its automatic and manual admission criteria.
 - The linked session ceiling design.
 
-## Results
+## Historical contributor results
 
 - RED: the new test failed on the original code with one agent launched past
   the ceiling.
 - GREEN: the new test and the existing focus and idle-suspension tests pass.
 - RED: the completed-session replay test launched no agent before the deferred
   record kept the focus resume permission; it passes with the change.
-- `TestCeilingDispatchAdmissionSerializesRouteMutation` (`start_created` and
-  `prompt_ensure`) fails on Windows with and without this change.
+- The contributor baseline reported Windows dispatch-serialization failures;
+  those are historical results, not the integrated candidate verification.
 - `go vet` and `golangci-lint` on the changed package report no issues.
 
 ## Maintainer integration and verification
@@ -131,3 +131,14 @@ idle suspension returns the superseded-provenance outcome. An extracted-source
 shortcut regression failed with nonretryable provenance loss before this fix
 and passes under the race detector afterward. Real replay/settlement package
 regressions cover all three lease-loss variants in hosted Backend CI.
+
+Hosted real-package verification found one fixture error in the lost-provenance
+regression: `UpsertExecutorRunning` intentionally preserves a suspension marker,
+so it cannot clear that marker for the test. The fixture now uses the guarded
+`CompareAndSetExecutorRunningIdleSuspension` transition over the exact execution
+and observed row timestamp, then asserts readback before replay. No production
+budget or assertion is relaxed. Completed replay, exact claim/lease retention,
+route serialization, cancellation and immutable retry regressions passed in
+that run. The full corrected exact-head suites remain the final delivery gate.
+The unrelated protected terminal-environment fix is included in this same
+necessary fixture-remediation integration batch.
