@@ -256,6 +256,7 @@ Agent routing and Office ownership are independent. Workflow-level defaults, per
 - `list_related_tasks_kandev`.
 - 3 task-document tools (`list_task_documents_kandev`, `get_task_document_kandev`, `write_task_document_kandev`).
 - `show_rich_output_kandev` and gated `step_complete_kandev`.
+- Independent local-source review tools (`set_review_source_kandev`, `run_code_review_kandev`, and `get_code_review_kandev`), as defined by [Native Code Review Local Sources](../../agents/system-design/native-code-review-local-source.md).
 
 `ModeOffice` excludes kanban/config tools, workspace/workflow listing tools, and
 the workflow-step decision action. Its first-turn context lists only registered

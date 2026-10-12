@@ -310,14 +310,19 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 	if in.Action.RunCodeReview != nil {
 		profileID = in.Action.RunCodeReview.AgentProfileID
 	}
+	sessionID := in.State.SessionID
+	writer := c.svc.reviewWriterSession(ctx, in.State.TaskID, sessionID)
+	if writer != nil {
+		sessionID = writer.ID
+	}
 	_, err := c.svc.reviewRunner.Launch(ctx, review.RunRequest{
 		TaskID:         in.State.TaskID,
-		SessionID:      in.State.SessionID,
+		SessionID:      sessionID,
 		AgentProfileID: profileID,
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
 		EntryID:        in.EntryID,
-		Origin:         c.svc.reviewOriginIdentity(ctx, in.State.TaskID, in.State.SessionID),
+		Origin:         c.svc.reviewOriginIdentity(writer),
 		OriginRequired: true,
 	})
 	if err != nil {
@@ -339,14 +344,13 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 // MachineState carries no session, so stateSessionID is empty on every real step
 // entry. The writer is therefore taken from the committed arrival itself — see
 // reviewWriterSession.
-func (s *Service) reviewOriginIdentity(ctx context.Context, taskID, stateSessionID string) *review.OriginIdentity {
-	session := s.reviewWriterSession(ctx, taskID, stateSessionID)
+func (s *Service) reviewOriginIdentity(session *taskmodels.TaskSession) *review.OriginIdentity {
 	if session == nil {
 		return nil
 	}
 	if session.AgentProfileID == "" && session.ExecutionProfileID == "" {
 		s.logger.Warn("review origin identity unavailable: writer session has no profile",
-			zap.String("task_id", taskID), zap.String("session_id", session.ID))
+			zap.String("task_id", session.TaskID), zap.String("session_id", session.ID))
 		return nil
 	}
 	// A dynamic profile session stores its logical profile as AgentProfileID and
