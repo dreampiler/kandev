@@ -219,7 +219,7 @@ Office automatic starts do not use workflow-step auto-start eligibility when the
 sweep evaluates a `start` record. This keeps Office scheduling ownership in the
 Office path.
 
-An automation run's start refused at seam 1 is queued, not failed. The `start`
+A legacy automation run's start refused at seam 1 is queued, not failed. The `start`
 payload records the run ID and thread disposition under `automation_run`. The
 automation dispatcher receives `ErrRunDeferred`, so it leaves the run
 `triggered` and bound to its task, and the run keeps its concurrency slot while
@@ -227,8 +227,9 @@ the ceiling stays full. The orchestrator skips failure cleanup, so the task and
 its record remain. The sweep replays that start through the same dispatcher. It
 binds the new session and turn to the run, or fails the run when the launch
 fails for a non-ceiling reason. When the launch succeeds but the binding fails,
-the run is failed and the launched session is stopped, since no completion
-would settle the run; the task is kept. Workflow-step auto-start eligibility
+the run is failed and cleanup attempts to stop the launched session, since no
+completion would settle the run; the task is kept. Failed or unknown stopping
+does not authorize a replacement start. Workflow-step auto-start eligibility
 does not apply because the trigger is the start signal.
 
 A newly created automation task carries `automation_start_owned` before
@@ -252,17 +253,25 @@ and read uncertainty do not certify termination or permit generic replay.
 Unresolved legacy boolean markers also remain fenced. Explicit task/session
 recovery remains subject to the existing retry owner controls.
 
-The sweep drops a start whose run was deleted or is no longer `triggered`, such
+For legacy runs, the sweep drops a start whose run was deleted or is no longer
+`triggered`, such
 as a stopped, bound, failed, or startup-reconciled run, without launching. A run
 that closes between that check and the replay's dispatch is reported by the
 replay, and the start is dropped the same way. Dropping any other queued
 automation start first fails its run, because no completion event will settle
 it; the record is cleared only after the run is no longer waiting, so a failed
-run update leaves the record for the next sweep. A queued automation start does
-not survive a backend restart: startup reconciliation fails the unbound run, and
-the sweep then drops the start. When the task is hard-deleted while its start is
-queued, the task-deleted event fails the unbound run. Its concurrency slot is
-released, and the missing task prevents a later replay.
+run update leaves the record for the next sweep. Startup reconciliation can
+fail an unbound legacy run, after which the sweep drops its waiting start. When
+its task is hard-deleted while the start is queued, the task-deleted event fails
+the unbound legacy run. Its concurrency slot is released, and the missing task
+prevents a later replay.
+
+Retry-enabled starts use the durable launch ledger and exact prepared-payload
+admission. Queued, accepted or uncertain launch ownership can survive restart
+and remain live across instances. Startup, lease recovery and task deletion
+must retain unresolved ownership and use the existing retry cancellation and
+termination boundaries; none of them alone proves a launch stopped or permits
+a replacement start.
 
 ## Persistence
 
