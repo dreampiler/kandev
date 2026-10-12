@@ -954,6 +954,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.AssigneeAgentProfileID != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "assignee_agent_profile_id is office-only and cannot be set via create_task_kandev", nil)
 	}
+	// An omitted priority takes the service default; a supplied one must be a
+	// canonical value. Rejected here so the caller gets a validation error
+	// naming the allowed values instead of a generic create failure.
+	if req.Priority != "" {
+		if err := models.ValidateTaskPriority(req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalidTaskPriorityMessage(req.Priority), nil)
+		}
+	}
 
 	// Default start_agent to true for backward compatibility
 	startAgent := req.StartAgent == nil || *req.StartAgent
@@ -1117,6 +1125,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID:         resolvedStepID,
 		Title:                  req.Title,
 		Description:            req.Description,
+		Priority:               req.Priority,
 		Autopilot:              req.Autopilot,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
@@ -2170,6 +2179,11 @@ func metadataString(metadata map[string]interface{}, key string) string {
 	return ""
 }
 
+// invalidTaskPriorityMessage names the offending value and the allowed ones.
+func invalidTaskPriorityMessage(priority string) string {
+	return fmt.Sprintf("invalid priority %q: must be one of %s", priority, strings.Join(taskcontract.TaskPriorityValues(), ", "))
+}
+
 // handleUpdateTask updates an existing task.
 func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.UpdateTaskRequest lacks them
@@ -2178,6 +2192,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title                *string `json:"title"`
 		Description          *string `json:"description"`
 		State                *string `json:"state"`
+		Priority             *string `json:"priority"`
 		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -2185,6 +2200,13 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	// Checked before anything is applied so a bad priority cannot half-apply
+	// the call (the launch-prompt edit below is written first).
+	if req.Priority != nil {
+		if err := models.ValidateTaskPriority(*req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalidTaskPriorityMessage(*req.Priority), nil)
+		}
 	}
 
 	// Applied before the ordinary field update so a rejected prompt edit does
@@ -2208,6 +2230,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
+		Priority:    req.Priority,
 		State:       state,
 	})
 	if err != nil {

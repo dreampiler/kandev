@@ -257,6 +257,32 @@ func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID st
 	return err
 }
 
+// automationTaskArchiverAdapter satisfies automation.TaskArchiver over the task
+// service. It delegates to ArchiveTaskIfIdle, which refuses a live session
+// instead of stopping it, and translates the task-service sentinels to
+// automation sentinels so the failed-run settlement can classify an
+// already-archived, missing, or still-live generated task without importing
+// the task service.
+type automationTaskArchiverAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a *automationTaskArchiverAdapter) ArchiveTaskIfIdle(ctx context.Context, taskID string) error {
+	err := a.svc.ArchiveTaskIfIdle(ctx, taskID)
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, taskservice.ErrTaskAlreadyArchived):
+		return fmt.Errorf("%w: %w", automation.ErrTaskAlreadyArchived, err)
+	case errors.Is(err, taskservice.ErrTaskActiveSessions):
+		return fmt.Errorf("%w: %w", automation.ErrTaskActiveSessions, err)
+	case errors.Is(err, taskrepo.ErrTaskNotFound):
+		return fmt.Errorf("%w: %w", automation.ErrTaskNotFound, err)
+	}
+	return err
+}
+
 type taskOriginGetter interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 }

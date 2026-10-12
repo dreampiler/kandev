@@ -18,6 +18,8 @@ type Components struct {
 	webhookDone        chan struct{}
 	managedCancel      context.CancelFunc
 	managedDone        chan struct{}
+	failedSettleCancel context.CancelFunc
+	failedSettleDone   chan struct{}
 	Service            *Service
 	Scheduler          *CronScheduler
 	Evaluator          *GitHubEvaluator
@@ -33,6 +35,9 @@ func (c *Components) Start(ctx context.Context) {
 	if err := c.Service.ReconcileOpenRuns(ctx); err != nil {
 		c.Service.logger.Warn("automation open-run reconciliation failed", zap.Error(err))
 	}
+	if err := c.Service.ReconcileFailedRunTasks(ctx); err != nil {
+		c.Service.logger.Warn("failed automation-run task reconciliation failed", zap.Error(err))
+	}
 	if err := c.Service.ReconcileManagedConversationDeliveries(ctx); err != nil {
 		c.Service.logger.Warn("managed automation delivery recovery failed", zap.Error(err))
 	}
@@ -47,6 +52,7 @@ func (c *Components) Start(ctx context.Context) {
 	c.managedCancel = managedCancel
 	c.managedDone = make(chan struct{})
 	go func() { defer close(c.managedDone); c.Service.runManagedAutomationDeliveryWorker(managedCtx) }()
+	c.failedSettleCancel, c.failedSettleDone = c.Service.startFailedRunTaskSettlementWorker(ctx)
 	c.Scheduler.Start(ctx)
 	c.Evaluator.Start(ctx)
 	c.WebhookSubscriber.Start(ctx)
@@ -62,6 +68,10 @@ func (c *Components) Stop() {
 	if c.managedCancel != nil {
 		c.managedCancel()
 		<-c.managedDone
+	}
+	if c.failedSettleCancel != nil {
+		c.failedSettleCancel()
+		<-c.failedSettleDone
 	}
 	c.Scheduler.Stop()
 	c.Evaluator.Stop()
