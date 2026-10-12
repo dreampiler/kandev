@@ -125,6 +125,8 @@ export type OverviewWorkspaceActivity = {
   sessions_failed: number;
   agent_turns: number;
   step_moves: number;
+  /** Automation-execution tasks created in the same window, shown separately. */
+  automation: number;
   failure_buckets?: OverviewFailureBucket[];
   /** The agent's own first-line errors behind the buckets, shown verbatim. */
   failure_samples?: { kind: string; count: number }[];

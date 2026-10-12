@@ -2,7 +2,7 @@
 status: active
 system: office
 created: 2026-08-23
-updated: 2026-09-27
+updated: 2026-10-12
 owners:
   - Kandev
 ---
@@ -28,7 +28,13 @@ repository is attached.
   no attached repository. It is not a repository selection.
 - **Visible normal task:** A task with the normal task origin and workflow
   behavior. It appears in the Kanban and sidebar and does not receive the
-  coordinator-only MCP surface.
+  coordinator-only MCP surface. It is still an
+  automation-execution origin for the workspace overview's default counts:
+  those counts (last-24-hour new and completed, per-project task counts, and
+  the project-statistics totals) exclude every automation-execution origin, and
+  the overview reports the automation volume separately. Remaining on the board
+  and being excluded from the human-facing aggregate counts are not in
+  conflict: the task row is preserved, only the default figures omit it.
 
 ## Requirements
 

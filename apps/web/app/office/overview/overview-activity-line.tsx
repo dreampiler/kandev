@@ -34,9 +34,12 @@ type Figure = {
 };
 
 /**
- * The project-statistics line: five period totals and, behind a disclosure, the
- * reasons its failed sessions failed. It renders whenever the overview answered
- * — including a workspace with no work — because it answers "how much happened
+ * The project-statistics line: five period totals over human work, a separate
+ * automation total, and, behind a disclosure, the reasons its failed sessions
+ * failed. Automation executions are kept out of the five totals and reported on
+ * their own, so the default figures read as the work a person drove while the
+ * automation volume stays visible. It renders whenever the overview answered —
+ * including a workspace with no work — because it answers "how much happened
  * here in the period" rather than "what is running now".
  */
 export function OverviewActivityLine({ activity }: { activity?: OverviewWorkspaceActivity }) {
@@ -57,6 +60,9 @@ export function OverviewActivityLine({ activity }: { activity?: OverviewWorkspac
     },
     { key: "agent-turns", labelKey: "office:overviewStatsAgentTurns", value: activity.agent_turns },
     { key: "step-moves", labelKey: "office:overviewStatsStepMoves", value: activity.step_moves },
+    // The automation figure shares the period the totals above are read over,
+    // so the split is honest about the same window.
+    { key: "automation", labelKey: "common:automation", value: activity.automation },
   ];
   return (
     <div

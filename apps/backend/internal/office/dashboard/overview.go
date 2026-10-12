@@ -94,6 +94,11 @@ type OverviewReader interface {
 	ListOverviewWorkspaceActivity(
 		ctx context.Context, workspaceIDs []string, since time.Time,
 	) (map[string]sqlite.OverviewWorkspaceActivityCounts, error)
+	// ListOverviewAutomationCounts is the separate per-workspace automation
+	// figure shown beside the period totals, read over the same window.
+	ListOverviewAutomationCounts(
+		ctx context.Context, workspaceIDs []string, since time.Time,
+	) (map[string]int, error)
 	ListOverviewFailureBuckets(
 		ctx context.Context, workspaceIDs []string, since time.Time,
 	) ([]*sqlite.OverviewFailureBucketRow, error)

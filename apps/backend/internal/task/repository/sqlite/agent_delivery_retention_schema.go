@@ -258,6 +258,10 @@ func (r *Repository) validateAgentDeliveryRetentionFormatMarker(ctx context.Cont
 
 func assertNoPartialAgentDeliveryRetentionSchema(ctx context.Context, database *sqlx.DB) error {
 	for _, column := range agentDeliveryRetentionColumns {
+		// A lone retired cursor is the legacy fork format; other unmarked retention state is rejected.
+		if column.table == "agent_delivery_cursors" && column.column == "retired_sequence" {
+			continue
+		}
 		hasColumn, err := db.ColumnExistsContext(ctx, database, column.table, column.column)
 		if err != nil {
 			return fmt.Errorf("check legacy agent delivery column %s.%s: %w", column.table, column.column, err)
