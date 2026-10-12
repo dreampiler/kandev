@@ -10302,6 +10302,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionForIdentity(
 		return false, messagequeue.ErrSessionIdentityMismatch
 	}
 	if err := s.checkSessionRecoveryBlock(ctx, identity.SessionID); err != nil {
+		s.autoRecoverBlockedQueue(ctx, identity.TaskID, identity.SessionID, err)
 		return false, err
 	}
 	if err := s.checkSessionPromptable(identity.TaskID, identity.SessionID, session.State); err != nil {
@@ -10321,6 +10322,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 		return false, nil
 	}
 	if err := s.checkSessionRecoveryBlock(ctx, identity.SessionID); err != nil {
+		s.autoRecoverBlockedQueue(ctx, identity.TaskID, identity.SessionID, err)
 		return false, err
 	}
 	if s.isInitialTaskBriefDispatchPending(identity.SessionID) {

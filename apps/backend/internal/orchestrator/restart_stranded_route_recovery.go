@@ -258,3 +258,24 @@ func (s *Service) refreshRouteActionResult(ctx context.Context, sessionID string
 	result.Reason = session.RouteReason
 	return result
 }
+
+// autoRecoverBlockedQueue gives queued work on a session blocked by a
+// restart-interrupted turn the same automatic continue_from_history a refused
+// prompt gets. Drain triggers fire for sessions without queued work too, so it
+// only acts when queue rows or a parked dispatch are waiting.
+func (s *Service) autoRecoverBlockedQueue(ctx context.Context, taskID, sessionID string, cause error) {
+	if s == nil || taskID == "" || sessionID == "" || s.messageQueue == nil {
+		return
+	}
+	reason := recoveryReasonFromError(cause)
+	if reason != "" && !interruptedTurnRecoveryReasons[reason] {
+		return
+	}
+	go func() {
+		recoveryCtx := context.WithoutCancel(ctx)
+		if reason != unknownQueueDispatchRecoveryReason && s.messageQueue.GetStatus(recoveryCtx, sessionID).Count == 0 {
+			return
+		}
+		s.AutoRecoverBlockedPrompt(recoveryCtx, taskID, sessionID, cause)
+	}()
+}

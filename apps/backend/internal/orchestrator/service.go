@@ -3708,6 +3708,9 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
+		// Last, so lifecycle recovery owns its sessions first: queued work on a
+		// primary that was idle at shutdown gets its one delivery trigger.
+		s.resumeQueuedSessionsOnStartup(sweepCtx)
 	}()
 	return true
 }
