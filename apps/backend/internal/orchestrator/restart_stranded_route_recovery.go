@@ -214,6 +214,43 @@ func (s *Service) handOffRouteActionToContinuation(ctx context.Context, session 
 	return true
 }
 
+// handOffRetryToContinuation answers Retry on a session a restart-interrupted
+// turn still blocks by continuing from history on the session's current
+// candidate. Retry means "run the current candidate again"; for such a session
+// that is exactly continue_from_history, which settles the block without
+// re-sending the interrupted prompt. It also covers a route the projection and
+// the durable state describe differently after a failed automatic recovery
+// (for example a FAILED session whose durable route is still active), where
+// the route engine would refuse Retry as a pending recovery. The generation
+// fence still applies: a stale generation goes to the route handler, which
+// reports the conflict.
+func (s *Service) handOffRetryToContinuation(ctx context.Context, request RouteActionRequest) bool {
+	if s.repo == nil {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, request.SessionID)
+	if err != nil || session == nil || session.TaskID == "" ||
+		session.RouteGeneration <= 0 || session.ExecutionProfileID == "" ||
+		session.RouteGeneration != request.ExpectedGeneration {
+		return false
+	}
+	block, err := s.GetOpenSessionRecoveryBlock(ctx, session.ID)
+	if err != nil || block == nil || !interruptedTurnRecoveryReasons[block.Reason] {
+		return false
+	}
+	if s.sessionRuntimeLive(ctx, session.ID) {
+		return false
+	}
+	if isOfficeTask, officeErr := s.lookupOfficeTask(ctx, session.TaskID); officeErr != nil || isOfficeTask {
+		return false
+	}
+	s.routeActionContinuations.Store(session.ID, session.TaskID)
+	s.logger.Info("route action retry continues the interrupted session from history",
+		zap.String("session_id", session.ID), zap.String("recovery_reason", block.Reason),
+		zap.String("route_state", session.RouteState), zap.Int64("route_generation", session.RouteGeneration))
+	return true
+}
+
 // finishRouteActionContinuation runs the continuation a route action handed
 // off, outside the route-action lock (resume acquires that same lock). A failed
 // continuation leaves the route at action_required with the launch-failed

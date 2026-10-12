@@ -1768,6 +1768,9 @@ func (s *Service) applyRouteActionUnderLock(ctx context.Context, request RouteAc
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	if request.Action == RouteActionRetry && s.handOffRetryToContinuation(ctx, request) {
+		return nil, nil
+	}
 	return s.routeActionHandler(ctx, request)
 }
 

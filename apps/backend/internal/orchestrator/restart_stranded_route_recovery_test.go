@@ -103,7 +103,7 @@ func TestRestartStrandedDynamicRoute_BothRecoveryPathsAreAdmissible(t *testing.T
 		return &RouteActionResult{SessionID: f.sessionID}, nil
 	})
 	_, err = f.svc.ApplyRouteAction(ctx, RouteActionRequest{
-		SessionID: f.sessionID, Action: RouteActionRetry, ExpectedGeneration: f.generation,
+		SessionID: f.sessionID, Action: RouteActionTryNext, ExpectedGeneration: f.generation,
 	})
 	require.NoError(t, err, "a turn no runtime can settle must not block the route action")
 	require.Equal(t, 1, handlerCalls)
@@ -186,4 +186,27 @@ func TestRestartStrandedDynamicRoute_RouteActionHandsOffToContinuation(t *testin
 
 	_, reclaimed := f.svc.reclaimActionRequiredRouteForRecovery(ctx, f.sessionID, recoveryActionContinueHistory)
 	require.True(t, reclaimed, "the continuation owns the parked generation")
+}
+
+// TestRestartStrandedDynamicRoute_RetryContinuesFromHistory covers Retry on a
+// session the interrupted turn still blocks: whatever the route projection
+// says (including a FAILED session whose durable route stayed active), Retry
+// runs continue_from_history on the current candidate instead of asking the
+// route engine, which would refuse it as a pending recovery.
+func TestRestartStrandedDynamicRoute_RetryContinuesFromHistory(t *testing.T) {
+	ctx := context.Background()
+	f := newStrandedRouteFixture(t)
+
+	stale := RouteActionRequest{SessionID: f.sessionID, Action: RouteActionRetry, ExpectedGeneration: f.generation + 1}
+	require.False(t, f.svc.handOffRetryToContinuation(ctx, stale), "a stale generation keeps the route handler's conflict")
+
+	f.agent.isAgentRunningFn = func(context.Context, string) bool { return true }
+	current := RouteActionRequest{SessionID: f.sessionID, Action: RouteActionRetry, ExpectedGeneration: f.generation}
+	require.False(t, f.svc.handOffRetryToContinuation(ctx, current), "a live runtime still owns the session")
+
+	f.agent.isAgentRunningFn = func(context.Context, string) bool { return false }
+	require.True(t, f.svc.handOffRetryToContinuation(ctx, current))
+	value, handed := f.svc.routeActionContinuations.Load(f.sessionID)
+	require.True(t, handed)
+	require.Equal(t, f.taskID, value)
 }
