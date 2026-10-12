@@ -1198,13 +1198,29 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // AgentctlURL returns the base URL of the agentctl HTTP server for this
 // execution. Returns an empty string when no agentctl client is set (e.g.
 // before the execution has been wired to an agentctl instance).
+//
+// It never blocks. Persistence reads it while holding the execution store
+// lock, and the base URL is immutable per client, so the client lease is not
+// needed. Taking agentctlLifecycleMu here re-entered a read lease the caller
+// could already hold (restoreRecoveredFailedExecution): with a terminal stop
+// waiting for the write side, that recursive read blocked forever while still
+// holding the store lock, which stalled every session on the backend. A
+// concurrent client replacement or detach yields "" for this one snapshot.
 func (ae *AgentExecution) AgentctlURL() string {
-	client, release := ae.AcquireAgentCtlClient()
-	defer release()
-	if client == nil {
+	if ae == nil {
 		return ""
 	}
-	return client.BaseURL()
+	if client := ae.agentctlOverride.Load(); client != nil {
+		return client.BaseURL()
+	}
+	if !ae.agentctlSourceMu.TryRLock() {
+		return ""
+	}
+	defer ae.agentctlSourceMu.RUnlock()
+	if client := ae.currentAgentCtlClient(); client != nil {
+		return client.BaseURL()
+	}
+	return ""
 }
 
 // SetWorkspaceStream sets the unified workspace stream for this execution
