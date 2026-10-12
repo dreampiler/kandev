@@ -2094,6 +2094,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchClaim.consume(ctx)
 	seam1Res.consume()
 
+	// A spawn whose task still points at a terminal primary succeeds it as
+	// primary and receives its queue. A live primary is preserved by the
+	// repository's conditional, atomic promotion.
+	if opts.SpawnOrigin != nil {
+		s.promoteSpawnedSuccessorOnTerminalPrimary(ctx, taskID, sessionID)
+	}
+
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
@@ -6113,6 +6120,52 @@ func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessio
 	// will deliver it: the demoted primary is no longer a trigger for this task.
 	s.drainQueuedAfterWaitingTransition(ctx, session.TaskID, sessionID)
 	return nil
+}
+
+// promoteSpawnedSuccessorOnTerminalPrimary makes a freshly spawned session the
+// task's primary only while the current primary is terminal, then hands the
+// previous primary's queue to it. The repository promotion is conditional and
+// atomic, so a live primary (including one a concurrent spawn just promoted)
+// is preserved; the queue moves through the same handoff path as
+// SetPrimarySessionTransferringQueue. It is best-effort: the spawn already
+// succeeded, so a promotion or transfer failure only logs.
+func (s *Service) promoteSpawnedSuccessorOnTerminalPrimary(ctx context.Context, taskID, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	previousPrimaryID, err := s.primarySessionID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to resolve current primary before spawn succession; queue will not transfer",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		previousPrimaryID = ""
+	}
+	promoted, err := s.repo.SetSessionPrimaryIfCurrentPrimaryTerminal(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to promote spawned successor over a terminal primary",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if !promoted {
+		return
+	}
+	s.refreshCurrentStepSessionBinding(ctx, sessionID)
+	if previousPrimaryID != "" && previousPrimaryID != sessionID {
+		if err := s.transferQueuedSessionState(ctx, taskID, previousPrimaryID, sessionID); err != nil {
+			// Fail-open: the promotion stands. A queue left behind is recovered
+			// when its dispatch observes the stranded session.
+			s.logger.Warn("failed to transfer queue to spawned successor",
+				zap.String("task_id", taskID),
+				zap.String("old_primary", previousPrimaryID),
+				zap.String("new_primary", sessionID),
+				zap.Error(err))
+		}
+	}
+	s.publishPrimarySessionUpdate(ctx, taskID, sessionID)
+	s.drainQueuedAfterWaitingTransition(ctx, taskID, sessionID)
 }
 
 // primarySessionID returns the current primary session for a task, or "" when

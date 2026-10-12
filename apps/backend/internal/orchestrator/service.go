@@ -488,6 +488,10 @@ type sessionExecutorStore interface {
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error)
+	// SetSessionPrimaryIfCurrentPrimaryTerminal promotes a session only while
+	// the task has no nonterminal primary, atomically. It is the succession
+	// boundary for a spawned successor of a terminal primary.
+	SetSessionPrimaryIfCurrentPrimaryTerminal(ctx context.Context, sessionID string) (bool, error)
 	RenameTaskSession(ctx context.Context, id, name string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
