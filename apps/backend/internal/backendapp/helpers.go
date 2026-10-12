@@ -2103,6 +2103,11 @@ func registerSecondaryRoutes(
 			p.authSvc,
 			p.log,
 		)
+		if p.services.OfficeSvcs.CrossWorkspace != nil && p.gateway != nil {
+			p.services.OfficeSvcs.CrossWorkspaceGateway = newOfficeCrossWorkspaceGateway(
+				p.services.OfficeSvcs.CrossWorkspace, p.gateway.Dispatcher, p.taskSvc,
+			)
+		}
 		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
@@ -2540,6 +2545,9 @@ func registerMCPAndDebugRoutes(
 				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
 			},
 		))
+	}
+	if p.services != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.CrossWorkspace != nil {
+		mcpHandlers.SetOfficeCrossWorkspace(p.services.OfficeSvcs.CrossWorkspace)
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)

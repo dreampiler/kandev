@@ -171,6 +171,10 @@ func WithLimitCalendar(calendar LimitCalendar) EngineOption {
 // share one API key — a limit reached through one of them is spent for all of
 // them, so pausing only the model that reported it would let each sibling
 // profile spend the same exhausted quota in turn.
+//
+// A limit whose signature names an exhausted account allowance reaches the
+// whole account instead (CauseAccountQuota in failureCauseRules); an
+// unrecognized limit stays on the binding, as it always has.
 func suspensionTarget(candidate Candidate, code routingerr.Code) string {
 	if isUsageLimitCode(code) && candidate.ModelKey != "" &&
 		policyForCandidate(candidate).modelScoped {
@@ -184,7 +188,8 @@ func suspensionTarget(candidate Candidate, code routingerr.Code) string {
 // stated renewal day has begun is retried on the short renewal-lag ladder.
 // Without either, a laddered provider blocks by strike count and never past
 // its next monthly reset or its stated renewal day; every other failure keeps
-// the standard short backoff.
+// the standard short backoff. Causes other than usage limits are sized by
+// causeSuspensionUntil, which calls this only for the usage-limit causes.
 func (e *Engine) suspensionUntil(
 	ctx context.Context,
 	candidate Candidate,

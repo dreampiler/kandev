@@ -464,6 +464,9 @@ type UpdateWorkspaceSettingsRequest struct {
 	RequireApprovalForNewAgents      *bool   `json:"require_approval_for_new_agents"`
 	RequireApprovalForTaskCompletion *bool   `json:"require_approval_for_task_completion"`
 	RequireApprovalForSkillChanges   *bool   `json:"require_approval_for_skill_changes"`
+	// CrossWorkspaceAccess replaces the whole cross-workspace access setting
+	// when present. Only a person (not an agent token) may set it.
+	CrossWorkspaceAccess *CrossWorkspaceAccessRequest `json:"cross_workspace_access"`
 }
 
 // WorkspaceSettingsResponse wraps the workspace settings for GET /settings.

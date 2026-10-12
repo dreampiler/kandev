@@ -281,7 +281,7 @@ func (t *overviewTask) currentSession() *sqlite.OverviewSessionRow {
 // past. A task whose step entry is unknown cannot have moved on, and the session
 // still counts.
 func (t *overviewTask) afterCurrentStep(s *sqlite.OverviewSessionRow) bool {
-	return !t.row.StepEnteredAt.IsZero() && t.row.StepEnteredAt.After(s.UpdatedAt)
+	return !t.row.StepEnteredAt.IsZero() && t.row.StepEnteredAt.After(s.EndedAt())
 }
 
 func (t *overviewTask) classifyError(lastOutput map[string]time.Time) bool {
@@ -326,11 +326,12 @@ func (t *overviewTask) failedWithoutProgressSince(lastOutput map[string]time.Tim
 	if failed == nil {
 		return false
 	}
+	failedAt := failed.EndedAt()
 	for _, s := range t.sessions {
-		if s.State == sessionStateCompleted && s.UpdatedAt.After(failed.UpdatedAt) {
+		if s.State == sessionStateCompleted && s.EndedAt().After(failedAt) {
 			return false
 		}
-		if lastOutput[s.ID].After(failed.UpdatedAt) {
+		if lastOutput[s.ID].After(failedAt) {
 			return false
 		}
 	}
@@ -344,7 +345,7 @@ func (t *overviewTask) newestFailure() *sqlite.OverviewSessionRow {
 		if s.State != sessionStateFailed {
 			continue
 		}
-		if newest == nil || s.UpdatedAt.After(newest.UpdatedAt) {
+		if newest == nil || s.EndedAt().After(newest.EndedAt()) {
 			newest = s
 		}
 	}

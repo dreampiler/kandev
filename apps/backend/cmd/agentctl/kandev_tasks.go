@@ -32,7 +32,7 @@ func (f *repeatableFlag) Set(value string) error {
 // the office runtime needs without breaking older scripts.
 func runTasksCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation> [flags]")
+		cliError("usage: agentctl kandev tasks <list|move|archive|message|conversation|sessions|transcript|plan|send> [flags]")
 		return 1
 	}
 	switch args[0] {
@@ -46,6 +46,14 @@ func runTasksCmd(args []string) int {
 		return tasksMessage(args[1:])
 	case "conversation":
 		return tasksConversation(args[1:])
+	case "sessions":
+		return tasksCrossRead("sessions", "sessions", args[1:])
+	case subcmdTranscript:
+		return tasksCrossRead(subcmdTranscript, "conversation", args[1:])
+	case "plan":
+		return tasksCrossRead("plan", "plan", args[1:])
+	case "send":
+		return tasksSend(args[1:])
 	default:
 		cliError("unknown tasks subcommand: %s", args[0])
 		return 1
@@ -73,9 +81,14 @@ func tasksList(args []string) int {
 	cursor := fs.String("cursor", "", "Continuation cursor value from a prior page")
 	cursorID := fs.String("cursor-id", "", "Continuation cursor id from a prior page")
 	includeSystem := fs.String("include-system", "", "Include kandev-managed system-workflow tasks: true | false")
+	workspace := fs.String("workspace", "", "List another reachable workspace's tasks (cross-workspace access)")
+	workflow := fs.String("workflow", "", "With --workspace: limit to one workflow ID")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
+	}
+	if ws := strings.TrimSpace(*workspace); ws != "" {
+		return listWorkspaceTasks(ws, *workflow)
 	}
 	values := url.Values{}
 	for _, v := range status {

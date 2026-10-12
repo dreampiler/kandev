@@ -54,7 +54,7 @@ Submission/terminal/workflow summaries have no TTL while their session exists; g
 
 Projected nonterminal output from an active or uncertain prompt can lose redundant raw content only after canonical persistence and its required effect commits.
 Keep its submission payload and terminal/recovery dependencies.
-Unprojected tool updates, permission state, turn/configuration events or unknown event/effect types remain intact unless the consumer proves durable application.
+Unprojected rows and unknown event/effect types stay intact; projected known state events (capabilities, modes, permissions, turns) retire like output.
 The collector has an explicit known-type eligibility classifier. An unknown state/type is a skip, never a best guess.
 
 ### Settlement dependencies

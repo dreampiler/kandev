@@ -5033,10 +5033,13 @@ func (r *Repository) setSessionPrimary(
 		}
 	}
 
-	// Clear primary flag on all sessions for this task
+	// Clear the primary flag only on the rows that hold it. Rewriting every
+	// session of the task moved updated_at on old finished rows, which then
+	// read as fresh activity (an old FAILED session reappeared as a new
+	// failure after each step move).
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
-	`), now, taskID)
+		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ? AND is_primary = 1 AND id <> ?
+	`), now, taskID, sessionID)
 	if err != nil {
 		return false, err
 	}

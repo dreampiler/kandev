@@ -1220,5 +1220,14 @@
   "overviewRefreshSeconds_other": "每{{seconds}}秒",
   "overviewUsageStaleObserved": "最後已知值，讀取於 {{relative}}",
   "overviewUsageObserved": "代理執行時觀測到，{{relative}}",
-  "overviewUsageMeasuredCall": "通過最小呼叫測量，{{relative}}"
+  "overviewUsageMeasuredCall": "通過最小呼叫測量，{{relative}}",
+  "crossWorkspaceAccess": "跨工作區存取",
+  "crossWorkspaceAccessToggle": "允許 Office 代理程式與其他工作區協作",
+  "crossWorkspaceAccessDescription": "開啟後，此 Office 工作區的代理程式可以讀取其他工作區的任務、工作階段、計劃和對話，並向這些任務傳送訊息。停止、移動任務和調整優先順序仍由各工作區的協調者負責。預設關閉。",
+  "crossWorkspaceReachableWorkspaces": "可存取的工作區",
+  "crossWorkspaceReachableHint": "全部不勾選則允許你可讀取的所有工作區。填寫協調者任務 ID，Office 代理程式即可知道在該工作區應向哪個任務傳送訊息。",
+  "crossWorkspaceCoordinatorPlaceholder": "協調者任務 ID（可選）",
+  "crossWorkspaceCoordinatorTask": "{{workspace}} 的協調者任務 ID",
+  "crossWorkspaceNoOtherWorkspaces": "暫無其他工作區。",
+  "crossWorkspaceSettingsSaved": "跨工作區存取已儲存"
 }

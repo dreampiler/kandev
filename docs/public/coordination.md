@@ -330,6 +330,12 @@ Regular Kanban does not currently expose a dependency editor or blocker filter. 
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
+### Office cross-workspace access
+
+An Office workspace has a **Cross-workspace access** setting (Office settings, off by default). When it is on, that Office workspace's agents can list other workspaces, read their tasks, sessions, plans and conversations, and send messages to their tasks with `$KANDEV_CLI kandev workspaces …` and `kandev tasks sessions|transcript|plan|send`. Reach is limited to workspaces the Office workspace's owner can read (within their organization when organizations are on) and, optionally, to an allow-list. Each workspace can name a coordinator task for Office agents to address.
+
+Office agents never stop, move or re-prioritize tasks in another workspace: they ask that workspace's coordinator, which acts. A reply sent with `message_task_kandev` to the Office task, a coordinator's `report_to_handoff_source_kandev`, and a handed-off task reaching a terminal state all become comments on the Office task and wake its assignee. Details: `docs/specs/office/requirements/office-cross-workspace-access.md`.
+
 </details>
 
 ## Troubleshooting

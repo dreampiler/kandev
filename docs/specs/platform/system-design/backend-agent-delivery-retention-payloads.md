@@ -20,7 +20,7 @@ prompt admission, terminal settlement, wire format and identity ownership are un
 
 | Requirement | Design sections |
 | --- | --- |
-| REQ-PLATFORM-DELIVERY-RETENTION-001 | Independent raw-output proof; protected evidence |
+| REQ-PLATFORM-DELIVERY-RETENTION-001 | Independent raw-output proof; protected evidence; superseded tool progress |
 | REQ-PLATFORM-DELIVERY-RETENTION-002 | Replay and retained receipts |
 | REQ-PLATFORM-DELIVERY-RETENTION-003 | Transactions and interruptions |
 | REQ-PLATFORM-DELIVERY-RETENTION-005 | Discovery progress and budgets |
@@ -161,6 +161,35 @@ Verify integrity and canonical preservation, restart the compatible corrected ba
 and observe several normal cleanup intervals. Report raw-payload growth separately
 from normal history, compact receipts, WAL, backups and physically reusable pages.
 No claim of a total database quota or permanent zero growth follows from this repair.
+
+## Superseded tool progress
+
+A long shell tool emits many in-progress `tool_update` events, and each carries the whole
+(bounded) output so far. Waiting for the payload grace therefore keeps O(n²) bytes per tool
+call: a 2026-10-12 production burst stored 399 updates of about 277 KB for one call.
+
+Lifecycle observes each received `tool_update` as a typed event. It remembers a projected
+update whose status is progress-only (`in_progress`, `running`, `started`, `pending`) as a
+hint of sequence plus receive-time versioned hash, keyed by stream and tool call. When a
+later update of that tool call is projected, it queues the hints. One tracked background
+drain coalesces them per tool call, so projection and acknowledgment never wait for
+compaction.
+
+The repository treats hints only as candidates. Under the normal stream barriers it
+requires the later update to be the stored, projected receipt with the same envelope and
+versioned hash. It reloads each candidate's metadata through the locked worker proof with
+the grace replaced by this supersession: the candidate must pass `can_prune`, be an
+earlier nonterminal `tool_update` of the same stream identity, have an unpruned body whose
+length equals its stored byte count, and carry a persisted hash equal to the hinted hash.
+That hash equality binds the observed tool call and status to the stored row, so the writer
+transaction neither loads nor decodes a body. The existing payload compaction statement
+clears the body; the envelope, hash, byte count and generic receipt remain.
+
+Unprojected rows, final tool statuses, terminal and other event types keep the normal policy.
+The newest update keeps its body for the grace. Live websocket delivery, canonical tool
+messages and duplicate classification are unchanged. Hints are bounded and in memory; a
+restart, eviction or failed compaction leaves the body to the worker. Compaction failure never
+fails projection or acknowledgment.
 
 ## Delivery record
 

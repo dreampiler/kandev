@@ -36,6 +36,10 @@ type streamEventProcessor struct {
 	// stopTransport detaches the updates stream this processor serves. It is
 	// set before the stream delivers its first event.
 	stopTransport func()
+	// detached closes when the transport is gone so a successor generation
+	// wait does not hold the disconnect path until its bound.
+	detached   chan struct{}
+	detachOnce sync.Once
 
 	closeOnce sync.Once
 	errMu     sync.Mutex
@@ -68,6 +72,7 @@ func newStreamEventProcessor(
 		startupGeneration: startupGeneration,
 		events:            make(chan agentctl.AgentEvent, streamProjectionQueueSize),
 		done:              make(chan struct{}),
+		detached:          make(chan struct{}),
 	}
 	go processor.run()
 	return processor
@@ -83,6 +88,7 @@ func (p *streamEventProcessor) enqueue(event agentctl.AgentEvent) bool {
 }
 
 func (p *streamEventProcessor) close() error {
+	p.detachOnce.Do(func() { close(p.detached) })
 	p.closeOnce.Do(func() {
 		close(p.events)
 	})
@@ -144,7 +150,9 @@ func (p *streamEventProcessor) run() {
 }
 
 func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
-	prepared, err := p.manager.prepareAgentEvent(p.ctx, p.execution, p.client, p.delivery, event)
+	prepared, err := p.manager.prepareAgentEvent(
+		withDeliveryDetachSignal(p.ctx, p.detached), p.execution, p.client, p.delivery, event,
+	)
 	if err != nil {
 		return err
 	}
@@ -272,5 +280,6 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	if !prepared.skipAcknowledgement {
 		sm.scheduleDurableDeliveryAck(execution, client, event)
 	}
+	sm.compactSupersededToolUpdates(delivery, prepared)
 	return nil
 }

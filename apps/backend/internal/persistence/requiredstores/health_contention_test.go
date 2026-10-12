@@ -26,8 +26,12 @@ func TestPersistenceContentionFixture(t *testing.T) {
 			reader := openSingleConnectionSQLite(t)
 			pool := db.NewPool(writer, reader)
 			t.Cleanup(func() { _ = pool.Close() })
-			if _, err := writer.Exec("CREATE TABLE required_probe (id TEXT PRIMARY KEY)"); err != nil {
-				t.Fatalf("create required table: %v", err)
+			// Separate in-memory databases stand in for one file: the table
+			// probe reads the schema through the reader pool.
+			for _, conn := range []*sqlx.DB{writer, reader} {
+				if _, err := conn.Exec("CREATE TABLE required_probe (id TEXT PRIMARY KEY)"); err != nil {
+					t.Fatalf("create required table: %v", err)
+				}
 			}
 			tracker, err := NewTracker([]Descriptor{{
 				ID: "fixture", OwnerPackage: "fixture", RequiredTables: []string{"required_probe"},

@@ -1220,5 +1220,14 @@
   "overviewRefreshSeconds_other": "{{seconds}}초마다",
   "overviewUsageStaleObserved": "마지막 확인 값 ({{relative}} 조회)",
   "overviewUsageObserved": "에이전트 실행 중 관측됨, {{relative}}",
-  "overviewUsageMeasuredCall": "최소 호출로 측정됨, {{relative}}"
+  "overviewUsageMeasuredCall": "최소 호출로 측정됨, {{relative}}",
+  "crossWorkspaceAccess": "워크스페이스 간 접근",
+  "crossWorkspaceAccessToggle": "Office 에이전트가 다른 워크스페이스와 함께 일하도록 허용",
+  "crossWorkspaceAccessDescription": "켜면 이 Office 워크스페이스의 에이전트가 다른 워크스페이스의 작업, 세션, 계획, 대화를 읽고 그 작업에 메시지를 보낼 수 있습니다. 작업 중지, 이동, 우선순위 변경은 각 워크스페이스의 코디네이터가 맡습니다. 기본값은 꺼짐입니다.",
+  "crossWorkspaceReachableWorkspaces": "접근 가능한 워크스페이스",
+  "crossWorkspaceReachableHint": "모두 선택하지 않으면 읽을 수 있는 모든 워크스페이스를 허용합니다. 코디네이터 작업 ID를 넣으면 Office 에이전트가 그 워크스페이스에서 어느 작업에 메시지를 보낼지 알 수 있습니다.",
+  "crossWorkspaceCoordinatorPlaceholder": "코디네이터 작업 ID (선택)",
+  "crossWorkspaceCoordinatorTask": "{{workspace}}의 코디네이터 작업 ID",
+  "crossWorkspaceNoOtherWorkspaces": "아직 다른 워크스페이스가 없습니다.",
+  "crossWorkspaceSettingsSaved": "워크스페이스 간 접근 설정을 저장했습니다"
 }

@@ -41,7 +41,8 @@ func authenticatedDeliveryReplayCursor(
 		if status.Stream.FirstRetained > 1 && status.Stream.FirstRetained <= status.Stream.HighWater+1 {
 			return 0, fmt.Errorf("%w: %s", ErrAgentDeliveryHistoryGap, models.AgentDeliveryHistoryGapDetails(status.StreamID, 1, int64(status.Stream.FirstRetained-1)))
 		}
-		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) {
+		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) ||
+			canReplayUncommittedSuccessorEvents(ctx, execution, repository, status) {
 			return 0, nil
 		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
@@ -53,6 +54,34 @@ func authenticatedDeliveryReplayCursor(
 		return 0, err
 	}
 	return projectedCursorCoveredByPeer(cursor, status)
+}
+
+// canReplayUncommittedSuccessorEvents is the context-continuation counterpart
+// of canReplayFreshBootstrapEvents. A continuation launches generation N+1
+// while SQL still names N and commits N+1 only after the launch returns, so an
+// attempt that stops before that commit leaves an unacknowledged prefix of the
+// successor stream in the session journal with no SQL receipt. The retry
+// reuses the same successor stream; replay that prefix from zero. Receipts
+// still wait for the committed successor generation and its live owner.
+func canReplayUncommittedSuccessorEvents(
+	ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, status *agentctl.DeliveryStatus,
+) bool {
+	stream := status.Stream
+	if execution == nil || !execution.ForceContextContinuation || execution.DeliveryHarnessGeneration < 2 ||
+		stream == nil || stream.FirstRetained != 1 || stream.Acknowledged != 0 || status.SubmissionsTruncated {
+		return false
+	}
+	for _, submission := range status.Submissions {
+		if submission.StreamID == status.StreamID {
+			return false
+		}
+	}
+	reader, supported := delivery.(harnessGenerationReader)
+	if !supported {
+		return false
+	}
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	return err == nil && current != nil && contextContinuationGenerationPending(execution, current)
 }
 
 func validateAuthenticatedDeliveryDescriptor(execution *AgentExecution, status *agentctl.DeliveryStatus) error {

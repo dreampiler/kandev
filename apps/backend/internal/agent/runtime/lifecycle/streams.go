@@ -80,6 +80,9 @@ type StreamManager struct {
 	wg         sync.WaitGroup
 	wgMu       sync.Mutex
 	stopped    bool
+	// toolUpdateSupersession hints which projected in-progress tool updates a
+	// later update for the same tool call makes redundant in the inbox.
+	toolUpdateSupersession toolUpdateSupersession
 }
 
 // stopChannelContext wraps a parent ctx with two auxiliary stop channels.

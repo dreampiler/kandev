@@ -485,6 +485,9 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 	if resp, err, handled := a.handleDynamicUnclassifiedFallback(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
+	if resp, err, handled := a.handleProviderFailureByModel(promptCtx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	if resp, err, handled := a.handleMockInterruptionContinuation(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}

@@ -719,6 +719,23 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	return r.executionFromDecisionWithRecovery(ctx, state.LogicalProfileID, sessionID, decision)
 }
 
+// ReclaimActionRequiredRoute lets an explicit session recovery action own a
+// route parked at action_required on its persisted candidate. It returns
+// false without changing anything when the route is not parked there.
+func (r *ProfileExecutionResolver) ReclaimActionRequiredRoute(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) (bool, error) {
+	if r == nil || r.engine == nil || sessionID == "" || expectedGeneration <= 0 {
+		return false, nil
+	}
+	if !r.enabled.Load() {
+		return false, ErrDynamicRoutingDisabled
+	}
+	return r.engine.ReclaimActionRequired(ctx, sessionID, expectedGeneration)
+}
+
 // MarkRouteRecoveryActionRequired returns a claimed "retrying" route to
 // manual recovery after its resumed launch failed.
 func (r *ProfileExecutionResolver) MarkRouteRecoveryActionRequired(
@@ -1033,7 +1050,37 @@ func (r *ProfileExecutionResolver) resolveDynamicCandidate(
 			),
 		)
 	}
+	if candidate.Enabled && !remoteExecution {
+		candidate.AccountKey = candidateAccountKey(candidate.BindingKey, concrete, candidate.ModelID)
+	}
 	return candidate, nil
+}
+
+// candidateAccountKey names the account a local candidate's path reaches. A
+// binding resolved from a real credential already is that account. A profile
+// with no credential of its own falls back to a profile-scoped binding, so
+// its account is the agent plus the model's provider: every OpenCode Zen
+// profile on this host shares one account, and OpenCode Go another.
+func candidateAccountKey(bindingKey string, concrete *agentsettingsmodels.AgentProfile, modelID string) string {
+	if concrete == nil || bindingKey == "" {
+		return ""
+	}
+	if !profileFallbackBinding(bindingKey) {
+		return bindingKey
+	}
+	agentID := strings.TrimSpace(concrete.AgentID)
+	if agentID == "" {
+		return ""
+	}
+	return dynamic.ResourceKey(dynamic.ScopeCredential,
+		"account:"+agentID+"|"+dynamic.ProviderOf(modelID))
+}
+
+// profileFallbackBinding reports whether a binding key is the profile-scoped
+// fallback used when no credential identity could be proven.
+func profileFallbackBinding(bindingKey string) bool {
+	return strings.HasPrefix(bindingKey, string(dynamic.ScopeProfile)+":") ||
+		strings.HasPrefix(bindingKey, string(dynamic.ScopeCredential)+":"+string(dynamic.ScopeProfile)+":")
 }
 
 // decodeDynamicRoutePolicy splits the stored document into the failure-policy

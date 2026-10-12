@@ -5726,6 +5726,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionOutcome(ctx context.Cont
 	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 		s.logger.Info("skipping queue drain while session recovery is required",
 			zap.String("session_id", sessionID), zap.Error(err))
+		s.autoRecoverBlockedQueue(ctx, session.TaskID, sessionID, err)
 		return queueDrainSkipped
 	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
@@ -5812,6 +5813,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionUnderGuard(
 	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 		s.logger.Info("skipping admission-gated queue drain while session recovery is required",
 			zap.String("session_id", sessionID), zap.Error(err))
+		s.autoRecoverBlockedQueue(ctx, taskID, sessionID, err)
 		return queueDrainSkipped
 	}
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
@@ -5916,6 +5918,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionA
 	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
 		s.logger.Info("skipping admission-gated queue reservation while session recovery is required",
 			zap.String("session_id", sessionID), zap.Error(err))
+		s.autoRecoverBlockedQueue(ctx, taskID, sessionID, err)
 		return queueDrainSkipped
 	}
 	queueIdentity, ok := s.resolveQueueDrainIdentity(ctx, taskID, sessionID, identity)

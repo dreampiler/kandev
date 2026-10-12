@@ -282,6 +282,26 @@ func ResolveFallbackSelection(
 	}
 }
 
+// excluding returns the plan with more candidates excluded for this decision
+// only. The durable chain is not changed: the exclusion belongs to the failure
+// that started this search, not to the transition chain.
+func (p selectionPlan) excluding(candidateIDs []string) selectionPlan {
+	if len(candidateIDs) == 0 {
+		return p
+	}
+	excluded := make(map[string]bool, len(p.excluded)+len(candidateIDs))
+	for id := range p.excluded {
+		excluded[id] = true
+	}
+	for _, id := range candidateIDs {
+		if id != "" {
+			excluded[id] = true
+		}
+	}
+	p.excluded = excluded
+	return p
+}
+
 func tierContaining(tiers []Tier, candidateID string) *Tier {
 	index := tierIndexOf(tiers, candidateID)
 	if index < 0 {

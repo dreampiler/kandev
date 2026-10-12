@@ -25,7 +25,9 @@ func (e *Engine) RecordResourceFailure(ctx context.Context, profile Profile, can
 }
 
 // RecordResourceSuccess clears the suspension history of a candidate whose
-// attempt produced real output.
+// turn completed without a provider error. Every key that gates the candidate
+// is cleared, so the model's identity, its path and its account all start
+// their ladders again from the first step.
 func (e *Engine) RecordResourceSuccess(candidate Candidate) {
 	if e == nil || e.circuits == nil {
 		return
@@ -70,7 +72,7 @@ func (e *Engine) SuspensionFor(candidate Candidate, now time.Time) CandidateSusp
 		}
 		scope := SuspensionScopeCredential
 		switch key {
-		case candidate.ModelKey:
+		case candidate.ModelKey, candidate.pathModelKey(), candidate.modelIdentityKey():
 			scope = SuspensionScopeModel
 		case candidate.accountBlockKey():
 			scope = SuspensionScopeProfile

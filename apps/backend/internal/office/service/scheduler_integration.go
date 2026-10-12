@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/office/crossworkspace"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/routing"
@@ -1369,6 +1370,9 @@ func (si *SchedulerIntegration) enrichCommentContext(
 func (si *SchedulerIntegration) resolveCommentAuthor(
 	ctx context.Context, comment *models.TaskComment,
 ) string {
+	if comment.Source == crossworkspace.CommentSource {
+		return "another workspace's task"
+	}
 	if comment.AuthorType == "agent" && comment.AuthorID != "" {
 		agent, err := si.svc.GetAgentFromConfig(ctx, comment.AuthorID)
 		if err == nil && agent != nil && agent.Name != "" {

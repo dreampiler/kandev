@@ -29,6 +29,15 @@ const (
 	// fail before the stores are recorded unavailable. A single slow probe
 	// under load previously turned every stateful route into a 503.
 	runtimeFailureThreshold = 3
+	// writerPingTimeoutFactor scales probeTimeout for a writer ping when the
+	// writer has not committed within the last probe window. SQLite has one
+	// writer connection, so the ping queues behind every in-flight write; an
+	// idle writer answers at once, and only a stuck one uses the full budget.
+	writerPingTimeoutFactor = 3
+	// writerBusyPingTimeout bounds the writer ping while the writer is
+	// committing. The commits already prove the writer works; the ping only
+	// has to catch a closed pool, which fails without queueing.
+	writerBusyPingTimeout = time.Second
 )
 
 // Health probes the shared database and every table declared by the catalog.
@@ -44,7 +53,10 @@ type Health struct {
 	cancel       context.CancelFunc
 	done         chan struct{}
 	// runtimeFailures counts consecutive failed periodic probes.
-	runtimeFailures    int
+	runtimeFailures int
+	// writerActivity reports the writer's most recent transaction commit.
+	// Tests replace it; the default reads the SQLite writer commit hook.
+	writerActivity     func() (time.Time, bool)
 	logMu              sync.Mutex
 	lastLoggedState    State
 	lastLoggedStoreIDs []string
@@ -65,11 +77,21 @@ type probeFailureDiagnostic struct {
 // NewHealth creates a runtime health probe for a completed store tracker.
 func NewHealth(tracker *Tracker, pool *db.Pool, log *logger.Logger) *Health {
 	return &Health{
-		tracker:      tracker,
-		pool:         pool,
-		log:          log,
-		interval:     defaultProbeInterval,
-		probeTimeout: defaultProbeTimeout,
+		tracker:        tracker,
+		pool:           pool,
+		log:            log,
+		interval:       defaultProbeInterval,
+		probeTimeout:   defaultProbeTimeout,
+		writerActivity: poolWriterActivity(pool),
+	}
+}
+
+func poolWriterActivity(pool *db.Pool) func() (time.Time, bool) {
+	return func() (time.Time, bool) {
+		if pool == nil || pool.Writer() == nil {
+			return time.Time{}, false
+		}
+		return db.SQLiteWriterCommitActivity(pool.Writer().DB)
 	}
 }
 
@@ -107,12 +129,20 @@ func (h *Health) probe(ctx context.Context, buffered bool) (*probeFailureDiagnos
 		diagnostic := h.failureDiagnostic("pool", 0, err, "")
 		return diagnostic, h.recordUnavailable(err)
 	}
-	diagnostic, probeErr := h.pingObserved(ctx)
+	diagnostic, probeErr := h.pingWriter(ctx)
+	// The reader stage (reader ping and every table probe) starts its own
+	// budget after the writer ping, so a writer queued behind real writes
+	// cannot consume it.
+	readerCtx, cancelReader := context.WithTimeout(ctx, h.probeTimeout)
+	defer cancelReader()
+	if probeErr == nil {
+		diagnostic, probeErr = h.pingReader(readerCtx)
+	}
 	results := make([]error, len(h.tracker.catalog))
 	for index, descriptor := range h.tracker.catalog {
 		results[index] = probeErr
 		if probeErr == nil {
-			tableDiagnostic, tableErr := h.probeTablesObserved(ctx, descriptor)
+			tableDiagnostic, tableErr := h.probeTablesObserved(readerCtx, descriptor)
 			results[index] = tableErr
 			if diagnostic == nil {
 				diagnostic = tableDiagnostic
@@ -213,21 +243,68 @@ func (h *Health) isSQLite() bool {
 	return h.pool != nil && h.pool.Writer() != nil && h.pool.Writer().DriverName() == dialect.SQLite3
 }
 
-func (h *Health) pingObserved(ctx context.Context) (*probeFailureDiagnostic, error) {
+func (h *Health) pingReader(ctx context.Context) (*probeFailureDiagnostic, error) {
 	started := time.Now()
-	if err := h.pool.Writer().PingContext(ctx); err != nil {
-		return h.failureDiagnostic("writer_ping", time.Since(started), err, ""), fmt.Errorf("writer ping failed: %w", err)
-	}
-	started = time.Now()
 	if err := h.pool.Reader().PingContext(ctx); err != nil {
 		return h.failureDiagnostic("reader_ping", time.Since(started), err, ""), fmt.Errorf("reader ping failed: %w", err)
 	}
 	return nil, nil
 }
 
+// pingWriter checks the single writer connection. The ping queues behind
+// every in-flight write, so under sustained agent load it can miss any fixed
+// deadline while the database is healthy. A deadline is therefore not a
+// failure when the writer committed within the last probe window: that is
+// contention, not an outage. Any other error (a closed pool, a driver error)
+// and a deadline without recent commits still fail the probe.
+func (h *Health) pingWriter(ctx context.Context) (*probeFailureDiagnostic, error) {
+	started := time.Now()
+	timeout := h.probeTimeout * writerPingTimeoutFactor
+	if h.writerCommittedSince(started.Add(-h.progressWindow())) {
+		timeout = min(writerBusyPingTimeout, h.probeTimeout)
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, timeout)
+	err := h.pool.Writer().PingContext(pingCtx)
+	cancel()
+	if err == nil {
+		return nil, nil
+	}
+	elapsed := time.Since(started)
+	diagnostic := h.failureDiagnostic("writer_ping", elapsed, err, "")
+	if errors.Is(err, context.DeadlineExceeded) && h.writerCommittedSince(time.Now().Add(-h.progressWindow())) {
+		if h.log != nil {
+			h.log.Debug("required persistence writer ping queued behind committing writes",
+				diagnostic.logFields()...)
+		}
+		return nil, nil
+	}
+	return diagnostic, fmt.Errorf("writer ping failed: %w", err)
+}
+
+// writerCommittedSince reports whether the writer committed a transaction at
+// or after since.
+func (h *Health) writerCommittedSince(since time.Time) bool {
+	if h.writerActivity == nil {
+		return false
+	}
+	last, ok := h.writerActivity()
+	return ok && !last.Before(since)
+}
+
+// progressWindow is how recent a writer commit must be to count as progress:
+// one probe interval.
+func (h *Health) progressWindow() time.Duration {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.interval
+}
+
+// probeTables checks schema presence through the reader pool. Schema reads do
+// not need the writer, and the reader pool keeps answering while the single
+// writer connection is busy with real writes.
 func (h *Health) probeTables(ctx context.Context, descriptor Descriptor) error {
 	for _, table := range descriptor.RequiredTables {
-		exists, err := db.TableExistsContext(ctx, h.pool.Writer(), table)
+		exists, err := db.TableExistsContext(ctx, h.pool.Reader(), table)
 		if err != nil {
 			return fmt.Errorf("table probe failed: %w", err)
 		}
@@ -363,7 +440,9 @@ func (h *Health) run(ctx context.Context, interval time.Duration, done chan stru
 			if ctx.Err() != nil {
 				return
 			}
-			checkCtx, cancel := context.WithTimeout(ctx, h.probeTimeout)
+			// Each stage bounds itself (writer ping, reader stage); this cap
+			// only guarantees the loop never waits longer than both together.
+			checkCtx, cancel := context.WithTimeout(ctx, h.probeTimeout*(writerPingTimeoutFactor+1))
 			_, diagnostic, err := h.checkRuntimeDetailed(checkCtx)
 			if err != nil {
 				h.logProbeFailure(diagnostic)

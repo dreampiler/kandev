@@ -363,6 +363,7 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 ) {
+	s.startupFailuresNeedingContinuation.Delete(sessionID)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
@@ -406,8 +407,9 @@ func (s *Service) handleAgentProcessStarted(
 func (s *Service) handleAgentProcessStartFailed(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
-	_ error,
+	startErr error,
 ) {
+	s.noteStartupFailureNeedingContinuation(sessionID, startErr)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
@@ -1321,6 +1323,11 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeld(ctx)
+	// The successor replaces this session's own failed attempt, which has
+	// usually left the counted population by now (its session is no longer
+	// starting or running), so the ceiling hands its unit over instead of
+	// refusing the replacement.
+	ctx = withReplacesFailedDynamicAttempt(ctx)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -1492,6 +1499,13 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	// A restart-interrupted turn still blocks this session: re-sending the last
+	// prompt would repeat a prompt whose outcome is unknown and is refused by the
+	// recovery block anyway. Continue from history on the claimed candidate.
+	if origin == launchOriginManual && s.handOffRouteActionToContinuation(ctx, session) {
+		succeeded = true
+		return nil
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
