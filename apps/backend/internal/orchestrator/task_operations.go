@@ -3921,8 +3921,8 @@ func (s *Service) idleSuspensionResumeShortcut(
 	}
 	// The session's own queued launch does not block the replay that owns it.
 	allowed, reason := s.autoResumeEligibility(ctx, task, session)
-	if !allowed && (reason != autoResumeBlockedLaunchQueued || !s.ceilingDispatchClaimOwnsIdleResume(ctx, taskID, sessionID)) {
-		return nil, ErrIdleSuspensionProvenanceRequired
+	if !allowed {
+		return nil, s.admitClaimedIdleFocusResume(ctx, taskID, sessionID, reason)
 	}
 	return nil, nil
 }

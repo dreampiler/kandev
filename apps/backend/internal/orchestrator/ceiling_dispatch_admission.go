@@ -14,18 +14,18 @@ func withCeilingDispatchClaim(ctx context.Context, claim *ceilingDeferredLaunchC
 	return context.WithValue(ctx, ceilingDispatchClaimContextKey{}, claim)
 }
 
-// ceilingDispatchClaimOwnsIdleResume validates the exact queued idle resume
-// and renews its durable lease before it can bypass passive queue admission.
-func (s *Service) ceilingDispatchClaimOwnsIdleResume(ctx context.Context, taskID, sessionID string) bool {
+// admitClaimedIdleFocusResume validates the exact queued idle resume and
+// renews its durable lease before it can bypass passive queue admission.
+func (s *Service) admitClaimedIdleFocusResume(ctx context.Context, taskID, sessionID, reason string) error {
 	claim, _ := ctx.Value(ceilingDispatchClaimContextKey{}).(*ceilingDeferredLaunchClaim)
-	if claim == nil || claim.svc != s || !claim.held || claim.taskID != taskID ||
-		claim.deferral.Kind != models.CeilingLaunchResume ||
+	if reason != autoResumeBlockedLaunchQueued || claim == nil || claim.svc != s || !claim.held ||
+		claim.taskID != taskID || claim.deferral.Kind != models.CeilingLaunchResume ||
 		claim.deferral.Origin != string(launchOriginAutomatic) ||
 		stringField(claim.deferral.Payload, metaKeySessionID) != sessionID ||
 		!boolField(claim.deferral.Payload, resumePayloadIdleProvenanceKey) {
-		return false
+		return ErrIdleSuspensionProvenanceRequired
 	}
-	return s.admitCeilingDispatch(ctx, taskID) == nil
+	return s.admitCeilingDispatch(ctx, taskID)
 }
 
 // admitCeilingDispatch orders final route validation and renewal of the exact

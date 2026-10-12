@@ -170,8 +170,9 @@ valid destination and the replay re-checks that the idle policy still parks it.
 Only a held claim from the same service for the exact task/session resume may
 bypass its own queued-launch guard. The bypass renews the unchanged durable
 claim, including its owner and unexpired lease, and validates the route;
-foreign, released, superseded and expired claims remain blocked. A replay that
-no longer has idle-suspension provenance is dropped. Final provider admission
+foreign, released, superseded and expired claims remain blocked. Renewal errors
+remain retryable and preserve the queued record. A replay that no longer has
+idle-suspension provenance is dropped. Final provider admission
 still revalidates claim and route ownership.
 The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and

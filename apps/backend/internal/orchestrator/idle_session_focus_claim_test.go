@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -49,8 +51,14 @@ func testIdleFocusDispatchClaim(t *testing.T, change string) {
 		if err != nil {
 			t.Fatalf("owned queued focus resume: %v", err)
 		}
-	} else if !errors.Is(err, ErrIdleSuspensionProvenanceRequired) {
-		t.Fatalf("%s claim authorized focus resume: %v", change, err)
+	} else {
+		want := ErrIdleSuspensionProvenanceRequired
+		if change == "expired" || change == "successor" || change == "foreign_owner" {
+			want = ErrCeilingLaunchClaimed
+		}
+		if !errors.Is(err, want) {
+			t.Fatalf("%s claim: err=%v, want %v", change, err, want)
+		}
 	}
 	if f.launchCalls.Load() != 0 {
 		t.Fatal("provenance inspection launched an agent")
@@ -128,4 +136,36 @@ func TestDeferredIdleFocusResumeDropsLostProvenance(t *testing.T) {
 	if _, err := models.ReadCeilingDeferral(record); err == nil {
 		t.Fatal("lost-provenance resume remained queued")
 	}
+}
+
+func TestDeferredIdleFocusResumeRetainsRecordAfterLeaseLoss(t *testing.T) {
+	for _, change := range []string{"expired", "successor", "foreign_owner"} {
+		t.Run(change, func(t *testing.T) { testDeferredIdleFocusLeaseLoss(t, change) })
+	}
+}
+
+func testDeferredIdleFocusLeaseLoss(t *testing.T, change string) {
+	t.Helper()
+	ctx := context.Background()
+	f := newFocusCeilingFixture(t, "focus-claim-task", "focus-claim-session", models.TaskSessionStateCompleted)
+	_, _, _, err := f.svc.focusTaskSession(ctx, "focus-claim-task", "focus-claim-session")
+	require.NoError(t, err)
+	claim, found, err := f.svc.claimCeilingDeferredLaunch(ctx, "focus-claim-task", "focus-claim-session", ceilingClaimOwnerReplay)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NotNil(t, claim)
+	defer claim.releaseIfHeld(ctx)
+	changeIdleFocusDispatchClaim(t, f.svc, claim, change)
+	f.svc.sessionCeiling.release(f.occupierKey)
+	task, err := f.svc.repo.GetTask(ctx, claim.taskID)
+	require.NoError(t, err)
+	replayCtx := withCeilingDispatchClaim(ctx, claim)
+	outcome := f.svc.replayCeilingLaunchResume(replayCtx, task, claim.deferral.Payload)
+	require.Equal(t, ceilingReplayFailed, outcome, "lost lease must remain a retryable failure")
+	f.svc.settleCeilingReplay(replayCtx, task, claim, claim.deferral, outcome)
+	require.Zero(t, f.launchCalls.Load(), "lost lease must not launch an agent")
+	current, _, err := f.svc.repo.GetTaskDeferredLaunch(ctx, claim.taskID)
+	require.NoError(t, err)
+	_, err = models.ReadCeilingDeferral(current)
+	require.NoError(t, err, "retryable focus record must remain queued")
 }

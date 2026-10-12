@@ -123,3 +123,11 @@ admission. This change does not alter rendered composition, navigation, touch
 controls or copy; existing session-resumption unit tests and mobile workflow
 session-focus E2E cover those entry points. Public behavior is clarified in
 `docs/public/agents-and-profiles.md` (explanation).
+
+Lease-error regression: admission renewal errors retain their retryable identity
+instead of becoming idle-provenance loss. Expired, replaced and foreign-owner
+claims leave the deferred resume queued without launching; only actual loss of
+idle suspension returns the superseded-provenance outcome. An extracted-source
+shortcut regression failed with nonretryable provenance loss before this fix
+and passes under the race detector afterward. Real replay/settlement package
+regressions cover all three lease-loss variants in hosted Backend CI.
