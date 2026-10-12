@@ -144,6 +144,18 @@ require the current exclusive probe lease.
 - If dynamic routing is disabled after a session is persisted, Kandev keeps its
   route state and does not launch or resume downstream ACP until the feature is
   enabled again.
+- If a resumed or prepared runtime settles to WAITING_FOR_INPUT before the
+  process-start callback runs, the callback still marks the claimed route
+  generation active for that execution, and the resume-ready path does the same
+  for a route it re-claimed as `starting` or `retrying`. A route left
+  `starting` would make every later explicit recovery report
+  `dynamic_route_pending`.
+- If an explicit recovery action finds the route `starting` and no runtime is
+  live for the session, it re-claims the same persisted candidate and resumes.
+  A live launch owner, a passive resume, and other non-active states keep the
+  `dynamic_route_pending` guard. An explicit recovery that is still blocked
+  returns that error to its caller instead of a success response with no
+  execution; a passive session open keeps its waiting response.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.
