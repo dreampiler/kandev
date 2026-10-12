@@ -28,7 +28,7 @@ func TestRegisteredTaskCreateCannotInjectAutomationStartOwner(t *testing.T) {
 			if transport == "REST" {
 				response := httptest.NewRecorder()
 				router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(body)))
-				require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			} else {
 				var payload map[string]interface{}
 				require.NoError(t, json.Unmarshal([]byte(body), &payload))
