@@ -264,7 +264,11 @@ func TestRetryCursorMCPConnectionDoesNotPublishStaleCommandDiagnostic(t *testing
 				result, err := manager.RetryCursorMCPConnection(context.Background(), execution.SessionID, "plugin-harness-figma")
 				done <- retryOutcome{result: result, err: err}
 			}()
-			<-runner.started
+			select {
+			case <-runner.started:
+			case outcome := <-done:
+				t.Fatalf("retry returned before reaching the %s command: result=%+v err=%v", operation, outcome.result, outcome.err)
+			}
 			key := cursorProjectMCPWorkspaceKey(execution.WorkspacePath)
 			nextGeneration := beginCursorProjectMCPPreparation(key)
 			defer finishCursorProjectMCPPreparation(key, nextGeneration)

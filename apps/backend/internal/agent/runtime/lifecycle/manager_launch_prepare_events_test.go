@@ -107,7 +107,7 @@ func TestLaunch_WorktreeResumePublishesPrepareCompleted(t *testing.T) {
 
 func TestLaunch_PromotionPublishesPrepareCompletedAfterCursorMCPPreparation(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	writeCursorMCPRecoveryPlugin(t, cursorHome)
 	workspace := t.TempDir()
