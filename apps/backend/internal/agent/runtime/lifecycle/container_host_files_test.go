@@ -169,11 +169,13 @@ func hasSourcePrefix(pairs []string, prefix string) bool {
 // mounts the wrong directory or fails the launch. A remote container must
 // carry no backend-host mount source at all.
 func TestRemoteLaunchConfigDropsLocalClonePath(t *testing.T) {
+	// The clone path must be absolute on the backend host; a POSIX literal is
+	// not absolute on Windows.
 	req := &ExecutorCreateRequest{
 		InstanceID: "instance-1",
 		TaskID:     "task-1",
 		Metadata: map[string]interface{}{
-			"repository_clone_url": "/home/dev/src/project",
+			"repository_clone_url": filepath.Join(t.TempDir(), "project"),
 		},
 	}
 

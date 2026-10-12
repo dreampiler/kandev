@@ -84,7 +84,7 @@ func TestPrepareCursorMCPAuthEligibility(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			workspace := t.TempDir()
 			execution := &AgentExecution{WorkspacePath: workspace}
 			if tc.homeOverride != "" {
@@ -162,7 +162,7 @@ func TestResumePassthroughSessionAppliesCursorOptOutBeforeStartingProcess(t *tes
 		t.Skip("shell-backed process assertion is not available on Windows")
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	mgr, runner, execution := newPassthroughRunnerManager(t)
 	t.Cleanup(func() {
 		if execution.PassthroughProcessID != "" {
@@ -231,7 +231,7 @@ func TestResumePassthroughSessionAppliesCursorOptOutBeforeStartingProcess(t *tes
 
 func TestPrepareCursorMCPAuthDoesNotCreateMissingCursorHome(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	mgr := newTestManager(t)
 	if err := mgr.prepareCursorMCPAuth(
 		&AgentExecution{WorkspacePath: t.TempDir()},
@@ -248,7 +248,7 @@ func TestPrepareCursorMCPAuthDoesNotCreateMissingCursorHome(t *testing.T) {
 
 func TestApplyPassthroughMCPPreparesCursorAuth(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	cursorProjects := filepath.Join(home, ".cursor", "projects")
 	if err := os.MkdirAll(filepath.Join(cursorProjects, "other-project"), 0o755); err != nil {
@@ -284,7 +284,7 @@ func TestApplyPassthroughMCPPreparesCursorAuth(t *testing.T) {
 func TestResumePassthroughCommandPreparesCursorAuth(t *testing.T) {
 	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	sourceRepository := t.TempDir()
 	unrelatedFolder := t.TempDir()
@@ -343,7 +343,7 @@ func TestResumePassthroughCommandPreparesCursorAuth(t *testing.T) {
 func TestPrepareCursorMCPAuthFailurePolicy(t *testing.T) {
 	t.Run("enabled publication failure does not block project MCP setup", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestUserHome(t, home)
 		if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -369,7 +369,7 @@ func TestPrepareCursorMCPAuthFailurePolicy(t *testing.T) {
 
 	t.Run("disabled cleanup failure is sanitized and blocks launch", func(t *testing.T) {
 		home := t.TempDir()
-		t.Setenv("HOME", home)
+		setTestUserHome(t, home)
 		if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -397,7 +397,7 @@ func TestPrepareCursorMCPAuthFailurePolicy(t *testing.T) {
 
 func TestMaterializeRuntimeProjectMCPPreparesCursorAuthWithoutServers(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	cursorProjects := filepath.Join(home, ".cursor", "projects")
 	if err := os.MkdirAll(filepath.Join(cursorProjects, "other-project"), 0o755); err != nil {
@@ -450,7 +450,7 @@ func TestSameCursorMCPAuthHomeRecognizesSymlinkAlias(t *testing.T) {
 
 func TestPrepareCursorMCPAuthExcludesConfiguredTaskWorktrees(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorProjects := filepath.Join(home, ".cursor", "projects")
 	taskRoot := filepath.Join(t.TempDir(), "custom-task-storage")
 	worktreeManager, err := worktree.NewManager(worktree.Config{TasksBasePath: taskRoot}, nil, nil)

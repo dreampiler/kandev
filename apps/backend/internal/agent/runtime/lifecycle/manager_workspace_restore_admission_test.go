@@ -265,14 +265,18 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 		})
 		return err
 	}
+	// Each wait below ends on a causal signal: the step being reached or the
+	// caller returning. Reaching the claim and the manual retry both run real
+	// git inspection whose duration depends on the host (Windows process
+	// creation under -race regularly exceeds several seconds), so a wall-clock
+	// bound would race the work it measures. A genuine deadlock is reported
+	// by the test binary timeout together with every goroutine's stack.
 	firstResult := make(chan error, 1)
 	go func() { firstResult <- runLifecycleAdmission(context.Background()) }()
 	select {
 	case <-claimEntered:
 	case err := <-firstResult:
 		t.Fatalf("workspace reconstruction ended before the recovery claim: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("workspace reconstruction did not reach the held recovery claim")
 	}
 
 	secondCtx := &lifecycleObservedDoneContext{Context: context.Background(), observed: make(chan struct{})}
@@ -280,9 +284,8 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 	go func() { secondResult <- runLifecycleAdmission(secondCtx) }()
 	select {
 	case <-secondCtx.observed:
-	case <-time.After(2 * time.Second):
-		release()
-		t.Fatal("second lifecycle caller did not join the session singleflight")
+	case err := <-secondResult:
+		t.Fatalf("second lifecycle caller returned without joining the session singleflight: %v", err)
 	}
 
 	manualRequest := worktree.RecoveryAdmissionRequest{
@@ -305,9 +308,8 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 	}()
 	select {
 	case <-manualCtx.observed:
-	case <-time.After(2 * time.Second):
-		release()
-		t.Fatal("manual recovery did not wait outside the lifecycle singleflight")
+	case err := <-manualResult:
+		t.Fatalf("manual recovery returned without waiting outside the lifecycle singleflight: %v", err)
 	}
 
 	release()
@@ -316,13 +318,8 @@ func TestManualRecoveryPreflightDoesNotDeadlockWorkspaceSingleflight(t *testing.
 		"lifecycle waiter": secondResult,
 		"manual preflight": manualResult,
 	} {
-		select {
-		case err := <-result:
-			if err == nil {
-				t.Errorf("%s unexpectedly acquired recovery authority", name)
-			}
-		case <-time.After(5 * time.Second):
-			t.Errorf("%s remained blocked after inspection release", name)
+		if err := <-result; err == nil {
+			t.Errorf("%s unexpectedly acquired recovery authority", name)
 		}
 	}
 	if got := singleflightBodyCalls.Load(); got != 1 {
