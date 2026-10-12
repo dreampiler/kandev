@@ -116,7 +116,8 @@ const agentDeliveryRetentionCandidateSQL = `
 					AND sequence <= projected_sequence
 					AND projected_at IS NOT NULL AND eligible_at <= ?
 					AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')
-					AND ((terminal = 0 AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan'))
+					AND ((terminal = 0 AND event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan')
+							AND /* no open recovery block */)
 						OR (/* settled event */ AND (first_terminal_sequence IS NULL OR sequence < first_terminal_sequence)))
 					AND generic_effect_complete = 1 AND has_pending_effect = 0
 					AND has_unknown_effect = 0
