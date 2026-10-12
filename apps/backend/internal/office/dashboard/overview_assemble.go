@@ -561,11 +561,15 @@ func failedSessionEvents(snap *overviewSnapshot, since time.Time) []OverviewEven
 	var events []OverviewEvent
 	for _, t := range snap.tasks {
 		for _, sess := range t.sessions {
-			if sess.State != sessionStateFailed || sess.UpdatedAt.Before(since) {
+			// The failure time is when the session ended. A later write to an old
+			// FAILED row (a step move rewrites every session's primary flag)
+			// moves updated_at and must not resurface the failure as new.
+			failedAt := sess.EndedAt()
+			if sess.State != sessionStateFailed || failedAt.Before(since) {
 				continue
 			}
 			event := OverviewEvent{
-				Kind: overviewEventSessionFailed, At: sess.UpdatedAt, WorkspaceID: t.row.WorkspaceID,
+				Kind: overviewEventSessionFailed, At: failedAt, WorkspaceID: t.row.WorkspaceID,
 				TaskID: t.row.ID, SessionID: sess.ID, Title: t.row.Title, Detail: errorFirstLine(sess.ErrorMessage),
 			}
 			// The follow-up is read on this same pass, so the line describing

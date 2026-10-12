@@ -56,9 +56,23 @@ type OverviewSessionRow struct {
 	ErrorMessage   string `db:"error_message"`
 	StartedAtRaw   string `db:"started_at"`
 	UpdatedAtRaw   string `db:"updated_at"`
+	CompletedAtRaw string `db:"completed_at"`
 	IsPrimary      bool   `db:"is_primary"`
 	StartedAt      time.Time
 	UpdatedAt      time.Time
+	// CompletedAt is when the session reached COMPLETED, FAILED or CANCELLED;
+	// zero while it is open. Unlike UpdatedAt, a later write to the row (such
+	// as a primary-flag change on a step move) does not move it.
+	CompletedAt time.Time
+}
+
+// EndedAt is when a finished session ended: its completion time, or its last
+// update for a row written before completion times were recorded.
+func (s *OverviewSessionRow) EndedAt() time.Time {
+	if !s.CompletedAt.IsZero() {
+		return s.CompletedAt
+	}
+	return s.UpdatedAt
 }
 
 // OverviewQueueRow groups queued messages by receiving session.
@@ -228,6 +242,7 @@ func (r *Repository) ListOverviewSessionsForTasks(ctx context.Context, taskIDs [
 			SELECT s.id, s.task_id, s.state, COALESCE(s.agent_profile_id, '') AS agent_profile_id,
 			       SUBSTR(COALESCE(s.error_message, ''), 1, 300) AS error_message,
 			       CAST(s.started_at AS TEXT) AS started_at, COALESCE(CAST(s.updated_at AS TEXT), '') AS updated_at,
+			       COALESCE(CAST(s.completed_at AS TEXT), '') AS completed_at,
 			       COALESCE(s.is_primary, 0) AS is_primary
 			FROM task_sessions s
 			WHERE s.task_id IN (` + strings.Join(placeholders, ",") + `)
@@ -243,6 +258,7 @@ func (r *Repository) ListOverviewSessionsForTasks(ctx context.Context, taskIDs [
 		if row.UpdatedAt.IsZero() {
 			row.UpdatedAt = row.StartedAt
 		}
+		row.CompletedAt = parseSqliteTime(row.CompletedAtRaw)
 	}
 	return out, nil
 }
