@@ -34,8 +34,7 @@ otherwise so preparation stops failing `git worktree add` with `already exists`.
 - Fresh-only reconcile entry (`addFreshWorktreeForBranch`) holding the existing
   target-path reservation exactly once.
 - Read-only task-root ownership-marker validation before directory creation or
-  marker write; live-writer guard from active durable rows and held recovery
-  claims.
+  marker write; live-writer guard from active durable rows.
 - Structural, repository-identity, cleanliness (including ignored entries), and
   reflection (ancestry or verified non-ancestor equivalence) checks.
 - Retirement via the existing managed no-follow removal plus `git worktree prune`.

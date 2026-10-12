@@ -39,7 +39,7 @@ decision, and no occupant is ever adopted.
 
 1. `os.Lstat(assignedPath)`: absent → proceed; any other error → preserve and report.
 2. Task-root ownership marker (read-only, before any create/write): `validateExistingWorktreePathOwner` rejects a root owned by another task with `ErrWorktreePathOwnedByAnotherTask`. `prepareTaskWorktreePath` additionally performs a read-only `ReadOwnershipMarker` check (`ensureTaskDirNotOwnedByAnotherTask`) before it creates the task directory or writes the marker, so an occupied foreign root is never rebranded; the marker write itself is guard-validated (`existingMarkerMatches`).
-3. Live-writer guard: any active `task_environment_repos` row for the task whose `worktree_path` equals the assigned path (`GetWorktreesByTaskID`) or a held durable environment recovery claim preserves and reports; a read error preserves and fails closed.
+3. Live-writer guard: any active `task_environment_repos` row for the task whose `worktree_path` equals the assigned path (`GetWorktreesByTaskID`) preserves and reports; a read error preserves and fails closed. Recovery claims for an already-existing environment are owned by the existing recovery-admission machinery, outside this fresh path (a fresh launch may have no bound environment yet).
 4. Structural identity: `inspectLinkedWorktree` must classify `healthy`.
 5. Repository identity: `checkoutMatchesRepositoryIdentity` must match the requested repository.
 6. Cleanliness including ignored entries: `git status --porcelain=v1 --untracked-files=all --ignored=traditional` must be empty. Any ignored entry makes the occupant ineligible, so non-recoverable ignored content is preserved; only content the existing cleanup contract explicitly treats as recoverable is not unique work.
