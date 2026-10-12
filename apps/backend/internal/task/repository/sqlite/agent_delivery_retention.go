@@ -144,7 +144,7 @@ func (r *Repository) selectAgentDeliveryRetentionBatch(
 		return r.selectAgentDeliveryRetentionPromptsFirst(ctx, tx, progress, options, cutoff)
 	}
 	events, eventWrapped, err := r.selectAgentDeliveryEventRetentionPages(
-		ctx, tx, progress, options.MaxCandidates, cutoff,
+		ctx, tx, progress, options.MaxCandidates, cutoff, agentDeliveryReplayWindowFor(options, cutoff),
 	)
 	if err != nil {
 		return nil, nil, false, false, "", err
@@ -172,12 +172,21 @@ func (r *Repository) selectAgentDeliveryRetentionPromptsFirst(
 		return nil, nil, false, false, "", err
 	}
 	events, eventWrapped, err := r.selectAgentDeliveryEventRetentionPages(
-		ctx, tx, progress, options.MaxCandidates-len(prompts), cutoff,
+		ctx, tx, progress, options.MaxCandidates-len(prompts), cutoff, agentDeliveryReplayWindowFor(options, cutoff),
 	)
 	if err != nil {
 		return nil, nil, false, false, "", err
 	}
 	return events, prompts, eventWrapped, promptWrapped, agentDeliveryRetentionPhaseEvents, nil
+}
+
+// agentDeliveryReplayWindowFor derives the replay window from the batch clock;
+// cutoff is the batch time minus the payload grace.
+func agentDeliveryReplayWindowFor(options models.AgentDeliveryRetentionBatchOptions, cutoff time.Time) agentDeliveryReplayWindow {
+	return agentDeliveryReplayWindow{
+		ageCutoff: cutoff.Add(options.PayloadGrace).Add(-options.ReplayAge),
+		events:    options.ReplayEvents,
+	}
 }
 
 func promptRetentionPayloadBytes(candidates []agentDeliveryPromptRetentionCandidate) int64 {
