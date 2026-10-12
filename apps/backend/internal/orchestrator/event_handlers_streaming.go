@@ -2088,10 +2088,9 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		return
 	}
 
-	// Pick the best candidate. The shared selector prefers a session compatible
-	// with the task's current workflow step and never reuses a session an earlier
-	// profile switch parked, so a surviving predecessor cannot become primary
-	// again and receive the queue.
+	// Only a newest same-logical-profile successor compatible with the workflow
+	// can inherit the queue. Otherwise the failed primary retains ownership for
+	// its ordinary recovery path.
 	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySessionTransferringQueue(ctx, candidate); err != nil {

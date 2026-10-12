@@ -55,6 +55,10 @@ func (s *Service) startupFailureNeedsContinuation(sessionID, errorMessage string
 	if _, ok := s.startupFailuresNeedingContinuation.LoadAndDelete(sessionID); ok {
 		return true
 	}
+	return startupFailureTextNeedsContinuation(errorMessage)
+}
+
+func startupFailureTextNeedsContinuation(errorMessage string) bool {
 	return strings.Contains(errorMessage, repoerrors.ErrAgentDeliveryCheckpointMissing.Error()) ||
 		strings.Contains(errorMessage, agentruntime.ErrDurableAdoptionBlocked.Error())
 }

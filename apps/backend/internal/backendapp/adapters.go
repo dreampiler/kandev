@@ -1365,6 +1365,10 @@ func (w *orchestratorWrapper) AutoRecoverBlockedPrompt(ctx context.Context, task
 	return w.svc.AutoRecoverBlockedPrompt(ctx, taskID, taskSessionID, cause)
 }
 
+func (w *orchestratorWrapper) CanAutoRecoverFailedSession(ctx context.Context, taskID, taskSessionID string) bool {
+	return w.svc.CanAutoRecoverFailedSession(ctx, taskID, taskSessionID)
+}
+
 // ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
 // provider acceptance for the handler's internal retry.
 func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
