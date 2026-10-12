@@ -44,6 +44,41 @@ var providerNeutralRules = []rule{
 		CodeModelCapacity,
 		ConfHigh,
 	),
+	// Model-host failures. Gateways relay them in the AI-SDK envelope or a
+	// streamed-response error, so each is anchored to that envelope or to a
+	// host-specific error name an agent does not write in prose. They precede
+	// provider.unavailable.v1 so routing can tell a slow or failing model host
+	// from a generic unavailable notice.
+	mustRule(
+		RuleProviderHeaderTimeout,
+		`(?i)\bProviderHeaderTimeoutError:\s*Provider\s+response\s+headers\s+timed\s+out\b`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderStreamServerError,
+		`(?i)\bStreaming\s+response\s+failed:\s*\[(?:500|502|503|504|server_error)\]`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderInternalServerError,
+		`(?im)^\s*AI_APICallError:\s*Internal\s+Server\s+Error\.?\s*$`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderNvidiaHost,
+		`(?i)(?:\bUpstream\s+error\s+from\s+Nvidia:\s*Service\s+temporarily\s+overloaded\b|\[Nvidia\]\s+(?:Failed\s+to\s+generate\s+completions|Service\s+is\s+not\s+ready|error\s+code:\s*\d+))`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderCannotConnect,
+		`(?im)^\s*AI_APICallError:\s*Cannot\s+connect\s+to\s+API:`,
+		CodeNetworkUnavailable,
+		ConfHigh,
+	),
 	mustRule(
 		"provider.network_unavailable.v1",
 		`(?i)(?:\b(?:ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND)\b|network\s+is\s+unreachable|no\s+route\s+to\s+host|connection\s+(?:reset|refused|timed\s+out)|temporary\s+failure\s+in\s+name\s+resolution|i/o\s+timeout|failed\s+to\s+fetch)`,
