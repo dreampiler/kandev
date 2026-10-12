@@ -438,6 +438,11 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
+	processor.stopTransport = func() {
+		if execution.ownsUpdateStream(streamGeneration) {
+			client.CloseUpdatesStream()
+		}
+	}
 	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
 		if !execution.ownsUpdateStream(streamGeneration) {
 			return

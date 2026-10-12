@@ -33,6 +33,9 @@ type streamEventProcessor struct {
 	startupGeneration uint64
 	events            chan agentctl.AgentEvent
 	done              chan struct{}
+	// stopTransport detaches the updates stream this processor serves. It is
+	// set before the stream delivers its first event.
+	stopTransport func()
 
 	closeOnce sync.Once
 	errMu     sync.Mutex
@@ -102,6 +105,17 @@ func (p *streamEventProcessor) fail(err error) {
 	p.cancel()
 }
 
+// stop records a processing failure and detaches the transport. A processor
+// that only cancelled itself would leave the reader attached: every later event
+// is then dropped as "processor unavailable" and the disconnect path that
+// reports the failure and recovers the execution never runs.
+func (p *streamEventProcessor) stop(err error) {
+	p.fail(err)
+	if p.stopTransport != nil {
+		p.stopTransport()
+	}
+}
+
 func (p *streamEventProcessor) run() {
 	defer close(p.done)
 	defer p.cancel()
@@ -115,12 +129,12 @@ func (p *streamEventProcessor) run() {
 				return
 			}
 			if err := p.handleEvent(batch, event); err != nil {
-				p.fail(err)
+				p.stop(err)
 				return
 			}
 		case <-batch.timerCh:
 			if err := p.flushBatch(batch); err != nil {
-				p.fail(err)
+				p.stop(err)
 				return
 			}
 		case <-p.ctx.Done():
