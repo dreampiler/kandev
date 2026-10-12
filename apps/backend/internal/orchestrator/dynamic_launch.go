@@ -540,7 +540,7 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
-	if err := s.admitFixedProfileDispatch(ctx, sessionID, options.AgentProfileID); err != nil {
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
 		return nil, err
 	}
 	if task != nil {

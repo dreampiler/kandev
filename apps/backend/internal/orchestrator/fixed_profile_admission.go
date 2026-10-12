@@ -35,6 +35,33 @@ func fixedProfileSuspensionMessage(suspension dynamicruntime.CandidateSuspension
 		suspension.Scope, suspension.Code, suspension.Until.UTC().Format(time.RFC3339))
 }
 
+// fixedSessionProfileID names the concrete profile a fixed session runs. A
+// fixed session usually leaves ExecutionProfileID empty, so its agent profile
+// is the profile, the same fallback the executor uses to launch it.
+func fixedSessionProfileID(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	if session.ExecutionProfileID != "" {
+		return session.ExecutionProfileID
+	}
+	return session.AgentProfileID
+}
+
+// fixedLaunchProfileID names the profile a concrete launch will run: the
+// launch option when given, otherwise the session's profile, as the executor
+// resolves it.
+func (s *Service) fixedLaunchProfileID(ctx context.Context, sessionID, optionProfileID string) string {
+	if optionProfileID != "" || s.profileExecutionResolver == nil || s.repo == nil || sessionID == "" {
+		return optionProfileID
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	return fixedSessionProfileID(session)
+}
+
 // admitFixedProfileDispatch refuses a new execution or a new prompt for a fixed
 // profile while that profile's resource circuit is open. Dynamic sessions are
 // gated by selection and never reach this check.
@@ -115,7 +142,7 @@ func (s *Service) recordFixedProfileFailure(
 	}
 	profileID := data.ExecutionProfileID
 	if profileID == "" && data.AgentExecutionID != "" && session.AgentExecutionID == data.AgentExecutionID {
-		profileID = session.ExecutionProfileID
+		profileID = fixedSessionProfileID(session)
 	}
 	if profileID == "" {
 		return

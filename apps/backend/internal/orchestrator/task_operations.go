@@ -7032,7 +7032,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// provider request, even into an execution that is still alive. Dynamic
 	// sessions are gated by their own selection.
 	if !s.isDynamicPromptSession(session) {
-		if err := s.admitFixedProfileDispatch(ctx, sessionID, session.ExecutionProfileID); err != nil {
+		if err := s.admitFixedProfileDispatch(ctx, sessionID, fixedSessionProfileID(session)); err != nil {
 			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 			return nil, err
 		}

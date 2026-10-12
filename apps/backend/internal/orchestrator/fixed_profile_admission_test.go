@@ -137,6 +137,43 @@ func TestFixedProfileUsageLimitRefusesNextPrompt(t *testing.T) {
 	}
 }
 
+// A prompt into a live fixed session is refused through the ordinary prompt
+// path. Such a session leaves ExecutionProfileID empty and runs its agent
+// profile, so admission resolves the profile the same way the executor does.
+func TestFixedProfilePromptRefusedForSessionWithoutExecutionProfile(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, "dynamic-unused", []workflowDynamicCandidate{
+		{executionProfileID: fixedProfileID, enabled: true},
+	}, dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(resolver)
+	seedTaskAndSession(t, repo, fixedProfileTaskID, fixedProfileSessionID, models.TaskSessionStateIdle)
+	session, err := repo.GetTaskSession(ctx, fixedProfileSessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentExecutionID = fixedProfileExecutionID
+	session.AgentProfileID = fixedProfileID
+	session.ExecutionProfileID = ""
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, fixedProfileExecutionID)
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("project fixed session: %v", err)
+	}
+	resolver.RecordResourceFailure(ctx, fixedProfileID, fixedProfileFailure(routingerr.CodeQuotaLimited))
+
+	_, err = svc.PromptTask(ctx, fixedProfileTaskID, fixedProfileSessionID, "follow-up", "", false, nil, false)
+	var refused *FixedProfileSuspendedError
+	if !errors.As(err, &refused) || refused.ExecutionProfileID != fixedProfileID {
+		t.Fatalf("prompt = %v, want a FixedProfileSuspendedError for %s", err, fixedProfileID)
+	}
+	if len(agentMgr.capturedPrompts) != 0 {
+		t.Fatalf("captured prompts = %d, want nothing sent to the suspended profile", len(agentMgr.capturedPrompts))
+	}
+}
+
 // A new launch of a suspended fixed profile is refused before the executor
 // starts anything, and a session that never started waits for input.
 func TestFixedProfileLaunchRefusedWhileCircuitOpen(t *testing.T) {

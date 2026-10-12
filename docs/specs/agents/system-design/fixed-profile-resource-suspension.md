@@ -60,8 +60,10 @@ owner and epoch fence of `dynamicFailureSession`, which is unchanged.
 
 `admitFixedProfileDispatch` reads `CandidateSuspension` for the profile and
 refuses with `FixedProfileSuspendedError` when the suspension is `waiting` or
-`probing`. It is called at the two places a fixed profile can send a new
-provider request:
+`probing`. The profile is resolved as the executor launches it: the launch
+option, else the session's `ExecutionProfileID`, else its `AgentProfileID`,
+because a fixed session usually leaves `ExecutionProfileID` empty. It is called
+at the two places a fixed profile can send a new provider request:
 
 - **New execution:** `launchConcretePreparedSession`
   (`orchestrator/dynamic_launch.go`), which every launch reaches after
