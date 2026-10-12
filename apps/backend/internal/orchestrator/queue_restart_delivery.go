@@ -62,13 +62,16 @@ func (s *Service) resumeQueuedSessionsOnStartup(ctx context.Context) {
 }
 
 // queuedStartupCandidate loads a session the startup queue pass may trigger:
-// an idle primary of a live, non-Office task. RUNNING/STARTING sessions drain
-// at their turn end; CREATED, IDLE (Office between runs) and terminal sessions
-// have their own owners.
+// an idle (or restart-failed) primary of a live, non-Office task.
+// RUNNING/STARTING sessions drain at their turn end; CREATED, IDLE (Office
+// between runs), COMPLETED and CANCELLED sessions have their own owners. A
+// FAILED session qualifies only with a restart-interrupted turn's recovery
+// block (checked by the caller): the agents dying before the backend leaves
+// such sessions FAILED with an unproven runtime stop.
 func (s *Service) queuedStartupCandidate(ctx context.Context, sessionID string) (*models.Task, *models.TaskSession, bool) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.TaskID == "" ||
-		!session.IsPrimary || session.State != models.TaskSessionStateWaitingForInput {
+	if err != nil || session == nil || session.TaskID == "" || !session.IsPrimary ||
+		(session.State != models.TaskSessionStateWaitingForInput && session.State != models.TaskSessionStateFailed) {
 		return nil, nil, false
 	}
 	task, err := s.repo.GetTask(ctx, session.TaskID)
@@ -104,7 +107,7 @@ func (s *Service) resumeQueuedSessionOnStartup(ctx context.Context, sessionID st
 		}
 		return s.AutoRecoverBlockedPrompt(ctx, taskID, sessionID, nil)
 	}
-	if status.Count == 0 {
+	if status.Count == 0 || session.State == models.TaskSessionStateFailed {
 		return false
 	}
 	if allowed, _ := s.autoResumeEligibility(ctx, task, session); !allowed {
