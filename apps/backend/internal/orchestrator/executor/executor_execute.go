@@ -1606,6 +1606,7 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		}
 	}
 	isPrimarySession := !hasPrimary
+	appliedInitialRuntimeConfig := false
 	if isTaskInitialSession {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
@@ -1613,6 +1614,7 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
 		if hasInitialRuntimeConfig && initialRuntimeConfigProfileID == agentProfileID && !hasAtomicInitialRuntimeSeed {
 			metadata[models.SessionMetaKeyRuntimeConfigOverrides] = initialRuntimeConfig
+			appliedInitialRuntimeConfig = true
 		}
 	}
 
@@ -1699,6 +1701,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if errors.Is(createErr, models.ErrWorkspacePreparing) {
 		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.TaskID, session.ID, createErr, func() error {
+			primary, err := e.refreshRetriedSessionOrder(createCtx, session, isPrimarySession, appliedInitialRuntimeConfig)
+			if err != nil {
+				return err
+			}
+			isPrimarySession = primary
 			return e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 		})
 	}
@@ -1817,9 +1824,44 @@ func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
 		return preparingErr
 	}
 	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
+		e.logger.Warn("workspace was not ready after the binding election; keeping the preparing refusal",
+			zap.String("session_id", sessionID),
+			zap.String("task_environment_id", env.ID),
+			zap.Error(err))
 		return preparingErr
 	}
 	return create()
+}
+
+// refreshRetriedSessionOrder re-derives creation order and primary ownership
+// before a binding retry. The election winner may have created the task's first
+// session while this start waited, so the retry must neither claim the
+// first-session origin nor take the primary flag from the winner.
+func (e *Executor) refreshRetriedSessionOrder(
+	ctx context.Context,
+	session *models.TaskSession,
+	wasPrimary bool,
+	appliedInitialRuntimeConfig bool,
+) (bool, error) {
+	sessions, err := e.repo.ListTaskSessions(ctx, session.TaskID)
+	if err != nil {
+		return wasPrimary, fmt.Errorf("list task sessions before workspace retry: %w", err)
+	}
+	if len(sessions) > 0 {
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+		if appliedInitialRuntimeConfig {
+			delete(session.Metadata, models.SessionMetaKeyRuntimeConfigOverrides)
+		}
+	}
+	primary := wasPrimary
+	for _, existing := range sessions {
+		if existing.IsPrimary {
+			primary = false
+			break
+		}
+	}
+	session.IsPrimary = primary
+	return primary, nil
 }
 
 // taskUsesDeferredEnvironmentInheritance keeps the handoff resolver
