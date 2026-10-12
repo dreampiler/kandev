@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -19,15 +20,25 @@ const lockOrderDeadlockGuard = 5 * time.Second
 
 // goroutineParkedIn reports whether a goroutine whose stack contains frame is
 // blocked on a sync primitive.
-func goroutineParkedIn(frame string) bool {
+func goroutineParkedIn(frames ...string) bool {
 	buffer := make([]byte, 4<<20)
 	for _, stack := range strings.Split(string(buffer[:runtime.Stack(buffer, true)]), "\n\n") {
 		header, _, _ := strings.Cut(stack, "\n")
-		if strings.Contains(header, "[sync.") && strings.Contains(stack, frame) {
+		matches := strings.Contains(header, "[sync.")
+		for _, frame := range frames {
+			matches = matches && strings.Contains(stack, frame)
+		}
+		if matches {
 			return true
 		}
 	}
 	return false
+}
+
+type lockOrderTransitionResult struct {
+	publish func()
+	payload *AgentEventPayload
+	err     error
 }
 
 func newLockOrderTestExecution() *AgentExecution {
@@ -60,13 +71,13 @@ func TestMarkReadyDoesNotDeadlockWithPromptCompletion(t *testing.T) {
 		name    string
 		frame   string
 		prepare func(*AgentExecution)
-		run     func(*Manager, *AgentExecution)
+		run     func(*Manager, *AgentExecution) lockOrderTransitionResult
 	}{
 		{
 			name:  "cancel escalation marks ready",
 			frame: "escalateStuckCancel",
-			run: func(m *Manager, execution *AgentExecution) {
-				_ = m.escalateStuckCancel(context.Background(), execution, nil)
+			run: func(m *Manager, execution *AgentExecution) lockOrderTransitionResult {
+				return lockOrderTransitionResult{err: m.escalateStuckCancel(context.Background(), execution, nil)}
 			},
 		},
 		{
@@ -76,15 +87,20 @@ func TestMarkReadyDoesNotDeadlockWithPromptCompletion(t *testing.T) {
 				execution.PassthroughProcessID = "pty-lock-order"
 				execution.Status = v1.AgentStatusReady
 			},
-			run: func(m *Manager, execution *AgentExecution) {
-				_, _ = m.PreparePassthroughRunning(execution.SessionID)
+			run: func(m *Manager, execution *AgentExecution) lockOrderTransitionResult {
+				publish, err := m.PreparePassthroughRunning(execution.SessionID)
+				return lockOrderTransitionResult{publish: publish, err: err}
 			},
 		},
 		{
 			name:  "recovered execution becomes available",
 			frame: "prepareRecoveredAvailability",
-			run: func(m *Manager, execution *AgentExecution) {
-				_, _ = m.prepareRecoveredAvailability(context.Background(), execution)
+			prepare: func(execution *AgentExecution) {
+				execution.recoveredPromptGenerationPending.Store(true)
+			},
+			run: func(m *Manager, execution *AgentExecution) lockOrderTransitionResult {
+				payload, err := m.prepareRecoveredAvailability(context.Background(), execution)
+				return lockOrderTransitionResult{payload: payload, err: err}
 			},
 		},
 	}
@@ -96,7 +112,10 @@ func TestMarkReadyDoesNotDeadlockWithPromptCompletion(t *testing.T) {
 				tc.prepare(execution)
 			}
 			require.NoError(t, mgr.executionStore.Add(execution))
-			assertNoLockOrderDeadlock(t, mgr, execution, tc.frame, tc.run)
+			mockBus := mgr.eventBus.(*MockEventBus)
+			mockBus.Notify = make(chan struct{}, 4)
+			result := assertNoLockOrderDeadlock(t, mgr, execution, tc.frame, tc.run)
+			assertLockOrderTransition(t, mgr, execution, mockBus, tc.frame, result)
 		})
 	}
 }
@@ -106,8 +125,8 @@ func assertNoLockOrderDeadlock(
 	mgr *Manager,
 	execution *AgentExecution,
 	frame string,
-	run func(*Manager, *AgentExecution),
-) {
+	run func(*Manager, *AgentExecution) lockOrderTransitionResult,
+) lockOrderTransitionResult {
 	t.Helper()
 	mgr.executionStore.mu.RLock()
 	readerHeld := true
@@ -119,36 +138,85 @@ func assertNoLockOrderDeadlock(
 	}
 	t.Cleanup(releaseReader)
 
-	payloadDone := make(chan struct{})
+	payloadDone := make(chan lockOrderTransitionResult, 1)
 	go func() {
-		defer close(payloadDone)
-		run(mgr, execution)
+		payloadDone <- run(mgr, execution)
 	}()
-	require.Eventually(t, func() bool { return goroutineParkedIn(frame) },
+	require.Eventually(t, func() bool { return goroutineParkedIn(frame, "sync.(*RWMutex).Lock") },
 		lockOrderDeadlockGuard, time.Millisecond, "payload path never waited for the store lock")
 
-	completionDone := make(chan struct{})
+	completionDone := make(chan bool, 1)
 	go func() {
-		defer close(completionDone)
-		claim, _ := mgr.claimPromptCompletion(execution, &agentctl.AgentEvent{
+		claim, accepted := mgr.claimPromptCompletion(execution, &agentctl.AgentEvent{
 			Type:             "complete",
 			PromptGeneration: 1,
+			TurnID:           "turn-lock-order",
 		}, false)
 		if claim.locked {
 			execution.promptLifecycleMu.Unlock()
 		}
+		completionDone <- accepted && claim.locked
 	}()
 	require.Eventually(t, func() bool { return goroutineParkedIn("claimPromptCompletion") },
 		lockOrderDeadlockGuard, time.Millisecond, "completion claim never waited for a lock")
 
 	releaseReader()
-	for _, done := range []<-chan struct{}{payloadDone, completionDone} {
-		select {
-		case <-done:
-		case <-time.After(lockOrderDeadlockGuard):
-			t.Fatalf("%s and the prompt completion claim deadlocked on promptLifecycleMu and the execution store lock", frame)
-		}
+	var result lockOrderTransitionResult
+	select {
+	case result = <-payloadDone:
+	case <-time.After(lockOrderDeadlockGuard):
+		t.Fatalf("%s deadlocked on promptLifecycleMu and the execution store lock", frame)
+	}
+	select {
+	case accepted := <-completionDone:
+		require.True(t, accepted, "completion must claim the original generation")
+	case <-time.After(lockOrderDeadlockGuard):
+		t.Fatal("prompt completion claim deadlocked")
 	}
 	_, found := mgr.executionStore.GetBySessionID("another-session")
 	require.False(t, found)
+	return result
+}
+
+func assertLockOrderTransition(t *testing.T, mgr *Manager, execution *AgentExecution,
+	mockBus *MockEventBus, frame string, result lockOrderTransitionResult,
+) {
+	t.Helper()
+	require.NoError(t, mgr.executionStore.WithRLock(execution.ID, func(current *AgentExecution) {
+		require.Same(t, execution, current)
+		require.Equal(t, uint64(1), current.promptCompletionGeneration)
+		require.Equal(t, v1.AgentStatusReady, current.Status)
+	}))
+	if frame == "prepareRecoveredAvailability" {
+		require.NoError(t, result.err)
+		require.NotNil(t, result.payload)
+		require.Equal(t, string(v1.AgentStatusReady), result.payload.Status)
+		require.Equal(t, "turn-lock-order", result.payload.TurnID)
+		require.True(t, result.payload.RecoveredAvailabilityOnly)
+		require.False(t, execution.recoveredPromptGenerationPending.Load())
+		return
+	}
+	eventType, status, turnID := events.AgentReady, v1.AgentStatusReady, "turn-lock-order"
+	if frame == "PreparePassthroughRunning" {
+		require.NoError(t, result.err)
+		require.NotNil(t, result.publish)
+		result.publish()
+		result.publish()
+		eventType, status, turnID = events.AgentRunning, v1.AgentStatusRunning, ""
+	} else {
+		require.ErrorIs(t, result.err, ErrCancelEscalated)
+	}
+	select {
+	case <-mockBus.Notify:
+	case <-time.After(lockOrderDeadlockGuard):
+		t.Fatal("transition did not publish its event")
+	}
+	require.Len(t, mockBus.PublishedEvents, 1)
+	event := mockBus.PublishedEvents[0]
+	require.Equal(t, eventType, event.Type)
+	payload := event.Data.(AgentEventPayload)
+	require.Equal(t, string(status), payload.Status)
+	require.Equal(t, turnID, payload.TurnID)
+	require.Equal(t, uint64(1), payload.PromptGeneration)
+	require.Equal(t, execution.ID, payload.AgentExecutionID)
 }

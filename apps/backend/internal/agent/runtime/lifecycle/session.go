@@ -64,15 +64,16 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger               *logger.Logger
-	eventPublisher       *EventPublisher
-	streamManager        *StreamManager
-	executionStore       *ExecutionStore
-	promptStarter        func(executionID string) (uint64, error)
-	initialPromptFailure func(failure InitialPromptFailure)
-	historyManager       *SessionHistoryManager
-	attachmentReader     AttachmentReader
-	stopCh               <-chan struct{} // For graceful shutdown coordination
+	logger                   *logger.Logger
+	eventPublisher           *EventPublisher
+	streamManager            *StreamManager
+	executionStore           *ExecutionStore
+	promptStarter            func(executionID string) (uint64, error)
+	persistPromptTurnBinding func(context.Context, *AgentExecution) error
+	initialPromptFailure     func(failure InitialPromptFailure)
+	historyManager           *SessionHistoryManager
+	attachmentReader         AttachmentReader
+	stopCh                   <-chan struct{} // For graceful shutdown coordination
 	// beforeSteerDispatchHook, when set (tests only), runs inside tryDispatchSteer
 	// after the active generation is selected but before the steer RPC, while
 	// promptLifecycleMu is held — used to drive the completion-vs-dispatch race
@@ -242,6 +243,7 @@ func (sm *SessionManager) InitializeSessionWithSettingsPolicy(
 		// Publish the negotiated mode before session/new or session/load can
 		// emit events on the already-connected updates stream.
 		execution.DeliveryMode = deliveryDecision.Mode
+		execution.deliveryNegotiation.Load().finish(nil)
 	}
 	sm.logger.Info("agentctl delivery capability negotiated",
 		zap.String("agent_type", agentConfig.ID()),
@@ -536,6 +538,14 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	runtimeConfigOptions map[string]string,
 	startModelPolicy StartModelPolicy,
 ) error {
+	negotiation := execution.beginDeliveryNegotiation()
+	defer negotiation.finish(ErrDurableAdoptionBlocked)
+	execution.deliveryBootstrap.Store(execution.ACPSessionID == "" && execution.DeliveryHarnessGeneration == 1)
+	defer func() {
+		if !execution.isSessionInitialized() {
+			execution.deliveryBootstrap.Store(false)
+		}
+	}()
 	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
 		return err
@@ -543,6 +553,11 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	startModelPolicy = strictAuggieTaskStartModelPolicy(startModelPolicy, execution, agentConfig)
 
 	execution.ACPSessionID = result.SessionID
+	if sm.eventPublisher != nil {
+		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
+	}
 	if !cacheFreshSessionModelState(execution) && (profileModel != "" || runtimeModel != "") {
 		waitForFreshSessionModelState(ctx, sm.logger, execution)
 	}
@@ -605,13 +620,6 @@ func (sm *SessionManager) InitializeAndPromptWithLayers(
 	execution.setSessionInitialized(true)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
-
-	// Publish session created event
-	if sm.eventPublisher != nil {
-		sm.eventPublisher.PublishACPSessionCreatedWithAttempt(
-			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
-		)
-	}
 
 	// Send the task prompt if provided, or mark the execution as ready.
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
@@ -721,6 +729,9 @@ func (sm *SessionManager) initializeACPConnection(
 		sm.streamManager.ConnectAll(execution, updatesReady)
 		select {
 		case <-updatesReady:
+			if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+				return ctx, nil, err
+			}
 			sm.logger.Debug("updates stream ready")
 		case <-time.After(10 * time.Second):
 			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")
@@ -1945,11 +1956,15 @@ func (sm *SessionManager) sendPrompt(
 		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
 		return nil, err
 	}
-	if sm.beforePromptDispatchHook != nil {
-		sm.beforePromptDispatchHook()
-	}
 	if callbacks.deliverySubmissionID != "" {
 		execution.setDeliverySubmissionID(deliverySubmissionIdentityForPrompt(callbacks.deliverySubmissionID, ""))
+	}
+	if err := sm.persistDurablePromptTurnBinding(preparedCtx, execution, callbacks.deliverySubmissionID); err != nil {
+		sm.reportPromptFailure(execution, promptGeneration, err, callbacks.onFailure)
+		return nil, err
+	}
+	if sm.beforePromptDispatchHook != nil {
+		sm.beforePromptDispatchHook()
 	}
 	if err := sm.triggerPrompt(
 		preparedCtx, execution, effectivePrompt, materializedAttachments,
@@ -2423,6 +2438,11 @@ const (
 	jsonRPCInvalidParams         = -32602
 	missingProviderRolloutPrefix = "no rollout found for thread id "
 	missingProviderSessionPrefix = "Session not found: "
+	// Codex reports a session it has archived with an internal error whose
+	// details name the requested session ("session <id> is archived. ...").
+	// The stored native session can no longer be loaded, like the other
+	// missing-provider-session shapes.
+	missingProviderArchivedSessionSuffix = " is archived"
 )
 
 type sessionLoadRequestError struct {
@@ -2434,24 +2454,25 @@ type sessionLoadRequestError struct {
 }
 
 // isMissingProviderSessionErr recognizes Codex's explicit not-found response
-// after its process-local rollout state disappeared and Auggie's session not
-// found error. The session ID must match the one Kandev attempted to load so an
-// unrelated provider error cannot be classified as missing native state.
-func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
+// after its process-local rollout state disappeared, Codex's archived-session
+// response, and Auggie's session not found error. The session ID must match the
+// one Kandev attempted to load so an unrelated provider error cannot be
+// classified as missing native state.
+func isMissingProviderSessionErr(err error, expectedSessionID, agentType string) bool {
 	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
 		return false
 	}
 	var reqErr *acp.RequestError
 	if errors.As(err, &reqErr) {
 		encoded, marshalErr := json.Marshal(reqErr)
-		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID) {
+		if marshalErr == nil && matchesMissingProviderSession(encoded, expectedSessionID, agentType) {
 			return true
 		}
 	}
 	message := err.Error()
 	for offset := strings.IndexByte(message, '{'); offset >= 0; {
 		candidate := message[offset:]
-		if matchesMissingProviderSession([]byte(candidate), expectedSessionID) {
+		if matchesMissingProviderSession([]byte(candidate), expectedSessionID, agentType) {
 			return true
 		}
 		next := strings.IndexByte(candidate[1:], '{')
@@ -2463,7 +2484,7 @@ func isMissingProviderSessionErr(err error, expectedSessionID string) bool {
 	return false
 }
 
-func matchesMissingProviderSession(encoded []byte, expectedSessionID string) bool {
+func matchesMissingProviderSession(encoded []byte, expectedSessionID, agentType string) bool {
 	var projected sessionLoadRequestError
 	if err := json.Unmarshal(encoded, &projected); err != nil {
 		return false
@@ -2471,6 +2492,13 @@ func matchesMissingProviderSession(encoded []byte, expectedSessionID string) boo
 	if projected.Code == jsonRPCInternalError &&
 		projected.Message == "Internal error" &&
 		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID {
+		return true
+	}
+	archivedDetail := "session " + expectedSessionID + missingProviderArchivedSessionSuffix
+	if agentType == codexACPAgentID && projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		(projected.Data.Details == archivedDetail || projected.Data.Details == archivedDetail+"." ||
+			strings.HasPrefix(projected.Data.Details, archivedDetail+". ")) {
 		return true
 	}
 	if projected.Code == jsonRPCInvalidParams &&

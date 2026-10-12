@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskSession,
   TaskCreateLastUsedApi,
   MCPTaskAgentProfileDefault,
   RepositoryBranchPolicy,
@@ -16,7 +17,6 @@ import type {
   SidebarTaskColorPatchApi,
   WorkflowAgentOverrides,
   Repository,
-  WorkspaceRecoveryProjection,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile, AvailableAgent } from "../../lib/types/http-agents";
 import type {
@@ -2833,12 +2833,6 @@ export class ApiClient {
     return this.request("GET", `/api/v1/sessions/${sessionId}/workflow/history`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: { id: string; last_read_message_id?: string };
-  }> {
-    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
-  }
-
   /**
    * Force-sets the session's read cursor directly, bypassing the production
    * mark-read endpoint's forward-only (monotonic) guard. Used by e2e specs
@@ -2903,18 +2897,18 @@ export class ApiClient {
     return this.request("GET", `/api/v1/tasks/${taskId}/sessions`);
   }
 
-  async getTaskSession(sessionId: string): Promise<{
-    session: {
-      id: string;
-      task_id: string;
-      agent_profile_id?: string;
-      agent_profile_snapshot?: Record<string, unknown> | null;
-      state: string;
-      task_environment_id?: string;
-      workspace_recovery?: WorkspaceRecoveryProjection | null;
-      error_message?: string;
-    };
-  }> {
+  async listTaskSessionDetails(taskId: string) {
+    const summary = await this.listTaskSessions(taskId);
+    const sessions = await Promise.all(
+      summary.sessions.map(async (row) => {
+        const { session } = await this.getTaskSession(row.id);
+        return { ...row, ...session };
+      }),
+    );
+    return { ...summary, sessions };
+  }
+
+  async getTaskSession(sessionId: string): Promise<{ session: TaskSession }> {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
   }
 

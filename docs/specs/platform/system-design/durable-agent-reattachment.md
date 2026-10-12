@@ -202,6 +202,10 @@ A crash between journal retirement and SQL commit resumes the same checkpoint af
 If a new execution already owns that checkpoint, reconcile it instead of comparing it only with the old execution ID.
 A foreign execution, generation, or native identity remains blocked.
 
+Automatic repair of provable journal/SQL/execution inconsistencies and coherent restored metadata
+follow [restart reconciliation](durable-restart-reconciliation.md). The existing restore-only
+checkpoint, admission, native identity, and process-termination boundaries remain authoritative.
+
 Workspace reads must not allocate a competing execution while durable recovery is unresolved.
 Check this at the workspace-only creation boundary, preserving access through an existing owned workspace execution.
 The restore launch keeps its pinned candidate identity and allocation checkpoint; it must not adopt an unrelated workspace-only successor.
@@ -320,3 +324,9 @@ Reuse existing agent_delivery_* metrics with bounded reasons; keep IDs out of me
 The [work package](../../../plans/durable-agent-reattachment/plan.md) owns implementation and validation.
 The [shutdown and recovery repair](../../../plans/agentctl-journal-shutdown-recovery/plan.md) owns the later closed-journal and missing-execution regressions.
 Detached MCP waiting/offline budgets and richer remote-working UI remain follow-up work.
+
+## Pending backend retention extension
+
+[Backend retention](backend-agent-delivery-retention.md) adds compact-evidence replay and authenticated projected-cursor ACK retry.
+It preserves this design's exact-submission terminal settlement and independent recovery causes.
+The [retention package](../../../plans/backend-agent-delivery-retention/plan.md) has Task 08 acceptance in progress; prior reattachment results do not verify pruning.

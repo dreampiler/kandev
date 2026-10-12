@@ -481,6 +481,9 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
+	}
 	return &sessionRecoveryRequiredError{Block: block}
 }
 
@@ -548,12 +551,19 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err != nil {
 		return fmt.Errorf("load session recovery block for resolution: %w", err)
 	}
-	resolved, err := store.ResolveSessionRecoveryBlock(ctx, block.ID, action, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
@@ -637,6 +647,9 @@ func (s *Service) recordSessionRecoveryBlock(
 	block.State = models.RecoveryBlockOpen
 	if block.ConsumerReference == "" {
 		block.ConsumerReference = consumer
+		if consumer == "interactive" && reason == durableDeliveryUnresolvedReason {
+			block.ConsumerReference = agentDeliveryConsumer
+		}
 	}
 	if block.CreatedAt.IsZero() {
 		block.CreatedAt = time.Now().UTC()
@@ -1356,6 +1369,9 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}
