@@ -51,8 +51,14 @@ func (r *Repository) selectAgentDeliveryEventRetentionPages(ctx context.Context,
 	return combined, wrapped, nil
 }
 
+// Session-state events (capabilities, modes, MCP attachments, context windows)
+// can never compact or retire; the locked proof rejects them by type. Skipping
+// them in discovery keeps that permanent residue from consuming every bounded
+// page on each frontier wrap. The list mirrors the proof's event-type gate.
+const agentDeliveryCompactableEventTypeFilter = `i.event_type IN ('message_chunk', 'reasoning', 'tool_call', 'tool_update', 'plan', 'agent_plan', 'complete', 'error', 'cancelled', 'canceled')`
+
 func agentDeliveryCompactionCandidateQuery(progress agentDeliveryRetentionProgress, limit int, cutoff time.Time) (string, []any) {
-	filters := []string{"i.payload_pruned_at IS NULL", "i.projected_at IS NOT NULL", "i.projected_at <= ?"}
+	filters := []string{"i.payload_pruned_at IS NULL", "i.projected_at IS NOT NULL", "i.projected_at <= ?", agentDeliveryCompactableEventTypeFilter}
 	args := []any{cutoff}
 	if progress.lastCompactionAt.Valid {
 		filters = append(filters, "(i.projected_at,i.stream_id,i.sequence) > (?,?,?)")
