@@ -24,6 +24,8 @@ system_design:
 - `apps/backend/internal/agent/runtime/lifecycle/manager_recovery_turn_outcome.go`
 - `apps/backend/internal/agent/runtime/lifecycle/manager_lock_order_test.go`
 - `apps/backend/internal/agent/runtime/lifecycle/execution_store_prompt_lock_test.go`
+- `apps/web/e2e/tests/task/mobile-html-preview.spec.ts`
+- `apps/web/e2e/tests/task/mobile-pr-unlink-sidebar-menu.spec.ts`
 
 ## Acceptance
 
@@ -66,3 +68,12 @@ passed. Exact-head hosted real-package and broader verification remains a
 delivery gate, recorded outside this head-agnostic implementation record. Public
 docs need no change: existing session recovery, payload and ownership contracts
 are preserved.
+
+The next hosted pass includes protected main's prepared-payload admission change.
+Its typed callbacks, immutable SQL payload checks and Send Now claim guards remain
+unchanged. Hosted E2E exposed missing synchronization in two existing phone tests:
+native preview selection now waits for the inspector's capture-mode acknowledgement
+before synthetic pointer input, and task-row hit-area measurement waits for the
+drawer animation to finish. The same screenshot and 44px assertions remain intact.
+These changes affect test scheduling only; their rendered verification remains
+part of the hosted E2E delivery gate.
