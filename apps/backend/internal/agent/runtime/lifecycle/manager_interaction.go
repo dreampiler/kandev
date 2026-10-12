@@ -116,7 +116,7 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 // StartAgentProcess.
 func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
@@ -206,7 +206,7 @@ func (m *Manager) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return m.PromptAgentWithAdmissionCallbackAndSubmissionID(
@@ -222,7 +222,7 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {

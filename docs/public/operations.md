@@ -31,7 +31,7 @@ See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-se
 
 Kandev automatically checks interrupted sessions at startup and after replacement of a crashed local agent runtime. When retained delivery records agree with the session's saved identity and the original process is proven terminated, Kandev restores the same native conversation without resending its interrupted prompt. Recovery checks continue while Kandev runs, so a temporarily unavailable runtime can recover later. These checks are enabled by default; the Agent Survival feature toggle separately controls whether local agents survive a graceful backend shutdown.
 
-The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
+The interrupted prompt's historical outcome remains unknown unless a retained terminal event proves it. Recovery also reconciles a shutdown failure label that lacks terminal evidence with the backend's unknown outcome. It preserves both historical records and repairs missing recovery associations only after verifying the saved conversation and retired work. Missing native state, conflicting records, or an owner whose termination cannot be verified keep the session blocked. **Retry connection** checks retained evidence without sending another prompt. A successful native **Resume** clears the matching interrupted notice, including after a page reload, while preserving the conversation history.
 
 If an older crash left journal acknowledgments ahead of saved output, Kandev
 can restore a verified conversation on a new delivery generation while keeping
@@ -551,11 +551,11 @@ session of the task replaced it, the block stays open as the session's recovery 
 Archive and Stop preserve this evidence. Explicit deletion retires the session identity and schedules bounded removal of its delivery records.
 Protected backlog and canonical history can continue to grow. Retention is not a database quota.
 
-Cleanup starts after the first normal interval, which defaults to one minute.
+Cleanup starts when the background worker starts, without an initial delay.
 Each batch examines at most 200 candidates and 4 MiB of payload. Background event and settled-prompt batches target at most 50 candidates, respecting lower configured ceilings.
-Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, with a 100 ms pause between batches. Frontier wrap alone does not repeat a phase. A pass starts no further batch after five seconds.
-When a pass runs out of time while it still removes at least as many candidates as it skips as protected, or removes work despite a transient batch deadline, the next pass starts after five seconds instead of the interval.
-Passes that only advance discovery through protected candidates wait the normal interval.
+Admitted SQL work has a 250 ms deadline. Cleanup checks every phase once per pass, then repeats phases that commit cleanup work or advance discovery through protected candidates, without artificial sleeps between batches. Frontier wrap alone does not repeat a phase. Passes are bounded to five seconds.
+When a pass runs out of time while it is still committing cleanup, the next pass starts immediately. When a pass runs out of time while it still removes at least as many candidates as it skips as protected, or removes work despite a transient batch deadline, the next pass starts after five seconds instead of the interval.
+Exhausted, busy-only, or quiet passes, and passes that only advance discovery through protected candidates, wait for the configured idle interval (one minute by default). Errors use bounded retry backoff.
 Projected session-state events (capabilities, modes, models, MCP attachment, context window, permission notices,
 turn markers, usage and background-work updates) compact and retire like projected output. Discovery skips
 unclassified event types, which stay intact and stop retirement for their stream.
@@ -578,7 +578,7 @@ deletion is needed. Large backlogs take multiple passes; unresolved recovery evi
 and canonical history remain protected.
 
 **Preserve a verified pre-pruning backup before the pruning upgrade.** Removed transport payloads cannot be restored within the live database.
-SQLite version changes create a `VACUUM INTO` snapshot before migration.
+SQLite version changes create a consistent page-copy snapshot before migration and verify its integrity. Backup copying does not rebuild the database or reclaim free pages; explicit physical compaction remains separate.
 Automatic rotation retains only the newest two snapshots. Copy the verified pre-pruning snapshot outside that directory.
 PostgreSQL has no automatic upgrade snapshot. Create a `pg_dump` before the upgrade and verify restoration into an isolated database.
 

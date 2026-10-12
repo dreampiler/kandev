@@ -8,6 +8,7 @@ import (
 	"time"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
@@ -36,6 +37,13 @@ func (s *Service) loadSilentRestoreInputs(
 ) (*silentRestoreInputs, error) {
 	owner, eligible, err := s.loadSilentRestoreOwner(ctx, candidate)
 	if err != nil || !eligible {
+		return nil, err
+	}
+	current, err := s.repo.GetTaskSession(owner.ctx, candidate.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if restored, err := s.resumeLegacyNativeRestart(owner.ctx, current); err != nil || restored {
 		return nil, err
 	}
 	session, recovery, eligible, err := s.loadSilentRestoreSession(
@@ -91,6 +99,9 @@ func (s *Service) loadSilentRestoreOwner(
 	task, err := s.repo.GetTask(ownerCtx, candidate.TaskID)
 	if err != nil || !silentRestoreTaskMatches(task, candidate) {
 		return nil, false, err
+	}
+	if s.automationOwnsRetrySession(ownerCtx, task.ID, candidate.SessionID) {
+		return nil, false, nil
 	}
 	officeTask, err := s.lookupOfficeTask(ownerCtx, task.ID)
 	if err != nil || officeTask {
@@ -428,6 +439,9 @@ func (s *Service) revalidateSilentRestoreTask(
 			return err
 		}
 		return errors.New("task is no longer eligible for silent restart recovery")
+	}
+	if s.automationOwnsRetrySession(ownerCtx, task.ID, sessionID) {
+		return automation.ErrRetryLaunchUncertain
 	}
 	officeTask, err := s.lookupOfficeTask(ownerCtx, task.ID)
 	if err != nil {

@@ -104,10 +104,13 @@ func SucceededCleanupJobEligible(ctx context.Context, q sqlx.QueryerContext, dri
 	return eligible, nil
 }
 
+// archivedRetentionSQLiteDriver is the only engine archived data retention measures.
+const archivedRetentionSQLiteDriver = "sqlite3"
+
 // requireSQLite keeps the SQLite-only date comparisons below unreachable on any
 // other engine, so a Postgres install is refused rather than mis-measured.
 func requireSQLite(driverName string) error {
-	if driverName != "sqlite3" {
+	if driverName != archivedRetentionSQLiteDriver {
 		return errors.New("archived data retention requires SQLite")
 	}
 	return nil
