@@ -111,3 +111,9 @@ The full hostutility suite stops at `TestManagedRuntimeProbeRecoveryPreservesSha
 `0d12c83d82` reproduced the same timeout at that Windows directory-read site with a 30-second
 budget. The repair does not modify that cache deletion path. Related host launch/admission tests
 pass independently; the baseline failure is retained as a validation limitation.
+
+After integrating fork main, the existing inference harness's installed-agent list assertion varied
+between two host CLI discovery calls (7 versus 6 agents). The harness now registers only its
+explicit fake agents, and the OpenCode command-parity case explicitly registers OpenCode. This
+keeps the reviewer unit tests independent of real provider installations without changing runtime
+selection or installation behavior.

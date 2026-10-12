@@ -34,7 +34,7 @@ func TestInferenceReviewLaunchResolvesProfileSecret(t *testing.T) {
 
 func TestInferenceReviewLaunchUsesSessionCommandAndRuntimeEnv(t *testing.T) {
 	ag := agents.NewOpenCodeACP()
-	h := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{AgentID: ag.ID()}})
+	h := newInferenceHarness(t, &stubProfileResolver{profile: &AgentProfileInfo{AgentID: ag.ID()}}, ag)
 	h.manager.SetManagedRuntimeSelectionStore(managedRuntimeOpenCodeStore{openCodeSelection: managedruntime.OpenCodeSelection{
 		Family: managedruntime.OpenCodeFamilyV2, Source: managedruntime.OpenCodeSourceManaged, SelectedVersion: "2.0.3",
 	}})

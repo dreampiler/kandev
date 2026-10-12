@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
@@ -126,7 +127,7 @@ func newInferenceHarness(t *testing.T, resolver ProfileResolver, registered ...a
 	t.Cleanup(server.Close)
 
 	log := newTestLogger()
-	reg := newTestRegistry()
+	reg := registry.NewRegistry(log)
 	for _, agent := range registered {
 		if err := reg.Register(agent); err != nil {
 			t.Fatalf("register agent %s: %v", agent.ID(), err)
