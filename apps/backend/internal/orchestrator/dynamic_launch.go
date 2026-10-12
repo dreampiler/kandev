@@ -386,7 +386,11 @@ func (s *Service) handleAgentProcessStarted(
 	if session.AgentExecutionID != "" && agentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
 		return
 	}
-	if session.State != models.TaskSessionStateStarting && session.State != models.TaskSessionStateRunning {
+	// A resumed or prepared runtime settles to WAITING_FOR_INPUT before this
+	// callback runs. The process did start for this exact execution, so its
+	// claimed route is active.
+	if session.State != models.TaskSessionStateStarting && session.State != models.TaskSessionStateRunning &&
+		session.State != models.TaskSessionStateWaitingForInput {
 		return
 	}
 	s.markDynamicRouteActive(ctx, sessionID, session.RouteGeneration)
