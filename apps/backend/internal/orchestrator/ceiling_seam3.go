@@ -257,5 +257,10 @@ func (s *Service) classifyEnsureSessionRunningFailureForPrompt(
 	if errors.Is(err, errSessionAwaitingRuntimeLaunch) || isRetryableSessionRecoveryGuardError(err) {
 		return fmt.Errorf("%w: failed to ensure session is running: %w", ErrSessionRuntimeUnavailable, err)
 	}
+	if !errors.Is(err, ErrSessionRecoveryRequired) && resumeNeedsContextContinuation(err) {
+		// Native resume refused the durable delivery state; only
+		// continue_from_history settles it (resume_continuation_fallback.go).
+		err = &resumeContinuationRequiredError{cause: err}
+	}
 	return fmt.Errorf("failed to ensure session is running: %w", err)
 }

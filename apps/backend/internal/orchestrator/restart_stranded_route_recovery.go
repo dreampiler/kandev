@@ -273,6 +273,12 @@ func (s *Service) autoRecoverBlockedQueue(ctx context.Context, taskID, sessionID
 	}
 	go func() {
 		recoveryCtx := context.WithoutCancel(ctx)
+		// Only a primary is woken for its queue: an old non-primary session can
+		// hold rows a primary handoff left behind, and resuming it competes with
+		// the primary for the same workspace.
+		if session, err := s.repo.GetTaskSession(recoveryCtx, sessionID); err != nil || session == nil || !session.IsPrimary {
+			return
+		}
 		if reason != unknownQueueDispatchRecoveryReason && s.messageQueue.GetStatus(recoveryCtx, sessionID).Count == 0 {
 			return
 		}

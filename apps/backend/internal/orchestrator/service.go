@@ -775,6 +775,10 @@ type Service struct {
 	// turn still blocks the session (sessionID -> taskID). ApplyRouteAction runs
 	// the continuation after releasing the route-action lock.
 	routeActionContinuations sync.Map
+	// startupFailuresNeedingContinuation records sessions whose asynchronous
+	// agent start was refused for a durable delivery reason that only
+	// continue_from_history settles (see resume_continuation_fallback.go).
+	startupFailuresNeedingContinuation sync.Map
 	// orphanedStartingRoutesStartupSwept marks that the boot pass of the
 	// orphaned-starting-route reconcile has run (STARTING/IDLE are only
 	// orphaned at boot; see reconcileOrphanedDynamicStartingRoutes).

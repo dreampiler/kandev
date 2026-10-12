@@ -363,6 +363,7 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 ) {
+	s.startupFailuresNeedingContinuation.Delete(sessionID)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
@@ -406,8 +407,9 @@ func (s *Service) handleAgentProcessStarted(
 func (s *Service) handleAgentProcessStartFailed(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
-	_ error,
+	startErr error,
 ) {
+	s.noteStartupFailureNeedingContinuation(sessionID, startErr)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}

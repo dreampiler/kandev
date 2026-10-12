@@ -4559,6 +4559,8 @@ func (s *Service) attemptColdResume(
 	if err := s.admitCeilingDispatch(resumeCtx, session.TaskID); err != nil {
 		return false, err
 	}
+	// A refusal recorded by an earlier start belongs to that start only.
+	s.startupFailuresNeedingContinuation.Delete(sessionID)
 	dispatchCtx, releaseCeilingDispatch, err := s.commitCeilingEntryDispatch(
 		resumeCtx, session.TaskID, ceilingEntryBindingFromContext(resumeCtx),
 	)
@@ -4835,7 +4837,11 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 			if errMsg == "" {
 				errMsg = "session failed during startup"
 			}
-			return fmt.Errorf("session failed: %s", errMsg)
+			failure := fmt.Errorf("session failed: %s", errMsg)
+			if s.startupFailureNeedsContinuation(sessionID, errMsg) {
+				return &resumeContinuationRequiredError{cause: failure}
+			}
+			return failure
 		case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
 			return fmt.Errorf("session in unexpected state: %s", sess.State)
 		}
