@@ -17,7 +17,7 @@ func TestClassifyClaudeWeeklyLimit(t *testing.T) {
 		for _, phase := range []Phase{PhasePromptSend, PhaseStreaming} {
 			t.Run(string(phase)+"/"+notice, func(t *testing.T) {
 				e := Classify(Input{ProviderID: "claude-acp", Phase: phase, Stderr: notice})
-				if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard || !e.FallbackAllowed {
+				if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard || !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
 					t.Fatalf("classification = %+v, want high-confidence hard quota_limited with fallback", e)
 				}
 				if e.ClassifierRule != "claude.stderr.weekly_limit.v1" {
