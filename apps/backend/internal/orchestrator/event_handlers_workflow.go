@@ -2096,6 +2096,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	// launch a second session for it; the automation dispatch or its ceiling
 	// replay performs the single launch and binds the run. See
 	// models.MetaKeyAutomationStartOwned.
+	if models.AutomationStartOwned(task.Metadata) && s.reconcileAutomationStartOwnership(ctx, task) {
+		delete(task.Metadata, models.MetaKeyAutomationStartOwned)
+	}
 	if models.AutomationStartOwned(task.Metadata) {
 		s.logger.Info(eventName+": automation run owns this task's start; skipping workflow auto-start",
 			zap.String("task_id", task.ID),
