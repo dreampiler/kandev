@@ -48,6 +48,7 @@ const (
 	stringType           = "string"
 	retryKeyArg          = "retry_key"
 	agentProfileIDArg    = "agent_profile_id"
+	taskPriorityArg      = "priority"
 )
 
 // transportRequestIDMetaKey is the Kandev-private `_meta` key under which the
@@ -267,6 +268,11 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		if s.sessionID != "" && s.taskID != "" {
 			payload["source_session_id"] = s.sessionID
 		}
+		// Forwarded only when supplied: an omitted priority must reach the
+		// backend as an omitted field so the service default applies.
+		if priority := req.GetString(taskPriorityArg, ""); priority != "" {
+			payload[taskPriorityArg] = priority
+		}
 		if parentIsSelf {
 			// This is an internal server-owned intent marker. The backend still
 			// authenticates the current session and verifies that parent_id is
@@ -351,6 +357,9 @@ func (s *Server) updateTaskHandler() server.ToolHandlerFunc {
 		}
 		if state := req.GetString("state", ""); state != "" {
 			payload["state"] = state
+		}
+		if priority := req.GetString(taskPriorityArg, ""); priority != "" {
+			payload[taskPriorityArg] = priority
 		}
 		if launchPrompt := req.GetString("deferred_launch_prompt", ""); launchPrompt != "" {
 			payload["deferred_launch_prompt"] = launchPrompt

@@ -1410,6 +1410,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithString(taskPriorityArg, mcp.Enum(taskcontract.TaskPriorityValues()...), mcp.Description(updateTaskPriorityParamDesc)),
 			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
@@ -1623,6 +1624,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
+			mcp.WithString(taskPriorityArg, mcp.Enum(taskcontract.TaskPriorityValues()...), mcp.Description(createTaskPriorityParamDesc)),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
@@ -1638,6 +1640,19 @@ func (s *Server) registerCreateTaskTool() {
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
 }
+
+// Task priority parameter descriptions. The urgency guidance is shared so the
+// create and update tools cannot drift: a controller that raises an existing
+// task and one that creates an urgent task must read the same rule.
+const (
+	taskPriorityGuidance = "Priority orders queued work: critical first, then high, medium, low. " +
+		"Use critical only for the owner's direct orders, outages or operational blockers, or work that blocks other work; " +
+		"leave everything else at medium (or high/low when it clearly differs)."
+
+	createTaskPriorityParamDesc = "Task priority: critical, high, medium, or low. Omit it for the default, medium. " + taskPriorityGuidance
+
+	updateTaskPriorityParamDesc = "New task priority: critical, high, medium, or low. Omit it to leave the priority unchanged. " + taskPriorityGuidance
+)
 
 // Dependency parameter descriptions for create_task_kandev. Extracted as
 // constants because the same guidance has to appear on the two dependency tools
