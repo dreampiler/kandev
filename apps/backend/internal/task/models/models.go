@@ -81,6 +81,23 @@ type ListMessagesOptions struct {
 	Around      string
 }
 
+// MessageTurnCoverage identifies the message rows whose turn context was read
+// from the same database snapshot, plus the active turn observed by that read.
+type MessageTurnCoverage struct {
+	MessageIDs   []string
+	ActiveTurnID string
+}
+
+// MessageTurnWindow is a bounded transcript page and the turn rows needed to
+// render it. Turns are limited to distinct message turn IDs plus the active
+// turn, regardless of how much older turn history exists.
+type MessageTurnWindow struct {
+	Messages []*Message
+	Turns    []*Turn
+	HasMore  bool
+	Coverage *MessageTurnCoverage
+}
+
 // SearchMessagesOptions defines options for searching a session's messages.
 type SearchMessagesOptions struct {
 	Query string
@@ -139,7 +156,7 @@ const (
 	// time, before the feeder pull can publish task.moved, so the workflow
 	// auto-start chokepoint does not launch the same task a second time; the
 	// automation dispatch (or its ceiling replay) is the single start owner.
-	// The dispatch removes the marker once it resolves.
+	// Only its exact owner can release the marker after definitive admission or termination.
 	MetaKeyAutomationStartOwned = "automation_start_owned"
 	// MetaKeyCoordinatorID records the coordinator that owns a conversation
 	// task, set at creation and read by the startup cleanup pass that
@@ -545,12 +562,19 @@ func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
 }
 
 // AutomationStartOwned reports whether task metadata marks the task's initial
-// agent start as owned by the automation run that created it. Only an explicit
-// true value counts. When set, the workflow auto-start chokepoint must not
+// agent start as owned by the automation run that created it. Legacy boolean
+// markers remain fenced until their ownership can be established. The workflow
+// auto-start chokepoint must not
 // launch the task; the automation dispatch owns the launch and its binding.
 func AutomationStartOwned(metadata map[string]interface{}) bool {
-	owned, ok := metadata[MetaKeyAutomationStartOwned].(bool)
-	return ok && owned
+	switch owner := metadata[MetaKeyAutomationStartOwned].(type) {
+	case string:
+		return owner != ""
+	case bool:
+		return owner
+	default:
+		return false
+	}
 }
 
 // TaskSession.Metadata key that records how the session came into existence.

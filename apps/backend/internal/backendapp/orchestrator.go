@@ -801,11 +801,17 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		Origin:         req.Origin,
 
 		AutomationStartOwned: req.AutomationStartOwned,
+		AutomationStartOwner: req.AutomationStartOwner,
+		ExternalID:           req.ExternalID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result.Task, nil
+}
+
+func (a *reviewTaskCreatorAdapter) GetReviewTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error) {
+	return a.svc.GetTaskByExternalID(ctx, workspaceID, externalID)
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.

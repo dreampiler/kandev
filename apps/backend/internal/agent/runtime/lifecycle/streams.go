@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // StreamCallbacks defines callbacks for stream events
@@ -235,6 +236,9 @@ func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *Agent
 	connected := client.HasAgentStream()
 	releaseClient()
 	if !connected {
+		if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+			return err
+		}
 		return errors.New("agent updates stream did not connect")
 	}
 	return nil
@@ -404,7 +408,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	if streamID == "" {
 		streamID = execution.SessionID
 	}
-	after, cursorErr := sm.deliveryReplayCursor(ctx, delivery, streamID)
+	after, cursorErr := sm.initialDeliveryReplayCursor(ctx, execution, delivery, client, streamID)
+	execution.recordDeliveryStreamFailure(startupGeneration, cursorErr)
 	if cursorErr != nil {
 		sm.logger.Error("failed to load durable delivery replay cursor",
 			zap.String("instance_id", execution.ID),
@@ -422,15 +427,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
-	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
-		if !processor.enqueue(event) {
-			sm.logger.Error("durable agent event processor is unavailable",
-				zap.String("instance_id", execution.ID))
-			if processor.ctx.Err() == nil {
-				processor.fail(errStreamEventProcessorQueueFull)
-				client.CloseUpdatesStream()
-			}
-		}
+	// Processor failure cancels only this connection, including when no later
+	// frame arrives. Disconnect handling reports the original processing error.
+	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
+		processor.enqueue(event)
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		processErr := processor.close()
 		if processErr != nil {
@@ -443,6 +443,10 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			}
 		}
 		if disconnectErr != nil {
+			if errors.Is(disconnectErr, errDeliveryReplayReconciled) {
+				sm.reconnectAfterExpiredDeliveryReplay(execution)
+				return
+			}
 			overloaded := errors.Is(disconnectErr, agentctl.ErrAgentEventQueueFull) ||
 				errors.Is(disconnectErr, errStreamEventProcessorQueueFull)
 			if overloaded && execution.DeliveryMode != DurableDeliveryV1 {
@@ -466,6 +470,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
 	}, after)
+	execution.recordDeliveryStreamFailure(startupGeneration, err)
 	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)
@@ -476,9 +481,25 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	if err != nil {
+		processor.fail(err)
+		_ = processor.close()
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
+	}
+}
+
+func (sm *StreamManager) reconnectAfterExpiredDeliveryReplay(execution *AgentExecution) {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return
+	}
+	if !sm.start(func() {
+		if sm.sleepOrStop(20 * time.Millisecond) {
+			sm.connectUpdatesStream(execution, nil)
+		}
+	}) {
+		sm.logger.Debug("skipping expired delivery replay reconnect during shutdown",
+			zap.String("execution_id", execution.ID))
 	}
 }
 
@@ -544,6 +565,9 @@ func (sm *StreamManager) prepareAgentEvent(
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 ) (preparedAgentEvent, error) {
+	if err := waitForDeliveryNegotiation(ctx, execution); err != nil {
+		return preparedAgentEvent{}, err
+	}
 	durable, err := durableAgentEventIdentity(execution, event)
 	if err != nil {
 		return preparedAgentEvent{}, err
@@ -566,7 +590,7 @@ func (sm *StreamManager) prepareAgentEvent(
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
 	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		ctx, execution, durableEvent, delivery,
+		ctx, execution, durableEvent, delivery, client,
 	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
@@ -607,6 +631,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	execution *AgentExecution,
 	durableEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
+	client *agentctl.Client,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, err error) {
 	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
 		return true, false, nil, nil
@@ -616,6 +641,16 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 		return false, false, nil, err
 	}
 	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository)
+	if errors.Is(err, repoerrors.ErrAgentDeliveryReplayExpired) {
+		projected, recoveryErr := reconcileExpiredAgentDeliveryReplay(
+			ctx, execution, durableEvent, repository, client, client,
+		)
+		if recoveryErr != nil {
+			return false, false, nil, fmt.Errorf("reconcile expired durable replay: %w", recoveryErr)
+		}
+		execution.DeliveryReplayCursor = projected
+		return false, false, nil, errDeliveryReplayReconciled
+	}
 	if err != nil {
 		return false, false, nil, fmt.Errorf("admit durable agent event: %w", err)
 	}
@@ -792,6 +827,12 @@ func (sm *StreamManager) notifyCanonicalAgentEventBatch(
 func durableAgentEventIdentity(execution *AgentExecution, event agentctl.AgentEvent) (bool, error) {
 	complete := event.DeliveryStreamID != "" && event.DeliverySequence > 0
 	if complete {
+		if execution == nil || execution.DeliveryMode != DurableDeliveryV1 || execution.DeliveryStreamID == "" ||
+			execution.DeliveryStreamID != event.DeliveryStreamID || execution.DeliveryIncarnationID == "" ||
+			execution.DeliveryIncarnationID != event.DeliveryIncarnationID || execution.DeliveryHarnessGeneration == 0 ||
+			execution.DeliveryHarnessGeneration != event.DeliveryHarnessGeneration {
+			return false, ErrDurableAdoptionIdentityMismatch
+		}
 		return true, nil
 	}
 	partial := event.DeliveryStreamID != "" ||

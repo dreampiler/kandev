@@ -22,73 +22,66 @@ creates, so a feeder pull's workflow auto-start cannot race it.
 
 ## In scope
 
-- Add regression tests for the owned-task skip, the create-time marker, and the
-  marker's release before the change.
-- Stamp `automation_start_owned` on a newly created automation task.
-- Skip workflow auto-start for a task that carries the marker.
-- Remove the marker when the automation dispatch resolves, publish
-  `task.updated`, and clear abandoned markers at startup.
-- Accept the marker only from the automation create path, never from request
-  metadata or an ordinary metadata update.
-- Record the single start owner in the session ceiling design.
+- Mark newly created tasks before feeder publication, never reused continuations.
+- Reject ownership injection through actual registered REST/WS adapters.
+- Preserve ownership in ordinary metadata replacement and merge on both dialects.
+- Fence queued starts and uncertain retry acknowledgement, cancellation and Stop.
+- Release the exact owner after definitive admission or termination through CAS.
+- Reconcile startup and later workflow entry using existing durable evidence.
+- Update requirements, system design and the public automation explanation.
 
 ## Out of scope
 
-Continuation runs, the ceiling deferral comparison, automation failure cleanup,
-and UI changes.
+Rendered UI, migrations, flag changes and competing retry ownership machinery.
+Existing failed-stop/no-replacement and generic retry/recovery fences are retained.
 
 ## Acceptance
 
-- An owned task on an auto-start step starts no workflow launch; an unmarked
-  task on the same step launches.
-- A task the automation creates carries the marker when `CreateTask` runs.
-- After the automation dispatch resolves, even with a cancelled context, the
-  task no longer carries the marker and a `task.updated` is published.
-- Startup reconciliation clears a marker left by a stopped process.
-- Create request metadata and ordinary metadata updates cannot add or remove
-  the marker.
-- Existing deferred automation start tests pass.
+- A feeder move cannot start an automation's new task before its dispatch.
+- The internal request's run identity is present at task construction.
+- Queued dispatch remains owned; a definitive drop releases its exact marker.
+- Restart and lease age cannot release unresolved ownership across instances.
+- Stale cleanup cannot clear a successor, and successful release publishes once.
+- Missing/read-uncertain ownership and failed Stop remain fenced.
+- Continuations preserve original task/session identity and marker.
+- Registered wire callers and ordinary metadata writes cannot inject or erase it.
 
 ## Verification
 
-From the repository root:
+Contained local proof uses extracted actual source and stdlib-only tests with
+explicit fake boundaries; it does not compile the full orchestrator or lifecycle.
+The work-order repository/caller commands run in hosted CI:
 
 ```bash
-(cd apps/backend && go test -trimpath ./internal/orchestrator -run 'Automation|AutoStart|TaskMoved|Feeder|WIP|Ceiling' -count=1)
-(cd apps/backend && go test -trimpath ./internal/task/models ./internal/task/service -count=1)
+(cd apps/backend && go test -trimpath -race ./internal/orchestrator -run 'Automation|AutoStart|TaskMoved|Feeder|WIP|Ceiling|Startup' -count=1)
+(cd apps/backend && go test -trimpath ./internal/task/models ./internal/task/service ./internal/task/handlers ./internal/task/repository/sqlite -count=1)
 (cd apps/backend && go vet ./internal/orchestrator ./internal/task/...)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
 git diff --check
 ```
 
-## Files likely touched
+PostgreSQL contracts require the hosted isolated PostgreSQL fixture. Full actual
+Backend/Frontend/E2E CI remains an exact-head external delivery gate.
 
-- apps/backend/internal/orchestrator/event_handlers_automation.go
-- apps/backend/internal/orchestrator/event_handlers_workflow.go
-- apps/backend/internal/orchestrator/event_handlers_github.go
-- apps/backend/internal/orchestrator/service.go
-- apps/backend/internal/backendapp/orchestrator.go
-- apps/backend/internal/task/service/service_requests.go
-- apps/backend/internal/task/service/service_task_metadata.go
-- apps/backend/internal/task/service/service_tasks.go
-- apps/backend/internal/task/models/task_metadata_update.go
-- apps/backend/internal/task/repository/sqlite/task.go
-- apps/backend/internal/task/repository/sqlite/task_metadata_merge.go
-- apps/backend/internal/orchestrator/event_handlers_workflow_automation_owned_start_test.go
-- apps/backend/internal/orchestrator/automation_ceiling_defer_test.go
-- apps/backend/internal/task/models/models.go
-- apps/backend/internal/task/service/service_step_handoff_metadata_test.go
-- docs/specs/agents/system-design/session-concurrency-ceiling.md
+## Owned files
+
+The automation request adapter, task construction/protection, workflow guard,
+initial-start ownership reconciler and ceiling replay/drop boundaries; their
+regression tests; the linked ceiling requirements/design and public automation
+explanation. Preserve all current-main contracts in these files.
 
 ## Dependencies
 
-None.
+Current durable retry launch ledger, immutable admission, metadata CAS and
+failed-cleanup guards. No new schema or parallel owner.
 
 ## Risks
 
-A move of an automation task before its dispatch resolves does not auto-start
-it; the automation dispatch, or its ceiling replay, starts it instead.
+Unresolved legacy markers stay fenced until definitive evidence is available;
+explicit task/session recovery remains subject to existing retry controls.
 
 ## Parallelism
 
@@ -96,12 +89,13 @@ it; the automation dispatch, or its ceiling replay, starts it instead.
 
 ## Inputs
 
-- Issue #4323.
-- REQ-AGENTS-SESSION-CEILING-001 and AC-AGENTS-SESSION-CEILING-001.10.
-- The linked session ceiling design.
+Issue #4323, REQ-AGENTS-SESSION-CEILING-001,
+AC-AGENTS-SESSION-CEILING-001.10 and the linked system design.
 
 ## Results
 
-- RED: on the original code, the owned task started one workflow launch, the
-  created automation task had no marker, and the marker was not released.
-- GREEN: the new tests and the existing deferred automation start tests pass.
+Implementation and contained extracted-source proofs are complete. RED observed
+unresolved startup release and stale cleanup erasing a successor. GREEN passed
+with race detection. Actual repository/caller/full-suite verification is required
+in hosted CI before delivery; immutable receipts are external so validation does
+not require status-only source pushes.

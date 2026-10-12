@@ -2170,6 +2170,31 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 	}
 	if effect != nil {
+		if effect.WorkflowStepID != "" || effect.WorkflowPolicyUpdatedAt != nil {
+			policyMatches, err := r.workflowPolicyMatchesTx(ctx, tx, actualWorkflowID, actualSourceStepID, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !policyMatches {
+				return false, false, nil
+			}
+		}
+		if effect.TaskID != "" && effect.SessionID != "" && effect.IncarnationID != "" &&
+			effect.HarnessGeneration > 0 && effect.SubmissionID != "" && effect.StreamID != "" && effect.Sequence > 0 {
+			if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), effect.SessionID); err != nil {
+				return false, false, err
+			}
+			if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{effect.SessionID}, []string{effect.StreamID}); err != nil {
+				return false, false, err
+			}
+			terminalMatches, err := r.agentDeliveryWorkflowTerminalMatchesTx(ctx, tx, effect)
+			if err != nil {
+				return false, false, err
+			}
+			if !terminalMatches {
+				return false, false, nil
+			}
+		}
 		inserted, err := insertDeliveryEffectTx(ctx, tx, r.db.Rebind, effect)
 		if err != nil {
 			return false, false, err
@@ -3679,6 +3704,9 @@ func (r *Repository) deleteTaskWithVacatedStep(ctx context.Context, id string, c
 	if err := r.purgeTaskPromptSequenceTx(ctx, tx, id, sessions); err != nil {
 		return "", err
 	}
+	if err := r.retireAgentDeliveryTaskSessionsTx(ctx, tx, id); err != nil {
+		return "", err
+	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return "", err
@@ -4183,10 +4211,10 @@ func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*model
 func (r *Repository) ListTasksWithAutomationStartOwned(ctx context.Context) ([]*models.Task, error) {
 	var predicate, path string
 	if dialect.IsPostgres(r.ro.DriverName()) {
-		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) = 'true'::jsonb"
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?) IS NOT NULL"
 		path = models.MetaKeyAutomationStartOwned
 	} else {
-		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) = 'true'"
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
 		path = jsonPath(models.MetaKeyAutomationStartOwned)
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
@@ -5467,7 +5495,14 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 	if err != nil {
 		return false, err
 	}
+	identities, err := r.agentDeliverySessionIdentitiesInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessions...); err != nil {
+		return false, err
+	}
+	if err := r.lockAgentDeliverySessionIdentitiesTx(ctx, tx, identities); err != nil {
 		return false, err
 	}
 	query := "WITH candidate AS (" + candidate + ") DELETE FROM tasks WHERE id = ? AND EXISTS (SELECT 1 FROM candidate)"
@@ -5481,6 +5516,9 @@ func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, 
 		return false, err
 	}
 	if rows > 0 {
+		if err := r.insertAgentDeliveryRetirementJobsTx(ctx, tx, identities); err != nil {
+			return false, err
+		}
 		if err := r.purgePromptSequencesForSessionsTx(ctx, tx, sessions); err != nil {
 			return false, err
 		}

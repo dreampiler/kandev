@@ -166,10 +166,13 @@ func TestBuildTaskStampsAutomationStartOwnershipOnlyFromInternalField(t *testing
 	}
 
 	owned := svc.buildTask(ctx, &CreateTaskRequest{
-		WorkspaceID: "ws-1", Title: "automation", AutomationStartOwned: true,
+		WorkspaceID: "ws-1", Title: "automation", AutomationStartOwned: true, AutomationStartOwner: "admitted-run",
 	}, "")
 	if !models.AutomationStartOwned(owned.Metadata) {
 		t.Fatalf("automation create metadata = %v, want %s=true", owned.Metadata, models.MetaKeyAutomationStartOwned)
+	}
+	if owner := owned.Metadata[models.MetaKeyAutomationStartOwned]; owner != "admitted-run" {
+		t.Fatalf("initial start owner = %v, want admitted-run", owner)
 	}
 }
 

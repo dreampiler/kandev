@@ -158,31 +158,30 @@ func TestCreateAutomationTaskStampsStartOwnership(t *testing.T) {
 func TestReleaseAutomationStartOwnershipPublishesTaskUpdate(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedAutomationTask(t, repo, "t-release", models.TaskOriginAutomationRun, false)
-	require.NoError(t, repo.SetTaskMetadataKey(context.Background(), "t-release", models.MetaKeyAutomationStartOwned, true))
+	require.NoError(t, repo.SetTaskMetadataKey(context.Background(), "t-release", models.MetaKeyAutomationStartOwned, "release-owner"))
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	taskEvents := &recordingTaskUpdatedPublisher{}
 	svc.SetTaskEventPublisher(taskEvents)
 
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	svc.releaseAutomationStartOwnership(cancelled, "t-release")
+	svc.releaseAutomationStartOwnership(cancelled, "t-release", "release-owner")
 
 	task, err := repo.GetTask(context.Background(), "t-release")
 	require.NoError(t, err)
 	require.False(t, models.AutomationStartOwned(task.Metadata), "the marker must be cleared")
 	require.Equal(t, []string{"t-release"}, taskEvents.updatedTaskIDs, "clearing the marker publishes task.updated")
 
-	svc.releaseAutomationStartOwnership(context.Background(), "t-release")
+	svc.releaseAutomationStartOwnership(context.Background(), "t-release", "release-owner")
 	require.Len(t, taskEvents.updatedTaskIDs, 1, "a marker that is already gone publishes nothing")
 }
 
-// TestStartupReleasesAbandonedAutomationStartOwnership covers a process that
+// TestStartupRetainsUnresolvedAutomationStartOwnership covers a process that
 // stopped after creating an automation task but before its dispatch resolved:
-// no dispatch survives the restart, so startup reconciliation clears the
-// marker and later workflow auto-starts are no longer skipped.
+// restart alone supplies no proof that its owner terminated.
 //
 // @covers AC-AGENTS-SESSION-CEILING-001.10
-func TestStartupReleasesAbandonedAutomationStartOwnership(t *testing.T) {
+func TestStartupRetainsUnresolvedAutomationStartOwnership(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	seedAutomationTask(t, repo, "t-abandoned", models.TaskOriginAutomationRun, false)
@@ -196,8 +195,8 @@ func TestStartupReleasesAbandonedAutomationStartOwnership(t *testing.T) {
 
 	task, err := repo.GetTask(ctx, "t-abandoned")
 	require.NoError(t, err)
-	require.False(t, models.AutomationStartOwned(task.Metadata), "an abandoned marker must be cleared at startup")
-	require.Equal(t, []string{"t-abandoned"}, taskEvents.updatedTaskIDs, "only the cleared task is republished")
+	require.True(t, models.AutomationStartOwned(task.Metadata), "restart alone cannot prove the dispatch terminated")
+	require.Empty(t, taskEvents.updatedTaskIDs, "unresolved ownership is not republished as released")
 }
 
 func requireNotNil(t *testing.T, value interface{}, msg string) {

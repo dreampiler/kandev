@@ -1026,7 +1026,11 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
-		metadata[models.MetaKeyAutomationStartOwned] = true
+		owner := req.AutomationStartOwner
+		if owner == "" {
+			owner = uuid.NewString()
+		}
+		metadata[models.MetaKeyAutomationStartOwned] = owner
 	}
 	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
 		if metadata == nil {

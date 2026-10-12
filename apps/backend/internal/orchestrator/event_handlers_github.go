@@ -138,6 +138,9 @@ type ReviewTaskRequest struct {
 	// AutomationStartOwned reserves the created task's initial start for the
 	// automation dispatch (see models.MetaKeyAutomationStartOwned).
 	AutomationStartOwned bool
+	AutomationStartOwner string
+	// ExternalID is the stable provider identity for retry task creation.
+	ExternalID string
 }
 
 // ReviewTaskRepository associates a repository with a review task.

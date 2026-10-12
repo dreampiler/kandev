@@ -162,7 +162,19 @@ launch request
 ```
 
 Manual origins bypass refusal and write a manual-override audit entry. Automatic
-origins never become manual during replay. The sweep clears a record only after
+origins never become manual during replay. Task focus that resumes an
+idle-suspended session is passive inspection, like opening a conversation, so it
+uses the automatic origin. Its deferred record keeps the completed-session
+permission and the idle-suspension check, so a parked completed session stays a
+valid destination and the replay re-checks that the idle policy still parks it.
+Only a held claim from the same service for the exact task/session resume may
+bypass its own queued-launch guard. The bypass renews the unchanged durable
+claim, including its owner and unexpired lease, and validates the route;
+foreign, released, superseded and expired claims remain blocked. Renewal errors
+remain retryable and preserve the queued record. A replay that no longer has
+idle-suspension provenance is dropped. Final provider admission
+still revalidates claim and route ownership.
+The sweep clears a record only after
 successful dispatch. A repeated refusal leaves the original timestamp and
 payload in place.
 
@@ -219,17 +231,26 @@ the run is failed and the launched session is stopped, since no completion
 would settle the run; the task is kept. Workflow-step auto-start eligibility
 does not apply because the trigger is the start signal.
 
-A task an automation creates carries `automation_start_owned` from creation
-until the automation dispatch resolves. While the marker is set, workflow
-auto-start skips the task, including the `task.moved` of a feeder pull that
-`CreateTask` runs before it returns. The automation dispatch is then the task's
-only initial starter, so its start is never refused as a conflicting deferral or
-as a workspace that another start is still preparing. The dispatch removes the
-marker whatever its outcome, so a task left without a session auto-starts on a
-later move like any other task. Only the automation create path can set the
-marker; create metadata and ordinary metadata updates cannot add or remove it.
-Startup reconciliation clears any marker a stopped process left behind, since no
-dispatch survives a restart.
+A newly created automation task carries `automation_start_owned` before
+`CreateTask` publishes feeder moves. Its value is the admitted run ID, or a
+fresh internal token for an unbound internal start. Workflow auto-start yields
+to that owner. Continuations reuse their task and never acquire or overwrite
+initial-start ownership. Wire create requests and ordinary metadata updates
+cannot set or remove the marker.
+
+Release compares the captured owner through the existing metadata CAS boundary
+and publishes `task.updated` on removal, using a bounded detached context.
+A queued dispatch keeps its marker until exact replay admission or a definitive
+queue drop. Legacy bound session/turn evidence can release the initial fence;
+a durable retry keeps it until its matching run is terminal and its immutable
+run/generation/task/session/turn/submission launch is confirmed stopped. Generic
+retry and recovery fences continue to apply independently.
+
+Startup and later workflow entry consult the existing run and launch ledgers.
+Restart, expired leases, unknown acceptance, failed Stop, missing ownership
+and read uncertainty do not certify termination or permit generic replay.
+Unresolved legacy boolean markers also remain fenced. Explicit task/session
+recovery remains subject to the existing retry owner controls.
 
 The sweep drops a start whose run was deleted or is no longer `triggered`, such
 as a stopped, bound, failed, or startup-reconciled run, without launching. A run

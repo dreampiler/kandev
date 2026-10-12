@@ -23,62 +23,26 @@ reports the gap.
 
 ## Scope
 
-### In scope
+- Stamp server-managed initial-start ownership before feeder publication.
+- Use the existing run and launch ledgers, immutable identity and metadata CAS.
+- Preserve queued and uncertain ownership across instances and recovery.
+- Release only definitive admission or termination; publish task updates.
+- Protect ordinary create, replacement and merged metadata on SQLite and PostgreSQL.
+- Preserve continuation identity and all existing retry/manual recovery fences.
 
-- Mark a task an automation creates as owned by the automation dispatch for its
-  initial start.
-- Skip workflow auto-start for a task that carries the marker.
-- Remove the marker once the automation dispatch resolves, and clear markers a
-  stopped process left behind at startup.
-- Accept the marker only from the automation create path.
-- Record the single start owner in the session ceiling design.
-
-### Out of scope
-
-- Continuation runs, which reuse an existing task.
-- Changes to the ceiling deferral comparison or to automation failure cleanup.
-- Rendered UI.
+Rendered UI, runtime flags and persistence migrations are outside this change.
+The private marker is not a new retry ledger.
 
 ## Technical approach
 
-`prepareAutomationTask` sets the internal `AutomationStartOwned` field of its
-create request, and `CreateTask` stamps `automation_start_owned` when it builds
-the task, so the marker is present before the feeder pull publishes
-`task.moved`. Ordinary create and metadata update requests can neither add nor
-remove the key, so a caller cannot keep its own task from auto-starting. `autoStartTaskForLoadedStep` returns before any launch
-when the marker is set, and discards an auto-start-on-create claim it holds.
-`autoStartAutomationTaskForRun` removes the marker when its dispatch returns,
-whether the start ran, was queued by the ceiling, or failed. A task left without
-a session, such as one whose queued start is later dropped, then auto-starts on
-a later move like any other task. The removal runs on a bounded context
-detached from the dispatch and publishes `task.updated`. Startup reconciliation
-lists marked tasks, automation-origin ones included, and clears every
-remaining marker before automation events are subscribed, since no dispatch
-survives a restart.
-
-## Tests
-
-`event_handlers_workflow_automation_owned_start_test.go` covers
-`TestAutoStartTaskForLoadedStepHonorsAutomationStartOwnership` and
-`TestCreateAutomationTaskStampsStartOwnership`:
-AC-AGENTS-SESSION-CEILING-001.10. An owned task on an auto-start step starts no
-workflow launch, and an unmarked control task launches. The created automation
-task carries the marker.
-`automation_ceiling_defer_test.go` covers
-`TestAutomationStartDeferredByCeiling_ReleasesStartOwnership`: after a dispatch
-the ceiling queued, the task no longer carries the marker.
-`TestReleaseAutomationStartOwnershipPublishesTaskUpdate` and
-`TestStartupReleasesAbandonedAutomationStartOwnership` cover the release on a
-cancelled dispatch context, its `task.updated`, and the startup cleanup.
-`service_step_handoff_metadata_test.go` covers
-`TestProtectedTaskMetadataForCreateRejectsAutomationStartOwnership`,
-`TestBuildTaskStampsAutomationStartOwnershipOnlyFromInternalField`, and
-`TestUpdateTaskMetadataPreservesAutomationStartOwnership`.
-
-## E2E tests
-
-The service tests use the real repository and ceiling controller; only the
-agent manager is simulated. No rendered UI changes require browser coverage.
+The automation request supplies its admitted run identity through private create
+fields. Task construction stamps the marker before feeder events. An unbound
+internal start receives a fresh token. Generic workflow auto-start yields to the
+marker and can reconcile only definitive ledger evidence. Queued dispatches
+retain their marker. Exact queue drops and bound legacy starts release by CAS;
+durable retry markers remain until their exact launch is confirmed stopped and
+the run is terminal. Missing evidence, failed Stop and restart alone retain the
+fence. Continuation refresh cannot replace an earlier initial-start owner.
 
 ## Work orders
 
@@ -86,11 +50,18 @@ agent manager is simulated. No rendered UI changes require browser coverage.
 
 ## Verification results
 
-The three orchestrator tests failed on the original code and pass with the
-change. The existing deferred automation start tests pass with the marker on
-their tasks.
+Contained extracted-source RED proofs exposed unresolved startup release and
+stale cleanup erasing a successor. The actual-source GREEN suite passes with
+race detection using explicit fake repository, ledger, logger and publisher
+boundaries. Repository/caller coverage is committed for hosted Backend CI,
+including registered REST/WS creation and SQLite/PostgreSQL metadata contracts.
+Full actual Backend, Frontend and E2E results are an external exact-head delivery
+gate. Their immutable run/head receipts are retained outside these tracked
+implementation records; local extracted proofs do not establish those results.
 
 ## Risks
 
-A move of an automation task before its dispatch resolves does not auto-start
-it; the automation dispatch, or its ceiling replay, starts it instead.
+Unresolved legacy ownership remains fenced when termination cannot be proven.
+Explicit task/session recovery remains available under existing retry controls.
+An unavailable metadata write leaves ownership in place until later ledger-based
+reconciliation succeeds; capacity expiry does not authorize replay.

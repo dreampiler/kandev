@@ -186,6 +186,12 @@ Committed output remains available for replay. A failed cancellation does not
 prove that the agent stopped. The journal never discards unacknowledged output
 to make room.
 
+Backend delivery cleanup preserves saved conversation output on desktop and phones.
+It removes redundant transport payloads after safe projection and settlement.
+If an ACK was lost after cleanup, **Retry connection** uses the persisted cursor without resending the prompt.
+Uncertain work remains protected. **Stop** and the existing recovery actions remain available.
+See [delivery retention operations](operations.md#backend-delivery-retention) for expiry, deletion, and rollback limits.
+
 Kandev can replace the local agent runtime while the backend and browser
 connection stay active. This restores runtime service only. A session with an
 uncertain prompt outcome remains blocked until a safe recovery action or the
@@ -685,3 +691,9 @@ Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 
 Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.

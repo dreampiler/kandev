@@ -1,0 +1,90 @@
+package orchestrator
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/automation"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
+)
+
+func TestAutomationStartOwnershipReleasePreservesSuccessor(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationTask(t, repo, "owned-task", models.TaskOriginAutomationTask, false)
+	ctx := context.Background()
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "owned-task", models.MetaKeyAutomationStartOwned, "successor"))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	publisher := &recordingTaskUpdatedPublisher{}
+	svc.SetTaskEventPublisher(publisher)
+	require.False(t, svc.releaseAutomationStartOwnership(ctx, "owned-task", "original"))
+	task, err := repo.GetTask(ctx, "owned-task")
+	require.NoError(t, err)
+	require.Equal(t, "successor", task.Metadata[models.MetaKeyAutomationStartOwned])
+	require.Empty(t, publisher.updatedTaskIDs)
+	require.True(t, svc.releaseAutomationStartOwnership(ctx, "owned-task", "successor"))
+	require.Equal(t, []string{"owned-task"}, publisher.updatedTaskIDs)
+}
+
+func TestAutomationInitialStartRequiresDefinitiveExactEvidence(t *testing.T) {
+	for _, state := range []string{automation.RetryLaunchPrepared, automation.RetryLaunchQueued, automation.RetryLaunchDispatching, automation.RetryLaunchAccepted, automation.RetryLaunchUncertain, automation.RetryLaunchStopped} {
+		t.Run(state, func(t *testing.T) {
+			task := &models.Task{ID: "task", Metadata: map[string]interface{}{models.MetaKeyAutomationStartOwned: "run"}}
+			run := &automation.AutomationRun{ID: "run", AutomationID: "auto", TaskID: "task", SessionID: "session", TurnID: "turn", RetryGroupID: "group", RetryGroupGeneration: 2, Status: automation.RunStatusFailed}
+			launch := &automation.RetryLaunch{RunID: "run", AutomationID: "auto", TaskID: "task", SessionID: "session", TurnID: "turn", SubmissionID: "submission", Generation: 2, State: state, CancelRequested: true}
+			require.Equal(t, state == automation.RetryLaunchStopped, automationInitialStartResolved(task, run, launch))
+			launch.Generation++
+			require.False(t, automationInitialStartResolved(task, run, launch), "an old generation cannot release its successor")
+			launch.Generation--
+			launch.TurnID = "other-turn"
+			require.False(t, automationInitialStartResolved(task, run, launch))
+			launch.TurnID = "turn"
+			run.Status = automation.RunStatusTriggered
+			require.False(t, automationInitialStartResolved(task, run, launch), "open dispatch remains owned even after lease recovery")
+		})
+	}
+}
+
+func TestStartupReleasesOnlyBoundLegacyInitialStart(t *testing.T) {
+	ctx := context.Background()
+	base := setupAutomationRetentionFixture(t)
+	seedAutomationTask(t, base.repo, "bound-task", models.TaskOriginAutomationTask, false)
+	a := &automation.Automation{WorkspaceID: "ws-bound-task", Name: "bound", Enabled: true}
+	require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+	run := &automation.AutomationRun{AutomationID: a.ID, TaskID: "bound-task", SessionID: "session", TurnID: "turn", Status: automation.RunStatusTaskCreated}
+	require.NoError(t, base.autoStore.CreateRun(ctx, run))
+	require.NoError(t, base.repo.SetTaskMetadataKey(ctx, "bound-task", models.MetaKeyAutomationStartOwned, run.ID))
+	svc := createTestService(base.repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(base.autoSvc)
+	svc.releaseAbandonedAutomationStartOwnership(ctx)
+	task, err := base.repo.GetTask(ctx, "bound-task")
+	require.NoError(t, err)
+	require.False(t, models.AutomationStartOwned(task.Metadata))
+}
+
+func TestStartupRetainsRetryOwnerAcrossInstancesAndLeaseRecovery(t *testing.T) {
+	ctx := context.Background()
+	base := setupAutomationRetentionFixture(t)
+	seedAutomationTask(t, base.repo, "retry-owned-task", models.TaskOriginAutomationTask, false)
+	a := &automation.Automation{ID: "retry-owner-auto", WorkspaceID: "ws-retry-owned-task", Name: "owned", Enabled: true, MaxConcurrentRuns: 1}
+	require.NoError(t, base.autoStore.CreateAutomation(ctx, a))
+	run := &automation.AutomationRun{ID: "retry-owner-run", AutomationID: a.ID, TaskID: "retry-owned-task", Status: automation.RunStatusTriggered, RetryGroupID: "retry-owner-group", RetryGroupGeneration: 1, RetryState: automation.RetryStateTriggered, RetryLaunchConfigVersion: automation.RetryLaunchConfigVersion}
+	run.RetryLaunchConfigSnapshot = retrySnapshotForTest(run, a)
+	require.NoError(t, base.autoStore.CreateRetryAdmission(ctx, run, &automation.RetryGroup{ID: run.RetryGroupID, AutomationID: a.ID, Generation: 1, State: automation.RetryGroupLive}))
+	launch, err := base.autoStore.ReserveRetryLaunch(ctx, run.ID, run.TaskID, "", automation.ThreadActionCreated, "original")
+	require.NoError(t, err)
+	require.NoError(t, base.repo.SetTaskMetadataKey(ctx, run.TaskID, models.MetaKeyAutomationStartOwned, run.ID))
+	for range 2 {
+		svc := createTestService(base.repo, newMockStepGetter(), newMockTaskRepo())
+		svc.SetAutomationService(base.autoSvc)
+		require.NoError(t, base.autoStore.RecoverRetryLedger(ctx, time.Now().Add(24*time.Hour)))
+		svc.releaseAbandonedAutomationStartOwnership(ctx)
+		task, err := base.repo.GetTask(ctx, run.TaskID)
+		require.NoError(t, err)
+		require.Equal(t, run.ID, task.Metadata[models.MetaKeyAutomationStartOwned])
+		current, err := base.autoStore.GetRetryLaunch(ctx, run.ID)
+		require.NoError(t, err)
+		require.Equal(t, launch, current, "startup must preserve immutable launch evidence")
+	}
+}
