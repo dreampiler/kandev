@@ -13,7 +13,7 @@ import (
 func accountBlockedFailure() *routingerr.Error {
 	return routingerr.Classify(routingerr.Input{
 		Phase: routingerr.PhasePromptSend,
-		Stderr: `Error from provider meta-contributor: 403 Forbidden {"error":{"code":"user_blocked",` +
+		Stderr: `Error from provider example-gateway: 403 Forbidden {"error":{"code":"user_blocked",` +
 			`"message":"Your access has been restricted due to repeated policy violations."}}`,
 	})
 }

@@ -11,7 +11,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const accountBlockedProviderError = `Error from provider meta-contributor: 403 Forbidden {"error":{"code":"user_blocked",` +
+const accountBlockedProviderError = `Error from provider example-gateway: 403 Forbidden {"error":{"code":"user_blocked",` +
 	`"message":"Your access has been restricted due to repeated policy violations."}}`
 
 // An account restriction reported after the attempt already produced output
