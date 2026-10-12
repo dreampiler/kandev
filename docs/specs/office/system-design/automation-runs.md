@@ -190,6 +190,23 @@ raced the failure keeps its work. Only the task row is archived. The run row, it
 and its transcript are never touched, and the persisted `failed` status remains authoritative, so
 the failure stays visible in the feed.
 
+**Exact-turn outcome for restart settlement.** Restart recovery cannot classify an open bound run
+from liveness alone: a session parked after a completed turn is not live, so `WAITING_FOR_INPUT`,
+`FAILED`, and `CANCELLED` all read as "not live", and a not-live turn with no recorded outcome is
+not proof of failure. The turn row is the durable record (`task_session_turns.completed_at`), but
+completion is not outcome: `CompleteTurn` writes `now`, while `AbandonTurn` and provider
+interruption write `started_at`, and a cancelled turn completes without a failure marker. The
+outcome is therefore recorded on the exact turn when the completion handler decides it, before the
+run write, as turn metadata that reconciliation reads back: `succeeded`, `failed`, or `cancelled`.
+Reconciliation matches the run's task, session, and turn identity against the turn's own binding
+before settling, settles `succeeded` as succeeded and `failed` / `cancelled` (or existing
+authoritative negative evidence: an `error_terminated` or `interrupted` turn) as failed, and leaves
+a run whose exact-turn outcome is not authoritative — a legacy turn, an abandoned or resumed turn,
+a read failure, a malformed or conflicting marker, or no marker — open rather than guessing. A
+recorded outcome is never overwritten, the managed-conversation and webhook protections and any
+pending, deferred, or uncertain delivery ownership are evaluated first, and a settled success
+cannot be rewritten as failed.
+
 ## API surface
 
 Five actions. The detail view reads one automation's runs and its summary; the
@@ -296,9 +313,10 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | An open run falls outside the page's own run window | The open count comes from the server, not from the loaded window, so the page still reports work in flight and keeps polling |
 | A user stops a running reused turn | The action addresses its stored run/session/turn identity, cancels that exact turn, and marks only that run failed. |
 | A user stops an open run whose bound turn already ended | The exact open run becomes failed and releases its concurrency slot. The stale stop result does not become not-found. No successor turn is touched. |
-| Restart recovery cannot find the bound execution, task, or session | Typed runtime, executor, SQL, task, and session not-found errors normalize to not live and the exact open run becomes failed. A transient inspection error leaves the run open for a later retry. |
+| Restart recovery cannot find the bound execution, task, or session | Typed not-found errors normalize to not live; the run is then settled from the exact turn's recorded outcome (unknown stays open). A transient inspection error leaves the run open for a later retry. |
 | A run reaches persisted terminal `failed` | Its generated hidden task is archived idempotently; the run stays `failed` with its message and transcript. A visible `automation_task`, a referenced or continuation task, an open or uncertain-delivery run, a succeeded run, and a task with a live session are left untouched. |
 | Settlement crashes or is dropped between the run write and the task archive | The next startup reconciliation archives the still-unarchived generated task; a repeated settlement of an already-archived task is a no-op. |
+| Restart recovery finds an open bound run whose exact turn already completed | The run is settled from the exact turn's recorded outcome: `succeeded` stays succeeded, and `failed` / `cancelled` become failed. When the outcome is not recorded, the run stays open for the next startup pass instead of being guessed failed. |
 
 ## Scenarios
 
