@@ -10,6 +10,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // A turn that was in flight when Kandev (and its agentctl runtime) restarted
@@ -58,6 +59,12 @@ func resumeNeedsContextContinuation(err error) bool {
 		return false
 	}
 	if errors.Is(err, agentruntime.ErrDurableAdoptionBlocked) {
+		return true
+	}
+	// The journal still holds a stream SQL never received (for example output
+	// dropped before its first receipt). Native resume refuses that missing
+	// checkpoint by design; a fresh successor generation does not depend on it.
+	if errors.Is(err, repoerrors.ErrAgentDeliveryCheckpointMissing) {
 		return true
 	}
 	reason := recoveryReasonFromError(err)
