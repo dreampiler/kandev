@@ -63,9 +63,17 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** An account restriction shall be
+  classified as `account_blocked` only from the provider error envelope defined
+  in
+  [provider account-block classification](provider-account-block-classification.md).
+  Agent prose that mentions `user_blocked` or a restricted account, a plain
+  `403`, and other permission or authentication denials shall not be
+  `account_blocked`.
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags.
-- Changing the provider-neutral rules or the runtime-environment rules.
+- Changing the provider-neutral rules, other than the account-block signature,
+  or the runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
