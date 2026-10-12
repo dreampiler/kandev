@@ -55,6 +55,7 @@ session-activity authority remain with Tasks and Platform.
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
+- [Native Code Review Reviewer Exclusion](requirements/native-code-review-reviewer-exclusion.md)
 - [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
   profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
@@ -105,6 +106,7 @@ session-activity authority remain with Tasks and Platform.
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
 - [Pending Permission Lookup Bounds](system-design/pending-permission-lookup-bounds.md)
+- [Native Code Review Reviewer Exclusion](system-design/native-code-review-reviewer-exclusion.md)
 
 ## Migration record
 
