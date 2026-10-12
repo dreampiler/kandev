@@ -34,7 +34,10 @@ func DynamicRecoverableResourceWait(err error) (time.Time, bool) {
 // routed as a failure) and carried no provider diagnostic. Each attempt
 // records at most once. The success belongs to the profile the producing
 // execution runs, which the stream event carries; the route profile captured
-// when the attempt began is the fallback for an event without it.
+// when the attempt began is the fallback for an event without it. A
+// fixed-profile attempt has no route profile, so only the producing
+// execution's profile from the event can name it. Clearing never lifts an
+// account hold or a block whose reset instant has not passed.
 func (s *Service) recordDynamicResourceTurnSuccess(
 	ctx context.Context,
 	sessionID, executionID, eventExecutionProfileID string,
@@ -49,7 +52,10 @@ func (s *Service) recordDynamicResourceTurnSuccess(
 	}
 	attempt.mu.Lock()
 	executionProfileID := attempt.executionProfileID
-	claim := attempt.dynamic && executionProfileID != "" && !attempt.resourceSuccessClaimed &&
+	if !attempt.dynamic {
+		executionProfileID = eventExecutionProfileID
+	}
+	claim := executionProfileID != "" && !attempt.resourceSuccessClaimed &&
 		attempt.evidenceKnown && (attempt.output || attempt.effect) &&
 		attempt.providerDiagnosticCode == "" &&
 		attempt.promptIdentityMatchesForClearLocked(executionID, promptGeneration)

@@ -540,6 +540,9 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, options.AgentProfileID); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -873,6 +876,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		s.recordSupersededCandidateFailure(ctx, data, classified)
