@@ -136,3 +136,6 @@ task's ready canonical environment instead of a stale task-metadata
 `executor_profile_id`; a deliberately selected different profile (a real
 executor transition) is preserved.
 
+- Commit: `f87bb80a9317f0176ad764b39a630840574995ed`
+- Fork PR: https://github.com/dreampiler/kandev/pull/247 (based on `main`)
+
