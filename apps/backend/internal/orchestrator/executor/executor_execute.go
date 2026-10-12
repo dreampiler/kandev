@@ -1559,6 +1559,17 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	// A task that already materialized a canonical environment has a frozen
+	// runner (see EvaluateRunnerMutability): a surviving task-metadata
+	// executor_profile_id (workflow agent override, import, older PATCH) is
+	// stale and must not override the environment's executor and force a second
+	// workspace/session under a different executor. Only an explicit
+	// caller-selected runner (a real executor transition) may override it.
+	if existingEnv := e.existingEnvironmentRunner(ctx, task); existingEnv != nil {
+		executorID, executorProfileID = canonicalEnvironmentRunner(
+			task, existingEnv, executorID, executorProfileID,
+		)
+	}
 	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
 		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
 	)
@@ -1643,13 +1654,20 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 	// workflow_step_id is a task-level field; no longer stored on sessions.
 
-	// Store executor profile ID on session
+	// Store executor profile ID on session. The value is the effective runner
+	// resolved above (possibly empty for a local default); a stale
+	// task-metadata profile must not survive here, or resolveExecutorConfig's
+	// applyProfile would override the selected executor.
 	if executorProfileID != "" {
 		session.ExecutorProfileID = executorProfileID
 		if metadata == nil {
 			metadata = make(map[string]interface{})
 		}
 		metadata["executor_profile_id"] = executorProfileID
+	} else if metadata != nil {
+		if _, present := metadata["executor_profile_id"]; present {
+			metadata["executor_profile_id"] = ""
+		}
 	}
 
 	// Resolve executor configuration
@@ -1906,6 +1924,47 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 			models.DescribeInheritedEnvironmentUnavailable(env.TaskID, owner))
 	}
 	return nil
+}
+
+// existingEnvironmentRunner returns the task's canonical environment when its
+// runner must take precedence over task metadata, or nil. A task that has
+// already materialized a canonical environment has a frozen runner
+// (EvaluateRunnerMutability rejects a runner switch once any session or
+// environment exists). A surviving task-metadata executor_profile_id is then
+// stale evidence, not a selection.
+func (e *Executor) existingEnvironmentRunner(ctx context.Context, task *v1.Task) *models.TaskEnvironment {
+	if e.repo == nil || task == nil {
+		return nil
+	}
+	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil || env == nil || env.ExecutorType == "" {
+		return nil
+	}
+	return env
+}
+
+// canonicalEnvironmentRunner overrides a requested runner with the canonical
+// environment's runner unless the caller deliberately selected a different
+// profile (a real executor transition). Once an environment exists the runner is
+// frozen (EvaluateRunnerMutability rejects a switch after session or environment
+// creation), so a requested profile that merely echoes the task's stored
+// metadata is stale evidence and must not force a second workspace under a
+// different backend. The environment is the durable runner authority.
+func canonicalEnvironmentRunner(
+	task *v1.Task,
+	env *models.TaskEnvironment,
+	executorID, executorProfileID string,
+) (string, string) {
+	if env == nil || env.ExecutorType == "" {
+		return executorID, executorProfileID
+	}
+	if runnerRequestedDiffersFromTaskMetadata(task, executorProfileID) {
+		return executorID, executorProfileID
+	}
+	if env.ExecutorID != "" {
+		executorID = env.ExecutorID
+	}
+	return executorID, env.ExecutorProfileID
 }
 
 func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
@@ -2722,12 +2781,7 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 	env *models.TaskEnvironment,
 ) *LaunchAgentRequest {
 	metadata := cloneMetadata(task.Metadata)
-	if session.ExecutorProfileID != "" {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
-		metadata["executor_profile_id"] = session.ExecutorProfileID
-	}
+	executorID, metadata = bindSessionLaunchRunner(task, env, session, executorID, metadata)
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
 	// This request is constructed only after finding an existing runtime row.
 	// That row may outlive a failed materialization by this same session, so it
@@ -2777,18 +2831,55 @@ func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *mod
 	}
 }
 
+// bindSessionLaunchRunner resolves the runner for a prepared-session launch.
+// The session's canonical environment is the durable runner authority for any
+// launch whose requested profile merely echoes the task's stored runner
+// metadata: a stale task-metadata executor_profile_id must not override it at
+// launch time, or resolveExecutorConfig would apply the wrong executor via
+// applyProfile and a second workspace would be materialized under a different
+// backend. A caller that deliberately selected a different profile (a real
+// executor transition) is preserved. The effective profile is projected onto
+// the launch metadata (an empty value is meaningful: local default, no profile)
+// so the metadata fallback cannot resurrect a stale value. When no environment
+// is bound, the session's own stored profile keeps the prior behavior.
+func bindSessionLaunchRunner(
+	task *v1.Task,
+	env *models.TaskEnvironment,
+	session *models.TaskSession,
+	executorID string,
+	metadata map[string]interface{},
+) (string, map[string]interface{}) {
+	sessionProfileID := ""
+	if session != nil {
+		sessionProfileID = session.ExecutorProfileID
+	}
+	if env != nil && env.ExecutorType != "" && !runnerRequestedDiffersFromTaskMetadata(task, sessionProfileID) {
+		if env.ExecutorID != "" {
+			executorID = env.ExecutorID
+		}
+		return executorID, setLaunchMetadataProfile(metadata, env.ExecutorProfileID)
+	}
+	if session != nil {
+		return executorID, setLaunchMetadataProfile(metadata, sessionProfileID)
+	}
+	return executorID, metadata
+}
+
+func setLaunchMetadataProfile(metadata map[string]interface{}, profileID string) map[string]interface{} {
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata["executor_profile_id"] = profileID
+	return metadata
+}
+
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
 // applying executor config, repository/worktree settings, and remote docker URL as needed.
 // allRepos carries every repository for the task in Position order; for single-repo
 // or repo-less tasks it has length <=1 and the legacy single-repo path runs unchanged.
 func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, executorID, prompt string, repoInfo *repoInfo, allRepos []*repoInfo, workspaceReuseRequired bool, existingEnv *models.TaskEnvironment) (*LaunchAgentRequest, executorConfig, error) {
 	metadata := cloneMetadata(task.Metadata)
-	if session.ExecutorProfileID != "" {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
-		metadata["executor_profile_id"] = session.ExecutorProfileID
-	}
+	executorID, metadata = bindSessionLaunchRunner(task, existingEnv, session, executorID, metadata)
 	sessionID := session.ID
 	req := &LaunchAgentRequest{
 		TaskID:                 task.ID,
