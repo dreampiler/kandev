@@ -24,3 +24,7 @@ var ErrCancelEscalated = lifecycle.ErrCancelEscalated
 
 // ErrVirtualProfile marks a logical routing profile that has no concrete execution profile.
 var ErrVirtualProfile = lifecycle.ErrVirtualProfile
+
+// ErrDurableAdoptionBlocked reports that retained delivery evidence for an
+// interrupted turn could not be settled by native resume or adoption.
+var ErrDurableAdoptionBlocked = lifecycle.ErrDurableAdoptionBlocked
