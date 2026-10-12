@@ -28,7 +28,7 @@ func (s *Service) settleFailedRunTask(ctx context.Context, run *AutomationRun) {
 	if !s.failedRunTaskOriginIsHidden(ctx, run.TaskID) {
 		return
 	}
-	referenced, err := s.runTaskHasReferences(ctx, run)
+	referenced, err := s.runTaskHasReferences(ctx, run, run.TaskID)
 	if err != nil {
 		s.logger.Warn("failed to check failed-run task references",
 			zap.String("run_id", run.ID), zap.String("task_id", run.TaskID), zap.Error(err))

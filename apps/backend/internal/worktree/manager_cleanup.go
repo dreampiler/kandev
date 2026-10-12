@@ -352,7 +352,7 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 		return oid, found, nil
 	}
 
-	output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	output, err := m.runCheckoutLocalGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		// Even under our own lock, an external actor (a raw filesystem cleanup,
 		// not another Manager operation) can remove the checkout or its Git
@@ -377,6 +377,17 @@ func (m *Manager) captureCleanupHeadOID(ctx context.Context, wt *Worktree) (stri
 		return "", false, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 	}
 	return oid, true, nil
+}
+
+// runCheckoutLocalGitInspect pins Git to the checkout's own .git. The presence
+// check cannot hold off an external actor, so if that metadata disappears
+// before Git starts, the inspection fails instead of discovering an enclosing
+// repository and returning its HEAD as this worktree's identity.
+func (m *Manager) runCheckoutLocalGitInspect(ctx context.Context, path string, args ...string) (string, error) {
+	gitDir := "GIT_DIR=.git"
+	return m.runBoundedGitInspectWithEnvironment(ctx, path, func(env []string) []string {
+		return append(env, gitDir)
+	}, args...)
 }
 
 func cleanupCheckoutGitPresent(path string) (bool, error) {

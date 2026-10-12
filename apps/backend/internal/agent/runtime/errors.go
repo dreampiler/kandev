@@ -28,3 +28,6 @@ var ErrVirtualProfile = lifecycle.ErrVirtualProfile
 // ErrDurableAdoptionBlocked reports that retained delivery evidence for an
 // interrupted turn could not be settled by native resume or adoption.
 var ErrDurableAdoptionBlocked = lifecycle.ErrDurableAdoptionBlocked
+
+// PromptAdmissionPersistenceError identifies durable admission failures before provider dispatch.
+type PromptAdmissionPersistenceError = lifecycle.PromptAdmissionPersistenceError

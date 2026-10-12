@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 )
 
 const (
@@ -146,6 +147,24 @@ func newestModTime(dir string, entry os.DirEntry) (time.Time, bool) {
 		}
 	}
 	return newest, true
+}
+
+// CopySQLiteSnapshot creates a consistent page copy without physical compaction.
+func CopySQLiteSnapshot(source *sqlx.DB, path string) (int64, error) {
+	return CopySQLiteSnapshotContext(context.Background(), source, path)
+}
+
+// CopySQLiteSnapshotContext copies in bounded increments. The caller verifies
+// integrity before publishing the completed snapshot.
+func CopySQLiteSnapshotContext(ctx context.Context, source *sqlx.DB, path string) (int64, error) {
+	if err := db.BackupSQLite(ctx, source.DB, path); err != nil {
+		return 0, fmt.Errorf("copy SQLite snapshot: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("stat snapshot: %w", err)
+	}
+	return info.Size(), nil
 }
 
 // PruneBackups is the exported alias of pruneBackups, intended for callers

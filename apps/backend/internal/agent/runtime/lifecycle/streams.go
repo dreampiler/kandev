@@ -443,7 +443,9 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 			client.CloseUpdatesStream()
 		}
 	}
-	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
+	// Processor failure cancels only this connection, including when no later
+	// frame arrives. Disconnect handling reports the original processing error.
+	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
 		if !execution.ownsUpdateStream(streamGeneration) {
 			return
 		}
@@ -460,6 +462,7 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}, after)
 	execution.recordDeliveryStreamFailure(startupGeneration, err)
 	if err != nil {
+		processor.fail(err)
 		_ = processor.close()
 	}
 	return err
