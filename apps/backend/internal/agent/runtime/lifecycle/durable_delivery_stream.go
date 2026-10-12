@@ -341,12 +341,6 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	}
 	inserted, err := repository.ReceiveAgentDeliveryEvent(ctx, deliveryEvent, 0)
 	if err != nil {
-		// A sequence at or below the retired prefix was already projected and
-		// acknowledged before its retained payload was removed. Treat the replay
-		// as already handled: never re-insert or re-project it.
-		if errors.Is(err, repoerrors.ErrAgentDeliveryReplayExpired) {
-			return false, nil
-		}
 		return false, err
 	}
 	if inserted {
@@ -539,6 +533,7 @@ func deliveryEventIsStale(
 	if event == nil || event.HarnessGeneration == 0 || event.IncarnationID == "" {
 		return false, nil
 	}
+	authenticated := event.TaskID != "" || event.ExecutionID != "" || event.OwnerGeneration != 0 || event.ExpectedStreamID != ""
 	reader, ok := repository.(harnessGenerationReader)
 	if !ok {
 		return false, nil
@@ -547,14 +542,46 @@ func deliveryEventIsStale(
 	if execution != nil && execution.SessionID != "" {
 		sessionID = execution.SessionID
 	}
-	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, event.IncarnationID)
+	current, err := deliveryHarnessGeneration(ctx, execution, reader, sessionID, event.IncarnationID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		if authenticated {
+			return false, ErrDurableAdoptionIdentityMismatch
+		}
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
+	if authenticated && (current == nil || current.Generation != event.HarnessGeneration || execution == nil ||
+		execution.DeliveryMode != DurableDeliveryV1 || execution.DeliveryStreamID != event.ExpectedStreamID ||
+		execution.DeliveryIncarnationID != event.IncarnationID || execution.DeliveryHarnessGeneration != uint64(event.HarnessGeneration)) {
+		return false, ErrDurableAdoptionIdentityMismatch
+	}
 	return current != nil && current.Generation > event.HarnessGeneration, nil
+}
+
+func deliveryHarnessGeneration(
+	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
+) (*models.HarnessSessionGeneration, error) {
+	if execution == nil || !execution.deliveryBootstrap.Load() {
+		return awaitSilentRestoreGeneration(ctx, execution, reader, sessionID, incarnationID)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for {
+		current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, incarnationID)
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			execution.deliveryBootstrap.Store(false)
+			return current, err
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {
@@ -609,6 +636,10 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 		SessionID:         sessionID,
 		IncarnationID:     incarnationID,
 		HarnessGeneration: int64(harnessGeneration),
+		TaskID:            durableEventTaskID(execution),
+		ExecutionID:       durableEventExecutionID(execution),
+		OwnerGeneration:   durableEventOwnerGeneration(execution, harnessGeneration),
+		ExpectedStreamID:  durableEventExpectedStreamID(execution),
 		StreamID:          event.DeliveryStreamID,
 		Sequence:          int64(event.DeliverySequence),
 		SubmissionID:      event.DeliverySubmissionID,
@@ -616,6 +647,34 @@ func durableAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) *mo
 		Payload:           payload,
 		Terminal:          event.Type == streams.EventTypeComplete || event.Type == streams.EventTypeError,
 	}
+}
+
+func durableEventTaskID(execution *AgentExecution) string {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return ""
+	}
+	return execution.TaskID
+}
+
+func durableEventExecutionID(execution *AgentExecution) string {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return ""
+	}
+	return execution.ID
+}
+
+func durableEventOwnerGeneration(execution *AgentExecution, harnessGeneration uint64) int64 {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return 0
+	}
+	return int64(harnessGeneration)
+}
+
+func durableEventExpectedStreamID(execution *AgentExecution) string {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return ""
+	}
+	return execution.DeliveryStreamID
 }
 
 func canonicalAgentDeliveryEvent(event agentctl.AgentEvent) bool {

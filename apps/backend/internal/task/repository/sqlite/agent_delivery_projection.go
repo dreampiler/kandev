@@ -47,24 +47,27 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
 	if len(events) == 0 {
 		return nil, nil
 	}
+	if err := r.prepareAgentDeliveryReceiptStatement(ctx); err != nil {
+		return nil, err
+	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	sessionIDs := make([]string, 0, len(events))
+	for _, event := range events {
+		sessionIDs = append(sessionIDs, event.SessionID)
+	}
+	if err := lockAgentDeliveryEventWritesMode(ctx, tx, r.db.DriverName(), sessionIDs, []string{streamID}, sharedCanonicalDeliverySession(events, effects)); err != nil {
+		return nil, err
+	}
 
 	var projectedSequence int64
 	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT projected_sequence FROM agent_delivery_cursors WHERE stream_id = ?`),
 		streamID).Scan(&projectedSequence); err != nil {
 		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
-	}
-	retired, err := retiredSequenceTx(ctx, tx, r.db.Rebind, streamID)
-	if err != nil {
-		return nil, err
-	}
-	if events[0].Sequence <= retired {
-		return nil, repoerrors.ErrAgentDeliveryReplayExpired
 	}
 	appendMessages := make([]bool, len(events))
 	if err := r.projectCanonicalDeliveryBatchTx(
@@ -103,7 +106,11 @@ func (r *Repository) projectCanonicalDeliveryBatchTx(
 		if loadErr != nil {
 			return loadErr
 		}
-		if !sameAgentDeliveryEvent(&stored, event) {
+		matches, err := sameAgentDeliveryEvent(&stored, event)
+		if err != nil {
+			return err
+		}
+		if !matches {
 			return repoerrors.ErrAgentDeliveryEventConflict
 		}
 		if projectedAt.Valid {

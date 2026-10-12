@@ -2,7 +2,7 @@ import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { GatewayTrafficFrame } from "./ws-traffic";
 
-type SessionRecord = Awaited<ReturnType<ApiClient["listTaskSessions"]>>["sessions"][number];
+type SessionRecord = Awaited<ReturnType<ApiClient["getTaskSession"]>>["session"];
 
 export type SilentRestartSnapshot = {
   sessionId: string;
@@ -30,9 +30,10 @@ function nativeSessionId(session: SessionRecord): string {
 }
 
 async function getSession(api: ApiClient, taskId: string, sessionId: string) {
-  const { sessions } = await api.listTaskSessions(taskId);
-  const session = sessions.find((candidate) => candidate.id === sessionId);
-  if (!session) throw new Error(`task ${taskId} no longer has session ${sessionId}`);
+  const { session } = await api.getTaskSession(sessionId);
+  if (session.id !== sessionId || session.task_id !== taskId) {
+    throw new Error(`task ${taskId} no longer has session ${sessionId}`);
+  }
   return session;
 }
 
@@ -69,16 +70,6 @@ export async function expectSilentRestartRestoration(
   snapshot: SilentRestartSnapshot,
   traffic: readonly GatewayTrafficFrame[],
 ): Promise<void> {
-  await expectRestartConversationIdentity({
-    page,
-    api,
-    taskId,
-    snapshot,
-    traffic,
-    expectedState: "WAITING_FOR_INPUT",
-    executionDisposition: "replaced",
-  });
-
   await expect
     .poll(
       async () => {
@@ -94,6 +85,16 @@ export async function expectSilentRestartRestoration(
       },
     )
     .toBe("restored");
+
+  await expectRestartConversationIdentity({
+    page,
+    api,
+    taskId,
+    snapshot,
+    traffic,
+    expectedState: "WAITING_FOR_INPUT",
+    executionDisposition: "replaced",
+  });
 
   for (const testId of ["failed-session-banner", "delivery-recovery-result"]) {
     await expect(page.getByTestId(testId)).toHaveCount(0);

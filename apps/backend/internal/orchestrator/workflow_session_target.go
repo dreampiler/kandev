@@ -251,35 +251,21 @@ func (s *Service) loadRecordedWorkflowSessionRoute(
 		return &route, nil, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, route.DestinationID)
-	if err != nil {
-		if !errors.Is(err, models.ErrTaskSessionNotFound) {
-			return nil, nil, fmt.Errorf("load recorded workflow session route destination: %w", err)
-		}
-		// The recorded destination no longer exists (a session lost to a
-		// database migration, manual delete, or an interrupted import). It is
-		// a stale route, not a reason to block starting the step: fall through
-		// to the caller's fresh-session allocation, which replaces this
-		// bounded route record. Log the cause so the reference is not skipped
-		// silently.
-		s.logger.Warn("recorded workflow session route destination is missing; allocating a fresh session",
+	if errors.Is(err, models.ErrTaskSessionNotFound) {
+		// A deleted destination cannot satisfy reuse either. Let the caller
+		// allocate the target profile's fresh fallback and replace this bounded
+		// route record, as for a terminal destination below.
+		s.logger.Warn("recorded workflow session route destination was deleted; allocating a fresh session",
 			zap.String("task_id", taskID),
 			zap.String("step_id", step.ID),
-			zap.String("destination_id", route.DestinationID),
-			zap.Error(err),
-		)
+			zap.String("destination_id", route.DestinationID))
 		return &route, nil, nil
 	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("load recorded workflow session route destination: %w", err)
+	}
 	if session == nil || session.TaskID != taskID || session.AgentProfileID != profileID {
-		// The destination row exists but no longer matches the route's task or
-		// profile. Reusing it would bind the step to the wrong conversation, so
-		// treat the route as stale and let the caller allocate the correct
-		// target profile's fresh session.
-		s.logger.Warn("recorded workflow session route destination is unavailable; allocating a fresh session",
-			zap.String("task_id", taskID),
-			zap.String("step_id", step.ID),
-			zap.String("destination_id", route.DestinationID),
-		)
-		return &route, nil, nil
+		return nil, nil, fmt.Errorf("recorded workflow session route destination %q is unavailable", route.DestinationID)
 	}
 	if isTerminalSessionState(session.State) {
 		// A terminal conversation is a valid historical destination, but it
