@@ -13,6 +13,19 @@ var (
 	ErrWorkspaceReuseUnsafe = errors.New("workspace reuse is unsafe")
 )
 
+// WorkspacePreparingError identifies the environment elected for materialization.
+// Shared group members wait on this identity instead of their own task row.
+type WorkspacePreparingError struct {
+	EnvironmentID string
+	Reason        string
+}
+
+func (e *WorkspacePreparingError) Error() string {
+	return fmt.Sprintf("%s: %s", ErrWorkspacePreparing, e.Reason)
+}
+
+func (e *WorkspacePreparingError) Unwrap() error { return ErrWorkspacePreparing }
+
 // DescribeInheritedEnvironmentUnavailable builds the reason clause for an
 // inherit_parent task whose inherited task_environments row cannot be used
 // (missing, or belonging to an archived parent). It is shared by
