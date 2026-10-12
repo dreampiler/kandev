@@ -30,6 +30,8 @@ type Handler struct {
 	decisions   DecisionRecorder
 	logger      *commonlogger.Logger
 	taskLister  TaskFilteredLister
+	// crossWorkspace backs the cross-workspace routes; nil answers 503.
+	crossWorkspace CrossWorkspaceGateway
 }
 
 // RunEventAppender records runtime behavior against a run.
@@ -80,6 +82,7 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
 	group.POST("/runtime/handoffs", h.handoffTask)
+	registerCrossWorkspaceRoutes(group, h)
 }
 
 type recordAgentDecisionRequest struct {

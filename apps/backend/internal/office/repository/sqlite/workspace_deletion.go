@@ -97,6 +97,7 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 		`DELETE FROM office_projects WHERE workspace_id = ?`,
 		`DELETE FROM agent_profiles WHERE workspace_id = ? AND workspace_id != ''`,
 		`DELETE FROM office_workspace_governance WHERE workspace_id = ?`,
+		`DELETE FROM office_workspace_cross_access WHERE workspace_id = ?`,
 		`DELETE FROM office_onboarding WHERE workspace_id = ?`,
 	}
 	for _, stmt := range statements {

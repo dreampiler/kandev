@@ -55,6 +55,8 @@ func runKandevCLI(args []string) int {
 		return runProjectsCmd(args[1:])
 	case "budget":
 		return runBudgetCmd(args[1:])
+	case "workspaces":
+		return runWorkspacesCmd(args[1:])
 	default:
 		cliError("unknown command: %s", args[0])
 		return 1
@@ -64,7 +66,7 @@ func runKandevCLI(args []string) int {
 func printUsage() {
 	fmt.Fprintln(os.Stderr, "Usage: agentctl kandev <command> [flags]")
 	fmt.Fprintln(os.Stderr,
-		"Commands: task, tasks, comment, agents, memory, checkout, label, doc, routines, approvals, projects, budget")
+		"Commands: task, tasks, comment, agents, memory, checkout, label, doc, routines, approvals, projects, budget, workspaces")
 }
 
 // cliError writes a JSON error object to stderr.

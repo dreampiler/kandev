@@ -1235,6 +1235,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
+		{name: "office-cross-workspace", enabled: andProfilePredicates(office, capabilityEnabled(mcpprofile.CapabilityOfficeCrossWorkspace)), register: func(s *Server) { s.registerOfficeCrossWorkspaceTools() }},
+		{name: "office-handoff-report", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityOfficeHandoffReport)), register: func(s *Server) { s.registerHandoffReportTool() }},
 	}
 }
 
@@ -1360,34 +1362,10 @@ func (s *Server) registerKanbanTools() {
 	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
 	// omitempty which drops empty properties maps, causing OpenAI API validation
 	// errors ("object schema missing properties").
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces_kandev",
-			"List all workspaces. Use this first to get workspace IDs.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace. Omit workspace_id to list the workflows of the current task's own workspace."),
-			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Optional: defaults to the current task's workspace. Use list_workspaces_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow. Omit workflow_id to list the steps of the current task's own workflow."),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
-	)
+	s.registerListWorkspacesTool()
+	s.registerListWorkflowsTool()
+	s.registerListWorkflowStepsTool()
+	s.registerListTasksTool()
 	s.registerCreateTaskTool()
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("list_agents_kandev",
@@ -1448,6 +1426,64 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
+	s.registerMessageTaskTool()
+	s.mcpServer.AddTool(
+		mcp.NewTool("stop_task_kandev",
+			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
+		),
+		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
+	)
+	s.registerSpawnSessionTool()
+	s.registerGetTaskConversationTool()
+	s.registerListTaskSessionsTool()
+}
+
+func (s *Server) registerListWorkspacesTool() {
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("list_workspaces_kandev",
+			"List all workspaces. Use this first to get workspace IDs.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
+	)
+}
+
+func (s *Server) registerListWorkflowsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_workflows_kandev",
+			mcp.WithDescription("List all workflows in a workspace. Omit workspace_id to list the workflows of the current task's own workspace."),
+			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Optional: defaults to the current task's workspace. Use list_workspaces_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
+	)
+}
+
+func (s *Server) registerListWorkflowStepsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_workflow_steps_kandev",
+			mcp.WithDescription("List all workflow steps in a workflow. Omit workflow_id to list the steps of the current task's own workflow."),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
+	)
+}
+
+func (s *Server) registerListTasksTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_tasks_kandev",
+			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
+	)
+}
+
+func (s *Server) registerMessageTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
 			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question, and operation_id to name a send. Returns "queued", "sent", or "started".`),
@@ -1464,18 +1500,9 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("stop_task_kandev",
-			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithIdempotentHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
-		),
-		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
-	)
-	s.registerSpawnSessionTool()
+}
+
+func (s *Server) registerGetTaskConversationTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",
 			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
@@ -1489,7 +1516,6 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
-	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerPRAutomationTools() {

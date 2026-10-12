@@ -1789,6 +1789,7 @@ func constructOfficeServices(
 		)
 	}
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
+	wireOfficeCrossWorkspace(services, orchestratorSvc, eventBus, log)
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written
 	// to disk by EnsureBundledSkills above) into office_skills as
@@ -2875,6 +2876,10 @@ func buildOfficeFeatureServices(
 		services.Office.SetPauseGate(pauseSvc)
 		pauseSvc.SetAssignmentReplayer(services.Office)
 	}
+	crossWorkspaceSvc := buildOfficeCrossWorkspaceService(repo, taskRepo, dashboardSvc, services, log)
+	if crossWorkspaceSvc != nil {
+		dashboardSvc.SetCrossWorkspaceSettings(crossWorkspaceSvc)
+	}
 
 	return &office.Services{
 		Agents:       agentSvc,
@@ -2897,6 +2902,8 @@ func buildOfficeFeatureServices(
 		Repo:         repo,
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,
+
+		CrossWorkspace: crossWorkspaceSvc,
 	}
 }
 

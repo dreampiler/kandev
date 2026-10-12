@@ -37,7 +37,7 @@ func RegisterAllRoutes(
 	log *logger.Logger,
 ) {
 	agents.RegisterRoutes(router, svcs.Agents, log)
-	officeruntime.RegisterRoutes(router, officeruntime.NewHandler(
+	runtimeHandler := officeruntime.NewHandler(
 		svcs.Agents,
 		officeruntime.NewActions(officeruntime.ActionDependencies{
 			Comments:      svcs.Dashboard,
@@ -56,7 +56,11 @@ func RegisterAllRoutes(
 		newRuntimeDecisionRecorder(svcs.Dashboard),
 		log,
 		svcs.Dashboard,
-	))
+	)
+	if svcs.CrossWorkspaceGateway != nil {
+		runtimeHandler.SetCrossWorkspace(svcs.CrossWorkspaceGateway)
+	}
+	officeruntime.RegisterRoutes(router, runtimeHandler)
 
 	skillsHandler := skills.NewHandler(svcs.Skills)
 	skillsHandler.RegisterRoutes(router)

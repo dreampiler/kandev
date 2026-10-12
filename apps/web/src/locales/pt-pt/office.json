@@ -1220,5 +1220,14 @@
   "overviewRefreshSeconds_other": "a cada {{seconds}} segundos",
   "overviewUsageStaleObserved": "Último valor conhecido, lido {{relative}}",
   "overviewUsageObserved": "Observado durante a execução do agente, {{relative}}",
-  "overviewUsageMeasuredCall": "Medido através de invocação mínima, {{relative}}"
+  "overviewUsageMeasuredCall": "Medido através de invocação mínima, {{relative}}",
+  "crossWorkspaceAccess": "Acesso entre áreas de trabalho",
+  "crossWorkspaceAccessToggle": "Permitir que os agentes do Office trabalhem com outras áreas de trabalho",
+  "crossWorkspaceAccessDescription": "Quando ativo, os agentes desta área de trabalho do Office podem ler tarefas, sessões, planos e conversas de outras áreas de trabalho e enviar mensagens às respetivas tarefas. Parar, mover e alterar a prioridade das tarefas continua a cargo do coordenador de cada área de trabalho. Desativado por predefinição.",
+  "crossWorkspaceReachableWorkspaces": "Áreas de trabalho acessíveis",
+  "crossWorkspaceReachableHint": "Deixe todas as caixas por assinalar para permitir todas as áreas de trabalho que pode ler. Indique o ID da tarefa coordenadora para que os agentes do Office saibam a que tarefa enviar mensagens.",
+  "crossWorkspaceCoordinatorPlaceholder": "ID da tarefa coordenadora (opcional)",
+  "crossWorkspaceCoordinatorTask": "ID da tarefa coordenadora de {{workspace}}",
+  "crossWorkspaceNoOtherWorkspaces": "Ainda não existem outras áreas de trabalho.",
+  "crossWorkspaceSettingsSaved": "Acesso entre áreas de trabalho guardado"
 }

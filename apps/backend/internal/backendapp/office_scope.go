@@ -199,10 +199,27 @@ func inboxDismissScopeRef(body []byte) (string, string, bool) {
 // silently-shortened request.
 const maxOfficeScopeBody = 64 * 1024
 
+// officeAgentReach decides whether an Office agent token minted for one
+// workspace may read another (the opt-in Office cross-workspace access
+// setting). Satisfied by *crossworkspace.Service.
+type officeAgentReach interface {
+	Reachable(ctx context.Context, officeWorkspaceID, targetWorkspaceID string) error
+}
+
 // officeWorkspaceScopeMiddleware enforces per-user workspace ownership on
 // every Office route, whether it is keyed by `:wsId` or by a resource id.
 func officeWorkspaceScopeMiddleware(
 	authSvc *auth.Service, taskSvc *taskservice.Service, officeRepo *officesqlite.Repository,
+) gin.HandlerFunc {
+	return officeWorkspaceScopeMiddlewareWithReach(authSvc, taskSvc, officeRepo, nil)
+}
+
+// officeWorkspaceScopeMiddlewareWithReach is officeWorkspaceScopeMiddleware
+// with the Office cross-workspace access setting wired in: an agent token may
+// then also READ resources of workspaces its own Office workspace reaches.
+// reach == nil is exactly officeWorkspaceScopeMiddleware.
+func officeWorkspaceScopeMiddlewareWithReach(
+	authSvc *auth.Service, taskSvc *taskservice.Service, officeRepo *officesqlite.Repository, reach officeAgentReach,
 ) gin.HandlerFunc {
 	resolvers := officeParamScopeResolvers(officeRepo)
 	return func(c *gin.Context) {
@@ -225,7 +242,7 @@ func officeWorkspaceScopeMiddleware(
 			c.Next()
 			return
 		}
-		if err := authorizeOfficeRequest(c, taskSvc, officeRepo, resolvers); err != nil {
+		if err := authorizeOfficeRequestWithReach(c, taskSvc, officeRepo, resolvers, reach); err != nil {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
 			return
 		}
@@ -308,6 +325,16 @@ func authorizeOfficeRequest(
 	officeRepo *officesqlite.Repository,
 	resolvers map[string]officeWorkspaceResolver,
 ) error {
+	return authorizeOfficeRequestWithReach(c, taskSvc, officeRepo, resolvers, nil)
+}
+
+func authorizeOfficeRequestWithReach(
+	c *gin.Context,
+	taskSvc *taskservice.Service,
+	officeRepo *officesqlite.Repository,
+	resolvers map[string]officeWorkspaceResolver,
+	reach officeAgentReach,
+) error {
 	route, ok := officeRelativeRoute(c.FullPath())
 	if !ok {
 		// Unreachable in the mounted binary (group middleware only runs for
@@ -323,7 +350,7 @@ func authorizeOfficeRequest(
 		return repoerrors.ErrWorkspaceNotFound
 	}
 	if officeagents.CallerFromContext(c) != nil {
-		return authorizeOfficeAgentCaller(c, officeRepo, resolvers, refs)
+		return authorizeOfficeAgentCallerWithReach(c, officeRepo, resolvers, refs, reach)
 	}
 	return authorizeOfficeUser(c, taskSvc, officeRepo, resolvers, refs)
 }
@@ -389,6 +416,21 @@ func authorizeOfficeAgentCaller(
 	resolvers map[string]officeWorkspaceResolver,
 	refs map[string]string,
 ) error {
+	return authorizeOfficeAgentCallerWithReach(c, officeRepo, resolvers, refs, nil)
+}
+
+// authorizeOfficeAgentCallerWithReach is authorizeOfficeAgentCaller with one
+// opt-in exception, the Office cross-workspace access setting: a GET whose
+// ids all resolve to ONE workspace the token's Office workspace reaches is
+// allowed. Writes stay confined to the token's own workspace, and reach ==
+// nil (or the setting off) is exactly the confined rule.
+func authorizeOfficeAgentCallerWithReach(
+	c *gin.Context,
+	officeRepo *officesqlite.Repository,
+	resolvers map[string]officeWorkspaceResolver,
+	refs map[string]string,
+	reach officeAgentReach,
+) error {
 	callerWorkspace := officeCallerWorkspace(c)
 	if callerWorkspace == "" {
 		return repoerrors.ErrWorkspaceNotFound
@@ -407,8 +449,19 @@ func authorizeOfficeAgentCaller(
 	// Requiring every id to equal the token's workspace also gives the agent
 	// path the same-workspace relationship rule officeRouteWorkspaces gives
 	// the user path, by transitivity.
+	readOnly := c.Request.Method == http.MethodGet && reach != nil
+	route := &officeRouteWorkspaces{}
 	_, err := authorizeOfficeRefs(c.Request.Context(), refs, resolvers, func(workspaceID string) error {
-		if workspaceID != callerWorkspace {
+		if workspaceID == callerWorkspace {
+			return nil
+		}
+		if !readOnly {
+			return repoerrors.ErrWorkspaceNotFound
+		}
+		if err := route.consistent(workspaceID); err != nil {
+			return err
+		}
+		if reach.Reachable(c.Request.Context(), callerWorkspace, workspaceID) != nil {
 			return repoerrors.ErrWorkspaceNotFound
 		}
 		return nil
@@ -614,6 +667,10 @@ func mountOfficeRoutes(
 ) {
 	api := router.Group(officeRoutePrefix)
 	api.Use(officeagents.AgentAuthMiddleware(svcs.Agents))
-	api.Use(officeWorkspaceScopeMiddleware(authSvc, taskSvc, officeRepo))
+	var reach officeAgentReach
+	if svcs.CrossWorkspace != nil {
+		reach = svcs.CrossWorkspace
+	}
+	api.Use(officeWorkspaceScopeMiddlewareWithReach(authSvc, taskSvc, officeRepo, reach))
 	office.RegisterAllRoutes(api, svcs, handoffSvc, handoffDeps, log)
 }
