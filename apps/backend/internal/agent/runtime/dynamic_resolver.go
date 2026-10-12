@@ -232,7 +232,7 @@ func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, c
 
 // ReleaseAccountBlock closes the owner-release hold of one concrete execution
 // profile and reports whether a hold was closed.
-func (r *ProfileExecutionResolver) ReleaseAccountBlock(executionProfileID string) (bool, error) {
+func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {
 	if r == nil || r.engine == nil {
 		return false, nil
 	}
