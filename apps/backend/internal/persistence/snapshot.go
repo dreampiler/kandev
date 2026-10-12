@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -114,8 +115,15 @@ func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 			continue
 		}
 		path := filepath.Join(backupDir, e.Name())
-		newest, ok := newestModTime(path, e)
-		if !ok || time.Since(newest) < staleBootStagingAge {
+		newest, err := newestModTime(path, e)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) && log != nil {
+				log.Warn("persistence: failed to inspect boot backup staging directory",
+					zap.String("path", path), zap.Error(err))
+			}
+			continue
+		}
+		if time.Since(newest) < staleBootStagingAge {
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil && log != nil {
@@ -126,27 +134,27 @@ func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 }
 
 // newestModTime returns the most recent modification time among dir itself and
-// its direct children. ok is false when the directory cannot be inspected.
-func newestModTime(dir string, entry os.DirEntry) (time.Time, bool) {
+// its direct children. Inspection errors leave the directory untouched.
+func newestModTime(dir string, entry os.DirEntry) (time.Time, error) {
 	info, err := entry.Info()
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, err
 	}
 	newest := info.ModTime()
 	children, err := os.ReadDir(dir)
 	if err != nil {
-		return newest, true
+		return time.Time{}, err
 	}
 	for _, child := range children {
 		childInfo, err := child.Info()
 		if err != nil {
-			continue
+			return time.Time{}, err
 		}
 		if childInfo.ModTime().After(newest) {
 			newest = childInfo.ModTime()
 		}
 	}
-	return newest, true
+	return newest, nil
 }
 
 // CopySQLiteSnapshot creates a consistent page copy without physical compaction.

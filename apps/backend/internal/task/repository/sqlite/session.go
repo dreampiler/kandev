@@ -685,7 +685,7 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 			}
 			return fmt.Errorf("%w: the initial workspace materialization did not complete", models.ErrWorkspaceReuseUnsafe)
 		}
-		return fmt.Errorf("%w: retry after the initial workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: envID, Reason: "retry after the initial workspace launch completes"}
 	case models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusReady || models.TaskEnvironmentStatus(status) == models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = envID
 	default:
@@ -844,7 +844,7 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
 		session.TaskEnvironmentID = environmentID
 	case models.TaskEnvironmentStatusCreating:
-		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the shared workspace launch completes"}
 	default:
 		// Mirror the non-shared binding: a failed environment that never
 		// materialized can be reclaimed by this session for a fresh

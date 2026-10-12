@@ -325,7 +325,10 @@ func (c *ControlClient) CreateInstance(ctx context.Context, req *CreateInstanceR
 
 	// Instance creation starts its process manager and workspace trackers before
 	// responding, so it needs a longer bound than ordinary control requests.
+	// Copy under c.mu: credential rotation replaces the transport under it.
+	c.mu.Lock()
 	createClient := *c.httpClient
+	c.mu.Unlock()
 	createClient.Timeout = createInstanceHTTPTimeout
 	resp, err := createClient.Do(httpReq)
 	if err != nil {

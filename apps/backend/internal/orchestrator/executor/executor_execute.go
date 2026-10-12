@@ -1828,22 +1828,24 @@ func (e *Executor) createPreparedSession(
 	return e.repo.CreateTaskSession(ctx, session)
 }
 
-// retryPreparedSessionAfterWorkspaceReady waits for a sibling session's
-// in-progress workspace materialization to finish, then retries the session
-// binding once. A launch that races another start for the same task's first
-// session is refused with ErrWorkspacePreparing while the winner materializes;
-// failing immediately strands the loser (an automation run is marked FAILED)
-// even though the workspace is about to become ready. The wait reuses the same
-// environment-state transition the failed-environment reclaim path uses, so it
-// never polls a fixed schedule. A workspace that fails or never becomes ready
-// returns the original error unchanged.
+// retryPreparedSessionAfterWorkspaceReady waits for the elected environment,
+// then retries binding once. Shared groups use the refusal's environment ID;
+// legacy same-task refusals use the task's own row. A self-owned, failed, or
+// unready environment keeps the original refusal.
 func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
 	ctx context.Context,
 	taskID, sessionID string,
 	preparingErr error,
 	create func() error,
 ) error {
-	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	var env *models.TaskEnvironment
+	var err error
+	var preparing *models.WorkspacePreparingError
+	if errors.As(preparingErr, &preparing) && preparing.EnvironmentID != "" {
+		env, err = e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
+	} else {
+		env, err = e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
+	}
 	if err != nil || env == nil || env.ID == "" {
 		return preparingErr
 	}
