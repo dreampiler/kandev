@@ -850,6 +850,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	if classified == nil {
 		return dynamicFailureRouteResult{}
 	}
+	s.holdBlockedAccount(data, session, classified)
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
 		return dynamicFailureRouteResult{}
@@ -875,6 +876,28 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	}
 	handled = s.launchDynamicSuccessorAfterFailure(ctx, data, session, conductor, decision, continuationInput, launchClaim)
 	return dynamicFailureRouteResult{handled: handled}
+}
+
+// holdBlockedAccount holds the execution profile whose provider account was
+// restricted, whether or not this failure is routed. The hold only keeps that
+// profile out of later selections; it never replays or advances this turn, so
+// output and effect safety still decide what happens to the failed attempt.
+// The failed execution's own profile is held; the route's current profile is
+// used only when the failure carries the route's current execution.
+func (s *Service) holdBlockedAccount(
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	classified *routingerr.Error,
+) {
+	if !routingerr.HoldsUntilRelease(classified.Code) {
+		return
+	}
+	profileID := data.ExecutionProfileID
+	if profileID == "" && session != nil && data.AgentExecutionID != "" &&
+		session.AgentExecutionID == data.AgentExecutionID {
+		profileID = session.ExecutionProfileID
+	}
+	s.profileExecutionResolver.HoldAccountBlock(profileID, classified.Code)
 }
 
 func (s *Service) routeDynamicFailureDecision(

@@ -232,6 +232,9 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
 		return false
 	}
+	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
+		return false
+	}
 	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
 		return true
 	}
@@ -349,14 +352,19 @@ func (e *Engine) ActionFor(profile Profile, candidateID string, code routingerr.
 
 func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
-		return actionForRules(candidate.Rules, code)
+		action := actionForRules(candidate.Rules, code)
+		if action == ActionRetrySame && routingerr.HoldsUntilRelease(code) {
+			// A held candidate cannot serve the retry, so it moves on.
+			return ActionTryNext
+		}
+		return action
 	}
 	class := routingerr.ClassForCode(code)
 	policy, ok := candidate.Policies.PolicyFor(class)
 	if !ok {
 		return ActionStop
 	}
-	if policy.Retry.Enabled {
+	if policy.Retry.Enabled && !routingerr.HoldsUntilRelease(code) {
 		return ActionRetrySame
 	}
 	if policy.OnExhausted == routingpolicy.OutcomeSkip {
@@ -1315,7 +1323,16 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 }
 
 func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
-	if failure == nil || e.circuits == nil || !qualifiesForCircuit(failure.Code) {
+	if failure == nil || e.circuits == nil {
+		return
+	}
+	if routingerr.HoldsUntilRelease(failure.Code) {
+		// The restriction belongs to this execution profile's account; its
+		// credential binding and model stay available to sibling profiles.
+		e.HoldAccountBlock(candidateID, failure.Code)
+		return
+	}
+	if !qualifiesForCircuit(failure.Code) {
 		return
 	}
 	for _, candidate := range profile.Candidates {

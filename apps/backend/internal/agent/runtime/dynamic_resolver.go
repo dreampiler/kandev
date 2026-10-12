@@ -221,6 +221,24 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	}, nil
 }
 
+// HoldAccountBlock keeps the concrete execution profile whose provider account
+// was restricted out of later selections until its owner releases it.
+func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, code routingerr.Code) {
+	if r == nil || r.engine == nil {
+		return
+	}
+	r.engine.HoldAccountBlock(executionProfileID, code)
+}
+
+// ReleaseAccountBlock closes the owner-release hold of one concrete execution
+// profile and reports whether a hold was closed.
+func (r *ProfileExecutionResolver) ReleaseAccountBlock(executionProfileID string) (bool, error) {
+	if r == nil || r.engine == nil {
+		return false, nil
+	}
+	return r.engine.ReleaseAccountBlock(executionProfileID)
+}
+
 // RouteAfterUnclassifiedFailure validates the logical profile and applies the
 // narrow repeated-failure policy only with evidence built by a trusted task
 // runtime boundary.
