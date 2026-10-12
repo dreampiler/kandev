@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-sqlite3"
@@ -62,10 +63,49 @@ func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
 	return err
 }
 
-func init() {
-	sql.Register(sqliteWriterDriverName, &sqlite3.SQLiteDriver{
-		ConnectHook: applyWriterPragmas,
+// sqliteWriterDriver is the driver instance registered under
+// sqliteWriterDriverName. SQLiteWriterCommitActivity compares against it so
+// only pools opened by OpenSQLite report writer commit activity.
+var sqliteWriterDriver = &sqlite3.SQLiteDriver{
+	ConnectHook: connectSQLiteWriter,
+}
+
+// sqliteWriterLastCommitUnixNano is the wall-clock time of the most recent
+// transaction commit on a writer connection opened by OpenSQLite. A process
+// runs one writer pool, so a single value is enough for liveness reporting.
+var sqliteWriterLastCommitUnixNano atomic.Int64
+
+func connectSQLiteWriter(conn *sqlite3.SQLiteConn) error {
+	if err := applyWriterPragmas(conn); err != nil {
+		return err
+	}
+	// The commit hook runs inside SQLite when a write transaction commits. It
+	// only stores a timestamp and always lets the commit proceed (returns 0).
+	conn.RegisterCommitHook(func() int {
+		sqliteWriterLastCommitUnixNano.Store(time.Now().UnixNano())
+		return 0
 	})
+	return nil
+}
+
+// SQLiteWriterCommitActivity reports when the writer connection last committed
+// a transaction. ok is false when conn was not opened by OpenSQLite or no
+// commit has been observed yet. Health probes use it to tell a writer that is
+// busy serving real writes from one that is stuck: a ping queued behind a
+// stream of committing writes is contention, not an unavailable database.
+func SQLiteWriterCommitActivity(conn *sql.DB) (last time.Time, ok bool) {
+	if conn == nil || conn.Driver() != driver.Driver(sqliteWriterDriver) {
+		return time.Time{}, false
+	}
+	nanos := sqliteWriterLastCommitUnixNano.Load()
+	if nanos == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, nanos), true
+}
+
+func init() {
+	sql.Register(sqliteWriterDriverName, sqliteWriterDriver)
 }
 
 // sqliteReaderConns resolves the read pool size. A missing, non-numeric, or
