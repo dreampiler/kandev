@@ -48,6 +48,10 @@ steps:
       - Map which files will be created or modified and what each is responsible for.
       - When including diagrams (architecture, sequence, flowcharts), use mermaid syntax in code blocks.
 
+      OPTIONAL DESIGN ADVICE
+      - When you need it, request design or review advice through the existing review path.
+      - You remain the decision owner: judge the advice, record what you accepted or rejected, and keep the plan yours.
+
       IMPORTANT: Save your plan using the create_task_plan_kandev MCP tool with the task_id provided in the session context.
       After saving the plan, STOP and wait for user review. The user will review your plan in the UI and may edit it.
       Do not create any other files during this phase — only use the MCP tool to save the plan.
@@ -186,21 +190,21 @@ steps:
       - No speculative code (unused flags, one-off abstractions with single call site)
       - Deep nesting (>3 levels) — suggest early returns
 
-      STEP 3: FIX OR REPORT
-      - Fix directly any issues you can resolve confidently (dead code, unused imports, missing early returns).
-      - For issues needing the author's input, report with file:line, why it matters, and how to fix.
-      - Only report findings you're >=80% confident about.
+      STEP 3: JUDGE THE REVIEW FINDINGS YOURSELF
+      - Read this task's native code review with the task.review.get MCP tool (or the published-findings event) and inspect each finding.
+      - You own the decision. Fix confidently the issues you agree with (dead code, unused imports, missing early returns, and anything else within scope).
+      - For issues needing more context, decide and record why you are not changing the code. Never defer the decision to the reviewer.
+      - The reviewer is advisory and never fixes or commits; you are the writer and you own every change.
 
       Do NOT report issues on code that was not modified in this branch.
 
-      STEP 4: COMMIT ANY FIXES YOU MADE
-      If you made direct fixes in STEP 3:
+      STEP 4: COMMIT YOUR OWN FIXES
+      If you made fixes in STEP 3:
       - Run `git status` to see what changed.
       - Stage only the files YOU edited, using explicit paths (see GIT SAFETY) — never `git add .`. Commit with a descriptive message (e.g. `review: remove dead code` or `review: early returns in X`).
       - Leave any other uncommitted or untracked files alone; they are the user's work and QA will exercise them from the working tree.
     events:
       on_enter:
-        - type: reset_agent_context
         - type: auto_start_agent
 
   - id: qa
@@ -226,6 +230,8 @@ steps:
       STEP 1: UNDERSTAND WHAT WAS BUILT
       Read the task description and recent commits to understand what the feature should do.
       Retrieve the task plan using get_task_plan_kandev if available.
+      This step also starts a native code review of the task's changes. Read its findings with
+      task.review.get and judge each one yourself — you own any fix and commit, the reviewer does not.
 
       STEP 2: TRACE THE WIRING
       Before testing behavior, verify the feature is actually connected:
@@ -251,6 +257,7 @@ steps:
       Summarize: what was verified working, what issues were found (with file:line and how to reproduce), and what test coverage is missing.
     events:
       on_enter:
+        - type: run_code_review
         - type: auto_start_agent
 
   - id: pr
