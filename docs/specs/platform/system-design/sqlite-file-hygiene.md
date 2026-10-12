@@ -66,7 +66,7 @@ The limit is a size bound at reset time, not a per-write budget.
 
 ## Boot backup staging reclaim
 
-`createPreMigrationBackup` writes `VACUUM INTO` output into a private
+`createPreMigrationBackup` writes its snapshot copy into a private
 `.kandev-backup-*` directory and removes it with a deferred `os.RemoveAll`. A
 crash or kill between `os.MkdirTemp` and that cleanup leaves the directory and
 a full database copy in `<database dir>/backups`. The existing system-backups
@@ -78,7 +78,7 @@ newest modification time of the directory and its direct entries. It removes
 the directory only when that time is more than six hours old.
 
 The newest-child rule exists because a directory's own modification time does
-not change while `VACUUM INTO` grows a file inside it. The six-hour window is
+not change while the snapshot copy grows a file inside it. The six-hour window is
 the liveness guard. The backups directory sits beside the database file, so
 two backend processes that use different database files in one directory
 share it, and the runtime-state ownership lock does not exclude the other

@@ -14,11 +14,12 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 )
 
 const (
 	// bootStagingDirPrefix names the private directory createPreMigrationBackup
-	// reserves before VACUUM INTO writes the staged backup into it.
+	// reserves before the snapshot copy writes the staged backup into it.
 	bootStagingDirPrefix = ".kandev-backup-"
 
 	// staleBootStagingAge is how long a boot staging directory must show no
@@ -98,8 +99,8 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 // directory otherwise keeps a whole database copy on disk.
 //
 // Liveness is the newest modification time of the directory and its direct
-// entries, because a directory's own time does not change while VACUUM INTO
-// grows a file inside it. Only names with the boot staging prefix are matched,
+// entries, because a directory's own time does not change while the snapshot
+// copy grows a file inside it. Only names with the boot staging prefix are matched,
 // so published backups and other staging directories are never removed. A
 // failure is logged and never returned: reclaiming debris must not fail boot
 // or backup creation.
@@ -156,6 +157,24 @@ func newestModTime(dir string) (time.Time, error) {
 		}
 	}
 	return newest, nil
+}
+
+// CopySQLiteSnapshot creates a consistent page copy without physical compaction.
+func CopySQLiteSnapshot(source *sqlx.DB, path string) (int64, error) {
+	return CopySQLiteSnapshotContext(context.Background(), source, path)
+}
+
+// CopySQLiteSnapshotContext copies in bounded increments. The caller verifies
+// integrity before publishing the completed snapshot.
+func CopySQLiteSnapshotContext(ctx context.Context, source *sqlx.DB, path string) (int64, error) {
+	if err := db.BackupSQLite(ctx, source.DB, path); err != nil {
+		return 0, fmt.Errorf("copy SQLite snapshot: %w", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return 0, fmt.Errorf("stat snapshot: %w", err)
+	}
+	return info.Size(), nil
 }
 
 // PruneBackups is the exported alias of pruneBackups, intended for callers
