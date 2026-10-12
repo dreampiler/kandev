@@ -117,3 +117,8 @@ Cancellation concurrent with an unsupported-major observation preserves both
 error identities and the rejection evidence, so a later transient failure
 cannot reuse an older supported detection. The deterministic detector-seam
 regression fails before this correction and passes afterward.
+
+
+### Hosted CI process-termination remediation (2026-10-12)
+
+The integrated Backend run exposed `TestRetiredCleanupRequiresOriginalProcessTermination`: cleanup remained blocked after the fixture killed and reaped its original owner. Bounded isolated Linux procfs churn reproduced a disappearing unrelated stat entry returning `ESRCH`, which enumeration had not classified alongside `ENOENT`. The narrow classifier now recognizes those two disappearance errors while retaining all other read failures, birth/group/session identity checks, live-child rejection and the original cleanup assertion. Permanent real opened-stat and read-error regressions accompany exact-source contained RED/GREEN ownership proofs; no broad lifecycle/runtime/orchestrator package was rebuilt locally. A complete corrective exact-head Backend, Frontend and E2E run remains the delivery gate.
