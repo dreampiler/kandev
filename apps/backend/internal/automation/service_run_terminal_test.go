@@ -20,12 +20,13 @@ func (s runStopperStub) StopAutomationRun(context.Context, string, string, strin
 }
 
 type runLivenessStub struct {
-	live bool
-	err  error
+	live    bool
+	outcome AutomationTurnOutcome
+	err     error
 }
 
-func (s runLivenessStub) AutomationRunLive(context.Context, string, string, string) (bool, error) {
-	return s.live, s.err
+func (s runLivenessStub) AutomationRunEvidence(context.Context, string, string, string) (AutomationRunEvidence, error) {
+	return AutomationRunEvidence{Live: s.live, Outcome: s.outcome}, s.err
 }
 
 // @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.3
@@ -119,18 +120,23 @@ func TestStopRun(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.4
+// @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.7
 func TestReconcileOpenRuns(t *testing.T) {
 	transientErr := errors.New("database temporarily unavailable")
 	tests := []struct {
 		name        string
 		bound       bool
 		live        bool
+		outcome     AutomationTurnOutcome
 		livenessErr error
 		wantStatus  RunStatus
 		wantMessage string
 	}{
-		{name: "transient liveness error preserves run", bound: true, livenessErr: transientErr, wantStatus: RunStatusTaskCreated},
-		{name: "not live settles run", bound: true, wantStatus: RunStatusFailed, wantMessage: "automation turn was stale after backend recovery"},
+		{name: "transient evidence error preserves run", bound: true, livenessErr: transientErr, wantStatus: RunStatusTaskCreated},
+		{name: "recorded success settles run succeeded", bound: true, outcome: AutomationTurnOutcomeSucceeded, wantStatus: RunStatusSucceeded},
+		{name: "recorded failure settles run failed", bound: true, outcome: AutomationTurnOutcomeFailed, wantStatus: RunStatusFailed, wantMessage: "automation turn recorded failed after backend recovery"},
+		{name: "recorded cancel settles run failed", bound: true, outcome: AutomationTurnOutcomeCancelled, wantStatus: RunStatusFailed, wantMessage: "automation turn recorded cancelled after backend recovery"},
+		{name: "no recorded outcome preserves run", bound: true, wantStatus: RunStatusTaskCreated},
 		{name: "live run stays open", bound: true, live: true, wantStatus: RunStatusTaskCreated},
 		{name: "unbound admitted run settles", wantStatus: RunStatusFailed, wantMessage: "backend stopped before the automation turn was bound"},
 	}
@@ -157,7 +163,7 @@ func TestReconcileOpenRuns(t *testing.T) {
 			if err := svc.store.CreateRun(ctx, run); err != nil {
 				t.Fatal(err)
 			}
-			svc.SetRunLivenessChecker(runLivenessStub{live: tt.live, err: tt.livenessErr})
+			svc.SetRunLivenessChecker(runLivenessStub{live: tt.live, outcome: tt.outcome, err: tt.livenessErr})
 
 			if err := svc.ReconcileOpenRuns(ctx); err != nil {
 				t.Fatal(err)

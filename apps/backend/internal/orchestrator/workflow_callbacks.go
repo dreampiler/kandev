@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/review"
+	"github.com/kandev/kandev/internal/steptelemetry"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -316,7 +317,7 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
 		WorkflowStepID: in.Step.ID,
 		EntryID:        in.EntryID,
-		Origin:         c.svc.reviewOriginIdentity(ctx, in.State.SessionID),
+		Origin:         c.svc.reviewOriginIdentity(ctx, in.State.TaskID, in.State.SessionID),
 		OriginRequired: true,
 	})
 	if err != nil {
@@ -328,30 +329,81 @@ func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInp
 	return engine.ActionResult{}, nil
 }
 
-// reviewOriginIdentity reads the entering session's concrete execution identity
+// reviewOriginIdentity reads the writer session's concrete execution identity
 // so the reviewer is never the writer's own profile or model. A nil result means
 // the writer could not be identified; because the caller marks OriginRequired,
 // resolution then fails closed (review_agent_unavailable) instead of reviewing
 // with a model it cannot prove distinct. Step entry itself is unaffected.
-func (s *Service) reviewOriginIdentity(ctx context.Context, sessionID string) *review.OriginIdentity {
-	if sessionID == "" || s.repo == nil {
-		return nil
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		if err != nil {
-			s.logger.Warn("review origin identity unavailable",
-				zap.String("session_id", sessionID), zap.Error(err))
-		}
+//
+// run_code_review is ledger-owned: it runs from Engine.DispatchStepEntry, whose
+// MachineState carries no session, so stateSessionID is empty on every real step
+// entry. The writer is therefore taken from the committed arrival itself — see
+// reviewWriterSession.
+func (s *Service) reviewOriginIdentity(ctx context.Context, taskID, stateSessionID string) *review.OriginIdentity {
+	session := s.reviewWriterSession(ctx, taskID, stateSessionID)
+	if session == nil {
 		return nil
 	}
 	if session.AgentProfileID == "" && session.ExecutionProfileID == "" {
+		s.logger.Warn("review origin identity unavailable: writer session has no profile",
+			zap.String("task_id", taskID), zap.String("session_id", session.ID))
 		return nil
 	}
+	// A dynamic profile session stores its logical profile as AgentProfileID and
+	// the concrete candidate it actually ran as ExecutionProfileID; both are
+	// carried so the resolver excludes the logical profile and the real model.
 	return &review.OriginIdentity{
 		ProfileID:          session.AgentProfileID,
 		ExecutionProfileID: session.ExecutionProfileID,
 	}
+}
+
+// reviewWriterSession identifies the session that wrote the change a step-entry
+// review judges, in order:
+//
+//  1. the session the engine state names, when a caller supplies one;
+//  2. the session that initiated the committed step change — the same
+//     attribution the task_step_transitions ledger row for this entry records
+//     (the session whose turn completed, or the task's own agent moving
+//     itself). A session of another task (a coordinator moving the card) did
+//     not write this task's change and is passed over;
+//  3. the task's primary session, for an arrival no session of the task
+//     initiated (a manual move, a WIP pull, a coordinator's move).
+//
+// A named session that cannot be read stops the search and returns nil: the
+// writer is then unknown and the review fails closed rather than guessing.
+func (s *Service) reviewWriterSession(ctx context.Context, taskID, stateSessionID string) *taskmodels.TaskSession {
+	if s.repo == nil || taskID == "" {
+		return nil
+	}
+	for _, sessionID := range []string{stateSessionID, steptelemetry.FromContext(ctx).SessionID} {
+		if sessionID == "" {
+			continue
+		}
+		session, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			s.logger.Warn("review origin identity unavailable",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+			return nil
+		}
+		if session.TaskID == taskID {
+			return session
+		}
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("review origin identity unavailable: list task sessions",
+			zap.String("task_id", taskID), zap.Error(err))
+		return nil
+	}
+	for _, session := range sessions {
+		if session != nil && session.IsPrimary {
+			return session
+		}
+	}
+	s.logger.Warn("review origin identity unavailable: no session identifies the writer",
+		zap.String("task_id", taskID))
+	return nil
 }
 
 // setWorkflowDataCallback writes key/value data into the workflow data bag.

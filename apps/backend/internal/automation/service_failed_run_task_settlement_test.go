@@ -266,7 +266,7 @@ func TestStopRun_EnqueuesSettlement(t *testing.T) {
 }
 
 // @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.6
-func TestReconcileOpenRuns_ArchivesStaleHiddenTask(t *testing.T) {
+func TestReconcileOpenRuns_ArchivesRecordedFailureHiddenTask(t *testing.T) {
 	svc, archiver := newSettlementService(t)
 	ctx := context.Background()
 	a := seedSettlementAutomation(t, svc)
@@ -277,7 +277,7 @@ func TestReconcileOpenRuns_ArchivesStaleHiddenTask(t *testing.T) {
 	if err := svc.store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
-	svc.SetRunLivenessChecker(runLivenessStub{live: false})
+	svc.SetRunLivenessChecker(runLivenessStub{outcome: AutomationTurnOutcomeFailed})
 
 	if err := svc.ReconcileOpenRuns(ctx); err != nil {
 		t.Fatalf("ReconcileOpenRuns: %v", err)
@@ -285,6 +285,35 @@ func TestReconcileOpenRuns_ArchivesStaleHiddenTask(t *testing.T) {
 
 	if len(archiver.calls) != 1 || archiver.calls[0] != "task-hidden" {
 		t.Fatalf("archive calls = %v, want [task-hidden]", archiver.calls)
+	}
+}
+
+// @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.7
+func TestReconcileOpenRuns_RecordedSuccessKeepsTask(t *testing.T) {
+	svc, archiver := newSettlementService(t)
+	ctx := context.Background()
+	a := seedSettlementAutomation(t, svc)
+	run := &AutomationRun{
+		AutomationID: a.ID, TriggerType: TriggerTypeScheduled, Status: RunStatusTaskCreated,
+		TaskID: "task-hidden", SessionID: "session", TurnID: "turn",
+	}
+	if err := svc.store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	svc.SetRunLivenessChecker(runLivenessStub{outcome: AutomationTurnOutcomeSucceeded})
+
+	if err := svc.ReconcileOpenRuns(ctx); err != nil {
+		t.Fatalf("ReconcileOpenRuns: %v", err)
+	}
+	if len(archiver.calls) != 0 {
+		t.Fatalf("a succeeded run must keep its generated task, got %v", archiver.calls)
+	}
+	stored, err := svc.store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if stored.Status != RunStatusSucceeded {
+		t.Fatalf("status = %q, want succeeded", stored.Status)
 	}
 }
 

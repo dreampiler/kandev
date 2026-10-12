@@ -80,6 +80,22 @@ func newDynamicUsageSnapshot(
 	return &dynamicUsageSnapshot{usage: usage, manual: manual, now: now}
 }
 
+// newDynamicSelectionPreview builds the read-only current-choice preview: the
+// tier runtime's usage snapshot, its round-robin history and, when routing is
+// wired, the live route-health registry (the resolver routing itself uses, so a
+// candidate's binding key resolves identically on both paths). The settings
+// editor and the native review's dynamic reviewer resolution both use it, so
+// neither carries a selection rule of its own.
+func newDynamicSelectionPreview(services *Services, ledger *sqliterepo.Repository) *dynamicUsageSnapshot {
+	snapshot := newDynamicUsageSnapshot(services.UsageAdapter, ledger, time.Now).
+		WithInternalUsage(newAccountUsageReader(services.UsageAdapter, ledger)).
+		WithSelectionHistory(routeSelectionHistory{repo: ledger})
+	if services.DynamicProfileResolver != nil {
+		snapshot.WithPreviewHealth(services.DynamicProfileResolver)
+	}
+	return snapshot
+}
+
 // WithPreviewHealth injects the shared route-health reader. Without it a preview
 // can still name a choice, but it cannot account for a paused binding, so the
 // wiring is explicit rather than assumed.

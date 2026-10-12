@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/review"
@@ -46,6 +50,13 @@ func buildReviewComponents(p routeParams) reviewComponents {
 		reviewUtilityLookup{agents: p.services.Utility},
 		reviewDefaultsLookup{settings: p.services.User},
 	)
+	if p.services.DynamicProfileResolver != nil {
+		resolver.Routes = reviewDynamicRoute{
+			profiles: p.services.DynamicProfileResolver,
+			preview:  newDynamicSelectionPreview(p.services, p.taskRepo),
+			now:      time.Now,
+		}
+	}
 	runner := review.NewRunner(review.RunnerDeps{
 		Store:       service,
 		Resolver:    resolver,
@@ -122,7 +133,53 @@ func (l reviewProfileLookup) ReviewerProfile(ctx context.Context, profileID stri
 		Mode:           profile.Mode,
 		CLIPassthrough: profile.CLIPassthrough,
 		Name:           profile.Name,
+		Dynamic:        profile.AgentID == agents.DynamicAgentID,
 	}, true, nil
+}
+
+// reviewDynamicRoute resolves a dynamic reviewer profile to one concrete
+// candidate through the dynamic route itself: the profile's saved candidate
+// order and tier ranking, and the same route health a live selection consults
+// (open circuits, provider limits, account blocks). It is the read-only preview
+// the settings editor shows, so it claims no generation, takes no probe lease
+// and writes no route state. The review only marks the rows it must not use —
+// disabled rows, as a live selection does, and the rows the resolver rejects
+// (the writer's own model, or a row that cannot run a structured review) — and
+// takes the route's own choice among the rest.
+type reviewDynamicRoute struct {
+	profiles dynamicProfileLoader
+	preview  agentsettingscontroller.DynamicPreviewProvider
+	now      func() time.Time
+}
+
+// dynamicProfileLoader loads a dynamic profile's ordered candidates without
+// claiming a route generation. Satisfied by *agentruntime.ProfileExecutionResolver.
+type dynamicProfileLoader interface {
+	LoadDynamicProfile(ctx context.Context, profileID string) (dynamicruntime.Profile, error)
+}
+
+func (r reviewDynamicRoute) SelectCandidate(ctx context.Context, profileID string, skip func(string) bool) (string, error) {
+	if r.profiles == nil || r.preview == nil {
+		return "", errors.New("dynamic routing is not configured")
+	}
+	profile, err := r.profiles.LoadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return "", err
+	}
+	ineligible := make(map[string]string, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		switch {
+		case !candidate.Enabled:
+			ineligible[candidate.ID] = dynamicruntime.IneligibleDisabled
+		case skip != nil && skip(candidate.ID):
+			ineligible[candidate.ID] = dynamicruntime.IneligibleUnusable
+		}
+	}
+	now := time.Now
+	if r.now != nil {
+		now = r.now
+	}
+	return r.preview.PreviewDynamicSelection(ctx, profile, ineligible, now()).CandidateID, nil
 }
 
 // reviewUtilityLookup resolves the built-in code-review utility agent, which
