@@ -190,6 +190,18 @@ raced the failure keeps its work. Only the task row is archived. The run row, it
 and its transcript are never touched, and the persisted `failed` status remains authoritative, so
 the failure stays visible in the feed.
 
+**Exact-turn outcome for restart settlement.** Restart recovery cannot classify an open bound run
+from liveness alone: a session parked after a completed turn is not live, so `WAITING_FOR_INPUT`,
+`FAILED`, and `CANCELLED` all read as "not live". The turn row is the durable record
+(`task_session_turns.completed_at`), but completion is not outcome: `CompleteTurn` writes `now`,
+while `AbandonTurn` and provider interruption write `started_at`, and a cancelled turn completes
+without a failure marker. The outcome is therefore recorded on the exact turn when the completion
+handler decides it, before the run write, as turn metadata that reconciliation reads back:
+`succeeded`, `failed`, or `cancelled`. Reconciliation settles `succeeded` as succeeded and
+`failed` / `cancelled` as failed, and leaves a run whose exact-turn outcome is not recorded (a
+legacy turn or an unresolved path) open rather than guessing. This cannot rewrite a proven success
+as failed and cannot mask a pending, deferred, or uncertain delivery effect.
+
 ## API surface
 
 Five actions. The detail view reads one automation's runs and its summary; the
@@ -299,6 +311,7 @@ The action is workspace-scoped: the caller must be authorized for `workspace_id`
 | Restart recovery cannot find the bound execution, task, or session | Typed runtime, executor, SQL, task, and session not-found errors normalize to not live and the exact open run becomes failed. A transient inspection error leaves the run open for a later retry. |
 | A run reaches persisted terminal `failed` | Its generated hidden task is archived idempotently; the run stays `failed` with its message and transcript. A visible `automation_task`, a referenced or continuation task, an open or uncertain-delivery run, a succeeded run, and a task with a live session are left untouched. |
 | Settlement crashes or is dropped between the run write and the task archive | The next startup reconciliation archives the still-unarchived generated task; a repeated settlement of an already-archived task is a no-op. |
+| Restart recovery finds an open bound run whose exact turn already completed | The run is settled from the exact turn's recorded outcome: `succeeded` stays succeeded, and `failed` / `cancelled` become failed. When the outcome is not recorded, the run stays open for the next startup pass instead of being guessed failed. |
 
 ## Scenarios
 

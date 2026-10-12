@@ -117,6 +117,15 @@ each scheduled firing independently selectable and controllable.
   run, an uncertain-delivery run, a visible `automation_task`, a task referenced
   by another run or the automation's continuation pointer, or a task with a
   `STARTING` / `RUNNING` session.
+- **AC-OFFICE-AUTOMATION-CONTINUITY-003.7:** Startup and dispatch recovery shall
+  settle an open bound run from the exact turn's durably recorded outcome, not
+  from the "not live now" observation alone. A turn proven successful shall not
+  be recorded failed. A turn durably completed failed or cancelled shall be
+  recorded failed. When the exact turn's outcome is not durably recorded — a
+  legacy turn or an unresolved path — the run shall be left open and surfaced by
+  the existing startup reconciliation rather than guessed. A run shall not be
+  failed while a pending, deferred, or uncertain delivery effect holds it, and an
+  unreadable outcome shall leave the run open for a later pass.
 
 ### REQ-OFFICE-AUTOMATION-CONTINUITY-004: Constrain coordinator authority
 
