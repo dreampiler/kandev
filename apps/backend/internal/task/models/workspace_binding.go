@@ -13,8 +13,10 @@ var (
 	ErrWorkspaceReuseUnsafe = errors.New("workspace reuse is unsafe")
 )
 
-// WorkspacePreparingError identifies the environment elected for materialization.
-// Shared group members wait on this identity instead of their own task row.
+// WorkspacePreparingError is ErrWorkspacePreparing for a binding that lost the
+// workspace election. EnvironmentID names the environment being materialized.
+// In a shared workspace group it belongs to another member task, so a caller
+// that wants to wait must use this ID rather than look up its own task.
 type WorkspacePreparingError struct {
 	EnvironmentID string
 	Reason        string

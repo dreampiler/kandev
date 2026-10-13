@@ -935,10 +935,15 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+	var sessionCount, primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
+		FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
+	// The task lock or SQLite writer serializes primary election with insertion.
+	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
