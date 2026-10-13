@@ -64,6 +64,10 @@ temp/
 /.verify-cache/
 /.tmp/
 
+# Per-worktree golangci-lint analysis cache and lock file (see
+# scripts/lint-go-changed).
+/.lint-cache/
+
 # Agent session files (local development)
 .augment/
 

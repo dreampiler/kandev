@@ -46,8 +46,10 @@ Before Git discovery, the wrapper clears `GIT_DIR`, `GIT_WORK_TREE`,
 own path, then runs `scripts/resolve-go-lint-base --comparison-base` there.
 Authentication and transport environment settings remain available.
 
-The resolver retains configured-base, canonical-upstream, merge-base, and
-incoming-base-merge behavior. A resolution failure exits before lint. The
+The resolver retains configured-base, origin-default, merge-base, and
+incoming-base-merge behavior. A fork therefore lints against the branch it opens
+pull requests against (`origin`'s head branch), not a canonical upstream it has
+diverged from. A resolution failure exits before lint. The
 wrapper uses `exec` for the linter so its diagnostics and failure status reach
 pre-commit directly. There is no fallback to a different comparison base or to
 backend-wide analysis.

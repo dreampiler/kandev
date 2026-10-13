@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # resolve-go-lint-base prints the local remote-tracking ref used by the
-# pre-commit Go lint hook. Fork worktrees conventionally retain the canonical
-# repository as `upstream`; do not silently fall back when the base is unclear.
+# pre-commit Go lint hook. The hook scopes changed packages with
+# `--new-from-rev`, so the base must be the branch this checkout opens PRs
+# against: a fork's own origin default branch, not the canonical upstream the
+# fork diverges from. Do not silently fall back when the base is unclear.
 set -euo pipefail
 
-canonical_repository='kdlbs/kandev'
 comparison_base=false
 
 die() {
@@ -37,22 +38,6 @@ normalize_remote_ref() {
 	printf '%s\n' "$normalized"
 }
 
-is_canonical_remote() {
-	local url=$1 path
-	case "$url" in
-		https://github.com/*) path=${url#https://github.com/} ;;
-		http://github.com/*) path=${url#http://github.com/} ;;
-		ssh://git@github.com/*) path=${url#ssh://git@github.com/} ;;
-		git+ssh://git@github.com/*) path=${url#git+ssh://git@github.com/} ;;
-		git://github.com/*) path=${url#git://github.com/} ;;
-		git@github.com:*) path=${url#git@github.com:} ;;
-		*) return 1 ;;
-	esac
-	path=${path%.git}
-	path=${path%/}
-	[ "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')" = "$canonical_repository" ]
-}
-
 configured_refs=()
 while IFS= read -r ref; do
 	[ -n "$ref" ] && configured_refs+=("$ref")
@@ -72,14 +57,7 @@ else
 		*) die "origin's default ref is invalid: $origin_head" ;;
 	esac
 	[ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
-
-	if upstream_url=$(git remote get-url upstream 2>/dev/null); then
-		is_canonical_remote "$upstream_url" || die "upstream remote is not the canonical $canonical_repository repository"
-		base_ref=$(normalize_remote_ref "refs/remotes/upstream/$base_branch")
-		git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "canonical upstream ref does not resolve locally: $base_ref"
-	else
-		base_ref=$(normalize_remote_ref "$origin_head")
-	fi
+	base_ref=$(normalize_remote_ref "$origin_head")
 fi
 
 git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"
