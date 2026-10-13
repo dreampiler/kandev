@@ -144,6 +144,79 @@ func TestAccountBlockedHoldSurvivesRestore(t *testing.T) {
 	}
 }
 
+func TestAccountBlockedHoldRetriesFailedSave(t *testing.T) {
+	now := time.Unix(1000, 0)
+	store := newStubCircuitPersistence()
+	clock := WithCircuitClock(func() time.Time { return now })
+	registry := NewCircuitRegistry(WithCircuitPersistence(store), clock)
+	key := accountBlockKey("blocked")
+	store.setFailing(true)
+
+	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err == nil {
+		t.Fatal("hold during outage reported no error")
+	}
+	if !registry.IsHeld(key) {
+		t.Fatal("unsaved hold was not kept in memory")
+	}
+	store.setFailing(false)
+	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
+		t.Fatalf("repeated hold after outage: %v", err)
+	}
+
+	restored := NewCircuitRegistry(WithCircuitPersistence(store), clock)
+	if err := restored.Restore(context.Background()); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !restored.IsHeld(key) {
+		t.Fatal("a repeated hold did not save the hold its first save lost")
+	}
+}
+
+// A route that was waiting to retry a profile must not resume on it after
+// another session held that profile, neither by schedule nor by Retry now.
+func TestAccountBlockedHoldStopsPendingResume(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		now := time.Unix(1000, 0)
+		engine := NewEngine(WithClock(func() time.Time { return now }))
+		document := routingpolicy.DefaultDocument()
+		document.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 2, InitialIntervalSeconds: 5}
+		profile := Profile{
+			ID: "dynamic-pending", Version: 1,
+			Candidates: []Candidate{
+				{ID: "blocked", Enabled: true, Policies: document},
+				{ID: "next", Enabled: true, Policies: document},
+			},
+		}
+		initial, err := engine.Select("session-waiting", profile, 0, "")
+		if err != nil || initial.ExecutionProfileID != "blocked" {
+			t.Fatalf("initial selection = %#v, %v; want blocked", initial, err)
+		}
+		if _, err := engine.ApplyFailure("session-waiting", profile, initial.Generation, "blocked", &routingerr.Error{
+			Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true,
+		}); !errors.Is(err, ErrRecoveryPending) {
+			t.Fatalf("ApplyFailure = %v, want a pending retry", err)
+		}
+		if err := engine.HoldAccountBlock("blocked", routingerr.CodeAccountBlocked); err != nil {
+			t.Fatalf("HoldAccountBlock: %v", err)
+		}
+		now = now.Add(5 * time.Second)
+
+		resume := engine.ResumePending
+		if manual {
+			resume = engine.ResumePendingNow
+		}
+		decision, err := resume(context.Background(), "session-waiting", initial.Generation)
+
+		if !errors.Is(err, ErrExecutionProfileHeld) || !errors.Is(err, ErrRecoveryPending) {
+			t.Fatalf("manual=%v resume = %#v, %v; want the held profile refused", manual, decision, err)
+		}
+		state, ok := engine.State("session-waiting")
+		if !ok || state.Status != routeStatusActionRequired || state.ExecutionProfileID != "blocked" {
+			t.Fatalf("manual=%v route state = %#v, %v; want manual recovery on the held profile", manual, state, ok)
+		}
+	}
+}
+
 func TestAccountBlockedHoldKeepsRouteManual(t *testing.T) {
 	now := time.Unix(1000, 0)
 	engine := NewEngine(WithClock(func() time.Time { return now }))
@@ -220,7 +293,9 @@ func TestReleaseAccountBlockKeepsHoldWhenSaveFails(t *testing.T) {
 	store := newStubCircuitPersistence()
 	registry := NewCircuitRegistry(WithCircuitPersistence(store), WithCircuitClock(func() time.Time { return now }))
 	key := accountBlockKey("blocked")
-	registry.Hold(key, routingerr.CodeAccountBlocked)
+	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
 	store.setFailing(true)
 
 	released, err := registry.ReleaseHold(key)

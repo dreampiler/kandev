@@ -12,11 +12,11 @@ func accountBlockKey(executionProfileID string) string {
 // HoldAccountBlock keeps one execution profile out of every later selection
 // until its owner releases it. Credential, model, and other profiles'
 // circuits are never read or changed.
-func (e *Engine) HoldAccountBlock(executionProfileID string, code routingerr.Code) {
+func (e *Engine) HoldAccountBlock(executionProfileID string, code routingerr.Code) error {
 	if e == nil || e.circuits == nil {
-		return
+		return nil
 	}
-	e.circuits.Hold(accountBlockKey(executionProfileID), code)
+	return e.circuits.Hold(accountBlockKey(executionProfileID), code)
 }
 
 // ReleaseAccountBlock closes the owner-release hold of one execution profile

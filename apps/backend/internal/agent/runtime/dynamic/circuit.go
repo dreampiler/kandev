@@ -146,19 +146,26 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 }
 
 // Hold opens a circuit that has no expiry and admits no probe. Only
-// ReleaseHold closes it, and holding an already held circuit changes nothing.
-func (r *CircuitRegistry) Hold(key string, code routingerr.Code) {
+// ReleaseHold closes it. The hold applies in memory even when its save fails;
+// the error is returned and the save stays pending, so holding the key again
+// retries it until the hold is durable.
+func (r *CircuitRegistry) Hold(key string, code routingerr.Code) error {
 	if key == "" || !routingerr.HoldsUntilRelease(code) {
-		return
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.flushPendingLocked(key)
 	if r.circuits[key].held() {
-		return
+		if _, unsaved := r.pending[key]; !unsaved {
+			return nil
+		}
+	} else {
+		r.circuits[key] = circuit{state: CircuitOpen, code: code}
+		r.logger.Warn("circuit held until owner release",
+			zap.String("key", key), zap.String("code", string(code)))
 	}
-	r.circuits[key] = circuit{state: CircuitOpen, code: code}
-	_ = r.persistSnapshotLocked(key)
+	return r.persistSnapshotLocked(key)
 }
 
 // ReleaseHold closes a held circuit and reports whether one was held. Any
@@ -181,6 +188,7 @@ func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
 		r.circuits[key] = entry
 		return false, err
 	}
+	r.logger.Info("circuit hold released by owner", zap.String("key", key))
 	return true, nil
 }
 

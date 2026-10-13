@@ -222,12 +222,13 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 }
 
 // HoldAccountBlock keeps the concrete execution profile whose provider account
-// was restricted out of later selections until its owner releases it.
-func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, code routingerr.Code) {
+// was restricted out of later selections until its owner releases it. An error
+// means the hold applies in memory but is not yet durable.
+func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, code routingerr.Code) error {
 	if r == nil || r.engine == nil {
-		return
+		return nil
 	}
-	r.engine.HoldAccountBlock(executionProfileID, code)
+	return r.engine.HoldAccountBlock(executionProfileID, code)
 }
 
 // ReleaseAccountBlock closes the owner-release hold of one concrete execution

@@ -1279,6 +1279,9 @@ func (e *Engine) resumePending(
 		}
 	}
 	now := e.now()
+	if e.circuits.IsHeld(accountBlockKey(state.ExecutionProfileID)) {
+		return RouteDecision{}, e.holdPendingRouteLocked(ctx, state, now)
+	}
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
@@ -1297,6 +1300,22 @@ func (e *Engine) resumePending(
 		CatalogueVersion: policyState.CatalogueVersion,
 		RetryOrdinal:     policyState.RetryOrdinal, PendingOutcome: policyState.PendingOutcome,
 	}, nil
+}
+
+// holdPendingRouteLocked refuses to resume a route on a profile that another
+// failure held after the route started waiting. The route returns to manual
+// recovery so the operator can skip to another candidate or release the hold.
+func (e *Engine) holdPendingRouteLocked(ctx context.Context, state RouteState, now time.Time) error {
+	if state.Status != routeStatusActionRequired {
+		expectedStatus := state.Status
+		state.Status = routeStatusActionRequired
+		state.UpdatedAt = now
+		if err := e.persistExpectedStatus(ctx, state.Generation, expectedStatus, state); err != nil {
+			return err
+		}
+		e.states[state.SessionID] = state
+	}
+	return ErrExecutionProfileHeld
 }
 
 // ReleaseProbe closes a successful half-open resource probe or applies the
@@ -1329,7 +1348,9 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 	if routingerr.HoldsUntilRelease(failure.Code) {
 		// The restriction belongs to this execution profile's account; its
 		// credential binding and model stay available to sibling profiles.
-		e.HoldAccountBlock(candidateID, failure.Code)
+		// A failed save is logged and kept pending by the registry, and the
+		// hold stays in memory, so routing proceeds without the profile.
+		_ = e.HoldAccountBlock(candidateID, failure.Code)
 		return
 	}
 	if !qualifiesForCircuit(failure.Code) {
