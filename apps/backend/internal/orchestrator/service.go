@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -78,7 +79,11 @@ type ServiceConfig struct {
 	// ControlAgentProfileIDs names the agent profiles whose sessions belong to
 	// the control lane. Every other session, including one whose profile cannot
 	// be resolved, is a worker.
-	ControlAgentProfileIDs        []string
+	ControlAgentProfileIDs []string
+	// SessionMemoryGuard holds the host-memory pressure thresholds. When
+	// enabled, a new automatic worker launch is deferred while the host is
+	// under pressure; the control lane and Office coordinator are not.
+	SessionMemoryGuard            hostmemory.Gate
 	ClaudeBackgroundPromptHandoff bool
 
 	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
@@ -1928,7 +1933,7 @@ func NewService(
 			WorkerCeiling:     cfg.SessionCapacity,
 			ControlCeiling:    cfg.ControlSessionCapacity,
 			ControlProfileIDs: cfg.ControlAgentProfileIDs,
-		}, svcLogger.Zap()),
+		}, cfg.SessionMemoryGuard, svcLogger.Zap()),
 		backgroundProbeConfig: LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:          make(map[string]*parkedSessionState),
 		taskParkedStates:      make(map[string]*taskParkedState),
