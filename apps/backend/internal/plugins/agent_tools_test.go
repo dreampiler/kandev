@@ -169,6 +169,20 @@ func TestAgentToolCatalogHidesPluginUntilRequiredConfigIsSaved(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, snapshot.Tools, 1)
 	require.Equal(t, plugintools.ExposedName("kandev-plugin-forge", "pr"), snapshot.Tools[0].ExposedName)
+
+	signalsBeforeClear := listener.calls.Load()
+	require.NoError(t, svc.UpdateConfig(context.Background(), "kandev-plugin-forge", map[string]any{
+		"base_url": "   ", "api_token": configSecretMask,
+	}))
+	require.Greater(t, listener.calls.Load(), signalsBeforeClear)
+	cleared, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Empty(t, cleared.Tools, "clearing required config must remove the plugin's tools")
+	require.Equal(t, snapshot.Generation, cleared.Generation)
+	require.Equal(t, snapshot.Revision+1, cleared.Revision)
+	unchanged, err := svc.AgentToolCatalog()
+	require.NoError(t, err)
+	require.Equal(t, cleared.Revision, unchanged.Revision)
 }
 
 func TestAgentToolCatalogRequiredConfigReadinessMatchesSetupBadge(t *testing.T) {
@@ -199,10 +213,13 @@ func TestAgentToolCatalogIsolatesUnreadablePluginConfig(t *testing.T) {
 	schema := map[string]any{"type": "object", "required": []any{"base_url"}}
 	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("broken", schema))
 	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("healthy", schema))
+	addAgentToolRecord(t, svc, fsStore, requiredConfigToolRecord("no-required", map[string]any{"type": "object"}))
 	require.NoError(t, fsStore.SetConfig("healthy", map[string]any{"base_url": "https://forge.example"}))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.config.yml"), []byte("base_url: [unterminated-value\n"), 0o600))
 
-	require.Equal(t, []string{"healthy"}, catalogPluginIDs(t, svc))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "no-required.config.yml"), []byte("[invalid\n"), 0o600))
+
+	require.ElementsMatch(t, []string{"healthy", "no-required"}, catalogPluginIDs(t, svc))
 
 	entries := observed.FilterMessage("plugins: agent tools hidden because the plugin config could not be read").All()
 	require.NotEmpty(t, entries)

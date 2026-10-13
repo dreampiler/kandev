@@ -66,3 +66,17 @@ go vet ./internal/plugins/
 ```
 
 Fixtures use placeholder values only; no real credentials.
+
+## Review remediation coverage
+
+The catalog regression also clears a required string after a successful save and
+asserts that tools disappear, the effective revision advances once, and the
+service generation remains stable. The unreadable-config regression includes a
+plugin without required fields to verify that its config is never needed for
+catalog membership. Production behavior is unchanged.
+
+The maintainer review uses bounded exact-source proofs with explicit storage,
+runtime, and vault boundary fakes. Genuine package tests, builds, static checks,
+and full application suites are verified by hosted CI; the bounded proofs do not
+replace those checks. Exact-head hosted receipts are kept in the persistent
+review task's evidence directory.

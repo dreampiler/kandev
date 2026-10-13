@@ -40,3 +40,7 @@ settings UI are unchanged.
 Focused unit tests in `apps/backend/internal/plugins` (catalog membership, readiness
 rule, recompute signal, failure isolation), then `go build ./...` and `go vet` for the
 package from `apps/backend`.
+
+Review remediation adds clear-config/revision stability and no-required-field
+read-bypass assertions. Full package and application verification is delegated
+to hosted CI; bounded maintainer proofs are supplemental evidence only.
