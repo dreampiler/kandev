@@ -209,3 +209,31 @@ func TestUploadCredentialFilesLeavesTargetUnchangedForMalformedSource(t *testing
 		t.Fatalf("target changed to %q", uploader.files[targetPath])
 	}
 }
+
+func TestTargetPathJoinUsesPOSIXRulesForRemoteRoots(t *testing.T) {
+	if got := targetPathJoin("/root", ".codex", "auth.json"); got != "/root/.codex/auth.json" {
+		t.Fatalf("remote join = %q, want /root/.codex/auth.json", got)
+	}
+	if got := targetPathJoin("/run/kandev/home", filepath.Join(".local", "share"), "auth.json"); got != "/run/kandev/home/.local/share/auth.json" {
+		t.Fatalf("remote join with host-separated element = %q", got)
+	}
+	local := t.TempDir()
+	if got, want := targetPathJoin(local, ".codex", "auth.json"), filepath.Join(local, ".codex", "auth.json"); got != want {
+		t.Fatalf("local join = %q, want %q", got, want)
+	}
+}
+
+func TestContainedTargetPathRejectsEscapesFromRemoteRoots(t *testing.T) {
+	if got, err := containedTargetPath("/root", "/root/.codex/auth.json"); err != nil || got != "/root/.codex/auth.json" {
+		t.Fatalf("contained remote path = %q, %v", got, err)
+	}
+	for _, escape := range []string{"/root/../etc/passwd", "/rootkit/auth.json", "/etc/passwd"} {
+		if _, err := containedTargetPath("/root", escape); err == nil {
+			t.Fatalf("containedTargetPath(/root, %q) succeeded, want an escape error", escape)
+		}
+	}
+	local := t.TempDir()
+	if _, err := containedTargetPath(local, filepath.Join(local, "..", "outside")); err == nil {
+		t.Fatal("local escape was accepted")
+	}
+}

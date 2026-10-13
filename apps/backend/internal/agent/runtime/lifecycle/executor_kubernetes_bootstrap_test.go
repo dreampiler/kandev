@@ -131,7 +131,7 @@ func TestKubernetesWriteFileCommandRejectsSymlinkedAncestor(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	require.NoError(t, os.Symlink(outside, filepath.Join(root, "redirect")))
-	destination := filepath.ToSlash(filepath.Join(root, "redirect", "secret.json"))
+	destination := shellPOSIXPath(filepath.Join(root, "redirect", "secret.json"))
 	command := exec.Command("sh", "-c", kubernetesWriteFileCommand(destination, 0o600, true))
 	command.Stdin = strings.NewReader("secret")
 

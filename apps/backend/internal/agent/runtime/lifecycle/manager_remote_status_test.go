@@ -191,7 +191,7 @@ func TestKubernetesRefreshStatusInstanceOverlaysCurrentConnectionSettings(t *tes
 			ID: "executor-1", Type: models.ExecutorTypeKubernetes,
 			Config: map[string]string{
 				MetadataKeyKubernetesAuthMode:              "kubeconfig",
-				MetadataKeyKubernetesKubeconfigPath:        "/etc/kandev/current.yaml",
+				MetadataKeyKubernetesKubeconfigPath:        hostAbsPath("/etc/kandev/current.yaml"),
 				MetadataKeyKubernetesKubeContext:           "current",
 				MetadataKeyKubernetesConfigNamespace:       "new-agents",
 				MetadataKeyKubernetesRequestTimeoutSeconds: "45",
@@ -215,7 +215,7 @@ func TestKubernetesRefreshStatusInstanceOverlaysCurrentConnectionSettings(t *tes
 
 	require.NoError(t, err)
 	require.Equal(t, "kubeconfig", instance.Metadata[MetadataKeyKubernetesAuthMode])
-	require.Equal(t, "/etc/kandev/current.yaml", instance.Metadata[MetadataKeyKubernetesKubeconfigPath])
+	require.Equal(t, hostAbsPath("/etc/kandev/current.yaml"), instance.Metadata[MetadataKeyKubernetesKubeconfigPath])
 	require.Equal(t, "current", instance.Metadata[MetadataKeyKubernetesKubeContext])
 	require.Equal(t, "new-agents", instance.Metadata[MetadataKeyKubernetesConfigNamespace])
 	require.Equal(t, "old-agents", instance.Metadata[MetadataKeyKubernetesNamespace])

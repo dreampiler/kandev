@@ -6,6 +6,9 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,6 +125,63 @@ func newFakeSSHServer(t *testing.T, handler sshExecHandler) *fakeSSHServer {
 // enableSFTP turns on the "sftp" subsystem. The server serves the real
 // filesystem, so tests must use paths under t.TempDir().
 func (s *fakeSSHServer) enableSFTP() { s.sftpEnabled = true }
+
+// sftpRemotePath turns a local directory into the remote path the fake SFTP
+// server resolves back to it. Product code treats SSH paths as POSIX; on
+// Windows the pkg/sftp server maps "/C:/dir" to "C:\dir".
+func sftpRemotePath(local string) string {
+	if runtime.GOOS != "windows" {
+		return local
+	}
+	return "/" + filepath.ToSlash(local)
+}
+
+// hostAbsPath turns a POSIX fixture path for a file on the backend host into
+// an absolute host path: unchanged on POSIX, placed on the system volume on
+// Windows ("/etc/x" -> "C:\etc\x").
+func hostAbsPath(posix string) string {
+	if runtime.GOOS != "windows" {
+		return posix
+	}
+	return filepath.VolumeName(os.TempDir()) + filepath.FromSlash(posix)
+}
+
+// shellPOSIXPath converts a local path to the POSIX form that Git for
+// Windows' sh resolves ("C:\x\y" -> "/c/x/y"), so POSIX scripts that walk
+// "/"-separated components see real directories. Unchanged on POSIX.
+func shellPOSIXPath(local string) string {
+	if runtime.GOOS != "windows" {
+		return local
+	}
+	vol := filepath.VolumeName(local)
+	if len(vol) == 2 && vol[1] == ':' {
+		return "/" + strings.ToLower(vol[:1]) + filepath.ToSlash(local[len(vol):])
+	}
+	return filepath.ToSlash(local)
+}
+
+// localFileURL returns a file:// URL git accepts for a local path:
+// "file:///tmp/x" on POSIX and "file:///C:/x" on Windows.
+func localFileURL(local string) string {
+	p := filepath.ToSlash(local)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return "file://" + p
+}
+
+// observableFileMode is the permission os.Stat reports for a file written
+// with mode. Windows keeps only the owner-write bit: writable files report
+// 0666 and read-only ones 0444.
+func observableFileMode(mode os.FileMode) os.FileMode {
+	if runtime.GOOS != "windows" {
+		return mode
+	}
+	if mode&0o200 != 0 {
+		return 0o666
+	}
+	return 0o444
+}
 
 // forwardTo makes every direct-tcpip channel connect to addr regardless of the
 // port the client asked for. Used to point remote "127.0.0.1:<port>" dials at
