@@ -11,6 +11,7 @@ import (
 )
 
 const commandCheckTimeout = 5 * time.Second
+const osWindows = "windows"
 
 // DetectOption is a detection strategy. Returns (found, matchedPath, err).
 type DetectOption func(ctx context.Context) (bool, string, error)
@@ -82,7 +83,7 @@ func commandCheckTimedOut(checkCtx context.Context, state *os.ProcessState, inte
 	if !interrupted || !errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
 		return false
 	}
-	return runtime.GOOS == "windows" || state == nil || !state.Exited()
+	return runtime.GOOS == osWindows || state == nil || !state.Exited()
 }
 
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
