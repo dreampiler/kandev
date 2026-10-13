@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/stretchr/testify/require"
 )
 
 // testConfigSchema mirrors the JSON shape a manifest's config_schema decodes
@@ -86,6 +87,66 @@ func installConfigPlugin(t *testing.T, svc *Service, id string) *store.Record {
 		t.Fatalf("Install(%q): %v", id, err)
 	}
 	return rec
+}
+
+// installRequiredConfigToolPlugin is like installConfigPlugin but the package
+// also declares an agent tool, so the catalog lists it only once the required
+// config is set. It is the fixture for the restart-failure catalog regression.
+func installRequiredConfigToolPlugin(t *testing.T, svc *Service, id string) *store.Record {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: 1.0.0
+display_name: Test Plugin
+config_schema:
+  type: object
+  required: ["github_token"]
+  properties:
+    github_token:
+      type: string
+      secret: true
+agent_tools:
+  - name: pr
+    description: This task's pull request.
+    surfaces: ["kanban-task"]
+    input_schema:
+      type: object
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, platformKey)
+
+	var buf bytes.Buffer
+	files := map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}
+	if err := pkgtartest.WritePackage(&buf, files); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	rec, err := svc.Install(context.Background(), &buf)
+	if err != nil {
+		t.Fatalf("Install(%q): %v", id, err)
+	}
+	return rec
+}
+
+// catalogPluginIDsFor returns the plugin IDs currently listed in the agent
+// tool catalog, or a sentinel error if the catalog itself fails.
+func catalogPluginIDsFor(t *testing.T, svc *Service) []string {
+	t.Helper()
+	snapshot, err := svc.AgentToolCatalog()
+	if err != nil {
+		t.Fatalf("AgentToolCatalog: %v", err)
+	}
+	ids := make([]string, 0, len(snapshot.Tools))
+	for _, tool := range snapshot.Tools {
+		ids = append(ids, tool.PluginID)
+	}
+	return ids
 }
 
 // --- helper unit tests ---
@@ -343,6 +404,35 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 	rec, _ := svc.Get("kandev-plugin-github")
 	if rec.Status != StatusError {
 		t.Fatalf("status = %q, want error after failed restart", rec.Status)
+	}
+}
+
+func TestServiceUpdateConfigRestartFailureRemovesToolsFromCatalog(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	svc.SetSecrets(newFakeSecretRevealer())
+	installRequiredConfigToolPlugin(t, svc, "kandev-plugin-github")
+	rt.setStartErr("kandev-plugin-github", errors.New("spawn boom"))
+
+	// Before any config save the required field is unset, so the plugin's
+	// tool must not be listed yet.
+	require.Empty(t, catalogPluginIDsFor(t, svc), "unconfigured plugin must contribute no agent tools")
+
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err == nil {
+		t.Fatalf("UpdateConfig should surface the restart failure")
+	}
+	rec, _ := svc.Get("kandev-plugin-github")
+	if rec.Status != StatusError {
+		t.Fatalf("status = %q, want error after failed restart", rec.Status)
+	}
+	// The restart failed and transitioned the plugin to StatusError, so its
+	// tool must no longer be listed. UpdateConfig signals the catalog before
+	// the restart, so without a second signal after the failed status write
+	// running agents would keep seeing a tool for a stopped plugin.
+	ids := catalogPluginIDsFor(t, svc)
+	for _, id := range ids {
+		if id == "kandev-plugin-github" {
+			t.Fatalf("catalog still lists tools of %q after its restart failed", id)
+		}
 	}
 }
 

@@ -248,8 +248,18 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 			// StatusActive with no process running — don't lose that.
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
+		} else {
+			// The status transition to StatusError changes whether the
+			// plugin's agent tools are listed, so the catalog must be
+			// recomputed. UpdateConfig already signalled before the restart,
+			// but that signal rebuilt the catalog while the plugin was still
+			// StatusActive; without this second signal running agents keep
+			// tools for a plugin that is no longer active. Pair the status
+			// write with both notifications the same way StartActivePlugins
+			// and DisableWithResult do.
+			s.notifyAgentToolCatalogChanged()
+			s.notifyDeliverer()
 		}
-		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}
 	return nil
