@@ -131,10 +131,14 @@ func TestSeedAgentSessionDir_CopiesSelectedPortableConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Windows has no POSIX permission bits; os.Stat reports 0666 for any
-	// writable file regardless of the requested mode.
-	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
-		t.Fatalf("selected config mode = %o, want 600", info.Mode().Perm())
+	// Windows keeps only the owner-write bit of the requested 0600: a writable
+	// file reports 0666 and a read-only one 0444.
+	wantMode := os.FileMode(0o600)
+	if runtime.GOOS == "windows" {
+		wantMode = 0o666
+	}
+	if info.Mode().Perm() != wantMode {
+		t.Fatalf("selected config mode = %o, want %o", info.Mode().Perm(), wantMode)
 	}
 }
 
