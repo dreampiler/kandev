@@ -69,14 +69,42 @@ The matching completed generic `agent_delivery_effects` receipt is deleted in th
 
 The command applies the same retention batch as the background worker, so its delete conditions are exactly those above; no new framework, verifier, hash or ledger is created.
 
-## Read-only copy estimate
+## Read-only copy measurement
 
-Counted on the approved operational database copy (path requested from the parent), reading only table/event_type/row-count/status metadata:
+Source: the approved operational database copy at `D:\260720_Ai_Workspace_Tools\offload-c-20261013\dbcopy-delivery\kandev.db`, taken 2026-10-13 17:53 KST (08:53 UTC) with the SQLite online backup API (WAL-consistent), 6.23 GB.
+Read-only (`file:...?mode=ro&immutable=1`); only `agent_delivery_inbox`, `agent_delivery_effects`, `agent_delivery_cursors`, `agent_delivery_submissions`, `session_recovery_blocks` aggregates; no credential or payload values read.
+The predicate is evaluated with the retention code's own classifiers: the retained-terminal proof SQL is extracted verbatim from `agent_delivery_retention_proof.go`; the event-type classifier, submission states, event expiry (`replayAge = 24h`, `replayEvents = 10000`), `payload_pruned_at`/`hash_version`/`content_hash` guards and the contiguous-prefix rule mirror `agent_delivery_retention_candidates.go`, `agent_delivery_retention_events.go` and the new `agentDeliveryCompletedStreamSQL`. Clock is the copy time.
 
-- Copy path and copy timestamp: pending parent-provided path.
-- Aggregation scope and counted deletable rows: pending.
+Measured:
 
-The 2.29M total inbox row count is not a measured deletable figure and is not used as one.
+| Quantity | Rows |
+| --- | --- |
+| `agent_delivery_inbox` total | 2,957,385 |
+| `agent_delivery_effects` total | 2,962,074 |
+| `agent_delivery_cursors` (streams) | 548 |
+| `agent_delivery_submissions` | 2,731 |
+| Already retired (sum of `retired_sequence`) | 4,372,662 |
+| Candidate region (`retired_sequence < sequence <= projected_sequence`) | 2,957,370 |
+| Retirable from the current frontier under condition (a) | 502,825 |
+| Of those, newly eligible only via the completed-stream predicate | 396,441 |
+| Of those, already window-expired but not yet retired (worker lag) | 106,384 |
+
+Rows outside condition (a) in the candidate region (approx., attributed by each stream's first blocking row):
+
+| Residual cause | Rows (approx.) |
+| --- | --- |
+| First unsettled terminal pins the suffix (320 `block_resolved` terminal settlements) | 1,084,930 |
+| Stream has an active submission (`prepared`/`dispatching`/`accepted`/`interrupted_unknown`) | 831,055 |
+| First blocking row not yet compacted | 255,006 |
+| Stream not fully projected (`received_sequence != projected_sequence`, 8 streams) | 215,451 |
+| Within the replay window and not a completed stream | 73,071 |
+
+Additional measured facts: 15 inbox rows are unprojected; 1,208 of 1,661 terminal rows carry a completed settlement, 320 are `block_resolved`; 440 streams have a settled `terminal_stream_id`; 220 submissions are active; 62 recovery blocks are open (1 with a live owner). Between the operator's 15:29 and 17:53 samples the inbox grew 2,290,421 -> 2,957,385 rows (about 277k rows/hour) while the file grew 5.08 -> 6.23 GB.
+
+Interpretation: the fixed binary retires a completed stream's fragments after the payload grace, which is the 396,441-row incremental effect here. The dominant residue is `block_resolved` terminal settlements (320 effects) pinning long suffixes and active submissions; condition (a) is deliberately conservative for those, so they remain the separate settlement/reconciliation concern, not part of this predicate.
+
+Scope limits: this is a point-in-time estimate, not the production batch's exact output. Rows become eligible over time as compaction catches up and rows cross the age window; the retained checkpoint rows (cursors, submissions, terminal/workflow receipts) are not deleted and are excluded above. The 2.29M earlier total is not used as a deletable figure.
+
 
 ## Verification
 
