@@ -25,9 +25,9 @@ type ChildStallStore interface {
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
-	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error)
+	ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error)
 	ListPendingInteractions(ctx context.Context, filter models.PendingInteractionFilter) ([]*models.Message, error)
 	GetMessage(ctx context.Context, id string) (*models.Message, error)
 }

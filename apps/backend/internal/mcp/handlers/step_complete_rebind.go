@@ -118,10 +118,13 @@ func (h *Handlers) clearStepCompleteRejection(ctx context.Context, sessionID str
 
 func boundStepCompleteRejectionReason(reason string) string {
 	trimmed := strings.TrimSpace(reason)
-	if len(trimmed) <= stepCompleteRejectionReasonLimit {
+	runes := []rune(trimmed)
+	if len(runes) <= stepCompleteRejectionReasonLimit {
 		return trimmed
 	}
-	return strings.TrimSpace(trimmed[:stepCompleteRejectionReasonLimit])
+	// Truncate by runes, not bytes: a byte slice can split a multi-byte rune
+	// (step names may be non-ASCII) and store invalid UTF-8.
+	return strings.TrimSpace(string(runes[:stepCompleteRejectionReasonLimit]))
 }
 
 // rebindStepCompleteSession decides whether the calling session may take over a

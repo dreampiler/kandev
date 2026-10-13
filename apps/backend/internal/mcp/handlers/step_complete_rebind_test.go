@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -412,4 +414,13 @@ func TestHandleStepComplete_RecordsAndClearsOwnershipRefusal(t *testing.T) {
 	require.NoError(t, err)
 	_, hasRejection := models.LoadStepCompleteRejection(primary.Metadata)
 	assert.False(t, hasRejection, "an accepted signal must clear a recorded refusal")
+}
+
+// TestBoundStepCompleteRejectionReasonIsRuneSafe pins that truncating a refusal
+// reason never splits a multi-byte rune (step names may be non-ASCII).
+func TestBoundStepCompleteRejectionReasonIsRuneSafe(t *testing.T) {
+	reason := strings.Repeat("가", stepCompleteRejectionReasonLimit+10)
+	got := boundStepCompleteRejectionReason(reason)
+	assert.True(t, utf8.ValidString(got), "truncated reason must be valid UTF-8")
+	assert.Equal(t, stepCompleteRejectionReasonLimit, len([]rune(got)))
 }

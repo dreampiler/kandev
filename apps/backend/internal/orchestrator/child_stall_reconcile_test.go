@@ -82,16 +82,6 @@ func (f *childStallStoreFake) SetTaskMetadataKeyIfNotArchived(_ context.Context,
 	return true, nil
 }
 
-func (f *childStallStoreFake) ListTaskSessions(_ context.Context, taskID string) ([]*models.TaskSession, error) {
-	sessions := make([]*models.TaskSession, 0, len(f.sessions))
-	for _, session := range f.sessions {
-		if session != nil && session.TaskID == taskID {
-			sessions = append(sessions, session)
-		}
-	}
-	return sessions, nil
-}
-
 func (f *childStallStoreFake) GetTask(_ context.Context, id string) (*models.Task, error) {
 	return f.tasks[id], nil
 }
@@ -111,6 +101,10 @@ func (f *childStallStoreFake) GetPrimarySessionByTaskID(_ context.Context, taskI
 
 func (f *childStallStoreFake) GetLatestTaskStepTransitionID(context.Context, string) (int64, error) {
 	return 1, nil
+}
+
+func (f *childStallStoreFake) ListTaskStepTransitions(context.Context, string, int64, int) ([]models.StepTransition, error) {
+	return []models.StepTransition{{ID: 1, OccurredAt: childStallReconcileNow.Add(-30 * time.Minute)}}, nil
 }
 
 func (f *childStallStoreFake) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
@@ -461,7 +455,7 @@ func TestMissingSignalSuppressedWhenSignalIsOnAnotherSession(t *testing.T) {
 	ctx := context.Background()
 	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
 	store.sessions["child-session-2"] = &models.TaskSession{
-		ID: "child-session-2", TaskID: "child", State: models.TaskSessionStateWaitingForInput,
+		ID: "child-session-2", TaskID: "child", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyPendingStepCompletion: models.PendingStepCompletionSignal{
 				StepID: "step-1", Summary: "done",
@@ -477,6 +471,30 @@ func TestMissingSignalSuppressedWhenSignalIsOnAnotherSession(t *testing.T) {
 	}
 	if state, _ := models.LoadChildStallState(turn.Metadata); state.State == childStallStateNudgedChild {
 		t.Fatalf("turn was nudged despite the signal on another session: %+v", state)
+	}
+}
+
+// TestMissingSignalNotSuppressedBySignalFromEarlierEntry proves a signal left
+// on an authoritative session by an earlier entry of the same step cannot hide
+// a genuine stall in the new entry: the reminder still fires.
+func TestMissingSignalNotSuppressedBySignalFromEarlierEntry(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	// The primary still carries a signal for the step, but it was signalled
+	// before this entry began.
+	store.sessions["child-session"].IsPrimary = true
+	store.sessions["child-session"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyPendingStepCompletion: models.PendingStepCompletionSignal{
+			StepID: "step-1", Summary: "old", SignaledAt: childStallReconcileNow.Add(-time.Hour),
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := childSessionEntries(t, ctx, queue, "child", "child-session"); len(ids) == 0 {
+		t.Fatal("a signal from an earlier entry must not suppress the reminder")
 	}
 }
 

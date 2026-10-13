@@ -86,52 +86,97 @@ func (p *ChildStallProducer) gatherSessionEvidence(
 
 // gatherCompletionSignalState reads whether the child task already holds an
 // accepted completion signal for its current step, and whether a completion
-// signal for that step was refused by the ownership/profile gate. Both are read
-// across the task's sessions, not only the settled turn's session: a session
-// substitution moves the accepted signal and the refusal onto a new session
-// while the settled turn keeps naming the old one, which is how a reminder
-// repeats after the agent already signalled.
+// signal for that step was refused by the ownership/profile gate. The completed
+// signal is written on whichever session called step_complete, which after a
+// session substitution is the task's current driving session, not the settled
+// turn's session. Only the sessions that can authoritatively hold it are read —
+// the settled turn's session, the step's durable binding, and the task's
+// primary — so a stale bag left on a superseded session from an earlier entry of
+// the same step cannot suppress a genuine stall.
 func (p *ChildStallProducer) gatherCompletionSignalState(
 	ctx context.Context,
 	turnSession *models.TaskSession,
 	child *models.Task,
 	evidence *childstall.Evidence,
 ) error {
-	sessions, err := p.store.ListTaskSessions(ctx, child.ID)
-	if err != nil {
-		return err
-	}
-	var newestRejection time.Time
-	seen := make(map[string]struct{}, len(sessions)+1)
-	for _, session := range sessions {
+	candidates := make([]*models.TaskSession, 0, 3)
+	seen := make(map[string]struct{}, 3)
+	add := func(session *models.TaskSession) {
 		if session == nil || session.ID == "" {
-			continue
+			return
+		}
+		if _, ok := seen[session.ID]; ok {
+			return
 		}
 		seen[session.ID] = struct{}{}
-		observeCompletionSignalState(session, child.WorkflowStepID, evidence, &newestRejection)
+		candidates = append(candidates, session)
 	}
-	// The settled turn's session owns the read even when the list is stale or
-	// does not include it, so add it explicitly.
-	if turnSession != nil && turnSession.ID != "" {
-		if _, ok := seen[turnSession.ID]; !ok {
-			observeCompletionSignalState(turnSession, child.WorkflowStepID, evidence, &newestRejection)
+	add(turnSession)
+	if p.svc != nil {
+		boundID, err := p.svc.BoundWorkflowStepSession(ctx, child.ID, child.WorkflowStepID)
+		if err != nil {
+			return err
 		}
+		if boundID != "" {
+			session, err := p.store.GetTaskSession(ctx, boundID)
+			if err != nil {
+				return err
+			}
+			add(session)
+		}
+	}
+	primary, err := p.store.GetPrimarySessionByTaskID(ctx, child.ID)
+	if err != nil && !errors.Is(err, repoerrors.ErrNoPrimarySession) {
+		return err
+	}
+	add(primary)
+
+	entryOccurredAt, entryKnown := p.currentEntryOccurredAt(ctx, child.ID, evidence.Start.TransitionID)
+	var newestRejection time.Time
+	for _, session := range candidates {
+		observeCompletionSignalState(session, child.WorkflowStepID, entryOccurredAt, entryKnown, evidence, &newestRejection)
 	}
 	return nil
 }
 
+// currentEntryOccurredAt returns when the task entered the workflow entry the
+// candidate turn started in. It is the anchor a stored signal is judged
+// against: a signal left on a session by an earlier entry of the same step (an
+// auto-advance out of the step does not consume it) must not hide a genuine
+// stall in the new entry. The second result is false when the entry time cannot
+// be established, in which case the caller trusts any matching signal so an
+// accepted signal never lets the reminder resume.
+func (p *ChildStallProducer) currentEntryOccurredAt(ctx context.Context, taskID string, transitionID int64) (time.Time, bool) {
+	if transitionID == 0 {
+		return time.Time{}, false
+	}
+	transitions, err := p.store.ListTaskStepTransitions(ctx, taskID, 0, 1)
+	if err != nil || len(transitions) == 0 {
+		return time.Time{}, false
+	}
+	latest := transitions[0]
+	if latest.ID != transitionID || latest.OccurredAt.IsZero() {
+		return time.Time{}, false
+	}
+	return latest.OccurredAt, true
+}
+
 // observeCompletionSignalState folds one session's stored completion state for
 // the current step into the evidence. A signal for the step marks the task as
-// signalled; the newest recorded rejection for the step provides the block
-// reason shown in the reminder.
+// signalled unless it predates the current entry; the newest recorded rejection
+// for the step provides the block reason shown in the reminder.
 func observeCompletionSignalState(
 	session *models.TaskSession,
 	stepID string,
+	entryOccurredAt time.Time,
+	entryKnown bool,
 	evidence *childstall.Evidence,
 	newestRejection *time.Time,
 ) {
 	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == stepID {
-		evidence.PendingStepSignal = true
+		if signalBelongsToEntry(signal, entryOccurredAt, entryKnown) {
+			evidence.PendingStepSignal = true
+		}
 	}
 	if rejection, has := models.LoadStepCompleteRejection(session.Metadata); has && rejection.StepID == stepID {
 		if rejection.At.After(*newestRejection) {
@@ -139,6 +184,17 @@ func observeCompletionSignalState(
 			evidence.BlockedReason = rejection.Reason
 		}
 	}
+}
+
+// signalBelongsToEntry reports whether a stored signal can suppress a reminder
+// for the current entry. An unknown entry time or a signal with no timestamp is
+// trusted so an accepted signal always suppresses; otherwise the signal must
+// not predate the entry it would hide a stall in.
+func signalBelongsToEntry(signal models.PendingStepCompletionSignal, entryOccurredAt time.Time, entryKnown bool) bool {
+	if !entryKnown || signal.SignaledAt.IsZero() {
+		return true
+	}
+	return !signal.SignaledAt.Before(entryOccurredAt)
 }
 
 func (p *ChildStallProducer) hasActiveTurn(ctx context.Context, sessionID string) (bool, error) {
