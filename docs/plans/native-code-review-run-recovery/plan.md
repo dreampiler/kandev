@@ -12,11 +12,13 @@ legacy_specs: []
 
 ## Overview
 
-Make a native code-review pass always converge on a recorded terminal state, and
+Make a native code-review pass always converge on a recorded terminal state,
 stop one abandoned pass from making a task's Review surface permanently
-unavailable. The change is limited to the review runner (`internal/review`) and
-its use of the existing review service write path. It adds no queue, watcher,
-schema, or product requirement beyond the two acceptance criteria it implements.
+unavailable, and let a pass that overruns its time budget fall back once to the
+dynamic route's next candidate. The change is limited to the review runner
+(`internal/review`) and its use of the existing review service write path. It
+adds no queue, watcher, schema, or product requirement beyond the acceptance
+criteria it implements.
 
 ## Confirmed root cause
 
@@ -46,6 +48,11 @@ Reproduced from `apps/backend/internal/review/runner.go`,
   with `review_interrupted` / "interrupted by restart" on boot. This is a
   backstop, not a live-process guarantee, so it neither cleared the observed run
   nor unblocked the task before a restart.
+- The pass budget is a fixed `runTimeout = 10m` and a deadline is recorded as
+  `review_cancelled` with no fallback, so a slow free model that cannot finish a
+  review in ten minutes ends the request outright even when the review-dynamic
+  route holds another candidate that would finish. Failures clustered on one PR
+  (#266, about 140 changed lines) show diff size is not the trigger.
 
 Candidate comparison:
 
@@ -56,6 +63,11 @@ Candidate comparison:
 - (c) Progress-less time limit excluded from duplicate suppression: the live
   guarantee for a permanently failed write. Chosen as Task 02, applied lazily at
   the existing suppression seam rather than as a new monitor.
+- (d) Record a pass that overran its budget as `failed` (`review_timeout`) and
+  retry once on the dynamic route's next candidate: recovers the timeout case
+  the other two cannot, without changing route order or adding state. Chosen as
+  Task 03. A diff-size-proportional budget is left as a follow-up candidate
+  because the observed timeouts were on small diffs.
 
 ## Scope
 
@@ -68,6 +80,9 @@ Candidate comparison:
 - Treat a `pending`/`running` run older than the progress-less time limit as
   abandoned: record it `failed` with a reason and exclude it from duplicate
   suppression so a new pass starts.
+- Record a pass that ends on its time budget as `failed` with a `review_timeout`
+  reason, and retry exactly once on the dynamic route's next candidate, keeping
+  the route order and never retrying a non-timeout failure or a retry.
 
 ### Out of scope
 
@@ -76,6 +91,7 @@ Candidate comparison:
   batching, and finding publication.
 - Any new background monitor, queue, metric, schema column, or configuration.
 - Changing the pass timeout (`runTimeout`) or the review API and events.
+- A pass timeout proportional to the diff size (follow-up candidate).
 
 ## Technical approach
 
@@ -93,19 +109,32 @@ active run is returned by the store, an abandoned run is finalized through the
 Task 01 helper with a stable code, and the branch continues to create a new pass
 instead of returning the abandoned run. The existing boot sweep is untouched.
 
+Task 03 adds a `review_timeout` error code, records a deadline failure with it
+(and a message naming the pass budget) instead of the generic cancelled code,
+and adds a fallback in `execute`: when the reviewer error is a deadline and the
+pass is not itself a retry, it resolves the timed-out identity's dynamic route
+for the next candidate excluding the timed-out profile, creates one retry run on
+the held in-flight slot, and runs it. The retry identity links back through the
+existing run summary and error message. It reuses `nextDynamicReviewer` from the
+existing dynamic launch fallback and introduces no new state.
+
 ## Work orders
 
 - [done] [Task 01: Durable terminal write](task-01-terminal-write-durability.md)
 - [done] [Task 02: Finalize abandoned run](task-02-finalize-abandoned-run.md)
+- [done] [Task 03: Timeout fallback to next candidate](task-03-timeout-fallback.md)
 
 ## Dependency order
 
 ```text
 Task 01 -> Task 02
+Task 01 -> Task 03
 ```
 
 Task 02 reuses the terminal-write helper from Task 01 to finalize the abandoned
-run. Both ship in one PR.
+run. Task 03 reuses it to record the timeout and reuses the existing
+`nextDynamicReviewer` fallback from the dynamic launch path. All three ship in
+one PR.
 
 ## Verification strategy
 
@@ -114,6 +143,10 @@ run. Both ship in one PR.
   and the abandonment predicate/branch with a fake store.
 - Unit tests in the same package prove a fresh active run is still rejoined and
   a terminal run is untouched.
+- Unit tests prove the timeout fallback: a deadline records `review_timeout` and
+  retries exactly once on the next dynamic candidate; no next candidate, a
+  non-timeout failure, and a retry that also times out start no further pass; and
+  an ordinary dynamic success starts none.
 - `go build ./...` and `go vet` on the changed packages.
 - On Windows, exclude the six non-loopback listener tests that prompt for
   firewall access if any broader run is used:
@@ -129,7 +162,7 @@ run. Both ship in one PR.
 ## Verification results
 
 - `go test ./internal/review -count=1` passed (full package), including the eight
-  new companion tests.
+  companion tests from Tasks 01-02 and the five from Task 03.
 - `go build ./...` and `go vet ./internal/review ./internal/task/service
   ./internal/task/repository/sqlite` passed.
 - `gofmt -l` clean; `golangci-lint run ./internal/review --new-from-rev=<base>`
@@ -147,10 +180,14 @@ run. Both ship in one PR.
 - Delays must select on shutdown so `Runner.Stop` is not delayed by backoff.
 - `execute`'s new fallback from `CompleteRun` to `fail` must not overwrite a
   user cancel; `mutateRunIfLive` keeps the cancelled row.
+- The timeout fallback must not loop: it is suppressed when the pass already is a
+  retry, and it must preserve the route's candidate order rather than choosing a
+  model itself. A user cancel stays `cancelled`; only a pass deadline becomes
+  `review_timeout`.
 
 ## Package handoff
 
 The package is the requirement pair (the new companion requirement plus the new
-system design) and the two work orders above. Implementation starts after the
+system design) and the work orders above. Implementation starts after the
 orchestrator's instruction and follows the dependency order, updating each work
 order's status and this plan as its verification passes.

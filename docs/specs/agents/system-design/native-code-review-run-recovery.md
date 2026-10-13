@@ -64,7 +64,8 @@ the pass context, and it must survive a transient storage error.
 
 ## Failure and recovery
 
-Two independent guarantees keep a run from being stranded as `running`.
+Three independent guarantees keep a run from being stranded as `running` and
+keep a timeout from ending the task's review.
 
 ### Detached, bounded terminal write
 
@@ -102,6 +103,46 @@ abandoned one. This is a lazy check at an existing decision point, not a new
 background monitor. The restart sweep in the startup path remains the backstop
 for a run that no request ever observes again.
 
+### Time-budget fallback to the next candidate
+
+A pass whose reviewer overruns the pass timeout fails with a recorded
+`review_timeout` reason, and the runner immediately tries the dynamic route's
+next candidate once. This is distinct from the progress-less limit above:
+
+- The timeout is decided while the pass is still live — the expired pass context
+  is the signal, so the runner knows the previous attempt genuinely ended rather
+  than being assumed dead.
+- The runner excludes the candidate that timed out, then asks the route for its
+  next candidate in the route's own order. It never changes that order, and it
+  never asks for a candidate that is not already eligible; when the route returns
+  none, no retry starts. A non-dynamic reviewer (a concrete profile or the
+  utility/default agent) has no next candidate and is never retried.
+- Only a timeout triggers it. A parse failure, an unavailable agent, or any other
+  reviewer error is recorded and stops, because those do not change with another
+  candidate.
+- The retry is exactly one attempt. It carries the timed-out run's identity in
+  its summary (and in any failure message), so the two runs read as one
+  replacement chain in the existing run history. No new column or table is
+  needed; the retry is an ordinary run row.
+
+The retry reuses the task's held in-flight slot, so it never races a
+duplicate-suppression decision: a concurrent request during the fallback rejoins
+the retry run, not a new one. After the fallback the slot is released as usual.
+
+The two time-based mechanisms do not overlap. The timeout fallback finalizes the
+timed-out run as terminal before it starts the retry, so the retry run is the
+only non-terminal row for the task and the progress-less limit can never
+misclassify the just-finalized run. If the retry's own pass is lost without
+finalization (for example a process stop), its row is non-terminal with no live
+pass behind it and the progress-less limit is what closes it on the next review
+request. Ordering is therefore: timeout fallback first, progress-less limit as
+the later backstop for a row no live pass owns.
+
+The diff-size-proportional timeout is deliberately not part of this design. An
+observed repeated timeout was on a small change set (#266), so reviewer
+exploration or model speed, not diff volume, is the suspect; the next-candidate
+fallback is the remedy that covers it.
+
 ### Existing cancellation and restart behavior
 
 - A user cancel cancels the live pass context and records `cancelled`; a late
@@ -116,7 +157,7 @@ for a run that no request ever observes again.
 | - | `pending` | review requested |
 | `pending` | `running` | the pass claims the diff and dispatches the reviewer |
 | `running` | `completed` | reviewer result parsed and findings persisted |
-| `running` | `failed` | reviewer error, unparseable result, a failed terminal write, or the progress-less time limit |
+| `running` | `failed` | reviewer error, unparseable result, a failed terminal write, the pass time budget (`review_timeout`), or the progress-less time limit |
 | `pending`/`running` | `cancelled` | user cancel, or the backend start sweep |
 
 Every terminal state is final. The progress-less time limit and the retry both
@@ -133,8 +174,9 @@ the reason remains visible.
 
 The runner already logs a failed pass and a terminal-write failure. This design
 adds one log when an abandoned run is finalized at the suppression seam, naming
-the run and task and the abandonment reason. No new metric, queue, or watcher is
-introduced.
+the run and task and the abandonment reason. The timeout fallback logs when no
+next candidate is available and when the retry itself fails, naming both the
+original and retry run. No new metric, queue, or watcher is introduced.
 
 ## Related decisions
 
