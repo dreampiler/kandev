@@ -25,7 +25,7 @@ Its invariants are `FallbackAllowed: true`, `AutoRetryable: false`, and `UserAct
 
 One provider-neutral rule, `provider.account_blocked.v1`, has high confidence. It matches only one line that:
 
-1. opens with `Error from provider <name>:`, optionally after an `Internal error:`, `API Error:`, `AI_APICallError:`, or `Error:` label and an opening JSON `message` field;
+1. opens with `Error from provider <name>:`, optionally after an `Internal error:`, `API Error:`, `AI_APICallError:`, or `Error:` label and an opening JSON object that may carry a leading scalar `code` field before its `message` field (`{"code":<n>,"message":"..."}`);
 2. continues with `403 Forbidden`; and
 3. carries `"code":"user_blocked"`, with plain or escaped quotes, or the message "Your access has been restricted" later on the same line.
 

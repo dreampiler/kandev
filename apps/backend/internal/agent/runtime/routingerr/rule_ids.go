@@ -51,6 +51,15 @@ const (
 	RuleProviderNvidiaHost = "provider.nvidia_host.v1"
 	// RuleProviderCannotConnect is the AI-SDK "Cannot connect to API" family.
 	RuleProviderCannotConnect = "provider.cannot_connect.v1"
+	// RuleProviderStructuredErrorType is the AI-SDK error envelope's own
+	// structured classification field, for example
+	// {"metadata":{"error_type":"provider_unavailable"}}. The underscore-joined
+	// value never matches the space-separated prose in provider.unavailable.v1.
+	RuleProviderStructuredErrorType = "provider.structured_error_type.v1"
+	// RuleProviderContextLengthExceeded is a model rejecting a request whose
+	// input exceeds its context window. Retrying the same candidate cannot help,
+	// so it is named without changing the runtime-error code or routing.
+	RuleProviderContextLengthExceeded = "provider.context_length_exceeded.v1"
 	// RuleProviderModelCapacity is a selected model at capacity.
 	RuleProviderModelCapacity = "provider.model_capacity.v1"
 	// RuleProviderQuotaNotice is a period quota notice with a stated reset.

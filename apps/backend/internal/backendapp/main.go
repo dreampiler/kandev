@@ -1613,7 +1613,10 @@ func startGatewayAndServe(
 	if err := recordSchemaVersionAfterPersistence(
 		repos.RequiredStores.ValidateComplete,
 		func() error { return persistenceHealth.Check(ctx) },
-		func() { recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log) },
+		func() {
+			recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log)
+			recordServerStart(dbPool.Writer(), Version, log)
+		},
 	); err != nil {
 		log.Error("Required persistence changed before readiness", zap.Error(err))
 		closeBoundListeners(server, listeners, log)

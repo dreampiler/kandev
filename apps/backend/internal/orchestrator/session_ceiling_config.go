@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"go.uber.org/zap"
 )
 
@@ -18,8 +19,12 @@ const unlimitedSessionCeiling = 0
 // only its own in-process reservations, so every session already running on the
 // instance is invisible to it and the ceiling admits without bound. A build-time
 // assertion covers the production repository; this warning covers everything else.
+//
+// guard is the host-memory pressure threshold pair. When it is enabled the
+// controller asks the process's host-memory reader on each admission; a
+// disabled guard leaves memoryReader nil and never reads the host.
 func newSessionCeilingForRepo(
-	repo interface{}, capacity SessionCeilingCapacity, logger *zap.Logger,
+	repo interface{}, capacity SessionCeilingCapacity, guard hostmemory.Gate, logger *zap.Logger,
 ) *sessionCeilingController {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -32,6 +37,10 @@ func newSessionCeilingForRepo(
 	controller := newSessionCeilingController(capacity.WorkerCeiling, lister, logger)
 	controller.controlCeiling = capacity.ControlCeiling
 	controller.controlProfiles = controlProfileSet(activeControlProfiles(capacity.ControlCeiling, capacity.ControlProfileIDs))
+	if guard.Enabled {
+		controller.memoryGate = guard
+		controller.memoryReader = hostmemory.NewReader()
+	}
 	return controller
 }
 

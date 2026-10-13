@@ -20,6 +20,7 @@ type fakeStore struct {
 	mu         sync.Mutex
 	runs       map[string]*models.TaskReviewRun
 	active     *models.TaskReviewRun
+	activeErr  error
 	published  []taskservice.PublishFindingsRequest
 	completed  []taskservice.CompleteRunRequest
 	failures   []fakeFailure
@@ -60,6 +61,9 @@ func (f *fakeStore) CreateRun(_ context.Context, req taskservice.CreateRunReques
 func (f *fakeStore) ActiveRun(context.Context, string) (*models.TaskReviewRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.activeErr != nil {
+		return nil, f.activeErr
+	}
 	return f.active, nil
 }
 

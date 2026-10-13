@@ -12,6 +12,8 @@ const (
 	CodeUnparseableResponse  = "review_unparseable_response"
 	CodeExecutionFailed      = "review_execution_failed"
 	CodeCancelled            = "review_cancelled"
+	CodeAbandoned            = "review_abandoned"
+	CodeTimeout              = "review_timeout"
 )
 
 var (
