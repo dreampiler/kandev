@@ -347,7 +347,13 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 
 	// A pass that survived a restart has a DB row but no in-memory claim, so the
 	// claim above succeeds. Rejoin it instead of starting a second one.
-	if existing, err := r.store.ActiveRun(ctx, req.TaskID); err == nil && existing != nil {
+	existing, err := r.store.ActiveRun(ctx, req.TaskID)
+	if err != nil {
+		// Fail closed: an unreadable active-run set may already hold a row, and
+		// creating a second run would break the single-active-run invariant.
+		return nil, nil, err
+	}
+	if existing != nil {
 		if !r.abandoned(existing) {
 			return existing, nil, nil
 		}
@@ -550,10 +556,12 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	plan := PlanBatches(files, r.budgetBytes)
 	accumulated, identity, err := r.reviewWithLaunchFallback(ctx, plan, identity, req, promptCtx)
 	if err != nil {
-		// Record the failure first, then let a deadline fall back to the route's
-		// next candidate. The caller still gets the original failure.
-		_ = r.fail(ctx, runID, linkRetry(req, err), started)
-		r.maybeRetryAfterTimeout(ctx, err, req, identity, runID, files)
+		// Record the failure first. A retry on another candidate is only safe
+		// once this run is terminal, or a failed finalization would leave two
+		// active rows for the task.
+		if r.recordFailure(ctx, runID, linkRetry(req, err), started) {
+			r.maybeRetryAfterTimeout(ctx, err, req, identity, runID, files)
+		}
 		return err
 	}
 
@@ -739,6 +747,18 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 }
 
 func (r *Runner) fail(ctx context.Context, runID string, cause error, started time.Time) error {
+	r.recordFailure(ctx, runID, cause, started)
+	if cause != nil {
+		return cause
+	}
+	return ctx.Err()
+}
+
+// recordFailure persists a run's failure and reports whether the row reached a
+// terminal state. A caller that starts further work for the same task — the
+// timeout fallback — must wait for this to be true, or a failed finalization
+// would leave two active rows.
+func (r *Runner) recordFailure(ctx context.Context, runID string, cause error, started time.Time) bool {
 	// An explicit cancel already recorded the terminal state, so re-reporting it
 	// as a failure would only churn the row (and would overwrite it on any store
 	// without a terminal guard). A deadline is different: nobody recorded that.
@@ -746,16 +766,15 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 	// %v and dropped context.Canceled from the chain.
 	if isReviewCanceled(cause) || isReviewCanceled(ctx.Err()) {
 		r.logger.Debug("review run unwound after cancellation", zap.String("run_id", runID))
-		if cause != nil {
-			return cause
-		}
-		return ctx.Err()
+		return true
 	}
 	code := CodeFor(cause)
 	message := cause.Error()
-	if errors.Is(cause, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		// A pass that overran its own time budget is a failure with its own
-		// reason, not a user cancel: the reason has to say why the run ended.
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		// The pass's own deadline fired: record it as a timeout with its own
+		// reason, not a user cancel. A storage write that timed out on a
+		// detached context leaves the pass context alive, so it is not this
+		// case and keeps its own execution-failure reason.
 		code = CodeTimeout
 		message = fmt.Sprintf("review pass exceeded its %s time budget: %v", r.passTimeout, cause)
 	}
@@ -766,8 +785,9 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 		return werr
 	}); err != nil {
 		r.logger.Error("record review run failure", zap.String("run_id", runID), zap.Error(err))
+		return false
 	}
-	return cause
+	return true
 }
 
 // isReviewCanceled reports a user/cancel signal (context.Canceled), not a

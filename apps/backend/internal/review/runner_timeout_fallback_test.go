@@ -50,6 +50,11 @@ func (f *timeoutInference) models() []string {
 func newTimeoutHarness(t *testing.T, route DynamicRouteSelector, inference Inference, passTimeout time.Duration) (*Runner, *fakeStore) {
 	t.Helper()
 	store := newFakeStore()
+	return newTimeoutRunner(t, store, route, inference, passTimeout), store
+}
+
+func newTimeoutRunner(t *testing.T, store Store, route DynamicRouteSelector, inference Inference, passTimeout time.Duration) *Runner {
+	t.Helper()
 	resolver := NewResolver(reviewProfiles(), nil, nil)
 	resolver.Routes = route
 	runner := NewRunner(RunnerDeps{
@@ -66,7 +71,7 @@ func newTimeoutHarness(t *testing.T, route DynamicRouteSelector, inference Infer
 	runner.writePolicy = terminalWritePolicy{attempts: 3, timeout: time.Second, backoff: 0}
 	runner.Start(context.Background())
 	t.Cleanup(runner.Stop)
-	return runner, store
+	return runner
 }
 
 func dynamicRoute(candidates ...string) *fakeRoute {
@@ -196,6 +201,29 @@ func TestRunner_DynamicReviewerSuccessDoesNotRetry(t *testing.T) {
 	}
 	if got := store.statusOf(run.ID); got != models.ReviewRunCompleted {
 		t.Fatalf("expected completed, got %q", got)
+	}
+	if models := inference.models(); len(models) != 1 {
+		t.Fatalf("expected a single attempt, got %v", models)
+	}
+}
+
+// TestRunner_TimeoutDoesNotRetryWhenFinalizationFails covers the review finding
+// on the fallback gate: a timed-out run whose finalization write keeps failing
+// is not terminal, so starting a retry would leave two active rows for the task.
+func TestRunner_TimeoutDoesNotRetryWhenFinalizationFails(t *testing.T) {
+	store := &scriptedStore{fakeStore: newFakeStore(), failBudget: 99, failErr: errors.New("database is locked")}
+	inference := &timeoutInference{timeoutModels: map[string]bool{"opencode/big-pickle": true}}
+	runner := newTimeoutRunner(t, store, dynamicRoute("big-pickle", "space-bunny"), inference, 50*time.Millisecond)
+
+	run, err := runner.Run(context.Background(), RunRequest{TaskID: "task-fail-stuck", AgentProfileID: "review-dynamic"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if store.runCount() != 1 {
+		t.Fatalf("a retry must not start while the timed-out run is not terminal, got %d runs", store.runCount())
+	}
+	if got := store.statusOf(run.ID); got != models.ReviewRunRunning {
+		t.Fatalf("finalization failed, so the run should still be running, got %q", got)
 	}
 	if models := inference.models(); len(models) != 1 {
 		t.Fatalf("expected a single attempt, got %v", models)

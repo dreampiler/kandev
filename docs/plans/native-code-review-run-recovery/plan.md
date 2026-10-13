@@ -162,13 +162,35 @@ one PR.
 ## Verification results
 
 - `go test ./internal/review -count=1` passed (full package), including the eight
-  companion tests from Tasks 01-02 and the five from Task 03.
+  companion tests from Tasks 01-02, the five from Task 03, and three from the
+  step-entry review fixes.
 - `go build ./...` and `go vet ./internal/review ./internal/task/service
   ./internal/task/repository/sqlite` passed.
 - `gofmt -l` clean; `golangci-lint run ./internal/review --new-from-rev=<base>`
   reported 0 issues.
 - `python3 scripts/list-docs.py validate` and
   `python3 scripts/lint-spec-files.py --all` passed.
+
+## Step-entry review (2026-10-13)
+
+Reviewed range `ef4924f08d..d918afd5a3`. The step-entry review run
+`7782693a-7f2d-4c25-87dc-5b19f7547cf1` (model `muse-spark-1.3-contributor`)
+reported two findings, both acted on:
+
+- The timeout fallback ran even when the timed-out run's finalization write had
+  failed, which could leave two active rows for the task. Fixed: `fail` now
+  records through `recordFailure`, which reports whether the row reached a
+  terminal state, and the fallback is gated on that; companion test
+  `TestRunner_TimeoutDoesNotRetryWhenFinalizationFails`.
+- The `ActiveRun` read fell through to `CreateRun` on a read error. Fixed:
+  `launch` fails closed on that read; companion test
+  `TestRunner_ActiveRunReadErrorFailsClosed`.
+
+A third classification issue found during the same pass: a storage write that
+timed out on a detached context was labeled `review_timeout` with a "pass
+exceeded its budget" message. Fixed by keying the timeout code on the pass
+context deadline only; companion test
+`TestRunner_CompletionWriteDeadlineKeepsExecutionFailureReason`.
 
 ## Risks
 

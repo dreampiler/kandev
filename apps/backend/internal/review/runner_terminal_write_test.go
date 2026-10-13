@@ -274,3 +274,34 @@ func TestRunner_AbandonedRunStaysWhenFinalizeFails(t *testing.T) {
 		t.Fatalf("expected the abandonment write retried, got %d attempts", store.failAttempts)
 	}
 }
+
+// TestRunner_ActiveRunReadErrorFailsClosed covers the review finding on the
+// downstream `ActiveRun` read: an unreadable active-run set may already hold a
+// row, so a launch must not proceed to create a second run.
+func TestRunner_ActiveRunReadErrorFailsClosed(t *testing.T) {
+	runner, store := newScriptedHarness(t)
+	store.activeErr = errors.New("database is locked")
+
+	if _, err := runner.Launch(context.Background(), RunRequest{TaskID: "task-read-error"}); err == nil {
+		t.Fatal("Launch must fail closed when the active-run read fails")
+	}
+	if store.runCount() != 0 {
+		t.Fatalf("no run may be created when the active-run read failed, got %d", store.runCount())
+	}
+}
+
+// TestRunner_CompletionWriteDeadlineKeepsExecutionFailureReason guards that a
+// storage write that timed out on a detached context is not mislabeled as the
+// pass exceeding its time budget; only the pass's own deadline is a timeout.
+func TestRunner_CompletionWriteDeadlineKeepsExecutionFailureReason(t *testing.T) {
+	runner, store := newScriptedHarness(t)
+	store.completeBudget = 99
+	store.completeErr = context.DeadlineExceeded
+
+	if _, err := runner.Run(context.Background(), RunRequest{TaskID: "task-complete-deadline"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if failure, ok := store.lastFailure(); !ok || failure.code != CodeExecutionFailed {
+		t.Fatalf("a completion-write timeout must keep the execution-failure reason, got %+v ok=%v", failure, ok)
+	}
+}

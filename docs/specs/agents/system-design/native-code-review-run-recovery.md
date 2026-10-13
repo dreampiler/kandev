@@ -103,6 +103,11 @@ abandoned one. This is a lazy check at an existing decision point, not a new
 background monitor. The restart sweep in the startup path remains the backstop
 for a run that no request ever observes again.
 
+The read that finds the active run fails closed: if it cannot be read, `launch`
+returns the error instead of starting a competing pass, because an unreadable
+active-run set may already hold a row and creating a second one would break the
+single-active-run invariant.
+
 ### Time-budget fallback to the next candidate
 
 A pass whose reviewer overruns the pass timeout fails with a recorded
@@ -124,6 +129,10 @@ next candidate once. This is distinct from the progress-less limit above:
   its summary (and in any failure message), so the two runs read as one
   replacement chain in the existing run history. No new column or table is
   needed; the retry is an ordinary run row.
+- The retry starts only after the timed-out run has actually reached a terminal
+  state. If the finalization write still fails after its bounded retries, the
+  fallback is skipped: a retry while that row is still `pending`/`running` would
+  leave two active rows for the task, which is the state this design removes.
 
 The retry reuses the task's held in-flight slot, so it never races a
 duplicate-suppression decision: a concurrent request during the fallback rejoins
