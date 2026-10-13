@@ -565,7 +565,12 @@ failure must have the same code, origin, phase, provider, and complete
 diagnostic. Kandev normalizes whitespace only; case and punctuation remain
 significant. Diagnostics that need redaction or truncation stay on manual
 recovery. Task, repository, permission, tool, cancellation, ambiguous
-mid-turn, stale, and other unclassified failures also remain manual.
+mid-turn, stale, and other unclassified failures also remain manual. A
+post-start `agent_runtime_error` that arrives before any output or effect is a
+separate origin and is exempt from the complete-diagnostic requirement. A
+process exit keeps only its exit code as identity, so exits with the same code
+match even when their stderr differs; any other such message uses its sanitized
+first 256 bytes, so messages sharing that prefix count as the same failure.
 
 Below the threshold, each failure stops for manual recovery. Use **Retry** to
 make the next attempt; there is no automatic retry timer. On the threshold
