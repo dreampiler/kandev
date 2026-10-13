@@ -162,12 +162,9 @@ type WorkspaceTracker struct {
 	monitorTickTotalNanos atomic.Int64
 	monitorStatsMu        sync.Mutex
 
-	// Slow-mode backoff counters: the number of consecutive completed scans
-	// that observed nothing, one per polling loop because the loops have
-	// independent cadences and independent observations. Each is reset the
-	// moment that loop's next scan sees a change, and both are reset by
-	// SetPollMode so a push (focus, resubscribe, task resume) always restarts
-	// the base cadence. See slowPollInterval.
+	// Slow-mode backoff counters: consecutive completed scans that observed no
+	// change, one per polling loop because each loop has its own observation.
+	// See slowPollInterval.
 	slowIdleMonitorTicks atomic.Uint32
 	slowIdleGitPollTicks atomic.Uint32
 
@@ -222,6 +219,9 @@ type WorkspaceTracker struct {
 	// gitStatusBetweenQueries is an optional test hook invoked between the
 	// tracked and untracked queries. It is nil in production.
 	gitStatusBetweenQueries func(context.Context)
+	// pollTimerArmed is an optional test hook invoked each time a polling loop
+	// arms its timer, with the loop name and interval. It is nil in production.
+	pollTimerArmed func(loop string, interval time.Duration)
 
 	// Control
 	stopCh          chan struct{}
