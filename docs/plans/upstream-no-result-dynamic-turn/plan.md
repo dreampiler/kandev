@@ -169,10 +169,11 @@ The completion handler skips its ordinary follow-up only when a successor was la
 
 Source assessment: the candidate change touches `backendapp/dynamic_routing.go`, `orchestrator/handlers/handlers.go`, `orchestrator/service.go`, and their tests. It applies to the base without conflicts. It shares only `orchestrator/service.go` with Task 01, in a different declaration block.
 
-## Task 03: moved
+## Task 03: already upstream
 
-The work order for a launch that selects the virtual dynamic family moved to a separate change about launch-time agent and command resolution, because it edits the same launch code.
-That change is [#4412](https://github.com/kdlbs/kandev/pull/4412). This package no longer changes that contract or code.
+Failing closed when a launch selects the virtual dynamic family is implemented upstream by [#4412](https://github.com/kdlbs/kandev/pull/4412).
+The lifecycle launch helper and candidate resolution reject the family with `ErrVirtualProfile`, as the [virtual agent launch rejection plan](../virtual-agent-launch-rejection/plan.md) and the [routing design](../../specs/agents/system-design/dynamic-agent-routing-01.md) describe.
+This package has no remaining work for it and does not change that contract or code.
 
 ## Task 04: restart recovery route activation
 
