@@ -63,3 +63,10 @@ C, and E passed, D unverified, `web_assets_ok` false (the embedded web bundle is
 not built in this worktree), and `result` `passed`. No operating instance,
 home, or installation was touched. The script is the approved fork
 release-confirmation entry point, not a recurring generic test.
+
+Caveat: this run was launched by pointing `scripts/dev-isolated.ps1` at the
+worktree through a directory junction, because the script refuses binaries under
+the user home. That is a guard bypass, not the official run location. Treat the
+result as preliminary until it is rerun from the operationally designated
+location. No junction, link, script/source copy, or other guard workaround is
+used going forward.

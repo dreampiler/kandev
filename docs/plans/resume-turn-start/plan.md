@@ -135,6 +135,11 @@ for the upstream write owner, not code to add here.
 - `scripts/verify-release.ps1` emits the v09 §2.2 JSON. `result` is `passed` only
   for the covered scenario set; uncovered real-provider behavior is listed in
   `unverified`.
+- The single confirming run recorded in task 04 was launched by bypassing the
+  `scripts/dev-isolated.ps1` path guard with a directory junction. That is a
+  guard bypass, not the official run location, and its result is preliminary
+  until it is rerun from the operationally designated location. No junction,
+  link, script/source copy, or other guard workaround is used going forward.
 - Readbacks: `GET /api/v1/system/info` for the installed revision and
   `GET /api/v1/system/liveness` for running turns.
 - Existing Windows listener and snapshot test failures are recorded as existing

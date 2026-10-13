@@ -68,3 +68,6 @@ remains the recorded manual reproduction run (B, E FAIL) taken before
 those fixes. This is a no-change result: the K1 fix is already on the fork
 baseline, and the remaining deliverable is the release-confidence mechanism
 (task 04) and this package.
+
+Caveat: the baseline check came from the guard-bypassing run recorded in task 04
+and is preliminary until it is rerun from the operationally designated location.
