@@ -32,22 +32,14 @@ a second count query.
 `Service.ListTasksByWorkspace(workspaceID, "", ...)`, whose existing contract
 already includes workflow-less tasks and keeps the provenance filters (archived
 and automation-origin hidden). `handleListWorkspaceTasks` refuses a non-Office
-caller that names another workspace; the Office reach guard evaluates the
-`workspace_id` target for an Office principal.
-
-## Office plan-read reach
-
-`get_task_plan_kandev`, `list_task_plan_revisions_kandev`, and
-`get_task_plan_revision_kandev` join `officeCrossWorkspaceActions`, so the Office
-guard checks their `task_id` against reach. `list_tasks_kandev` resolves its
-target from `workspace_id` when `workflow_id` is absent. Plan writes,
-`move_task_kandev`, archive, and delete stay out of the guarded set
-(`AC-OFFICE-XWS-004.3`).
+caller that names another workspace; the service's own workspace authorization
+still applies underneath. Cross-workspace listing stays on the Office reach
+path, which this change does not touch.
 
 ## Failure behavior
 
 - A failed prefix lookup logs and leaves the raw value, so the tool's own
   not-found path answers; resolution never fails a request that the target tool
   would otherwise handle.
-- Reach and workspace authorization keep their existing failure modes; the new
-  reads add no new grant.
+- Workspace authorization keeps its existing failure modes; the new reads add no
+  new grant.
