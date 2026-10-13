@@ -567,7 +567,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		// once this run is terminal, or a failed finalization would leave two
 		// active rows for the task.
 		if r.recordFailure(ctx, runID, linkRetry(req, err), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
-			r.maybeRetryAfterTimeout(ctx, err, req, identity, runID, files)
+			r.maybeRetryAfterFailure(ctx, err, req, identity, runID, files)
 		}
 		return err
 	}
@@ -606,7 +606,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 			// pass overrunning its budget: record it and take the same one-shot
 			// candidate fallback as an inference-phase timeout.
 			if r.recordFailure(ctx, runID, linkRetry(req, pubErr), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
-				r.maybeRetryAfterTimeout(ctx, pubErr, req, identity, runID, files)
+				r.maybeRetryAfterFailure(ctx, pubErr, req, identity, runID, files)
 			}
 			return pubErr
 		}
@@ -643,7 +643,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 }
 
 // linkRetry prefixes a failure with the run this pass retries, so an automatic
-// timeout fallback is visibly tied to the timed-out run.
+// fallback is visibly tied to the failed run.
 func linkRetry(req RunRequest, err error) error {
 	if req.retryOfRunID == "" || err == nil {
 		return err
@@ -651,25 +651,25 @@ func linkRetry(req RunRequest, err error) error {
 	return fmt.Errorf("retry of run %s: %w", req.retryOfRunID, err)
 }
 
-// maybeRetryAfterTimeout runs one automatic fallback when a pass ended on a
-// deadline: the dynamic route's next candidate runs the same review once. It
-// never runs for any other failure, never repeats a model that already timed
-// out, and never retries a retry.
+// maybeRetryAfterFailure runs one automatic fallback when a pass ended on a
+// retryable failure — a deadline or an unparseable reviewer reply: the dynamic
+// route's next candidate runs the same review once. It never runs for any other
+// failure, never repeats a model that already failed, and never retries a retry.
 //
 // Called from the pass goroutine, so the task's in-flight slot stays held and
 // the cancel handle is repointed at the retry run.
-func (r *Runner) maybeRetryAfterTimeout(ctx context.Context, cause error, req RunRequest, timedOut ReviewerIdentity, origRunID string, files []ChangedFile) {
-	if req.retryOfRunID != "" || !isRunTimeout(ctx, cause) {
+func (r *Runner) maybeRetryAfterFailure(ctx context.Context, cause error, req RunRequest, failed ReviewerIdentity, origRunID string, files []ChangedFile) {
+	if req.retryOfRunID != "" || !isRetryableFailure(ctx, cause) {
 		return
 	}
 	base := r.backgroundContext()
 	setupCtx, cancelSetup := context.WithTimeout(base, retrySetupTimeout)
 	defer cancelSetup()
-	// Exclude the reviewer that timed out so the retry is a different candidate,
+	// Exclude the reviewer that failed so the retry is a different candidate,
 	// in the route's existing order.
-	next, err := r.resolver.nextDynamicReviewer(setupCtx, timedOut, req.Origin, map[string]bool{timedOut.ProfileID: true})
+	next, err := r.resolver.nextDynamicReviewer(setupCtx, failed, req.Origin, map[string]bool{failed.ProfileID: true})
 	if err != nil {
-		r.logger.Info("no reviewer candidate for a timed-out review",
+		r.logger.Info("no reviewer candidate for a failed review",
 			zap.String("task_id", req.TaskID), zap.String("run_id", origRunID), zap.Error(err))
 		return
 	}
@@ -699,10 +699,16 @@ func (r *Runner) maybeRetryAfterTimeout(ctx context.Context, cause error, req Ru
 	}
 }
 
-// isRunTimeout reports whether a pass ended because its own deadline expired,
-// the only failure that triggers the automatic candidate fallback.
+// isRunTimeout reports whether a pass ended because its own deadline expired.
 func isRunTimeout(ctx context.Context, err error) bool {
 	return errors.Is(err, context.DeadlineExceeded) || (ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded))
+}
+
+// isRetryableFailure reports whether a failed pass should run once more on the
+// dynamic route's next candidate: a deadline, or an unreadable reviewer reply.
+// Any other failure is final.
+func isRetryableFailure(ctx context.Context, err error) bool {
+	return isRunTimeout(ctx, err) || errors.Is(err, ErrUnparseableResponse)
 }
 
 // retrySetupTimeout bounds the resolve-and-create work before a fallback pass.
