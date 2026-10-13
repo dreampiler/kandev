@@ -52,7 +52,8 @@ Each read resolves the base, ahead/behind, remote-head, and comparison reference
 Apply the existing reference allowlist first; an empty or unsafe reference yields an empty value without running Git.
 A single remaining reference keeps the existing `rev-parse --verify` call.
 Resolve two or more distinct references with one `git rev-parse <ref>^{commit}...` process.
-Accept the batch only when Git exits zero and returns exactly one object-ID line per argument.
+Accept the batch only when Git exits zero and returns exactly one full SHA-1 or SHA-256 object-ID line per argument.
+Allow LF or CRLF termination; extra records, including blank records, require fallback.
 Otherwise resolve each reference with the existing `rev-parse --verify` path.
 That fallback also covers a missing reference, a truncated result, and an echoed argument that only looks like an object ID.
 A cancelled context skips the fallback and yields the same empty values the separate path yields.

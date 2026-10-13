@@ -110,3 +110,11 @@ Implemented on 2026-10-12 against `add376a2af`.
   with no monitor scan and both idle counters still zero. With the same-mode
   wake disabled it fails (`did not arm their timer at 30s`); it passes three
   times under `-race`.
+
+Review assessment on 2026-10-13: retained the explicit freshness trade-off.
+Runtime interest selects slow mode only without focused UI interest; focus wakes
+both loops, explicit refresh scans directly, and turn-end final refresh precedes
+removal of runtime interest. Failed reads leave idle counts unchanged. The
+running-loop test observes both timer arms without consuming their wake signals.
+The public Git operations guide now documents the five-minute unfocused bound.
+Full process-package, Windows, and integration verification runs in hosted CI.

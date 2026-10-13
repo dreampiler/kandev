@@ -546,7 +546,7 @@ func (wt *WorkspaceTracker) resolveGitRefOIDs(ctx context.Context, refs []string
 // It reports false unless the output holds exactly count lines and each line is
 // a full object ID.
 func batchedRefOIDs(out []byte, count int) ([]string, bool) {
-	trimmed := strings.TrimRight(string(out), "\r\n")
+	trimmed := strings.TrimSuffix(string(out), "\n")
 	if trimmed == "" {
 		return nil, false
 	}
@@ -555,7 +555,7 @@ func batchedRefOIDs(out []byte, count int) ([]string, bool) {
 		return nil, false
 	}
 	for i, line := range lines {
-		line = strings.TrimSpace(line)
+		line = strings.TrimSuffix(line, "\r")
 		if !gitObjectIDPattern.MatchString(line) {
 			return nil, false
 		}

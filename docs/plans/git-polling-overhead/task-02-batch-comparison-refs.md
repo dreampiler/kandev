@@ -95,3 +95,11 @@ Implemented on 2026-10-12 against `add376a2af`.
   ref, so it does not take the batched path. The two POSIX-shell wrapper
   tests skip on Windows.
 - `go build ./...` and `go vet ./internal/agentctl/server/process/` pass.
+
+Review remediation on 2026-10-13: batch parsing removes one optional LF
+terminator and one CR per record rather than discarding every trailing record.
+Extra blank LF/CRLF records failed the new regression before the fix. The exact
+parser and production test table passed `go test -trimpath -race -v -count=1`
+in a network-disabled stdlib-only sandbox. SHA-256 and unterminated full IDs
+remain accepted; abbreviated and echoed output remains rejected. Full tracker,
+concurrent capture, cancellation, and process validation runs in hosted CI.

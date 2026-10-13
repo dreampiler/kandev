@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: in_progress
+status: done
 requirements:
   - REQ-PLATFORM-GIT-SUBPROCESS-ADMISSION-002
   - REQ-PLATFORM-GIT-CAPTURE-RECOVERY-001
@@ -50,7 +50,7 @@ No open upstream pull request changes the production files in scope.
 ## Contract changes
 
 - `AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.7` (new): reuse the resolved Git
-  executable while `PATH` is unchanged and the file exists.
+  executable while `PATH` and `PATHEXT` are unchanged and the target remains executable.
 - `AC-PLATFORM-GIT-CAPTURE-RECOVERY-001.7` (new): one process per comparison
   evidence read, with per-reference fallback that keeps published values equal.
 - `AC-WORKSPACES-LOCAL-REPOSITORIES-004.6` (new, Task 03): proposes a change to
@@ -107,13 +107,15 @@ changed paths before publication.
 
 ## E2E, docs, and mobile assessment
 
-All orders are backend-internal. No API, payload, copy, setting, or UI
-changes, so no ASCII preview, public docs, or browser/E2E evidence is needed.
+All orders change backend tracking without layout, touch, navigation, or API
+changes. The public Git operations guide documents the five-minute unfocused
+badge freshness bound and immediate focus/refresh/turn-end behavior. Existing
+browser/mobile behavior remains unchanged; full hosted CI validates integration.
 
 ## Risks
 
 - Task 01: a stale remembered path after an in-place upgrade is bounded by the
-  stat check; a test that swaps `PATH` resolves again.
+  direct executable check; a test that swaps `PATH` resolves again.
 - Task 02: `rev-parse` without `--verify` echoes unresolvable arguments; only
   a zero exit with one object ID per argument is accepted.
 - Task 03: an unfocused badge can lag a change by up to 5 minutes after a long

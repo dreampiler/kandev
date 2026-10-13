@@ -19,7 +19,7 @@ system_design:
 ## Summary
 
 Build managed Git commands from a remembered absolute Git path while the
-process `PATH` is unchanged and the file still exists, instead of walking
+process `PATH` and `PATHEXT` are unchanged and the target remains executable, instead of walking
 `PATH` for every command.
 
 ## In scope
@@ -29,16 +29,18 @@ process `PATH` is unchanged and the file still exists, instead of walking
      executable even after an earlier `PATH` directory gains a `git`
      candidate. This is the observable form of "no new `PATH` search" and
      fails on the baseline, which picks the new candidate.
-   - A changed `PATH` resolves again.
-   - Removing the remembered file resolves again.
+   - A changed `PATH` or `PATHEXT` resolves again.
+   - Removing the remembered file, replacing it with a directory, or removing
+     Unix execute permission resolves again; absent later candidates preserve
+     the normal not-found error.
    - `cmd.Args[0]` stays `git`; an unresolvable Git keeps the `git` name and
      the existing not-found error.
    Fixtures are empty placeholder files (`git.exe` on Windows, mode `0755`
    elsewhere); they are resolved, never executed. Each test installs its own
    temporary `PATH`, so no test hook resets the memo.
-2. Add a mutex-guarded memo of the resolved path and the `PATH` value it was
-   resolved under. `GitExecutablePath` checks the remembered file with one
-   `os.Stat`, resolves again on a `PATH` change or missing file, and clears the
+2. Add a mutex-guarded memo of the resolved path and its `PATH` and `PATHEXT`
+   lookup environment. `GitExecutablePath` checks the remembered file with a direct
+   `exec.LookPath`, resolves again on a `PATH` or `PATHEXT` change or unusable target, and clears the
    memo when resolution fails.
 3. `NewGitCommand` builds the command from the remembered path when available
    and falls back to `git`; `cmd.Args` stays `git` followed by caller arguments.
@@ -92,3 +94,11 @@ Implemented on 2026-10-12 against `add376a2af`.
   POSIX shell fake `git` and fail on Windows with the baseline file as well;
   they are not affected by this change.
 - `go build ./...` and `go vet ./internal/common/subproc/` pass.
+
+Review remediation on 2026-10-13: cached-path validity now uses direct
+`exec.LookPath`, and `PATHEXT` joins `PATH` in the lookup environment key.
+New regressions failed on the original implementation for permission loss,
+directory replacement, and extension-policy invalidation. The exact source
+plus tests passed with `go test -trimpath -race -v -count=1` in a nonroot,
+network-disabled sandbox without external dependencies. This local proof covers
+the isolated executable seam; complete package and Windows validation is hosted.

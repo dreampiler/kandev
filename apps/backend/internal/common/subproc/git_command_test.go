@@ -110,3 +110,58 @@ func TestNewGitCommandKeepsGitArgvAndNotFoundError(t *testing.T) {
 		t.Fatalf("GitExecutablePath() error = %v, want exec.ErrNotFound", err)
 	}
 }
+
+// @covers AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.7
+func TestNewGitCommandResolvesAgainWhenPathExtChanges(t *testing.T) {
+	earlier, later := t.TempDir(), t.TempDir()
+	remembered := placeholderGit(t, later)
+	t.Setenv("PATH", earlier+string(os.PathListSeparator)+later)
+	t.Setenv("PATHEXT", ".EXE")
+	samePath(t, NewGitCommand(context.Background(), "status").Path, remembered)
+	replacement := placeholderGit(t, earlier)
+	t.Setenv("PATHEXT", ".COM;.EXE")
+	samePath(t, NewGitCommand(context.Background(), "status").Path, replacement)
+}
+
+// @covers AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.7
+func TestNewGitCommandResolvesAgainWhenRememberedGitIsUnusable(t *testing.T) {
+	for _, directory := range []bool{false, true} {
+		name := "execute permission removed"
+		if directory {
+			name = "replaced by directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			if !directory && runtime.GOOS == "windows" {
+				t.Skip("Unix execute permission contract")
+			}
+			earlier, later := t.TempDir(), t.TempDir()
+			remembered := placeholderGit(t, earlier)
+			t.Setenv("PATH", earlier+string(os.PathListSeparator)+later)
+			samePath(t, NewGitCommand(context.Background(), "status").Path, remembered)
+			if directory {
+				if err := os.Remove(remembered); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(remembered, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if err := os.Chmod(remembered, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := exec.LookPath(remembered); err == nil {
+				t.Fatal("fixture remains executable")
+			}
+			replacement := placeholderGit(t, later)
+			samePath(t, NewGitCommand(context.Background(), "status").Path, replacement)
+			if err := os.Remove(replacement); err != nil {
+				t.Fatal(err)
+			}
+			cmd := NewGitCommand(context.Background(), "status")
+			if cmd.Args[0] != "git" || !errors.Is(cmd.Err, exec.ErrNotFound) {
+				t.Fatalf("unresolvable Git: Args=%q Err=%v", cmd.Args, cmd.Err)
+			}
+		})
+	}
+}

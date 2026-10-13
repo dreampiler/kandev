@@ -148,6 +148,11 @@ func TestBatchedRefOIDsRejectsOutputThatDoesNotMapToObjectIDs(t *testing.T) {
 		{name: "truncated", output: oid + "\n", count: 2},
 		{name: "extra line", output: oid + "\n" + oid + "\n" + oid + "\n", count: 2},
 		{name: "echoed non-object line", output: oid + "\norigin/main^{commit}\n", count: 2},
+		{name: "extra blank record", output: oid + "\n\n", count: 1},
+		{name: "extra blank CRLF record", output: oid + "\r\n\r\n", count: 1},
+		{name: "sha256", output: strings.Repeat("b", 64) + "\r\n", count: 1, ok: true},
+		{name: "abbreviated", output: strings.Repeat("a", 39) + "\n", count: 1},
+		{name: "unterminated", output: oid, count: 1, ok: true},
 		{name: "empty", output: "", count: 1},
 	}
 	for _, tc := range cases {

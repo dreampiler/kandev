@@ -65,9 +65,9 @@ Do not disable host-key verification or accept unknown hosts automatically.
 
 ## Executable resolution
 
-`NewGitCommand` and `GitExecutablePath` share one process-wide record of the resolved Git path and the `PATH` value it was resolved under.
-A command built under the same `PATH` checks the remembered file with one stat and reuses it; on Windows this replaces a `PATH` x `PATHEXT` walk per command.
-A different `PATH` value or a missing remembered file resolves Git again and replaces the record. A failed resolution clears it.
+`NewGitCommand` and `GitExecutablePath` share one process-wide record of the resolved Git path and the `PATH` and `PATHEXT` values it was resolved under.
+A command under the same lookup environment validates the remembered path directly with `exec.LookPath`; on Windows this replaces a directory-by-extension search per command.
+A changed lookup environment, removed file, directory replacement, or lost Unix execute permission resolves Git again and replaces the record. A failed resolution clears it.
 The command keeps `argv[0]` as `git`, and an unresolvable Git still builds the command for `git` so exec reports the same not-found error.
 The remembered value is a resolved executable path, never caller input; callers still supply only tokenized arguments.
 
