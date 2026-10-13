@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Validate the commit message with commitlint when the workspace dependencies
-# are installed. A fresh fork worktree has no apps/node_modules, and a commit
-# that touches no front-end file must not wait on an install (or fail on the
-# missing binary). CI re-validates the squash-merge title, so skip the local
-# check with a one-line notice instead of blocking the commit.
+# Validate the commit message. When the workspace is installed, hand off to
+# commitlint so the repository config is authoritative. A fresh fork worktree
+# has no apps/node_modules, and a commit that touches no front-end file must
+# not wait on an install; run a built-in check instead of skipping, so a
+# malformed header still blocks the commit without the dependency.
 set -euo pipefail
 unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
 	GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
@@ -19,5 +19,37 @@ if [ -f "$shim_dir/commitlint" ] || [ -f "$shim_dir/commitlint.cmd" ]; then
 	exec pnpm exec commitlint --edit "$msg_file"
 fi
 
-echo "apps/node_modules not installed; commitlint skipped (CI validates the squash-merge title)"
-exit 0
+# Built-in fallback for the rules the effective commitlint config enforces
+# without a node_modules install: header-max-length (config-conventional 100),
+# type case and type-enum (the local override), the "type(scope): subject"
+# shape, a non-empty subject, and subject-full-stop. It intentionally omits the
+# parser-dependent rules (subject-case, body/footer line length).
+allowed_types='feat fix perf refactor docs chore ci test release'
+max_header=100
+
+fail() {
+	printf 'commitlint-hook: %s\n' "$*" >&2
+	exit 1
+}
+
+header="$(sed -e '/^#/d' -e '/^[[:space:]]*$/d' "$msg_file" | head -n 1)"
+[ -n "$header" ] || fail "empty commit message"
+
+len=${#header}
+[ "$len" -le "$max_header" ] || fail "header is $len characters; the limit is $max_header"
+
+[[ "$header" =~ ^([a-z]+)(\([^()]+\))?!?:[[:space:]](.+)$ ]] \
+	|| fail "header must be 'type(scope): subject' with a lowercase type (got: $header)"
+type=${BASH_REMATCH[1]}
+subject=${BASH_REMATCH[3]}
+
+case " $allowed_types " in
+	*" $type "*) ;;
+	*) fail "type '$type' is not allowed (allowed: $allowed_types)" ;;
+esac
+
+case "$subject" in
+	*.) fail "subject must not end with a period" ;;
+esac
+
+printf 'commitlint-hook: apps/node_modules not installed; validated with the built-in check\n'

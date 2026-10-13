@@ -30,7 +30,7 @@ apps/
 
 ### Worktrees and commit hooks
 
-A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly — so run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint. The commit-msg hook (`scripts/commitlint-hook`) tolerates the missing install: it skips commitlint with a one-line notice instead of failing the commit, because CI re-validates the squash-merge title.
+A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly — so run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint. The commit-msg hook (`scripts/commitlint-hook`) tolerates the missing install: it runs a built-in conventional-commit check (header length, allowed type, `type(scope): subject`, no trailing period) instead of requiring commitlint.
 
 ---
 
