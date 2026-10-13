@@ -189,6 +189,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("TestHermesACP_CallerCancellationDuringRetry", tests)
         self.assertIn("TestRunCommandCheck_SeparatesTimeoutFromFailure", tests)
         self.assertIn("TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation", tests)
+        self.assertIn("TestRunCommandCheck_ExpiredBoundBeforeStart", tests)
         for name in tests:
             with self.subTest(test=name):
                 self.assertRegex(name, selection)

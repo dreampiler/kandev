@@ -52,6 +52,8 @@ joins the process and context watcher before classification. POSIX additionally
 preserves a naturally exited process state when a kill races the exit. Windows
 reports terminated processes as exited, so it uses the cancellation callback's
 result. A caller cancellation is never reported as a timeout.
+If the check's own deadline prevents the process from starting at all, that
+remains an inconclusive timeout; there is no command exit to classify.
 `WithCommandCheck` keeps its previous contract exactly: everything except
 cancellation maps to unavailable. Agents that use it, such as MiniMax, Muse, and
 Pi, see no behavior change.
@@ -140,6 +142,7 @@ unchanged caller error, an unavailable result and joined check cleanup.
 The nonzero-exit boundary regression uses a real helper's terminal process
 state and a deterministic expired check context, without a timing race. It
 proves a deadline alone cannot turn a conclusive failure into a retry.
+An expired-before-start bound remains a timeout and starts no subprocess.
 
 Discovery tests prove a healthy version check starts while another installation
 check is blocked, and that cancellation retains completed availability after

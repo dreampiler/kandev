@@ -68,6 +68,9 @@ func runCommandCheck(ctx context.Context, path string, timeout time.Duration, ar
 		if ctx.Err() != nil {
 			return false, false, ctx.Err()
 		}
+		if cmd.Process == nil && errors.Is(runErr, context.DeadlineExceeded) {
+			return false, true, nil
+		}
 		return false, commandCheckTimedOut(checkCtx, cmd.ProcessState, interrupted.Load()), nil
 	}
 	return true, false, nil

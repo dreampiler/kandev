@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -184,5 +185,22 @@ func TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && commandCheckTimedOut(ctx, exitErr.ProcessState, true) {
 		t.Fatal("a kill racing a naturally exited POSIX process must not cause a retry")
+	}
+}
+
+func TestRunCommandCheck_ExpiredBoundBeforeStart(t *testing.T) {
+	installHermesACPCheckHelper(t)
+	useHermesCheckCounter(t)
+	t.Setenv(hermesACPCheckHelperEnv, "counted-unavailable")
+	hermesPath, err := exec.LookPath(hermesBin)
+	if err != nil {
+		t.Fatalf("LookPath(hermes): %v", err)
+	}
+	found, timedOut, err := runCommandCheck(context.Background(), hermesPath, 0, "acp", "--check")
+	if err != nil || found || !timedOut {
+		t.Fatalf("found=%v timedOut=%v err=%v, want false/true/nil", found, timedOut, err)
+	}
+	if _, err := os.Stat(os.Getenv(hermesCheckCounterEnv)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("helper started after the bound expired: %v", err)
 	}
 }
