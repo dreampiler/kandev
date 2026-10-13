@@ -391,9 +391,13 @@ try {
 # D is not exercised deterministically here.
 $scenarios += @{ id = 'D'; definition = 'v09'; status = 'unverified'; reason = 'primary handoff delivery rebinding is not induced by this check' }
 
+$coveredIds = @('A', 'B', 'C', 'E')
 $failedCount = @($scenarios | Where-Object { $_.status -eq 'failed' }).Count
-$aPassed = @($scenarios | Where-Object { $_.id -eq 'A' -and $_.status -eq 'passed' }).Count
-$passed = (($failedCount -eq 0) -and ($aPassed -eq 1))
+$coveredPassed = @($scenarios | Where-Object { $coveredIds -contains $_.id -and $_.status -eq 'passed' }).Count
+# result is passed only when every covered scenario passed and none failed; a
+# covered scenario left pending (for example because the restart step did not
+# run to completion) must not be reported as covered.
+$passed = (($failedCount -eq 0) -and ($coveredPassed -eq $coveredIds.Count))
 $result = @{
   revision = $HeadSha
   release_dir = $ReleaseRoot
