@@ -186,9 +186,9 @@ This package has no remaining work for it and does not change that contract or c
 
 `AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12`, `.13` and the [failure rules](../../specs/agents/system-design/dynamic-agent-routing-02.md) define the contract.
 
-### Source
+### Scope
 
-The change ports items 3 and 4 of the restart-recovery fix prepared in the fork (dreampiler/kandev #229, head `7fd7cc4bae`). Items 1 and 2 of that change add an automatic `continue_from_history` fallback, and item 5 changes a fork-only reconcile; neither is part of this package.
+The change covers only route activation after a resume and the result of a blocked explicit recovery. It does not add an automatic `continue_from_history` fallback or change how stranded sessions are reconciled.
 
 ### Tests
 
