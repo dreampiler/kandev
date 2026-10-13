@@ -7,26 +7,28 @@ export async function assertComposerFocusAfterSend(
   submitFollowUp: () => Promise<void>,
 ) {
   const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
-  const submittedMessage = (text: string) =>
-    session
-      .activeChat()
-      .locator(".chat-message-list")
-      .getByTestId("user-message-bubble")
-      .getByText(text, { exact: true });
 
   await session.sendMessageViaButton("first message after send");
-  await expect(submittedMessage("first message after send")).toHaveCount(1, { timeout: 15_000 });
-  await expect(submittedMessage("first message after send")).toBeVisible();
   await expect(editor).toHaveText("");
+  const firstSubmittedMessage = session
+    .activeChat()
+    .getByTestId("user-message-bubble")
+    .getByText("first message after send", { exact: true });
+  await expect(firstSubmittedMessage).toHaveCount(1);
+  await expect(firstSubmittedMessage).toBeVisible({ timeout: 15_000 });
   await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
   await expect(editor).toBeFocused({ timeout: 10_000 });
 
   // No click or editor focus here. The composer must already hold focus.
   await page.keyboard.type("second message after send");
   await submitFollowUp();
-  await expect(submittedMessage("second message after send")).toHaveCount(1, { timeout: 15_000 });
-  await expect(submittedMessage("second message after send")).toBeVisible();
   await expect(editor).toHaveText("");
+  const secondSubmittedMessage = session
+    .activeChat()
+    .getByTestId("user-message-bubble")
+    .getByText("second message after send", { exact: true });
+  await expect(secondSubmittedMessage).toHaveCount(1);
+  await expect(secondSubmittedMessage).toBeVisible({ timeout: 15_000 });
   await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
   await expect(editor).toBeFocused({ timeout: 10_000 });
 }
