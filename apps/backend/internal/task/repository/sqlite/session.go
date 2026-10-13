@@ -24,6 +24,7 @@ import (
 
 type taskSessionExecutor interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
 // Turn operations
@@ -2148,13 +2149,9 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 	// would clobber metadata set via those side-channel paths since the
 	// caller's in-memory copy may be stale.
 
-	// is_primary is NOT written here for the same reason, and with a worse
-	// consequence: primary ownership is a task-wide invariant that only
-	// SetSessionPrimary* demotes-then-promotes atomically, so a full-row write
-	// carrying a copy read before that transaction silently reasserts the
-	// demoted session. No unique constraint backs the column, so the row lands
-	// without error and the task ends up with two primaries — the older one
-	// answerable for queued work it must never receive again.
+	// Primary promotion belongs to SetSessionPrimary's task-wide transaction.
+	// Full-row writes preserve the stored selection; only snapshot-guarded
+	// rollback may release its owned primary flag.
 
 	// agent_profile_id is stored as NULL when empty. No unique index
 	// constrains (task_id, agent_profile_id) at this UPDATE path — office
@@ -2171,7 +2168,8 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
-			review_status = ?, is_passthrough = ?, task_environment_id = ?
+			review_status = ?, is_passthrough = ?, task_environment_id = ?,
+			is_primary = CASE WHEN ? = 1 THEN 0 ELSE is_primary END
 		WHERE id = ?`
 	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.RouteGeneration, session.RouteState, session.RouteReason, session.DownstreamACPSessionID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
@@ -2180,6 +2178,7 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
 		session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
+		dialect.BoolToInt(expectedUpdatedAt != nil && !session.IsPrimary),
 		session.ID}
 	if expected != nil {
 		query += " AND state = ?"
@@ -2189,15 +2188,21 @@ func (r *Repository) updateTaskSessionWithSnapshotGuard(
 		query += optimisticUpdatedAtPredicate
 		args = append(args, *expectedUpdatedAt)
 	}
-	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
+	// Primary selection belongs to the task-scoped SetSessionPrimary transaction.
+	// Lifecycle writes return that stored selection without reclaiming it;
+	// snapshot-guarded rollback may release its owned primary flag. Promotion
+	// still goes through SetSessionPrimary so it clears the other primary rows.
+	query += " RETURNING is_primary"
+	var primary int
+	err = exec.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&primary)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return rows > 0, nil
+	session.IsPrimary = primary == 1
+	return true, nil
 }
 
 // ensureTaskSessionEnvironmentAvailableTx protects full-row session updates
