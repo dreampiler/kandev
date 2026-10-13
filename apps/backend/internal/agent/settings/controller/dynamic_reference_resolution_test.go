@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -117,6 +118,22 @@ func TestRemoveDynamicCandidateTierHeadInheritance(t *testing.T) {
 			t.Fatalf("removeDynamicCandidate got=%v changed=%v err=%v", got, changed, err)
 		}
 	})
+}
+
+// TestResolveDynamicCandidateRoutesRejectsEmptyRemoval pins the builder guard:
+// removing the only candidate row would leave an invalid empty document, so it
+// fails closed, while disabling the same sole row stays valid.
+func TestResolveDynamicCandidateRoutesRejectsEmptyRemoval(t *testing.T) {
+	pace := &dto.DynamicAgentTierPolicyDTO{Mode: "pace", OnFailure: "next_tier"}
+	routes := resolutionRoutes(t, []dto.DynamicAgentCandidateDTO{
+		{Position: 0, ExecutionProfileID: "a", Enabled: true, Policies: resolutionPolicy(false, pace)},
+	})
+	if _, _, err := resolveDynamicCandidateRoutes(routes, "a", dynamicResolutionActionRemove); !errors.Is(err, ErrDynamicProfileWouldEmpty) {
+		t.Fatalf("remove sole candidate err = %v, want ErrDynamicProfileWouldEmpty", err)
+	}
+	if _, matched, err := resolveDynamicCandidateRoutes(routes, "a", dynamicResolutionActionDisable); err != nil || !matched {
+		t.Fatalf("disable sole candidate err = %v matched = %v, want no error and matched", err, matched)
+	}
 }
 
 func TestDisableDynamicCandidateClearsEnabled(t *testing.T) {
@@ -248,6 +265,43 @@ func TestResolveDynamicReferencesStaleVersionChangesNothing(t *testing.T) {
 	}
 }
 
+// TestResolveDynamicReferencesRemoveSoleCandidateRejectsAndChangesNothing
+// confirms the zero-candidate case fails before any write: the whole request is
+// rejected with the named error (carrying the blocking profile name), the target
+// profile stays enabled, and the dynamic document is byte-for-byte unchanged.
+func TestResolveDynamicReferencesRemoveSoleCandidateRejectsAndChangesNothing(t *testing.T) {
+	ctrl, repo, fixture := newSoleCandidateResolutionFixture(t)
+	dynamicRepo := repo.(store.DynamicProfileRepository)
+
+	refs, err := ctrl.listDynamicProfileReferences(context.Background(), fixture.candidateID)
+	if err != nil {
+		t.Fatalf("list references: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("references = %#v, want exactly one", refs)
+	}
+	_, err = ctrl.ResolveDynamicReferences(context.Background(), DynamicReferenceResolutionRequest{
+		ProfileID: fixture.candidateID,
+		Operation: "delete",
+		Action:    "remove_candidate",
+		Versions:  map[string]int64{fixture.dynamicID: refs[0].Version},
+	})
+	if !errors.Is(err, ErrDynamicProfileWouldEmpty) {
+		t.Fatalf("err = %v, want ErrDynamicProfileWouldEmpty", err)
+	}
+	if !strings.Contains(err.Error(), "Solo") {
+		t.Fatalf("err = %v, want the blocking dynamic profile name", err)
+	}
+	profile, err := repo.GetAgentProfile(context.Background(), fixture.candidateID)
+	if err != nil || !profile.Enabled {
+		t.Fatalf("target profile = %#v err = %v, want unchanged enabled", profile, err)
+	}
+	stored, routes, err := dynamicRepo.GetDynamicAgentProfile(context.Background(), fixture.dynamicID)
+	if err != nil || stored.Version != 1 || len(routes) != 1 {
+		t.Fatalf("dynamic profile changed: version=%d routes=%#v err=%v", stored.Version, routes, err)
+	}
+}
+
 func TestResolveDynamicReferencesReferenceSetChangeRejects(t *testing.T) {
 	ctrl, _, fixture := newResolutionFixture(t)
 	_, err := ctrl.ResolveDynamicReferences(context.Background(), DynamicReferenceResolutionRequest{
@@ -269,9 +323,9 @@ type resolutionFixture struct {
 	dynamicID   string
 }
 
-// newResolutionFixture builds the smallest dynamic document that exercises
-// tier-head inheritance: candidate (head, pace) joined by other.
-func newResolutionFixture(t *testing.T) (*Controller, store.Repository, resolutionFixture) {
+// newResolutionHarness builds the controller, store, and two concrete candidate
+// profiles shared by the resolution fixtures.
+func newResolutionHarness(t *testing.T) (*Controller, store.Repository, *models.AgentProfile, *models.AgentProfile) {
 	t.Helper()
 	ctrl, repo := newSQLiteBackedController(t)
 	if err := ctrl.agentRegistry.Register(agents.NewDynamicAgent()); err != nil {
@@ -296,13 +350,44 @@ func newResolutionFixture(t *testing.T) (*Controller, store.Repository, resoluti
 	if err := repo.CreateAgentProfile(ctx, other); err != nil {
 		t.Fatalf("create other: %v", err)
 	}
+	return ctrl, repo, candidate, other
+}
+
+// newResolutionFixture builds the smallest dynamic document that exercises
+// tier-head inheritance: candidate (head, pace) joined by other.
+func newResolutionFixture(t *testing.T) (*Controller, store.Repository, resolutionFixture) {
+	t.Helper()
+	ctrl, repo, candidate, other := newResolutionHarness(t)
 	pace := &dto.DynamicAgentTierPolicyDTO{Mode: "pace", OnFailure: "next_tier"}
-	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+	created, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
 		AgentID: agents.DynamicAgentID,
 		Name:    "Balanced",
 		Dynamic: &dto.DynamicAgentProfileDTO{Candidates: []dto.DynamicAgentCandidateDTO{
 			{Position: 0, ExecutionProfileID: candidate.ID, Enabled: true, Policies: resolutionPolicy(false, pace)},
 			{Position: 1, ExecutionProfileID: other.ID, Enabled: true, Policies: resolutionPolicy(true, nil)},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create dynamic profile: %v", err)
+	}
+	return ctrl, repo, resolutionFixture{
+		candidateID: candidate.ID,
+		otherID:     other.ID,
+		dynamicID:   created.ID,
+	}
+}
+
+// newSoleCandidateResolutionFixture builds a dynamic profile whose only
+// candidate is the target, so a remove_candidate would empty it.
+func newSoleCandidateResolutionFixture(t *testing.T) (*Controller, store.Repository, resolutionFixture) {
+	t.Helper()
+	ctrl, repo, candidate, other := newResolutionHarness(t)
+	pace := &dto.DynamicAgentTierPolicyDTO{Mode: "pace", OnFailure: "next_tier"}
+	created, err := ctrl.CreateProfile(context.Background(), CreateProfileRequest{
+		AgentID: agents.DynamicAgentID,
+		Name:    "Solo",
+		Dynamic: &dto.DynamicAgentProfileDTO{Candidates: []dto.DynamicAgentCandidateDTO{
+			{Position: 0, ExecutionProfileID: candidate.ID, Enabled: true, Policies: resolutionPolicy(false, pace)},
 		}},
 	})
 	if err != nil {

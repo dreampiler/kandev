@@ -124,6 +124,12 @@ change without editing each dynamic profile by hand.
   profile delete flow, and shall provide the same choices and outcomes on desktop
   and phone using the existing confirmation surfaces and touch targets.
 
+- **AC-AGENTS-DYNAMIC-ROUTE-RESOLUTION-001.10:** A `remove_candidate` that would
+  leave any referencing dynamic profile with zero candidates shall be rejected
+  with a named error before any write, shall name the profile that blocks the
+  change, and shall change no rows. Disabling the sole candidate
+  (`disable_candidate`) remains valid.
+
 ## Out of scope
 
 - Auto-resolving routing-tier, utility-agent, session, watcher, or automation

@@ -179,6 +179,13 @@ When `remove_candidate` removes row `i`:
 3. If the removed row was not a head, or the following row was itself a head, no
    inheritance occurs; the empty tier simply disappears.
 
+Removing the profile's only candidate row would leave an empty route list, which
+is not a valid dynamic document, so `resolveDynamicCandidateRoutes` fails closed
+with `ErrDynamicProfileWouldEmpty`, naming the profile, before any write;
+`ResolveDynamicReferences` maps it to the existing conflict response and nothing
+changes (`AC-AGENTS-DYNAMIC-ROUTE-RESOLUTION-001.10`). `disable_candidate` on the
+sole row stays valid.
+
 This never merges two tiers, never promotes a non-adjacent row, and never changes
 the relative order of the remaining candidates
 (`AC-AGENTS-DYNAMIC-ROUTE-RESOLUTION-001.4`). The transformation runs after the

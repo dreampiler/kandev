@@ -18,10 +18,7 @@ import { ProfileFormFields, type ProfileFormData } from "@/components/settings/p
 import { CursorMcpProfileSelection } from "@/components/settings/cursor-mcp-profile-selection";
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
-import {
-  AgentProfileDeleteConflictDialog,
-  AgentProfileDisableConflictDialog,
-} from "@/components/settings/agent-profile-delete-dialog";
+import { AgentProfileDeleteConflictDialog } from "@/components/settings/agent-profile-delete-dialog";
 import {
   useDynamicReferenceDialog,
   type DynamicReferenceRequest,
@@ -59,7 +56,7 @@ import type {
   PassthroughConfig,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
-import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
+import type { DynamicReferenceConflictLists } from "@/lib/types/agent-profile-errors";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
@@ -367,7 +364,7 @@ function ProfileEditor({
     acceptProfileSaveResponse,
     discardProfileDraft,
   } = useProfileEditorState(profile, permissionSettings);
-  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
+  const [saveConflict, setSaveConflict] = useState<DynamicReferenceConflictLists | null>(null);
   const storeApi = useAppStoreApi();
   const saveResolution = useDynamicReferenceDialog({
     onResolved: ({ profile }) => {
@@ -375,7 +372,10 @@ function ProfileEditor({
       acceptProfileSaveResponse(profile, draft);
       publishProfileSaveResponse(storeApi, agent.id, profile);
     },
-    onBlocked: (lists) => setUtilityConflict(lists.utilityAgents),
+    // A resolution re-check can still find routing tiers, sessions, watchers,
+    // automations, or utility agents. Forward the full list so the existing
+    // conflict surface shows every blocker instead of dropping all but utility.
+    onBlocked: (lists) => setSaveConflict(lists),
     onError: (message) => {
       toast({
         title: t("agents:dynamicReferenceFailed"),
@@ -406,7 +406,14 @@ function ProfileEditor({
     markProfileSubmitted,
     acceptProfileSaveResponse,
     toast,
-    onUtilityConflict: setUtilityConflict,
+    onUtilityConflict: (agents) =>
+      setSaveConflict({
+        activeSessions: [],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+        utilityAgents: agents,
+      }),
     onDynamicConflict: (references) => {
       const request: DynamicReferenceRequest = {
         profileId: draft.id,
@@ -525,12 +532,15 @@ function ProfileEditor({
         onOpenChange={deleteState.setShowDeleteConfirm}
         onConfirm={deleteState.handleDeleteProfile}
       />
-      <AgentProfileDisableConflictDialog
-        agents={utilityConflict}
-        onCancel={() => setUtilityConflict([])}
-        onConfirm={async () => {
-          setUtilityConflict([]);
-          await handleSave(true);
+      <AgentProfileDeleteConflictDialog
+        intent="disable"
+        conflict={saveConflict}
+        onOpenChange={(open) => {
+          if (!open) setSaveConflict(null);
+        }}
+        onConfirm={() => {
+          setSaveConflict(null);
+          void handleSave(true);
         }}
       />
       <AgentProfileDeleteConflictDialog

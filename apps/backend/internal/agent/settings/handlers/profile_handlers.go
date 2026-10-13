@@ -394,6 +394,7 @@ func (h *Handlers) writeDynamicResolutionError(c *gin.Context, err error) {
 	case errors.Is(err, controller.ErrDynamicResolutionInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 	case errors.Is(err, controller.ErrDynamicProfileVersionConflict),
+		errors.Is(err, controller.ErrDynamicProfileWouldEmpty),
 		errors.Is(err, controller.ErrDynamicAgentRoutingDisabled):
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 	default:

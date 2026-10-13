@@ -30,6 +30,13 @@ const (
 // write.
 var ErrDynamicResolutionInvalid = errors.New("invalid dynamic reference resolution request")
 
+// ErrDynamicProfileWouldEmpty marks a remove_candidate that would leave a
+// referencing dynamic profile with no candidate rows at all. An empty route
+// document is not a valid dynamic profile, so the whole request is rejected
+// before any write, naming the profile that would be emptied. It maps to the
+// existing conflict response.
+var ErrDynamicProfileWouldEmpty = errors.New("removing the candidate would leave a dynamic profile with no candidates")
+
 // DynamicReferenceResolutionRequest resolves every dynamic profile that
 // references a concrete profile before that profile is disabled or deleted.
 type DynamicReferenceResolutionRequest struct {
@@ -180,7 +187,7 @@ func (c *Controller) buildDynamicResolutions(
 		}
 		newRoutes, changed, err := resolveDynamicCandidateRoutes(routes, req.ProfileID, req.Action)
 		if err != nil {
-			return nil, err
+			return nil, nameDynamicResolutionError(ref, err)
 		}
 		if !changed {
 			return nil, fmt.Errorf("%w: dynamic profile %s no longer references this profile", ErrDynamicResolutionInvalid, ref.ID)
@@ -198,16 +205,35 @@ func (c *Controller) buildDynamicResolutions(
 // resolveDynamicCandidateRoutes maps the requested action onto the route
 // document. `disable_candidate` keeps every row and clears the candidate's
 // enabled flag; `remove_candidate` removes the row and, when it was a tier
-// head, promotes the next same-tier row.
+// head, promotes the next same-tier row. Removing the profile's only candidate
+// row would leave an invalid empty document, so it fails closed with
+// ErrDynamicProfileWouldEmpty before any write.
 func resolveDynamicCandidateRoutes(
 	routes []models.DynamicAgentRoute,
 	targetID, action string,
 ) ([]models.DynamicAgentRoute, bool, error) {
 	if action == dynamicResolutionActionRemove {
-		return removeDynamicCandidate(routes, targetID)
+		out, changed, err := removeDynamicCandidate(routes, targetID)
+		if err != nil {
+			return nil, false, err
+		}
+		if changed && len(out) == 0 {
+			return nil, false, ErrDynamicProfileWouldEmpty
+		}
+		return out, changed, nil
 	}
 	disabled, matched := disableDynamicCandidate(routes, targetID)
 	return disabled, matched, nil
+}
+
+// nameDynamicResolutionError attaches the referencing dynamic profile's name to
+// a would-empty rejection so the administrator sees which profile blocks the
+// change. Every other error passes through unchanged.
+func nameDynamicResolutionError(ref DynamicProfileReference, err error) error {
+	if errors.Is(err, ErrDynamicProfileWouldEmpty) {
+		return fmt.Errorf("%w: %q", ErrDynamicProfileWouldEmpty, ref.Name)
+	}
+	return err
 }
 
 // disableDynamicCandidate clears the candidate's enabled flag and reports
