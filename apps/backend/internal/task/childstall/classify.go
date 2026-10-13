@@ -86,16 +86,22 @@ type Evidence struct {
 	PendingInputs      []PendingInput
 	StepRequiresSignal bool
 	PendingStepSignal  bool
+	// BlockedReason is the short reason a completion signal for the current
+	// step was refused by the ownership/profile gate, when one was recorded. It
+	// lets a missing-signal reminder name the real block instead of implying the
+	// agent simply forgot to signal.
+	BlockedReason string
 	// SettledFor is how long ago the turn completed.
 	SettledFor time.Duration
 }
 
 // Decision is the classification result.
 type Decision struct {
-	Outcome    Outcome
-	Cause      Cause
-	Reason     string
-	QuestionID string
+	Outcome       Outcome
+	Cause         Cause
+	Reason        string
+	QuestionID    string
+	BlockedReason string
 }
 
 // Policy bounds the settling wait.
@@ -179,7 +185,9 @@ func classifyCause(evidence Evidence, policy Policy) Decision {
 		}
 		return suppressed(ReasonSignalUnprocessed)
 	}
-	return qualified(CauseMissingCompletionSignal)
+	decision := qualified(CauseMissingCompletionSignal)
+	decision.BlockedReason = evidence.BlockedReason
+	return decision
 }
 
 func sessionExecuting(state models.TaskSessionState) bool {
