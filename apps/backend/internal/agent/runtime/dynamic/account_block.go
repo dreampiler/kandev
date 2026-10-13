@@ -32,7 +32,7 @@ func (e *Engine) HoldAccountBlock(executionProfileID string, code routingerr.Cod
 	key := accountBlockKey(executionProfileID)
 	wasHeld := e.circuits.IsHeld(key)
 	err := e.circuits.Hold(key, code)
-	if !wasHeld && routingerr.HoldsUntilRelease(code) {
+	if !wasHeld && e.circuits.IsHeld(key) {
 		e.logger.Warn(eventAccountBlockHold,
 			zap.String("execution_profile_id", executionProfileID),
 			zap.String("code", string(code)))

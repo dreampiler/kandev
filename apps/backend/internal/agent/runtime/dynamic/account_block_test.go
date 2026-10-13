@@ -318,6 +318,14 @@ func TestAccountBlockHoldAndReleaseEmitRoutingEvents(t *testing.T) {
 	log, observed := newObservedLogger()
 	engine := NewEngine(WithEngineLogger(log))
 
+	// An empty execution profile id holds nothing and must not emit.
+	if err := engine.HoldAccountBlock("", routingerr.CodeAccountBlocked); err != nil {
+		t.Fatalf("empty-id HoldAccountBlock: %v", err)
+	}
+	if emitted := observed.Len(); emitted != 0 {
+		t.Fatalf("empty-id hold emitted %d events, want 0", emitted)
+	}
+
 	if err := engine.HoldAccountBlock("blocked", routingerr.CodeAccountBlocked); err != nil {
 		t.Fatalf("HoldAccountBlock: %v", err)
 	}
