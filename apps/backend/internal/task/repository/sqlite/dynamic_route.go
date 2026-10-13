@@ -580,6 +580,10 @@ func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicru
 }
 
 func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.CircuitSnapshot) error {
+	updatedAt := snapshot.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO dynamic_resource_circuits
 			(resource_key, state, until_at, code, probe_until, strikes, updated_at)
@@ -592,7 +596,7 @@ func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.Ci
 			strikes = excluded.strikes,
 			updated_at = excluded.updated_at
 	`), snapshot.Key, snapshot.State, nullableTime(snapshot.Until), snapshot.Code,
-		nullableTime(snapshot.ProbeUntil), snapshot.Strikes, time.Now().UTC())
+		nullableTime(snapshot.ProbeUntil), snapshot.Strikes, updatedAt)
 	return err
 }
 
@@ -601,7 +605,7 @@ func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.Ci
 // the suspension ladder of a resource that never produced output again.
 func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.CircuitSnapshot, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT resource_key, state, until_at, code, probe_until, strikes
+		SELECT resource_key, state, until_at, code, probe_until, strikes, updated_at
 		FROM dynamic_resource_circuits
 		WHERE state <> ? OR strikes > 0 ORDER BY resource_key
 	`), dynamicruntime.CircuitClosed)
@@ -615,7 +619,7 @@ func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.Circuit
 		var until, probeUntil sql.NullTime
 		var state string
 		var code string
-		if err := rows.Scan(&snapshot.Key, &state, &until, &code, &probeUntil, &snapshot.Strikes); err != nil {
+		if err := rows.Scan(&snapshot.Key, &state, &until, &code, &probeUntil, &snapshot.Strikes, &snapshot.UpdatedAt); err != nil {
 			return nil, err
 		}
 		snapshot.State = dynamicruntime.CircuitState(state)

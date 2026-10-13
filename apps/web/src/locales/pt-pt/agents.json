@@ -558,5 +558,9 @@
   "profileDragStart": "Perfil {{name}} selecionado. Posição {{position}} de {{total}}.",
   "profileDragOver": "Perfil {{name}} movido para a posição {{position}} de {{total}}.",
   "profileDragEnd": "Perfil {{name}} colocado na posição {{position}} de {{total}}.",
-  "profileDragCancel": "Reordenação do perfil {{name}} cancelada."
+  "profileDragCancel": "Reordenação do perfil {{name}} cancelada.",
+  "resourceCircuitsTitle": "Suspensões de recursos",
+  "releaseResourceCircuit": "Libertar esta suspensão",
+  "noResourceCircuits": "Nenhuma suspensão de recursos",
+  "resourceCircuitOperationFailed": "Não foi possível consultar ou libertar a suspensão. Atualize para tentar novamente."
 }
