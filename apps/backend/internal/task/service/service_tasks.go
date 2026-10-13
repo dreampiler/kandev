@@ -4580,6 +4580,29 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 	return tasks, nil
 }
 
+// taskIDPrefixLister is the optional narrow repository contract behind
+// FindTasksByIDPrefix. It is asserted rather than added to the shared
+// TaskRepository interface so the many service-test fakes stay intact; a repo
+// without it simply yields no prefix matches.
+type taskIDPrefixLister interface {
+	ListTasksByIDPrefix(ctx context.Context, workspaceID, prefix string) ([]*models.Task, error)
+}
+
+// FindTasksByIDPrefix returns the tasks in a workspace whose id begins with
+// prefix (lowercase hex). The MCP control surface uses it to expand a short
+// task id. The result is workspace-scoped and the target tool still applies its
+// own access rules, so this resolves identity without granting access.
+func (s *Service) FindTasksByIDPrefix(ctx context.Context, workspaceID, prefix string) ([]*models.Task, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	lister, ok := s.tasks.(taskIDPrefixLister)
+	if !ok {
+		return nil, nil
+	}
+	return lister.ListTasksByIDPrefix(ctx, workspaceID, prefix)
+}
+
 func filterTasksByWorkspace(tasks []*models.Task, workspaceID string) []*models.Task {
 	filtered := tasks[:0]
 	for _, task := range tasks {

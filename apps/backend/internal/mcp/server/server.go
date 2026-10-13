@@ -1478,8 +1478,9 @@ func (s *Server) registerListWorkflowStepsTool() {
 func (s *Server) registerListTasksTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
+			mcp.WithDescription("List all tasks in a workflow, or every task in a workspace when workspace_id is given. The workspace form also returns tasks that belong to no workflow, so an automation-created or otherwise board-less task can still be found. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
+			mcp.WithString("workspace_id", mcp.Description("List every task in this workspace instead of one workflow's. Optional. A non-Office caller may only name its own workspace. When both workflow_id and workspace_id are given, workspace_id wins.")),
 		),
 		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
 	)

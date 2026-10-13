@@ -915,8 +915,13 @@ func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) 
 		})
 }
 
-// handleListTasks lists tasks for a workflow.
+// handleListTasks lists tasks for a workflow, or for a whole workspace when
+// workspace_id is supplied instead. The workspace form includes tasks with no
+// workflow so a controller can find them without a board to look in.
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if workspaceID, _ := unmarshalStringField(msg.Payload, "workspace_id"); strings.TrimSpace(workspaceID) != "" {
+		return h.handleListWorkspaceTasks(ctx, msg, strings.TrimSpace(workspaceID))
+	}
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
 			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)

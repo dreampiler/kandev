@@ -51,6 +51,13 @@ var officeCrossWorkspaceActions = map[string]officeCrossWorkspaceTarget{
 	ws.ActionMCPGetTaskConversation: targetByTaskID,
 	ws.ActionMCPListTaskSessions:    targetByTaskID,
 	ws.ActionMCPMessageTask:         targetByTaskID,
+	// Plan reads are promised to a reached workspace (AC-OFFICE-XWS-003.2);
+	// listing and fetching revisions use the same task_id. Plan writes, move,
+	// and delete stay out: cross-workspace control belongs to each target
+	// workspace's coordinator (AC-OFFICE-XWS-004.3).
+	ws.ActionMCPGetTaskPlan:           targetByTaskID,
+	ws.ActionMCPListTaskPlanRevisions: targetByTaskID,
+	ws.ActionMCPGetTaskPlanRevision:   targetByTaskID,
 }
 
 // authorizeOfficeCrossWorkspaceRequest confines an Office task principal to
@@ -119,6 +126,15 @@ func (h *Handlers) officeCrossWorkspaceTargetWorkspace(
 	}[kind]
 	id, _ := payload[field].(string)
 	id = strings.TrimSpace(id)
+	// list_tasks_kandev accepts workspace_id instead of workflow_id; when it
+	// names a workspace directly, that workspace is the target the reach check
+	// must evaluate rather than the caller's own.
+	if id == "" && kind == targetByWorkflowID {
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID = strings.TrimSpace(workspaceID); workspaceID != "" {
+			return workspaceID, nil
+		}
+	}
 	if id == "" {
 		return principal.WorkspaceID, nil
 	}

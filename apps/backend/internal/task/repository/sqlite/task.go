@@ -3796,6 +3796,30 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 	return r.scanTasks(rows)
 }
 
+// ListTasksByIDPrefix returns tasks in a workspace whose id starts with the
+// given lowercase hex prefix. Archived, ephemeral, and automation-origin tasks
+// are included: this is an identity lookup, not a user-facing list, so the
+// caller resolves the exact row a short id names and the target tool applies
+// its own access rules afterward. The cap keeps an ambiguous prefix bounded.
+const taskIDPrefixLookupCap = 20
+
+func (r *Repository) ListTasksByIDPrefix(ctx context.Context, workspaceID, prefix string) ([]*models.Task, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByIDPrefix")
+	defer span.End()
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.workspace_id = ? AND t.id LIKE ?
+		ORDER BY t.id ASC
+		LIMIT ?`), workspaceID, prefix+"%", taskIDPrefixLookupCap)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanTasks(rows)
+}
+
 // CountTasksByWorkflow returns the number of non-archived, non-ephemeral tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int

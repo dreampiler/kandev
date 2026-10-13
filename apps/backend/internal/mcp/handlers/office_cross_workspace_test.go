@@ -118,6 +118,36 @@ func TestOfficeCrossWorkspaceGuard_AllowsReachableAndOwnWorkspace(t *testing.T) 
 	assertWSError(t, guarded, ws.ErrorCodeNotFound)
 }
 
+func TestOfficeCrossWorkspaceGuard_PlanReadRequiresReach(t *testing.T) {
+	h, fake := seedOfficeAndKanban(t)
+	ctx := officePrincipalCtx("ws-office")
+
+	foreign := makeWSMessage(t, ws.ActionMCPGetTaskPlan, map[string]string{"task_id": "ctl"})
+	guarded, _, err := h.authorizeOfficeCrossWorkspaceRequest(ctx, foreign)
+	require.NoError(t, err)
+	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+
+	fake.reachable["ws-kanban"] = nil
+	guarded, replacement, err := h.authorizeOfficeCrossWorkspaceRequest(ctx, foreign)
+	require.NoError(t, err)
+	assert.Nil(t, guarded)
+	require.NotNil(t, replacement)
+
+	own := makeWSMessage(t, ws.ActionMCPGetTaskPlan, map[string]string{"task_id": "office-task"})
+	guarded, replacement, err = h.authorizeOfficeCrossWorkspaceRequest(ctx, own)
+	require.NoError(t, err)
+	assert.Nil(t, guarded)
+	assert.Same(t, own, replacement)
+}
+
+func TestOfficeCrossWorkspaceGuard_ListTasksByWorkspaceUsesReach(t *testing.T) {
+	h, _ := seedOfficeAndKanban(t)
+	msg := makeWSMessage(t, ws.ActionMCPListTasks, map[string]string{"workspace_id": "ws-kanban"})
+	guarded, _, err := h.authorizeOfficeCrossWorkspaceRequest(officePrincipalCtx("ws-office"), msg)
+	require.NoError(t, err)
+	assertWSError(t, guarded, ws.ErrorCodeForbidden)
+}
+
 func TestOfficeCrossWorkspaceGuard_LeavesOtherPrincipalsAlone(t *testing.T) {
 	h, _ := seedOfficeAndKanban(t)
 	kanbanCtx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{

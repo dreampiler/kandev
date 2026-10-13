@@ -21,6 +21,13 @@ type guardedMCPDispatcher struct {
 
 func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFunc) {
 	d.Dispatcher.RegisterFunc(action, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		// Expand a short task-id prefix before the authorization guards so they
+		// evaluate the resolved id, not the raw prefix.
+		expanded, prefixErr := d.handlers.expandShortTaskRefs(ctx, msg)
+		if prefixErr != nil {
+			return prefixErr, nil
+		}
+		msg = expanded
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {
 			return guarded, err
