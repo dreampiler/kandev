@@ -1474,4 +1474,3 @@ func TestServiceStartActivePluginsFailurePersistsDiagnosticAndRefreshesDeliverer
 		t.Fatalf("Refresh() calls after boot failure = %d, want 2", deliverer.refreshCount)
 	}
 }
-

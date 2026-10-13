@@ -44,3 +44,6 @@ package from `apps/backend`.
 Review remediation adds clear-config/revision stability and no-required-field
 read-bypass assertions. Full package and application verification is delegated
 to hosted CI; bounded maintainer proofs are supplemental evidence only.
+
+The restart-failure regression lives in `service_config_restart_test.go` so the
+change respects the existing service-test file length limit.

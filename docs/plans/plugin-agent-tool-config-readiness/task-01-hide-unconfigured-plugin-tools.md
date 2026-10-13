@@ -60,7 +60,7 @@ because of fixture setup.
 From `apps/backend`:
 
 ```bash
-go test ./internal/plugins/ -run 'TestAgentToolCatalog|TestServiceUpdateConfig' -count=1
+go test ./internal/plugins/ -run 'TestAgentToolCatalog|TestServiceUpdateConfig|TestRestartForConfigChange' -count=1
 go build ./...
 go vet ./internal/plugins/
 ```
@@ -80,3 +80,6 @@ runtime, and vault boundary fakes. Genuine package tests, builds, static checks,
 and full application suites are verified by hosted CI; the bounded proofs do not
 replace those checks. Exact-head hosted receipts are kept in the persistent
 review task's evidence directory.
+
+The restart-failure regression lives in `service_config_restart_test.go` so the
+change respects the existing service-test file length limit.
