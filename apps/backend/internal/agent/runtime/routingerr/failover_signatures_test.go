@@ -109,6 +109,8 @@ func TestStructuredSignatureRulesIgnoreQuotedProse(t *testing.T) {
 	for _, text := range []string{
 		`The other session reported {"metadata":{"error_type":"provider_unavailable"}} before it retried.`,
 		`Child session log: Agent encountered an error: Internal error: {"code":502,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}`,
+		`{"error_type":"provider_unavailable","retry":true}`,
+		`{"metadata":{"error_type":"provider_unavailable"}}`,
 		"The reviewer said the model's maximum context length is 32768 tokens, so I split the file.",
 	} {
 		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: text})

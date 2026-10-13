@@ -89,13 +89,16 @@ var providerNeutralRules = []rule{
 	// structured field. Its underscore-joined value ("provider_unavailable")
 	// does not match the space-separated prose in provider.unavailable.v1, and
 	// the field is emitted by the adapter rather than written by the model, so
-	// it classifies at high confidence. It sits immediately before that generic
-	// rule so a structured provider_unavailable outranks bare prose. The line
-	// may open with the "Agent encountered an error:" status prefix the agent
-	// error surface adds in front of the envelope.
+	// it classifies at high confidence. The error label is required, not
+	// optional: an assistant chunk is classified on its own, so a bare JSON
+	// object that merely carries the field must not count as a provider
+	// diagnostic. It sits immediately before the generic rule so a structured
+	// provider_unavailable outranks bare prose. The line may open with the
+	// "Agent encountered an error:" status prefix the agent error surface adds
+	// in front of the envelope.
 	mustRule(
 		RuleProviderStructuredErrorType,
-		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
 		CodeProviderUnavailable,
 		ConfHigh,
 	),

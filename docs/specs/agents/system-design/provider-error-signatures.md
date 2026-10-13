@@ -68,12 +68,15 @@ rule and the held circuit it opens.
 
 Structured error-type signature (provider-neutral,
 `provider.structured_error_type.v1`): an AI-SDK error envelope that opens a
-line, optionally after the `Agent encountered an error:` status prefix and/or an
-error label, and carries `"error_type":"provider_unavailable"` classifies as
+line with an error label (`Internal error:`, `API Error:`, `AI_APICallError:`,
+or `Error:`), optionally after the `Agent encountered an error:` status prefix,
+and carries `"error_type":"provider_unavailable"` classifies as
 `provider_unavailable` at high confidence. The underscore-joined value never
 matches the space-separated prose in `provider.unavailable.v1`, and the field is
 emitted by the adapter rather than authored by the model, so the rule sits
-immediately before that generic rule.
+immediately before that generic rule. The label is required, not optional,
+because an assistant chunk is classified on its own; a bare JSON object that
+merely carries the field does not classify.
 
 Context-length signature (provider-neutral,
 `provider.context_length_exceeded.v1`): a line that opens with an optional error
