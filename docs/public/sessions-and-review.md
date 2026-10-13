@@ -142,6 +142,15 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+An older session can already have its conversation loaded while a delivery block
+still prevents new messages. For an empty historical delivery block, the card
+also offers **Resume**. Resume checks and reconciles the saved delivery against
+the same native conversation without resending the old prompt. **Retry connection**
+and **Stop** remain available. A successful load alone cannot replace missing
+proof about the original process, so automatic recovery may leave this action
+to you. If Resume cannot verify the saved evidence, it keeps the session blocked
+and reports the cause.
+
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session
 when its agentctl process has terminated. It does not send another prompt, add
@@ -691,3 +700,9 @@ Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 
 Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.
