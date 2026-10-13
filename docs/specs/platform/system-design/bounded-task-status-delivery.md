@@ -169,6 +169,9 @@ already cached the task's workspace before deletion.
   re-reading the task row and the install-wide admitted-session population, so
   per-message and per-turn traffic does not scale the summary's read volume.
   The refresh set is closed: a newly subscribed source must be classified.
+  Change detection compares the next queue with both the in-memory observation
+  and the last persisted summary. A failed write may advance the observation
+  without committing it; the next source refresh retries that transition.
 - A semantic no-op does not increment `revision` or emit an update.
 - For valid summaries, `TaskStatusSummary.SemanticEqual` uses the same
   canonical semantic payload as `SemanticJSON` and the repository's no-op
