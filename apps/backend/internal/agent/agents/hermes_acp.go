@@ -24,6 +24,12 @@ const hermesBin = "hermes"
 // detection sweep budget.
 const hermesCheckRetryTimeout = 8 * time.Second
 
+// hermesCommandCheckRunner runs one bounded ACP check. It is a variable so
+// tests can stub the runner and count attempts synchronously in the caller;
+// counting via the helper subprocess is load-sensitive (a bound can elapse
+// before the child records its start).
+var hermesCommandCheckRunner = runCommandCheck
+
 var (
 	_ Agent            = (*HermesACP)(nil)
 	_ PassthroughAgent = (*HermesACP)(nil)
@@ -96,7 +102,7 @@ func withHermesACPCheck(first, second time.Duration) DetectOption {
 		if err != nil {
 			return false, "", nil
 		}
-		found, timedOut, err := runCommandCheck(ctx, path, first, "acp", "--check")
+		found, timedOut, err := hermesCommandCheckRunner(ctx, path, first, "acp", "--check")
 		if err != nil {
 			return false, "", err
 		}
@@ -106,7 +112,7 @@ func withHermesACPCheck(first, second time.Duration) DetectOption {
 		if !timedOut {
 			return false, "", nil
 		}
-		found, _, err = runCommandCheck(ctx, path, second, "acp", "--check")
+		found, _, err = hermesCommandCheckRunner(ctx, path, second, "acp", "--check")
 		if err != nil {
 			return false, "", err
 		}

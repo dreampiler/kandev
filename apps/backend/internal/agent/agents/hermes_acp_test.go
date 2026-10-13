@@ -319,6 +319,27 @@ const (
 	hermesStagedSecond = 1500 * time.Millisecond
 )
 
+// stubHermesCommandCheck replaces hermesCommandCheckRunner with scripted
+// answers, counting attempts synchronously in the caller, and restores the
+// real runner when the subtest ends. Counting via the helper subprocess is
+// load-sensitive — a bound can elapse before the child records its start, so
+// the counter file can lag behind (or miss) the attempt the parent already
+// timed out — which flakes timing-critical retry assertions under a full
+// package run. Real-subprocess behavior stays covered by
+// TestRunCommandCheck_SeparatesTimeoutFromFailure.
+func stubHermesCommandCheck(t *testing.T, attempts *int, script ...func(ctx context.Context) (found, timedOut bool, err error)) {
+	t.Helper()
+	old := hermesCommandCheckRunner
+	hermesCommandCheckRunner = func(ctx context.Context, _ string, _ time.Duration, _ ...string) (bool, bool, error) {
+		*attempts++
+		if *attempts <= len(script) {
+			return script[*attempts-1](ctx)
+		}
+		return false, true, nil
+	}
+	t.Cleanup(func() { hermesCommandCheckRunner = old })
+}
+
 // runHermesCheck drives withHermesACPCheck through Detect, as IsInstalled does.
 func runHermesCheck(t *testing.T, ctx context.Context) (*DiscoveryResult, error) {
 	t.Helper()
@@ -334,8 +355,15 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 	installHermesACPCheckHelper(t)
 
 	t.Run("second measurement succeeds after a timeout", func(t *testing.T) {
-		useHermesCheckCounter(t)
-		t.Setenv(hermesACPCheckHelperEnv, "timeout-then-available")
+		// Deterministic: the runner stub counts attempts in the caller, so
+		// this no longer depends on the helper subprocess recording its
+		// start before the first bound elapses.
+		installHermesACPCheckHelper(t)
+		var attempts int
+		stubHermesCommandCheck(t, &attempts,
+			func(context.Context) (bool, bool, error) { return false, true, nil },
+			func(context.Context) (bool, bool, error) { return true, false, nil },
+		)
 
 		result, err := runHermesCheck(t, context.Background())
 		if err != nil {
@@ -347,14 +375,21 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		if result.MatchedPath == "" {
 			t.Error("MatchedPath is empty for an available agent")
 		}
-		if got := hermesCheckInvocationCount(t); got != 2 {
-			t.Errorf("helper invocations = %d, want 2 (one timed-out, one retry)", got)
+		if attempts != 2 {
+			t.Errorf("check attempts = %d, want 2 (one timed-out, one retry)", attempts)
 		}
 	})
 
 	t.Run("both measurements time out", func(t *testing.T) {
-		useHermesCheckCounter(t)
-		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
+		// Deterministic: same stub approach — both scripted measurements
+		// report an elapsed bound, so the retry branch must run exactly twice
+		// regardless of subprocess scheduling under a full package run.
+		installHermesACPCheckHelper(t)
+		var attempts int
+		stubHermesCommandCheck(t, &attempts,
+			func(context.Context) (bool, bool, error) { return false, true, nil },
+			func(context.Context) (bool, bool, error) { return false, true, nil },
+		)
 
 		result, err := runHermesCheck(t, context.Background())
 		if err != nil {
@@ -363,8 +398,8 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		if result.Available {
 			t.Fatal("Available=true although neither measurement answered")
 		}
-		if got := hermesCheckInvocationCount(t); got != 2 {
-			t.Errorf("helper invocations = %d, want 2 (both bounds elapsed)", got)
+		if attempts != 2 {
+			t.Errorf("check attempts = %d, want 2 (both bounds elapsed)", attempts)
 		}
 	})
 
@@ -436,12 +471,13 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 			t.Fatal("Available=true with a cancelled retry context")
 		}
 		// The first bound (800ms) must elapse so the retry branch enters.
-		// On a loaded host the second measurement may not start before the
-		// 1100ms cancellation; assert at least 1 (first attempt + retry
-		// entry) while allowing exactly 2 when the retry starts.
-		if got := hermesCheckInvocationCount(t); got < 1 {
-			t.Errorf("helper invocations = %d, want >= 1 (retry branch must have entered)", got)
-		}
+		// Do not assert an exact helper count here: under load the second
+		// measurement may not start before the 1100ms cancellation, and the
+		// helper records its start asynchronously. Entry into the retry
+		// branch is already pinned deterministically by the
+		// "second measurement succeeds after a timeout" and
+		// "both measurements time out" subtests above; this subtest only
+		// pins the caller-visible outcome (cancelled, unavailable).
 	})
 
 	t.Run("a missing binary stays unavailable", func(t *testing.T) {
