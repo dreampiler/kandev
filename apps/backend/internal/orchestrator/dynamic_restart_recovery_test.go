@@ -260,3 +260,57 @@ func TestLaunchResumeRecoveryActionReportsBlockedRouteAsError(t *testing.T) {
 		t.Fatalf("passive resume = %#v, %v; want the existing waiting response", passive, err)
 	}
 }
+
+// A transient activation-write failure leaves the claimed route "starting"
+// behind a healthy, prompt-ready runtime. After the store recovers, the
+// ordinary resume admission retries the same-generation activation instead of
+// leaving the route blocked as pending, and it neither stops nor replaces the
+// live runtime.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12
+func TestResumeAdmissionCompletesRecoverableStartingRoute(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-activation-recovery"
+		sessionID   = "session-dynamic-activation-recovery"
+		executionID = "execution-dynamic-activation-recovery"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+	persistence := &failingRouteActivationRepo{Repository: repo}
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(persistence))
+	agentMgr := &mockAgentManager{isAgentRunningFn: func(context.Context, string) bool { return true }}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+
+	// The first activation write fails while the runtime stays healthy.
+	persistence.failActivation = true
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if err := svc.activateResumedDynamicRoute(ctx, session); err == nil {
+		t.Fatal("activation reported success while the durable route write failed")
+	}
+
+	// The store recovers; the ordinary resume admission must settle the same
+	// generation instead of blocking it as pending.
+	persistence.failActivation = false
+	admission, err := svc.loadResumeSessionCandidate(ctx, taskID, sessionID, executor.ResumeOptions{}, nil)
+	if err != nil {
+		t.Fatalf("loadResumeSessionCandidate after store recovery: %v", err)
+	}
+	if admission == nil || admission.session.RouteState != dynamicRouteStatusActive {
+		t.Fatalf("admitted session route = %#v, want active", admission)
+	}
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusActive {
+		t.Fatalf("route state after recovery = %#v, want active generation %d", state, decision.Generation)
+	}
+}

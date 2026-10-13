@@ -3831,8 +3831,13 @@ func (s *Service) loadResumeSessionCandidate(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	// A claim still "starting" behind a live, prompt-ready runtime is an
+	// unfinished activation write, so this admission attempt retries the durable
+	// completion for the current generation before the pending-route guard can
+	// reject it.
 	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive &&
-		!s.explicitRecoveryOwnsStrandedStartingRoute(ctx, session, options) {
+		!s.explicitRecoveryOwnsStrandedStartingRoute(ctx, session, options) &&
+		!s.completeReadyStrandedStartingRoute(ctx, session) {
 		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
