@@ -122,6 +122,8 @@ never prepared and `auto_start_agent` never runs.
 1. Inside the promotion transaction, after the task row is locked, a same-step
    admission reads the task's latest ledger id and stores it on the admission
    marker as `models.QueuePromotionEntryTransitionIDKey` (`entry_transition_id`).
+   Its decimal string encoding preserves the full 64-bit ledger identity through
+   untyped metadata JSON decoding. The reader also accepts earlier numeric markers.
    That row is the entry made when the task was queued.
 2. The handler resolves the entry identity in this order: the delivered
    `step_transition_id` when non-zero, the pinned marker value, and then the

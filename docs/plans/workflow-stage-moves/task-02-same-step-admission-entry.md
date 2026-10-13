@@ -77,3 +77,12 @@ See In scope. Dependencies: none.
   first kept the previous step's route (the entry never ran) and the second
   found no pinned entry on the marker. Both pass after the fix, together with
   the existing queue-promotion tests.
+- Review verification found that untyped JSON decoding rounded the valid ledger
+  ID `9007199254740993` to `9007199254740992`. The marker now stores a decimal
+  string, and the reader preserves numeric-marker compatibility. A bounded
+  exact-source write/read proof failed before the correction and passed after it;
+  the ledger read is an explicit fake, so this is not SQL evidence.
+- Genuine SQLite/PostgreSQL promotion regressions verify the large pinned ID
+  after persisted metadata decoding and reject a duplicate admission. Their
+  hosted execution remains required before merge. The reader regression also
+  covers the maximum signed 64-bit ID and invalid strings.

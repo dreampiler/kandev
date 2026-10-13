@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -122,7 +124,7 @@ func TestHandleTaskQueuePromotedSameStepIgnoresReentryAfterPromotion(t *testing.
 	require.NoError(t, err)
 	marker, ok := promotedTask.Metadata[models.MetaKeyQueuePromotionPending].(map[string]interface{})
 	require.True(t, ok, "promotion marker must remain until the entry is handled")
-	require.EqualValues(t, queuedEntryID, marker["entry_transition_id"],
+	require.Equal(t, queuedEntryID, queuePromotionStampedEntryID(marker),
 		"the promotion must pin the queued entry on its marker")
 
 	for _, stepID := range []string{"step-a", "step-b"} {
@@ -143,4 +145,26 @@ func TestHandleTaskQueuePromotedSameStepIgnoresReentryAfterPromotion(t *testing.
 	require.True(t, ok)
 	require.Equal(t, "step-a", route.DestinationStepID,
 		"a promotion delivery for the earlier entry must not dispatch the re-entry's on_enter")
+}
+
+func TestQueuePromotionStampedEntryIDPreservesFullLedgerRange(t *testing.T) {
+	for _, entryID := range []int64{1<<53 + 1, 1<<63 - 1} {
+		encoded, err := json.Marshal(map[string]interface{}{
+			models.QueuePromotionEntryTransitionIDKey: strconv.FormatInt(entryID, 10),
+		})
+		require.NoError(t, err)
+		var marker map[string]interface{}
+		require.NoError(t, json.Unmarshal(encoded, &marker))
+		require.Equal(t, entryID, queuePromotionStampedEntryID(marker))
+	}
+	for _, legacyID := range []interface{}{int(17), int64(17), float64(17)} {
+		require.EqualValues(t, 17, queuePromotionStampedEntryID(map[string]interface{}{
+			models.QueuePromotionEntryTransitionIDKey: legacyID,
+		}))
+	}
+	for _, invalidID := range []string{"not-an-entry", "9223372036854775808"} {
+		require.Zero(t, queuePromotionStampedEntryID(map[string]interface{}{
+			models.QueuePromotionEntryTransitionIDKey: invalidID,
+		}))
+	}
 }

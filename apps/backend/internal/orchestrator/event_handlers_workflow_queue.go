@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -69,14 +70,20 @@ func (s *Service) queuePromotionEntryID(ctx context.Context, taskID string, deli
 }
 
 // queuePromotionStampedEntryID reads the entry row a same-step promotion
-// pinned on its marker. The marker is decoded from task metadata JSON, so the
-// number normally arrives as float64.
+// pinned on its marker. Decimal strings preserve the full ledger range through
+// metadata JSON; numeric markers remain readable for compatibility.
 func queuePromotionStampedEntryID(promotionToken interface{}) int64 {
 	marker, ok := promotionToken.(map[string]interface{})
 	if !ok {
 		return 0
 	}
 	switch value := marker[models.QueuePromotionEntryTransitionIDKey].(type) {
+	case string:
+		entryID, err := strconv.ParseInt(value, 10, 64)
+		if err != nil {
+			return 0
+		}
+		return entryID
 	case int64:
 		return value
 	case int:

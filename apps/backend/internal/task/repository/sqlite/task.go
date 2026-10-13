@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -3605,7 +3606,7 @@ func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, 
 		return err
 	}
 	if entryID > 0 {
-		marker[models.QueuePromotionEntryTransitionIDKey] = entryID
+		marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(entryID, 10)
 	}
 	return nil
 }
