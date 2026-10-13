@@ -1344,6 +1344,14 @@ func (s *Service) updateTaskSessionStateWithHook(
 				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
+		// A session that turned terminal before its turn reached
+		// on_turn_complete leaves a block_resolved settlement (and any stranded
+		// active submission) that would otherwise pin the stream's suffix
+		// forever. Run the bounded residual passes here, best-effort and
+		// time-boxed, so the existing settle/reconcile paths can finish them.
+		residualCtx, residualCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		s.reconcileResidualDeliverySettlements(residualCtx, sessionID)
+		residualCancel()
 	}
 	// Entering STARTING/RUNNING only records a recovery attempt. The durable
 	// interruption marker is cleared after the provider confirms boot/readiness,

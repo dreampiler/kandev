@@ -24,6 +24,45 @@ var errDeadOwnerRecoveryPending = errors.New("dead owner has pending recovery ev
 // its normal recovery window.
 const agentDeliveryDeadOwnerGrace = agentDeliveryRetentionPayloadGrace
 
+// agentDeliveryResidualScanLimit bounds one residual work-queue scan so the
+// startup/reconcile/session-terminal entry points stay cheap. Repeated passes
+// converge as earlier candidates settle.
+const agentDeliveryResidualScanLimit = 200
+
+// ListActiveAgentDeliverySubmissionIDs returns a bounded, ordered work queue of
+// submission IDs still in an automatic-dispatch state (prepared, dispatching,
+// accepted, interrupted_unknown). sessionID == "" scans every session. The
+// list is only a work queue: every eligibility guard is re-checked inside
+// SettleDeadOwnerAgentDeliverySubmission, so a returned id is never itself a
+// settlement decision.
+func (r *Repository) ListActiveAgentDeliverySubmissionIDs(
+	ctx context.Context,
+	sessionID string,
+	limit int,
+) ([]string, error) {
+	if limit <= 0 || limit > agentDeliveryResidualScanLimit {
+		limit = agentDeliveryResidualScanLimit
+	}
+	query := `SELECT id FROM agent_delivery_submissions WHERE state IN (?, ?, ?, ?)`
+	args := []any{
+		string(models.DeliverySubmissionPrepared),
+		string(models.DeliverySubmissionDispatching),
+		string(models.DeliverySubmissionAccepted),
+		string(models.DeliverySubmissionInterruptedUnknown),
+	}
+	if sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
+	}
+	query += ` ORDER BY updated_at, id LIMIT ?`
+	args = append(args, limit)
+	ids := make([]string, 0, limit)
+	if err := r.db.SelectContext(ctx, &ids, r.db.Rebind(query), args...); err != nil {
+		return nil, fmt.Errorf("list active agent delivery submissions: %w", err)
+	}
+	return ids, nil
+}
+
 // SettleDeadOwnerAgentDeliverySubmission settles an active-state submission
 // whose owner session is dead, through the existing terminal settlement path.
 // All guards are checked inside one bounded writer transaction:

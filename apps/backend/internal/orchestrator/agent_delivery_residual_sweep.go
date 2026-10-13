@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -12,7 +14,7 @@ import (
 // sweepResidualDeliveryNoOp records guarded workflow no-op receipts for
 // block_resolved terminal settlements whose workflow receipt is still
 // missing, then leaves promotion to the existing reconcile path. It returns
-// the number of receipts recorded.
+// the number of receipts recorded. sessionID == "" scans every session.
 //
 // A block_resolved settlement without its workflow receipt pins the stream's
 // suffix forever: promotion requires hasExactAgentDeliveryWorkflowOutcomeTx
@@ -25,12 +27,12 @@ import (
 //
 // The sweep is idempotent: a recorded receipt is never rewritten, and a
 // terminal that gained its receipt by another path is skipped.
-func (s *Service) sweepResidualDeliveryNoOp(ctx context.Context) (int, error) {
+func (s *Service) sweepResidualDeliveryNoOp(ctx context.Context, sessionID string) (int, error) {
 	settlements, ok := s.repo.(repository.AgentDeliverySettlementRepository)
 	if !ok {
 		return 0, nil
 	}
-	effects, err := settlements.ListPendingAgentDeliverySettlements(ctx, "")
+	effects, err := settlements.ListPendingAgentDeliverySettlements(ctx, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -67,32 +69,16 @@ func (s *Service) recordResidualDeliveryNoOp(ctx context.Context, effect *models
 	if workflowKey == "" {
 		return false, nil
 	}
-	stored, err := reader.GetAgentDeliveryEffect(ctx, workflowKey)
-	if err == nil && stored != nil {
-		return false, nil
-	}
-	if err != nil && !errors.Is(err, repository.ErrAgentDeliveryEffectNotFound) &&
-		!errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+	recorded, err := residualNoOpReceiptExists(ctx, reader, workflowKey)
+	if err != nil || recorded {
 		return false, err
 	}
-	sessionRepo, ok := s.repo.(interface {
-		GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
-	})
-	if !ok {
-		return false, nil
-	}
-	session, err := sessionRepo.GetTaskSession(ctx, effect.SessionID)
-	if err != nil || session == nil {
-		return false, nil
-	}
-	taskRepo, ok := s.repo.(interface {
-		GetTask(ctx context.Context, id string) (*models.Task, error)
-	})
-	if !ok {
-		return false, nil
-	}
-	task, err := taskRepo.GetTask(ctx, session.TaskID)
+	task, err := s.residualNoOpTask(ctx, effect.SessionID)
 	if err != nil || task == nil {
+		return false, err
+	}
+	outcome := residualNoOpOutcome(task)
+	if outcome == "" {
 		return false, nil
 	}
 	workflowEffect := &models.AgentDeliveryEffect{
@@ -108,16 +94,112 @@ func (s *Service) recordResidualDeliveryNoOp(ctx context.Context, effect *models
 		TurnID:            effect.TurnID,
 		TaskID:            task.ID,
 	}
-	committed := s.recordDeliveryWorkflowNoOp(ctx, task, workflowEffect, residualNoOpOutcome(task))
-	return committed, nil
+	return s.recordDeliveryWorkflowNoOp(ctx, task, workflowEffect, outcome), nil
 }
 
-// residualNoOpOutcome picks the guarded no-op outcome for a swept terminal.
-// Sessions without a workflow step never had a transition to evaluate, so
-// they record not_required, matching the live no-workflow path.
+// residualNoOpReceiptExists reports whether an exact workflow receipt already
+// exists for the turn; a missing receipt is not an error.
+func residualNoOpReceiptExists(
+	ctx context.Context,
+	reader agentDeliveryEffectReader,
+	workflowKey string,
+) (bool, error) {
+	stored, err := reader.GetAgentDeliveryEffect(ctx, workflowKey)
+	if err == nil {
+		return stored != nil, nil
+	}
+	if errors.Is(err, repository.ErrAgentDeliveryEffectNotFound) ||
+		errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
+		return false, nil
+	}
+	return false, err
+}
+
+// residualNoOpTask resolves the owning task for a session. It returns (nil,
+// nil) when the session or task is unavailable, so the caller simply skips.
+func (s *Service) residualNoOpTask(ctx context.Context, sessionID string) (*models.Task, error) {
+	sessionRepo, ok := s.repo.(interface {
+		GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	session, err := sessionRepo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil, nil
+	}
+	taskRepo, ok := s.repo.(interface {
+		GetTask(ctx context.Context, id string) (*models.Task, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	task, err := taskRepo.GetTask(ctx, session.TaskID)
+	if err != nil || task == nil {
+		return nil, nil
+	}
+	return task, nil
+}
+
+// residualNoOpOutcome returns the only guarded no-op the sweep may record
+// without an on_turn_complete evaluation: not_required for a terminal whose
+// task has no workflow step at all, so there is genuinely nothing to
+// transition. A task that does have a workflow step may still need a real
+// automatic transition, so the sweep returns "" and leaves that terminal
+// pinned rather than fabricating no_automatic_transition to unpin it.
 func residualNoOpOutcome(task *models.Task) string {
 	if task == nil || task.WorkflowStepID == "" {
 		return "not_required"
 	}
-	return "no_automatic_transition"
+	return ""
+}
+
+// settleDeadOwnerDeliverySubmissions settles active submissions whose owner
+// session is dead, through the existing terminal settlement path. It scans a
+// bounded work queue (sessionID == "" scans every session) and re-checks every
+// guard inside SettleDeadOwnerAgentDeliverySubmission, so it never settles a
+// submission with a live owner, an open recovery block, or pending queue,
+// dispatch, or send-now evidence.
+func (s *Service) settleDeadOwnerDeliverySubmissions(ctx context.Context, sessionID string) (int, error) {
+	repo, ok := s.repo.(interface {
+		ListActiveAgentDeliverySubmissionIDs(context.Context, string, int) ([]string, error)
+		SettleDeadOwnerAgentDeliverySubmission(context.Context, string) (bool, error)
+	})
+	if !ok {
+		return 0, nil
+	}
+	ids, err := repo.ListActiveAgentDeliverySubmissionIDs(ctx, sessionID, 0)
+	if err != nil {
+		return 0, err
+	}
+	settled := 0
+	for _, id := range ids {
+		committed, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, id)
+		if err != nil {
+			return settled, err
+		}
+		if committed {
+			settled++
+		}
+	}
+	return settled, nil
+}
+
+// reconcileResidualDeliverySettlements runs the two residual-settlement passes
+// for one session (sessionID == "" means every session) from the existing
+// startup, reconcile, and session-terminal entry points. Both passes are
+// bounded, idempotent, and reuse the existing settlement paths; a failure is
+// logged and never propagated, so it can not break the transition that
+// triggered it.
+func (s *Service) reconcileResidualDeliverySettlements(ctx context.Context, sessionID string) {
+	if _, err := s.settleDeadOwnerDeliverySubmissions(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to settle dead-owner delivery submissions",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	if _, err := s.sweepResidualDeliveryNoOp(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to sweep residual delivery workflow no-ops",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
