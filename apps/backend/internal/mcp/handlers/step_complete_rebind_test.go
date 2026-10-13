@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -370,4 +372,55 @@ func TestHandleStepComplete_AcceptsOwningPrimaryWithoutRebind(t *testing.T) {
 	assert.Equal(t, true, payload["accepted"])
 	assert.Empty(t, rebinder.promoted, "an owning session must not be re-promoted")
 	require.Len(t, bus.events, 1)
+}
+
+// TestHandleStepComplete_RecordsAndClearsOwnershipRefusal proves a refused
+// step_complete records the reason so the child reminder can name the real
+// block, and that an accepted signal clears a recorded refusal.
+func TestHandleStepComplete_RecordsAndClearsOwnershipRefusal(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteRebindTask(t, repo, "task-rebind-reason", "step-rebind",
+		rebindSessionSeed{id: "session-primary", state: models.TaskSessionStateRunning, primary: true, profile: "profile-step"},
+		rebindSessionSeed{id: "session-side", state: models.TaskSessionStateRunning, primary: false, profile: "profile-step"},
+	)
+	createStepCompleteRecoveryTurn(t, repo, "turn-reason-side", "task-rebind-reason", "session-side")
+	createStepCompleteRecoveryTurn(t, repo, "turn-reason-primary", "task-rebind-reason", "session-primary")
+
+	bus := &mcpRecordingEventBus{}
+	h := newStepCompleteRebindHandler(t, svc, repo, bus, map[string]string{"step-rebind": "profile-step"})
+	h.SetStepCompleteSessionRebinder(&recordingStepCompleteRebinder{repo: repo})
+
+	resp, err := h.handleStepComplete(ctx, rebindStepCompleteMessage(t, "task-rebind-reason", "session-side"))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	side, err := repo.GetTaskSession(ctx, "session-side")
+	require.NoError(t, err)
+	rejection, ok := models.LoadStepCompleteRejection(side.Metadata)
+	require.True(t, ok, "a refused step_complete must record the reason")
+	assert.Equal(t, "step-rebind", rejection.StepID)
+	assert.NotEmpty(t, rejection.Reason)
+
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-primary",
+		models.SessionMetaKeyStepCompleteRejection,
+		models.StepCompleteRejection{StepID: "step-rebind", Reason: "stale refusal", At: time.Now().UTC()}.ToMap()))
+	acceptResp, err := h.handleStepComplete(ctx, rebindStepCompleteMessage(t, "task-rebind-reason", "session-primary"))
+	require.NoError(t, err)
+	accepted := acceptedStepComplete(t, acceptResp)
+	assert.Equal(t, true, accepted["accepted"])
+
+	primary, err := repo.GetTaskSession(ctx, "session-primary")
+	require.NoError(t, err)
+	_, hasRejection := models.LoadStepCompleteRejection(primary.Metadata)
+	assert.False(t, hasRejection, "an accepted signal must clear a recorded refusal")
+}
+
+// TestBoundStepCompleteRejectionReasonIsRuneSafe pins that truncating a refusal
+// reason never splits a multi-byte rune (step names may be non-ASCII).
+func TestBoundStepCompleteRejectionReasonIsRuneSafe(t *testing.T) {
+	reason := strings.Repeat("가", stepCompleteRejectionReasonLimit+10)
+	got := boundStepCompleteRejectionReason(reason)
+	assert.True(t, utf8.ValidString(got), "truncated reason must be valid UTF-8")
+	assert.Equal(t, stepCompleteRejectionReasonLimit, len([]rune(got)))
 }

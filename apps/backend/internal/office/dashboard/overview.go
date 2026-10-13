@@ -71,6 +71,12 @@ type OverviewReader interface {
 	ListOverviewModelBlocks(
 		ctx context.Context, since, now time.Time, limit int,
 	) ([]*sqlite.OverviewModelBlockRow, error)
+	// ListOverviewServerStarts reads the durable backend-boot history, so the
+	// server-started kind counts every startup in the window rather than only
+	// the running process.
+	ListOverviewServerStarts(
+		ctx context.Context, since time.Time, limit int,
+	) ([]*sqlite.OverviewServerStartRow, error)
 	ListOverviewMergedPRs(
 		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
 	) ([]*sqlite.OverviewMergedPRRow, error)
@@ -360,10 +366,13 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 	if err != nil {
 		return err
 	}
+	serverStarts := readOptionalEventSource(func() ([]*sqlite.OverviewServerStartRow, error) {
+		return s.overviewReader.ListOverviewServerStarts(ctx, since, overviewEventKindLimit)
+	})
 	extra := s.readExtraEvents(ctx, snap, ids, since)
 	capacity, capacityKnown := s.readSessionCapacity(ctx)
 	assembleSystem(snap, capacity, capacityKnown, th)
-	snap.resp.Last24h = assembleEvents(snap, automation, created, extra, since)
+	snap.resp.Last24h = assembleEvents(snap, serverStarts, automation, created, extra, since, processStartedAt())
 	return nil
 }
 

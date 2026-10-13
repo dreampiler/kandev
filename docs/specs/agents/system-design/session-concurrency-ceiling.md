@@ -261,6 +261,36 @@ plans explicit passive-inspection classification at the caller boundary. Opening
 a conversation is not a manual override. Actual explicit execution retains this
 design's manual admission rule; workflow parking eligibility remains task-owned.
 
+## Host-memory admission condition
+
+A worker-lane launch is also held when the host itself is short of memory. The
+condition is met when available physical memory is below a configured floor
+(default 8 GiB) or system commit charge is above a configured ceiling (default
+75%). It reuses the ceiling deferral machinery end to end: the refusal carries
+the `memory_pressure` reason code, persists through `deferCeilingRefusal`, writes
+the same session card note, and the periodic sweep replays it once the pressure
+clears and the lane has free capacity. No second queue, timer, or framework is
+introduced.
+
+The condition applies to every worker-lane origin, including a human manual start
+or resume: the manual override passes the session-count ceiling but never the
+host-memory condition. Only a launch that adds a new agent process is subject. A
+prompt or resume into a session that is already counted is never held, a dynamic
+hand-off and a failed-attempt replacement are never refused, and a running turn
+is never cut. The control lane and Office coordinator are exempt through the same
+lane classification that governs the count ceiling, so reclamation judgement does
+not stop with the work it manages. An unreadable or unsupported host reading
+fails open (treated as not pressured) and logs the cause once.
+
+The commit ceiling default stays below the host watchdog's whole-instance restart
+threshold (77% commit), because a guard that deferred only at or above that line
+would let the watchdog restart every session before any launch was held. The
+guard is configured through environment/profile values, not the Settings surface:
+`KANDEV_SESSION_MEMORY_GUARD_ENABLED`,
+`KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB` (default 8192), and
+`KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT` (default 75). Changing them requires a
+restart.
+
 ## Failure and recovery
 
 Before reserving a free unit for a new automatic launch, the launch seam supplies
