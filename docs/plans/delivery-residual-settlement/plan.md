@@ -12,8 +12,7 @@ legacy_specs: []
 
 # Plan: delivery residual settlement (design checkpoint)
 
-Status: NON-COMMITTED design checkpoint for parent review. No production code.
-Second PR only after explicit parent implementation order.
+Status: implemented in the second PR under explicit parent implementation order.
 
 ## Work orders
 

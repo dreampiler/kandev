@@ -9,7 +9,7 @@ requirements:
 
 # System design: delivery residual settlement
 
-Status: design checkpoint (non-committed). Companion to
+Status: implemented (second PR). Companion to
 `requirements/delivery-residual-settlement.md`.
 
 ## Where the pin lives
