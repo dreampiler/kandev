@@ -48,6 +48,12 @@ while every conclusive failure keeps its single-attempt behavior.
 - `backend-tests.yml`, the backend Makefile, and the existing workflow contract:
   execute Hermes/detection regressions in the required native Windows suite.
 
+`runCommandCheck` records whether context cancellation successfully interrupted
+the process and inspects the joined process state before reporting an elapsed
+bound. A deadline sampled after a conclusive nonzero exit remains unavailable
+without a retry. The boundary regression uses real terminal process state and
+an expired context rather than wall-clock scheduling.
+
 ## Acceptance criteria
 
 - **AC-AGENTS-INSTALL-DETECTION-001.1:** `runCommandCheck` reports an elapsed

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -161,4 +162,27 @@ func TestRunCommandCheck_SeparatesTimeoutFromFailure(t *testing.T) {
 			t.Errorf("found=%v timedOut=%v, want false/false for a binary that cannot start", found, timedOut)
 		}
 	})
+}
+
+// @covers AC-AGENTS-INSTALL-DETECTION-001.1, AC-AGENTS-INSTALL-DETECTION-001.4
+func TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation(t *testing.T) {
+	installHermesACPCheckHelper(t)
+	t.Setenv(hermesACPCheckHelperEnv, "unavailable")
+	hermesPath, err := exec.LookPath(hermesBin)
+	if err != nil {
+		t.Fatalf("LookPath(hermes): %v", err)
+	}
+	cmd := exec.Command(hermesPath, "acp", "--check")
+	var exitErr *exec.ExitError
+	if err := cmd.Run(); !errors.As(err, &exitErr) {
+		t.Fatalf("helper error = %v, want a conclusive nonzero exit", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	if commandCheckTimedOut(ctx, exitErr.ProcessState, false) {
+		t.Fatal("a deadline observed after a conclusive exit must not cause a retry")
+	}
+	if runtime.GOOS != "windows" && commandCheckTimedOut(ctx, exitErr.ProcessState, true) {
+		t.Fatal("a kill racing a naturally exited POSIX process must not cause a retry")
+	}
 }

@@ -44,8 +44,14 @@ the ACP probe path.
 | Bound elapsed first | `false` | `true` | `nil` |
 | Caller cancelled | `false` | `false` | `ctx.Err()` |
 
-`timedOut` comes from the check context's own deadline, after the parent context
-is ruled out, so a caller cancellation is never reported as a timeout.
+`timedOut` requires the check context's own deadline and a successful
+cancellation of the subprocess, after the parent context is ruled out. A
+deadline observed after a conclusive exit cannot trigger another measurement.
+The cancellation callback records successful termination atomically; `Run`
+joins the process and context watcher before classification. POSIX additionally
+preserves a naturally exited process state when a kill races the exit. Windows
+reports terminated processes as exited, so it uses the cancellation callback's
+result. A caller cancellation is never reported as a timeout.
 `WithCommandCheck` keeps its previous contract exactly: everything except
 cancellation maps to unavailable. Agents that use it, such as MiniMax, Muse, and
 Pi, see no behavior change.
@@ -131,6 +137,9 @@ of subprocess scheduling. Channel barriers prove the second check has started
 before caller cancellation or a parent deadline, with `testing/synctest` driving
 the deadline deterministically. Both cases assert exactly two attempts, the
 unchanged caller error, an unavailable result and joined check cleanup.
+The nonzero-exit boundary regression uses a real helper's terminal process
+state and a deterministic expired check context, without a timing race. It
+proves a deadline alone cannot turn a conclusive failure into a retry.
 
 Discovery tests prove a healthy version check starts while another installation
 check is blocked, and that cancellation retains completed availability after

@@ -3,7 +3,10 @@ package agents
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"runtime"
+	"sync/atomic"
 	"time"
 )
 
@@ -52,13 +55,31 @@ func WithCommandCheck(name string, args ...string) DetectOption {
 func runCommandCheck(ctx context.Context, path string, timeout time.Duration, args ...string) (found, timedOut bool, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if runErr := exec.CommandContext(checkCtx, path, args...).Run(); runErr != nil {
+	cmd := exec.CommandContext(checkCtx, path, args...)
+	var interrupted atomic.Bool
+	cmd.Cancel = func() error {
+		err := cmd.Process.Kill()
+		if err == nil {
+			interrupted.Store(true)
+		}
+		return err
+	}
+	if runErr := cmd.Run(); runErr != nil {
 		if ctx.Err() != nil {
 			return false, false, ctx.Err()
 		}
-		return false, errors.Is(checkCtx.Err(), context.DeadlineExceeded), nil
+		return false, commandCheckTimedOut(checkCtx, cmd.ProcessState, interrupted.Load()), nil
 	}
 	return true, false, nil
+}
+
+// A deadline is a timeout only when cancellation interrupted the check.
+// POSIX preserves a signalled termination; Windows reports killed processes as exited.
+func commandCheckTimedOut(checkCtx context.Context, state *os.ProcessState, interrupted bool) bool {
+	if !interrupted || !errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+		return false
+	}
+	return runtime.GOOS == "windows" || state == nil || !state.Exited()
 }
 
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
