@@ -74,6 +74,7 @@ session-activity authority remain with Tasks and Platform.
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
 - [Profile-backed Utility Agents](requirements/utility-agent-profiles.md)
 - [Plan injection budget](requirements/plan-injection-budget-01.md)
+- [Restart Resume Turn Start](requirements/resume-turn-start.md) (draft)
 
 ### System design
 
@@ -109,6 +110,7 @@ session-activity authority remain with Tasks and Platform.
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
 - [Pending Permission Lookup Bounds](system-design/pending-permission-lookup-bounds.md)
 - [Native Code Review Reviewer Exclusion](system-design/native-code-review-reviewer-exclusion.md)
+- [Restart Resume Turn Start](system-design/resume-turn-start.md) (draft)
 
 ## Migration record
 
