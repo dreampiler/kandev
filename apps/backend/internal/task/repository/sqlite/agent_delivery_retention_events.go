@@ -98,7 +98,7 @@ func agentDeliveryRetentionCandidateReady(
 		candidate.event.PayloadBytes >= 0 && candidate.genericEffectComplete && !candidate.hasPendingEffect &&
 		agentDeliveryRetentionSequenceExpired(
 			candidate.event.Sequence, expectedSequence, projectedSequence,
-			candidate.firstTerminalSequence, candidate.projectedAt, ageCutoff, replayEvents,
+			candidate.firstTerminalSequence, candidate.projectedAt, candidate.streamCompleted, ageCutoff, replayEvents,
 		)
 }
 
@@ -106,12 +106,20 @@ func agentDeliveryRetentionSequenceExpired(
 	sequence, expectedSequence, projectedSequence int64,
 	firstTerminalSequence sql.NullInt64,
 	projectedAt sql.NullTime,
+	streamCompleted bool,
 	ageCutoff time.Time,
 	replayEvents int,
 ) bool {
 	if sequence != expectedSequence || sequence > projectedSequence ||
 		(firstTerminalSequence.Valid && sequence >= firstTerminalSequence.Int64) {
 		return false
+	}
+	// A completed stream (fully projected, settled terminal, no active
+	// submission) has no consumer that can replay its fragments, so the
+	// replay window no longer applies. Active and uncertain streams keep the
+	// age/count contract below.
+	if streamCompleted {
+		return true
 	}
 	ageExpired := projectedAt.Valid && !projectedAt.Time.After(ageCutoff)
 	countExpired := sequence <= projectedSequence-int64(replayEvents)

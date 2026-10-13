@@ -80,6 +80,7 @@ var agentDeliveryRetentionCandidateSQL = `
 				   AND /* unsettled terminal */) AS first_terminal_sequence,
 				CASE WHEN i.terminal <> 0 THEN (SELECT settled.fully_settled_at FROM agent_delivery_submissions settled WHERE settled.id = i.submission_id)
 				     ELSE i.projected_at END AS eligible_at,
+				CASE WHEN ` + agentDeliveryCompletedStreamSQL("c") + ` THEN 1 ELSE 0 END AS stream_completed,
 				CASE WHEN (
 					SELECT 1 FROM agent_delivery_effects effect
 					WHERE effect.stream_id = i.stream_id AND effect.sequence = i.sequence
@@ -150,6 +151,7 @@ var agentDeliveryRetentionCandidateSQL = `
 			budgeted.can_prune, budgeted.can_retire, budgeted.cursor_session_id,
 			budgeted.cursor_incarnation_id, budgeted.cursor_harness_generation,
 			budgeted.projected_sequence, budgeted.retired_sequence, budgeted.first_terminal_sequence,
+			budgeted.stream_completed,
 			CASE WHEN ? AND budgeted.can_prune = 1 AND budgeted.payload_length <= ?
 				AND budgeted.cumulative_payload_bytes <= ? THEN i.payload ELSE NULL END AS candidate_payload,
 			CASE WHEN ? AND budgeted.can_prune = 1 AND budgeted.payload_length <= ?
@@ -165,7 +167,7 @@ type retentionCandidateScanner interface {
 func scanAgentDeliveryRetentionCandidate(row retentionCandidateScanner) (agentDeliveryRetentionCandidate, error) {
 	var candidate agentDeliveryRetentionCandidate
 	var terminal int
-	var genericComplete, pending, unknownEffect, canPrune, canRetire, payloadLoaded int
+	var genericComplete, pending, unknownEffect, canPrune, canRetire, streamCompleted, payloadLoaded int
 	var cursorSessionID, cursorIncarnationID sql.NullString
 	var cursorHarness, projectedSequence, retiredSequence sql.NullInt64
 	var payload []byte
@@ -177,7 +179,7 @@ func scanAgentDeliveryRetentionCandidate(row retentionCandidateScanner) (agentDe
 		&candidate.event.HashVersion, &candidate.payloadPrunedAt, &candidate.event.PayloadBytes,
 		&candidate.payloadLength, &genericComplete, &pending, &unknownEffect, &canPrune, &canRetire,
 		&cursorSessionID, &cursorIncarnationID, &cursorHarness, &projectedSequence,
-		&retiredSequence, &candidate.firstTerminalSequence, &payload, &payloadLoaded,
+		&retiredSequence, &candidate.firstTerminalSequence, &streamCompleted, &payload, &payloadLoaded,
 	)
 	if err != nil {
 		return candidate, err
@@ -190,6 +192,7 @@ func scanAgentDeliveryRetentionCandidate(row retentionCandidateScanner) (agentDe
 	candidate.hasUnknownEffect = unknownEffect != 0
 	candidate.canPrune = canPrune != 0
 	candidate.canRetire = canRetire != 0
+	candidate.streamCompleted = streamCompleted != 0
 	candidate.cursorExists = cursorSessionID.Valid && cursorIncarnationID.Valid && cursorHarness.Valid
 	candidate.cursorIdentityValid = candidate.cursorExists &&
 		cursorSessionID.String == candidate.event.SessionID &&
