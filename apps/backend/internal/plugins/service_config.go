@@ -242,24 +242,19 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-			// The restart error stays the returned error (it is the primary
-			// signal), but a failed status write means the registry may show
-			// StatusActive with no process running — don't lose that.
+		setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true)
+		if setErr != nil {
+			// The status write failed; the registry keeps its previous state,
+			// which is usually StatusActive with no running process.
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
-		} else {
-			// The status transition to StatusError changes whether the
-			// plugin's agent tools are listed, so the catalog must be
-			// recomputed. UpdateConfig already signalled before the restart,
-			// but that signal rebuilt the catalog while the plugin was still
-			// StatusActive; without this second signal running agents keep
-			// tools for a plugin that is no longer active. Pair the status
-			// write with both notifications the same way StartActivePlugins
-			// and DisableWithResult do.
-			s.notifyAgentToolCatalogChanged()
-			s.notifyDeliverer()
 		}
+		// Refresh both notifications unconditionally after any restart failure.
+		// The catalog and delivery worker must reflect the actual failure
+		// whether StatusError was persisted (setErr == nil) or the DB write
+		// failed (setErr != nil, registry may still show StatusActive).
+		s.notifyAgentToolCatalogChanged()
+		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}
 	return nil
