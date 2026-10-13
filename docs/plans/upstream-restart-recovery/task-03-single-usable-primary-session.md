@@ -26,13 +26,17 @@ again, and automatic promotion prefers a session the current step can use.
 ## In scope
 
 - Write failing repository and orchestrator tests first.
-- Remove `is_primary` from the full-row `UPDATE` in
-  `updateTaskSessionWithSnapshotGuard`.
+- Keep the full-row `UPDATE` in
+  `updateTaskSessionWithSnapshotGuard` from promoting `is_primary`. The current
+  upstream main already carries the conditional release write (a
+  snapshot-guarded write whose session copy says non-primary clears the owned
+  flag, all other writes keep it), which covers the stale-copy case; this work
+  order keeps that guard and adds the regression test.
 - Add `bestPrimarySessionCandidate` in a new `primary_session_candidate.go`
   and call it from `maybePromotePrimary` (`activeOnly=true`) and
   `promoteNextPrimaryAfterRemoval` (`activeOnly=false`).
-- Switch existing fixtures that set the primary flag through the full-row write
-  to `SetSessionPrimary`.
+- Keep fixtures that need a primary using `SetSessionPrimary`; the current
+  base's fixtures already do.
 
 ## Out of scope
 
@@ -65,16 +69,21 @@ From the repository root:
 
 ## Results
 
+Recorded on the base of first preparation; the branch is since retargeted onto
+the current upstream main, where the stale-copy guard already exists and this
+work order's repository test runs as a regression guard (GREEN on both ends of
+the base).
+
 - RED before the fix: `TestUpdateTaskSessionKeepsPrimaryFromStaleCopy` found
   two primaries; `TestPrimaryPromotionAfterStopSkipsParkedSession`,
   `TestPrimaryPromotionAfterStopPrefersCurrentStepProfile`, and
   `TestPrimaryPromotionAfterRemovalSkipsTerminalSession` picked the parked,
   other-profile, and completed sessions. The two guard tests passed.
 - GREEN after the fix: all six tests pass.
-- Two fixtures set the primary flag through the full-row write and now call
-  `SetSessionPrimary`: `TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails`
-  and `newPreparedPromptFixture`. Every test in the orchestrator files that
-  write `IsPrimary` before `UpdateTaskSession`, and the `mcp/handlers`
+- The primary fixtures `TestCreateNewSessionForStepKeepsCurrentSessionWhenWorkspaceAttachFails`
+  and `newPreparedPromptFixture` call `SetSessionPrimary` before their full-row
+  write, matching the base's contract. Every test in the orchestrator files
+  that write `IsPrimary` before `UpdateTaskSession`, and the `mcp/handlers`
   message tests, pass.
 - Production code changes the flag only through `SetSessionPrimary*`; the
   three places that assign `IsPrimary` do so after that call.

@@ -26,8 +26,9 @@ its session-bound targets.
 
 - `SetSessionPrimary`, `SetSessionPrimaryIfNonterminal`, and the workflow route
   variant in `task/repository/sqlite/session.go` demote every session of the
-  task and promote one inside one transaction. They are the only writers of
-  `is_primary` after creation.
+  task and promote one inside one transaction. They are the only writers that
+  can set `is_primary` after creation; the full-row session update only
+  releases it.
 - `updateTaskSessionWithSnapshotGuard` backs `UpdateTaskSession` and its state
   and revision guarded variants. It writes the session's other columns.
 - `bestPrimarySessionCandidate` in `orchestrator/primary_session_candidate.go`
@@ -43,9 +44,11 @@ copy read while a session was primary therefore made it primary again after a
 later promotion, without an error, and `GetPrimarySessionByTaskID` could return
 either row.
 
-The full-row `UPDATE` no longer writes `is_primary`, for the same reason it
-already skips `metadata`. Creation keeps its own `INSERT` (`001.1`). Test
-fixtures that set the flag through the full-row write use `SetSessionPrimary`.
+The full-row `UPDATE` never promotes `is_primary`: it keeps the stored flag,
+and only a snapshot-guarded write whose session copy says non-primary releases
+the owned flag. Promotion and removal still go through `SetSessionPrimary`.
+Creation keeps its own `INSERT` (`001.1`). Test fixtures that set the flag
+through the full-row write use `SetSessionPrimary`.
 
 `bestPrimarySessionCandidate(ctx, taskID, sessions, excludeSessionID, activeOnly)`
 skips the excluded and terminal sessions and, with `activeOnly`, sessions that

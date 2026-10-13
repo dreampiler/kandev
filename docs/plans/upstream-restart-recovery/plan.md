@@ -29,7 +29,9 @@ resume, or a session change:
   primary again, and automatic promotion can pick a parked or finished session.
 - A move into a step without an agent launches the task's deferred start.
 
-Each case is reproduced on the current main branch with unit-level fixtures.
+Each case is reproduced on the branch's base with unit-level fixtures. After
+the retarget to the current upstream main, the stale-copy primary case is
+covered by that base's existing conditional `is_primary` write (see Tests).
 Each work order fixes one case with the smallest change in the code that owns
 it.
 
@@ -40,8 +42,9 @@ it.
 - Treat `context.DeadlineExceeded` as a retryable queued-dispatch failure.
 - One startup pass over orphaned `SCHEDULING` tasks, with the exclusions in
   REQ-TASKS-RESTART-ORPHAN-SESSIONS-003, and the repository list it needs.
-- Remove `is_primary` from the full-row session update, and route both automatic
-  primary promotions through one selector.
+- Keep the full-row session update from promoting `is_primary` (the snapshot
+  guard only releases it), and route both automatic primary promotions through
+  one selector.
 - Keep the deferred-launch record when a `task.moved` entry targets a step
   without automatic start.
 - The requirement and system-design amendments listed in the frontmatter.
@@ -84,11 +87,14 @@ deferred-launch, launch-error, Office, and dependency checks, and starts work
 through `autoStartTaskForStep` or `processOnEnter`. A session with prompt
 history only gets a compare-and-set state repair.
 
-Work order 03 drops `is_primary` from `updateTaskSessionWithSnapshotGuard` and
-adds `bestPrimarySessionCandidate` in a new `primary_session_candidate.go`.
-`maybePromotePrimary` passes `activeOnly=true`, and
-`promoteNextPrimaryAfterRemoval` passes `false`. Existing fixtures that set the
-flag through the full-row write switch to `SetSessionPrimary`.
+Work order 03 keeps `updateTaskSessionWithSnapshotGuard` from promoting
+`is_primary`. The base's full-row update already carries a conditional release
+write (a snapshot-guarded write whose session copy says non-primary clears the
+owned flag, all other writes keep it), which covers the stale-copy case, so
+this work order keeps that guard and adds `bestPrimarySessionCandidate` in a
+new `primary_session_candidate.go`. `maybePromotePrimary` passes
+`activeOnly=true`, and `promoteNextPrimaryAfterRemoval` passes `false`. Test
+fixtures that set the flag use `SetSessionPrimary` directly.
 
 Work order 04 makes `autoStartTaskForLoadedStep` keep the deferred-launch
 record for `task.moved` into a step without automatic start, which covers both
@@ -108,7 +114,11 @@ it when the step read fails.
 - Work order 04: AC-TASKS-DEFERRED-START-STEP-ENTRY-001.1 to 001.3 in
   orchestrator auto-start tests.
 
-Each test fails on the current main branch before its fix.
+Each test was RED against the base of first preparation and GREEN with its
+work order. After retargeting onto the current upstream main the stale-copy
+primary guard already exists there, so work order 03's repository test is a
+regression guard that passes on both ends of its base; the other work orders'
+tests keep their RED claims as recorded.
 
 ## E2E tests
 
@@ -127,8 +137,11 @@ is added.
 ## Verification results
 
 Each work order records its RED and GREEN tests. Every new test that asserts a
-fixed behavior fails on the current main branch, and the guard tests pass on
-both.
+fixed behavior failed on the base of first preparation, and the guard tests
+pass on both ends. After the retarget to the current upstream main, only work
+order 03's repository test is a guard-only case: the stale-copy primary
+resurrection it guards against is already fixed by the base's conditional
+`is_primary` write.
 
 - `go build ./...`, `go vet` of the changed packages, `sqlguard`, the
   documentation catalog and specification checks, and a local run of the PR
