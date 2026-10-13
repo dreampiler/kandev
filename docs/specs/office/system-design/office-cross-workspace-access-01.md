@@ -110,13 +110,7 @@ runs `authorizeOfficeCrossWorkspaceRequest` for every Office-surface principal,
 resolving each action's target workspace from `workspace_id`, `workflow_id`, or
 `task_id` and refusing it out of reach. `list_workspaces_kandev` from an Office
 principal answers the reach directory instead of every visible workspace.
-`get_task_plan_kandev`, `list_task_plan_revisions_kandev`, and
-`get_task_plan_revision_kandev` are already on the Office surface; the guard now
-evaluates each one's `task_id`, so a reached workspace's plan is readable and an
-out-of-reach one is refused. `list_tasks_kandev` also resolves its target from
-`workspace_id` when that is supplied instead of `workflow_id`. Plan writes,
-`move_task_kandev`, archive, and delete stay out of the guarded set: the target
-workspace's coordinator owns control actions (REQ-OFFICE-XWS-004.3).
+`get_task_plan_kandev`, already on the Office surface, keeps its existing rule.
 
 **Office routes:** `authorizeOfficeAgentCallerWithReach` lets a `GET` whose ids
 all resolve to one reached workspace through. With `reach == nil` or any other
