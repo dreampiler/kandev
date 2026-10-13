@@ -18,10 +18,11 @@ import { ProfileFormFields, type ProfileFormData } from "@/components/settings/p
 import { CursorMcpProfileSelection } from "@/components/settings/cursor-mcp-profile-selection";
 import { profilePermissionValues } from "@/lib/agent-permissions";
 import { toAgentProfilePatch } from "@/app/settings/agents/[agentId]/agent-save-helpers";
+import { AgentProfileDeleteConflictDialog } from "@/components/settings/agent-profile-delete-dialog";
 import {
-  AgentProfileDeleteConflictDialog,
-  AgentProfileDisableConflictDialog,
-} from "@/components/settings/agent-profile-delete-dialog";
+  useDynamicReferenceDialog,
+  type DynamicReferenceRequest,
+} from "@/components/settings/agent-profile-dynamic-reference-dialog";
 import { DeleteProfileCard } from "@/components/settings/agent-profile-delete-card";
 import {
   ProfileEnvVarsSection,
@@ -29,6 +30,7 @@ import {
 } from "@/components/settings/profile-edit/profile-env-vars-section";
 import {
   errorMessage,
+  publishProfileSaveResponse,
   useProfileDelete,
   useProfileEditorState,
   useProfileSave,
@@ -54,8 +56,8 @@ import type {
   PassthroughConfig,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
-import type { UtilityAgentReference } from "@/lib/types/agent-profile-errors";
-import { useAppStore } from "@/components/state-provider";
+import type { DynamicReferenceConflictLists } from "@/lib/types/agent-profile-errors";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { AgentLogo } from "@/components/agent-logo";
 import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mcp-config-card";
 import { ProviderLimitsCard } from "@/components/settings/provider-limits-card";
@@ -362,7 +364,26 @@ function ProfileEditor({
     acceptProfileSaveResponse,
     discardProfileDraft,
   } = useProfileEditorState(profile, permissionSettings);
-  const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
+  const [saveConflict, setSaveConflict] = useState<DynamicReferenceConflictLists | null>(null);
+  const storeApi = useAppStoreApi();
+  const saveResolution = useDynamicReferenceDialog({
+    onResolved: ({ profile }) => {
+      if (!profile) return;
+      acceptProfileSaveResponse(profile, draft);
+      publishProfileSaveResponse(storeApi, agent.id, profile);
+    },
+    // A resolution re-check can still find routing tiers, sessions, watchers,
+    // automations, or utility agents. Forward the full list so the existing
+    // conflict surface shows every blocker instead of dropping all but utility.
+    onBlocked: (lists) => setSaveConflict(lists),
+    onError: (message) => {
+      toast({
+        title: t("agents:dynamicReferenceFailed"),
+        description: message,
+        variant: "error",
+      });
+    },
+  });
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
       setDraft((current) => {
@@ -385,7 +406,23 @@ function ProfileEditor({
     markProfileSubmitted,
     acceptProfileSaveResponse,
     toast,
-    onUtilityConflict: setUtilityConflict,
+    onUtilityConflict: (agents) =>
+      setSaveConflict({
+        activeSessions: [],
+        watchers: [],
+        routingTiers: [],
+        automations: [],
+        utilityAgents: agents,
+      }),
+    onDynamicConflict: (references) => {
+      const request: DynamicReferenceRequest = {
+        profileId: draft.id,
+        profileName: draft.name,
+        operation: "disable",
+        references,
+      };
+      saveResolution.open(request);
+    },
   });
   const providerInvalidKey = providerConfigInvalidReasonKey({
     providerKind: draft.providerKind,
@@ -495,12 +532,15 @@ function ProfileEditor({
         onOpenChange={deleteState.setShowDeleteConfirm}
         onConfirm={deleteState.handleDeleteProfile}
       />
-      <AgentProfileDisableConflictDialog
-        agents={utilityConflict}
-        onCancel={() => setUtilityConflict([])}
-        onConfirm={async () => {
-          setUtilityConflict([]);
-          await handleSave(true);
+      <AgentProfileDeleteConflictDialog
+        intent="disable"
+        conflict={saveConflict}
+        onOpenChange={(open) => {
+          if (!open) setSaveConflict(null);
+        }}
+        onConfirm={() => {
+          setSaveConflict(null);
+          void handleSave(true);
         }}
       />
       <AgentProfileDeleteConflictDialog
@@ -510,6 +550,8 @@ function ProfileEditor({
         }}
         onConfirm={deleteState.handleForceDelete}
       />
+      {saveResolution.dialog}
+      {deleteState.resolutionDialog}
     </div>
   );
 }

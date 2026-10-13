@@ -219,6 +219,8 @@ export async function duplicateAgentProfileAction(id: string): Promise<AgentProf
 import type {
   ActiveSessionInfo,
   AutomationReference,
+  DynamicProfileReference,
+  DynamicReferenceConflictLists,
   RoutingTierReference,
   WatcherReference,
   UtilityAgentReference,
@@ -233,6 +235,7 @@ export type DeleteProfileResult =
       routingTiers: RoutingTierReference[];
       automations: AutomationReference[];
       utilityAgents: UtilityAgentReference[];
+      dynamicProfiles: DynamicProfileReference[];
     }
   | { status: "error"; message: string; handled?: boolean };
 
@@ -256,6 +259,7 @@ type DeleteProfileErrorBody = {
   routing_tiers?: RoutingTierReference[];
   automations?: AutomationReference[];
   utility_agents?: UtilityAgentReference[];
+  dynamic_profiles?: DynamicProfileReference[];
 };
 
 function readDeleteProfileErrorBody(value: unknown): DeleteProfileErrorBody {
@@ -268,8 +272,19 @@ function hasDeleteProfileConflict(body: DeleteProfileErrorBody): boolean {
     body.watchers ||
     body.routing_tiers ||
     body.automations ||
-    body.utility_agents,
+    body.utility_agents ||
+    body.dynamic_profiles,
   );
+}
+
+function conflictListsFromBody(body: DeleteProfileErrorBody): DynamicReferenceConflictLists {
+  return {
+    activeSessions: body.active_sessions ?? [],
+    watchers: body.watchers ?? [],
+    routingTiers: body.routing_tiers ?? [],
+    automations: body.automations ?? [],
+    utilityAgents: body.utility_agents ?? [],
+  };
 }
 
 function deleteAgentProfileError(error: unknown): DeleteProfileResult {
@@ -281,11 +296,8 @@ function deleteAgentProfileError(error: unknown): DeleteProfileResult {
   if (apiError?.status === 409 && hasDeleteProfileConflict(body)) {
     return {
       status: "conflict",
-      activeSessions: body.active_sessions ?? [],
-      watchers: body.watchers ?? [],
-      routingTiers: body.routing_tiers ?? [],
-      automations: body.automations ?? [],
-      utilityAgents: body.utility_agents ?? [],
+      ...conflictListsFromBody(body),
+      dynamicProfiles: body.dynamic_profiles ?? [],
     };
   }
   // i18n-exempt: server-provided error text, or an HTTP status diagnostic when
@@ -295,6 +307,49 @@ function deleteAgentProfileError(error: unknown): DeleteProfileResult {
     message: error instanceof Error ? error.message : "Request failed",
     ...(apiError?.handled ? { handled: true } : {}),
   };
+}
+
+// dynamicProfilesFromApiError extracts the dynamic-profile references from a
+// profile PATCH 409 (the editor save and list-row toggle paths) so the caller
+// can open the resolution dialog. A 409 without the dynamic list returns [].
+export function dynamicProfilesFromApiError(error: unknown): DynamicProfileReference[] {
+  if (!(error instanceof ApiError) || error.status !== 409) return [];
+  const body = readDeleteProfileErrorBody(error.body);
+  return Array.isArray(body.dynamic_profiles) ? body.dynamic_profiles : [];
+}
+
+export async function resolveDynamicReferencesAction(
+  id: string,
+  payload: {
+    operation: "disable" | "delete";
+    action: "disable_candidate" | "remove_candidate";
+    versions: Record<string, number>;
+  },
+): Promise<
+  | { status: "ok"; profile: AgentProfile | null }
+  | ({ status: "conflict" } & DynamicReferenceConflictLists)
+  | { status: "error"; message: string; handled?: boolean }
+> {
+  try {
+    const raw = await agentSettingsRequest<unknown>(
+      `${apiBaseUrl}/api/v1/agent-profiles/${id}/dynamic-reference-resolution`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+    if (payload.operation === "delete") return { status: "ok", profile: null };
+    return { status: "ok", profile: normalizeAgentProfile(raw) };
+  } catch (error) {
+    const apiError = error instanceof ApiError ? error : undefined;
+    const body = apiError ? readDeleteProfileErrorBody(apiError.body) : {};
+    if (apiError?.status === 409 && hasDeleteProfileConflict(body)) {
+      return { status: "conflict", ...conflictListsFromBody(body) };
+    }
+    // i18n-exempt: server-provided error text or a status diagnostic.
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Request failed",
+      ...(apiError?.handled ? { handled: true } : {}),
+    };
+  }
 }
 
 export async function getAgentProfileMcpConfigAction(
