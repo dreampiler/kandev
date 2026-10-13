@@ -132,5 +132,5 @@ func seedRetentionOpenStream(
 	if _, err := repo.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects); err != nil {
 		t.Fatalf("project open events: %v", err)
 	}
-	return repo, events, func(delta time.Duration) { currentTime = baseTime.Add(delta) }
+	return repo, events, func(delta time.Duration) { currentTime = currentTime.Add(delta) }
 }
