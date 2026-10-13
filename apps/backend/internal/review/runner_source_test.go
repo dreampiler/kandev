@@ -144,3 +144,15 @@ func TestRunnerSavedReviewSourceEmptyRangeDoesNotFallThrough(t *testing.T) {
 		t.Fatal("an empty saved range must not fall through to the workspace and call the reviewer")
 	}
 }
+
+// The explicit scope label must name the fields actually set: a base/head pair
+// reads as a range, a worktree-only request reads as the path rather than an
+// empty "base..head".
+func TestExplicitSourceLabelUsesFieldsActuallySet(t *testing.T) {
+	if got := explicitSourceLabel(RunRequest{BaseRef: "main", HeadRef: "abc123"}); got != "explicit range main..abc123" {
+		t.Fatalf("range label = %q", got)
+	}
+	if got := explicitSourceLabel(RunRequest{WorktreePath: `C:\worktrees\slot`}); got != `explicit worktree C:\worktrees\slot` {
+		t.Fatalf("worktree label = %q", got)
+	}
+}

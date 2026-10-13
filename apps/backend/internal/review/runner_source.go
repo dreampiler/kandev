@@ -25,7 +25,7 @@ type ReviewSourceMetadataLookup interface {
 func (r *Runner) collectRequestChanges(ctx context.Context, req RunRequest) ([]ChangedFile, string, error) {
 	if req.WorktreePath != "" || req.BaseRef != "" || req.HeadRef != "" {
 		files, err := CollectLocalChanges(ctx, Source{WorktreePath: req.WorktreePath, BaseRef: req.BaseRef, HeadRef: req.HeadRef})
-		return files, fmt.Sprintf("explicit range %s..%s", req.BaseRef, req.HeadRef), err
+		return files, explicitSourceLabel(req), err
 	}
 	if lookup, ok := r.taskContext.(ReviewSourceMetadataLookup); ok {
 		metadata, err := lookup.ReviewSourceMetadata(ctx, req.TaskID, req.SessionID)
@@ -46,4 +46,14 @@ func (r *Runner) collectRequestChanges(ctx context.Context, req RunRequest) ([]C
 	}
 	files, err := CollectChanges(ctx, r.changes, req.SessionID, req.RepositoryID)
 	return files, "session workspace", err
+}
+
+// explicitSourceLabel names an explicit request scope from the fields actually
+// set: a base/head pair reads as a range, while a worktree-only request reads as
+// the worktree path instead of an empty "base..head".
+func explicitSourceLabel(req RunRequest) string {
+	if req.BaseRef != "" || req.HeadRef != "" {
+		return fmt.Sprintf("explicit range %s..%s", req.BaseRef, req.HeadRef)
+	}
+	return fmt.Sprintf("explicit worktree %s", req.WorktreePath)
 }
