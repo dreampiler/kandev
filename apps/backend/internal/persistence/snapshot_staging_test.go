@@ -1,44 +1,35 @@
 package persistence
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
-func bootStagingTestLogger(t *testing.T) (*logger.Logger, string) {
+func bootStagingTestLogger(t *testing.T) (*logger.Logger, *observer.ObservedLogs) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "warnings.jsonl")
-	log, err := logger.NewLogger(logger.LoggingConfig{Level: "warn", Format: "json", OutputPath: path})
+	core, logs := observer.New(zap.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = log.Close() })
-	return log, path
+	return log, logs
 }
 
-func bootStagingWarnings(t *testing.T, path string) []map[string]any {
+func bootStagingWarnings(t *testing.T, logs *observer.ObservedLogs) []map[string]any {
 	t.Helper()
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
 	var warnings []map[string]any
-	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-		var entry map[string]any
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatal(err)
-		}
+	for _, observed := range logs.All() {
+		entry := observed.ContextMap()
+		entry["msg"] = observed.Message
 		warnings = append(warnings, entry)
 	}
 	return warnings
@@ -50,9 +41,9 @@ func TestSweepStaleBootStagingListingFailureAndAbsence(t *testing.T) {
 	if err := os.WriteFile(path, []byte("preserve"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	log, logPath := bootStagingTestLogger(t)
+	log, observed := bootStagingTestLogger(t)
 	SweepStaleBootStaging(path, log)
-	warnings := bootStagingWarnings(t, logPath)
+	warnings := bootStagingWarnings(t, observed)
 	if len(warnings) != 1 || warnings[0]["msg"] != "persistence: failed to list boot backup staging directories" || warnings[0]["path"] != path || warnings[0]["error"] == nil {
 		t.Fatalf("listing failure lacks warning context: %v", warnings)
 	}
@@ -61,7 +52,7 @@ func TestSweepStaleBootStagingListingFailureAndAbsence(t *testing.T) {
 		t.Fatalf("listing failure changed the file: %q, %v", data, err)
 	}
 	SweepStaleBootStaging(path+"-missing", log)
-	if warnings := bootStagingWarnings(t, logPath); len(warnings) != 1 {
+	if warnings := bootStagingWarnings(t, observed); len(warnings) != 1 {
 		t.Fatalf("missing directory logged a warning: %v", warnings)
 	}
 }
@@ -77,10 +68,11 @@ func TestSweepStaleBootStagingWarnings(t *testing.T) {
 			stale := seedBootStaging(t, backupDir, bootStagingDirPrefix+"stale", 2*staleBootStagingAge)
 			blocked, mode := stale, os.FileMode(0)
 			message := "persistence: failed to inspect boot backup staging directory"
-			if failure == "listing" {
+			switch failure {
+			case "listing":
 				blocked = backupDir
 				message = "persistence: failed to list boot backup staging directories"
-			} else if failure == "removal" {
+			case "removal":
 				blocked, mode = backupDir, 0o500
 				message = "persistence: failed to reclaim stale boot backup staging directory"
 			}
@@ -88,9 +80,9 @@ func TestSweepStaleBootStagingWarnings(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.Chmod(blocked, 0o700) })
-			log, logPath := bootStagingTestLogger(t)
+			log, observed := bootStagingTestLogger(t)
 			SweepStaleBootStaging(backupDir, log)
-			warnings := bootStagingWarnings(t, logPath)
+			warnings := bootStagingWarnings(t, observed)
 			if len(warnings) != 1 {
 				t.Fatalf("warnings = %v, want one %q", warnings, message)
 			}
@@ -120,7 +112,7 @@ func TestSweepStaleBootStagingConcurrentSweeps(t *testing.T) {
 	backupDir := t.TempDir()
 	stale := seedBootStaging(t, backupDir, bootStagingDirPrefix+"stale", 2*staleBootStagingAge)
 	live := seedBootStaging(t, backupDir, bootStagingDirPrefix+"live", staleBootStagingAge/2)
-	log, logPath := bootStagingTestLogger(t)
+	log, observed := bootStagingTestLogger(t)
 	var sweeps sync.WaitGroup
 	start := make(chan struct{})
 	for range 16 {
@@ -130,7 +122,7 @@ func TestSweepStaleBootStagingConcurrentSweeps(t *testing.T) {
 	sweeps.Wait()
 	requireExists(t, stale, false)
 	requireExists(t, live, true)
-	if warnings := bootStagingWarnings(t, logPath); len(warnings) != 0 {
+	if warnings := bootStagingWarnings(t, observed); len(warnings) != 0 {
 		t.Fatalf("benign concurrent removal logged warnings: %v", warnings)
 	}
 }

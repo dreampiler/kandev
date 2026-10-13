@@ -154,15 +154,16 @@ func TestPreparationFailureLoggingRequiresCommittedFailure(t *testing.T) {
 			require.NoError(t, err)
 			backupErr := errors.New("snapshot failed")
 			ctx := t.Context()
-			if failure == "cancelled" {
+			switch failure {
+			case "cancelled":
 				backupErr = context.Canceled
-			} else if failure == "deadline" {
+			case "deadline":
 				backupErr = context.DeadlineExceeded
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Hour))
 				defer cancel()
-			} else {
-				_, err := s.pool.Writer().Exec(`CREATE TRIGGER fail_retention_write BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'write rejected'); END`)
+			default:
+				_, err := s.pool.Writer().Exec(`CREATE TRIGGER fail_retention_write BEFORE UPDATE OF value ON settings BEGIN SELECT RAISE(ABORT, 'write rejected'); END`)
 				require.NoError(t, err)
 			}
 			var logs int
