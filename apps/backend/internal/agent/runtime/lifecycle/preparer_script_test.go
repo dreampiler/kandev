@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -228,6 +229,10 @@ func TestResolvePreparerSetupScript_UsesExplicitScript(t *testing.T) {
 }
 
 func TestResolvePreparerSetupScript_WorktreePlaceholders(t *testing.T) {
+	// Host-absolute paths: worktree.base_path is filepath.Dir of the
+	// workspace, which uses the host separator.
+	worktreesDir := filepath.Join(t.TempDir(), "worktrees")
+	workspacePath := filepath.Join(worktreesDir, "wt-123")
 	req := &EnvPrepareRequest{
 		ExecutorType:   executor.NameStandalone,
 		UseWorktree:    true,
@@ -244,15 +249,15 @@ func TestResolvePreparerSetupScript_WorktreePlaceholders(t *testing.T) {
 		}, "\n"),
 	}
 
-	got, err := resolvePreparerSetupScript(req, "/tmp/worktrees/wt-123")
+	got, err := resolvePreparerSetupScript(req, workspacePath)
 	if err != nil {
 		t.Fatalf("resolvePreparerSetupScript() error = %v", err)
 	}
 	// Data placeholders resolve to self-contained single-quoted tokens
 	// (shellQuote); worktree.id is a kandev UUID and stays unquoted.
 	expected := []string{
-		"echo '/tmp/worktrees'",
-		"echo '/tmp/worktrees/wt-123'",
+		"echo '" + worktreesDir + "'",
+		"echo '" + workspacePath + "'",
 		"echo wt-123",
 		"echo 'feature/test-abc'",
 		"echo 'main'",

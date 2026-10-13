@@ -51,7 +51,7 @@ func newRemoteInputsForTest(t *testing.T, w *recordingArchiveWriter) *remoteCont
 func seedLocalCredential(t *testing.T, body string) agents.Agent {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	path := filepath.Join(home, ".credential-agent", "creds.json")
 	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
 	require.NoError(t, os.WriteFile(path, []byte(body), 0o600))
@@ -117,7 +117,7 @@ func TestRemoteInputsDeliverHelperAndCredentials(t *testing.T) {
 // config paths remain relative to the container home.
 func TestRemoteInputsMatchCodexContainerLayout(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte(`{"token":"codex"}`), 0o600))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte(`model = "gpt"`), 0o600))
@@ -206,7 +206,7 @@ func TestRemoteInputsFailWhenTheHelperCannotBeResolved(t *testing.T) {
 // some agents authenticate from the environment or their setup script, so a
 // missing credential file must not abort the launch.
 func TestRemoteInputsTolerateACredentialFailure(t *testing.T) {
-	t.Setenv("HOME", t.TempDir()) // the declared credential file does not exist
+	setTestUserHome(t, t.TempDir()) // the declared credential file does not exist
 	writer := &recordingArchiveWriter{}
 	inputs := newRemoteInputsForTest(t, writer)
 
