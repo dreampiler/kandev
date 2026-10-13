@@ -961,9 +961,10 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 	profileID string,
 ) ([]models.DynamicProfileReference, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT p.id, p.name, p.deleted_at
+		SELECT p.id, p.name, p.deleted_at, COALESCE(dp.version, 0)
 		FROM dynamic_agent_routes r
 		JOIN agent_profiles p ON p.id = r.dynamic_profile_id
+		LEFT JOIN dynamic_agent_profiles dp ON dp.profile_id = r.dynamic_profile_id
 		WHERE r.execution_profile_id = ?
 		ORDER BY p.name, p.id
 	`), profileID)
@@ -975,7 +976,7 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 	seen := make(map[string]struct{})
 	for rows.Next() {
 		var ref models.DynamicProfileReference
-		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt); err != nil {
+		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt, &ref.Version); err != nil {
 			return nil, err
 		}
 		if _, ok := seen[ref.ProfileID]; ok {
@@ -984,7 +985,78 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 		seen[ref.ProfileID] = struct{}{}
 		refs = append(refs, ref)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for index := range refs {
+		routes, err := r.dynamicRouteRefs(ctx, refs[index].ProfileID, profileID)
+		if err != nil {
+			return nil, err
+		}
+		refs[index].Routes = routes
+	}
+	return refs, nil
+}
+
+// dynamicRouteRefs projects the referencing positions of one dynamic profile
+// for the target concrete profile. Tier is the 1-based index of the head that
+// owns each position; heads start at position 0 or any row whose selection
+// does not join the row above it.
+func (r *sqliteRepository) dynamicRouteRefs(
+	ctx context.Context,
+	dynamicProfileID, executionProfileID string,
+) ([]models.DynamicProfileRouteRef, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT position, execution_profile_id, enabled, COALESCE(rules_json, '')
+		FROM dynamic_agent_routes WHERE dynamic_profile_id = ? ORDER BY position ASC
+	`), dynamicProfileID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	refs := make([]models.DynamicProfileRouteRef, 0, 1)
+	tier := 0
+	first := true
+	for rows.Next() {
+		var (
+			position, enabled      int
+			candidateID, rulesJSON string
+		)
+		if err := rows.Scan(&position, &candidateID, &enabled, &rulesJSON); err != nil {
+			return nil, err
+		}
+		isHead := first || !dynamicRouteJoinsPrevious(rulesJSON)
+		if isHead {
+			tier++
+		}
+		first = false
+		if candidateID == executionProfileID {
+			refs = append(refs, models.DynamicProfileRouteRef{
+				Position: position,
+				Tier:     tier,
+				Enabled:  enabled != 0,
+			})
+		}
+	}
 	return refs, rows.Err()
+}
+
+// dynamicRouteJoinsPrevious reports whether a route's stored selection joins
+// the row above it. An absent or unparsable selection is a tier head, which
+// matches the controller's normalization of legacy documents.
+func dynamicRouteJoinsPrevious(rulesJSON string) bool {
+	if strings.TrimSpace(rulesJSON) == "" {
+		return false
+	}
+	var doc struct {
+		Selection *struct {
+			JoinPrevious bool `json:"join_previous"`
+		} `json:"selection"`
+	}
+	if err := json.Unmarshal([]byte(rulesJSON), &doc); err != nil {
+		return false
+	}
+	return doc.Selection != nil && doc.Selection.JoinPrevious
 }
 
 // DuplicateAgentProfile creates an independent copy of a profile in a single
@@ -1528,61 +1600,97 @@ func (r *sqliteRepository) UpdateAgentProfileEnabled(ctx context.Context, id str
 }
 
 func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) error {
+	return r.deleteAgentProfileTx(ctx, id, nil)
+}
+
+// deleteAgentProfileTx soft-deletes the profile row, retrying when the row's
+// ownership changes concurrently. beforeDelete runs inside the transaction,
+// after the ownership locks and re-read but before the row is stamped, so an
+// atomic companion mutation commits or rolls back with the delete.
+func (r *sqliteRepository) deleteAgentProfileTx(
+	ctx context.Context,
+	id string,
+	beforeDelete func(*sqlx.Tx) error,
+) error {
 	for range 3 {
-		profile, err := r.GetAgentProfile(ctx, id)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("agent profile not found: %s", id)
-		}
-		if err != nil {
-			return err
-		}
-		if r.profileOrderAfterOwnershipRead != nil {
-			if err := r.profileOrderAfterOwnershipRead(profile.ID, profile.AgentID, profile.WorkspaceID); err != nil {
-				return err
-			}
-		}
-		tx, err := r.db.BeginTxx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		// Lock the candidate owner even for workspace-scoped rows; an owner move
-		// between reads must not bypass membership serialization.
-		if err := r.lockMembership(ctx, tx, "delete-profile", profile.AgentID); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if err := lockAgentProfileIdentity(ctx, tx, r.db.DriverName(), profile.ID); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		var agentID, workspaceID string
-		err = tx.QueryRowxContext(ctx, tx.Rebind(`SELECT agent_id, workspace_id FROM agent_profiles WHERE id = ? AND deleted_at IS NULL`), id).Scan(&agentID, &workspaceID)
-		if errors.Is(err, sql.ErrNoRows) {
-			_ = tx.Rollback()
-			return fmt.Errorf("agent profile not found: %s", id)
-		}
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		if agentID != profile.AgentID || workspaceID != profile.WorkspaceID {
-			_ = tx.Rollback()
+		err := r.deleteAgentProfileOnce(ctx, id, beforeDelete)
+		if errors.Is(err, ErrProfileChanged) {
 			continue
 		}
-		now := time.Now().UTC()
-		result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`), now, now, id)
-		if err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			_ = tx.Rollback()
-			return fmt.Errorf("agent profile not found: %s", id)
-		}
-		return tx.Commit()
+		return err
 	}
 	return ErrProfileChanged
+}
+
+func (r *sqliteRepository) deleteAgentProfileOnce(
+	ctx context.Context,
+	id string,
+	beforeDelete func(*sqlx.Tx) error,
+) error {
+	profile, err := r.GetAgentProfile(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("agent profile not found: %s", id)
+	}
+	if err != nil {
+		return err
+	}
+	if r.profileOrderAfterOwnershipRead != nil {
+		if err := r.profileOrderAfterOwnershipRead(profile.ID, profile.AgentID, profile.WorkspaceID); err != nil {
+			return err
+		}
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	agentID, workspaceID, err := r.lockProfileForDeletion(ctx, tx, profile)
+	if err != nil {
+		return err
+	}
+	if agentID != profile.AgentID || workspaceID != profile.WorkspaceID {
+		return ErrProfileChanged
+	}
+	if beforeDelete != nil {
+		if err := beforeDelete(tx); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE agent_profiles SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL`), now, now, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("agent profile not found: %s", id)
+	}
+	return tx.Commit()
+}
+
+// lockProfileForDeletion locks the profile's membership owner and identity, then
+// re-reads its ownership columns inside the transaction so an owner move
+// between the initial read and the delete cannot bypass serialization.
+func (r *sqliteRepository) lockProfileForDeletion(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	profile *models.AgentProfile,
+) (string, string, error) {
+	if err := r.lockMembership(ctx, tx, "delete-profile", profile.AgentID); err != nil {
+		return "", "", err
+	}
+	if err := lockAgentProfileIdentity(ctx, tx, r.db.DriverName(), profile.ID); err != nil {
+		return "", "", err
+	}
+	var agentID, workspaceID string
+	err := tx.QueryRowxContext(ctx, tx.Rebind(`SELECT agent_id, workspace_id FROM agent_profiles WHERE id = ? AND deleted_at IS NULL`), profile.ID).Scan(&agentID, &workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", fmt.Errorf("agent profile not found: %s", profile.ID)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return agentID, workspaceID, nil
 }
 
 // agentProfileSelectColumns is the SELECT projection used by every

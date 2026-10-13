@@ -344,15 +344,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 		}
 		var inUseErr *controller.ErrProfileInUseDetail
 		if errors.As(err, &inUseErr) {
-			c.JSON(http.StatusConflict, gin.H{
-				"error":            "agent profile is in use",
-				"active_sessions":  inUseErr.ActiveSessions,
-				"watchers":         inUseErr.Watchers,
-				"routing_tiers":    inUseErr.RoutingTiers,
-				"automations":      inUseErr.Automations,
-				"utility_agents":   inUseErr.UtilityAgents,
-				"dynamic_profiles": inUseErr.DynamicProfiles,
-			})
+			writeProfileInUseConflict(c, inUseErr)
 			return
 		}
 		h.logger.Error("failed to delete profile", zap.Error(err))
@@ -361,4 +353,71 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 	}
 	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileDeleted, profile)
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+type resolveDynamicReferencesRequest = dto.DynamicReferenceResolutionRequest
+
+// httpResolveDynamicReferences resolves the dynamic profiles that reference a
+// concrete profile and then disables or deletes it, all in one request. It is
+// the positive counterpart to the profile-in-use 409 from PATCH/DELETE.
+func (h *Handlers) httpResolveDynamicReferences(c *gin.Context) {
+	var body resolveDynamicReferencesRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	resp, err := h.controller.ResolveDynamicReferences(c.Request.Context(), controller.DynamicReferenceResolutionRequest{
+		ProfileID: c.Param("id"),
+		Operation: body.Operation,
+		Action:    body.Action,
+		Versions:  body.Versions,
+	})
+	if err != nil {
+		h.writeDynamicResolutionError(c, err)
+		return
+	}
+	if body.Operation == dynamicResolutionOperationDelete {
+		h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileDeleted, resp)
+		c.JSON(http.StatusOK, gin.H{"success": true})
+		return
+	}
+	h.broadcastProfileEvent(c.Request.Context(), ws.ActionAgentProfileUpdated, resp)
+	c.JSON(http.StatusOK, resp)
+}
+
+const dynamicResolutionOperationDelete = "delete"
+
+func (h *Handlers) writeDynamicResolutionError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, controller.ErrAgentProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
+	case errors.Is(err, controller.ErrDynamicResolutionInvalid):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case errors.Is(err, controller.ErrDynamicProfileVersionConflict),
+		errors.Is(err, controller.ErrDynamicAgentRoutingDisabled):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	default:
+		var inUseErr *controller.ErrProfileInUseDetail
+		if errors.As(err, &inUseErr) {
+			writeProfileInUseConflict(c, inUseErr)
+			return
+		}
+		h.logger.Error("failed to resolve dynamic references", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve dynamic references"})
+	}
+}
+
+// writeProfileInUseConflict serializes the shared profile-in-use 409 body. Both
+// the delete flow and the dynamic resolution flow report the same reference
+// breakdown so a client can render one confirmation.
+func writeProfileInUseConflict(c *gin.Context, inUseErr *controller.ErrProfileInUseDetail) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":            "agent profile is in use",
+		"active_sessions":  inUseErr.ActiveSessions,
+		"watchers":         inUseErr.Watchers,
+		"routing_tiers":    inUseErr.RoutingTiers,
+		"automations":      inUseErr.Automations,
+		"utility_agents":   inUseErr.UtilityAgents,
+		"dynamic_profiles": inUseErr.DynamicProfiles,
+	})
 }

@@ -26,11 +26,25 @@ type DynamicAgentRoute struct {
 	RulesJSON          string `json:"rules_json"`
 }
 
+// DynamicProfileRouteRef names one route row that references a concrete
+// profile: its position and its 1-based tier, so a resolution confirmation can
+// say which grade contains the candidate.
+type DynamicProfileRouteRef struct {
+	Position int  `json:"position"`
+	Tier     int  `json:"tier"`
+	Enabled  bool `json:"enabled"`
+}
+
 // DynamicProfileReference describes a dynamic profile that still points at a
 // concrete profile. Soft-deleted parents are included so delete confirmation
 // can explain stale configuration instead of silently losing the dependency.
+// Version is the document's optimistic version at read time and Routes lists
+// every referencing position, so a consumer can echo the version and name the
+// grade.
 type DynamicProfileReference struct {
-	ProfileID string     `json:"profile_id"`
-	Name      string     `json:"name"`
-	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	ProfileID string                   `json:"profile_id"`
+	Name      string                   `json:"name"`
+	DeletedAt *time.Time               `json:"deleted_at,omitempty"`
+	Version   int64                    `json:"version"`
+	Routes    []DynamicProfileRouteRef `json:"routes"`
 }
