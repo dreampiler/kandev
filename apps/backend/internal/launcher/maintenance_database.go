@@ -36,6 +36,19 @@ replaces the live database, preserving the pre-compaction file alongside it
 as <database-path>.pre-compact-<timestamp>.bak for manual rollback (stop
 kandev if running, then move that file back over the live database path).
 
+Offline delivery steps (payload pruning, orphan scan, and retired-session
+purge) each run under a longer finite per-step budget than the online
+background worker, in bounded batches. If a step exceeds its budget it is
+recorded as partial and the remaining steps (retired-session purge and
+--compact) still run; committed deletes are preserved and rerunning the
+command continues the bounded work.
+
+Exit codes:
+  0   Complete: every step finished and, with --compact, compaction applied.
+  1   Partial: a step ran out of budget or compaction was not applied.
+      Progress was committed; rerun the command to continue.
+  2   Failure: bad arguments or a non-recoverable error stopped the run.
+
 Options:
   --execute                    Perform retention deletes (default: dry run).
   --compact                    Also stage and swap in a compacted copy (requires --execute).
@@ -98,15 +111,34 @@ func runMaintenance(argv []string, _ BuildInfo) int {
 	}
 
 	outcome, err := maintenance.Run(context.Background(), homeDir, cfg.Database.Driver, databasePath, opts, nil)
-	if err != nil {
-		if outcome.Executed {
-			printMaintenanceOutcome(outcome)
-		}
-		printMaintenanceFailure(err)
-		return 1
+	code := maintenanceRunExitCode(err)
+	if err != nil && outcome.Executed {
+		printMaintenanceOutcome(outcome)
 	}
-	printMaintenanceOutcome(outcome)
-	return 0
+	switch code {
+	case 0:
+		printMaintenanceOutcome(outcome)
+		return 0
+	case 1:
+		fmt.Fprintf(os.Stderr, "[kandev] maintenance partial: %v\n", err)
+		return 1
+	default:
+		printMaintenanceFailure(err)
+		return 2
+	}
+}
+
+// maintenanceRunExitCode maps a maintenance.Run result to the documented
+// exit status: 0 complete, 1 partial (rerun to continue), 2 failure.
+func maintenanceRunExitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	case errors.Is(err, maintenance.ErrPartial):
+		return 1
+	default:
+		return 2
+	}
 }
 
 func applyMaintenanceHomeDirOverride(cfg *config.Config, homeDir string) {

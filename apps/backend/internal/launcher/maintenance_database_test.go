@@ -2,6 +2,8 @@ package launcher
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,8 +196,8 @@ func TestRunMaintenanceExecuteEndToEndDeletesAndBacksUp(t *testing.T) {
 }
 
 // TestRunMaintenanceExecuteRefusesWhileOwnershipLockHeld proves the CLI
-// path surfaces ownership-conflict refusals (e.g. kandev is running) as
-// exit status 1 with a clear stderr message, without touching the
+// path surfaces ownership-conflict refusals (e.g. kandev is running) as a
+// failure exit status 2 with a clear stderr message, without touching the
 // database.
 func TestRunMaintenanceExecuteRefusesWhileOwnershipLockHeld(t *testing.T) {
 	clearLauncherConfigurationEnvironment(t)
@@ -215,8 +217,28 @@ func TestRunMaintenanceExecuteRefusesWhileOwnershipLockHeld(t *testing.T) {
 	}
 	defer func() { _ = owner.Close() }()
 
-	if code := runMaintenance([]string{"database", "--execute"}, BuildInfo{}); code != 1 {
-		t.Fatalf("code = %d, want 1 (ownership conflict)", code)
+	if code := runMaintenance([]string{"database", "--execute"}, BuildInfo{}); code != 2 {
+		t.Fatalf("code = %d, want 2 (ownership conflict is a failure)", code)
+	}
+}
+
+// TestMaintenanceRunExitCode pins the documented exit-status rule:
+// 0 complete, 1 partial, 2 failure.
+func TestMaintenanceRunExitCode(t *testing.T) {
+	if got := maintenanceRunExitCode(nil); got != 0 {
+		t.Fatalf("maintenanceRunExitCode(nil) = %d, want 0", got)
+	}
+	if got := maintenanceRunExitCode(maintenance.ErrPartial); got != 1 {
+		t.Fatalf("maintenanceRunExitCode(ErrPartial) = %d, want 1", got)
+	}
+	if got := maintenanceRunExitCode(fmt.Errorf("compact database: %w", maintenance.ErrPartial)); got != 1 {
+		t.Fatalf("maintenanceRunExitCode(wrapped ErrPartial) = %d, want 1", got)
+	}
+	if got := maintenanceRunExitCode(maintenance.ErrOwnershipConflict); got != 2 {
+		t.Fatalf("maintenanceRunExitCode(ErrOwnershipConflict) = %d, want 2", got)
+	}
+	if got := maintenanceRunExitCode(errors.New("some failure")); got != 2 {
+		t.Fatalf("maintenanceRunExitCode(generic error) = %d, want 2", got)
 	}
 }
 

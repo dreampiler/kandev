@@ -231,21 +231,27 @@ func runExecuteAndCompact(
 	outcome.Execution.DeliveryBatches += retentionResult.DeliveryBatches
 	outcome.Execution.Partial = retentionResult.Partial || deliveryReportWasLimited(report)
 	if err != nil {
-		outcome.Execution.Partial = true
+		// A fatal (non-timeout) error aborts the run; step timeouts were
+		// already folded into outcome.Execution.Partial by
+		// executeDeliveryRetention.
 		return outcome, fmt.Errorf("execute bounded delivery retention: %w", err)
 	}
-	if !compactRequested {
-		return outcome, nil
+
+	if compactRequested {
+		compactionResult, compactErr := compactRun()
+		if compactErr != nil {
+			// Retention deletes already committed and are backed by backupPath;
+			// only the optional compaction step failed, so the run is reported
+			// as a partial success rather than a total abort.
+			outcome.Execution.Partial = true
+			return outcome, fmt.Errorf("%w: compact database: %w", ErrPartial, compactErr)
+		}
+		outcome.Compaction = &compactionResult
 	}
 
-	compactionResult, err := compactRun()
-	if err != nil {
-		// Retention deletes already committed and are backed by backupPath;
-		// only the optional compaction step failed, so the run is reported
-		// as a partial failure rather than a total abort.
-		return outcome, fmt.Errorf("compact database: %w", err)
+	if outcome.Execution.Partial {
+		return outcome, ErrPartial
 	}
-	outcome.Compaction = &compactionResult
 	return outcome, nil
 }
 
@@ -258,38 +264,74 @@ func applyDeliveryCandidateLimit(options models.AgentDeliveryRetentionBatchOptio
 
 func executeDeliveryRetention(
 	ctx context.Context,
-	repo *sqlite.Repository,
+	repo deliveryRetentionRepository,
 	options models.AgentDeliveryRetentionBatchOptions,
 ) (ExecutionResult, error) {
+	options.OfflineMaintenance = true
 	var execution ExecutionResult
+
 	result, err := repo.RunAgentDeliveryRetentionBatch(ctx, options)
 	if err != nil {
-		return execution, err
+		if !isTimeout(err) {
+			return execution, err
+		}
+		execution.Partial = true
+	} else {
+		execution.DeliveryBatches++
+		execution.DeletedDeliveryEventPayloads = result.EventPayloadsPruned
+		execution.DeletedSettledDeliveryPrompts = result.PromptPayloadsPruned
+		execution.RetiredDeliveryEventReceipts = result.EventRowsRetired
+		execution.Partial = result.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
 	}
-	execution.DeliveryBatches++
-	execution.DeletedDeliveryEventPayloads = result.EventPayloadsPruned
-	execution.DeletedSettledDeliveryPrompts = result.PromptPayloadsPruned
-	execution.RetiredDeliveryEventReceipts = result.EventRowsRetired
-	execution.Partial = result.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
-	orphans, err := repo.RunAgentDeliveryOrphanBatch(ctx, models.AgentDeliveryOrphanBatchOptions{MaxCandidates: options.MaxCandidates})
+
+	orphans, err := repo.RunAgentDeliveryOrphanBatch(ctx, models.AgentDeliveryOrphanBatchOptions{
+		MaxCandidates: options.MaxCandidates, OfflineMaintenance: true,
+	})
 	if err != nil {
-		execution.Partial = execution.DeliveryBatches > 0
-		return execution, err
+		if !isTimeout(err) {
+			return execution, err
+		}
+		execution.Partial = true
+	} else {
+		execution.DeliveryBatches++
+		execution.DeliveryOrphanJobsScheduled = orphans.JobsScheduled
+		execution.Partial = execution.Partial || orphans.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
 	}
-	execution.DeliveryBatches++
-	execution.DeliveryOrphanJobsScheduled = orphans.JobsScheduled
-	execution.Partial = execution.Partial || orphans.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
-	retirement, err := repo.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{MaxCandidates: options.MaxCandidates})
+
+	retirement, err := repo.RunAgentDeliveryRetirementBatch(ctx, models.AgentDeliveryRetirementBatchOptions{
+		MaxCandidates: options.MaxCandidates, OfflineMaintenance: true,
+	})
 	if err != nil {
-		execution.Partial = execution.DeliveryBatches > 0
-		return execution, err
+		if !isTimeout(err) {
+			return execution, err
+		}
+		execution.Partial = true
+	} else {
+		execution.DeliveryBatches++
+		execution.PurgedRetiredDeliveryRows = retirement.RowsPurged
+		execution.DeliveryRetirementJobsCompleted = retirement.Completed
+		execution.Partial = execution.Partial || retirement.Pending || retirement.Suspended > 0 ||
+			retirement.RowsPurged >= deliveryCandidateLimit(options.MaxCandidates)
 	}
-	execution.DeliveryBatches++
-	execution.PurgedRetiredDeliveryRows = retirement.RowsPurged
-	execution.DeliveryRetirementJobsCompleted = retirement.Completed
-	execution.Partial = execution.Partial || retirement.Pending || retirement.Suspended > 0 ||
-		retirement.RowsPurged >= deliveryCandidateLimit(options.MaxCandidates)
+
 	return execution, nil
+}
+
+// deliveryRetentionRepository is the narrow slice of the task repository
+// the offline maintenance command exercises for durable-delivery cleanup.
+// *sqlite.Repository satisfies it; tests substitute a fake to inject step
+// failures without a multi-million-row database.
+type deliveryRetentionRepository interface {
+	RunAgentDeliveryRetentionBatch(context.Context, models.AgentDeliveryRetentionBatchOptions) (models.AgentDeliveryRetentionBatchResult, error)
+	RunAgentDeliveryOrphanBatch(context.Context, models.AgentDeliveryOrphanBatchOptions) (models.AgentDeliveryOrphanBatchResult, error)
+	RunAgentDeliveryRetirementBatch(context.Context, models.AgentDeliveryRetirementBatchOptions) (models.AgentDeliveryRetirementBatchResult, error)
+}
+
+// isTimeout reports whether a repository step failed because its offline
+// budget expired. Such a failure is a partial result that the command
+// continues past, not a fatal error.
+func isTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 func deliveryCandidateLimit(limit int) int {
