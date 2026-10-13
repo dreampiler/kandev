@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { updateAgentProfileAction } from "@/app/actions/agents";
+import { dynamicProfilesFromApiError, updateAgentProfileAction } from "@/app/actions/agents";
 import { isHandledApiError } from "@/lib/api/client";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -13,6 +13,7 @@ import {
 } from "@/lib/settings/agent-profile-selector-order";
 import type { AppState } from "@/lib/state/store";
 import type { Agent, AgentProfile } from "@/lib/types/http";
+import type { DynamicProfileReference } from "@/lib/types/agent-profile-errors";
 
 type ProfileState = Pick<AppState, "settingsAgents" | "agentProfiles">;
 
@@ -52,8 +53,14 @@ export function applyEnabledProfileUpdate(
  * Immediate-save toggle for the /settings/agents profile list. The response
  * is merged into the store atomically from the current state, so concurrent
  * toggles cannot resurrect a sibling profile's previous enabled value.
+ *
+ * When the disable is refused because dynamic profiles reference the profile,
+ * `onDynamicConflict` receives the references so the caller can open the
+ * resolution confirmation instead of a generic toast.
  */
-export function useProfileEnabledToggle() {
+export function useProfileEnabledToggle(options?: {
+  onDynamicConflict?: (profile: AgentProfile, references: DynamicProfileReference[]) => void;
+}) {
   const { toast } = useToast();
   const storeApi = useAppStoreApi();
 
@@ -64,6 +71,11 @@ export function useProfileEnabledToggle() {
         storeApi.setState((state) => applyEnabledProfileUpdate(state, profile, updated));
       } catch (error) {
         if (isHandledApiError(error)) return;
+        const dynamicRefs = dynamicProfilesFromApiError(error);
+        if (dynamicRefs.length > 0) {
+          options?.onDynamicConflict?.(profile, dynamicRefs);
+          return;
+        }
         toast({
           title: translate("agents:failedToUpdateProfile"),
           description: error instanceof Error ? error.message : translate("agents:requestFailed"),
@@ -71,6 +83,6 @@ export function useProfileEnabledToggle() {
         });
       }
     },
-    [storeApi, toast],
+    [options, storeApi, toast],
   );
 }
