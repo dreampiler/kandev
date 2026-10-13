@@ -173,6 +173,17 @@ type DynamicAgentCandidateDTO struct {
 	Rules              map[string]string      `json:"rules,omitempty"`
 }
 
+// DynamicReferenceResolutionRequest is the dedicated body for resolving the
+// dynamic profiles that reference a concrete profile before it is disabled or
+// deleted. Operation is "disable" or "delete"; Action is "disable_candidate" or
+// "remove_candidate"; Versions echoes each referencing dynamic profile's
+// optimistic version from the conflict response.
+type DynamicReferenceResolutionRequest struct {
+	Operation string           `json:"operation"`
+	Action    string           `json:"action"`
+	Versions  map[string]int64 `json:"versions"`
+}
+
 // GetWorkspaceID lets struct-shaped profile payloads (e.g. the MCP event-bus
 // publisher wrapping *AgentProfileDTO under "profile") be routed by the
 // gateway's extractWorkspaceID without a JSON round-trip.

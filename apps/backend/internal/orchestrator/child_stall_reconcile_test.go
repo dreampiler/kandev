@@ -3,10 +3,12 @@ package orchestrator
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/childstall"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -68,12 +70,28 @@ func (f *childStallStoreFake) SetSessionMetadataKey(context.Context, string, str
 	return nil
 }
 
+func (f *childStallStoreFake) SetTaskMetadataKeyIfNotArchived(_ context.Context, taskID, key string, value interface{}) (bool, error) {
+	task := f.tasks[taskID]
+	if task == nil {
+		return false, nil
+	}
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	task.Metadata[key] = value
+	return true, nil
+}
+
 func (f *childStallStoreFake) GetTask(_ context.Context, id string) (*models.Task, error) {
 	return f.tasks[id], nil
 }
 
 func (f *childStallStoreFake) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
-	return f.sessions[id], nil
+	session, ok := f.sessions[id]
+	if !ok {
+		return nil, models.ErrTaskSessionNotFound
+	}
+	return session, nil
 }
 
 func (f *childStallStoreFake) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
@@ -87,6 +105,10 @@ func (f *childStallStoreFake) GetPrimarySessionByTaskID(_ context.Context, taskI
 
 func (f *childStallStoreFake) GetLatestTaskStepTransitionID(context.Context, string) (int64, error) {
 	return 1, nil
+}
+
+func (f *childStallStoreFake) ListTaskStepTransitions(context.Context, string, int64, int) ([]models.StepTransition, error) {
+	return []models.StepTransition{{ID: 1, OccurredAt: childStallReconcileNow.Add(-30 * time.Minute)}}, nil
 }
 
 func (f *childStallStoreFake) ListPendingInteractions(context.Context, models.PendingInteractionFilter) ([]*models.Message, error) {
@@ -122,20 +144,36 @@ func (childStallStepGetterFake) GetWorkflowMeta(context.Context, string) (Workfl
 // task repository.
 type childStallTestOrchestratorRepo struct {
 	sessionExecutorStore
+	// boundSessionID, when set, is returned as the task's durable step binding
+	// so tests can exercise the bound-session candidate read.
+	boundSessionID string
 }
 
 func (childStallTestOrchestratorRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }
 
+func (r childStallTestOrchestratorRepo) GetWorkflowSessionBinding(context.Context, string, string) (*models.WorkflowSessionBinding, error) {
+	if r.boundSessionID == "" {
+		return nil, nil
+	}
+	return &models.WorkflowSessionBinding{TaskID: "child", SessionID: r.boundSessionID}, nil
+}
+
 func newChildStallReconcileFixture(t *testing.T) (*ChildStallProducer, *messagequeue.Service, *childStallStoreFake) {
+	return newChildStallReconcileFixtureWithBinding(t, "")
+}
+
+func newChildStallReconcileFixtureWithBinding(
+	t *testing.T, boundSessionID string,
+) (*ChildStallProducer, *messagequeue.Service, *childStallStoreFake) {
 	t.Helper()
 	log := testLogger()
 	queue := messagequeue.NewServiceMemory(log)
 	svc := &Service{
 		logger:             log,
 		messageQueue:       queue,
-		repo:               childStallTestOrchestratorRepo{},
+		repo:               childStallTestOrchestratorRepo{boundSessionID: boundSessionID},
 		workflowStepGetter: childStallStepGetterFake{},
 	}
 	store := newChildStallStoreFake()
@@ -409,5 +447,170 @@ func TestPruneChildStallAlertsSupersedesOlderForSameChild(t *testing.T) {
 	}
 	if !containsID(ids, "user-key") {
 		t.Fatalf("user entry must be preserved, got %v", ids)
+	}
+}
+
+func childSessionEntries(
+	t *testing.T, ctx context.Context, queue *messagequeue.Service, taskID, sessionID string,
+) []messagequeue.QueuedMessage {
+	t.Helper()
+	identity, err := queue.ResolveSessionIdentity(ctx, taskID, sessionID)
+	if err != nil {
+		t.Fatalf("resolve session identity: %v", err)
+	}
+	entries, _, err := queue.SnapshotSessionForIdentity(ctx, identity)
+	if err != nil {
+		t.Fatalf("snapshot session: %v", err)
+	}
+	return entries
+}
+
+// TestMissingSignalSuppressedWhenSignalIsOnAnotherSession proves a completion
+// signal recorded on a replacement session suppresses the reminder even though
+// the settled turn still names the old session — the divergence that produced
+// repeated "STEP COMPLETION SIGNAL MISSING" reminders answered with
+// already_signaled.
+func TestMissingSignalSuppressedWhenSignalIsOnAnotherSession(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.sessions["child-session-2"] = &models.TaskSession{
+		ID: "child-session-2", TaskID: "child", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyPendingStepCompletion: models.PendingStepCompletionSignal{
+				StepID: "step-1", Summary: "done",
+			},
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := queueEntryIDs(t, ctx, queue, "child", "child-session"); len(ids) != 0 {
+		t.Fatalf("a step whose signal is recorded must not be nudged, got %v", ids)
+	}
+	if state, _ := models.LoadChildStallState(turn.Metadata); state.State == childStallStateNudgedChild {
+		t.Fatalf("turn was nudged despite the signal on another session: %+v", state)
+	}
+}
+
+// TestMissingSignalNotSuppressedBySignalFromEarlierEntry proves a signal left
+// on an authoritative session by an earlier entry of the same step cannot hide
+// a genuine stall in the new entry: the reminder still fires.
+func TestMissingSignalNotSuppressedBySignalFromEarlierEntry(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	// The primary still carries a signal for the step, but it was signalled
+	// before this entry began.
+	store.sessions["child-session"].IsPrimary = true
+	store.sessions["child-session"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyPendingStepCompletion: models.PendingStepCompletionSignal{
+			StepID: "step-1", Summary: "old", SignaledAt: childStallReconcileNow.Add(-time.Hour),
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := childSessionEntries(t, ctx, queue, "child", "child-session"); len(ids) == 0 {
+		t.Fatal("a signal from an earlier entry must not suppress the reminder")
+	}
+}
+
+// TestMissingSignalStreakContinuesOnTaskAcrossSessions proves the (task, step)
+// nudge streak is not reset by a session substitution: a third consecutive
+// stall escalates to the parent even though this turn runs on a fresh session.
+func TestMissingSignalStreakContinuesOnTaskAcrossSessions(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.tasks["child"].Metadata = map[string]interface{}{
+		models.TaskMetaKeyChildStallNudge: models.ChildStallNudgeStreak{
+			Cause: string(childstall.CauseMissingCompletionSignal), TransitionID: 1, Count: 2,
+		},
+	}
+	store.sessions["parent-session"] = &models.TaskSession{
+		ID: "parent-session", TaskID: "parent", IsPrimary: true, State: models.TaskSessionStateWaitingForInput,
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := queueEntryIDs(t, ctx, queue, "parent", "parent-session"); len(ids) == 0 {
+		t.Fatal("the third consecutive stall must escalate to the parent, got none")
+	}
+	if ids := queueEntryIDs(t, ctx, queue, "child", "child-session"); len(ids) != 0 {
+		t.Fatalf("an escalating stall must not also nudge the child, got %v", ids)
+	}
+}
+
+// TestMissingSignalNudgeNamesRecordedRefusal proves the reminder surfaces the
+// real refusal reason when a step_complete call was rejected by the
+// ownership/profile gate, instead of implying the agent never signalled.
+func TestMissingSignalNudgeNamesRecordedRefusal(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.sessions["child-session"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyStepCompleteRejection: models.StepCompleteRejection{
+			StepID: "step-1",
+			Reason: "This session runs agent profile a, but the current step uses b.",
+			At:     childStallReconcileNow.Add(-time.Minute),
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	entries := childSessionEntries(t, ctx, queue, "child", "child-session")
+	if len(entries) == 0 {
+		t.Fatal("a stalled step with no recorded signal must still be nudged")
+	}
+	content := entries[0].Content
+	if !strings.Contains(content, "was refused") || !strings.Contains(content, "profile a") {
+		t.Fatalf("nudge must name the recorded refusal, got %q", content)
+	}
+}
+
+// TestMissingSignalNudgeNamesRefusalWithoutTimestamp proves a recorded refusal
+// with a missing timestamp still names the block reason instead of falling back
+// to the generic missing-signal reminder.
+func TestMissingSignalNudgeNamesRefusalWithoutTimestamp(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.sessions["child-session"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyStepCompleteRejection: models.StepCompleteRejection{
+			StepID: "step-1",
+			Reason: "This session runs agent profile a, but the current step uses b.",
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	entries := childSessionEntries(t, ctx, queue, "child", "child-session")
+	if len(entries) == 0 {
+		t.Fatal("a stalled step with no recorded signal must still be nudged")
+	}
+	if content := entries[0].Content; !strings.Contains(content, "was refused") || !strings.Contains(content, "profile a") {
+		t.Fatalf("nudge must name the timestamp-less refusal, got %q", content)
+	}
+}
+
+// TestMissingSignalSurvivesDeletedBoundSession proves a durable step binding
+// that outlived its session (a not-found bound session row) does not abort
+// evidence gathering: the genuine stall is still classified and nudged.
+func TestMissingSignalSurvivesDeletedBoundSession(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixtureWithBinding(t, "deleted-session")
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := childSessionEntries(t, ctx, queue, "child", "child-session"); len(ids) == 0 {
+		t.Fatal("a missing bound session must not block the reminder")
 	}
 }
