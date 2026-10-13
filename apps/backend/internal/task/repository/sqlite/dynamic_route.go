@@ -580,7 +580,7 @@ func (r *Repository) SaveRouteContinuation(ctx context.Context, record dynamicru
 }
 
 func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.CircuitSnapshot) error {
-	updatedAt := snapshot.UpdatedAt
+	updatedAt := snapshot.UpdatedAt.UTC()
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}

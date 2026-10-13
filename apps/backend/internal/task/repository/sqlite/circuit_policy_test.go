@@ -2,12 +2,32 @@ package sqlite
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
+
+func TestCircuitPolicyPersistsFailureTimeInUTC(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	local := time.Date(2026, 10, 7, 13, 47, 0, 0, time.FixedZone("KST", 9*60*60))
+	if err := repo.SaveCircuit(ctx, dynamic.CircuitSnapshot{
+		Key: "model:timezone", State: dynamic.CircuitOpen,
+		Code: routingerr.CodeRateLimited, UpdatedAt: local,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var raw string
+	if err := repo.db.QueryRowContext(ctx, `SELECT CAST(updated_at AS TEXT) FROM dynamic_resource_circuits WHERE resource_key = ?`, "model:timezone").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(raw, "2026-10-07 04:47:00") || !strings.HasSuffix(raw, "+00:00") {
+		t.Fatalf("stored failure time = %q, want the same instant in UTC", raw)
+	}
+}
 
 func TestCircuitPolicyRestorePreservesFailureTimeAndDurableCap(t *testing.T) {
 	repo := newRepoForSessionTests(t)
