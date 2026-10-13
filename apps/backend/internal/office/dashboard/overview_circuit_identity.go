@@ -43,7 +43,7 @@ func circuitIdentityOf(key string) circuitIdentity {
 		return circuitIdentity{}
 	}
 	switch scope {
-	case "profile":
+	case "profile", "account_block":
 		return circuitIdentity{profileID: value}
 	case "credential":
 		return circuitIdentity{profileID: profileIDFromBinding(value)}

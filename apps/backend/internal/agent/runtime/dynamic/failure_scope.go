@@ -40,6 +40,8 @@ const (
 	// CauseUpstreamHostLimit is a gateway's shared upstream pool that is
 	// rate-limited for one model ("temporarily rate-limited upstream").
 	CauseUpstreamHostLimit FailureCause = "upstream_host_limit"
+	// CauseGatewayRateLimit is a gateway notice that does not name its window.
+	CauseGatewayRateLimit FailureCause = "gateway_rate_limit"
 	// CauseModelWithdrawn is a model the gateway no longer serves.
 	CauseModelWithdrawn FailureCause = "model_withdrawn"
 	// CauseAccountSetting is an account setting that excludes the model until
@@ -102,11 +104,11 @@ var failureCauseRules = []causeRule{
 	{rule: routingerr.RuleCodexQuota, cause: CauseAccountQuota},
 	{rule: routingerr.RuleProviderQuotaNotice, cause: CauseAccountQuota},
 	{rule: routingerr.RuleOpenCodeGoUsageLimit, cause: CauseGoUsageLimit},
-	// Free daily allowances. Zen recovered after the next 09:00 KST in 500 of
-	// 506 cases; the same notice from OpenRouter came from a withdrawn model,
-	// which a daily block also retries only once a day.
+	// Zen recovered after 09:00 KST in 500 of 506 observations. OpenRouter's
+	// AI-SDK notice hides whether its free allowance is per-minute or per-day;
+	// the single withdrawn-model observation does not establish a daily reset.
 	{rule: routingerr.RuleOpenCodeRateTryLater, path: pathOpenCodeZen, cause: CauseFreeDailyLimit},
-	{rule: routingerr.RuleOpenCodeRateTryLater, path: pathOpenRouter, cause: CauseFreeDailyLimit},
+	{rule: routingerr.RuleOpenCodeRateTryLater, path: pathOpenRouter, cause: CauseGatewayRateLimit},
 	{rule: routingerr.RuleOpenCodeFreeModelsPerDay, cause: CauseFreeAccountDailyLimit},
 	{rule: routingerr.RuleOpenCodeModelPerDay, cause: CauseFreeDailyLimit},
 	{rule: routingerr.RuleOpenCodeUpstreamHostLimit, cause: CauseUpstreamHostLimit},
@@ -171,6 +173,8 @@ type causePolicy struct {
 	// nextUTCDayAfterStrikes switches to the next 00:00 UTC once strikes pass
 	// this count; zero never switches.
 	nextUTCDayAfterStrikes int
+	// dailyStrikes counts only failures on the current UTC date.
+	dailyStrikes bool
 	// crossPathWindow suspends the model on every path when another path
 	// reported the same cause for the same model within the window.
 	crossPathWindow time.Duration
@@ -189,6 +193,8 @@ var (
 	endpointLadder = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute}
 	// modelHostLadder: header timeouts and 5xx recovered in 1 to 22 minutes.
 	modelHostLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+	// gatewayRateLadder retries notices whose per-minute/per-day window is hidden.
+	gatewayRateLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
 	// upstreamHostLadder: a shared upstream pool that stays limited for more
 	// than about six hours waits for the next daily reset.
 	upstreamHostLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
@@ -217,6 +223,7 @@ var failureCausePolicies = map[FailureCause]causePolicy{
 	CauseFreeAccountDailyLimit: {scope: BlockAccountTier, untilNextUTCDay: true},
 	CauseUsageLimit:            {scope: BlockUsageLimit, usageLimitDuration: true},
 	CauseUpstreamHostLimit:     {scope: BlockPathModel, ladder: upstreamHostLadder, nextUTCDayAfterStrikes: upstreamHostDailyAfterStrikes},
+	CauseGatewayRateLimit:      {scope: BlockPathModel, ladder: gatewayRateLadder, nextUTCDayAfterStrikes: upstreamHostDailyAfterStrikes, dailyStrikes: true},
 	CauseModelWithdrawn:        {scope: BlockPathModel, ladder: withdrawnLadder},
 	CauseAccountSetting:        {scope: BlockPathModel, ladder: accountSettingLadder},
 	CauseEndpointIntermittent:  {scope: BlockPathModel, ladder: endpointLadder},
@@ -424,11 +431,19 @@ func (e *Engine) openCircuit(
 	policy causePolicy,
 	now time.Time,
 ) {
-	until := e.causeSuspensionUntil(ctx, candidate, failure, policy, e.circuits.NextStrike(key), now)
+	strikes := e.circuits.NextStrike(key)
+	if policy.dailyStrikes {
+		strikes = e.circuits.NextDailyStrike(key)
+	}
+	until := e.causeSuspensionUntil(ctx, candidate, failure, policy, strikes, now)
 	if running := e.circuits.Inspect(key, now); running.State == ResourceWaiting && running.Until.After(until) {
 		until = running.Until
 	}
-	e.circuits.Open(key, until, failure.Code)
+	if policy.dailyStrikes {
+		e.circuits.OpenDaily(key, until, failure.Code)
+	} else {
+		e.circuits.Open(key, until, failure.Code)
+	}
 }
 
 // noteCrossPathFailure records a model-host failure of one path and reports
