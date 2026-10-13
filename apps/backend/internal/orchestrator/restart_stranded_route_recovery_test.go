@@ -32,6 +32,26 @@ type strandedRouteFixture struct {
 // runtime behind it.
 func newStrandedRouteFixture(t *testing.T) *strandedRouteFixture {
 	t.Helper()
+	return newStrandedRouteFixtureWithState(t, dynamicRouteStatusActionRequired, unknownPromptOutcome)
+}
+
+// newStrandedStartingRouteFixture reproduces the newly demonstrated restart
+// state: the route projection is still "starting" because the process-start
+// callback never arrived, a restart-interrupted recovery block records the
+// turn, and a turn row is open with no runtime behind it. seedBlock=false
+// models a launch merely starting in this boot, which has no restart-interrupted
+// block and must keep the route-action refusal.
+func newStrandedStartingRouteFixture(t *testing.T, seedBlock bool) *strandedRouteFixture {
+	t.Helper()
+	reason := ""
+	if seedBlock {
+		reason = durableDeliveryUnresolvedReason
+	}
+	return newStrandedRouteFixtureWithState(t, dynamicRouteStatusStarting, reason)
+}
+
+func newStrandedRouteFixtureWithState(t *testing.T, routeState, blockReason string) *strandedRouteFixture {
+	t.Helper()
 	ctx := context.Background()
 	const (
 		taskID      = "task-stranded-route"
@@ -51,15 +71,19 @@ func newStrandedRouteFixture(t *testing.T) *strandedRouteFixture {
 	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
 	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
 	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
-	svc.markDynamicRouteActionRequired(ctx, sessionID, decision.Generation, "agent_process_start_failed")
+	if routeState == dynamicRouteStatusActionRequired {
+		svc.markDynamicRouteActionRequired(ctx, sessionID, decision.Generation, "agent_process_start_failed")
+	}
 
 	session, err := repo.GetTaskSession(ctx, sessionID)
 	require.NoError(t, err)
-	require.Equal(t, dynamicRouteStatusActionRequired, session.RouteState)
-	require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
-		SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
-		Reason: unknownPromptOutcome, State: models.RecoveryBlockOpen,
-	}))
+	require.Equal(t, routeState, session.RouteState)
+	if blockReason != "" {
+		require.NoError(t, repo.UpsertSessionRecoveryBlock(ctx, &models.SessionRecoveryBlock{
+			SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
+			Reason: blockReason, State: models.RecoveryBlockOpen,
+		}))
+	}
 	_, err = svc.turnService.StartTurn(ctx, sessionID)
 	require.NoError(t, err)
 	return &strandedRouteFixture{
@@ -209,4 +233,67 @@ func TestRestartStrandedDynamicRoute_RetryContinuesFromHistory(t *testing.T) {
 	value, handed := f.svc.routeActionContinuations.Load(f.sessionID)
 	require.True(t, handed)
 	require.Equal(t, f.taskID, value)
+}
+
+// TestRestartStrandedStartingRoute_SettlesPreviousBootOrphanTurn covers the
+// newly demonstrated cycle: the route projection is still "starting" with an
+// open restart-interrupted block and no runtime, so the orphan turn is provably
+// pre-boot. The route action settles it and runs, and continue_from_history is
+// no longer refused as dynamic_route_pending. Only the route action performs
+// the turn settlement; the two entry points are no longer mutually blocking.
+func TestRestartStrandedStartingRoute_SettlesPreviousBootOrphanTurn(t *testing.T) {
+	ctx := context.Background()
+	f := newStrandedStartingRouteFixture(t, true)
+
+	require.NoError(t, f.explicitRecoveryAdmission(ctx),
+		"a stranded starting route must not block continue_from_history")
+
+	handlerCalls := 0
+	f.svc.SetRouteActionHandler(func(context.Context, RouteActionRequest) (*RouteActionResult, error) {
+		handlerCalls++
+		return &RouteActionResult{SessionID: f.sessionID}, nil
+	})
+	_, err := f.svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: f.sessionID, Action: RouteActionTryNext, ExpectedGeneration: f.generation,
+	})
+	require.NoError(t, err, "a provably pre-boot orphan turn must not block the route action")
+	require.Equal(t, 1, handlerCalls)
+	active, err := f.svc.turnService.GetActiveTurn(ctx, f.sessionID)
+	require.NoError(t, err)
+	require.Nil(t, active, "the orphaned turn is settled before the route action runs")
+}
+
+// TestRestartStrandedStartingRoute_LiveRuntimeKeepsGuard keeps the existing
+// safety guard: a live runtime still owns its turn, so the route action is
+// refused even with a restart-interrupted block present.
+func TestRestartStrandedStartingRoute_LiveRuntimeKeepsGuard(t *testing.T) {
+	ctx := context.Background()
+	f := newStrandedStartingRouteFixture(t, true)
+	f.agent.isAgentRunningFn = func(context.Context, string) bool { return true }
+
+	f.svc.SetRouteActionHandler(func(context.Context, RouteActionRequest) (*RouteActionResult, error) {
+		t.Fatal("route action handler must not run while a live runtime owns the turn")
+		return nil, nil
+	})
+	_, err := f.svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: f.sessionID, Action: RouteActionTryNext, ExpectedGeneration: f.generation,
+	})
+	require.ErrorIs(t, err, ErrRouteActionActiveTurn)
+}
+
+// TestRestartStrandedStartingRoute_NoInterruptedBlockKeepsGuard pins that a
+// "starting" route with no restart-interrupted block is a launch merely starting
+// in this boot; its turn must not be settled.
+func TestRestartStrandedStartingRoute_NoInterruptedBlockKeepsGuard(t *testing.T) {
+	ctx := context.Background()
+	f := newStrandedStartingRouteFixture(t, false)
+
+	f.svc.SetRouteActionHandler(func(context.Context, RouteActionRequest) (*RouteActionResult, error) {
+		t.Fatal("a launch merely starting in this boot must not have its turn settled")
+		return nil, nil
+	})
+	_, err := f.svc.ApplyRouteAction(ctx, RouteActionRequest{
+		SessionID: f.sessionID, Action: RouteActionTryNext, ExpectedGeneration: f.generation,
+	})
+	require.ErrorIs(t, err, ErrRouteActionActiveTurn)
 }
