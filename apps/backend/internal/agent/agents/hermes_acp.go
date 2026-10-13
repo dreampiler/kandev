@@ -24,10 +24,7 @@ const hermesBin = "hermes"
 // detection sweep budget.
 const hermesCheckRetryTimeout = 8 * time.Second
 
-// hermesCommandCheckRunner runs one bounded ACP check. It is a variable so
-// tests can stub the runner and count attempts synchronously in the caller;
-// counting via the helper subprocess is load-sensitive (a bound can elapse
-// before the child records its start).
+// hermesCommandCheckRunner runs one bounded ACP check.
 var hermesCommandCheckRunner = runCommandCheck
 
 var (
