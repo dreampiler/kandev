@@ -149,6 +149,9 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
 
     def test_windows_loopback_listener_coverage_is_required(self) -> None:
         step = step_block(self.workflow, "Test Windows loopback listeners")
+        makefile = (REPO_ROOT / "apps" / "backend" / "Makefile").read_text(encoding="utf-8")
+        windows_target = makefile.partition("\ntest-windows:\n")[2].partition("\n## ")[0]
+        self.assertTrue(windows_target)
         self.assertIn("if: matrix.suite == 'native'", step)
         self.assertIn("shell: bash", step)
         self.assertIn("set -euo pipefail", step)
@@ -164,6 +167,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         ):
             with self.subTest(package=package):
                 self.assertIn(package, step)
+                self.assertIn(package, windows_target)
         for test_name in (
             "ConcurrentFailingStarts", "ResolveAndBind", "Tunnel", "TestCanBind",
             "TestWaitForHealthBypassesHTTPProxyForSpecificBind",
@@ -171,6 +175,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         ):
             with self.subTest(test=test_name):
                 self.assertIn(test_name, step)
+                self.assertIn(test_name, windows_target)
 
     def test_linux_shards_allow_scale_budget_only_with_retention_package(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
