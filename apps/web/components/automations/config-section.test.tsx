@@ -88,6 +88,10 @@ vi.mock("@/hooks/domains/kanban/use-all-workflow-snapshots", () => ({
   useAllWorkflowSnapshots: vi.fn(),
 }));
 
+vi.mock("@/hooks/domains/settings/use-automation-parent-candidates", () => ({
+  useAutomationParentCandidates: () => ({ candidates: [], loading: false }),
+}));
+
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
   useRepositories: () => ({ repositories: mockRepositories }),
 }));
@@ -142,10 +146,12 @@ function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> =
     <ConfigSection
       workspaceId={WORKSPACE_ID}
       workflowId=""
+      parentTaskId=""
       agentProfileId=""
       executorProfileId=""
       repositorySelections={[]}
       onWorkflowChange={() => {}}
+      onParentChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}
@@ -193,6 +199,18 @@ describe("ConfigSection shared task selectors", () => {
     expect(screen.queryByText("Use workspace default")).toBeNull();
     expect(
       screen.getByText("Run without repository files in a task-owned scratch workspace."),
+    ).toBeTruthy();
+  });
+
+  it("offers the optional parent task picker with its explanation", () => {
+    renderConfig();
+
+    expect(screen.getByText("Parent task (optional)")).toBeTruthy();
+    expect(screen.getByTestId("automation-parent-picker")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Each run's task is created under this task. Leave empty to keep it top-level.",
+      ),
     ).toBeTruthy();
   });
 
