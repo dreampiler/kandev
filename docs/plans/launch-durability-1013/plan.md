@@ -7,12 +7,14 @@ requirements:
   - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
   - REQ-OFFICE-AUTOMATION-CONTINUITY-003
   - REQ-OFFICE-AUTOMATION-RETRIES-001
+  - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 system_design:
   - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
   - ../../specs/agents/system-design/dynamic-agent-routing-01.md
   - ../../specs/platform/system-design/interrupted-prompt-recovery.md
   - ../../specs/office/system-design/automation-runs.md
   - ../../specs/office/system-design/automation-retries.md
+  - ../../specs/tasks/system-design/wip-limit-pull-system.md
 legacy_specs: []
 ---
 
@@ -30,10 +32,13 @@ build, replace the runtime, change automation policy, or modify the sync lane.
   flight. The later park rejected that predecessor and rolled back the
   destination. Preserve the ended predecessor and complete the departure
   without parking it again.
-- `8b5c4925`: logs show successful queue promotion and launch at 11:20 KST.
-  The observed zero-session interval alone does not prove lost launch ownership.
-  Do not add another launch consumer or reinterpret exit completion as start
-  completion.
+- `8b5c4925`: the transition ledger records the original feeder `wip_pull` at
+  02:03Z. Manual/MCP out-and-back moves occurred at 02:14Z and 02:15Z; the
+  11:20 KST launch followed that workaround. The workflow-store feeder path
+  changed the destination step without setting admission or clearing the old
+  queue destination/time. Its transaction persisted a task that still looked
+  queued, and the completed source-exit marker suppressed entry. Normalize the
+  existing admission fields before the same atomic promotion and event path.
 - `9e8c2ab7`: initial dynamic selection returned `no_eligible_candidate`, leaving
   a prepared session with no executor. Later entry idled that session; workflow
   auto-start attempted native resume and rejected the missing executor. Use
@@ -57,6 +62,7 @@ build, replace the runtime, change automation policy, or modify the sync lane.
 | 1 | [Workflow entry repair](task-01-workflow-entry.md) | done |
 | 2 | [Peer-message recovery](task-02-peer-message-recovery.md) | done |
 | 3 | [Automation diagnosis](task-03-automation-evidence.md) | done |
+| 4 | [Feeder admission repair](task-04-feeder-admission.md) | done |
 
 No native implementation agents were launched. Delivery uses the latest
 `origin/main`, repository hooks, a PR to `dreampiler/kandev:main`, and merge
@@ -78,3 +84,14 @@ Documentation catalog and specification lint passed. Public-doc validation
 fails on the unchanged baseline and repair because `coverage.json` does not
 account for `report_to_handoff_source_kandev`. Public documentation is unchanged;
 this repair restores the existing entry and recovery behavior.
+
+PR #271 delivered work orders 1 and 2. Its initial log-only diagnosis of the
+feeder case was insufficient: the later transition-ledger read established
+that the observed successful launch was after the workaround. Work order 4
+completes that original scope on main after #271 and #272.
+
+Follow-up baseline: `383a1f4fa0fb5672da6c71e07ed7b52dd425e45f`.
+The feeder regression failed before the three-field correction and passed
+afterward. Workflow store, queue lifecycle, and previous repair regressions
+passed under race. The complete orchestrator package reproduced only the
+same three already-recorded baseline failures.
