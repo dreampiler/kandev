@@ -71,7 +71,7 @@ The command applies the same retention batch as the background worker, so its de
 
 ## Read-only copy measurement
 
-Source: the approved operational database copy at `D:\260720_Ai_Workspace_Tools\offload-c-20261013\dbcopy-delivery\kandev.db`, taken 2026-10-13 17:53 KST (08:53 UTC) with the SQLite online backup API (WAL-consistent), 6.23 GB.
+Source: the approved operational database copy (operator-local path, not recorded), taken 2026-10-13 17:53 KST (08:53 UTC) with the SQLite online backup API (WAL-consistent), 6.23 GB.
 Read-only (`file:...?mode=ro&immutable=1`); only `agent_delivery_inbox`, `agent_delivery_effects`, `agent_delivery_cursors`, `agent_delivery_submissions`, `session_recovery_blocks` aggregates; no credential or payload values read.
 The predicate is evaluated with the retention code's own classifiers: the retained-terminal proof SQL is extracted verbatim from `agent_delivery_retention_proof.go`; the event-type classifier, submission states, event expiry (`replayAge = 24h`, `replayEvents = 10000`), `payload_pruned_at`/`hash_version`/`content_hash` guards and the contiguous-prefix rule mirror `agent_delivery_retention_candidates.go`, `agent_delivery_retention_events.go` and the new `agentDeliveryCompletedStreamSQL`. Clock is the copy time.
 
