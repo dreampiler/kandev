@@ -1,6 +1,18 @@
 package dynamic
 
-import "github.com/kandev/kandev/internal/agent/runtime/routingerr"
+import (
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
+
+// Account-block routing lifecycle events. They live under the routing.metric.*
+// namespace, the routing metrics convention, so a log rule can match the
+// transition without scanning free-form text.
+const (
+	eventAccountBlockHold    = "routing.metric.account_block_hold"
+	eventAccountBlockRelease = "routing.metric.account_block_release"
+)
 
 func accountBlockKey(executionProfileID string) string {
 	if executionProfileID == "" {
@@ -11,19 +23,34 @@ func accountBlockKey(executionProfileID string) string {
 
 // HoldAccountBlock keeps one execution profile out of every later selection
 // until its owner releases it. Credential, model, and other profiles'
-// circuits are never read or changed.
+// circuits are never read or changed. A newly established hold is reported as
+// a routing event; a repeated hold of an already-held profile is a no-op.
 func (e *Engine) HoldAccountBlock(executionProfileID string, code routingerr.Code) error {
 	if e == nil || e.circuits == nil {
 		return nil
 	}
-	return e.circuits.Hold(accountBlockKey(executionProfileID), code)
+	key := accountBlockKey(executionProfileID)
+	wasHeld := e.circuits.IsHeld(key)
+	err := e.circuits.Hold(key, code)
+	if !wasHeld && routingerr.HoldsUntilRelease(code) {
+		e.logger.Warn(eventAccountBlockHold,
+			zap.String("execution_profile_id", executionProfileID),
+			zap.String("code", string(code)))
+	}
+	return err
 }
 
 // ReleaseAccountBlock closes the owner-release hold of one execution profile
-// and reports whether a hold was closed.
+// and reports whether a hold was closed. Closing a hold is reported as a
+// routing event; a profile without a hold is a silent no-op.
 func (e *Engine) ReleaseAccountBlock(executionProfileID string) (bool, error) {
 	if e == nil || e.circuits == nil {
 		return false, nil
 	}
-	return e.circuits.ReleaseHold(accountBlockKey(executionProfileID))
+	released, err := e.circuits.ReleaseHold(accountBlockKey(executionProfileID))
+	if released && err == nil {
+		e.logger.Warn(eventAccountBlockRelease,
+			zap.String("execution_profile_id", executionProfileID))
+	}
+	return released, err
 }

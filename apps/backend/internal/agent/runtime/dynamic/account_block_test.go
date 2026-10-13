@@ -310,3 +310,39 @@ func TestReleaseAccountBlockKeepsHoldWhenSaveFails(t *testing.T) {
 		t.Fatalf("release after outage = %v, %v; want released", released, err)
 	}
 }
+
+// A newly established hold and its owner release each emit one routing event
+// with the execution profile, so the operational transition is observable. A
+// repeated hold or release that changes nothing emits nothing.
+func TestAccountBlockHoldAndReleaseEmitRoutingEvents(t *testing.T) {
+	log, observed := newObservedLogger()
+	engine := NewEngine(WithEngineLogger(log))
+
+	if err := engine.HoldAccountBlock("blocked", routingerr.CodeAccountBlocked); err != nil {
+		t.Fatalf("HoldAccountBlock: %v", err)
+	}
+	if err := engine.HoldAccountBlock("blocked", routingerr.CodeAccountBlocked); err != nil {
+		t.Fatalf("repeated HoldAccountBlock: %v", err)
+	}
+	if released, err := engine.ReleaseAccountBlock("blocked"); err != nil || !released {
+		t.Fatalf("ReleaseAccountBlock = %v, %v; want released", released, err)
+	}
+	if released, err := engine.ReleaseAccountBlock("blocked"); err != nil || released {
+		t.Fatalf("repeated ReleaseAccountBlock = %v, %v; want no-op", released, err)
+	}
+
+	holds := observed.FilterMessage(eventAccountBlockHold).All()
+	if len(holds) != 1 {
+		t.Fatalf("hold events = %d, want 1", len(holds))
+	}
+	if got := holds[0].ContextMap()["execution_profile_id"]; got != "blocked" {
+		t.Fatalf("hold execution_profile_id = %v, want blocked", got)
+	}
+	releases := observed.FilterMessage(eventAccountBlockRelease).All()
+	if len(releases) != 1 {
+		t.Fatalf("release events = %d, want 1", len(releases))
+	}
+	if got := releases[0].ContextMap()["execution_profile_id"]; got != "blocked" {
+		t.Fatalf("release execution_profile_id = %v, want blocked", got)
+	}
+}

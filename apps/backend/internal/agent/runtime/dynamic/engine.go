@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
@@ -46,6 +48,16 @@ func WithPersistence(persistence Persistence) EngineOption {
 	}
 }
 
+// WithEngineLogger sets the logger used for routing lifecycle events, such as
+// an account-block hold and its owner release. It defaults to a no-op logger.
+func WithEngineLogger(log *zap.Logger) EngineOption {
+	return func(engine *Engine) {
+		if log != nil {
+			engine.logger = log
+		}
+	}
+}
+
 type Engine struct {
 	mu          sync.Mutex
 	now         func() time.Time
@@ -54,6 +66,7 @@ type Engine struct {
 	persistence Persistence
 	loader      StateLoader
 	probes      map[string]ProbeLease
+	logger      *zap.Logger
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -67,6 +80,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
 		probes:      make(map[string]ProbeLease),
+		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 	}
 	for _, option := range options {

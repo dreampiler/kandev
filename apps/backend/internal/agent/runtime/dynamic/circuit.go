@@ -162,8 +162,6 @@ func (r *CircuitRegistry) Hold(key string, code routingerr.Code) error {
 		}
 	} else {
 		r.circuits[key] = circuit{state: CircuitOpen, code: code}
-		r.logger.Warn("circuit held until owner release",
-			zap.String("key", key), zap.String("code", string(code)))
 	}
 	return r.persistSnapshotLocked(key)
 }
@@ -188,7 +186,6 @@ func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
 		r.circuits[key] = entry
 		return false, err
 	}
-	r.logger.Info("circuit hold released by owner", zap.String("key", key))
 	return true, nil
 }
 
