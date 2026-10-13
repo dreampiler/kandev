@@ -460,7 +460,7 @@ func (r *Repository) reelectFailedWorkspaceMaterializationTx(
 	}
 	switch models.TaskEnvironmentStatus(status) {
 	case models.TaskEnvironmentStatusCreating:
-		return fmt.Errorf("%w: retry after the workspace materialization completes", models.ErrWorkspacePreparing)
+		return &models.WorkspacePreparingError{EnvironmentID: environmentID, Reason: "retry after the workspace materialization completes"}
 	case models.TaskEnvironmentStatusFailed:
 		return models.ErrTaskEnvironmentResetRequired
 	default:

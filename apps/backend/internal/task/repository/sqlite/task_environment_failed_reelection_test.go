@@ -97,6 +97,13 @@ func TestWorkspaceBindingConcurrentFailedReelectionHasOneOwner(t *testing.T) {
 			succeeded++
 		case errors.Is(err, models.ErrWorkspacePreparing):
 			preparing++
+			var detail *models.WorkspacePreparingError
+			if !errors.As(err, &detail) {
+				t.Fatalf("concurrent re-election refusal %v is not a structured WorkspacePreparingError the binding retry can wait on", err)
+			}
+			if detail.EnvironmentID != environmentID {
+				t.Fatalf("refusal environment = %q, want elected environment %q", detail.EnvironmentID, environmentID)
+			}
 		default:
 			t.Fatalf("concurrent re-election error = %v", err)
 		}
@@ -110,6 +117,36 @@ func TestWorkspaceBindingConcurrentFailedReelectionHasOneOwner(t *testing.T) {
 	}
 	if environment.Status != models.TaskEnvironmentStatusCreating {
 		t.Fatalf("environment status = %q, want creating", environment.Status)
+	}
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6
+func TestFailedWorkspaceReelectionLoserReturnsPreparingError(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	seedMaterializationClaimTask(t, repo, "task-failed-race-loser")
+	owner := seedCreatingOwner(t, repo, "task-failed-race-loser", "session-failed-race-winner", models.TaskSessionStateCreated)
+
+	// A second start read the row while it was still failed; by the time its
+	// re-election UPDATE ran, the first start had already re-elected the row
+	// to creating. That interleaving is real under PostgreSQL READ COMMITTED,
+	// so force the losing re-election deterministically here.
+	ctx := context.Background()
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	err = repo.reelectFailedWorkspaceMaterializationTx(ctx, tx, owner.TaskEnvironmentID, "session-failed-race-loser")
+	var detail *models.WorkspacePreparingError
+	if !errors.As(err, &detail) {
+		t.Fatalf("lost failed re-election error = %v, want a structured WorkspacePreparingError the binding retry can wait on", err)
+	}
+	if !errors.Is(err, models.ErrWorkspacePreparing) {
+		t.Fatalf("lost failed re-election error = %v, want ErrWorkspacePreparing", err)
+	}
+	if detail.EnvironmentID != owner.TaskEnvironmentID {
+		t.Fatalf("refusal environment = %q, want elected environment %q", detail.EnvironmentID, owner.TaskEnvironmentID)
 	}
 }
 
