@@ -273,6 +273,10 @@ jobs:
       # them, so nothing in this job used to fail on a type error. Runs before
       # the tests to fail fast on the cheaper check.
       - name: Run typecheck
+        # Reserve a compiler heap on the 16 GiB CI hosts while leaving room
+        # for native memory and runner/container overhead.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm --filter @kandev/web typecheck
 
       - name: Verify standalone plugin SDK contract
