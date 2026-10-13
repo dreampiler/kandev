@@ -803,6 +803,9 @@ func (s *Service) startCreatedSession(
 	// When the user sends the first message to a prepared session, on_turn_start may fire
 	// and move the step, which sets the session to WAITING_FOR_INPUT before we get here.
 	if session.State != models.TaskSessionStateCreated && session.State != models.TaskSessionStateWaitingForInput {
+		if autoStart && isTerminalSessionState(session.State) {
+			return nil, newWorkflowAutoStartSessionTerminalizedError(session)
+		}
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
 			return nil, executor.ErrExecutionAlreadyRunning
 		}

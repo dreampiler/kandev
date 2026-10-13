@@ -4045,7 +4045,7 @@ func (s *Service) finishWorkflowProfileSwitchSource(
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 ) (bool, error) {
 	if endPolicy == models.WorkflowProfileSessionEndPolicyPark {
-		return s.parkSessionForProfileSwitch(ctx, taskID, session)
+		return s.finishParkedWorkflowProfileSwitchSource(ctx, taskID, session)
 	}
 	s.completeAndStopSession(ctx, taskID, session)
 	return true, nil
@@ -6343,6 +6343,11 @@ func (s *Service) autoStartStepPromptWithPromptContext(
 	handoffOnce *stepHandoffOnce,
 	promptReferenceContext string,
 ) error {
+	var err error
+	session, err = s.workflowEntryLaunchSession(ctx, session)
+	if err != nil {
+		return err
+	}
 	state, actionable, err := s.prepareAutoStartStepPrompt(
 		ctx, taskID, session, step, prompt, planMode, shouldQueueIfBusy, handoffOnce, promptReferenceContext,
 	)

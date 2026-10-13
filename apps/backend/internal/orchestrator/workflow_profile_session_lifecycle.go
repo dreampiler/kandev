@@ -60,6 +60,14 @@ func workflowProfileSwitchTerminalEventMatches(ctx context.Context, executionID 
 	return state.terminalExecutionID != "" && state.terminalExecutionID == executionID
 }
 
+func (s *Service) finishParkedWorkflowProfileSwitchSource(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+) (bool, error) {
+	return s.parkSessionForProfileSwitchWithTerminalSource(ctx, taskID, session, true)
+}
+
 // parkSessionForProfileSwitch keeps the source answerable while ensuring the
 // old runtime's terminal event cannot advance the destination workflow step.
 // The bool reports whether the source was durably parked. Runtime teardown is
@@ -69,11 +77,20 @@ func (s *Service) parkSessionForProfileSwitch(
 	taskID string,
 	session *models.TaskSession,
 ) (bool, error) {
+	return s.parkSessionForProfileSwitchWithTerminalSource(ctx, taskID, session, false)
+}
+
+func (s *Service) parkSessionForProfileSwitchWithTerminalSource(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	acceptTerminalSource bool,
+) (bool, error) {
 	if session == nil {
 		return false, errors.New("cannot park a nil workflow profile session")
 	}
 	if workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
-		parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
+		parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session, acceptTerminalSource)
 		if err != nil || !parked || executionID == "" {
 			return parked, err
 		}
@@ -88,7 +105,7 @@ func (s *Service) parkSessionForProfileSwitch(
 	lock, release := s.acquireCancelInFlightGuard(session.ID)
 	lock.Lock()
 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
-	parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
+	parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session, acceptTerminalSource)
 	lock.Unlock()
 	release()
 	if err != nil || !parked || executionID == "" {
@@ -111,6 +128,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 	ctx context.Context,
 	taskID string,
 	session *models.TaskSession,
+	acceptTerminalSource bool,
 ) (bool, string, error) {
 	if session == nil {
 		return false, "", errors.New("cannot park a nil workflow profile session")
@@ -123,9 +141,14 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 		defer lock.Unlock()
 		ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
 	}
-	currentSession, executionID, err := s.loadProfileSwitchParkCandidate(ctx, session.ID)
+	currentSession, executionID, err := s.loadProfileSwitchParkCandidate(ctx, session.ID, acceptTerminalSource)
 	if err != nil {
 		return false, "", err
+	}
+	// A predecessor that ended during destination preparation needs no park.
+	// Preserve its terminal state and the already prepared destination.
+	if isTerminalSessionState(currentSession.State) {
+		return true, "", nil
 	}
 
 	// Claim the exact runtime while the source session guard is still held.
@@ -189,6 +212,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
 func (s *Service) loadProfileSwitchParkCandidate(
 	ctx context.Context,
 	sessionID string,
+	acceptTerminalSource bool,
 ) (*models.TaskSession, string, error) {
 	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -198,6 +222,9 @@ func (s *Service) loadProfileSwitchParkCandidate(
 		return nil, "", fmt.Errorf("reload workflow profile session %q before park: session is nil", sessionID)
 	}
 	if isTerminalSessionState(currentSession.State) {
+		if acceptTerminalSource {
+			return currentSession, "", nil
+		}
 		return nil, "", fmt.Errorf("cannot park workflow profile session %q after it became %s", sessionID, currentSession.State)
 	}
 
