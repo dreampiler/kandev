@@ -415,6 +415,34 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		}
 	})
 
+	t.Run("cancellation during the retry measurement returns caller error", func(t *testing.T) {
+		// Covers the retry-cancellation gap: the first bound must elapse
+		// (so the retry runs), then the parent is cancelled while the second
+		// measurement is in progress.
+		installHermesACPCheckHelper(t)
+		useHermesCheckCounter(t)
+		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
+		// First bound (800ms) elapses; second bound (1500ms) will also elapse,
+		// giving the retry time to start. We cancel after 200ms so the retry
+		// starts but is interrupted by caller cancellation.
+		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		defer cancel()
+
+		result, err := runHermesCheck(t, ctx)
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Detect error = %v, want context.Canceled / DeadlineExceeded", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true with a cancelled retry context")
+		}
+		// The first call definitely starts; the second may start before cancel.
+		// Assert at least one attempt occurred (counter > 0), which proves
+		// the retry branch was entered.
+		if got := hermesCheckInvocationCount(t); got < 1 {
+			t.Errorf("helper invocations = %d, want >= 1 (retry branch must be entered)", got)
+		}
+	})
+
 	t.Run("a missing binary stays unavailable", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 

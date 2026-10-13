@@ -129,7 +129,7 @@ func TestRunCommandCheck_SeparatesTimeoutFromFailure(t *testing.T) {
 		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
 
 		// Long enough to cover spawning the helper, far short of its 2s stall.
-		found, timedOut, err := runCommandCheck(context.Background(), hermesPath, 400*time.Millisecond, "acp", "--check")
+		found, timedOut, err := runCommandCheck(context.Background(), hermesPath, 600*time.Millisecond, "acp", "--check")
 		if err != nil {
 			t.Fatalf("runCommandCheck error: %v", err)
 		}

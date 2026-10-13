@@ -19,10 +19,7 @@ var hermesLogoDark []byte
 
 const hermesBin = "hermes"
 
-// hermesCheckRetryTimeout bounds the second ACP check. `hermes acp --check`
-// resolves the ACP extra on every run and takes about 2s on an idle host, and
-// discovery runs every agent's IsInstalled concurrently, so the shared 5s
-// bound can elapse purely from that contention while the check is healthy.
+// hermesCheckRetryTimeout bounds the second ACP check.
 // commandCheckTimeout + hermesCheckRetryTimeout stays inside the 15s
 // detection sweep budget.
 const hermesCheckRetryTimeout = 8 * time.Second
