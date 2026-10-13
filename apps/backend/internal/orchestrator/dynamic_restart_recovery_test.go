@@ -9,6 +9,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -66,7 +67,9 @@ func TestActivateResumedDynamicRouteMarksClaimedRouteActive(t *testing.T) {
 		t.Fatalf("GetTaskSession: %v", err)
 	}
 
-	svc.activateResumedDynamicRoute(ctx, session)
+	if err := svc.activateResumedDynamicRoute(ctx, session); err != nil {
+		t.Fatalf("activateResumedDynamicRoute: %v", err)
+	}
 
 	state, err := repo.LoadRouteState(ctx, sessionID)
 	if err != nil {
@@ -74,6 +77,101 @@ func TestActivateResumedDynamicRouteMarksClaimedRouteActive(t *testing.T) {
 	}
 	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusActive {
 		t.Fatalf("route state after resume ready = %#v, want active generation %d", state, decision.Generation)
+	}
+}
+
+var errInjectedRouteActivation = errors.New("injected route activation failure")
+
+// failingRouteActivationRepo fails the same-generation route write that
+// completes "starting" -> "active", so a test can observe how a caller reacts
+// when the durable activation cannot be written.
+type failingRouteActivationRepo struct {
+	*sqliterepo.Repository
+	failActivation bool
+}
+
+func (r *failingRouteActivationRepo) ClaimRouteStateFrom(
+	ctx context.Context, expectedGeneration int64, expectedStatus string, state dynamicruntime.RouteState,
+) (bool, error) {
+	if r.failActivation {
+		return false, errInjectedRouteActivation
+	}
+	return r.Repository.ClaimRouteStateFrom(ctx, expectedGeneration, expectedStatus, state)
+}
+
+// A resume-ready activation that cannot complete the durable "starting" ->
+// "active" write must report the failure. Reporting success while the route is
+// still "starting" lets the resume caller acknowledge delivery or commit a
+// continuation against a route a later explicit recovery still treats as
+// pending.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12
+func TestActivateResumedDynamicRouteReportsFailedActivation(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-activation-failure"
+		sessionID   = "session-dynamic-activation-failure"
+		executionID = "execution-dynamic-activation-failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	persistence := &failingRouteActivationRepo{Repository: repo}
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(persistence))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+
+	persistence.failActivation = true
+	if err := svc.activateResumedDynamicRoute(ctx, session); err == nil {
+		t.Fatal("resume-ready activation reported success while the durable route write failed")
+	}
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusStarting {
+		t.Fatalf("route state after failed activation = %#v, want unchanged starting generation %d", state, decision.Generation)
+	}
+}
+
+// A stale generation leaves the route unchanged and is not an activation
+// failure: another worker already owns the claimed generation.
+//
+// @covers AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12
+func TestActivateResumedDynamicRouteStaleGenerationIsNotAFailure(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-dynamic-activation-stale"
+		sessionID   = "session-dynamic-activation-stale"
+		executionID = "execution-dynamic-activation-stale"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
+	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
+	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.RouteGeneration = decision.Generation + 1
+
+	if err := svc.activateResumedDynamicRoute(ctx, session); err != nil {
+		t.Fatalf("stale generation reported an activation failure: %v", err)
+	}
+
+	state, err := repo.LoadRouteState(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("LoadRouteState: %v", err)
+	}
+	if state == nil || state.Generation != decision.Generation || state.Status != dynamicRouteStatusStarting {
+		t.Fatalf("route state after stale activation = %#v, want unchanged starting generation %d", state, decision.Generation)
 	}
 }
 

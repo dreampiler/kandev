@@ -3617,7 +3617,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 	seam4Res.consume()
 	persistBranchRecovery()
-	s.activateResumedDynamicRoute(resumeCtx, readySession)
+	if err := s.activateResumedDynamicRoute(resumeCtx, readySession); err != nil {
+		return nil, decorateResumeFailure(fmt.Errorf("resumed dynamic route activation failed: %w", err))
+	}
 
 	// Owned initial submissions are written after provider acceptance so the
 	// transcript row can use the accepted turn identity. Ordinary resumes keep

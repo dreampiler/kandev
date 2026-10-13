@@ -14,15 +14,17 @@ const (
 )
 
 // activateResumedDynamicRoute completes the durable "starting" -> "active"
-// route transition for a resumed dynamic session whose runtime is ready.
-func (s *Service) activateResumedDynamicRoute(ctx context.Context, session *models.TaskSession) {
+// route transition for a resumed dynamic session whose runtime is ready. It
+// returns the transition error so the resume path does not report success while
+// the claimed route is still "starting".
+func (s *Service) activateResumedDynamicRoute(ctx context.Context, session *models.TaskSession) error {
 	if session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return
+		return nil
 	}
 	if session.RouteState != dynamicRouteStatusStarting && session.RouteState != dynamicRouteStatusRetrying {
-		return
+		return nil
 	}
-	s.markDynamicRouteActive(context.WithoutCancel(ctx), session.ID, session.RouteGeneration)
+	return s.markDynamicRouteActive(context.WithoutCancel(ctx), session.ID, session.RouteGeneration)
 }
 
 // explicitRecoveryOwnsStrandedStartingRoute reports whether an explicit
