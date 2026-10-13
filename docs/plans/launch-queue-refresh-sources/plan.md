@@ -13,8 +13,9 @@ legacy_specs: []
 ## Overview
 
 The task status summary projector re-reads a task's launch queue for every
-event it handles. One work order limits that read to the events that can
-change the queue.
+event it handles. Task 01 limits that read to the events that can
+change the queue. Task 02 preserves bounded recovery when mutation publication
+is lost, using the existing ceiling sweep.
 
 ## Evidence and confirmed scope
 
@@ -43,16 +44,19 @@ No open upstream pull request changes the production files in scope.
 ### In scope
 
 - `task/statussummary` refresh gating and its unit tests.
+- Sweep publication recovery and SQLite/Postgres persisted-summary selection.
 - The requirement criterion, design rule, this plan, and the work order.
 
 ### Out of scope
 
-- The loader, ceiling observation, sweep cadence, deferral records, summary
-  schema, and frontend.
+- The loader, ceiling observation, sweep cadence, deferral record semantics,
+  summary schema, and frontend.
 
 ## Work orders
 
 - [x] [Task 01: Refresh the launch queue only from its sources](task-01-launch-queue-refresh-sources.md) (wave 1, no dependencies)
+
+- [x] [Task 02: Recover lost launch queue publications](task-02-launch-queue-publication-recovery.md) (wave 2, depends on Task 01)
 
 ## Verification strategy
 
@@ -76,3 +80,11 @@ preview, public docs, or browser/E2E evidence is needed.
 
 A future subscribed event that can change the queue must join the closed set,
 which sits next to the other refresh classifiers to keep that visible.
+
+## Review remediation
+
+A lost clear publication removes the authoritative record from replay selection
+while leaving a positive summary. Recovery must index that persisted summary
+independently of replay; a lost enqueue must refresh before replay can return
+early. The original Task 01 results below remain historical. Task 02 results
+record contained proofs and hosted verification separately.

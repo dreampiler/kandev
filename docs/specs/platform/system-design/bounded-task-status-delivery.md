@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BOUNDED-TASK-STATUS-DELIVERY-001
 created: 2026-08-01
-updated: 2026-10-12
+updated: 2026-10-13
 owners:
   - kandev
 ---
@@ -153,9 +153,19 @@ already cached the task's workspace before deletion.
   `task.updated`, `task.state_changed`), `task_session.state_changed`, and
   `message.queue.status_changed`, plus any event that reaches a task whose queue
   has not been observed yet. A ceiling deferral is written on the task row and
-  every such write publishes `task.updated`; the ceiling sweep also publishes
-  `task.updated` for a still-deferred task, which is how the displayed capacity
-  sample stays current. Any other source keeps the last observation instead of
+  every such write attempts to publish `task.updated`. Before replay, each
+  existing 20-second ceiling sweep publishes `task.updated` for the ordered,
+  deduplicated union of actual deferred tasks and persisted positive queue
+  summaries. The latter retain cleared tasks after a lost mutation publication;
+  actual records retain enqueues even when a claimed or failed replay emits
+  nothing. Reload, transport, and projection failures leave durable eligibility
+  for another pass. Once a cleared summary commits, it leaves the recovery set.
+  This refresh changes no deferral ownership, task state, completion gate,
+  summary schema, timer owner, or sweep cadence. Each publication reloads the
+  current task and the projector reads the authoritative queue, including nil;
+  deleted tasks are excluded by the summary query and existing publication
+  and missing-task guards. Capacity samples also stay current through these
+  task events. Any other source keeps the last observation instead of
   re-reading the task row and the install-wide admitted-session population, so
   per-message and per-turn traffic does not scale the summary's read volume.
   The refresh set is closed: a newly subscribed source must be classified.
