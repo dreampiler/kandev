@@ -41,6 +41,11 @@ The election itself, the materialization timeout, and other refusals.
 - Other binding refusals are not retried.
 - A session the winner created while the loser waited stays primary and keeps
   the first-session origin.
+- Two retries for the same shared-group member elect one primary and consume
+  the initial runtime seed once in the insertion transaction on SQLite and
+  PostgreSQL. The caller follows committed ownership for primary notifications.
+- Cancellation does not invoke the retry, and a committed retry does not
+  overwrite a later manual primary selection.
 
 ## Verification
 
@@ -88,3 +93,12 @@ A losing start waits up to the launch timeout before it returns.
 - RED: without the change, the losing start returned `workspace_preparing`
   without a retry, and the refusals did not name the elected environment.
 - GREEN: the new tests and the existing workspace binding tests pass.
+- Review remediation RED: contained exact-source proofs exposed stale primary
+  ownership in the transaction and caller, repeated post-insert promotion, and
+  a cancelled ready wait that invoked its retry callback.
+- Review remediation GREEN: those exact-source proofs pass with transaction
+  ownership and caller/cancellation guards. Added hosted real repository
+  concurrency tests for SQLite/PostgreSQL, full caller ownership tests, and
+  shared-group selected-environment attachment assertions. Hosted CI provides
+  the full package and end-to-end results; narrow proofs use explicit boundary
+  fakes and do not substitute for those suites.

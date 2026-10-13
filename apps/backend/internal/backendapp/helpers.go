@@ -1543,6 +1543,12 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
+	if err := webapp.NormalizeBootPayloadGraph(&payload); err != nil {
+		if p.log != nil {
+			p.log.Error("failed to normalize boot entities; using version 1 payload", zap.Error(err))
+		}
+		payload.Version = 1
+	}
 	return payload
 }
 
@@ -1864,7 +1870,6 @@ func registerSecondaryRoutes(
 
 	if p.features.Coordinator {
 		wireCoordinatorConversation(p)
-		registerCoordinatorRoutes(p)
 	}
 
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
@@ -2048,6 +2053,9 @@ func registerSecondaryRoutes(
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -2603,6 +2611,9 @@ func registerMCPAndDebugRoutes(
 
 	if p.services.Coordinator != nil {
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
 		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},

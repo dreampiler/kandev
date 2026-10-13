@@ -17,9 +17,11 @@ import (
 // refused as a lost election and later calls succeed.
 type workspacePreparingRepo struct {
 	*mockRepository
-	onBinding      func(call int) error
-	calls          int
-	sharedGroupIDs []string
+	onBinding          func(call int) error
+	calls              int
+	sharedGroupIDs     []string
+	boundEnvironmentID string
+	onSession          func(*models.TaskSession)
 }
 
 func (r *workspacePreparingRepo) CreateTaskSessionWithWorkspaceBinding(
@@ -31,6 +33,10 @@ func (r *workspacePreparingRepo) CreateTaskSessionWithWorkspaceBinding(
 			return err
 		}
 	}
+	if r.onSession != nil {
+		r.onSession(session)
+	}
+	session.TaskEnvironmentID = r.boundEnvironmentID
 	return r.CreateTaskSession(ctx, session)
 }
 
@@ -75,6 +81,7 @@ func TestPrepareSessionRetriesAfterWorkspacePreparing(t *testing.T) {
 				MaterializationSessionID: "winner-session",
 			}
 			repo.taskEnvironments[env.ID] = env
+			repo.boundEnvironmentID = env.ID
 			lookups := 0
 			repo.getTaskEnvironmentFunc = func(_ context.Context, id string) (*models.TaskEnvironment, error) {
 				require.Equal(t, env.ID, id)
@@ -101,6 +108,7 @@ func TestPrepareSessionRetriesAfterWorkspacePreparing(t *testing.T) {
 			require.Equal(t, tc.wantGroups, repo.sharedGroupIDs, "a shared-group member must bind through the group binder")
 			require.GreaterOrEqual(t, lookups, 2, "the retry must wait for the environment to leave creating")
 			require.NotNil(t, repo.sessions[sessionID])
+			require.Equal(t, env.ID, repo.sessions[sessionID].TaskEnvironmentID)
 		})
 	}
 }

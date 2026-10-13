@@ -1520,6 +1520,12 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	// metadata for repo-less tasks where the user picked a starting folder.
 	workspacePath, _ := task.Metadata[models.MetaKeyWorkspacePath].(string)
 	sessionID := uuid.New().String()
+	if identity, reserved := models.ReservedLaunchIdentityFromContext(ctx); reserved {
+		if identity.TaskID != task.ID {
+			return "", errors.New("reserved launch belongs to another task")
+		}
+		sessionID = identity.SessionID
+	}
 	now := time.Now().UTC()
 	session := &models.TaskSession{
 		ID:                            sessionID,
@@ -1586,9 +1592,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
+	retriedWorkspaceBinding := false
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if errors.Is(createErr, models.ErrWorkspacePreparing) {
 		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.ID, createErr, func() error {
+			retriedWorkspaceBinding = true
 			primary, err := e.refreshRetriedSessionOrder(createCtx, session, isPrimarySession, appliedInitialRuntimeConfig)
 			if err != nil {
 				return err
@@ -1613,12 +1621,15 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	// Set primary flag only for the first session (no existing primary).
 	// Subsequent sessions do not override the established primary.
-	if isPrimarySession {
-		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
-			e.logger.Warn("failed to update primary session flag",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+	if session.IsPrimary {
+		// A retry has already committed its primary election with the insert.
+		if !retriedWorkspaceBinding {
+			if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+				e.logger.Warn("failed to update primary session flag",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
 		}
 		if e.onPrimarySessionSet != nil {
 			e.onPrimarySessionSet(ctx, task.ID, sessionID)
@@ -2239,6 +2250,9 @@ func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
 	if !errors.As(preparingErr, &preparing) || preparing.EnvironmentID == "" {
 		return preparingErr
 	}
+	if ctx.Err() != nil {
+		return preparingErr
+	}
 	env, err := e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
 	if err != nil || env == nil || env.MaterializationSessionID == sessionID {
 		return preparingErr
@@ -2248,6 +2262,9 @@ func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
 			zap.String("session_id", sessionID),
 			zap.String("task_environment_id", env.ID),
 			zap.Error(err))
+		return preparingErr
+	}
+	if ctx.Err() != nil {
 		return preparingErr
 	}
 	return create()
@@ -2950,7 +2967,7 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	mcpMode string,
 	request *LaunchAgentRequest,
 	onExecutionAdmitted func(string),
-	beforeInitialPromptDispatch func(string) error,
+	beforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error,
 	onInitialPromptAccepted func(string),
 	onInitialPromptFailed func(),
 	refuseIfAgentRunning bool,
@@ -3018,12 +3035,6 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
 	}
-	if request.BeforeAgentStart != nil {
-		if err := request.BeforeAgentStart(ctx, executionID, prompt); err != nil {
-			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
-		}
-	}
-
 	// Lazy workspace restoration creates an execution without an agent command.
 	// Preserve the request's description, environment, and MCP mode above, then
 	// route it through LaunchAgent so lifecycle.Launch can promote the execution
@@ -3031,6 +3042,12 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 	// subprocess is started.
 	if !e.agentManager.IsAgentCommandConfigured(executionID) {
 		return nil, ErrAgentCommandMissing
+	}
+
+	if request.BeforeAgentStart != nil {
+		if err := request.BeforeAgentStart(ctx, executionID, prompt); err != nil {
+			return nil, fmt.Errorf("admit initial prompt delivery: %w", err)
+		}
 	}
 
 	// Transition session to STARTING

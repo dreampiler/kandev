@@ -43,8 +43,9 @@ and shared-group binders with the existing messages. `prepareSessionAttempt`
 calls `retryPreparedSessionAfterWorkspaceReady` for a preparing refusal: it
 loads the named environment, skips one this session materializes, waits with
 the existing `waitForTaskEnvironmentReady`, and retries the binding once.
-Before the retry it re-reads the task's sessions, so a session the winner
-created meanwhile keeps the first-session origin and the primary flag. A
+Before the retry it re-reads the task's sessions. The insertion transaction
+rechecks primary ownership alongside origin and runtime seed ownership, and the
+caller follows that committed decision without promoting the retry again. A
 failed environment or a wait that ends without readiness returns the original
 refusal.
 
@@ -68,7 +69,12 @@ browser coverage.
 
 ## Verification results
 
-The retry and environment-ID checks failed without the change and pass with it.
+Contributor validation reported the original retry and environment-ID checks
+passing. Review remediation additionally reproduced stale transaction/caller
+primary decisions and cancellation using contained exact-source proofs, then
+passed those proofs after the fixes. Full executor, repository, PostgreSQL,
+frontend, and E2E validation runs in hosted CI; final run receipts are recorded
+in the PR delivery evidence.
 
 ## Risks
 
