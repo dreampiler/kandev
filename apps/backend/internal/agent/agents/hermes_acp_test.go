@@ -422,10 +422,10 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		installHermesACPCheckHelper(t)
 		useHermesCheckCounter(t)
 		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
-		// First bound (800ms) elapses; second bound (1500ms) will also elapse,
-		// giving the retry time to start. We cancel after 200ms so the retry
-		// starts but is interrupted by caller cancellation.
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+		// First bound is 800ms, second 1500ms; cancel 1100ms after start,
+		// so the first measurement times out (enters retry) and the retry
+		// is interrupted by cancellation.
+		ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
 		defer cancel()
 
 		result, err := runHermesCheck(t, ctx)
@@ -435,11 +435,10 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		if result.Available {
 			t.Fatal("Available=true with a cancelled retry context")
 		}
-		// The first call definitely starts; the second may start before cancel.
-		// Assert at least one attempt occurred (counter > 0), which proves
-		// the retry branch was entered.
-		if got := hermesCheckInvocationCount(t); got < 1 {
-			t.Errorf("helper invocations = %d, want >= 1 (retry branch must be entered)", got)
+		// The retry branch must have entered: first attempt (timeout) plus
+		// the retry that was started before cancellation => exactly 2.
+		if got := hermesCheckInvocationCount(t); got != 2 {
+			t.Errorf("helper invocations = %d, want exactly 2 (first timeout + retry interrupted)", got)
 		}
 	})
 
