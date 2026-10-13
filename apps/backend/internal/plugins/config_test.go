@@ -417,6 +417,13 @@ func TestServiceUpdateConfigRestartFailureRemovesToolsFromCatalog(t *testing.T) 
 	// tool must not be listed yet.
 	require.Empty(t, catalogPluginIDsFor(t, svc), "unconfigured plugin must contribute no agent tools")
 
+	// The listener counts every catalog recompute. UpdateConfig signals
+	// before the restart, so a working restart emits one signal; a failed
+	// restart must emit a second signal after the status write, otherwise
+	// running agents keep tools for a plugin that is no longer active.
+	listener := &countingAgentToolCatalogListener{}
+	svc.SetAgentToolCatalogListener(listener)
+
 	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err == nil {
 		t.Fatalf("UpdateConfig should surface the restart failure")
 	}
@@ -424,10 +431,12 @@ func TestServiceUpdateConfigRestartFailureRemovesToolsFromCatalog(t *testing.T) 
 	if rec.Status != StatusError {
 		t.Fatalf("status = %q, want error after failed restart", rec.Status)
 	}
-	// The restart failed and transitioned the plugin to StatusError, so its
-	// tool must no longer be listed. UpdateConfig signals the catalog before
-	// the restart, so without a second signal after the failed status write
-	// running agents would keep seeing a tool for a stopped plugin.
+	// The first signal fired before the restart (required config became set);
+	// the second must fire after the failed status write. Without the second
+	// signal the listener stays at 1 and the catalog still lists the tool.
+	if got := listener.calls.Load(); got < 2 {
+		t.Fatalf("catalog signals = %d, want at least 2 (before and after the failed restart)", got)
+	}
 	ids := catalogPluginIDsFor(t, svc)
 	for _, id := range ids {
 		if id == "kandev-plugin-github" {
