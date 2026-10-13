@@ -101,6 +101,10 @@ type RunRequest struct {
 	// retryOfRunID links an automatic timeout fallback to the run it replaces.
 	// Set only by the runner itself; never a persisted column.
 	retryOfRunID string
+	// sourceOrigin describes the scope a pass read (an explicit range, the
+	// saved review_source, or the session workspace). Set by the runner; it is
+	// folded into the run summary so a run record shows which range it reviewed.
+	sourceOrigin string
 }
 
 // Runner orchestrates review passes.
@@ -393,12 +397,13 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	if err != nil {
 		return nil, nil, err
 	}
-	files, err := r.collectRequestChanges(ctx, req)
+	files, sourceOrigin, err := r.collectRequestChanges(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
+	req.sourceOrigin = sourceOrigin
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("%w: the task has no changed files to review", ErrNoChanges)
+		return nil, nil, fmt.Errorf("%w: no changed files to review in the %s", ErrNoChanges, sourceOrigin)
 	}
 
 	run, err := r.store.CreateRun(ctx, taskservice.CreateRunRequest{
@@ -413,6 +418,8 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	if err != nil {
 		return nil, nil, err
 	}
+	r.logger.Info("review run source",
+		zap.String("task_id", req.TaskID), zap.String("run_id", run.ID), zap.String("source", sourceOrigin))
 
 	runCtx, cancel := context.WithTimeout(r.backgroundContext(), r.passTimeout)
 	done := r.attach(req.TaskID, run.ID, cancel)
@@ -577,6 +584,11 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	index := FileByKey(files)
 	inputs := anchorFindings(accumulated.findings, index)
 	summary := buildRunSummary(accumulated, plan, len(inputs))
+	if req.sourceOrigin != "" {
+		// Fold the reviewed scope into the run summary so a run record shows
+		// which base..head it read, not just its file count.
+		summary = strings.TrimSpace(fmt.Sprintf("Reviewed %s. %s", req.sourceOrigin, summary))
+	}
 	if req.retryOfRunID != "" {
 		summary = fmt.Sprintf("Automatic retry of run %s after a review timeout. %s", req.retryOfRunID, summary)
 	}
