@@ -2,11 +2,11 @@
 
 Status: implemented; delivery in progress (design package produced; narrow verification green; fork PR pending)
 Initiative: workflow-entry-executor-continuity
-Worktree: `C:/Users/dream/.kandev/tasks/rbuff8ah/kandev` (branch `feature/08ddc5af-453e-4792-8-t5b`, fork main base)
+Worktree: assigned task worktree (branch `feature/08ddc5af-453e-4792-8-t5b`, fork main base)
 
 ## Owner goal and confirmed result
 
-Owner goal (Operations, 2026-10-12): the workflow-step entry ("칸 진입") must
+Owner goal (Operations, 2026-10-12): the workflow-step entry must
 follow the task's actual executor/canonical environment, safely reuse the same
 task's existing worktree, and produce exactly one session per entry, so the
 `git worktree add` "already exists" failure does not repeat.
