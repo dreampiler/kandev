@@ -27,7 +27,7 @@ Document the exact row conditions and the operator procedure for reclaiming the 
 - The exact SQL conditions under which a row is deleted (below), matching the production retention code.
 - The rows that are kept.
 - The exclusive-access requirement, the execute/re-run/restore order, and the read-only before/after accounting.
-- A read-only estimate of deletable rows counted on the approved operational database copy (path requested from the parent; recorded when provided).
+- A read-only estimate of deletable rows counted on the approved operational database copy (path provided by the parent; kept operator-local and intentionally not recorded in this repo).
 
 ## Out of scope
 
