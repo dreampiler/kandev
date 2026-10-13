@@ -87,7 +87,11 @@ func (f *childStallStoreFake) GetTask(_ context.Context, id string) (*models.Tas
 }
 
 func (f *childStallStoreFake) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
-	return f.sessions[id], nil
+	session, ok := f.sessions[id]
+	if !ok {
+		return nil, models.ErrTaskSessionNotFound
+	}
+	return session, nil
 }
 
 func (f *childStallStoreFake) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
@@ -140,20 +144,36 @@ func (childStallStepGetterFake) GetWorkflowMeta(context.Context, string) (Workfl
 // task repository.
 type childStallTestOrchestratorRepo struct {
 	sessionExecutorStore
+	// boundSessionID, when set, is returned as the task's durable step binding
+	// so tests can exercise the bound-session candidate read.
+	boundSessionID string
 }
 
 func (childStallTestOrchestratorRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }
 
+func (r childStallTestOrchestratorRepo) GetWorkflowSessionBinding(context.Context, string, string) (*models.WorkflowSessionBinding, error) {
+	if r.boundSessionID == "" {
+		return nil, nil
+	}
+	return &models.WorkflowSessionBinding{TaskID: "child", SessionID: r.boundSessionID}, nil
+}
+
 func newChildStallReconcileFixture(t *testing.T) (*ChildStallProducer, *messagequeue.Service, *childStallStoreFake) {
+	return newChildStallReconcileFixtureWithBinding(t, "")
+}
+
+func newChildStallReconcileFixtureWithBinding(
+	t *testing.T, boundSessionID string,
+) (*ChildStallProducer, *messagequeue.Service, *childStallStoreFake) {
 	t.Helper()
 	log := testLogger()
 	queue := messagequeue.NewServiceMemory(log)
 	svc := &Service{
 		logger:             log,
 		messageQueue:       queue,
-		repo:               childStallTestOrchestratorRepo{},
+		repo:               childStallTestOrchestratorRepo{boundSessionID: boundSessionID},
 		workflowStepGetter: childStallStepGetterFake{},
 	}
 	store := newChildStallStoreFake()
@@ -550,5 +570,47 @@ func TestMissingSignalNudgeNamesRecordedRefusal(t *testing.T) {
 	content := entries[0].Content
 	if !strings.Contains(content, "was refused") || !strings.Contains(content, "profile a") {
 		t.Fatalf("nudge must name the recorded refusal, got %q", content)
+	}
+}
+
+// TestMissingSignalNudgeNamesRefusalWithoutTimestamp proves a recorded refusal
+// with a missing timestamp still names the block reason instead of falling back
+// to the generic missing-signal reminder.
+func TestMissingSignalNudgeNamesRefusalWithoutTimestamp(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixture(t)
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.sessions["child-session"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyStepCompleteRejection: models.StepCompleteRejection{
+			StepID: "step-1",
+			Reason: "This session runs agent profile a, but the current step uses b.",
+		},
+	}
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	entries := childSessionEntries(t, ctx, queue, "child", "child-session")
+	if len(entries) == 0 {
+		t.Fatal("a stalled step with no recorded signal must still be nudged")
+	}
+	if content := entries[0].Content; !strings.Contains(content, "was refused") || !strings.Contains(content, "profile a") {
+		t.Fatalf("nudge must name the timestamp-less refusal, got %q", content)
+	}
+}
+
+// TestMissingSignalSurvivesDeletedBoundSession proves a durable step binding
+// that outlived its session (a not-found bound session row) does not abort
+// evidence gathering: the genuine stall is still classified and nudged.
+func TestMissingSignalSurvivesDeletedBoundSession(t *testing.T) {
+	producer, queue, store := newChildStallReconcileFixtureWithBinding(t, "deleted-session")
+	ctx := context.Background()
+	turn := seedStalledChild(store, &models.Task{ID: "parent", State: v1.TaskStateInProgress})
+	store.listed = []*models.Turn{turn}
+
+	producer.runPass(ctx)
+
+	if ids := childSessionEntries(t, ctx, queue, "child", "child-session"); len(ids) == 0 {
+		t.Fatal("a missing bound session must not block the reminder")
 	}
 }

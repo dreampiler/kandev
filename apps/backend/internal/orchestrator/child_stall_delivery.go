@@ -291,11 +291,20 @@ func (p *ChildStallProducer) persistNudgeStreak(
 		Escalated:    streak.Escalated,
 		UpdatedAt:    now,
 	}
-	if _, err := p.store.SetTaskMetadataKeyIfNotArchived(
+	stored, err := p.store.SetTaskMetadataKeyIfNotArchived(
 		ctx, turn.TaskID, models.TaskMetaKeyChildStallNudge, persisted.ToMap(),
-	); err != nil {
+	)
+	if err != nil {
 		p.log.Warn("failed to persist child stall nudge streak",
 			zap.String("turn_id", turn.ID), zap.Error(err))
+		return
+	}
+	if !stored {
+		// The task stopped accepting metadata (archiving/archived) before the
+		// streak write; the delivery already happened, so only make the missed
+		// escalation bookkeeping visible.
+		p.log.Debug("child stall nudge streak not persisted: task no longer accepts metadata",
+			zap.String("turn_id", turn.ID))
 	}
 }
 

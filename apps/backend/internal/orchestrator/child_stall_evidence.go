@@ -119,10 +119,16 @@ func (p *ChildStallProducer) gatherCompletionSignalState(
 		}
 		if boundID != "" {
 			session, err := p.store.GetTaskSession(ctx, boundID)
-			if err != nil {
+			switch {
+			case err == nil:
+				add(session)
+			case errors.Is(err, models.ErrTaskSessionNotFound):
+				// The durable binding can outlive the session it names after a
+				// substitution or cleanup. A missing bound session is not fatal
+				// to the remaining candidates, so classify on those.
+			default:
 				return err
 			}
-			add(session)
 		}
 	}
 	primary, err := p.store.GetPrimarySessionByTaskID(ctx, child.ID)
@@ -179,7 +185,9 @@ func observeCompletionSignalState(
 		}
 	}
 	if rejection, has := models.LoadStepCompleteRejection(session.Metadata); has && rejection.StepID == stepID {
-		if rejection.At.After(*newestRejection) {
+		// A zero timestamp (missing/legacy) must still become the block reason;
+		// only an older recorded rejection loses to a newer one.
+		if newestRejection.IsZero() || rejection.At.After(*newestRejection) {
 			*newestRejection = rejection.At
 			evidence.BlockedReason = rejection.Reason
 		}
