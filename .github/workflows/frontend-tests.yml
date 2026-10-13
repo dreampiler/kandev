@@ -273,10 +273,9 @@ jobs:
       # them, so nothing in this job used to fail on a type error. Runs before
       # the tests to fail fast on the cheaper check.
       - name: Run typecheck
-        # Reserve a compiler heap on the 16 GiB CI hosts while leaving room
-        # for native memory and runner/container overhead.
         env:
-          NODE_OPTIONS: --max-old-space-size=6144
+          # The complete TypeScript graph exceeds Node's default 4 GiB heap.
+          NODE_OPTIONS: --max-old-space-size=8192
         run: pnpm --filter @kandev/web typecheck
 
       - name: Verify standalone plugin SDK contract
@@ -386,6 +385,7 @@ jobs:
       - name: Run tests
         env:
           NODE_ENV: production
+          NODE_COMPILE_CACHE: ${{ runner.temp }}/kandev-node-compile-cache
         run: pnpm --filter @kandev/web test
 
       - name: Build

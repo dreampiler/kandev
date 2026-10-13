@@ -70,7 +70,7 @@ class FrontendTestsWorkflowContractTest(unittest.TestCase):
         job = frontend_job(workflow)
         step = job.partition("      - name: Run typecheck\n")[2].partition(NEXT_STEP_MARKER)[0]
 
-        self.assertIn("NODE_OPTIONS: --max-old-space-size=6144", step)
+        self.assertIn("NODE_OPTIONS: --max-old-space-size=8192", step)
         self.assertIn("run: pnpm --filter @kandev/web typecheck", step)
         self.assertNotIn("NODE_OPTIONS", run_tests_step(workflow))
         self.assertNotIn("NODE_OPTIONS", job.partition("    steps:\n")[0])
