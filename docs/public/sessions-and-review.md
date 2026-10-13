@@ -30,6 +30,11 @@ The New Session dialog does not accept a session name. Rename the session from i
 
 The empty-panel watermark has the same **New Agent** action. On mobile, open the **Sessions** picker and select **New session**.
 
+If simultaneous starts are still preparing the shared workspace, the later
+start waits for that preparation and tries to attach once. Failed or unfinished
+preparation leaves the start retryable without creating another workspace.
+Later sessions preserve the existing primary session and its initial settings.
+
 The profile picker shows only profiles compatible with the task executor. If none are available, use the link in the dialog to configure an executor or agent profile. See [Agents and profiles](agents-and-profiles.md).
 
 ### Choose starting context
@@ -141,6 +146,15 @@ original stream and replays committed output from its durable cursor. It does
 not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
+
+An older session can already have its conversation loaded while a delivery block
+still prevents new messages. For an empty historical delivery block, the card
+also offers **Resume**. Resume checks and reconciles the saved delivery against
+the same native conversation without resending the old prompt. **Retry connection**
+and **Stop** remain available. A successful load alone cannot replace missing
+proof about the original process, so automatic recovery may leave this action
+to you. If Resume cannot verify the saved evidence, it keeps the session blocked
+and reports the cause.
 
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session

@@ -68,7 +68,7 @@ other instances no longer wait for it.
 
 Hold creations with the existing `afterTrackerStart` seam. Bound every wait in
 the tests, release held creations before failing, and shut down each manager in
-cleanup. Use `Ports{Base: 0, Max: 0}` and `t.TempDir()` workspaces.
+cleanup. Use a probed bindable loopback port range and `t.TempDir()` workspaces.
 
 ## Verification
 
