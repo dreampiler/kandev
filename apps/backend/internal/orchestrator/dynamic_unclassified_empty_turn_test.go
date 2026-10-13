@@ -83,6 +83,47 @@ func TestEmptyTurnCompletionCountsUnclassifiedFailure(t *testing.T) {
 	}
 }
 
+// A normal end_turn whose assistant text arrives only on the complete frame is
+// not an empty turn: the earlier stream events carried no output, so the
+// detector must read the completion frame itself before counting a failure.
+func TestCompleteFrameTextIsNotAnEmptyTurn(t *testing.T) {
+	fixture := newUnclassifiedWorkflowFenceFixture(t, false, false)
+	defer fixture.svc.stopDynamicSuccessorWorkers()
+	messages := &mockMessageCreator{}
+	fixture.svc.messageCreator = messages
+
+	// A genuine empty completion below the threshold counts one failure.
+	beginEmptyTurnPrompt(fixture, "execution-one", 1)
+	fixture.svc.handleAgentStreamEvent(fixture.ctx, emptyTurnCompletePayload(fixture, "execution-one", 1, endTurnData()))
+	if _, _, _, streak := loadEmptyTurnPolicy(t, fixture); streak == nil || streak.Count != 1 {
+		t.Fatalf("setup empty turn streak = %+v, want count 1", streak)
+	}
+
+	// The next turn produced text on the complete frame only. Counted, it would
+	// reach the threshold, launch a successor and drop the text.
+	fixture.resume(t, "execution-two")
+	fixture.persistRunningExecution(t, "execution-two")
+	beginEmptyTurnPrompt(fixture, "execution-two", 2)
+	payload := emptyTurnCompletePayload(fixture, "execution-two", 2, endTurnData())
+	payload.Data.TurnID = "turn-two"
+	payload.Data.Text = "the delayed answer"
+	fixture.svc.handleAgentStreamEvent(fixture.ctx, payload)
+
+	_, candidate, generation, streak := loadEmptyTurnPolicy(t, fixture)
+	if candidate != "candidate-a" || generation != 1 {
+		t.Fatalf("route after complete-frame text = %s/%d, want candidate-a/1", candidate, generation)
+	}
+	if streak == nil || streak.Count != 1 {
+		t.Fatalf("streak after complete-frame text = %+v, want unchanged count 1", streak)
+	}
+	if len(fixture.agentManager.startAgentProcessCalls) != 0 {
+		t.Fatalf("successor launches after complete-frame text = %d, want none", len(fixture.agentManager.startAgentProcessCalls))
+	}
+	if len(messages.agentMessages) != 1 || messages.agentMessages[0].content != "the delayed answer" {
+		t.Fatalf("persisted agent messages = %+v, want the complete-frame text saved once", messages.agentMessages)
+	}
+}
+
 func TestEmptyTurnCompletionPreconditions(t *testing.T) {
 	for name, testCase := range map[string]struct {
 		data    map[string]interface{}

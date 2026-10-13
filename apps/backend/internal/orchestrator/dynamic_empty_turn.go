@@ -25,6 +25,10 @@ type emptyTurnCompletion struct {
 	data       watcher.AgentEventData
 	stopReason string
 	isError    bool
+	// completeOutput is set when the completion frame itself carries assistant
+	// output (message text or plan content) that the ordinary completion path
+	// persists.
+	completeOutput bool
 }
 
 // routeDynamicEmptyTurn counts a normal end_turn completion with no assistant
@@ -39,6 +43,11 @@ func (s *Service) routeDynamicEmptyTurn(
 	streamGuard *lockedCancelInFlightGuard,
 ) bool {
 	if !s.emptyTurnCompletionAdmissible(completion, session, streamGuard) {
+		return false
+	}
+	// A completion frame carrying assistant output is not an empty turn, so it
+	// is never counted; the caller persists that output.
+	if completion.completeOutput {
 		return false
 	}
 	data := s.withPromptAttemptEvidence(completion.data)

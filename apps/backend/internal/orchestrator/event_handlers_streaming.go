@@ -3577,9 +3577,29 @@ func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) 
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,
 		},
-		stopReason: extractStopReason(payload),
-		isError:    extractCompleteIsError(payload),
+		stopReason:     extractStopReason(payload),
+		isError:        extractCompleteIsError(payload),
+		completeOutput: completeFrameCarriesOutput(payload),
 	}
+}
+
+// completeFrameCarriesOutput reports whether a completion frame itself carries
+// assistant output: message text (persisted by saveAgentTextForTurn) or plan
+// content (persisted by publishAgentPlanForTurn). Output present only here, and
+// not in earlier stream events, still means the turn produced content.
+func completeFrameCarriesOutput(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	if strings.TrimSpace(payload.Data.Text) != "" {
+		return true
+	}
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		if planContent, ok := data["plan_content"].(string); ok && strings.TrimSpace(planContent) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.
