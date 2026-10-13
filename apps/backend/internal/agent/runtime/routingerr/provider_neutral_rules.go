@@ -11,7 +11,7 @@ var providerNeutralRules = []rule{
 	// code on any other status is a different failure.
 	mustRule(
 		"provider.account_blocked.v1",
-		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*"message"\s*:\s*")?`+
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*(?:"code"\s*:\s*-?\d+\s*,\s*)?"message"\s*:\s*")?`+
 			`Error\s+from\s+provider\s+[^\s:]+:\s*403\s+Forbidden\b[^\n]*?`+
 			`(?:\\?"code\\?"\s*:\s*\\?"user_blocked\\?"|\byour\s+access\s+has\s+been\s+restricted\b)`,
 		CodeAccountBlocked,
@@ -83,6 +83,29 @@ var providerNeutralRules = []rule{
 		"provider.network_unavailable.v1",
 		`(?i)(?:\b(?:ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND)\b|network\s+is\s+unreachable|no\s+route\s+to\s+host|connection\s+(?:reset|refused|timed\s+out)|temporary\s+failure\s+in\s+name\s+resolution|i/o\s+timeout|failed\s+to\s+fetch)`,
 		CodeNetworkUnavailable,
+		ConfHigh,
+	),
+	// An AI-SDK error envelope carries the provider's own classification in a
+	// structured field. Its underscore-joined value ("provider_unavailable")
+	// does not match the space-separated prose in provider.unavailable.v1, and
+	// the field is emitted by the adapter rather than written by the model, so
+	// it classifies at high confidence. It sits immediately before that generic
+	// rule so a structured provider_unavailable outranks bare prose.
+	mustRule(
+		RuleProviderStructuredErrorType,
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		CodeProviderUnavailable,
+		ConfHigh,
+	),
+	// A model rejects a request whose input exceeds its context window. The same
+	// candidate cannot succeed by retrying, so this is a task failure rather than
+	// a transient provider condition. Naming the rule removes the failure from
+	// the unclassified bucket without changing routing: task_error keeps
+	// FallbackAllowed and AutoRetryable false, exactly as the phase default did.
+	mustRule(
+		RuleProviderContextLengthExceeded,
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeTask,
 		ConfHigh,
 	),
 	mustRule(

@@ -37,6 +37,8 @@ func TestFailoverCatalogueSignatures(t *testing.T) {
 		{"nvidia overloaded", "opencode-acp", `Internal error: {"code":503,"message":"Upstream error from Nvidia: Service temporarily overloaded","metadata":{"error_type":"provider_overloaded"}}`, CodeProviderUnavailable, RuleProviderNvidiaHost},
 		{"nvidia not ready", "opencode-acp", "AI_APICallError: [Nvidia] Service is not ready", CodeProviderUnavailable, RuleProviderNvidiaHost},
 		{"cannot connect", "opencode-acp", "AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly", CodeNetworkUnavailable, RuleProviderCannotConnect},
+		{"structured error_type unavailable", "opencode-acp", `Internal error: {"code":503,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}`, CodeProviderUnavailable, RuleProviderStructuredErrorType},
+		{"context length exceeded", "opencode-acp", "Internal error: This model's maximum context length is 32768 tokens. However, your messages resulted in 41000 tokens.", CodeTask, RuleProviderContextLengthExceeded},
 		// Signatures whose rule did not change.
 		{"go usage limit", "opencode-acp", "AI_APICallError: Go usage limit exceeded", CodeQuotaLimited, RuleOpenCodeGoUsageLimit},
 		{"opencode service failure", "opencode-acp", "Internal error: OpenCode service failure", CodeProviderUnavailable, RuleOpenCodeServiceFailure},
@@ -61,6 +63,7 @@ func TestFailoverCatalogueSignatures(t *testing.T) {
 		RuleOpenCodeUpstreamHostLimit: true, RuleOpenCodeModelWithdrawn: true, RuleOpenCodeGoAccountSetting: true,
 		RuleOpenCodeEndpointUnavailable: true, RuleProviderHeaderTimeout: true, RuleProviderStreamServerError: true,
 		RuleProviderInternalServerError: true, RuleProviderNvidiaHost: true, RuleProviderCannotConnect: true,
+		RuleProviderStructuredErrorType: true, RuleProviderContextLengthExceeded: true,
 	}
 	all := append([]rule{}, providerNeutralRules...)
 	for _, rules := range providerRules {
@@ -92,6 +95,23 @@ func TestFailoverSignaturesIgnoreQuotedProse(t *testing.T) {
 		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: text})
 		switch got.ClassifierRule {
 		case RuleOpenCodeEndpointUnavailable, RuleOpenCodeModelWithdrawn, RuleProviderInternalServerError:
+			t.Fatalf("prose %q matched %s", text, got.ClassifierRule)
+		}
+	}
+}
+
+// The structured error-type field and the context-length phrase are provider
+// signatures, not a topic an agent narrates. Quoted prose that does not open a
+// line with the error envelope must stay unclassified.
+func TestStructuredSignatureRulesIgnoreQuotedProse(t *testing.T) {
+	resetInjection()
+	for _, text := range []string{
+		`The other session reported {"metadata":{"error_type":"provider_unavailable"}} before it retried.`,
+		"The reviewer said the model's maximum context length is 32768 tokens, so I split the file.",
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: text})
+		switch got.ClassifierRule {
+		case RuleProviderStructuredErrorType, RuleProviderContextLengthExceeded:
 			t.Fatalf("prose %q matched %s", text, got.ClassifierRule)
 		}
 	}

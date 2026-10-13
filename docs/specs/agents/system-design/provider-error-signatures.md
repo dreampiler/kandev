@@ -66,6 +66,23 @@ after an error label and an opening JSON `message` field, and carries
 [account-block design](provider-account-block-classification.md) owns the
 rule and the held circuit it opens.
 
+Structured error-type signature (provider-neutral,
+`provider.structured_error_type.v1`): an AI-SDK error envelope that opens a
+line, optionally after an error label, and carries
+`"error_type":"provider_unavailable"` classifies as `provider_unavailable` at
+high confidence. The underscore-joined value never matches the space-separated
+prose in `provider.unavailable.v1`, and the field is emitted by the adapter
+rather than authored by the model, so the rule sits immediately before that
+generic rule.
+
+Context-length signature (provider-neutral,
+`provider.context_length_exceeded.v1`): a line that opens with an optional error
+label and reports `maximum context length is <n> tokens` classifies as
+`task_error` at high confidence. The same candidate cannot succeed by retrying,
+so the named rule removes the failure from the unclassified bucket without
+suspending a provider resource; `task_error` keeps `FallbackAllowed` and
+`AutoRetryable` false, exactly as the phase default did.
+
 Rule order and confidence are unchanged, so a provider signature that matched
 before still yields the same code, confidence, and flags. Text that matched
 only through a topic word now falls through to the next rule, the

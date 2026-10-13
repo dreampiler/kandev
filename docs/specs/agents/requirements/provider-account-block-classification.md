@@ -37,6 +37,14 @@ The agent system owns provider error classification and the dynamic candidate ci
 - **AC-AGENTS-PROVIDER-ACCOUNT-BLOCK-001.4:** An `account_blocked` failure attributed to an execution profile shall open a held circuit scoped to that execution profile only, including when the failed attempt already produced output or effects or the route already moved past that profile. Other execution profiles, including profiles that share its credential binding, their circuits, and the configured candidate order shall be unchanged.
 - **AC-AGENTS-PROVIDER-ACCOUNT-BLOCK-001.5:** A held circuit shall not expire, shall admit no probe, shall not close after output from another attempt, and shall survive a backend restart. Selection, fallback, and the settings preview shall treat the held profile as unavailable in every dynamic profile that lists it, and a fully held route shall stay on manual recovery without a resource-wait timer.
 - **AC-AGENTS-PROVIDER-ACCOUNT-BLOCK-001.6:** `POST /api/v1/agent-profiles/:id/account-block/release` shall require the existing agent-settings mutation permission and close only the held account-block circuit of the named execution profile. It shall be idempotent, report whether a held circuit was closed, return not found for an unknown profile, and leave credential-binding, model, and other circuits, the profile's account, credentials, model, enablement, and candidate order unchanged. Enabling, disabling, or editing a profile shall not release a held circuit.
+- **AC-AGENTS-PROVIDER-ACCOUNT-BLOCK-001.7:** The account-block envelope shall
+  also match when its opening JSON object places a leading scalar `code` field
+  before the `message` field (for example
+  `{"code":<n>,"message":"Error from provider <name>: 403 Forbidden ..."}`), at
+  the same high confidence and under the same requirement that the line carries
+  `user_blocked` or "Your access has been restricted". A plain `403` inside the
+  envelope, and agent prose that does not open the line with the envelope, shall
+  keep their existing classification.
 
 ## Out of scope
 
