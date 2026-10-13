@@ -190,6 +190,7 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("TestRunCommandCheck_SeparatesTimeoutFromFailure", tests)
         self.assertIn("TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation", tests)
         self.assertIn("TestRunCommandCheck_ExpiredBoundBeforeStart", tests)
+        self.assertIn("TestRunCommandCheck_SuccessBeforeDeadlineObservation", tests)
         for name in tests:
             with self.subTest(test=name):
                 self.assertRegex(name, selection)

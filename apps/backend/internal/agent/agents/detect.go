@@ -72,18 +72,22 @@ func runCommandCheck(ctx context.Context, path string, timeout time.Duration, ar
 		if cmd.Process == nil && errors.Is(runErr, context.DeadlineExceeded) {
 			return false, true, nil
 		}
-		return false, commandCheckTimedOut(checkCtx, cmd.ProcessState, interrupted.Load()), nil
+		found, timedOut = commandCheckOutcome(checkCtx, cmd.ProcessState, interrupted.Load())
+		return found, timedOut, nil
 	}
 	return true, false, nil
 }
 
-// A deadline is a timeout only when cancellation interrupted the check.
+// Conclusive successes remain available; only an interrupted check can time out.
 // POSIX preserves a signalled termination; Windows reports killed processes as exited.
-func commandCheckTimedOut(checkCtx context.Context, state *os.ProcessState, interrupted bool) bool {
-	if !interrupted || !errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
-		return false
+func commandCheckOutcome(checkCtx context.Context, state *os.ProcessState, interrupted bool) (bool, bool) {
+	if state != nil && state.Success() {
+		return true, false
 	}
-	return runtime.GOOS == osWindows || state == nil || !state.Exited()
+	if !interrupted || !errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+		return false, false
+	}
+	return false, runtime.GOOS == osWindows || state == nil || !state.Exited()
 }
 
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever

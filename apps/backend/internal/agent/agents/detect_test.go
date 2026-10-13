@@ -180,11 +180,13 @@ func TestRunCommandCheck_NonzeroExitBeforeDeadlineObservation(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
-	if commandCheckTimedOut(ctx, exitErr.ProcessState, false) {
+	if found, timedOut := commandCheckOutcome(ctx, exitErr.ProcessState, false); found || timedOut {
 		t.Fatal("a deadline observed after a conclusive exit must not cause a retry")
 	}
-	if runtime.GOOS != "windows" && commandCheckTimedOut(ctx, exitErr.ProcessState, true) {
-		t.Fatal("a kill racing a naturally exited POSIX process must not cause a retry")
+	if runtime.GOOS != "windows" {
+		if found, timedOut := commandCheckOutcome(ctx, exitErr.ProcessState, true); found || timedOut {
+			t.Fatal("a kill racing a naturally exited POSIX process must not cause a retry")
+		}
 	}
 }
 
@@ -202,5 +204,26 @@ func TestRunCommandCheck_ExpiredBoundBeforeStart(t *testing.T) {
 	}
 	if _, err := os.Stat(os.Getenv(hermesCheckCounterEnv)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("helper started after the bound expired: %v", err)
+	}
+}
+
+func TestRunCommandCheck_SuccessBeforeDeadlineObservation(t *testing.T) {
+	installHermesACPCheckHelper(t)
+	t.Setenv(hermesACPCheckHelperEnv, "available")
+	hermesPath, err := exec.LookPath(hermesBin)
+	if err != nil {
+		t.Fatalf("LookPath(hermes): %v", err)
+	}
+	cmd := exec.Command(hermesPath, "acp", "--check")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("helper error = %v, want a conclusive success", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	for _, interrupted := range []bool{false, true} {
+		found, timedOut := commandCheckOutcome(ctx, cmd.ProcessState, interrupted)
+		if !found || timedOut {
+			t.Errorf("interrupted=%v: found=%v timedOut=%v, want true/false", interrupted, found, timedOut)
+		}
 	}
 }
