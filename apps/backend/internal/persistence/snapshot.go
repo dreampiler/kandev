@@ -107,6 +107,10 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) && log != nil {
+			log.Warn("persistence: failed to list boot backup staging directories",
+				zap.String("path", backupDir), zap.Error(err))
+		}
 		return
 	}
 	for _, e := range entries {

@@ -102,8 +102,9 @@ rules, so that I understand the first cleanup and its recovery limits.
   containing a space, `#`, `%`, or, where file names allow it, `?`. Verification
   shall not create or check any other file.
 - **AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.9:** When backup preparation
-  fails, the backend shall log the underlying error and keep its message, cut
-  to at most 1,024 bytes, in the stored retention record. The status response
+  fails, the backend shall log the underlying error and keep its message as
+  valid UTF-8, cut to at most 1,024 bytes after replacing invalid byte sequences,
+  in the stored retention record. The status response
   shall still report only the failure code. A later successful preparation, a
   disable, a new pending preparation, or an interrupted preparation shall
   clear the stored message.

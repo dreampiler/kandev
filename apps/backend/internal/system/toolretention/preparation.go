@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -86,9 +87,10 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 // message cannot bloat the settings row.
 const preparationDetailLimit = 1024
 
-// limitPreparationDetail cuts message to the limit without splitting a UTF-8
-// sequence.
+// limitPreparationDetail normalizes invalid UTF-8 before bounding the persisted
+// message, so JSON encoding cannot expand invalid bytes beyond the limit.
 func limitPreparationDetail(message string) string {
+	message = strings.ToValidUTF8(message, "\ufffd")
 	if len(message) <= preparationDetailLimit {
 		return message
 	}

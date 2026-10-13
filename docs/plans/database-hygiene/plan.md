@@ -81,3 +81,16 @@ validators once after the specification changes:
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
+
+## Review verification
+
+The review integrates current upstream contracts for SQLite snapshot copying,
+development database selection, persistence identity, and Windows fixtures.
+Task 02 adds failure-warning and concurrent-sweep coverage. Task 03 fixes
+invalid UTF-8 expanding the stored diagnostic past its byte limit and covers
+diagnostic lifecycle and stale completion guards.
+
+Local execution is limited to tiny exact-source proofs and static validators
+inside an isolated task sandbox. Full backend, frontend, E2E, database, and
+static gates are hosted delivery requirements. Their exact head and run
+receipts are maintained outside the repository.

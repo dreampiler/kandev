@@ -103,11 +103,15 @@ The WAL pragma runs while the connection opens. If it fails, the driver
 returns the error from `Open`, and the pool reports it like any other
 connection failure. Startup fails instead of running without the bound.
 
-A sweep never fails boot or backup creation. If it cannot list the directory,
-it returns without doing anything. If it cannot inspect or remove one staging
+A sweep never fails boot or backup creation. An absent backups directory is a
+quiet no-op. Other listing failures log a warning with the directory path and
+error, then return. If it cannot inspect or remove one staging
 directory, it logs a warning with the path and the error, then continues with
-the other entries. A partially removed directory keeps its prefix, so a later
-sweep retries it.
+the other entries. A directory or direct entry that disappears during inspection
+is a quiet no-op. Symlinks with the staging prefix are skipped; direct-entry
+timestamps are read with `Lstat` without following symlink targets. A partially
+removed directory keeps its prefix, so a later sweep retries it after the
+liveness window.
 
 ## Persistence
 
@@ -117,8 +121,9 @@ existing names and their retention rule (the last two pre-migration backups).
 
 ## Observability
 
-A reclaimed staging directory is not logged. A failed removal logs a warning
-with the staging path and the error. The WAL limit can be read back with
+A reclaimed or already vanished staging directory is not logged. Listing,
+inspection, and removal failures have distinct warnings with the affected path
+and error. The WAL limit can be read back with
 `PRAGMA journal_size_limit` on a writer connection.
 
 ## Related decisions

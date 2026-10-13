@@ -86,7 +86,8 @@ crash does not permanently cost one extra database's worth of disk.
   directory without the `.kandev-backup-` prefix shall not be removed by this
   rule.
 - **AC-PLATFORM-SQLITE-FILE-HYGIENE-002.4:** When a staging directory cannot be
-  inspected or removed, Kandev shall log a warning and shall continue the boot
+  inspected or removed, or the backups directory cannot be listed for a reason
+  other than absence, Kandev shall log a warning and shall continue the boot
   or the backup. A failure to reclaim debris shall not fail startup or backup
   creation.
 

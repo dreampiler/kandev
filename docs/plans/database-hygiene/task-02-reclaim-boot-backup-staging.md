@@ -87,5 +87,23 @@ Implemented on 2026-10-12, verified on Windows 11 with Go 1.26.
   (`snapshot mode = 0666`), which this change does not touch.
 - `go vet ./internal/persistence/... ./internal/system/backups/...` passes.
 - Limits: debris younger than six hours stays, including debris from a crash
-  just before the restart; a later boot or backup creation reclaims it. The
-  warning path for a failed removal has no automated test.
+  just before the restart; a later boot or backup creation reclaims it.
+
+### Review remediation
+
+Added non-root POSIX filesystem regressions for listing, inspection, and removal
+warnings, including the path and underlying error. Listing failures now warn;
+an absent directory remains quiet. Additional tests cover concurrent sweeps and
+staging-prefix symlinks without following their targets. The permission cases
+skip on Windows and when run as root; the local contained proof exercises them
+as UID 1000. The listing-error and missing-directory tests also run as root.
+
+Focused command:
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/persistence -run '^TestSweepStaleBootStaging' -count=1 -v)
+```
+
+Local verification uses exact production function slices and these regression
+tests in the isolated task sandbox, with only the logger boundary replaced.
+Full package, SQL guard, lint, and database verification run in hosted CI.

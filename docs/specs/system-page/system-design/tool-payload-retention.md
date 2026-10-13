@@ -290,8 +290,10 @@ reports the backup error once through the `Options.Log` callback, which
 `system.provideToolRetention` wires to the backend logger at error level. It
 also keeps the message in the runtime record's `preparation_detail` field. The
 field is part of the persisted record, not of `Status`, so the authorized read
-endpoint never returns raw error text. The message is cut to 1,024 bytes at a
-UTF-8 boundary. A successful preparation, a disable, a new pending
+endpoint never returns raw error text. Invalid UTF-8 byte sequences are replaced
+before the message is cut to 1,024 bytes at a UTF-8 boundary, keeping the decoded
+stored value within the limit after JSON serialization. The logger receives
+the original error. A successful preparation, a disable, a new pending
 preparation, and `failPreparation` (interrupted preparation) clear it, so a
 stored message always belongs to the current failure.
 

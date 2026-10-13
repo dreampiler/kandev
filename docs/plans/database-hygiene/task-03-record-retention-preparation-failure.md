@@ -83,3 +83,23 @@ Implemented on 2026-10-12, verified on Windows 11 with Go 1.26.
   `backup_failed` code.
 - `go vet ./internal/system/toolretention/... ./internal/system` and
   `go build ./...` pass.
+
+### Review remediation
+
+Invalid UTF-8 in an error message could survive the limiter and expand during
+JSON serialization, leaving a decoded stored message larger than 1,024 bytes.
+Normalize invalid sequences before truncation. Add regressions for the limiter
+and the actual stored record while retaining the original callback error and
+public status code. Additional tests cover clearing on retry, success, and
+recovery, and preservation under stale revision and operation identities.
+
+Focused command:
+
+```bash
+(cd apps/backend && go test -trimpath -tags fts5 -race ./internal/system/toolretention -run '^Test(LimitPreparationDetail|PreparationFailure|PreparationDetail|StalePreparationFailure)' -count=1 -v)
+```
+
+The tiny exact-source limiter proof fails before normalization, including a
+3,072-byte decoded stored value, and passes afterward in the task sandbox.
+Full SQLite persistence and service regressions run in hosted CI; no local
+backend dependency rebuild is required.
