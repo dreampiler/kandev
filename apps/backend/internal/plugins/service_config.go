@@ -247,9 +247,16 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 			// StatusActive with no process running — don't lose that.
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			// DB error path: the registry keeps StatusActive with no running process,
+			// so the delivery worker must be told (Greptile P1, 2026-10-13).
+			s.notifyDeliverer()
+		} else {
+			// Status transition to StatusError succeeded: pair the status write
+			// with both notifications the same way StartActivePlugins and
+			// DisableWithResult do (8aa34eddcc).
+			s.notifyAgentToolCatalogChanged()
+			s.notifyDeliverer()
 		}
-		s.notifyDeliverer()
-		s.notifyAgentToolCatalogChanged()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}
 	return nil
