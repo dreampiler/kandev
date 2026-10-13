@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -155,6 +156,30 @@ func TestPrepareEngineTurnCompletion_SupersededEntryPromptDoesNotHoldAdvance(t *
 	f.queue(t, f.boundEntryPrompt(t, "entry-ended-destination"))
 
 	require.True(t, f.advances(t, turnCompletionCauseAgentTurn))
+}
+
+// A deferred-launch read error leaves the entry-prompt state unknown, so the
+// signal-gated advance must stay held rather than release the hold.
+func TestWorkflowEntryPromptPendingForStep_HoldsAdvanceWhenDeferredLaunchReadFails(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-read-error", "entry-read-error-session", models.TaskSessionStateWaitingForInput)
+	f.queue(t, f.boundEntryPrompt(t, f.session))
+	f.svc.repo = entryPromptReadErrorRepo{sessionExecutorStore: f.repo, err: errors.New("deferred launch storage unavailable")}
+
+	require.True(t, f.svc.workflowEntryPromptPendingForStep(f.ctx, f.task(t), entryGateStepID),
+		"an unreadable deferred-launch record must hold the signal-gated advance")
+}
+
+// entryPromptReadErrorRepo fails deferred-launch reads while delegating the
+// rest of the store to the real repository.
+type entryPromptReadErrorRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r entryPromptReadErrorRepo) GetTaskDeferredLaunch(
+	context.Context, string,
+) (map[string]interface{}, interface{}, error) {
+	return nil, nil, r.err
 }
 
 // A held entry prompt is released by existing events rather than by an age

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -1274,6 +1275,19 @@ func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
 	assert.Equal(t,
 		"Failed to move task",
 		moveTaskErrorMessage(fmt.Errorf("database path /tmp/private failed")),
+	)
+}
+
+func TestMoveTaskErrorMessage_CoversPendingMoveSentinels(t *testing.T) {
+	assert.Equal(t, ws.ErrorCodeConflict, classifyMoveTaskError(workflowmove.ErrPendingMoveActiveSession))
+	assert.Equal(t, ws.ErrorCodeConflict, classifyMoveTaskError(workflowmove.ErrPermanentPendingMoveMismatch))
+	assert.Equal(t,
+		"Move task conflicts with the current task or workflow state: "+workflowmove.ErrPendingMoveActiveSession.Error(),
+		moveTaskErrorMessage(workflowmove.ErrPendingMoveActiveSession),
+	)
+	assert.Equal(t,
+		"Move task conflicts with the current task or workflow state: "+workflowmove.ErrPermanentPendingMoveMismatch.Error(),
+		moveTaskErrorMessage(workflowmove.ErrPermanentPendingMoveMismatch),
 	)
 }
 

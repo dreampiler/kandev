@@ -5085,9 +5085,9 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		return
 	}
 	currentStepID := task.WorkflowStepID
-	// The move remembers the step it was requested from. Replaying against the
-	// current step instead would let a stale move overwrite a later move. A
-	// legacy row without the recorded source keeps the current-step behavior.
+	// The recorded-source rule governs replay: the move applies only from the
+	// step it was requested from. A legacy row without the recorded source
+	// keeps the current-step behavior.
 	fromStepID := currentStepID
 	if move.FromStepID != "" {
 		fromStepID = move.FromStepID
@@ -8024,7 +8024,14 @@ func (s *Service) workflowEntryPromptPendingForStep(
 	if task == nil || stepID == "" || task.WorkflowStepID != stepID {
 		return false
 	}
-	deferral, ok := s.pendingStepEntryDeferral(ctx, task)
+	deferral, ok, deferralErr := s.pendingStepEntryDeferral(ctx, task)
+	if deferralErr != nil {
+		s.logger.Warn("on_turn_complete gated on unreadable step-entry prompt",
+			zap.String("task_id", task.ID),
+			zap.String("step_id", stepID),
+			zap.Error(deferralErr))
+		return true
+	}
 	if !ok || !isStepEntryPromptKind(deferral.Kind) || !stepEntryBindingTargetsStep(deferral, stepID) {
 		return false
 	}
@@ -8036,21 +8043,27 @@ func (s *Service) workflowEntryPromptPendingForStep(
 }
 
 // pendingStepEntryDeferral reads the task's ceiling-deferred launch, when one
-// exists. ok is false when there is no ceiling record. A record that cannot be
-// decoded is returned as-is so the caller's binding check rejects it.
+// exists. ok is false when there is no ceiling record. An unreadable record
+// keeps ok false and reports the read failure separately, so the caller can
+// hold the advance instead of treating uncertainty as "no prompt". A record
+// that cannot be decoded is returned as-is so the caller's binding check
+// rejects it.
 func (s *Service) pendingStepEntryDeferral(
 	ctx context.Context,
 	task *models.Task,
-) (models.CeilingDeferral, bool) {
+) (models.CeilingDeferral, bool, error) {
 	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
-	if err != nil || raw == nil {
-		return models.CeilingDeferral{}, false
+	if err != nil {
+		return models.CeilingDeferral{}, false, err
+	}
+	if raw == nil {
+		return models.CeilingDeferral{}, false, nil
 	}
 	if ceilingFlag, hasCeilingFlag := raw[models.CeilingDeferredKey]; !hasCeilingFlag || ceilingFlag != true {
-		return models.CeilingDeferral{}, false
+		return models.CeilingDeferral{}, false, nil
 	}
 	deferral, _ := models.ReadCeilingDeferral(raw)
-	return deferral, true
+	return deferral, true, nil
 }
 
 // isStepEntryPromptKind reports whether kind is one of the deferred launches

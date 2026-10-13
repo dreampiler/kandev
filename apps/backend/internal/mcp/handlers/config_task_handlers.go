@@ -247,10 +247,10 @@ func (h *Handlers) deferMoveTask(
 	// the task orphaned on the board.
 	//
 	// sourceStepID records the step the task occupies now, and
-	// sourceTransitionID its latest step-transition ledger id. The deferred move
-	// remembers both so a later explicit move (which relocates the card while
-	// this move sits armed) can supersede it instead of being overwritten at
-	// replay — including when the card returns to the same source step (A to B to A).
+	// sourceTransitionID its latest step-transition ledger id. The recorded
+	// source governs replay: a later explicit move supersedes this one instead
+	// of being overwritten at replay — including when the card returns to the
+	// same source step (A to B to A).
 	sourceStepID := ""
 	var sourceTransitionID int64
 	if h.workflowCtrl != nil {
@@ -430,7 +430,9 @@ func classifyMoveTaskError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
 	}
-	if errors.Is(err, workflowmove.ErrMoveConflict) {
+	if errors.Is(err, workflowmove.ErrMoveConflict) ||
+		errors.Is(err, workflowmove.ErrPendingMoveActiveSession) ||
+		errors.Is(err, workflowmove.ErrPermanentPendingMoveMismatch) {
 		return ws.ErrorCodeConflict
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
@@ -488,6 +490,8 @@ func moveTaskErrorReason(err error) (reason string, known bool) {
 	}
 	for _, sentinel := range []error{
 		workflowmove.ErrMoveConflict,
+		workflowmove.ErrPendingMoveActiveSession,
+		workflowmove.ErrPermanentPendingMoveMismatch,
 		workflowmove.ErrConflictingInstructions,
 		workflowmove.ErrEntryOptionsRequireStepChange,
 		workflowmove.ErrEntryOptionsUnsupported,
