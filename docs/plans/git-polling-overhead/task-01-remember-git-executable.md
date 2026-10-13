@@ -102,3 +102,13 @@ directory replacement, and extension-policy invalidation. The exact source
 plus tests passed with `go test -trimpath -race -v -count=1` in a nonroot,
 network-disabled sandbox without external dependencies. This local proof covers
 the isolated executable seam; complete package and Windows validation is hosted.
+
+Independent root review found that the native Windows CI suite previously
+compiled this package but selected only helper-console tests. Added an additive
+`Test Windows Git executable memo` step and mirrored it in `make test-windows`:
+`go test -tags fts5 -race -v -timeout 10m ./internal/common/subproc -run '^TestNewGitCommand'`.
+A workflow contract regression requires native-suite placement, the existing
+race/build tags and finite budget, selection of every executable-memo test,
+and the local Makefile mirror. It failed before the step existed. Actual
+Windows execution of these tests, including PATHEXT, must be observed in the
+final candidate job log; dependency compilation does not establish coverage.
