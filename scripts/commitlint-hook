@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Validate the commit message with commitlint when the workspace dependencies
+# are installed. A fresh fork worktree has no apps/node_modules, and a commit
+# that touches no front-end file must not wait on an install (or fail on the
+# missing binary). CI re-validates the squash-merge title, so skip the local
+# check with a one-line notice instead of blocking the commit.
+set -euo pipefail
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE \
+	GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+msg_file=${1:?'commitlint-hook requires the commit-msg filename'}
+apps_dir="$PWD/apps"
+shim_dir="$apps_dir/node_modules/.bin"
+
+if [ -f "$shim_dir/commitlint" ] || [ -f "$shim_dir/commitlint.cmd" ]; then
+	cd "$apps_dir"
+	exec pnpm exec commitlint --edit "$msg_file"
+fi
+
+echo "apps/node_modules not installed; commitlint skipped (CI validates the squash-merge title)"
+exit 0
