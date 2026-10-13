@@ -52,3 +52,7 @@ change respects the existing service-test file length limit.
 A real-store failure regression verifies that a committed config survives a
 failed restart/status write, preserves the existing record rollback contract,
 and still emits both catalog invalidation and deliverer refresh.
+
+Review remediation also serializes ordinary invocation with the existing config
+restart dispatch write lease, preserving immediate config-presence invalidation.
+The work order includes AC 001.11 and the deterministic blocked-restart regression.

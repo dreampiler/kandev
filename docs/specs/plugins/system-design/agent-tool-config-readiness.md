@@ -13,14 +13,16 @@ created: 2026-10-12
 This refines catalog membership for [plugin-contributed agent tools](../requirements/agent-tools.md).
 The plugin service owns the authoritative catalog (`Service.AgentToolCatalog`) and the
 operator config store. The MCP handlers, the live catalog refresher, and agentctl
-consume the catalog unchanged. Manifest validation, config validation
-(`validateConfigSchema`), secret vault storage, tool invocation, and the settings UI are
+consume the catalog unchanged. Ordinary invocation joins the existing per-plugin
+dispatch read lease. Manifest validation, config validation
+(`validateConfigSchema`), secret vault storage, tool payloads, and the settings UI are
 unchanged.
 
 | Requirement | Design sections |
 | --- | --- |
 | REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.9) | Catalog membership; readiness rule |
 | REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.10) | Recompute on config save; failure isolation |
+| REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.11) | Invocation ordering |
 
 ## Problem
 
@@ -67,12 +69,30 @@ signal. `UpdateConfig` is the only writer of plugin config; uninstall and upgrad
 signal.
 
 Catalog readiness describes stored config presence, not a subprocess liveness
-guarantee. The existing invocation and lifecycle behavior remains unchanged. A
+guarantee. Lifecycle status and persistence behavior remain unchanged. A
 failed restart requests another catalog and delivery refresh even if the status
 transition or its cleanup fails. Consumers read the authoritative registry state;
 a failed record write retains the existing registry rollback behavior. Catalog
 refresh does not restart the agent or task session, while a running plugin
 subprocess still restarts to read the saved config.
+
+## Invocation ordering
+
+`UpdateConfig` holds the existing per-plugin dispatch write lock across the config
+commit, catalog invalidation, and subprocess restart. Ordinary `InvokeAgentTool`
+now takes the read side before reading the installation and retains it through
+the RPC, matching managed invocation. An invocation begun after the newly
+configured tool is advertised therefore cannot reach the old unconfigured
+process or the gap before its replacement is ready. The same lease also protects
+ordinary calls against the existing disable, uninstall, and upgrade write paths.
+
+The initial notification stays after the commit and before restart so clearing
+required config invalidates the catalog immediately, and inactive or failed
+restarts still recompute it. No subprocess-liveness membership gate is added.
+A deterministic regression blocks the replacement handshake, reads the newly
+advertised catalog, then starts invocation and observes its dispatch wait. After
+a failed restart, invocation reads the resulting inactive status instead of
+returning the premature missing-runtime error.
 
 ## Failure isolation
 
@@ -91,7 +111,7 @@ counts are small, so the extra local file reads are bounded.
 
 ## Non-goals
 
-- `InvokeAgentTool` is unchanged. A client holding a stale list may still call a hidden
+- Config readiness adds no new invocation membership gate. A client holding a stale list may still call a hidden
   tool; the plugin answers as it does today, and the next `tools/list_changed` refresh
   removes the tool.
 - No new plugin status, API field, or UI change. The settings badge already reports the

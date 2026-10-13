@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-PLUGINS-AGENT-TOOLS-001.6
   - AC-PLUGINS-AGENT-TOOLS-001.9
   - AC-PLUGINS-AGENT-TOOLS-001.10
+  - AC-PLUGINS-AGENT-TOOLS-001.11
 system_design:
   - ../../specs/plugins/system-design/agent-tool-config-readiness.md
 ---
@@ -36,7 +37,7 @@ affecting other plugins.
 
 ## Out of scope
 
-No change to manifest or config validation, secret storage, `InvokeAgentTool`, plugin
+No change to manifest or config validation, secret storage, invocation payloads, plugin
 status, HTTP or WebSocket APIs, the MCP server, agentctl, or the web settings UI.
 
 ## Acceptance
@@ -60,7 +61,7 @@ because of fixture setup.
 From `apps/backend`:
 
 ```bash
-go test ./internal/plugins/ -run 'TestAgentToolCatalog|TestServiceUpdateConfig|TestRestartForConfigChange' -count=1
+go test ./internal/plugins/ -run 'TestAgentToolCatalog|TestServiceUpdateConfig|TestRestartForConfigChange|TestInvokeAgentToolWaitsForNewlyAdvertisedConfigRestart' -count=1
 go build ./...
 go vet ./internal/plugins/
 ```
@@ -88,3 +89,13 @@ A real-store failure regression covers catalog invalidation and deliverer refres
 even when saving the restart failure status fails. The existing registry rollback
 contract is preserved; public copy distinguishes agent/task-session refresh from
 the running plugin subprocess restart.
+
+## Invocation ordering remediation
+
+Ordinary `InvokeAgentTool` holds the existing per-plugin dispatch read lease
+from installation lookup through the RPC, serializing with the config restart
+write lease (AC 001.11). `agent_tools_config_restart_test.go` blocks a real
+service config restart at the runtime boundary, observes the newly advertised
+catalog, starts invocation, and verifies that it waits until the restart failure
+has settled. The bounded exact-source proof first failed with the premature
+missing-runtime error. Full package and race verification remain hosted checks.

@@ -229,6 +229,11 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 			zap.String("outcome", outcome))
 	}()
 
+	// Keep record lookup and the RPC in one dispatch lease across lifecycle changes.
+	dispatchLock := s.dispatchLocks.lockFor(pluginID)
+	dispatchLock.RLock()
+	defer dispatchLock.RUnlock()
+
 	record, err := s.Get(pluginID)
 	if err != nil {
 		return nil, err
