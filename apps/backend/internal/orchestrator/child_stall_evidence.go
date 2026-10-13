@@ -78,10 +78,67 @@ func (p *ChildStallProducer) gatherSessionEvidence(
 	if p.svc != nil {
 		evidence.StepRequiresSignal = p.svc.WorkflowStepRequiresCompletionSignal(ctx, child.WorkflowStepID)
 	}
-	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == child.WorkflowStepID {
-		evidence.PendingStepSignal = true
+	if err := p.gatherCompletionSignalState(ctx, session, child, evidence); err != nil {
+		return err
 	}
 	return nil
+}
+
+// gatherCompletionSignalState reads whether the child task already holds an
+// accepted completion signal for its current step, and whether a completion
+// signal for that step was refused by the ownership/profile gate. Both are read
+// across the task's sessions, not only the settled turn's session: a session
+// substitution moves the accepted signal and the refusal onto a new session
+// while the settled turn keeps naming the old one, which is how a reminder
+// repeats after the agent already signalled.
+func (p *ChildStallProducer) gatherCompletionSignalState(
+	ctx context.Context,
+	turnSession *models.TaskSession,
+	child *models.Task,
+	evidence *childstall.Evidence,
+) error {
+	sessions, err := p.store.ListTaskSessions(ctx, child.ID)
+	if err != nil {
+		return err
+	}
+	var newestRejection time.Time
+	seen := make(map[string]struct{}, len(sessions)+1)
+	for _, session := range sessions {
+		if session == nil || session.ID == "" {
+			continue
+		}
+		seen[session.ID] = struct{}{}
+		observeCompletionSignalState(session, child.WorkflowStepID, evidence, &newestRejection)
+	}
+	// The settled turn's session owns the read even when the list is stale or
+	// does not include it, so add it explicitly.
+	if turnSession != nil && turnSession.ID != "" {
+		if _, ok := seen[turnSession.ID]; !ok {
+			observeCompletionSignalState(turnSession, child.WorkflowStepID, evidence, &newestRejection)
+		}
+	}
+	return nil
+}
+
+// observeCompletionSignalState folds one session's stored completion state for
+// the current step into the evidence. A signal for the step marks the task as
+// signalled; the newest recorded rejection for the step provides the block
+// reason shown in the reminder.
+func observeCompletionSignalState(
+	session *models.TaskSession,
+	stepID string,
+	evidence *childstall.Evidence,
+	newestRejection *time.Time,
+) {
+	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == stepID {
+		evidence.PendingStepSignal = true
+	}
+	if rejection, has := models.LoadStepCompleteRejection(session.Metadata); has && rejection.StepID == stepID {
+		if rejection.At.After(*newestRejection) {
+			*newestRejection = rejection.At
+			evidence.BlockedReason = rejection.Reason
+		}
+	}
 }
 
 func (p *ChildStallProducer) hasActiveTurn(ctx context.Context, sessionID string) (bool, error) {
