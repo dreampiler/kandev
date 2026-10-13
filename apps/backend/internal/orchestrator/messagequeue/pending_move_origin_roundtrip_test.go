@@ -23,32 +23,32 @@ func verifyPendingMoveOriginRoundtrip(t *testing.T, repo Repository) {
 	seedQueueSessionIdentity(t, repo, identity)
 	move := &PendingMove{
 		SessionIncarnationID: identity.SessionIncarnationID, MoveID: "origin-move", TaskID: "origin-task", WorkflowID: "origin-workflow",
-		WorkflowStepID: "target-step", FromStepID: "source-step", FromTransitionID: 71,
+		WorkflowStepID: "target-step", FromStepID: "source-step", FromTransitionID: 1 << 40,
 		QueuedAt: time.Now().UTC(),
 	}
 	require.NoError(t, repo.SetPendingMove(ctx, "origin-session", move))
-	move.FromTransitionID = 72
+	move.FromTransitionID = 1<<40 + 1
 	require.NoError(t, repo.SetPendingMove(ctx, "origin-session", move))
 	got, err := repo.GetPendingMove(ctx, "origin-session")
 	require.NoError(t, err)
 	require.Equal(t, "source-step", got.FromStepID)
-	require.Equal(t, int64(72), got.FromTransitionID)
+	require.Equal(t, int64(1<<40+1), got.FromTransitionID)
 	snapshot, err := repo.Snapshot(ctx, identity)
 	require.NoError(t, err)
-	require.Equal(t, int64(72), snapshot.PendingMove.FromTransitionID)
+	require.Equal(t, int64(1<<40+1), snapshot.PendingMove.FromTransitionID)
 	listed, err := repo.ListPendingMoves(ctx)
 	require.NoError(t, err)
 	require.Len(t, listed, 1)
 	require.Equal(t, "source-step", listed[0].Move.FromStepID)
-	require.Equal(t, int64(72), listed[0].Move.FromTransitionID)
+	require.Equal(t, int64(1<<40+1), listed[0].Move.FromTransitionID)
 	taken, err := repo.TakePendingMove(ctx, "origin-session")
 	require.NoError(t, err)
-	require.Equal(t, int64(72), taken.FromTransitionID)
+	require.Equal(t, int64(1<<40+1), taken.FromTransitionID)
 	require.NoError(t, repo.ReplaceSession(ctx, "origin-session", snapshot.Entries, snapshot.PendingMove))
 	restored, err := repo.GetPendingMove(ctx, "origin-session")
 	require.NoError(t, err)
 	require.Equal(t, "source-step", restored.FromStepID)
-	require.Equal(t, int64(72), restored.FromTransitionID)
+	require.Equal(t, int64(1<<40+1), restored.FromTransitionID)
 	removed, err := repo.DeletePendingMoveIfMatch(ctx, PendingMoveRecord{SessionID: "origin-session", Move: *restored}, "")
 	require.NoError(t, err)
 	require.True(t, removed)
@@ -92,11 +92,11 @@ func verifyPendingMoveOriginUpgrade(t *testing.T, repo *sqliteRepository) {
 	legacy, err := repo.GetPendingMove(ctx, "legacy-session")
 	require.NoError(t, err)
 	legacy.FromStepID = "source-step"
-	legacy.FromTransitionID = 91
+	legacy.FromTransitionID = 1<<40 + 2
 	require.NoError(t, repo.SetPendingMove(ctx, "legacy-session", legacy))
 	require.NoError(t, repo.initSchema())
 	taken, err := repo.TakePendingMove(ctx, "legacy-session")
 	require.NoError(t, err)
 	require.Equal(t, "source-step", taken.FromStepID)
-	require.Equal(t, int64(91), taken.FromTransitionID)
+	require.Equal(t, int64(1<<40+2), taken.FromTransitionID)
 }

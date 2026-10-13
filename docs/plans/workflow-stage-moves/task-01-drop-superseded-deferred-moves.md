@@ -96,3 +96,12 @@ See In scope. Dependencies: none.
   admission test, and the handler test failed on assertions before the fix and
   pass after it. The moves are built from their persisted JSON shape, so the
   same test source compiles before and after the new fields exist.
+
+- Review remediation uses `BIGINT` for the new transition reference, matching
+  the PostgreSQL ledger's 64-bit identity. SQLite and PostgreSQL regression
+  tests cover large IDs through upsert, get, list, snapshot, take, restore,
+  deletion, legacy upgrade, and schema replay. The isolated static range proof
+  rejected the former 32-bit declaration; actual database behavior is verified
+  only by hosted Backend CI.
+- The deferred-move leave-and-return admission regression now runs against an
+  isolated real PostgreSQL schema as well as SQLite.

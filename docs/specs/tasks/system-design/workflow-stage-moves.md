@@ -50,12 +50,13 @@ validation.
 | Field | Column | Meaning |
 | --- | --- | --- |
 | `FromStepID` | `from_step_id TEXT NOT NULL DEFAULT ''` | Step the task occupied when the move was recorded. |
-| `FromTransitionID` | `from_transition_id INTEGER NOT NULL DEFAULT 0` | Task's latest `task_step_transitions.id` when the move was recorded. |
+| `FromTransitionID` | `from_transition_id BIGINT NOT NULL DEFAULT 0` | Task's latest `task_step_transitions.id` when the move was recorded. |
 
 Fresh databases create both columns in the table DDL. Existing databases add
 them with idempotent `ALTER TABLE ... ADD COLUMN`. Every read, upsert,
 snapshot restore, and sweep listing of `pending_moves` carries both values.
-Legacy rows decode as the empty string and zero.
+Legacy rows decode as the empty string and zero. The transition reference uses
+`BIGINT` so PostgreSQL accepts the full signed 64-bit ledger identity range.
 
 ### Control flow
 
