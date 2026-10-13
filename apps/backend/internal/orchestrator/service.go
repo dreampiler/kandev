@@ -1264,10 +1264,12 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
-	idleParkingMu         sync.Mutex
-	idleParkingCandidates map[idleParkingCandidateKey]time.Time
-	idleParkingFocusAt    map[string]time.Time
-	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+	idleParkingMu           sync.Mutex
+	replacedSessionReclaims sync.Map // map[sessionID]replacedSessionReclaim
+	primarySessionReclaimMu sync.Mutex
+	idleParkingCandidates   map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt      map[string]time.Time
+	idleParkingInFlight     map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow

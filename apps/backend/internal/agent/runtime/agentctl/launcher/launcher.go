@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -282,6 +283,11 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	if err != nil {
 		return err
 	}
+	jobName := ""
+	if runtime.GOOS == "windows" {
+		jobName = processidentity.WindowsJobNamePrefix + uuid.NewString()
+	}
+	overrides = append(overrides, processidentity.WindowsJobNameEnv+"="+jobName)
 	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
 
@@ -314,11 +320,11 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
 	identity, identityErr := processidentity.Capture(l.cmd.Process.Pid)
+	identity.WindowsJobName = jobName
+	l.processIdentity = identity
 	if identityErr != nil {
 		l.logger.Warn("could not capture agentctl process identity; descendant cleanup will fail closed",
 			zap.Int("pid", l.cmd.Process.Pid), zap.Error(identityErr))
-	} else {
-		l.processIdentity = identity
 	}
 
 	closeChildPipeEnd(l.cmd)

@@ -9,6 +9,12 @@ import (
 
 var ErrUnverifiableIdentity = errors.New("process identity is incomplete or unsupported")
 
+// WindowsJobNamePrefix identifies launcher-created containment objects.
+const WindowsJobNamePrefix = `Local\kandev-agentctl-`
+
+// WindowsJobNameEnv carries the launcher-owned job to its suspended child.
+const WindowsJobNameEnv = "KANDEV_INTERNAL_WINDOWS_JOB_NAME"
+
 type State string
 
 const (
@@ -21,10 +27,11 @@ const (
 // Identity binds a process ID and its containment group to an OS-specific
 // birth token. Empty birth tokens represent legacy or unsupported evidence.
 type Identity struct {
-	PID        int    `json:"pid"`
-	GroupID    int    `json:"group_id,omitempty"`
-	SessionID  int    `json:"session_id,omitempty"`
-	BirthToken string `json:"birth_token,omitempty"`
+	PID            int    `json:"pid"`
+	GroupID        int    `json:"group_id,omitempty"`
+	SessionID      int    `json:"session_id,omitempty"`
+	BirthToken     string `json:"birth_token,omitempty"`
+	WindowsJobName string `json:"windows_job_name,omitempty"`
 }
 
 func (identity Identity) Validate() error {

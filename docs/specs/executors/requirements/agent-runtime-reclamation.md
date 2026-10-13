@@ -155,6 +155,27 @@ Acceptance criteria:
 - **AC-EXECUTORS-RUNTIME-RECLAIM-004.2:** A descendant that outlives its leader is reaped before the owning manager reports it stopped.
 - **AC-EXECUTORS-RUNTIME-RECLAIM-004.3:** The process runner and the VS Code manager do not return ownership while a descendant is still alive.
 
+### REQ-EXECUTORS-RUNTIME-RECLAIM-005: Windows ownership and replaced sessions
+
+Windows shall prove termination of a launcher-owned process tree through its
+original process birth identity and kernel containment. Session replacement
+shall release an obsolete execution once it is no longer primary and has no
+active turn or known pending work.
+
+Acceptance criteria:
+
+- **AC-EXECUTORS-RUNTIME-RECLAIM-005.1:** An exited original Windows process with an empty or destroyed owned kill-on-close Job Object shall permit cleanup. A surviving job member shall block termination proof until containment completes.
+- **AC-EXECUTORS-RUNTIME-RECLAIM-005.2:** Missing containment evidence, reused PIDs, unknown processes, foreign ownership, and inspection errors shall never authorize process termination.
+- **AC-EXECUTORS-RUNTIME-RECLAIM-005.3:** Primary promotion or a successful queue transfer shall stop the exact obsolete non-primary execution through the normal stop path. Its successor and queued messages shall remain intact.
+- **AC-EXECUTORS-RUNTIME-RECLAIM-005.4:** An active turn shall defer replacement cleanup. Maintenance shall retry after settlement and shall reject a rotated execution or a re-promoted session.
+- **AC-EXECUTORS-RUNTIME-RECLAIM-005.5:** Existing Office, coordinator, workflow parking, resource-use, and known-work protection shall remain intact. The operator's configured 60-minute idle timeout shall remain unchanged.
+
+The 2026-10-13 operating trace's `skip_identity_unavailable` count does not prove
+Windows process inspection failed: idle parking does not call
+`OwnedSessionTerminated`, and stopped historical rows receive that same skip
+reason. The confirmed independent defects are missing replacement teardown and
+unavailable Windows retired-owner termination proof.
+
 ## Evidence-closed requirements
 
 ### Descendant reclamation is not the leak
@@ -216,3 +237,4 @@ descendant outside these ownership paths is ever observed surviving.
 | REQ-EXECUTORS-RUNTIME-RECLAIM-002 | WO-01 | delivered |
 | REQ-EXECUTORS-RUNTIME-RECLAIM-003 | WO-02 | not started |
 | REQ-EXECUTORS-RUNTIME-RECLAIM-004 | closed with evidence | closed |
+| REQ-EXECUTORS-RUNTIME-RECLAIM-005 | WO-03 | delivered |
