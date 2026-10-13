@@ -258,10 +258,12 @@ ui:
 # Session admission: host-memory launch admission for the session ceiling.
 # On in prod so a replacement build holds new worker-lane launches back when the
 # host is low on available memory or above its commit ceiling; off in dev/e2e
-# because they share the host with normal work. The control lane and Office
-# coordinator are never held by this guard. One value turns it off anywhere, and
+# because they share the host with normal work. Every worker-lane new process is
+# held, including a human manual start or resume; only the control lane and Office
+# coordinator are exempt. One value turns it off anywhere, and
 # KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB / KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT
-# adjust the thresholds (defaults 8192 MiB and 85).
+# adjust the thresholds (defaults 8192 MiB and 75). The commit ceiling stays below
+# the host watchdog's 77% restart threshold so deferral acts before it restarts.
 session:
   KANDEV_SESSION_MEMORY_GUARD_ENABLED:
     prod: "true"

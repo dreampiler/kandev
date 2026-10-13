@@ -91,14 +91,33 @@ func TestSessionCeilingMemoryCommitAboveCeilingDefers(t *testing.T) {
 	}
 }
 
-func TestSessionCeilingMemoryManualOverrides(t *testing.T) {
+func TestSessionCeilingMemoryManualWorkerLaunchIsDeferred(t *testing.T) {
+	lister := &fakeAdmittedLister{}
+	c := newMemoryController(t, 10, lister, &fakeMemoryReader{reading: pressuredReading()})
+
+	decision := c.admit(context.Background(), workerRequest("s-manual", launchOriginManual))
+	if decision.admitted {
+		t.Fatal("a manual worker launch was admitted while the host was pressured")
+	}
+	if decision.reasonCode != ceilingReasonMemoryPressure {
+		t.Fatalf("reasonCode = %q, want %q", decision.reasonCode, ceilingReasonMemoryPressure)
+	}
+	if len(c.reservations) != 0 {
+		t.Fatalf("a memory refusal must not reserve capacity, got %d reservations", len(c.reservations))
+	}
+}
+
+// TestSessionCeilingMemoryManualOverridesCountCeilingWhenClear pins that the
+// manual override survives for the session-count ceiling. The host-memory
+// condition is the only admission input the manual override cannot pass.
+func TestSessionCeilingMemoryManualOverridesCountCeilingWhenClear(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	lister.set("worker-1") // saturate the worker lane so the override branch is reached
-	c := newMemoryController(t, 1, lister, &fakeMemoryReader{reading: pressuredReading()})
+	c := newMemoryController(t, 1, lister, &fakeMemoryReader{reading: clearReading()})
 
 	decision := c.admit(context.Background(), workerRequest("s-manual", launchOriginManual))
 	if !decision.admitted || !decision.manualOverride {
-		t.Fatalf("manual launch must keep its override under pressure: admitted=%v override=%v", decision.admitted, decision.manualOverride)
+		t.Fatalf("manual launch must keep its count-ceiling override on a clear host: admitted=%v override=%v", decision.admitted, decision.manualOverride)
 	}
 }
 
@@ -120,14 +139,20 @@ func TestSessionCeilingMemoryControlLaneIsExempt(t *testing.T) {
 	}
 }
 
-func TestSessionCeilingMemoryAlreadyAdmittedPasses(t *testing.T) {
+// TestSessionCeilingMemoryRunningSessionPromptIsNotHeld pins the D6 boundary:
+// the memory condition only refuses a launch that would add a new agent process.
+// A message or resume into a session that is already counted is never held, for
+// either origin.
+func TestSessionCeilingMemoryRunningSessionPromptIsNotHeld(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	lister.set("s-counted")
 	c := newMemoryController(t, 10, lister, &fakeMemoryReader{reading: pressuredReading()})
 
-	decision := c.admit(context.Background(), workerRequest("s-counted", launchOriginAutomatic))
-	if !decision.admitted {
-		t.Fatalf("an already-counted session must not be refused by memory: reason=%q", decision.reasonCode)
+	for _, origin := range []launchOrigin{launchOriginAutomatic, launchOriginManual} {
+		decision := c.admit(context.Background(), workerRequest("s-counted", origin))
+		if !decision.admitted {
+			t.Fatalf("a running session (%s) must not be held by memory: reason=%q", origin, decision.reasonCode)
+		}
 	}
 }
 

@@ -24,8 +24,12 @@ const (
 
 	// DefaultMinAvailableBytes is the shipped available-physical-memory floor.
 	DefaultMinAvailableBytes uint64 = 8 << 30 // 8 GiB
-	// DefaultMaxCommitPercent is the shipped commit-charge ceiling.
-	DefaultMaxCommitPercent float64 = 85
+	// DefaultMaxCommitPercent is the shipped commit-charge ceiling. It stays
+	// below an external host watchdog's restart threshold (77% commit), because
+	// if the guard deferred at or above that line the watchdog would restart the
+	// whole instance before any launch was ever held. An operator can still
+	// raise it, at the cost of that ordering.
+	DefaultMaxCommitPercent float64 = 75
 )
 
 // Reading is one observation of host memory. The counters are installation

@@ -632,12 +632,16 @@ func (c *sessionCeilingController) decideLocked(
 		classCeiling:    classCeiling,
 		classPopulation: classPopulation,
 	}
-	// Host memory pressure refuses a new automatic launch before any free slot
-	// is offered: the launch would add a process the host cannot currently
-	// afford. Manual launches keep their override, and an already-admitted
-	// session never reaches here. The refusal carries no population reading,
-	// so its card note describes the host rather than session counts.
-	if pressured && origin != launchOriginManual {
+	// Host memory pressure refuses a new worker launch before any free slot is
+	// offered: the launch would add a process the host cannot currently afford.
+	// The condition applies to every worker-lane origin, so a human manual
+	// launch is held too: the manual override passes the session-count ceiling
+	// but never the host-memory condition. An already-admitted session never
+	// reaches here, so a prompt into a live session is never held, and the
+	// control lane never reaches this branch because memoryPressuredLocked only
+	// reports the worker lane. The refusal carries no population reading, so its
+	// card note describes the host rather than session counts.
+	if pressured {
 		decision.reasonCode = ceilingReasonMemoryPressure
 		decision.populationKnown = false
 		c.logDecision(req, origin, decision)
