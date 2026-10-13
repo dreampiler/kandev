@@ -39,5 +39,14 @@ A user interface, automatic release, and profile setting changes.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/agent/settings/handlers -run ReleaseAccountBlock -count=1
+cd apps/backend && go test -trimpath ./internal/agent/settings/handlers -run ReleaseAccountBlock -count=1
 ```
+
+## Results
+
+- GREEN: `agent/settings/handlers` passed, including success, repeat, not
+  found, unwired, and failed-save release.
+- Locally on Windows, `agent/settings/controller` timed out while a host
+  runtime updater test waited, and three SQLite ordering tests in
+  `agent/settings/store` failed. This work order does not change either
+  package; CI is the reference for them.

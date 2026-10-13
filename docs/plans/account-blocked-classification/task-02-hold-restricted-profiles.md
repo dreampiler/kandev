@@ -27,8 +27,10 @@ orchestrator.
 ## In scope
 
 - `Hold`, `ReleaseHold`, and `IsHeld` on the circuit registry.
-- Engine selection, failure handling, and resolver methods.
-- Orchestrator hold for every dynamic-route failure.
+- Engine selection, pending-retry resume, failure handling, and resolver
+  methods.
+- Orchestrator hold for every dynamic-route failure, before the checks that
+  decide whether the failure may route.
 
 ## Out of scope
 
@@ -41,6 +43,21 @@ The settings release route and any change to candidate order.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/agent/runtime/dynamic -count=1
-cd apps/backend && go test ./internal/orchestrator -run AccountBlocked -count=1
+cd apps/backend && go test -trimpath ./internal/agent/runtime/dynamic -count=1
+cd apps/backend && go test -trimpath ./internal/orchestrator -run AccountBlocked -count=1
 ```
+
+## Results
+
+- RED: the orchestrator test failed with the hold call removed.
+- GREEN: `dynamic`, `agent/runtime`, and the orchestrator `AccountBlocked`
+  tests passed, also after rebuilding the branch on the current `main`.
+- Review fixes, each failing first and then passing:
+  - a repeated hold retries a hold save that failed, so the hold survives a
+    restart;
+  - a pending retry, scheduled or manual, refuses a profile held after the
+    route started waiting and returns the route to manual recovery;
+  - a predecessor still serving the session holds its own profile although
+    its failure cannot advance the route.
+- The orchestrator test for a restriction before any output holds the profile
+  and moves the route to the next candidate.

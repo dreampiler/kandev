@@ -49,16 +49,22 @@ A hold is a circuit in the open state with no expiry whose code satisfies
 `HoldsUntilRelease`. Its key uses the `account_block` scope and the concrete
 execution profile ID, so it never shares a key with a credential or model
 circuit. The existing circuit snapshot stores state and code, so a restart
-restores the hold without a schema change.
+restores the hold without a schema change. A hold applies in memory even when
+its save fails; the save stays pending and is retried by the next circuit
+change and by holding the same profile again.
 
 The registry never grants a probe for a held circuit, never replaces it with a
 timed suspension, and reports it as open. Candidate selection skips a held
 profile before it consults the credential circuit. A legacy retry rule for a
-held code moves to the next candidate.
+held code moves to the next candidate. A route that was waiting to retry a
+profile held in the meantime does not resume on it, by schedule or by a manual
+retry; it returns to manual recovery.
 
 The orchestrator holds the failed execution's own profile when the failure is
-reported, before safety checks decide whether to route. The hold keeps later
-selections away from the account. It does not launch a successor or replay.
+reported, before the cancellation, attribution, and safety checks decide
+whether to route, so a predecessor that still serves the session holds its
+profile too. The hold keeps later selections away from the account. It does
+not launch a successor or replay.
 
 ## Owner release
 

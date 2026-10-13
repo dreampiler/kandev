@@ -39,6 +39,16 @@ Holding profiles, release, and other 403 or authentication failures.
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/agent/runtime/routingpolicy -count=1
-cd apps/backend && go test ./internal/agent/runtime/routingerr -run AccountBlocked -count=1
+cd apps/backend && go test -trimpath ./internal/agent/runtime/routingpolicy -count=1
+cd apps/backend && go test -trimpath ./internal/agent/runtime/routingerr -run AccountBlocked -count=1
 ```
+
+## Results
+
+- RED: on `main`, `account_blocked` was undefined and the diagnostic
+  classified as `agent_runtime_error`.
+- GREEN: `routingerr` and `routingpolicy` passed, also after rebuilding the
+  branch on the current `main`.
+- `TestRemediateNpxCache_RemovesHashDirAndPreservesParent` in `routingerr`
+  also fails on `main` on Windows, because it overrides only `HOME`. It was
+  skipped in the local run.
