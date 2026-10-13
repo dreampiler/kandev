@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # resolve-go-lint-base.test.sh — regression coverage for the Go lint hook's
-# comparison base. A fork opens its PRs against its own origin, so the resolver
-# must default to origin's head branch even when an upstream remote is present,
-# without weakening lint enforcement.
+# comparison base. The resolver picks the default branch nearest HEAD: a fork
+# lints against origin, a branch tracking the canonical upstream lints against
+# upstream, and a tie favors origin. Failures stay fail-closed.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,22 +51,36 @@ new_repo() {
 fork_repo="" single_repo="" release_repo="" configured_repo=""
 dangling_repo="" ambiguous_repo="" unsafe_repo="" history_repo="" missing_repo=""
 full_ref_repo="" collision_repo="" namespace_repo=""
-diverged_repo="" merge_repo=""
+diverged_repo="" merge_repo="" upstream_repo=""
 cleanup() {
 	local repo
 	for repo in "$fork_repo" "$single_repo" "$release_repo" "$configured_repo" \
 		"$dangling_repo" "$ambiguous_repo" "$unsafe_repo" "$history_repo" "$missing_repo" \
 		"$full_ref_repo" "$collision_repo" "$namespace_repo" \
-		"$diverged_repo" "$merge_repo"; do
+		"$diverged_repo" "$merge_repo" "$upstream_repo"; do
 		[ -z "$repo" ] || rm -rf "$repo"
 	done
 }
 trap cleanup EXIT
 
+# Fork shape: HEAD sits on origin/main, upstream/main is an older ancestor, so
+# origin is nearer and wins even though an upstream remote exists.
 fork_repo=$(new_repo)
+git -C "$fork_repo" commit --allow-empty -qm second
+git -C "$fork_repo" update-ref refs/remotes/origin/main HEAD
 git -C "$fork_repo" remote add upstream git@github.com:kdlbs/kandev.git
-git -C "$fork_repo" update-ref refs/remotes/upstream/main HEAD
-expect_eq 'fork keeps origin default over upstream' 'refs/remotes/origin/main' "$(cd "$fork_repo" && "$RESOLVER")"
+git -C "$fork_repo" update-ref refs/remotes/upstream/main HEAD~1
+expect_eq 'fork prefers the nearer origin base' 'refs/remotes/origin/main' "$(cd "$fork_repo" && "$RESOLVER")"
+
+# Upstream shape: HEAD extends upstream/main while origin/main is an older
+# ancestor, so upstream is nearer and wins.
+upstream_repo=$(new_repo)
+git -C "$upstream_repo" remote add upstream git@github.com:kdlbs/kandev.git
+git -C "$upstream_repo" commit --allow-empty -qm second
+git -C "$upstream_repo" update-ref refs/remotes/origin/main HEAD
+git -C "$upstream_repo" commit --allow-empty -qm third
+git -C "$upstream_repo" update-ref refs/remotes/upstream/main HEAD
+expect_eq 'upstream branch prefers the nearer upstream base' 'refs/remotes/upstream/main' "$(cd "$upstream_repo" && "$RESOLVER")"
 
 single_repo=$(new_repo)
 expect_eq 'single remote uses origin default' 'refs/remotes/origin/main' "$(cd "$single_repo" && "$RESOLVER")"

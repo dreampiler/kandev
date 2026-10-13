@@ -32,16 +32,8 @@ class ChangedGoLintTest(unittest.TestCase):
                 import os
                 import sys
 
-                record = {
-                    "cwd": os.getcwd(),
-                    "args": sys.argv[1:],
-                    "env": {
-                        key: os.environ.get(key)
-                        for key in ("GOLANGCI_LINT_CACHE", "TMPDIR", "TMP", "TEMP")
-                    },
-                }
                 with open(os.environ["GO_LINT_TEST_CALLS"], "a") as calls:
-                    calls.write(json.dumps(record) + "\\n")
+                    calls.write(json.dumps({"cwd": os.getcwd(), "args": sys.argv[1:]}) + "\\n")
                 sys.exit(int(os.environ.get("GO_LINT_TEST_EXIT", "0")))
                 """),
         ).chmod(0o755)
@@ -87,21 +79,10 @@ class ChangedGoLintTest(unittest.TestCase):
         return [json.loads(line) for line in self.calls.read_text().splitlines()]
 
     def expected_args(self, *packages):
-        return ["run", *packages, f"--new-from-rev={self.base}", "--timeout=5m"]
-
-    def lint_cache_suffix(self, value):
-        self.assertIsNotNone(value, "expected the linter to inherit a .lint-cache path")
-        normalized = value.replace("\\", "/").rstrip("/")
-        marker = "/.lint-cache/"
-        self.assertIn(marker, normalized, normalized)
-        return normalized.rsplit(marker, 1)[1]
-
-    def assert_isolated_lint_state(self, record):
-        env = record["env"]
-        self.assertEqual(self.lint_cache_suffix(env["GOLANGCI_LINT_CACHE"]), "cache")
-        for key in ("TMPDIR", "TMP", "TEMP"):
-            with self.subTest(env=key):
-                self.assertEqual(self.lint_cache_suffix(env[key]), "tmp")
+        return [
+            "run", *packages,
+            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
+        ]
 
     def test_lints_each_staged_package_once(self):
         for filename in ("one.go", "two_test.go"):
@@ -117,7 +98,6 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
         self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
-        self.assert_isolated_lint_state(calls[0])
         self.assertEqual(other.read_text(), unstaged)
 
     def test_lints_multiple_packages_in_one_process_without_recursing(self):
@@ -137,7 +117,7 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertCountEqual(calls[0]["args"], [
             "run", ".", "./internal/first", "./internal/first/child", "./internal/second",
-            f"--new-from-rev={self.base}", "--timeout=5m",
+            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
         ])
 
     def test_non_go_commit_skips_lint(self):
@@ -198,7 +178,6 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
         self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
-        self.assert_isolated_lint_state(calls[0])
 
 
 if __name__ == "__main__":

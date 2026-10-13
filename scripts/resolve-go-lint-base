@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # resolve-go-lint-base prints the local remote-tracking ref used by the
 # pre-commit Go lint hook. The hook scopes changed packages with
-# `--new-from-rev`, so the base must be the branch this checkout opens PRs
-# against: a fork's own origin default branch, not the canonical upstream the
-# fork diverges from. Do not silently fall back when the base is unclear.
+# `--new-from-rev`, so the base should be the default branch this checkout is
+# nearest to: a fork lints against its own origin, while a branch tracking the
+# canonical upstream lints against upstream. Do not silently fall back when the
+# base is unclear.
 set -euo pipefail
 
 comparison_base=false
@@ -57,7 +58,28 @@ else
 		*) die "origin's default ref is invalid: $origin_head" ;;
 	esac
 	[ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
-	base_ref=$(normalize_remote_ref "$origin_head")
+
+	# Lint against the default branch this checkout is nearest to: a fork opens
+	# PRs against its own origin, while a branch tracking the canonical upstream
+	# is measured against upstream. Pick the candidate whose merge base with HEAD
+	# is closest (fewest commits HEAD is ahead of it); a tie favors origin.
+	candidate_refs=("$(normalize_remote_ref "$origin_head")")
+	if git remote get-url upstream >/dev/null 2>&1; then
+		candidate_refs+=("refs/remotes/upstream/$base_branch")
+	fi
+
+	base_ref=""
+	best_ahead=""
+	for candidate in "${candidate_refs[@]}"; do
+		git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1 || continue
+		merge_base=$(git merge-base HEAD "$candidate" 2>/dev/null) || continue
+		ahead=$(git rev-list --count "$merge_base..HEAD")
+		if [ -z "$best_ahead" ] || [ "$ahead" -lt "$best_ahead" ]; then
+			base_ref=$candidate
+			best_ahead=$ahead
+		fi
+	done
+	[ -n "$base_ref" ] || base_ref=$(normalize_remote_ref "$origin_head")
 fi
 
 git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"
