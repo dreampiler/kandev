@@ -496,9 +496,10 @@ func assembleEvents(
 	created []*sqlite.OverviewCreatedTaskRow,
 	extra *overviewExtraEvents,
 	since time.Time,
+	fallback time.Time,
 ) []OverviewEvent {
 	var events []OverviewEvent
-	events = append(events, serverStartEvents(serverStarts, snap.buildVersion, since)...)
+	events = append(events, serverStartEvents(serverStarts, snap.buildVersion, since, fallback)...)
 	events = append(events, createdTaskEvents(created)...)
 	for _, row := range automation {
 		events = append(events, OverviewEvent{
@@ -531,10 +532,18 @@ func assembleEvents(
 // every startup rather than only the running process. A record written without
 // a version falls back to the running binary's version, so the row is never
 // blank.
+//
+// When the durable history has no in-window record, the running process's own
+// start is rendered instead, so a reachable overview never reports zero
+// startups while a server is up. This covers a fresh install, an upgrade, and a
+// boot whose record write failed. Startups before the record began are not
+// reconstructed from logs, so the running process is the only entry until the
+// next boot records itself. The fallback is dropped when it predates the
+// window, so a server that has run longer than the window reports no startups.
 func serverStartEvents(
-	starts []*sqlite.OverviewServerStartRow, buildVersion string, since time.Time,
+	starts []*sqlite.OverviewServerStartRow, buildVersion string, since, fallback time.Time,
 ) []OverviewEvent {
-	out := make([]OverviewEvent, 0, len(starts))
+	out := make([]OverviewEvent, 0, len(starts)+1)
 	for _, start := range starts {
 		if start == nil || start.At.Before(since) {
 			continue
@@ -544,6 +553,9 @@ func serverStartEvents(
 			version = buildVersion
 		}
 		out = append(out, OverviewEvent{Kind: overviewEventServerStarted, At: start.At, Version: version})
+	}
+	if len(out) == 0 && !fallback.IsZero() && !fallback.Before(since) {
+		out = append(out, OverviewEvent{Kind: overviewEventServerStarted, At: fallback, Version: buildVersion})
 	}
 	return out
 }

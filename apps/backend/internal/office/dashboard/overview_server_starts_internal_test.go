@@ -22,7 +22,7 @@ func TestServerStartEvents_OneRowPerRecord(t *testing.T) {
 		serverStartRecord(now.Add(-3*time.Hour), "v1"),
 	}
 
-	got := serverStartEvents(starts, "fallback", since)
+	got := serverStartEvents(starts, "fallback", since, time.Time{})
 	if len(got) != 2 {
 		t.Fatalf("rows = %d, want 2", len(got))
 	}
@@ -44,12 +44,58 @@ func TestServerStartEvents_FiltersWindowAndFallsBackVersion(t *testing.T) {
 		serverStartRecord(now.Add(-time.Hour), ""),
 	}
 
-	got := serverStartEvents(starts, "fallback", since)
+	got := serverStartEvents(starts, "fallback", since, time.Time{})
 	if len(got) != 1 {
 		t.Fatalf("rows = %d, want 1 (out-of-window dropped)", len(got))
 	}
 	if got[0].Version != "fallback" {
 		t.Fatalf("version = %q, want the running build fallback", got[0].Version)
+	}
+}
+
+// TestServerStartEvents_FallsBackToRunningProcess proves an empty durable
+// history still shows the running process, so a boot whose record write failed
+// (or a fresh install, or an upgrade) is not reported as zero startups.
+func TestServerStartEvents_FallsBackToRunningProcess(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-24 * time.Hour)
+	boot := now.Add(-time.Minute)
+
+	got := serverStartEvents(nil, "v9", since, boot)
+	if len(got) != 1 {
+		t.Fatalf("rows = %d, want 1 (running process)", len(got))
+	}
+	if !got[0].At.Equal(boot) || got[0].Version != "v9" {
+		t.Fatalf("row = %+v, want the running boot at %s with version v9", got[0], boot)
+	}
+}
+
+// TestServerStartEvents_NoFallbackWhenHistoryPresent proves the running
+// process is not added on top of a durable record, so a normal boot is counted
+// once rather than twice.
+func TestServerStartEvents_NoFallbackWhenHistoryPresent(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-24 * time.Hour)
+	starts := []*sqlite.OverviewServerStartRow{
+		serverStartRecord(now.Add(-time.Hour), "v9"),
+	}
+
+	got := serverStartEvents(starts, "v9", since, now.Add(-time.Minute))
+	if len(got) != 1 {
+		t.Fatalf("rows = %d, want 1 (record only, no running-process fallback)", len(got))
+	}
+}
+
+// TestServerStartEvents_NoFallbackOutsideWindow proves a running process that
+// started before the window is not shown, so a server up for longer than the
+// window reports no startups rather than one stale entry.
+func TestServerStartEvents_NoFallbackOutsideWindow(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-24 * time.Hour)
+
+	got := serverStartEvents(nil, "v9", since, now.Add(-48*time.Hour))
+	if len(got) != 0 {
+		t.Fatalf("rows = %d, want 0 (running process outside window)", len(got))
 	}
 }
 
@@ -66,7 +112,7 @@ func TestAssembleEvents_RendersEveryServerStart(t *testing.T) {
 		serverStartRecord(now.Add(-5*time.Hour), "v0"),
 	}
 
-	got := assembleEvents(snap, starts, nil, nil, nil, since)
+	got := assembleEvents(snap, starts, nil, nil, nil, since, time.Time{})
 	serverRows := 0
 	var times []time.Time
 	for _, event := range got {
@@ -84,7 +130,24 @@ func TestAssembleEvents_RendersEveryServerStart(t *testing.T) {
 		}
 	}
 
-	if empty := assembleEvents(snap, nil, nil, nil, nil, since); len(empty) != 0 {
+	if empty := assembleEvents(snap, nil, nil, nil, nil, since, time.Time{}); len(empty) != 0 {
 		t.Fatalf("empty window rows = %d, want 0", len(empty))
+	}
+}
+
+// TestAssembleEvents_RunningProcessFallback proves the assembled list shows the
+// running process when the durable history is empty, so the overview is never
+// empty while a server is up.
+func TestAssembleEvents_RunningProcessFallback(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	since := now.Add(-24 * time.Hour)
+	snap := &overviewSnapshot{buildVersion: "v9"}
+
+	got := assembleEvents(snap, nil, nil, nil, nil, since, now.Add(-time.Minute))
+	if len(got) != 1 {
+		t.Fatalf("rows = %d, want 1 (running process)", len(got))
+	}
+	if got[0].Kind != overviewEventServerStarted || got[0].Version != "v9" {
+		t.Fatalf("row = %+v, want one server-started row with version v9", got[0])
 	}
 }

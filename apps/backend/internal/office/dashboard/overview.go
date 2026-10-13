@@ -366,14 +366,13 @@ func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnaps
 	if err != nil {
 		return err
 	}
-	serverStarts, err := s.overviewReader.ListOverviewServerStarts(ctx, since, overviewEventKindLimit)
-	if err != nil {
-		return err
-	}
+	serverStarts := readOptionalEventSource(func() ([]*sqlite.OverviewServerStartRow, error) {
+		return s.overviewReader.ListOverviewServerStarts(ctx, since, overviewEventKindLimit)
+	})
 	extra := s.readExtraEvents(ctx, snap, ids, since)
 	capacity, capacityKnown := s.readSessionCapacity(ctx)
 	assembleSystem(snap, capacity, capacityKnown, th)
-	snap.resp.Last24h = assembleEvents(snap, serverStarts, automation, created, extra, since)
+	snap.resp.Last24h = assembleEvents(snap, serverStarts, automation, created, extra, since, processStartedAt())
 	return nil
 }
 
