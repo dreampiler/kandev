@@ -828,6 +828,9 @@ func (s *workflowStore) pullOneFeederTask(
 		fromStepID := candidate.WorkflowStepID
 		candidate.WorkflowID = vacatedStep.WorkflowID
 		candidate.WorkflowStepID = vacatedStep.ID
+		candidate.WIPAdmitted = true
+		candidate.QueuedForStepID = ""
+		candidate.QueuedAt = nil
 		if candidate.Metadata == nil {
 			candidate.Metadata = make(map[string]interface{})
 		}
