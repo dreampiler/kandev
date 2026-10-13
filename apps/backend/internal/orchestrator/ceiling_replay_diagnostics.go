@@ -27,6 +27,9 @@ func (s *Service) validateClaimedCeilingReplay(ctx context.Context, taskID strin
 		return task
 	}
 	if disposition == ceilingEntrySuperseded || disposition == ceilingEntryPermanentlyUnavailable {
+		if disposition == ceilingEntrySuperseded && s.settleCeilingSupersedeRequeue(ctx, task, claim, claim.deferral, detail) {
+			return nil
+		}
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(claim.deferral), claim.deferral,
 			ceilingReasonSuperseded, detail)
 	} else {
