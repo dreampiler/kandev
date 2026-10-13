@@ -4172,6 +4172,9 @@ func (h *Handlers) promptPreparedTaskMessage(
 		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
 			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 		}
+		if h.autoRecoverTaskMessagePrompt(ctx, taskID, session.ID, err) {
+			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
+		}
 		h.deleteRecordedUserMessage(ctx, recorded, ownedTurnID)
 		return taskMessageDispatchResult{}, err
 	}
