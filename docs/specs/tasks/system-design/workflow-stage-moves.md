@@ -159,8 +159,9 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
    If that launch is a `prompt_ensure` or `workflow_step_ensure` whose binding
    targets the current step and `validateCeilingEntry` reports it valid or
    unavailable, the gate holds the transition and leaves the session
-   `WAITING_FOR_INPUT`. A validation error also holds
-   (AC-TASKS-WORKFLOW-STAGE-MOVES-003.3, 003.5).
+   `WAITING_FOR_INPUT`. A binding decode error or validation error also holds
+   (AC-TASKS-WORKFLOW-STAGE-MOVES-003.3, 003.5). An absent binding or a readable
+   binding targeting a different step keeps the prior handling.
 3. A delivered, superseded, or absent entry prompt does not hold. User
    cancellation and steps without `auto_advance_requires_signal` keep their
    existing paths (AC-TASKS-WORKFLOW-STAGE-MOVES-003.4). The completion signal

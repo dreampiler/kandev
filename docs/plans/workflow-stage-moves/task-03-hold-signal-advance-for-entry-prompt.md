@@ -79,3 +79,9 @@ See In scope. Dependencies: none.
 - `TestCeilingDispatchAdmissionSerializesRouteMutation` fails intermittently
   on Windows at its claim-expiry time comparison, with and without this
   change. It is excluded from this order's evidence.
+
+- Review remediation adds `TestPrepareEngineTurnCompletion_HoldsAdvanceWhenEntryBindingUnreadable`:
+  incomplete and malformed bindings remain pending until ceiling recovery settles
+  their record. The exact-source contained gate proof failed both assertions
+  before remediation. Genuine repository and orchestrator verification remains
+  owned by hosted Backend CI; the contained proof fakes storage and validation.

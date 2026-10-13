@@ -255,7 +255,16 @@ Kandev normalizes the object, omits empty optional strings, and validates the de
 - `disposition: "applied"` means a step change committed immediately, or the task was already at the requested workflow and step with no entry options. In that same-step case, Kandev returns the stored task without retrying or changing its position.
 - Every result includes `task`. An optioned step change also returns `move_id` and the accepted `entry_options`.
 - The top-level `prompt` remains an alias for `entry_options.instructions`. If both are non-empty, validation fails.
-- A prompt or `entry_options` is rejected when the destination is a manual step that does not start work on entry, for example Waiting, Blocked, or Done. The rejection applies even when the task has a session that could receive the hand-off. This stricter rule applies only to agent calls. Move without options and record the instruction in the task description or plan instead. A step that starts work on entry (`auto_start_agent`, `queue_run`, `queue_run_for_each_participant`, `run_code_review`, or a pull source) is not manual and accepts the options.
+- A prompt or `entry_options` is rejected for a manual destination, such as Waiting, Blocked, or Done, even when the task has a session. A manual step starts no work on entry.
+
+  This stricter rule applies only to agent calls. Move without options and record instructions in the task description or plan instead.
+
+  <details>
+  <summary>Steps that accept entry options</summary>
+
+  A step accepts options when it has an `auto_start_agent`, `queue_run`, `queue_run_for_each_participant`, or `run_code_review` entry action, or a pull source.
+
+  </details>
 - A rejected move names a recognized reason, such as a WIP limit, an active session, an archived task, a different workspace, or a step outside the requested workflow. Other failures return generic text.
 - Pull-request draft and review status are not generic move options.
 

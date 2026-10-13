@@ -2,6 +2,8 @@
 status: current
 system: platform
 requirements:
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
+  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-008
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-001
   - REQ-PLATFORM-DURABLE-RESTART-RECONCILIATION-002
 ---
@@ -92,6 +94,14 @@ source evidence, exact SQL history and complete stream projection are rechecked.
 no prompt and does not revive a dispatched queue entry. A distinct new prompt
 requires a new immutable submission and normal workflow/queue authority.
 
+Legacy prompt bindings may lack original-process identity and prompt generation.
+A successful native load does not supply that missing automatic-retirement proof.
+For an empty generic agent-delivery block without active recovery metadata, the
+composer offers explicit Resume through the existing authenticated retirement
+transaction. Retry remains available for missing-record reconstruction, alongside
+Stop. An open block outranks a historical restored snapshot; changing that block
+invalidates pending UI results. Desktop and phone expose the same guarded actions.
+
 ## Verification
 
 Generate reachable states using admission, dispatch, terminal, shutdown,
@@ -110,3 +120,21 @@ no host shutdown, production mutation or local browser testing is authorized.
 ## Delivery
 
 [Sequential work package](../../../plans/session-recovery-convergence/plan.md).
+
+## Projected terminal reconciliation
+
+Terminal `error` and `complete` events settle a dispatching journal submission in
+the same transaction as the event append. An interrupted return path or restart
+cannot downgrade those known outcomes. Nonterminal errors and previously stored
+unknown outcomes retain their existing semantics.
+
+Legacy journals can contain interrupted-unknown submissions with retained
+terminal sequence evidence already projected as a known SQL outcome. An idle,
+authenticated native successor may retire these exact submissions without
+changing either store's historical state. Eligibility requires matching session,
+incarnation, generation, stream, immutable hash, terminal sequence and fully
+projected SQL cursor. SQL admission revalidates the pinned terminal state and
+outcome along with the complete active inventory, current native execution and
+matching recovery fences. Any independent active record or projection gap
+refuses resolution. The same proof permits normal loaded-session reconciliation
+and explicit Resume; neither path dispatches an old prompt.

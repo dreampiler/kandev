@@ -3097,18 +3097,34 @@ func (s *Service) resolveStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 	if step.AgentProfileID != "" {
 		return step.AgentProfileID
 	}
-	if s.workflowStepGetter != nil && step.WorkflowID != "" {
-		meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
-		if err != nil {
-			s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
-				zap.String("workflow_id", step.WorkflowID),
-				zap.String("step_id", step.ID),
-				zap.Error(err))
-		} else if meta.AgentProfileID != "" {
-			return meta.AgentProfileID
-		}
+	return s.workflowDefaultProfile(ctx, step)
+}
+
+// workflowDefaultProfile returns the default agent profile of the step's
+// workflow, or "" when there is none or it cannot be read.
+func (s *Service) workflowDefaultProfile(ctx context.Context, step *wfmodels.WorkflowStep) string {
+	if s.workflowStepGetter == nil || step.WorkflowID == "" {
+		return ""
 	}
-	return ""
+	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
+	if err != nil {
+		s.logger.Warn("failed to resolve workflow agent profile, falling back to task defaults",
+			zap.String("workflow_id", step.WorkflowID),
+			zap.String("step_id", step.ID),
+			zap.Error(err))
+		return ""
+	}
+	return meta.AgentProfileID
+}
+
+// stepProfileInputs returns the task's fixed-step replacement and the step's
+// own agent profile. replaced reports whether the task carries a replacement
+// for the step at all, which an empty replacement still settles.
+func (s *Service) stepProfileInputs(task *models.Task, step *wfmodels.WorkflowStep) (replacement string, replaced bool, own string) {
+	if task != nil && step.SessionTarget == nil && task.WorkflowID == step.WorkflowID {
+		replacement, replaced = task.WorkflowAgentOverrides.ReplacementFor(task.WorkflowID, step.ID)
+	}
+	return replacement, replaced, step.AgentProfileID
 }
 
 // resolveStepAgentProfileForTask applies a task's fixed-step substitution
@@ -5159,9 +5175,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		}, move.MoveID)
 		return
 	} else if errors.Is(transitionErr, errDeferredMoveSourceChanged) {
-		// A later move committed between the check above and the atomic write.
-		// The write rolled back without changing the task, so the pending row is
-		// still armed; drop it now.
+		// A rejected source check leaves the pending row armed for exact cleanup.
 		s.discardPendingMove(deferredMoveCtx, taskID, sessionID, move, record, "superseded")
 		return
 	} else if transitionErr != nil {
@@ -8009,13 +8023,9 @@ func (s *Service) allowEngineSignalCompletion(
 	return true
 }
 
-// workflowEntryPromptPendingForStep reports whether the workflow entry that
-// brought the task to stepID still has a valid queued entry prompt
-// (prompt_ensure or workflow_step_ensure). Advancing on the step's completion
-// signal before that prompt is delivered would skip the step's own turn, so the
-// signal gate holds the transition until the ceiling sweep delivers or drops
-// the record. A record that cannot be validated is not proof that the prompt
-// was delivered, so it also holds.
+// workflowEntryPromptPendingForStep holds the signal gate while the current
+// entry's prompt is valid, unavailable, or unreadable. Absent, unbound, and
+// superseded prompts do not hold the gate.
 func (s *Service) workflowEntryPromptPendingForStep(
 	ctx context.Context,
 	task *models.Task,
@@ -8032,7 +8042,14 @@ func (s *Service) workflowEntryPromptPendingForStep(
 			zap.Error(deferralErr))
 		return true
 	}
-	if !ok || !isStepEntryPromptKind(deferral.Kind) || !stepEntryBindingTargetsStep(deferral, stepID) {
+	if !ok || !isStepEntryPromptKind(deferral.Kind) {
+		return false
+	}
+	targetsStep, bindingErr := stepEntryBindingTargetsStep(deferral, stepID)
+	if bindingErr != nil {
+		return true
+	}
+	if !targetsStep {
 		return false
 	}
 	disposition, _, validationErr := s.validateCeilingEntry(ctx, task, deferral)
@@ -8042,12 +8059,8 @@ func (s *Service) workflowEntryPromptPendingForStep(
 	return disposition == ceilingEntryValid || disposition == ceilingEntryUnavailable
 }
 
-// pendingStepEntryDeferral reads the task's ceiling-deferred launch, when one
-// exists. ok is false when there is no ceiling record. An unreadable record
-// keeps ok false and reports the read failure separately, so the caller can
-// hold the advance instead of treating uncertainty as "no prompt". A record
-// that cannot be decoded is returned as-is so the caller's binding check
-// rejects it.
+// pendingStepEntryDeferral distinguishes an absent ceiling record from a
+// failed read. The caller separately validates the launch kind and binding.
 func (s *Service) pendingStepEntryDeferral(
 	ctx context.Context,
 	task *models.Task,
@@ -8075,12 +8088,12 @@ func isStepEntryPromptKind(kind models.CeilingLaunchKind) bool {
 
 // stepEntryBindingTargetsStep reports whether deferral carries a valid
 // workflow-entry binding addressed to stepID.
-func stepEntryBindingTargetsStep(deferral models.CeilingDeferral, stepID string) bool {
+func stepEntryBindingTargetsStep(deferral models.CeilingDeferral, stepID string) (bool, error) {
 	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
-	if err != nil || !present {
-		return false
+	if err != nil {
+		return false, err
 	}
-	return binding.Valid() && binding.DestinationStepID == stepID
+	return present && binding.DestinationStepID == stepID, nil
 }
 
 // transitionLifecycleMode identifies the caller-owned part of a transition.

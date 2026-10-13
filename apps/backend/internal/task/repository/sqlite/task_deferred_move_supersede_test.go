@@ -8,13 +8,27 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/testutil"
 )
 
 // AC-TASKS-WORKFLOW-STAGE-MOVES-001.3: a later move that leaves and returns
 // to the source step between the replay check and the atomic write must make
 // the deferred admission a source change, not an applied move.
 func TestUpdateTaskWithWorkflowStepAdmissionForDeferredMoveRejectsLeaveAndReturn(t *testing.T) {
-	repo := newRepoForEntityTests(t)
+	verifyDeferredMoveRejectsLeaveAndReturn(t, newRepoForEntityTests(t))
+}
+
+func TestPostgresDeferredMoveRejectsLeaveAndReturn(t *testing.T) {
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 2)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifyDeferredMoveRejectsLeaveAndReturn(t, repo)
+}
+
+func verifyDeferredMoveRejectsLeaveAndReturn(t *testing.T, repo *Repository) {
+	t.Helper()
 	ctx := context.Background()
 	seedWorkspace(t, repo, "workspace-deferred-return")
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "workflow-deferred-return", WorkspaceID: "workspace-deferred-return", Name: "Workflow"}); err != nil {

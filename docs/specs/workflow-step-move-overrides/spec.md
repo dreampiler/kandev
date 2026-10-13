@@ -84,7 +84,7 @@ The existing task move authorization and MCP session authorization remain unchan
 - Invalid target, cross-workspace target, archived task, active-session conflict, or invalid override leaves the task in its original step. A full limited destination accepts the move into its destination queue and defers destination entry and option consumption until promotion.
 - A pending move survives backend restart with its override object. Invalid target data discovered at turn end is dropped using the existing pending-move cleanup path and cannot deliver its prompt to the source session.
 - If prompt queueing fails after a direct move has been persisted, the task remains at the target and the backend records a sanitized warning; the prompt is not silently redelivered.
-- A target without auto-start and without an existing session rejects agent-facing overrides rather than accepting an option that has no recipient.
+- Agent `move_task_kandev` calls reject overrides for a manual target, regardless of existing sessions. A target with an entry work action or pull source accepts overrides. HTTP and WebSocket moves retain their session-or-auto-start rule.
 - Repeated task.moved or agent-ready signals do not apply the same override twice. Existing transition and queue idempotence remains the guard.
 - A move waiting for WIP capacity retains its private options unconsumed; promotion applies them once after admission.
 

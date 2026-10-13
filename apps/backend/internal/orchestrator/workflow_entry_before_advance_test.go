@@ -201,3 +201,20 @@ func TestValidateCeilingEntry_HeldEntryPromptEndsWithTurnOrStepChange(t *testing
 	require.NoError(t, err)
 	require.Equal(t, ceilingEntrySuperseded, disposition, "leaving the step supersedes the held prompt")
 }
+
+func TestPrepareEngineTurnCompletion_HoldsAdvanceWhenEntryBindingUnreadable(t *testing.T) {
+	for _, binding := range []interface{}{
+		map[string]interface{}{"destination_step_id": entryGateStepID},
+		"unreadable binding",
+	} {
+		f := newEntryPromptFixture(t, "entry-binding-error", "entry-binding-error-session", models.TaskSessionStateWaitingForInput)
+		deferral := f.boundEntryPrompt(t, f.session)
+		deferral.Payload[models.CeilingLaunchEntryBindingKey] = binding
+		f.queue(t, deferral)
+		disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+		require.NoError(t, err)
+		require.Equal(t, ceilingEntryUnavailable, disposition)
+		require.False(t, f.advances(t, turnCompletionCauseAgentTurn),
+			"an unreadable bound entry prompt must hold the signal-gated advance")
+	}
+}

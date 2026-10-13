@@ -75,14 +75,8 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
 		return response, err
 	}
-	// A step change that carries entry options must target a step that starts
-	// work on entry. Manual steps (for example Waiting, Blocked, or Done) park or
-	// complete the task, so one-shot instructions would be silently dropped.
-	// This agent surface rejects them even when the task has a session that the
-	// service could hand the options to; HTTP and WebSocket moves keep the
-	// service's session-or-auto-start rule. Rejecting before the
-	// deferred/immediate split keeps the deferred path from accepting an
-	// undeliverable hand-off it would later discard.
+	// Agent entry options require work on entry, independently of existing
+	// sessions. HTTP and WebSocket moves retain their service validation.
 	if req.EntryOptions != nil {
 		if err := h.validateEntryTargetStep(ctx, req.WorkflowStepID); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
