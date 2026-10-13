@@ -83,3 +83,8 @@ review task's evidence directory.
 
 The restart-failure regression lives in `service_config_restart_test.go` so the
 change respects the existing service-test file length limit.
+
+A real-store failure regression covers catalog invalidation and deliverer refresh
+even when saving the restart failure status fails. The existing registry rollback
+contract is preserved; public copy distinguishes agent/task-session refresh from
+the running plugin subprocess restart.

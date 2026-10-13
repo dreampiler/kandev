@@ -66,6 +66,14 @@ when the plugin is not running or its restart fails. A rejected or failed save d
 signal. `UpdateConfig` is the only writer of plugin config; uninstall and upgrade already
 signal.
 
+Catalog readiness describes stored config presence, not a subprocess liveness
+guarantee. The existing invocation and lifecycle behavior remains unchanged. A
+failed restart requests another catalog and delivery refresh even if the status
+transition or its cleanup fails. Consumers read the authoritative registry state;
+a failed record write retains the existing registry rollback behavior. Catalog
+refresh does not restart the agent or task session, while a running plugin
+subprocess still restarts to read the saved config.
+
 ## Failure isolation
 
 Readiness reads the stored config per record through the existing store. If that read

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestRestartForConfigChangeRefreshesBothNotificationsOnFailure(t *testing.T) {
@@ -58,4 +60,33 @@ func TestRestartForConfigChangeRefreshesBothNotificationsOnFailure(t *testing.T)
 	if onDisk.Status != StatusError {
 		t.Errorf("persisted status = %q, want %q", onDisk.Status, StatusError)
 	}
+}
+
+func TestRestartForConfigChangeStatusWriteFailureStillInvalidates(t *testing.T) {
+	svc, _, fsStore, rt := newTestServiceWithDir(t)
+	const id = "kandev-plugin-slack"
+	installTestPlugin(t, svc, id)
+	rt.setStartErr(id, errors.New("restart handshake failed"))
+	failing := &failingSaveStore{Store: fsStore}
+	failing.armFailNextSave()
+	svc.store = failing
+	deliverer := &fakeDeliverer{}
+	svc.SetDeliverer(deliverer)
+	listener := &countingAgentToolCatalogListener{}
+	svc.SetAgentToolCatalogListener(listener)
+
+	err := svc.UpdateConfig(context.Background(), id, map[string]any{"new_key": "new_value"})
+	require.ErrorContains(t, err, "restart handshake failed")
+	require.False(t, rt.Running(id))
+	config, err := fsStore.GetConfig(id)
+	require.NoError(t, err)
+	require.Equal(t, "new_value", config["new_key"])
+	record, err := svc.Get(id)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, record.Status, "a failed record write preserves the persisted status")
+	onDisk, err := fsStore.Get(id)
+	require.NoError(t, err)
+	require.Equal(t, StatusActive, onDisk.Status)
+	require.EqualValues(t, 2, listener.calls.Load(), "invalidate both before restart and after its failure")
+	require.Equal(t, 1, deliverer.refreshCount)
 }

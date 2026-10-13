@@ -249,10 +249,8 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 			s.log.Warn("plugins: could not transition to error status after restart failure",
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
 		}
-		// Refresh both notifications unconditionally after any restart failure.
-		// The catalog and delivery worker must reflect the actual failure
-		// whether StatusError was persisted (setErr == nil) or the DB write
-		// failed (setErr != nil, registry may still show StatusActive).
+		// Refresh consumers even when the status transition or its cleanup
+		// failed. Each consumer re-reads the authoritative registry state.
 		s.notifyAgentToolCatalogChanged()
 		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)

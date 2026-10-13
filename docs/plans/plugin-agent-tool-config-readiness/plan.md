@@ -14,7 +14,8 @@ legacy_specs: []
 
 Task agents see a plugin's tools only once the plugin can serve them. An active plugin
 that declares required config fields contributes no agent tools until the operator sets
-every required field, and saving the config makes its tools appear without a restart.
+every required field, and saving the config makes its tools appear without restarting
+the agent or task session. A running plugin subprocess still restarts on config saves.
 Configured plugins, plugins without required fields, and every other plugin keep their
 tools.
 
@@ -47,3 +48,7 @@ to hosted CI; bounded maintainer proofs are supplemental evidence only.
 
 The restart-failure regression lives in `service_config_restart_test.go` so the
 change respects the existing service-test file length limit.
+
+A real-store failure regression verifies that a committed config survives a
+failed restart/status write, preserves the existing record rollback contract,
+and still emits both catalog invalidation and deliverer refresh.

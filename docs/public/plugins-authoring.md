@@ -283,7 +283,8 @@ its `config_schema.required` list has a value. A required field counts as unset
 when it is missing, null, or a blank string; `false` and `0` count as set. A
 connector that needs a URL or token therefore stays out of the agent tool list
 until the operator saves its settings, and its tools appear right after the
-save, without a restart. A plugin without required fields is listed as soon as
+save, without restarting the agent or task session. Saving config still restarts
+a running plugin subprocess. A plugin without required fields is listed as soon as
 it is active.
 
 Tools are not exposed to configuration or external MCP clients. Kandev validates
