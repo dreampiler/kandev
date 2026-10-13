@@ -3,6 +3,7 @@ package dynamic
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -152,14 +153,14 @@ func TestAccountBlockedHoldRetriesFailedSave(t *testing.T) {
 	key := accountBlockKey("blocked")
 	store.setFailing(true)
 
-	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err == nil {
+	if _, err := registry.Hold(key, routingerr.CodeAccountBlocked); err == nil {
 		t.Fatal("hold during outage reported no error")
 	}
 	if !registry.IsHeld(key) {
 		t.Fatal("unsaved hold was not kept in memory")
 	}
 	store.setFailing(false)
-	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
+	if _, err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
 		t.Fatalf("repeated hold after outage: %v", err)
 	}
 
@@ -293,7 +294,7 @@ func TestReleaseAccountBlockKeepsHoldWhenSaveFails(t *testing.T) {
 	store := newStubCircuitPersistence()
 	registry := NewCircuitRegistry(WithCircuitPersistence(store), WithCircuitClock(func() time.Time { return now }))
 	key := accountBlockKey("blocked")
-	if err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
+	if _, err := registry.Hold(key, routingerr.CodeAccountBlocked); err != nil {
 		t.Fatalf("Hold: %v", err)
 	}
 	store.setFailing(true)
@@ -352,5 +353,33 @@ func TestAccountBlockHoldAndReleaseEmitRoutingEvents(t *testing.T) {
 	}
 	if got := releases[0].ContextMap()["execution_profile_id"]; got != "blocked" {
 		t.Fatalf("release execution_profile_id = %v, want blocked", got)
+	}
+}
+
+// Concurrent holds of one profile race for a single atomic registry
+// transition, so the routing event is emitted exactly once regardless of the
+// interleaving.
+func TestAccountBlockConcurrentHoldsEmitOneEvent(t *testing.T) {
+	log, observed := newObservedLogger()
+	engine := NewEngine(WithEngineLogger(log))
+
+	const callers = 16
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if err := engine.HoldAccountBlock("blocked", routingerr.CodeAccountBlocked); err != nil {
+				t.Errorf("HoldAccountBlock: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	if holds := observed.FilterMessage(eventAccountBlockHold).All(); len(holds) != 1 {
+		t.Fatalf("concurrent hold events = %d, want 1", len(holds))
 	}
 }

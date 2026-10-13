@@ -23,16 +23,16 @@ func accountBlockKey(executionProfileID string) string {
 
 // HoldAccountBlock keeps one execution profile out of every later selection
 // until its owner releases it. Credential, model, and other profiles'
-// circuits are never read or changed. A newly established hold is reported as
-// a routing event; a repeated hold of an already-held profile is a no-op.
+// circuits are never read or changed. The routing event is emitted by the
+// caller that wins the registry's atomic hold transition, so concurrent holds
+// for one profile report exactly one event; an empty profile id holds nothing
+// and stays silent.
 func (e *Engine) HoldAccountBlock(executionProfileID string, code routingerr.Code) error {
 	if e == nil || e.circuits == nil {
 		return nil
 	}
-	key := accountBlockKey(executionProfileID)
-	wasHeld := e.circuits.IsHeld(key)
-	err := e.circuits.Hold(key, code)
-	if !wasHeld && e.circuits.IsHeld(key) {
+	established, err := e.circuits.Hold(accountBlockKey(executionProfileID), code)
+	if established {
 		e.logger.Warn(eventAccountBlockHold,
 			zap.String("execution_profile_id", executionProfileID),
 			zap.String("code", string(code)))
