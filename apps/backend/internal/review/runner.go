@@ -559,7 +559,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		// Record the failure first. A retry on another candidate is only safe
 		// once this run is terminal, or a failed finalization would leave two
 		// active rows for the task.
-		if r.recordFailure(ctx, runID, linkRetry(req, err), started) {
+		if r.recordFailure(ctx, runID, linkRetry(req, err), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 			r.maybeRetryAfterTimeout(ctx, err, req, identity, runID, files)
 		}
 		return err
@@ -593,13 +593,18 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 			// PublishFindings runs on the pass context, so a deadline here is the
 			// pass overrunning its budget: record it and take the same one-shot
 			// candidate fallback as an inference-phase timeout.
-			if r.recordFailure(ctx, runID, linkRetry(req, pubErr), started) {
+			if r.recordFailure(ctx, runID, linkRetry(req, pubErr), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
 				r.maybeRetryAfterTimeout(ctx, pubErr, req, identity, runID, files)
 			}
 			return pubErr
 		}
 	}
 
+	// Reaching the completion write means the pass was in budget when it began —
+	// a pass that overran during inference or publication left by another path —
+	// so a completion write whose retries outlast the pass context is a storage
+	// failure, not a pass timeout. Capture the budget state before the retries.
+	passTimedOutBeforeComplete := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	completeErr := r.writeTerminal(ctx, func(wctx context.Context) error {
 		_, werr := r.store.CompleteRun(wctx, taskservice.CompleteRunRequest{
 			AgentID:         identity.AgentID,
@@ -618,7 +623,9 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	if completeErr != nil {
 		// The completion write failed on every attempt. Record a failure so the
 		// run does not stay running with no reason.
-		return r.fail(ctx, runID, linkRetry(req, fmt.Errorf("%w: record completion: %w", ErrExecutionFailed, completeErr)), started)
+		cause := linkRetry(req, fmt.Errorf("%w: record completion: %w", ErrExecutionFailed, completeErr))
+		r.recordFailure(ctx, runID, cause, started, passTimedOutBeforeComplete)
+		return cause
 	}
 	return nil
 }
@@ -753,18 +760,21 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 }
 
 func (r *Runner) fail(ctx context.Context, runID string, cause error, started time.Time) error {
-	r.recordFailure(ctx, runID, cause, started)
-	if cause != nil {
-		return cause
+	if cause == nil {
+		// Preserve the historical nil-cause contract: nothing to record.
+		return ctx.Err()
 	}
-	return ctx.Err()
+	r.recordFailure(ctx, runID, cause, started, errors.Is(ctx.Err(), context.DeadlineExceeded))
+	return cause
 }
 
 // recordFailure persists a run's failure and reports whether the row reached a
-// terminal state. A caller that starts further work for the same task — the
-// timeout fallback — must wait for this to be true, or a failed finalization
-// would leave two active rows.
-func (r *Runner) recordFailure(ctx context.Context, runID string, cause error, started time.Time) bool {
+// terminal state. timedOut is the caller's pass-budget decision, taken while the
+// failed phase was still current so a slow terminal write is not mistaken for it.
+// A caller that starts further work for the same task — the timeout fallback —
+// must wait for this to be true, or a failed finalization would leave two active
+// rows.
+func (r *Runner) recordFailure(ctx context.Context, runID string, cause error, started time.Time, timedOut bool) bool {
 	// An explicit cancel already recorded the terminal state, so re-reporting it
 	// as a failure would only churn the row (and would overwrite it on any store
 	// without a terminal guard). A deadline is different: nobody recorded that.
@@ -774,13 +784,17 @@ func (r *Runner) recordFailure(ctx context.Context, runID string, cause error, s
 		r.logger.Debug("review run unwound after cancellation", zap.String("run_id", runID))
 		return true
 	}
+	if cause == nil {
+		// A nil cause carries no reason to record.
+		return true
+	}
 	code := CodeFor(cause)
 	message := cause.Error()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		// The pass's own deadline fired: record it as a timeout with its own
-		// reason, not a user cancel. A storage write that timed out on a
-		// detached context leaves the pass context alive, so it is not this
-		// case and keeps its own execution-failure reason.
+	if timedOut {
+		// The caller decided, while the failed phase was current, that the pass's
+		// own budget expired. A terminal write whose retries outlast the budget is
+		// a storage failure, not a timeout, so the decision is not re-derived from
+		// the ambient context here.
 		code = CodeTimeout
 		message = fmt.Sprintf("review pass exceeded its %s time budget: %v", r.passTimeout, cause)
 	}

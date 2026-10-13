@@ -162,7 +162,7 @@ one PR.
 ## Verification results
 
 - `go test ./internal/review -count=1` passed (full package), including the eight
-  companion tests from Tasks 01-02, the five from Task 03, and four from the
+  companion tests from Tasks 01-02, the five from Task 03, and six from the
   step-entry review fixes.
 - `go build ./...` and `go vet ./internal/review ./internal/task/service
   ./internal/task/repository/sqlite` passed.
@@ -205,6 +205,22 @@ review run `314b5cd7-d195-4ba1-9f2c-d89259cc2371` (model
   fallback; `PublishFindings` runs on the pass context, so a deadline there is
   the pass overrunning its budget. Companion test
   `TestRunner_PublishPhaseTimeoutRetriesNextCandidate`.
+
+## Third step-entry review (2026-10-13)
+
+Reviewed range `85a8902c19..bbab4a70e8` (head `bbab4a70e8`). The step-entry
+review run `9dde6fff-d256-4d18-8abe-df2b876332c8` (model
+`muse-spark-1.3-contributor`) reported two findings, both acted on:
+
+- `recordFailure` dereferenced a nil `cause` before the guard `fail` kept for it.
+  The base `fail` dereferenced `cause` in its persist block the same way, so this
+  is not a behavior change; the guard is nonetheless restored so a nil cause is
+  treated as nothing to record. Companion test
+  `TestRunner_RecordFailureNilCauseDoesNotPanic`.
+- A completion-write failure whose retries outlasted the pass context was
+  recorded as `review_timeout`. The pass-budget decision is now taken before the
+  completion write's retries, so a storage failure keeps its execution-failure
+  reason. Companion test `TestRunner_CompletionWriteFailureIsNotAPassTimeout`.
 
 ## Risks
 

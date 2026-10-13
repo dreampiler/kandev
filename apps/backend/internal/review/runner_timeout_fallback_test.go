@@ -285,3 +285,51 @@ func TestRunner_PublishPhaseTimeoutRetriesNextCandidate(t *testing.T) {
 		t.Fatalf("expected the retry to complete, got %+v", retry)
 	}
 }
+
+// TestRunner_CompletionWriteFailureIsNotAPassTimeout covers the review finding on
+// the completion phase: a completion write that fails while the pass context is
+// expired is a storage failure, not a pass timeout, because the pass budget is
+// decided before the write's retries can outlast it.
+func TestRunner_CompletionWriteFailureIsNotAPassTimeout(t *testing.T) {
+	store := newFakeStore()
+	runner := newTimeoutRunner(t, store, dynamicRoute("big-pickle", "space-bunny"), &timeoutInference{}, time.Minute)
+	expired, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	run, err := store.CreateRun(context.Background(), taskservice.CreateRunRequest{TaskID: "task-completion-fail", AgentID: "a", Model: "m"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	runner.recordFailure(expired, run.ID, errors.New("database is locked"), time.Now(), false)
+	if failure, ok := store.lastFailure(); !ok || failure.code != CodeExecutionFailed {
+		t.Fatalf("expected a storage execution failure, got %+v ok=%v", failure, ok)
+	}
+
+	run2, err := store.CreateRun(context.Background(), taskservice.CreateRunRequest{TaskID: "task-budget-fail", AgentID: "a", Model: "m"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	runner.recordFailure(expired, run2.ID, errors.New("deadline exceeded"), time.Now(), true)
+	if failure, ok := store.lastFailure(); !ok || failure.code != CodeTimeout {
+		t.Fatalf("expected a recorded timeout, got %+v ok=%v", failure, ok)
+	}
+}
+
+// TestRunner_RecordFailureNilCauseDoesNotPanic covers the review finding on the
+// nil-cause path: recording a failure with no cause must not panic.
+func TestRunner_RecordFailureNilCauseDoesNotPanic(t *testing.T) {
+	store := newFakeStore()
+	runner := newTimeoutRunner(t, store, dynamicRoute("big-pickle"), &timeoutInference{}, time.Minute)
+	run, err := store.CreateRun(context.Background(), taskservice.CreateRunRequest{TaskID: "task-nil-cause", AgentID: "a", Model: "m"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("recordFailure panicked on a nil cause: %v", r)
+		}
+	}()
+	if ok := runner.recordFailure(context.Background(), run.ID, nil, time.Now(), false); !ok {
+		t.Fatalf("expected a nil cause to be treated as nothing to record")
+	}
+}
