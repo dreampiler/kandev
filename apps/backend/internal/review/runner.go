@@ -590,7 +590,13 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 			Summary:   summary,
 			Findings:  inputs,
 		}); pubErr != nil {
-			return r.fail(ctx, runID, linkRetry(req, pubErr), started)
+			// PublishFindings runs on the pass context, so a deadline here is the
+			// pass overrunning its budget: record it and take the same one-shot
+			// candidate fallback as an inference-phase timeout.
+			if r.recordFailure(ctx, runID, linkRetry(req, pubErr), started) {
+				r.maybeRetryAfterTimeout(ctx, pubErr, req, identity, runID, files)
+			}
+			return pubErr
 		}
 	}
 

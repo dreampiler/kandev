@@ -162,7 +162,7 @@ one PR.
 ## Verification results
 
 - `go test ./internal/review -count=1` passed (full package), including the eight
-  companion tests from Tasks 01-02, the five from Task 03, and three from the
+  companion tests from Tasks 01-02, the five from Task 03, and four from the
   step-entry review fixes.
 - `go build ./...` and `go vet ./internal/review ./internal/task/service
   ./internal/task/repository/sqlite` passed.
@@ -191,6 +191,20 @@ timed out on a detached context was labeled `review_timeout` with a "pass
 exceeded its budget" message. Fixed by keying the timeout code on the pass
 context deadline only; companion test
 `TestRunner_CompletionWriteDeadlineKeepsExecutionFailureReason`.
+
+## Second step-entry review (2026-10-13)
+
+Reviewed range `ef4924f08d..85a8902c19` (head `85a8902c19`). The step-entry
+review run `314b5cd7-d195-4ba1-9f2c-d89259cc2371` (model
+`muse-spark-1.3-contributor`) reported one finding:
+
+- A pass whose deadline expired while `PublishFindings` ran was recorded as
+  `review_timeout` but got no candidate fallback, unlike an inference-phase
+  timeout, so `review_timeout` meant two different things. Fixed: the publish
+  failure now records through `recordFailure` and takes the same one-shot
+  fallback; `PublishFindings` runs on the pass context, so a deadline there is
+  the pass overrunning its budget. Companion test
+  `TestRunner_PublishPhaseTimeoutRetriesNextCandidate`.
 
 ## Risks
 

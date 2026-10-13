@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // timeoutInference models a slow free reviewer: for a configured model it blocks
@@ -227,5 +228,60 @@ func TestRunner_TimeoutDoesNotRetryWhenFinalizationFails(t *testing.T) {
 	}
 	if models := inference.models(); len(models) != 1 {
 		t.Fatalf("expected a single attempt, got %v", models)
+	}
+}
+
+// publishDeadlineStore makes the first PublishFindings call overrun the pass
+// context, the way a pass that exhausts its budget while publishing fails, then
+// serves later calls normally. It models the publish phase, which runs on the
+// pass context rather than on a detached one.
+type publishDeadlineStore struct {
+	*fakeStore
+	calls int
+}
+
+func (s *publishDeadlineStore) PublishFindings(ctx context.Context, req taskservice.PublishFindingsRequest) (*models.TaskReviewRun, []*models.TaskReviewFinding, error) {
+	s.calls++
+	if s.calls == 1 {
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	}
+	return s.fakeStore.PublishFindings(ctx, req)
+}
+
+// TestRunner_PublishPhaseTimeoutRetriesNextCandidate covers the review finding on
+// the publish phase: a pass whose deadline expires while findings are published
+// is recorded as a timeout and takes the same one-shot fallback as an
+// inference-phase timeout, rather than being recorded as a timeout with no retry.
+func TestRunner_PublishPhaseTimeoutRetriesNextCandidate(t *testing.T) {
+	store := &publishDeadlineStore{fakeStore: newFakeStore()}
+	inference := &timeoutInference{}
+	runner := newTimeoutRunner(t, store, dynamicRoute("big-pickle", "space-bunny"), inference, 50*time.Millisecond)
+
+	run, err := runner.Run(context.Background(), RunRequest{TaskID: "task-publish-timeout", AgentProfileID: "review-dynamic"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if store.runCount() != 2 {
+		t.Fatalf("a publish-phase deadline must start exactly one fallback, got %d runs", store.runCount())
+	}
+	if failure, ok := store.lastFailure(); !ok || failure.code != CodeTimeout {
+		t.Fatalf("expected a recorded timeout failure, got %+v ok=%v", failure, ok)
+	}
+	if models := inference.models(); len(models) != 2 ||
+		models[0] != "opencode/big-pickle" || models[1] != "opencode/space-bunny-free" {
+		t.Fatalf("expected the fallback to run the next candidate once, got %v", models)
+	}
+	if got := store.statusOf(run.ID); got != models.ReviewRunFailed {
+		t.Fatalf("the timed-out run should be failed, got %q", got)
+	}
+	var retry *models.TaskReviewRun
+	for _, r := range store.runs {
+		if r.ID != run.ID {
+			retry = r
+		}
+	}
+	if retry == nil || store.statusOf(retry.ID) != models.ReviewRunCompleted {
+		t.Fatalf("expected the retry to complete, got %+v", retry)
 	}
 }

@@ -110,9 +110,11 @@ single-active-run invariant.
 
 ### Time-budget fallback to the next candidate
 
-A pass whose reviewer overruns the pass timeout fails with a recorded
-`review_timeout` reason, and the runner immediately tries the dynamic route's
-next candidate once. This is distinct from the progress-less limit above:
+A pass that exhausts its time budget fails with a recorded `review_timeout`
+reason, and the runner immediately tries the dynamic route's next candidate
+once. The budget covers the whole pass, so it applies whether the reviewer call
+or the finding publication is what overruns; both run on the pass context. This
+is distinct from the progress-less limit above:
 
 - The timeout is decided while the pass is still live — the expired pass context
   is the signal, so the runner knows the previous attempt genuinely ended rather
