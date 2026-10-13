@@ -38,10 +38,14 @@ check is reported unavailable after 5s, the same result as a binary that exits 1
 - One staged measurement for Hermes, whose check is measurably slower than the
   shared bound.
 - Focused unit tests for both, including a Windows-safe test helper.
+- Start host CLI version checks alongside pending installation checks and join
+  them before publishing partial results.
+- Deterministic cancellation and parent deadline during the second check, plus
+  bounded native Windows execution and a workflow-selection contract.
 
 ### Out of scope
 
-- The discovery budget, sweep concurrency, and cache.
+- The discovery budget, installation-probe concurrency, and cache policy.
 - Any other agent's detection path or bound.
 - New configuration, settings, or an exported API.
 - Frontend and public documentation changes.
@@ -53,6 +57,9 @@ reports whether the bound elapsed. `WithCommandCheck` keeps its exact behavior
 on top of it, so no other agent changes. Add `withHermesACPCheck`, which
 measures once more at a larger bound only when the first bound elapsed.
 Production bounds are 5s then 8s, summing to 13s inside the 15s sweep budget.
+Version checks start when each indexed installation result arrives, retaining
+the existing version timeout and process semaphore. Started version workers
+finish before the response or cache publication.
 
 ## Work packages
 
@@ -65,3 +72,17 @@ Production bounds are 5s then 8s, summing to 13s inside the 15s sweep budget.
 - `go test ./internal/agent/agents/ -run 'TestHermesACP|TestRunCommandCheck|TestWithNpxRunnable' -count=1`
 - `go build ./...` and `go vet ./internal/agent/agents/`
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`
+- `python3 .github/scripts/backend-tests-workflow-contract_test.py`
+- Native Windows hosted execution:
+  `go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'`
+- Discovery concurrency and cancellation:
+  `go test -race ./internal/agent/discovery -run '^TestDetectAll(ChecksHostCLIWhileAnotherAgentIsInstalling|RetainsAvailabilityWhenHostCLIIsCancelled)$' -count=1`
+
+## Review validation
+
+PR #4429 adds deterministic second-check cancellation and deadline coverage,
+preserves real subprocess tests, and makes Hermes regression execution part of
+the required native Windows job. Local validation uses a contained, stdlib-only
+exact-source proof with an explicit discovery DTO fake and the workflow
+contract. Full package, build, vet and suite results are hosted CI evidence;
+the local proof does not stand in for those results.

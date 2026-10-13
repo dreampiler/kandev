@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -450,36 +451,6 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("cancellation during the retry measurement returns caller error", func(t *testing.T) {
-		// Covers the retry-cancellation gap: the first bound must elapse
-		// (so the retry runs), then the parent is cancelled while the second
-		// measurement is in progress.
-		installHermesACPCheckHelper(t)
-		useHermesCheckCounter(t)
-		t.Setenv(hermesACPCheckHelperEnv, "always-slow")
-		// First bound is 800ms, second 1500ms; cancel 1100ms after start,
-		// so the first measurement times out (enters retry) and the retry
-		// is interrupted by cancellation.
-		ctx, cancel := context.WithTimeout(context.Background(), 1100*time.Millisecond)
-		defer cancel()
-
-		result, err := runHermesCheck(t, ctx)
-		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("Detect error = %v, want context.Canceled / DeadlineExceeded", err)
-		}
-		if result.Available {
-			t.Fatal("Available=true with a cancelled retry context")
-		}
-		// The first bound (800ms) must elapse so the retry branch enters.
-		// Do not assert an exact helper count here: under load the second
-		// measurement may not start before the 1100ms cancellation, and the
-		// helper records its start asynchronously. Entry into the retry
-		// branch is already pinned deterministically by the
-		// "second measurement succeeds after a timeout" and
-		// "both measurements time out" subtests above; this subtest only
-		// pins the caller-visible outcome (cancelled, unavailable).
-	})
-
 	t.Run("a missing binary stays unavailable", func(t *testing.T) {
 		t.Setenv("PATH", t.TempDir())
 
@@ -491,6 +462,69 @@ func TestHermesACP_RetriesOnlyATimedOutCheck(t *testing.T) {
 			t.Fatal("Available=true without hermes on PATH; discovery must not imply install")
 		}
 	})
+}
+
+// @covers AC-AGENTS-INSTALL-DETECTION-001.2, AC-AGENTS-INSTALL-DETECTION-001.3
+func TestHermesACP_CallerCancellationDuringRetry(t *testing.T) {
+	installHermesACPCheckHelper(t)
+	for _, tc := range []struct {
+		name   string
+		cancel bool
+		want   error
+	}{
+		{name: "caller cancels second check", cancel: true, want: context.Canceled},
+		{name: "parent deadline during second check", want: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+				defer cancel()
+				started, stopped := make(chan struct{}), make(chan struct{})
+				var attempts int
+				stubHermesCommandCheck(t, &attempts,
+					func(context.Context) (bool, bool, error) { return false, true, nil },
+					func(ctx context.Context) (bool, bool, error) {
+						defer close(stopped)
+						close(started)
+						<-ctx.Done()
+						return false, false, ctx.Err()
+					},
+				)
+				type outcome struct {
+					result *DiscoveryResult
+					err    error
+				}
+				out, done := make(chan outcome, 1), make(chan struct{})
+				go func() {
+					defer close(done)
+					result, err := runHermesCheck(t, ctx)
+					out <- outcome{result: result, err: err}
+				}()
+				defer func() { cancel(); <-done }()
+				<-started
+				if tc.cancel {
+					cancel()
+				}
+				<-ctx.Done()
+				<-done
+				got := <-out
+				if attempts != 2 {
+					t.Errorf("check attempts = %d, want exactly 2", attempts)
+				}
+				if !errors.Is(got.err, tc.want) || got.err != ctx.Err() {
+					t.Errorf("Detect error = %v, want caller error %v", got.err, tc.want)
+				}
+				if got.result.Available || got.result.MatchedPath != "" {
+					t.Errorf("cancelled retry result = %+v, want unavailable without a path", got.result)
+				}
+				select {
+				case <-stopped:
+				default:
+					t.Error("second check did not finish before Detect returned")
+				}
+			})
+		})
+	}
 }
 
 func TestHermesACP_LogosNonEmpty(t *testing.T) {

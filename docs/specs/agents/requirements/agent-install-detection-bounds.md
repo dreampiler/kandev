@@ -90,8 +90,9 @@ Hermes was reported as not installed on every sweep, not intermittently.
 
 ## Out of scope
 
-- Changing the discovery budget, the concurrency of the detection sweep, or its
-  cache.
+- Changing the discovery budget, installation-probe concurrency, or cache
+  policy. Host CLI version checks may begin as installation results arrive
+  within the existing sweep budget.
 - Changing the bound of any agent other than the one whose check is measurably
   slower.
 - New configuration, settings, or an exported API for detection bounds.

@@ -42,6 +42,11 @@ while every conclusive failure keeps its single-attempt behavior.
 - `detect_test.go` and `hermes_acp_test.go`: tests for every bounded-check
   outcome and for the staged measurement, with invocation counts so "measured
   twice" and "measured once" are told apart.
+- `discovery.go` and `host_cli_sweep_budget_test.go`: start host CLI version
+  checks as indexed installation results arrive; join every started worker
+  before returning partial results. Preserve cache policy and process bounds.
+- `backend-tests.yml`, the backend Makefile, and the existing workflow contract:
+  execute Hermes/detection regressions in the required native Windows suite.
 
 ## Acceptance criteria
 
@@ -69,8 +74,24 @@ the lifetime of the test, which made the existing
 `TestHermesACP_DetectionRequiresACPCheck` fail its temporary-directory cleanup.
 The copy removes that failure and lets the staged cases run on Windows.
 
+Second-check cancellation tests use scripted runner outcomes, channel barriers
+and a fake-time parent deadline. They prove retry entry before cancellation,
+exactly two attempts, the preserved caller error and cleanup before return.
+The real subprocess outcome tests remain selected by the Windows step.
+
 ## Validation
 
 - `go test ./internal/agent/agents/ -run 'TestHermesACP|TestRunCommandCheck|TestWithNpxRunnable' -count=1`
 - `go build ./...` and `go vet ./internal/agent/agents/`
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`
+- `python3 .github/scripts/backend-tests-workflow-contract_test.py`
+- Hosted native Windows:
+  `go test -trimpath -tags fts5 -race -p=1 -count=1 -v -timeout 5m ./internal/agent/agents -run '^Test(HermesACP|RunCommandCheck)'`
+- `go test -race ./internal/agent/discovery -run '^TestDetectAll(ChecksHostCLIWhileAnotherAgentIsInstalling|RetainsAvailabilityWhenHostCLIIsCancelled)$' -count=1`
+
+## Review results
+
+PR #4429 owns the review additions above. Its delivery evidence records the
+contained exact-source proof, mutation checks, workflow-contract results and
+actual hosted test logs at the final candidate SHA. No broad package build or
+test is inferred from the local DTO-faked proof.

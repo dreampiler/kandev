@@ -14,10 +14,11 @@ owners:
 
 `internal/agent/agents/detect.go` owns how a detection option runs a capability
 check. `internal/agent/discovery` owns the sweep that runs every enabled agent's
-`IsInstalled` concurrently under a 15s budget. This design changes only the
-first: how one check distinguishes an elapsed bound from a nonzero exit, and how
-the agent whose check is measurably slower than the shared bound spends a second
-measurement. The sweep's budget, concurrency, and cache are unchanged.
+`IsInstalled` concurrently under a 15s budget. This design distinguishes an
+elapsed bound from a nonzero exit and gives Hermes one second measurement.
+Host CLI version checks start as installation results arrive so that a slow
+installation check does not consume other agents' version-check budget. The
+sweep's overall budget, installation concurrency, and cache are unchanged.
 
 Detection answers only whether the executable and its capability check are
 present and healthy. Authentication and protocol compatibility still belong to
@@ -30,6 +31,7 @@ the ACP probe path.
 | `runCommandCheck` | Runs one bounded check and reports `found`, `timedOut`, and caller cancellation |
 | `WithCommandCheck` | Unchanged contract, now expressed through `runCommandCheck` |
 | `withHermesACPCheck` | Staged measurement for Hermes, the one agent that needs it |
+| `Registry.detectAll` | Starts version checks per completed installation result and joins them before returning |
 
 ## Bounded check
 
@@ -76,6 +78,21 @@ why an installed Hermes was reported as missing on every sweep.
 The bounds sum to 13s, inside the 15s sweep budget, so the sweep stays bounded
 even when both measurements run.
 
+## Version checks within the sweep
+
+Each installation worker sends exactly one result carrying its original slice
+index. The collector writes that result into its own slot and starts a host CLI
+version worker for that slot immediately. Version workers only update their
+own slot; the collector joins every started worker before assembling partial
+results or publishing them to the detection cache.
+
+Version checks retain the shared four-process semaphore, five-second version
+timeout, bounded output and generation-fenced cache. They use the same sweep
+context, so cancellation also stops queued or active version work. Completed
+installation results remain in a partial response when a version check is
+cancelled. Registry lookups and host CLI cache access retain their existing
+locks; no lock spans a subprocess invocation.
+
 ## Latency trade-off
 
 Only a Hermes check whose first bound elapses costs more time. Callers that
@@ -107,13 +124,22 @@ unavailable after the second bound.
 
 ## Testing
 
-Unit tests cover `runCommandCheck` directly for success, nonzero exit, elapsed
-bound, caller cancellation, and a binary that cannot start. The staged
-measurement is driven through `Detect` with sub-second bounds and a helper
-binary that stalls, asserting availability and invocation counts, so "measured
-twice after a timeout" and "measured once after a nonzero exit" are told apart
-rather than both appearing as unavailable.
+Unit tests cover `runCommandCheck` directly with a real subprocess for success,
+nonzero exit, elapsed bound, caller cancellation, and a binary that cannot
+start. Scripted staged measurements assert exact attempt counts independently
+of subprocess scheduling. Channel barriers prove the second check has started
+before caller cancellation or a parent deadline, with `testing/synctest` driving
+the deadline deterministically. Both cases assert exactly two attempts, the
+unchanged caller error, an unavailable result and joined check cleanup.
+
+Discovery tests prove a healthy version check starts while another installation
+check is blocked, and that cancellation retains completed availability after
+joining the version worker.
 
 The Hermes test helper copies the test binary instead of hard-linking it. On
 Windows a hard link to the running image stays locked for the test's lifetime,
 so the temporary-directory cleanup could not remove it.
+The Backend workflow's bounded native Windows step executes `TestHermesACP`
+and `TestRunCommandCheck` with race detection, including helper cleanup. The
+matching `test-windows` Make target and workflow-selection contract preserve
+this coverage; compilation alone does not verify it.
