@@ -491,17 +491,14 @@ func overviewThresholdsWire(th overviewThresholds) *OverviewThresholds {
 // renders.
 func assembleEvents(
 	snap *overviewSnapshot,
+	serverStarts []*sqlite.OverviewServerStartRow,
 	automation []*sqlite.OverviewAutomationTaskRow,
 	created []*sqlite.OverviewCreatedTaskRow,
 	extra *overviewExtraEvents,
 	since time.Time,
 ) []OverviewEvent {
 	var events []OverviewEvent
-	if started := processStartedAt(); !started.IsZero() && started.After(since) {
-		events = append(events, OverviewEvent{
-			Kind: overviewEventServerStarted, At: started, Version: snap.buildVersion,
-		})
-	}
+	events = append(events, serverStartEvents(serverStarts, snap.buildVersion, since)...)
 	events = append(events, createdTaskEvents(created)...)
 	for _, row := range automation {
 		events = append(events, OverviewEvent{
@@ -526,6 +523,29 @@ func assembleEvents(
 		events = events[:overviewEventMergeLimit]
 	}
 	return events
+}
+
+// serverStartEvents renders one server-started row per durable boot record in
+// the window. The records are already bounded and newest-first from the read,
+// and each carries the version that booted, so the list and its chip count
+// every startup rather than only the running process. A record written without
+// a version falls back to the running binary's version, so the row is never
+// blank.
+func serverStartEvents(
+	starts []*sqlite.OverviewServerStartRow, buildVersion string, since time.Time,
+) []OverviewEvent {
+	out := make([]OverviewEvent, 0, len(starts))
+	for _, start := range starts {
+		if start == nil || start.At.Before(since) {
+			continue
+		}
+		version := start.Version
+		if version == "" {
+			version = buildVersion
+		}
+		out = append(out, OverviewEvent{Kind: overviewEventServerStarted, At: start.At, Version: version})
+	}
+	return out
 }
 
 // extraEvents renders the additional last-24-hours sources into events, keeping

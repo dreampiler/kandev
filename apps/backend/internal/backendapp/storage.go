@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
@@ -358,6 +359,18 @@ func recordSchemaVersion(writer *sqlx.DB, _ string, version string, log *logger.
 	}
 	if log != nil {
 		log.Info("schema version recorded", zap.String(versionFieldKey, version))
+	}
+}
+
+// recordServerStart appends this boot's instant to the install-wide startup
+// history the Office overview counts, so that count survives a process
+// replacement instead of resetting to the running process. It runs once per
+// boot; a failure is non-fatal for the same reason recordSchemaVersion's is.
+func recordServerStart(writer *sqlx.DB, version string, log *logger.Logger) {
+	if err := persistence.RecordServerStarted(writer, time.Now().UTC(), version); err != nil {
+		if log != nil {
+			log.Warn("failed to record server start", zap.Error(err))
+		}
 	}
 }
 
