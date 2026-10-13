@@ -147,6 +147,31 @@ class BackendTestsWorkflowContractTest(unittest.TestCase):
         self.assertIn("if: matrix.suite == 'native'", step)
         self.assertIn("TestRuntimeObservationRunsWindowsCommandShimWithSpaces", step)
 
+    def test_windows_loopback_listener_coverage_is_required(self) -> None:
+        step = step_block(self.workflow, "Test Windows loopback listeners")
+        self.assertIn("if: matrix.suite == 'native'", step)
+        self.assertIn("shell: bash", step)
+        self.assertIn("set -euo pipefail", step)
+        self.assertNotIn("continue-on-error", step)
+        for package in (
+            "./internal/common/portutil",
+            "./internal/common/netprobe",
+            "./internal/agentctl/server/config",
+            "./cmd/plugin-fixture",
+            "./internal/gateway/websocket",
+            "./internal/launcher",
+            "./internal/agentctl/server/api",
+        ):
+            with self.subTest(package=package):
+                self.assertIn(package, step)
+        for test_name in (
+            "ConcurrentFailingStarts", "ResolveAndBind", "Tunnel", "TestCanBind",
+            "TestWaitForHealthBypassesHTTPProxyForSpecificBind",
+            "TestHandleVscodeStatus_AfterStart", "TestVscodeOpenFile_WaitsForRunning_E2E",
+        ):
+            with self.subTest(test=test_name):
+                self.assertIn(test_name, step)
+
     def test_linux_shards_allow_scale_budget_only_with_retention_package(self) -> None:
         test_step = step_block(self.workflow, "Run tests")
         self.assertIn("go test \\", test_step)

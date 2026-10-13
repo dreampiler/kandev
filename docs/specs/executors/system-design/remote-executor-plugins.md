@@ -160,6 +160,9 @@ port ownership remain owned by the
 [port collision and backend ownership safety](../requirements/port-collision-safety.md) requirement.
 The task-process port allocator (`portutil.AllocatePort`) only needs a port number, so its probe
 binds `127.0.0.1:0` rather than a wildcard address, the same loopback availability signal.
+It closes the probe before returning. The caller must bind the port and may lose
+that race; the result is neither a reservation nor a guarantee of uniqueness or
+availability on wildcard or non-loopback interfaces.
 No new public relay or tunnel broker is introduced.
 
 ## Connection leases

@@ -27,7 +27,7 @@ AC-EXECUTORS-PORT-COLLISION-SAFETY-001.7.
 ## In scope
 
 - `AllocatePort` binds `127.0.0.1:0`.
-- The allocator's duplicate-port test binds loopback.
+- The allocator's regression test holds returned ports on loopback.
 
 ## Out of scope
 
@@ -36,7 +36,12 @@ Task 01.
 
 ## Acceptance
 
-- `AllocatePort` returns distinct usable ports.
+- `AllocatePort` returns an OS-assigned TCP port after closing its loopback probe.
+- A caller can bind the returned loopback port, absent another process winning
+  the probe-to-bind race. Once the caller holds that port, further allocations
+  do not return it.
+- Returned ports are not reserved, guaranteed unique across released probes,
+  or guaranteed available on wildcard or non-loopback interfaces.
 - No `portutil` test opens a wildcard listener.
 
 ## Verification
@@ -78,3 +83,8 @@ between the probe and the child bind.
 
 - `go test ./internal/common/portutil` passes, and the package opens only
   loopback listeners.
+- Review follow-up: `TestAllocatePort` now binds the actual returned port, and
+  `TestAllocatePortAvoidsHeldPorts` calls the allocator before holding each
+  returned port. The former OS-only uniqueness test could not detect allocator
+  regressions. Contained exact-source and mutation results are recorded in
+  the PR's delivery evidence; full native platform verification runs in CI.
