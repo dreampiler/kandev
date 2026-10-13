@@ -6110,7 +6110,11 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	s.primarySessionReclaimMu.Lock()
+	taskID, previousPrimaryID := s.previousPrimaryForReplacement(ctx, sessionID)
+	primaryErr := s.repo.SetSessionPrimary(ctx, sessionID)
+	s.primarySessionReclaimMu.Unlock()
+	if err := primaryErr; err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	// The promoted session now drives the task, so move the current step's
@@ -6118,6 +6122,7 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	// this session is judged against the replaced session's binding.
 	s.refreshCurrentStepSessionBinding(ctx, sessionID)
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	s.reclaimReplacedSession(ctx, taskID, previousPrimaryID, sessionID)
 	return nil
 }
 
