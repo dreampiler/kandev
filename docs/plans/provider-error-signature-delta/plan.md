@@ -44,8 +44,9 @@ own the contract.
 
 - Two provider-neutral signatures in `provider_neutral_rules.go` and the
   account-block envelope widening, plus rule IDs.
-- The context-length rule, which names the failure as `task_error` without
-  adding a code, a frontend enum value, or a route-policy change.
+- The context-length rule, which names the failure under a named rule while
+  keeping the `agent_runtime_error` code, without adding a code, a frontend enum
+  value, or a route-policy change.
 - Source-adjacent classifier tests.
 
 ### Out of scope
@@ -60,14 +61,13 @@ own the contract.
 
 ## Behavior note
 
-The context-length rule names the failure `task_error`. The orchestrator's
-unclassified-failure route accepts only `agent_runtime_error` at its origin gate
-(`internal/orchestrator/dynamic_launch.go`, `internal/agent/runtime/dynamic/types.go`),
-so a `task_error` failure is not routed there. The shipped default document
-disables the per-candidate unclassified policy, so under the default the routing
-is identical (both reach manual recovery); the difference appears only when an
-operator enables that policy. Preserving the old routing exactly would require
-extending the orchestrator gate, which is out of scope for a classifier change.
+The context-length rule keeps the `agent_runtime_error` code and only adds a
+rule name. The orchestrator's unclassified-failure route keys off that code at
+its origin gate (`internal/orchestrator/dynamic_launch.go`,
+`internal/agent/runtime/dynamic/types.go`), so the repeated-unclassified-failure
+route can still try a candidate with a larger context window. Routing is
+therefore unchanged: the failure leaves the anonymous `phase.poststart.unknown`
+rule but keeps the same code, flags, and route behavior.
 
 ## Tests
 

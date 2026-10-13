@@ -39,8 +39,8 @@ rejection.
 
 ## Out of scope
 
-- A new code or frontend enum value; the context-length signature reuses
-  `task_error` and changes no route policy.
+- A new code or frontend enum value; the context-length signature keeps the
+  `agent_runtime_error` code and changes no route policy.
 - The `opencode_db_statement` and `free-models-per-day` signatures.
 
 ## Acceptance
@@ -51,8 +51,9 @@ rejection.
 - An envelope carrying `"error_type":"provider_unavailable"` classifies as
   `provider_unavailable` at high confidence, and prose quoting the field does
   not.
-- `maximum context length is <n> tokens` classifies as `task_error` at high
-  confidence, with no retry or fallback, and prose quoting it does not.
+- `maximum context length is <n> tokens` classifies at high confidence under
+  `provider.context_length_exceeded.v1` while keeping the `agent_runtime_error`
+  code, so routing is unchanged, and prose quoting it does not.
 - The account-block circuit behavior is unchanged.
 
 ## Validation

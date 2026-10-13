@@ -38,7 +38,8 @@ func TestFailoverCatalogueSignatures(t *testing.T) {
 		{"nvidia not ready", "opencode-acp", "AI_APICallError: [Nvidia] Service is not ready", CodeProviderUnavailable, RuleProviderNvidiaHost},
 		{"cannot connect", "opencode-acp", "AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly", CodeNetworkUnavailable, RuleProviderCannotConnect},
 		{"structured error_type unavailable", "opencode-acp", `Internal error: {"code":503,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}`, CodeProviderUnavailable, RuleProviderStructuredErrorType},
-		{"context length exceeded", "opencode-acp", "Internal error: This model's maximum context length is 32768 tokens. However, your messages resulted in 41000 tokens.", CodeTask, RuleProviderContextLengthExceeded},
+		{"structured error_type unavailable with status prefix", "opencode-acp", `Agent encountered an error: Internal error: {"code":502,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}`, CodeProviderUnavailable, RuleProviderStructuredErrorType},
+		{"context length exceeded", "opencode-acp", "Internal error: This model's maximum context length is 32768 tokens. However, your messages resulted in 41000 tokens.", CodeAgentRuntime, RuleProviderContextLengthExceeded},
 		// Signatures whose rule did not change.
 		{"go usage limit", "opencode-acp", "AI_APICallError: Go usage limit exceeded", CodeQuotaLimited, RuleOpenCodeGoUsageLimit},
 		{"opencode service failure", "opencode-acp", "Internal error: OpenCode service failure", CodeProviderUnavailable, RuleOpenCodeServiceFailure},
@@ -107,6 +108,7 @@ func TestStructuredSignatureRulesIgnoreQuotedProse(t *testing.T) {
 	resetInjection()
 	for _, text := range []string{
 		`The other session reported {"metadata":{"error_type":"provider_unavailable"}} before it retried.`,
+		`Child session log: Agent encountered an error: Internal error: {"code":502,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}}`,
 		"The reviewer said the model's maximum context length is 32768 tokens, so I split the file.",
 	} {
 		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: text})

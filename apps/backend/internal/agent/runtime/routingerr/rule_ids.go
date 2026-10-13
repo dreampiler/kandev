@@ -58,7 +58,7 @@ const (
 	RuleProviderStructuredErrorType = "provider.structured_error_type.v1"
 	// RuleProviderContextLengthExceeded is a model rejecting a request whose
 	// input exceeds its context window. Retrying the same candidate cannot help,
-	// so it is named to leave the unclassified bucket without changing routing.
+	// so it is named without changing the runtime-error code or routing.
 	RuleProviderContextLengthExceeded = "provider.context_length_exceeded.v1"
 	// RuleProviderModelCapacity is a selected model at capacity.
 	RuleProviderModelCapacity = "provider.model_capacity.v1"

@@ -90,22 +90,25 @@ var providerNeutralRules = []rule{
 	// does not match the space-separated prose in provider.unavailable.v1, and
 	// the field is emitted by the adapter rather than written by the model, so
 	// it classifies at high confidence. It sits immediately before that generic
-	// rule so a structured provider_unavailable outranks bare prose.
+	// rule so a structured provider_unavailable outranks bare prose. The line
+	// may open with the "Agent encountered an error:" status prefix the agent
+	// error surface adds in front of the envelope.
 	mustRule(
 		RuleProviderStructuredErrorType,
-		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
 		CodeProviderUnavailable,
 		ConfHigh,
 	),
 	// A model rejects a request whose input exceeds its context window. The same
-	// candidate cannot succeed by retrying, so this is a task failure rather than
-	// a transient provider condition. Naming the rule removes the failure from
-	// the unclassified bucket without changing routing: task_error keeps
-	// FallbackAllowed and AutoRetryable false, exactly as the phase default did.
+	// candidate cannot succeed by retrying, but the failure stays a runtime
+	// error so the repeated-unclassified-failure route can still try a candidate
+	// with a larger context window. Naming the rule removes the failure from the
+	// anonymous phase default without changing routing: the code stays
+	// agent_runtime_error and keeps FallbackAllowed and AutoRetryable false.
 	mustRule(
 		RuleProviderContextLengthExceeded,
 		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
-		CodeTask,
+		CodeAgentRuntime,
 		ConfHigh,
 	),
 	mustRule(

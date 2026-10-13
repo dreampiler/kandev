@@ -71,18 +71,20 @@ errors does not take its own healthy account out of rotation.
   `403`, and other permission or authentication denials shall not be
   `account_blocked`.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** An AI-SDK error envelope that
-  opens a line (optionally after an `Internal error:`, `API Error:`,
-  `AI_APICallError:`, or `Error:` label) and carries the structured field
-  `"error_type":"provider_unavailable"` shall classify as `provider_unavailable`
-  with high confidence, so the shared transient policy can recover it. Agent
-  prose that mentions the field without opening a line with the envelope shall
-  not classify.
+  opens a line (optionally after the `Agent encountered an error:` status prefix
+  and/or an `Internal error:`, `API Error:`, `AI_APICallError:`, or `Error:`
+  label) and carries the structured field `"error_type":"provider_unavailable"`
+  shall classify as `provider_unavailable` with high confidence, so the shared
+  transient policy can recover it. Agent prose that mentions the field without
+  opening a line with the envelope shall not classify.
 - **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8:** A line that opens with an
   optional error label and reports `maximum context length is <n> tokens` shall
-  classify as `task_error` with high confidence, with `FallbackAllowed: false`
-  and `AutoRetryable: false`. The same candidate cannot succeed by retrying, so
-  the failure is named rather than left in the unclassified bucket, and it does
-  not suspend a provider resource.
+  classify at high confidence under the named rule
+  `provider.context_length_exceeded.v1`, keeping the `agent_runtime_error` code
+  with `FallbackAllowed: false` and `AutoRetryable: false`. Retrying the same
+  candidate cannot succeed, but the failure stays a runtime error so the
+  repeated-unclassified-failure route can still try a candidate with a larger
+  context window.
 
 ## Out of scope
 
