@@ -255,6 +255,19 @@ ui:
     dev:  "Dev"
     e2e:  ""
 
+# Session admission: host-memory launch admission for the session ceiling.
+# On in prod so a replacement build holds new worker-lane launches back when the
+# host is low on available memory or above its commit ceiling; off in dev/e2e
+# because they share the host with normal work. The control lane and Office
+# coordinator are never held by this guard. One value turns it off anywhere, and
+# KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB / KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT
+# adjust the thresholds (defaults 8192 MiB and 85).
+session:
+  KANDEV_SESSION_MEMORY_GUARD_ENABLED:
+    prod: "true"
+    dev:  "false"
+    e2e:  "false"
+
 # ── E2E test tuning ───────────────────────────────────────────────
 # Behaviour knobs that only matter when running playwright. These
 # don't belong in dev (would mask real interactions) and never in

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -18,7 +19,7 @@ func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	lister.set("s1", "s2")
 
-	controller := newSessionCeilingForRepo(lister, SessionCeilingCapacity{WorkerCeiling: 4}, zap.NewNop())
+	controller := newSessionCeilingForRepo(lister, SessionCeilingCapacity{WorkerCeiling: 4}, hostmemory.Gate{}, zap.NewNop())
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}
@@ -42,7 +43,7 @@ func TestNewSessionCeilingForRepoBindsARepositoryThatCanCount(t *testing.T) {
 func TestNewSessionCeilingForRepoWarnsWhenTheRepositoryCannotCount(t *testing.T) {
 	core, logs := observer.New(zapcore.WarnLevel)
 
-	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, SessionCeilingCapacity{WorkerCeiling: 4}, zap.New(core))
+	controller := newSessionCeilingForRepo(repoWithoutAdmittedLister{}, SessionCeilingCapacity{WorkerCeiling: 4}, hostmemory.Gate{}, zap.New(core))
 	if controller == nil {
 		t.Fatal("newSessionCeilingForRepo returned nil")
 	}

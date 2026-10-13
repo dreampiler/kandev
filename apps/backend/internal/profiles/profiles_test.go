@@ -17,6 +17,19 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FeatureFlagDefaults: %v", err)
 	}
+	// The applied count spans every section, not only features: the session
+	// admission section carries a prod default too. Derive both sides so adding
+	// a profile default cannot require a hard-coded update here.
+	allDefaults, err := EnvironmentDefaults()
+	if err != nil {
+		t.Fatalf("EnvironmentDefaults: %v", err)
+	}
+	expected := 0
+	for _, value := range allDefaults {
+		if value != "" {
+			expected++
+		}
+	}
 
 	count, env, err := ApplyProfile()
 	if err != nil {
@@ -25,10 +38,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if env != EnvProd {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
-	// Prod writes every declared feature flag with its shipped default. Derive
-	// the count so adding a flag cannot require another hard-coded update here.
-	if count != len(defaults) {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want %d profile feature defaults", count, len(defaults))
+	if count != expected {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want %d profile defaults", count, expected)
 	}
 	for shortName, want := range defaults {
 		envVar := featurePrefix + strings.ToUpper(shortName)
