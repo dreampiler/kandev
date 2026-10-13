@@ -55,6 +55,8 @@ type Manager struct {
 		Resolve(context.Context, string) (*settingsmodels.AgentProfile, error)
 	}
 	providerGatewayAuthResolver ProviderGatewayAuthResolver
+	utilityEnvironmentResolver  func(context.Context, string, []settingsmodels.ProfileEnvVar) (map[string]string, error)
+	utilityCommandResolver      func(context.Context, string) (agents.Command, error)
 
 	parentTmpDir  string
 	tempArtifacts *tempartifacts.Registry
@@ -115,6 +117,15 @@ func (m *Manager) SetProfileResolver(resolver interface {
 // SetProviderGatewayAuthResolver wires the lifecycle-owned provider resolver.
 func (m *Manager) SetProviderGatewayAuthResolver(resolver ProviderGatewayAuthResolver) {
 	m.providerGatewayAuthResolver = resolver
+}
+
+// SetUtilityLaunchResolvers wires the normal session launch sources for host prompts.
+func (m *Manager) SetUtilityLaunchResolvers(
+	environment func(context.Context, string, []settingsmodels.ProfileEnvVar) (map[string]string, error),
+	command func(context.Context, string) (agents.Command, error),
+) {
+	m.utilityEnvironmentResolver = environment
+	m.utilityCommandResolver = command
 }
 
 // instance is a single warm agentctl instance bound to an agent type.
@@ -1170,6 +1181,9 @@ func (m *Manager) resolveInferenceCommand(
 ) (agents.Command, error) {
 	if !override.IsEmpty() {
 		return override, nil
+	}
+	if m.utilityCommandResolver != nil {
+		return m.utilityCommandResolver(ctx, agentType)
 	}
 	cfg := inferenceConfigForHostUtility(ia)
 	if cfg == nil || !cfg.Supported {

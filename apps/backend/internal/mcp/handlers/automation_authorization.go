@@ -21,18 +21,23 @@ type guardedMCPDispatcher struct {
 
 func (d *guardedMCPDispatcher) RegisterFunc(action string, handler ws.HandlerFunc) {
 	d.Dispatcher.RegisterFunc(action, func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		ctx = d.handlers.withCoordinatorCaller(ctx)
 		guarded, replacement, err := d.handlers.authorizeAutomationRequest(ctx, msg)
 		if guarded != nil {
+			d.handlers.recordCoordinatorCall(ctx, msg, false)
 			return guarded, err
 		}
 		guarded, replacement, err = d.handlers.authorizeCoordinatorRequest(ctx, replacement)
 		if guarded != nil {
+			d.handlers.recordCoordinatorCall(ctx, msg, false)
 			return guarded, err
 		}
 		guarded, replacement, err = d.handlers.authorizeOfficeCrossWorkspaceRequest(ctx, replacement)
 		if guarded != nil {
+			d.handlers.recordCoordinatorCall(ctx, msg, false)
 			return guarded, err
 		}
+		d.handlers.recordCoordinatorCall(ctx, msg, true)
 		return handler(ctx, replacement)
 	})
 }

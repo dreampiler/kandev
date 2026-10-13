@@ -589,6 +589,8 @@ Before entering a workflow step with `run_code_review`, call `set_review_source_
 
 The path must exist and be a local Git worktree on the backend host, rather than a URL or remote executor path. Local and worktree executors can collect changes directly from disk when their session's agentctl is unreachable. Collection and prompt size limits are unchanged.
 
+Reviewers use their selected profile's resolved credentials and the same runtime command selection as task sessions. If a dynamic reviewer cannot start or initialize, Kandev tries the next eligible candidate through the same route, still excluding the writer's model. An explicit response that there are no findings completes successfully with zero findings. Missing or malformed review output remains an error.
+
 ## Generate a walkthrough
 
 Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle, it starts a new turn immediately. A running Claude Code session that is only waiting on recognized background work also starts immediately when the high-risk **Claude background prompt handoff** experiment is enabled; the default behavior queues it. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.

@@ -37,6 +37,7 @@ type agentDeliveryRetentionCandidate struct {
 	canRetire             bool
 	cursorExists          bool
 	cursorIdentityValid   bool
+	streamCompleted       bool
 	projectedSequence     int64
 	retiredSequence       int64
 	firstTerminalSequence sql.NullInt64

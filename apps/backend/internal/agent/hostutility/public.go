@@ -14,9 +14,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
-	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
-	"github.com/kandev/kandev/internal/common/acpprovider"
 	"github.com/kandev/kandev/internal/common/winproc"
 )
 
@@ -45,28 +43,15 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 			return nil, err
 		}
 	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
-	}
-	var gatewayAuth *acpprovider.GatewayAuth
-	var providerKeyEnvVar, providerKey string
-	if profile.ProviderKind == settingsmodels.ProviderKindOpenAICompatible {
-		if m.providerGatewayAuthResolver == nil {
-			return nil, errors.New("utility provider gateway resolver is not configured")
-		}
-		gatewayAuth, providerKeyEnvVar, providerKey, err = m.providerGatewayAuthResolver(ctx, profileID, profile.AgentID)
-		if err != nil {
-			return nil, err
-		}
-		if providerKey != "" && providerKeyEnvVar != "" {
-			env[providerKeyEnvVar] = providerKey
-		}
+	env, gatewayAuth, err := m.profilePromptEnvironment(ctx, profileID, profile)
+	if err != nil {
+		return nil, err
 	}
 	inst, ia, err := m.getInstance(ctx, profile.AgentID)
 	if err != nil {
+		if errors.Is(err, errAgentNotInstalled) {
+			return nil, fmt.Errorf("%w: %w", agentctlutil.ErrLaunchUnavailable, err)
+		}
 		return nil, err
 	}
 	command, release, err := m.acquireInferenceCommand(ctx, inst, ia, agents.Command{})
@@ -95,6 +80,9 @@ func (m *Manager) ExecuteProfilePrompt(ctx context.Context, profileID, prompt st
 		return nil, err
 	}
 	if !resp.Success {
+		if resp.LaunchFailed {
+			return nil, fmt.Errorf("%w: %s", agentctlutil.ErrLaunchUnavailable, resp.Error)
+		}
 		return nil, errors.New(resp.Error)
 	}
 	return &PromptResult{Response: resp.Response, Model: resp.Model, PromptTokens: resp.PromptTokens, ResponseTokens: resp.ResponseTokens, DurationMs: resp.DurationMs}, nil

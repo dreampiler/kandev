@@ -81,3 +81,42 @@ func TestClassifyRoutesEachCause(t *testing.T) {
 		})
 	}
 }
+
+// TestClassifySuppressesAProcessedSignal pins the behaviour the child-stall
+// reminder relies on: a step whose completion signal is already recorded must
+// never classify as a missing signal, regardless of which session recorded it.
+func TestClassifySuppressesAProcessedSignal(t *testing.T) {
+	policy := Policy{SettleGrace: time.Second, SignalWait: time.Minute}
+
+	settling := qualifiedEvidence()
+	settling.PendingStepSignal = true
+	settling.SettledFor = 30 * time.Second
+	if got := Classify(settling, policy); got.Outcome != OutcomeSettling {
+		t.Fatalf("a freshly processed signal must stay settling, got %+v", got)
+	}
+
+	settled := qualifiedEvidence()
+	settled.PendingStepSignal = true
+	settled.SettledFor = 2 * time.Minute
+	got := Classify(settled, policy)
+	if got.Outcome != OutcomeSuppressed || got.Reason != ReasonSignalUnprocessed {
+		t.Fatalf("a processed signal must be suppressed, got %+v", got)
+	}
+}
+
+// TestClassifyCarriesBlockedReason pins that a refusal reason gathered from the
+// task's sessions reaches the missing-signal decision so the reminder can name
+// the real block.
+func TestClassifyCarriesBlockedReason(t *testing.T) {
+	policy := Policy{SettleGrace: time.Second, SignalWait: time.Minute}
+	evidence := qualifiedEvidence()
+	evidence.BlockedReason = "This session runs agent profile a, but the current step uses b."
+
+	got := Classify(evidence, policy)
+	if got.Outcome != OutcomeQualified || got.Cause != CauseMissingCompletionSignal {
+		t.Fatalf("decision = %+v, want a qualified missing signal", got)
+	}
+	if got.BlockedReason != evidence.BlockedReason {
+		t.Fatalf("blocked reason = %q, want %q", got.BlockedReason, evidence.BlockedReason)
+	}
+}

@@ -255,6 +255,8 @@ type InferenceConfigDTO struct {
 
 // PromptResponse is the response from executing a utility prompt.
 type PromptResponse struct {
+	// LaunchFailed means execution failed before a prompt was admitted.
+	LaunchFailed bool `json:"launch_failed,omitempty"`
 	// Success indicates if the prompt completed successfully.
 	Success bool `json:"success"`
 

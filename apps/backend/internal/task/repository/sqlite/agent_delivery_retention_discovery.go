@@ -118,7 +118,8 @@ func agentDeliveryRetirementHeadQuery(lastStreamID string, lastSequence int64, l
 	  SELECT 1 FROM agent_delivery_inbox head
 	  WHERE head.stream_id = c.stream_id AND head.sequence = c.retired_sequence + 1
 	   AND head.payload_pruned_at IS NOT NULL
-	   AND (head.sequence <= c.projected_sequence - ? OR head.projected_at <= ?))
+	   AND (head.sequence <= c.projected_sequence - ? OR head.projected_at <= ?
+	        OR ` + agentDeliveryCompletedStreamSQL("c") + `))
 	 ORDER BY c.stream_id LIMIT ?`
 	return query, append(args, int64(replay.events), replay.ageCutoff, limit)
 }

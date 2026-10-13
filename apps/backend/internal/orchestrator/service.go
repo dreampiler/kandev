@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -78,7 +79,11 @@ type ServiceConfig struct {
 	// ControlAgentProfileIDs names the agent profiles whose sessions belong to
 	// the control lane. Every other session, including one whose profile cannot
 	// be resolved, is a worker.
-	ControlAgentProfileIDs        []string
+	ControlAgentProfileIDs []string
+	// SessionMemoryGuard holds the host-memory pressure thresholds. When
+	// enabled, a new automatic worker launch is deferred while the host is
+	// under pressure; the control lane and Office coordinator are not.
+	SessionMemoryGuard            hostmemory.Gate
 	ClaudeBackgroundPromptHandoff bool
 
 	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
@@ -884,6 +889,10 @@ type Service struct {
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
 
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
+
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
 	// liveness probe (spec docs/specs/disambiguate-waiting/spec.md). Loaded
@@ -1264,10 +1273,12 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
-	idleParkingMu         sync.Mutex
-	idleParkingCandidates map[idleParkingCandidateKey]time.Time
-	idleParkingFocusAt    map[string]time.Time
-	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+	idleParkingMu           sync.Mutex
+	replacedSessionReclaims sync.Map // map[sessionID]replacedSessionReclaim
+	primarySessionReclaimMu sync.Mutex
+	idleParkingCandidates   map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt      map[string]time.Time
+	idleParkingInFlight     map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow
@@ -1922,7 +1933,7 @@ func NewService(
 			WorkerCeiling:     cfg.SessionCapacity,
 			ControlCeiling:    cfg.ControlSessionCapacity,
 			ControlProfileIDs: cfg.ControlAgentProfileIDs,
-		}, svcLogger.Zap()),
+		}, cfg.SessionMemoryGuard, svcLogger.Zap()),
 		backgroundProbeConfig: LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:          make(map[string]*parkedSessionState),
 		taskParkedStates:      make(map[string]*taskParkedState),
@@ -3069,6 +3080,7 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
+	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
 	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
 		if isNoActiveTurnError(err) {

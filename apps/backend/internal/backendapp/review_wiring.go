@@ -314,7 +314,13 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 			}, nil
 		}
 		if err == nil && resp != nil && resp.Error != "" {
+			if resp.LaunchFailed {
+				return nil, fmt.Errorf("%w: %s", review.ErrAgentUnavailable, resp.Error)
+			}
 			return nil, fmt.Errorf("%s", resp.Error)
+		}
+		if errors.Is(err, agentctlutil.ErrLaunchUnavailable) {
+			return nil, fmt.Errorf("%w: %w", review.ErrAgentUnavailable, err)
 		}
 		if err != nil && r.host == nil {
 			return nil, err
@@ -331,6 +337,9 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 		result, err = r.host.ExecutePrompt(ctx, identity.AgentID, identity.Model, identity.Mode, prompt)
 	}
 	if err != nil {
+		if errors.Is(err, agentctlutil.ErrLaunchUnavailable) {
+			return nil, fmt.Errorf("%w: %w", review.ErrAgentUnavailable, err)
+		}
 		return nil, err
 	}
 	return &review.PromptResult{

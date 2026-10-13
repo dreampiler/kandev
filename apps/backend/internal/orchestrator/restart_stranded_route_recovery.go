@@ -140,17 +140,39 @@ func (s *Service) restoreRouteAfterFailedRecovery(ctx context.Context, sessionID
 	s.markDynamicRouteActionRequired(ctx, sessionID, generation, explicitRecoveryFailedRouteReason)
 }
 
+// routeActionMaySettleOrphanTurn reports whether a route state admits settling
+// a turn no runtime can settle before a route action. A parked route has no
+// launch owner, so its orphan turn is settled as before. A route still at
+// "starting" is admitted only when an open restart-interrupted recovery block
+// proves the turn predates the current boot: a launch that is merely starting
+// in this boot still owns its turn and keeps the route-action refusal. Every
+// other route state keeps refusing.
+func (s *Service) routeActionMaySettleOrphanTurn(ctx context.Context, session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	if dynamicRouteParked(session.RouteState) {
+		return true
+	}
+	if session.RouteState != dynamicRouteStatusStarting {
+		return false
+	}
+	block, err := s.GetOpenSessionRecoveryBlock(ctx, session.ID)
+	return err == nil && block != nil && interruptedTurnRecoveryReasons[block.Reason]
+}
+
 // settleOrphanTurnForRouteAction closes turn rows that no runtime can settle
-// before a route action on a parked route. Such a turn is not active work:
-// the route has no launch owner, no agent runs for the session, and no
-// resume, queued dispatch, or steer is in flight. The caller holds the
-// session's cancel-in-flight guard, so no prompt can be admitted meanwhile.
+// before a route action on a parked or restart-stranded route. Such a turn is
+// not active work: the route has no launch owner, no agent runs for the
+// session, and no resume, queued dispatch, or steer is in flight. The caller
+// holds the session's cancel-in-flight guard, so no prompt can be admitted
+// meanwhile.
 func (s *Service) settleOrphanTurnForRouteAction(ctx context.Context, sessionID string) bool {
 	if s.turnService == nil || sessionID == "" {
 		return false
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || !dynamicRouteParked(session.RouteState) {
+	if err != nil || session == nil || !s.routeActionMaySettleOrphanTurn(ctx, session) {
 		return false
 	}
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {

@@ -200,6 +200,7 @@ row in that table.
 | OpenCode Go usage limit | every paid model of the Go account | 5h, 24h, 7d |
 | Free daily allowance (Zen try-later, OpenRouter `limit_rpd/<model>`) | this model on this path | next 00:00 UTC |
 | OpenRouter `free-models-per-day` | every free model of the account | next 00:00 UTC |
+| OpenRouter generic try-later | this model on this path | 5m, 15m, 30m; after eight suspensions on the same UTC date, next 00:00 UTC |
 | Other rate or quota limit | model for model-metered providers, binding otherwise | free ladder or paid ladder (unchanged) |
 | Shared upstream pool limited | this model on this path | 5m, 15m, 30m, 1h; after eight strikes the next 00:00 UTC |
 | Model withdrawn (Not Found, no endpoints, model unavailable) | this model on this path | 24h |

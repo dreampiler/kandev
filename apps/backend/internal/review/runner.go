@@ -96,8 +96,15 @@ type RunRequest struct {
 	Origin *OriginIdentity
 	// OriginRequired marks a caller (the workflow-step path) that must exclude a
 	// known origin. With it set, a nil Origin fails closed with ErrAgentUnavailable
-	// instead of reviewing with an unprovable writer model.
+	// instead of reviewing with an unproven writer model.
 	OriginRequired bool
+	// retryOfRunID links an automatic timeout fallback to the run it replaces.
+	// Set only by the runner itself; never a persisted column.
+	retryOfRunID string
+	// sourceOrigin describes the scope a pass read (an explicit range, the
+	// saved review_source, or the session workspace). Set by the runner; it is
+	// folded into the run summary so a run record shows which range it reviewed.
+	sourceOrigin string
 }
 
 // Runner orchestrates review passes.
@@ -118,6 +125,13 @@ type Runner struct {
 
 	// budgetBytes overrides PromptBudgetBytes; tests set it to force batching.
 	budgetBytes int
+
+	// writePolicy bounds terminal-write retries; tests shrink it.
+	writePolicy terminalWritePolicy
+
+	// passTimeout bounds a single pass; defaults to runTimeout and is only
+	// overridden by tests.
+	passTimeout time.Duration
 
 	mu       sync.Mutex
 	inFlight map[string]*inFlightRun
@@ -161,8 +175,77 @@ func NewRunner(deps RunnerDeps) *Runner {
 		sessions:    deps.Sessions,
 		logger:      deps.Logger.WithFields(zap.String("component", "review-runner")),
 		budgetBytes: deps.BudgetBytes,
+		writePolicy: defaultTerminalWritePolicy,
+		passTimeout: runTimeout,
 		inFlight:    make(map[string]*inFlightRun),
 	}
+}
+
+// writeTerminal records a run's terminal outcome. A single write can lose to a
+// busy database writer, so it is retried a bounded number of times; every
+// attempt uses a context detached from the pass so neither the pass deadline nor
+// a caller disconnect can cancel the write that clears pending/running. Delays
+// observe the runner's shutdown context so Stop is not delayed by a backoff.
+func (r *Runner) writeTerminal(ctx context.Context, write func(context.Context) error) error {
+	base := context.WithoutCancel(ctx)
+	var lastErr error
+	for attempt := 0; attempt < r.writePolicy.attempts; attempt++ {
+		if attempt > 0 && !r.waitBeforeRetry() {
+			break
+		}
+		attemptCtx, cancel := context.WithTimeout(base, r.writePolicy.timeout)
+		lastErr = write(attemptCtx)
+		cancel()
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return lastErr
+}
+
+// waitBeforeRetry waits between terminal-write attempts and reports false when
+// the runner is shutting down.
+func (r *Runner) waitBeforeRetry() bool {
+	if r.writePolicy.backoff <= 0 {
+		return true
+	}
+	timer := time.NewTimer(r.writePolicy.backoff)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-r.backgroundContext().Done():
+		return false
+	}
+}
+
+// abandoned reports whether a non-terminal run has outlived any live pass: it is
+// still pending/running after the progress-less time limit. A run with no
+// recorded age is never classified as abandoned, so an unknown age cannot close
+// a run the runner may still own.
+func (r *Runner) abandoned(run *models.TaskReviewRun) bool {
+	if run == nil || run.Status.IsTerminal() || run.CreatedAt.IsZero() {
+		return false
+	}
+	return time.Since(run.CreatedAt) > staleRunLimit
+}
+
+// finalizeAbandoned records an abandoned run as failed so it stops counting as
+// an active pass. It retries like any terminal write and reports the outcome.
+func (r *Runner) finalizeAbandoned(ctx context.Context, run *models.TaskReviewRun) error {
+	err := r.writeTerminal(ctx, func(wctx context.Context) error {
+		_, werr := r.store.FailRun(wctx, run.ID, CodeAbandoned,
+			"review run made no progress within the progress-less time limit", 0)
+		return werr
+	})
+	if err != nil {
+		r.logger.Error("finalize abandoned review run",
+			zap.String("task_id", run.TaskID), zap.String("run_id", run.ID), zap.Error(err))
+		return err
+	}
+	r.logger.Warn("finalized abandoned review run",
+		zap.String("task_id", run.TaskID), zap.String("run_id", run.ID))
+	return nil
 }
 
 // Start registers the runner's background context.
@@ -192,6 +275,27 @@ func (r *Runner) Stop() {
 // runTimeout bounds a single review pass so a wedged provider cannot pin the
 // in-flight slot for a task forever.
 const runTimeout = 10 * time.Minute
+
+// staleRunLimit is the progress-less time limit for a non-terminal run. A live
+// pass cannot outlive runTimeout, so a row still pending/running past this limit
+// has no goroutine behind it and is abandoned. The margin keeps a pass the
+// runner still owns from being misclassified while it records its outcome.
+const staleRunLimit = 2 * runTimeout
+
+// terminalWritePolicy bounds how a pass records its terminal outcome. Each
+// attempt writes on a context detached from the pass, so the pass deadline or a
+// caller disconnect cannot cancel the write that clears pending/running.
+type terminalWritePolicy struct {
+	attempts int
+	timeout  time.Duration
+	backoff  time.Duration
+}
+
+var defaultTerminalWritePolicy = terminalWritePolicy{
+	attempts: 3,
+	timeout:  10 * time.Second,
+	backoff:  time.Second,
+}
 
 // Launch starts a review pass in the background and returns the pending run, so
 // the caller's request does not block on inference.
@@ -247,8 +351,23 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 
 	// A pass that survived a restart has a DB row but no in-memory claim, so the
 	// claim above succeeds. Rejoin it instead of starting a second one.
-	if existing, err := r.store.ActiveRun(ctx, req.TaskID); err == nil && existing != nil {
-		return existing, nil, nil
+	existing, err := r.store.ActiveRun(ctx, req.TaskID)
+	if err != nil {
+		// Fail closed: an unreadable active-run set may already hold a row, and
+		// creating a second run would break the single-active-run invariant.
+		return nil, nil, err
+	}
+	if existing != nil {
+		if !r.abandoned(existing) {
+			return existing, nil, nil
+		}
+		// The row has outlived any live pass, so it is abandoned: record it and
+		// let the requested pass start instead of blocking on it forever. If the
+		// abandonment cannot be recorded, keep the single-active-run invariant
+		// and report the existing run rather than start a duplicate.
+		if err := r.finalizeAbandoned(ctx, existing); err != nil {
+			return existing, nil, nil
+		}
 	}
 
 	// A redelivered step entry must rejoin the run it already created — even a
@@ -278,12 +397,13 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	if err != nil {
 		return nil, nil, err
 	}
-	files, err := r.collectRequestChanges(ctx, req)
+	files, sourceOrigin, err := r.collectRequestChanges(ctx, req)
 	if err != nil {
 		return nil, nil, err
 	}
+	req.sourceOrigin = sourceOrigin
 	if len(files) == 0 {
-		return nil, nil, fmt.Errorf("%w: the task has no changed files to review", ErrNoChanges)
+		return nil, nil, fmt.Errorf("%w: no changed files to review in the %s", ErrNoChanges, sourceOrigin)
 	}
 
 	run, err := r.store.CreateRun(ctx, taskservice.CreateRunRequest{
@@ -298,8 +418,10 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	if err != nil {
 		return nil, nil, err
 	}
+	r.logger.Info("review run source",
+		zap.String("task_id", req.TaskID), zap.String("run_id", run.ID), zap.String("source", sourceOrigin))
 
-	runCtx, cancel := context.WithTimeout(r.backgroundContext(), runTimeout)
+	runCtx, cancel := context.WithTimeout(r.backgroundContext(), r.passTimeout)
 	done := r.attach(req.TaskID, run.ID, cancel)
 	launched = true
 
@@ -435,13 +557,19 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 
 	promptCtx, err := r.promptContext(ctx, req)
 	if err != nil {
-		return r.fail(ctx, runID, err, started)
+		return r.fail(ctx, runID, linkRetry(req, err), started)
 	}
 
 	plan := PlanBatches(files, r.budgetBytes)
-	accumulated, err := r.reviewBatches(ctx, plan, identity, req.SessionID, promptCtx)
+	accumulated, identity, err := r.reviewWithLaunchFallback(ctx, plan, identity, req, promptCtx)
 	if err != nil {
-		return r.fail(ctx, runID, err, started)
+		// Record the failure first. A retry on another candidate is only safe
+		// once this run is terminal, or a failed finalization would leave two
+		// active rows for the task.
+		if r.recordFailure(ctx, runID, linkRetry(req, err), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+			r.maybeRetryAfterFailure(ctx, err, req, identity, runID, files)
+		}
+		return err
 	}
 
 	// A cancel that landed while inference was running must win: publishing here
@@ -456,6 +584,14 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	index := FileByKey(files)
 	inputs := anchorFindings(accumulated.findings, index)
 	summary := buildRunSummary(accumulated, plan, len(inputs))
+	if req.sourceOrigin != "" {
+		// Fold the reviewed scope into the run summary so a run record shows
+		// which base..head it read, not just its file count.
+		summary = strings.TrimSpace(fmt.Sprintf("Reviewed %s. %s", req.sourceOrigin, summary))
+	}
+	if req.retryOfRunID != "" {
+		summary = fmt.Sprintf("Automatic retry of run %s after a review timeout. %s", req.retryOfRunID, summary)
+	}
 
 	if len(inputs) > 0 {
 		if _, _, pubErr := r.store.PublishFindings(ctx, taskservice.PublishFindingsRequest{
@@ -466,22 +602,117 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 			Summary:   summary,
 			Findings:  inputs,
 		}); pubErr != nil {
-			return r.fail(ctx, runID, pubErr, started)
+			// PublishFindings runs on the pass context, so a deadline here is the
+			// pass overrunning its budget: record it and take the same one-shot
+			// candidate fallback as an inference-phase timeout.
+			if r.recordFailure(ctx, runID, linkRetry(req, pubErr), started, errors.Is(ctx.Err(), context.DeadlineExceeded)) {
+				r.maybeRetryAfterFailure(ctx, pubErr, req, identity, runID, files)
+			}
+			return pubErr
 		}
 	}
 
-	_, err = r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
-		RunID:           runID,
-		Summary:         summary,
-		FindingCount:    len(inputs),
-		FileCount:       plan.FileCount(),
-		RepositoryCount: RepositoryCount(files),
-		PromptTokens:    accumulated.promptTokens,
-		ResponseTokens:  accumulated.responseTokens,
-		DurationMs:      int(time.Since(started).Milliseconds()),
+	// Reaching the completion write means the pass was in budget when it began —
+	// a pass that overran during inference or publication left by another path —
+	// so a completion write whose retries outlast the pass context is a storage
+	// failure, not a pass timeout. Capture the budget state before the retries.
+	passTimedOutBeforeComplete := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	completeErr := r.writeTerminal(ctx, func(wctx context.Context) error {
+		_, werr := r.store.CompleteRun(wctx, taskservice.CompleteRunRequest{
+			AgentID:         identity.AgentID,
+			Model:           identity.Model,
+			RunID:           runID,
+			Summary:         summary,
+			FindingCount:    len(inputs),
+			FileCount:       plan.FileCount(),
+			RepositoryCount: RepositoryCount(files),
+			PromptTokens:    accumulated.promptTokens,
+			ResponseTokens:  accumulated.responseTokens,
+			DurationMs:      int(time.Since(started).Milliseconds()),
+		})
+		return werr
 	})
-	return err
+	if completeErr != nil {
+		// The completion write failed on every attempt. Record a failure so the
+		// run does not stay running with no reason.
+		cause := linkRetry(req, fmt.Errorf("%w: record completion: %w", ErrExecutionFailed, completeErr))
+		r.recordFailure(ctx, runID, cause, started, passTimedOutBeforeComplete)
+		return cause
+	}
+	return nil
 }
+
+// linkRetry prefixes a failure with the run this pass retries, so an automatic
+// fallback is visibly tied to the failed run.
+func linkRetry(req RunRequest, err error) error {
+	if req.retryOfRunID == "" || err == nil {
+		return err
+	}
+	return fmt.Errorf("retry of run %s: %w", req.retryOfRunID, err)
+}
+
+// maybeRetryAfterFailure runs one automatic fallback when a pass ended on a
+// retryable failure — a deadline or an unparseable reviewer reply: the dynamic
+// route's next candidate runs the same review once. It never runs for any other
+// failure, never repeats a model that already failed, and never retries a retry.
+//
+// Called from the pass goroutine, so the task's in-flight slot stays held and
+// the cancel handle is repointed at the retry run.
+func (r *Runner) maybeRetryAfterFailure(ctx context.Context, cause error, req RunRequest, failed ReviewerIdentity, origRunID string, files []ChangedFile) {
+	if req.retryOfRunID != "" || !isRetryableFailure(ctx, cause) {
+		return
+	}
+	base := r.backgroundContext()
+	setupCtx, cancelSetup := context.WithTimeout(base, retrySetupTimeout)
+	defer cancelSetup()
+	// Exclude the reviewer that failed so the retry is a different candidate,
+	// in the route's existing order.
+	next, err := r.resolver.nextDynamicReviewer(setupCtx, failed, req.Origin, map[string]bool{failed.ProfileID: true})
+	if err != nil {
+		r.logger.Info("no reviewer candidate for a failed review",
+			zap.String("task_id", req.TaskID), zap.String("run_id", origRunID), zap.Error(err))
+		return
+	}
+	retryReq := req
+	retryReq.retryOfRunID = origRunID
+	// The retry is not a new ledger entry: reusing the entry id would collide
+	// with the unique index and break step-entry redelivery dedup.
+	retryReq.EntryID = ""
+	retryRun, err := r.store.CreateRun(setupCtx, taskservice.CreateRunRequest{
+		TaskID:         req.TaskID,
+		SessionID:      req.SessionID,
+		Trigger:        req.Trigger,
+		WorkflowStepID: req.WorkflowStepID,
+		AgentID:        next.AgentID,
+		Model:          next.Model,
+	})
+	if err != nil {
+		r.logger.Error("create review retry run", zap.String("run_id", origRunID), zap.Error(err))
+		return
+	}
+	retryCtx, cancelRetry := context.WithTimeout(base, r.passTimeout)
+	r.attach(req.TaskID, retryRun.ID, cancelRetry)
+	defer cancelRetry()
+	if err := r.execute(retryCtx, retryReq, retryRun.ID, next, files); err != nil {
+		r.logger.Warn("review retry failed",
+			zap.String("task_id", req.TaskID), zap.String("run_id", retryRun.ID), zap.Error(err))
+	}
+}
+
+// isRunTimeout reports whether a pass ended because its own deadline expired.
+func isRunTimeout(ctx context.Context, err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || (ctx != nil && errors.Is(ctx.Err(), context.DeadlineExceeded))
+}
+
+// isRetryableFailure reports whether a failed pass should run once more on the
+// dynamic route's next candidate: a deadline, or an unreadable reviewer reply.
+// Any other failure is final.
+func isRetryableFailure(ctx context.Context, err error) bool {
+	return isRunTimeout(ctx, err) || errors.Is(err, ErrUnparseableResponse)
+}
+
+// retrySetupTimeout bounds the resolve-and-create work before a fallback pass.
+const retrySetupTimeout = 30 * time.Second
 
 func (r *Runner) promptContext(ctx context.Context, req RunRequest) (PromptContext, error) {
 	if r.taskContext == nil {
@@ -547,6 +778,21 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 }
 
 func (r *Runner) fail(ctx context.Context, runID string, cause error, started time.Time) error {
+	if cause == nil {
+		// Preserve the historical nil-cause contract: nothing to record.
+		return ctx.Err()
+	}
+	r.recordFailure(ctx, runID, cause, started, errors.Is(ctx.Err(), context.DeadlineExceeded))
+	return cause
+}
+
+// recordFailure persists a run's failure and reports whether the row reached a
+// terminal state. timedOut is the caller's pass-budget decision, taken while the
+// failed phase was still current so a slow terminal write is not mistaken for it.
+// A caller that starts further work for the same task — the timeout fallback —
+// must wait for this to be true, or a failed finalization would leave two active
+// rows.
+func (r *Runner) recordFailure(ctx context.Context, runID string, cause error, started time.Time, timedOut bool) bool {
 	// An explicit cancel already recorded the terminal state, so re-reporting it
 	// as a failure would only churn the row (and would overwrite it on any store
 	// without a terminal guard). A deadline is different: nobody recorded that.
@@ -554,23 +800,32 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 	// %v and dropped context.Canceled from the chain.
 	if isReviewCanceled(cause) || isReviewCanceled(ctx.Err()) {
 		r.logger.Debug("review run unwound after cancellation", zap.String("run_id", runID))
-		if cause != nil {
-			return cause
-		}
-		return ctx.Err()
+		return true
+	}
+	if cause == nil {
+		// A nil cause carries no reason to record.
+		return true
 	}
 	code := CodeFor(cause)
-	if errors.Is(cause, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		code = CodeCancelled
+	message := cause.Error()
+	if timedOut {
+		// The caller decided, while the failed phase was current, that the pass's
+		// own budget expired. A terminal write whose retries outlast the budget is
+		// a storage failure, not a timeout, so the decision is not re-derived from
+		// the ambient context here.
+		code = CodeTimeout
+		message = fmt.Sprintf("review pass exceeded its %s time budget: %v", r.passTimeout, cause)
 	}
-	// Persist the failure on a context detached from the (possibly cancelled)
-	// run context, otherwise the run would stay stuck as "running" forever.
-	failCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
-	if _, err := r.store.FailRun(failCtx, runID, code, cause.Error(), int(time.Since(started).Milliseconds())); err != nil {
+	// Persist the failure on a detached, retried write: a single attempt can lose
+	// to a busy writer and leave the run stuck as "running" forever.
+	if err := r.writeTerminal(ctx, func(wctx context.Context) error {
+		_, werr := r.store.FailRun(wctx, runID, code, message, int(time.Since(started).Milliseconds()))
+		return werr
+	}); err != nil {
 		r.logger.Error("record review run failure", zap.String("run_id", runID), zap.Error(err))
+		return false
 	}
-	return cause
+	return true
 }
 
 // isReviewCanceled reports a user/cancel signal (context.Canceled), not a

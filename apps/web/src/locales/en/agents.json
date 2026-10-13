@@ -558,5 +558,9 @@
   "profileDragStart": "Profile {{name}} picked up. Position {{position}} of {{total}}.",
   "profileDragOver": "Profile {{name}} moved to position {{position}} of {{total}}.",
   "profileDragEnd": "Profile {{name}} dropped at position {{position}} of {{total}}.",
-  "profileDragCancel": "Reordering profile {{name}} cancelled."
+  "profileDragCancel": "Reordering profile {{name}} cancelled.",
+  "resourceCircuitsTitle": "Resource suspensions",
+  "releaseResourceCircuit": "Release this suspension",
+  "noResourceCircuits": "No resource suspensions",
+  "resourceCircuitOperationFailed": "Could not read or release the suspension. Refresh to try again."
 }

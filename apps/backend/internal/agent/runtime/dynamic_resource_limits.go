@@ -216,6 +216,22 @@ func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, execut
 	return r.engine.ReleaseAccountBlock(executionProfileID)
 }
 
+// ReleaseResourceCircuit releases exactly the key selected in agent settings.
+func (r *ProfileExecutionResolver) ReleaseResourceCircuit(_ context.Context, key string) (bool, error) {
+	if r == nil || r.engine == nil {
+		return false, nil
+	}
+	return r.engine.Circuits().Release(key)
+}
+
+// ListResourceCircuits reads the same live registry used for admission.
+func (r *ProfileExecutionResolver) ListResourceCircuits(_ context.Context) ([]dynamic.CircuitSnapshot, error) {
+	if r == nil || r.engine == nil {
+		return nil, nil
+	}
+	return r.engine.Circuits().ListSuspended(), nil
+}
+
 // RecordResourceFailure suspends a concrete profile's resource after a failure
 // that is not routed to a successor.
 func (r *ProfileExecutionResolver) RecordResourceFailure(

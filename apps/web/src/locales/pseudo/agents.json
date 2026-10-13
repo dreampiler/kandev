@@ -558,5 +558,9 @@
   "profileDragStart": "Ƥŕōƒĩĺē {{name}} ƥĩćķēď ũƥ. Ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragOver": "Ƥŕōƒĩĺē {{name}} ḿōvēď ţō ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragEnd": "Ƥŕōƒĩĺē {{name}} ďŕōƥƥēď àţ ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
-  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď."
+  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď.",
+  "resourceCircuitsTitle": "Ŕēśōũŕćē śũśƥēńśĩōńś",
+  "releaseResourceCircuit": "Ŕēĺēàśē ţĥĩś śũśƥēńśĩōń",
+  "noResourceCircuits": "Ńō ŕēśōũŕćē śũśƥēńśĩōńś",
+  "resourceCircuitOperationFailed": "Ćōũĺď ńōţ ŕēàď ōŕ ŕēĺēàśē ţĥē śũśƥēńśĩōń. Ŕēƒŕēśĥ ţō ţŕŷ àĝàĩń."
 }

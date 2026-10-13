@@ -21,7 +21,7 @@ func TestDeliveryRetentionBounds(t *testing.T) {
 		retired := int64(0)
 		for sequence := int64(1); sequence <= projectedSequence; sequence++ {
 			if !agentDeliveryRetentionSequenceExpired(
-				sequence, retired+1, projectedSequence, firstTerminal, projectedAt, ageCutoff,
+				sequence, retired+1, projectedSequence, firstTerminal, projectedAt, false, ageCutoff,
 				agentDeliveryRetentionCompactEventLimit,
 			) {
 				t.Fatalf("terminal-free sequence %d was pinned before the million-event frontier", sequence)
@@ -36,7 +36,7 @@ func TestDeliveryRetentionBounds(t *testing.T) {
 		retired = 0
 		for sequence := int64(1); sequence <= projectedSequence; sequence++ {
 			if !agentDeliveryRetentionSequenceExpired(
-				sequence, retired+1, projectedSequence, firstTerminal, projectedAt, ageCutoff,
+				sequence, retired+1, projectedSequence, firstTerminal, projectedAt, false, ageCutoff,
 				agentDeliveryRetentionCompactEventLimit,
 			) {
 				break

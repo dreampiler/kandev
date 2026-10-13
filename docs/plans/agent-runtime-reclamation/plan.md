@@ -6,6 +6,7 @@ requirements:
   - REQ-EXECUTORS-RUNTIME-RECLAIM-002
   - REQ-EXECUTORS-RUNTIME-RECLAIM-003
   - REQ-EXECUTORS-RUNTIME-RECLAIM-004
+  - REQ-EXECUTORS-RUNTIME-RECLAIM-005
 system_design:
   - ../../specs/executors/system-design/agent-runtime-reclamation.md
 legacy_specs: []
@@ -47,6 +48,7 @@ None of these is a pending decision. They were declined.
 
 - [x] [WO-01: Terminal-session reclaim and recovery exclusion](task-01-terminal-reclaim.md) (done)
 - [x] [WO-02: Per-session footprint projection](task-02-runtime-footprint-projection.md) (done)
+- [x] [WO-03: Windows ownership and replaced-session teardown](task-03-windows-idle-reclaim.md) (done)
 
 ### WO-01 — Terminal-session reclaim and recovery exclusion
 

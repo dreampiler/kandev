@@ -11,10 +11,11 @@ import (
 // It is deliberately separate from the task's own agent profile: the point of the
 // feature is that a different model can review than implemented.
 type ReviewerIdentity struct {
-	ProfileID string
-	AgentID   string
-	Model     string
-	Mode      string
+	DynamicProfileID string
+	ProfileID        string
+	AgentID          string
+	Model            string
+	Mode             string
 	// Source names where the identity came from, for the run record and logs:
 	// "agent_profile", "utility_agent", or "user_default".
 	Source string
@@ -256,6 +257,7 @@ func (r *Resolver) resolveDynamic(ctx context.Context, profileID string, profile
 		return ReviewerIdentity{}, false, nil
 	}
 	identity.Source = source
+	identity.DynamicProfileID = profileID
 	return identity, true, nil
 }
 

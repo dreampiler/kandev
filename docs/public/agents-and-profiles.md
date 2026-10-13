@@ -26,6 +26,26 @@ profiles from the Settings navigation tree. Disabled profiles remain available
 on the Agents page, and the preference applies immediately in this browser
 profile.
 
+## Release a resource suspension
+
+Administrators can open **Settings > Agents > Resource suspensions** and select
+**Release this suspension** on one row. This clears that circuit and its retry
+history without changing another suspension, profile setting, or credential.
+It permits a later attempt; it does not start or replay a turn. Refresh the list
+to read current suspensions. The same action is available on phones.
+
+The API is `GET /api/v1/agent-circuits` and
+`POST /api/v1/agent-circuits/release` with
+`{"resource_key":"<exact key from the list>"}`. The POST uses the existing
+agent-settings permission and settings interlock, and reports whether it
+released a circuit. A save failure leaves the suspension in place.
+
+OpenRouter's generic try-later notice starts with a short 5/15/30-minute
+backoff; repeated failures on the same UTC date can escalate to the daily
+reset. Explicit daily-limit notices and Zen's daily-reset behavior still wait
+for 00:00 UTC. On load, older Go quota suspensions longer than the current
+policy maximum are capped at the original failure time plus seven days.
+
 ## Install or detect an agent
 
 Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which its backend runs, not the browser computer.
@@ -301,6 +321,11 @@ does not guarantee a rollback.
 When an existing native OpenCode v1 installation remains selected, same-family
 updates can still update that native executable. A v2 migration always uses
 the managed `@opencode/cli` package and does not run a global npm install.
+
+If a native OpenCode version check still fails after retries, Kandev can use a
+recent supported detection or the selected supported version. Cancelling the
+launch stops it. An observed unsupported major blocks launch until a later
+check reports a supported version; a transient probe failure cannot clear it.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm

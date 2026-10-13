@@ -6,6 +6,7 @@ requirements:
   - REQ-EXECUTORS-RUNTIME-RECLAIM-002
   - REQ-EXECUTORS-RUNTIME-RECLAIM-003
   - REQ-EXECUTORS-RUNTIME-RECLAIM-004
+  - REQ-EXECUTORS-RUNTIME-RECLAIM-005
 ---
 
 # Agent Runtime Reclamation System Design
@@ -178,6 +179,49 @@ complete.
 Closed with evidence; no design change. See the requirements document for the two
 rejected hypotheses, the four covering regression tests, and their passing run on
 the observed host.
+
+## REQ-005: Windows proof and replacement teardown
+
+The launcher retains its existing suspended-start, kill-on-close Job Object.
+Each launch receives a unique kernel job name, saved as the optional
+`windows_job_name` in the existing process identity record. The launcher passes
+the name only to its child; Windows self-capture accepts it only after verifying
+kernel job membership. This keeps authenticated server details and the saved
+launcher identity consistent. No process command line is read.
+
+`Inspect` checks creation time and exit time. A Windows process object can remain
+queryable after exit while another handle is open; a successful `OpenProcess`
+alone therefore cannot prove liveness.
+
+`OwnedSessionTerminated` rejects reused or unknown owners. An exited original
+owner requires the named job's accounting to show zero active members, or the
+job to have been destroyed after kill-on-close termination. Legacy identities
+without job evidence remain blocked. `TerminateOwnedSession` opens only that
+recorded job and contains it only after the original owner has exited. Access
+errors remain failures. Existing per-instance idle stop continues to use its
+owned job handle and never kills the shared agentctl root.
+
+Primary promotion and successful queue transfer register the observed old
+execution for cleanup. Queue transfer leaves teardown to maintenance so a
+workflow caller can finish its own completion or parking transition first.
+Session prompt admission and nonblocking lifecycle coordination
+re-read the demoted session, successor, runtime identity, turn, pending work,
+and ownership restrictions. The normal executor stop first commits logical
+cancellation for an open obsolete session, then tears down its exact execution
+after releasing the admission locks. A separate short primary-mutation mutex
+serializes promotion with logical cancellation without re-locking a workflow
+caller's lifecycle mutex. Terminal sessions retain their outcome.
+The successor is never stopped.
+
+An in-flight turn leaves the claim in a service-owned map for the existing
+maintenance tick. Rotation or re-promotion invalidates the claim. Restart loses
+these provisional claims; ordinary startup reconciliation and workspace idle
+parking still apply. No retention setting, default, or new background goroutine
+is introduced. The operator's enabled 60-minute policy is unchanged.
+
+Parent-chain scanning was not selected: exited intermediates lose ancestry
+evidence, and PID reuse makes a bare parent PID unsafe. The existing Job Object
+already owns descendants before their first instruction runs.
 
 The ownership boundary is the kill-on-close Job Object an agent process is bound
 to before it can spawn descendants, plus the equivalent reap path in the process

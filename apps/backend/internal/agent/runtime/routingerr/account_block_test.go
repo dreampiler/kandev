@@ -11,6 +11,7 @@ func TestAccountBlockedClassification(t *testing.T) {
 		"observed diagnostic":                    accountBlockedDiagnostic,
 		"internal error label":                   "Internal error: " + accountBlockedDiagnostic,
 		"json message field with escaped quotes": `Internal error: {"message":"Error from provider meta-contributor: 403 Forbidden {\"error\":{\"code\":\"user_blocked\",\"message\":\"Your access has been restricted due to repeated policy violations.\"}}"}`,
+		"json code field before message":         `Internal error: {"code":403,"message":"Error from provider meta-contributor: 403 Forbidden {\"error\":{\"code\":\"user_blocked\",\"message\":\"Your access has been restricted due to repeated policy violations.\"}}"}`,
 		"message without code":                   `Error from provider meta-contributor: 403 Forbidden {"error":{"message":"Your access has been restricted due to repeated policy violations."}}`,
 		"code without message":                   `AI_APICallError: Error from provider gateway-x: 403 Forbidden {"error":{"code":"user_blocked"}}`,
 		"after earlier output":                   "partial answer\n" + accountBlockedDiagnostic,
@@ -32,13 +33,15 @@ func TestAccountBlockedClassification(t *testing.T) {
 
 func TestAccountBlockedRejectsProseAndPlain403(t *testing.T) {
 	for name, text := range map[string]string{
-		"plain 403":           `Error from provider meta-contributor: 403 Forbidden {"error":{"code":"forbidden","message":"Access denied."}}`,
-		"non-403 with code":   `Error from provider meta-contributor: 401 Unauthorized {"error":{"code":"user_blocked"}}`,
-		"non-403 message":     `Error from provider meta-contributor: 429 Too Many Requests {"error":{"message":"Your access has been restricted for a minute."}}`,
-		"prose quoting error": `The other session failed with Error from provider meta-contributor: 403 Forbidden {"error":{"code":"user_blocked"}} so I switched models.`,
-		"prose about code":    "The gateway returns user_blocked when an account is restricted; your access has been restricted is the message.",
-		"bare 403 forbidden":  "403 Forbidden user_blocked",
-		"code on next line":   "Error from provider meta-contributor: 403 Forbidden\n{\"error\":{\"code\":\"user_blocked\"}}",
+		"plain 403":             `Error from provider meta-contributor: 403 Forbidden {"error":{"code":"forbidden","message":"Access denied."}}`,
+		"non-403 with code":     `Error from provider meta-contributor: 401 Unauthorized {"error":{"code":"user_blocked"}}`,
+		"non-403 message":       `Error from provider meta-contributor: 429 Too Many Requests {"error":{"message":"Your access has been restricted for a minute."}}`,
+		"prose quoting error":   `The other session failed with Error from provider meta-contributor: 403 Forbidden {"error":{"code":"user_blocked"}} so I switched models.`,
+		"prose about code":      "The gateway returns user_blocked when an account is restricted; your access has been restricted is the message.",
+		"bare 403 forbidden":    "403 Forbidden user_blocked",
+		"code on next line":     "Error from provider meta-contributor: 403 Forbidden\n{\"error\":{\"code\":\"user_blocked\"}}",
+		"plain 403 in envelope": `Internal error: {"code":403,"message":"Error from provider meta-contributor: 403 Forbidden {\"error\":{\"code\":\"forbidden\",\"message\":\"Access denied.\"}}"}`,
+		"prose in envelope":     `I checked and Internal error: {"code":403,"message":"Error from provider meta-contributor: 403 Forbidden {\"error\":{\"code\":\"user_blocked\"}}"} was the other task's failure.`,
 	} {
 		got := Classify(Input{Phase: PhasePromptSend, Stderr: text})
 		if got.Code == Code("account_blocked") {

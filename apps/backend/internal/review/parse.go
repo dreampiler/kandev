@@ -67,31 +67,38 @@ func ParseFindings(response string) (ParseResult, error) {
 		if err := json.Unmarshal([]byte(candidate), &envelope); err != nil {
 			continue
 		}
-		if envelope.Findings == nil && !hasFindingsKey(candidate) {
+		if envelope.Findings == nil {
 			// Parsed as JSON but is not the review envelope (for example a bare
 			// string or an unrelated object). Keep looking.
 			continue
 		}
 		return validateFindings(envelope), nil
 	}
+	if isExplicitEmptyReview(response) {
+		return ParseResult{Summary: strings.TrimSpace(response)}, nil
+	}
 	return ParseResult{}, fmt.Errorf("%w: no findings array in reviewer response", ErrUnparseableResponse)
 }
 
-func hasFindingsKey(candidate string) bool {
-	return strings.Contains(candidate, `"findings"`)
+func isExplicitEmptyReview(response string) bool {
+	normalized := strings.ToLower(strings.Trim(strings.TrimSpace(response), " .!\r\n"))
+	switch normalized {
+	case "no findings", "no findings found", "no issues found", "no review findings", "no actionable findings", "no actionable issues found":
+		return true
+	default:
+		return false
+	}
 }
 
 // jsonCandidates yields possible JSON payloads inside a reply, most-likely
-// first: fenced blocks in order, then the widest brace-balanced span.
+// first: fenced blocks in order, then individual decoded objects.
 func jsonCandidates(response string) []string {
 	trimmed := strings.TrimSpace(response)
 	if trimmed == "" {
 		return nil
 	}
 	candidates := extractFencedBlocks(trimmed)
-	if span := widestObjectSpan(trimmed); span != "" {
-		candidates = append(candidates, span)
-	}
+	candidates = append(candidates, objectSpans(trimmed)...)
 	return candidates
 }
 
@@ -131,15 +138,21 @@ func extractFencedBlocks(text string) []string {
 	}
 }
 
-// widestObjectSpan returns the text from the first '{' to the last '}', which
-// recovers a bare object surrounded by prose.
-func widestObjectSpan(text string) string {
-	start := strings.IndexByte(text, '{')
-	end := strings.LastIndexByte(text, '}')
-	if start < 0 || end <= start {
-		return ""
+// objectSpans decodes each complete object independently of surrounding prose.
+func objectSpans(text string) []string {
+	var spans []string
+	for start := 0; start < len(text); start++ {
+		if text[start] != '{' {
+			continue
+		}
+		var object json.RawMessage
+		decoder := json.NewDecoder(strings.NewReader(text[start:]))
+		if decoder.Decode(&object) == nil {
+			spans = append(spans, string(object))
+			start += int(decoder.InputOffset()) - 1
+		}
 	}
-	return text[start : end+1]
+	return spans
 }
 
 // validateFindings drops individually-invalid entries and normalizes the rest.
