@@ -185,20 +185,12 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		m.activeCreations.Done()
 	}()
 
-	inst, err := m.startInstance(ctx, admission, req)
+	_, err = m.startInstance(ctx, admission, req)
 	if err != nil {
 		return nil, err
 	}
 
-	m.mu.Lock()
-	if m.shuttingDown {
-		m.mu.Unlock()
-		return nil, ErrManagerShuttingDown
-	}
-	delete(m.provisional, bundle.id)
-	m.instances[bundle.id] = inst
 	cleanupPending = false
-	m.mu.Unlock()
 
 	// Clamp to a minimum of 1ms so a genuinely sub-millisecond creation can't
 	// be stored as 0, which CreateReadyMillis's zero value reserves to mean
@@ -278,12 +270,8 @@ func (m *Manager) admitCreate(ctx context.Context, req *CreateRequest) (*createA
 	return &createAdmission{bundle: bundle}, nil
 }
 
-// startInstance builds an admitted instance's process manager, materializes
-// comparison targets, starts workspace trackers, prepares its HTTP handler and
-// starts serving. It runs without m.mu; the caller publishes the returned
-// instance afterwards. The server starts before publication so a concurrent
-// StopInstance that already found the published instance always sees a
-// non-nil server.
+// startInstance builds an admitted instance without m.mu, then atomically
+// starts its server and publishes it through publishInstance.
 func (m *Manager) startInstance(ctx context.Context, admission *createAdmission, req *CreateRequest) (*Instance, error) {
 	bundle := admission.bundle
 	id := bundle.id
@@ -345,8 +333,27 @@ func (m *Manager) startInstance(ctx context.Context, admission *createAdmission,
 	}
 	inst.MarkActivity()
 	handler := activityMiddleware(inst)(m.buildHTTPHandler(instanceCfg, procMgr))
-	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
+	if err := m.publishInstance(ctx, inst, bundle, handler); err != nil {
+		return nil, err
+	}
 	return inst, nil
+}
+
+// publishInstance starts serving and publishes under the same lock. Shutdown
+// or caller cancellation before publication leaves the instance provisional.
+func (m *Manager) publishInstance(ctx context.Context, inst *Instance, bundle *provisionalInstance, handler http.Handler) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.shuttingDown {
+		return ErrManagerShuttingDown
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("create instance abandoned before publication: %w", err)
+	}
+	inst.server = m.startHTTPServer(inst, bundle.listener, handler)
+	m.instances[inst.ID] = inst
+	delete(m.provisional, inst.ID)
+	return nil
 }
 
 func (m *Manager) buildInstanceOverrides(id string, req *CreateRequest, agentCmd string, agentEnv []string) *config.InstanceOverrides {

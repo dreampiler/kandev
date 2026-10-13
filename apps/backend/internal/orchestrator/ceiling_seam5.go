@@ -63,11 +63,12 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 	}
 	sessionID, _ := relaunchPayload[metaKeySessionID].(string)
 	decision := s.handOffOrAdmitCeilingLaunch(ctx, admissionRequest{
-		taskID:         taskID,
-		sessionID:      sessionID,
-		origin:         origin,
-		seam:           "relaunchDynamicTaskAfterFailure",
-		agentProfileID: agentProfileID,
+		taskID:                taskID,
+		sessionID:             sessionID,
+		origin:                origin,
+		seam:                  "relaunchDynamicTaskAfterFailure",
+		agentProfileID:        agentProfileID,
+		replacesFailedAttempt: replacesFailedDynamicAttempt(ctx),
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{
@@ -86,4 +87,21 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 		return nil, false, err
 	}
 	return nil, true, nil
+}
+
+type replacesFailedDynamicAttemptKey struct{}
+
+// withReplacesFailedDynamicAttempt marks a relaunch as the automatic successor
+// of the same session's own failed dynamic attempt. Only that seam sets it; a
+// route action or a replayed deferral is an ordinary admission.
+func withReplacesFailedDynamicAttempt(ctx context.Context) context.Context {
+	return context.WithValue(ctx, replacesFailedDynamicAttemptKey{}, true)
+}
+
+func replacesFailedDynamicAttempt(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	marked, _ := ctx.Value(replacesFailedDynamicAttemptKey{}).(bool)
+	return marked
 }

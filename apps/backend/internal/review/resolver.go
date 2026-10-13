@@ -11,10 +11,11 @@ import (
 // It is deliberately separate from the task's own agent profile: the point of the
 // feature is that a different model can review than implemented.
 type ReviewerIdentity struct {
-	ProfileID string
-	AgentID   string
-	Model     string
-	Mode      string
+	DynamicProfileID string
+	ProfileID        string
+	AgentID          string
+	Model            string
+	Mode             string
 	// Source names where the identity came from, for the run record and logs:
 	// "agent_profile", "utility_agent", or "user_default".
 	Source string
@@ -34,6 +35,25 @@ type ReviewerProfile struct {
 	Mode           string
 	CLIPassthrough bool
 	Name           string
+	// Dynamic marks a dynamic profile. It names no model of its own: it routes
+	// to ordered concrete candidates, so a review must resolve it to one of
+	// them (see DynamicRouteSelector) before any model comparison is possible.
+	Dynamic bool
+}
+
+// DynamicRouteSelector resolves a dynamic profile to one of its concrete
+// candidates using the dynamic route's own candidate order, tier ranking and
+// route health (open circuits, provider limits, account blocks). It adds no
+// selection rule of its own: skip only removes a candidate in place, exactly
+// like an ineligible row, so every remaining candidate keeps its position.
+//
+// The review package cannot import the agent runtime, so the implementation is
+// an adapter wired by the application.
+type DynamicRouteSelector interface {
+	// SelectCandidate returns the concrete execution profile ID the route would
+	// choose now among the candidates skip does not reject. An empty ID with a
+	// nil error means no candidate is eligible.
+	SelectCandidate(ctx context.Context, dynamicProfileID string, skip func(executionProfileID string) bool) (string, error)
 }
 
 // ProfileLookup resolves an agent profile ID. Returns found=false for an unknown
@@ -64,11 +84,25 @@ type DefaultProfileLookup interface {
 	DefaultUtilityProfileID(ctx context.Context) (string, error)
 }
 
+// OriginIdentity is the concrete execution that produced the changes a review
+// pass is judging. The workflow-step path sets it from the entering session so
+// the resolver never selects the writer's own model or profile as the reviewer.
+// Every field is optional; an empty value never matches a candidate.
+type OriginIdentity struct {
+	// ProfileID is the origin session's logical agent profile.
+	ProfileID string
+	// ExecutionProfileID is the concrete profile the origin actually ran under.
+	ExecutionProfileID string
+}
+
 // Resolver picks the reviewer identity for a run.
 type Resolver struct {
 	Profiles ProfileLookup
 	Utility  UtilityAgentLookup
 	Defaults DefaultsLookup
+	// Routes resolves a dynamic reviewer profile to a concrete candidate. Nil
+	// leaves dynamic profiles unresolvable for review.
+	Routes DynamicRouteSelector
 }
 
 // NewResolver builds a resolver. Any lookup may be nil; a nil lookup simply
@@ -77,53 +111,280 @@ func NewResolver(profiles ProfileLookup, utility UtilityAgentLookup, defaults De
 	return &Resolver{Profiles: profiles, Utility: utility, Defaults: defaults}
 }
 
-// Resolve returns the reviewer identity for a run.
+// Resolve returns the reviewer identity for a run. See ResolveExcluding.
+func (r *Resolver) Resolve(ctx context.Context, agentProfileID string) (ReviewerIdentity, error) {
+	return r.ResolveExcluding(ctx, agentProfileID, nil)
+}
+
+// ResolveExcluding returns the reviewer identity for a run and removes any
+// candidate that is the origin's own execution.
 //
-// Precedence:
+// Precedence is unchanged:
 //  1. an explicit agent profile (the workflow-step path), which is what makes a
 //     per-step reviewing model possible;
 //  2. the enabled built-in `code-review` utility agent;
 //  3. the user's default utility agent/model.
 //
+// When origin is non-nil, a candidate whose concrete profile ID is the origin's,
+// or whose {agent, model, mode} triple equals the origin's, is skipped in place:
+// the order and eligibility of every remaining candidate are preserved. A
+// candidate the origin does not match still wins at its own precedence. When no
+// distinct candidate remains, the resolver fails closed with ErrAgentUnavailable
+// rather than silently reviewing with the writer's own model.
+//
+// A dynamic profile at any of these positions has no model of its own, so it is
+// resolved through its route (DynamicRouteSelector) to the first available
+// concrete candidate in the route's own order, with origin matches and rows that
+// cannot review skipped in place. When none remains, that position is passed
+// over exactly like an origin match.
+//
 // The agent/model pair is treated as inseparable: a default model from one
 // provider must never be sent to another provider's ACP config, so a blank model
 // pulls both halves from the defaults rather than just the model.
-//
-// Fails closed with ErrAgentUnavailable — never guesses an agent — because a
-// wrong provider/model pair produces either a hard provider error or, worse, a
-// confident review from a model the user did not choose.
-func (r *Resolver) Resolve(ctx context.Context, agentProfileID string) (ReviewerIdentity, error) {
-	if strings.TrimSpace(agentProfileID) != "" {
-		return r.resolveFromProfile(ctx, strings.TrimSpace(agentProfileID))
+func (r *Resolver) ResolveExcluding(ctx context.Context, agentProfileID string, origin *OriginIdentity) (ReviewerIdentity, error) {
+	exclusion := r.originExclusion(ctx, origin)
+
+	if trimmed := strings.TrimSpace(agentProfileID); trimmed != "" {
+		identity, ok, err := r.resolveExplicit(ctx, trimmed, exclusion)
+		if err != nil {
+			return ReviewerIdentity{}, err
+		}
+		if ok {
+			return identity, nil
+		}
+		// The explicit profile is the origin's own execution (or, for a dynamic
+		// profile, none of its available candidates is distinct); fall through
+		// to the utility/default candidates rather than reviewing with it.
 	}
+
 	identity, err := r.resolveFromUtilityAgent(ctx)
-	if err == nil {
-		return identity, nil
-	}
-	// Only an absent or disabled code-review agent defers to the user defaults.
-	// A configured-but-inconsistent one is a hard failure: falling back there
-	// would quietly review with a provider/model pair the user never chose.
-	if !errors.Is(err, errDeferToDefaults) {
+	switch {
+	case err == nil:
+		admitted, ok, admitErr := r.distinctCandidate(ctx, identity, exclusion)
+		if admitErr != nil {
+			return ReviewerIdentity{}, admitErr
+		}
+		if ok {
+			return admitted, nil
+		}
+		// The utility reviewer is the origin; fall through to the defaults.
+	case errors.Is(err, errDeferToDefaults):
+		// Absent or disabled utility agent; fall through to the defaults.
+	default:
+		// A configured-but-inconsistent utility agent is a hard failure:
+		// falling back there would quietly review with a provider/model pair
+		// the user never chose.
 		return ReviewerIdentity{}, err
 	}
-	return r.resolveFromDefaults(ctx)
+
+	identity, err = r.resolveFromDefaults(ctx)
+	if err != nil {
+		return ReviewerIdentity{}, err
+	}
+	admitted, ok, err := r.distinctCandidate(ctx, identity, exclusion)
+	if err != nil {
+		return ReviewerIdentity{}, err
+	}
+	if !ok {
+		return ReviewerIdentity{}, fmt.Errorf("%w: %w", ErrAgentUnavailable, ErrNoDistinctReviewer)
+	}
+	return admitted, nil
+}
+
+// resolveExplicit resolves the step's (or caller's) explicit reviewer profile.
+// ok=false means the profile is the origin, or a dynamic profile with no
+// distinct available candidate, and the caller should fall through.
+func (r *Resolver) resolveExplicit(ctx context.Context, profileID string, exclusion originExclusion) (ReviewerIdentity, bool, error) {
+	profile, err := r.loadProfile(ctx, profileID)
+	if err != nil {
+		return ReviewerIdentity{}, false, err
+	}
+	if profile.Dynamic {
+		return r.resolveDynamic(ctx, profileID, profile, SourceAgentProfile, exclusion)
+	}
+	identity, err := r.concreteIdentity(ctx, profileID, profile)
+	if err != nil {
+		return ReviewerIdentity{}, false, err
+	}
+	if exclusion.matches(r.withTriple(ctx, identity)) {
+		return ReviewerIdentity{}, false, nil
+	}
+	return identity, true, nil
+}
+
+// distinctCandidate admits a utility or default candidate when it is not the
+// origin. A profile-based candidate that names a dynamic profile is resolved to
+// a concrete candidate first; without that, its model could not be compared and
+// the launch would pick a candidate with no regard for the writer's model.
+func (r *Resolver) distinctCandidate(ctx context.Context, identity ReviewerIdentity, exclusion originExclusion) (ReviewerIdentity, bool, error) {
+	if identity.AgentID == "" && identity.ProfileID != "" && r.Profiles != nil && r.Routes != nil {
+		profile, found, err := r.Profiles.ReviewerProfile(ctx, identity.ProfileID)
+		if err == nil && found && profile.Dynamic {
+			return r.resolveDynamic(ctx, identity.ProfileID, profile, identity.Source, exclusion)
+		}
+	}
+	if exclusion.matches(r.withTriple(ctx, identity)) {
+		return ReviewerIdentity{}, false, nil
+	}
+	return identity, true, nil
+}
+
+// resolveDynamic turns a dynamic reviewer profile into one concrete reviewer by
+// asking the profile's own route for its current choice, with every candidate
+// that is the origin's model/profile — or that cannot run a structured review —
+// skipped in place. The route keeps the owner's candidate order and skips rows
+// its health marks blocked. ok=false means no distinct candidate is available.
+func (r *Resolver) resolveDynamic(ctx context.Context, profileID string, profile ReviewerProfile, source string, exclusion originExclusion) (ReviewerIdentity, bool, error) {
+	if r.Routes == nil {
+		return ReviewerIdentity{}, false, fmt.Errorf(
+			"%w: agent profile %q is a dynamic profile and no dynamic route is available to resolve it",
+			ErrAgentUnavailable, describeProfile(profile, profileID))
+	}
+	candidateID, err := r.Routes.SelectCandidate(ctx, profileID, func(candidateID string) bool {
+		identity, usable := r.concreteCandidate(ctx, candidateID)
+		return !usable || exclusion.matches(identity)
+	})
+	if err != nil {
+		return ReviewerIdentity{}, false, fmt.Errorf("%w: resolve dynamic agent profile %q: %v",
+			ErrAgentUnavailable, describeProfile(profile, profileID), err)
+	}
+	if candidateID == "" {
+		return ReviewerIdentity{}, false, nil
+	}
+	identity, usable := r.concreteCandidate(ctx, candidateID)
+	if !usable || exclusion.matches(identity) {
+		// The route returned a row it was told to skip; never review with it.
+		return ReviewerIdentity{}, false, nil
+	}
+	identity.Source = source
+	identity.DynamicProfileID = profileID
+	return identity, true, nil
+}
+
+// concreteCandidate resolves one dynamic route row to a reviewer identity.
+// usable=false for a row that cannot run a structured review: a missing or
+// unreadable profile, a nested dynamic profile, a CLI-passthrough profile, or
+// one with no agent/model.
+func (r *Resolver) concreteCandidate(ctx context.Context, profileID string) (ReviewerIdentity, bool) {
+	profile, err := r.loadProfile(ctx, profileID)
+	if err != nil || profile.Dynamic {
+		return ReviewerIdentity{}, false
+	}
+	identity, err := r.concreteIdentity(ctx, profileID, profile)
+	if err != nil {
+		return ReviewerIdentity{}, false
+	}
+	return identity, true
+}
+
+// ErrNoDistinctReviewer marks the case where every configured candidate is the
+// origin's own model/profile. It is always wrapped with ErrAgentUnavailable so
+// the run records the existing review_agent_unavailable code.
+var ErrNoDistinctReviewer = errors.New("reviewer would be the origin's own model/profile")
+
+// ErrOriginUnreadable marks a workflow-step review whose writer identity could
+// not be read. Without the origin the resolver cannot prove the reviewer is
+// distinct, so it fails closed rather than risk reviewing with the writer's own
+// model. Always wrapped with ErrAgentUnavailable.
+var ErrOriginUnreadable = errors.New("the origin execution identity is unavailable")
+
+// ResolveRequiredOrigin is the workflow-step form of ResolveExcluding: the
+// caller knows a change was written and must exclude its origin execution. A nil
+// origin means the writer's identity could not be read, which fails closed with
+// ErrAgentUnavailable instead of selecting an indistinguishable reviewer.
+func (r *Resolver) ResolveRequiredOrigin(ctx context.Context, agentProfileID string, origin *OriginIdentity) (ReviewerIdentity, error) {
+	if origin == nil {
+		return ReviewerIdentity{}, fmt.Errorf("%w: %w", ErrAgentUnavailable, ErrOriginUnreadable)
+	}
+	return r.ResolveExcluding(ctx, agentProfileID, origin)
+}
+
+// originExclusion is the set of identities the resolver must never select. It
+// holds the origin's profile IDs and, when known, its concrete {agent, model,
+// mode} triple.
+type originExclusion struct {
+	profileIDs map[string]bool
+	agentID    string
+	model      string
+}
+
+func (r *Resolver) originExclusion(ctx context.Context, origin *OriginIdentity) originExclusion {
+	ex := originExclusion{profileIDs: map[string]bool{}}
+	if origin == nil {
+		return ex
+	}
+	if origin.ProfileID != "" {
+		ex.profileIDs[origin.ProfileID] = true
+	}
+	if origin.ExecutionProfileID != "" {
+		ex.profileIDs[origin.ExecutionProfileID] = true
+	}
+	// Prefer the concrete execution profile for the triple, then the logical
+	// profile. A load failure leaves the triple empty; profile-ID equality
+	// still applies.
+	for _, id := range []string{origin.ExecutionProfileID, origin.ProfileID} {
+		if id == "" || r.Profiles == nil {
+			continue
+		}
+		profile, found, err := r.Profiles.ReviewerProfile(ctx, id)
+		if err == nil && found {
+			ex.agentID, ex.model = profile.AgentID, profile.Model
+			break
+		}
+	}
+	return ex
+}
+
+func (ex originExclusion) matches(identity ReviewerIdentity) bool {
+	if identity.ProfileID != "" && ex.profileIDs[identity.ProfileID] {
+		return true
+	}
+	if ex.agentID == "" || ex.model == "" || identity.AgentID == "" || identity.Model == "" {
+		return false
+	}
+	// Same agent and model is the same underlying model, regardless of
+	// permission mode: the owner's rule is that the reviewer must not silently
+	// become the writer's own model, and a profile's mode is a posture, not a
+	// distinct model. An empty mode on either side therefore still matches.
+	return identity.AgentID == ex.agentID && identity.Model == ex.model
+}
+
+// withTriple fills in a profile-based candidate's {agent, model, mode} so it can
+// be compared against the origin triple. Agent/model candidates already carry it.
+func (r *Resolver) withTriple(ctx context.Context, identity ReviewerIdentity) ReviewerIdentity {
+	if identity.AgentID != "" || identity.ProfileID == "" || r.Profiles == nil {
+		return identity
+	}
+	profile, found, err := r.Profiles.ReviewerProfile(ctx, identity.ProfileID)
+	if err == nil && found {
+		identity.AgentID = profile.AgentID
+		identity.Model = profile.Model
+		identity.Mode = profile.Mode
+	}
+	return identity
 }
 
 // errDeferToDefaults marks the "code-review utility agent is absent or turned
 // off" case, where falling back to the user's default agent/model is correct.
 var errDeferToDefaults = errors.New("defer to default utility settings")
 
-func (r *Resolver) resolveFromProfile(ctx context.Context, profileID string) (ReviewerIdentity, error) {
+// loadProfile reads one agent profile for review resolution.
+func (r *Resolver) loadProfile(ctx context.Context, profileID string) (ReviewerProfile, error) {
 	if r.Profiles == nil {
-		return ReviewerIdentity{}, fmt.Errorf("%w: agent profiles are not available", ErrAgentUnavailable)
+		return ReviewerProfile{}, fmt.Errorf("%w: agent profiles are not available", ErrAgentUnavailable)
 	}
 	profile, found, err := r.Profiles.ReviewerProfile(ctx, profileID)
 	if err != nil {
-		return ReviewerIdentity{}, fmt.Errorf("%w: load agent profile %s: %v", ErrAgentUnavailable, profileID, err)
+		return ReviewerProfile{}, fmt.Errorf("%w: load agent profile %s: %v", ErrAgentUnavailable, profileID, err)
 	}
 	if !found {
-		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %s no longer exists", ErrAgentUnavailable, profileID)
+		return ReviewerProfile{}, fmt.Errorf("%w: agent profile %s no longer exists", ErrAgentUnavailable, profileID)
 	}
+	return profile, nil
+}
+
+// concreteIdentity validates a concrete (non-dynamic) profile as a reviewer.
+func (r *Resolver) concreteIdentity(ctx context.Context, profileID string, profile ReviewerProfile) (ReviewerIdentity, error) {
 	if profile.CLIPassthrough {
 		return ReviewerIdentity{}, fmt.Errorf(
 			"%w: agent profile %q is CLI-passthrough only and cannot run a structured review",

@@ -84,6 +84,17 @@ var providerRules = map[string][]rule{
 		// Explicit credit exhaustion takes precedence over generic payment wording.
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
+		// The gateway notices below share wording with the generic rate and
+		// unavailable signatures but mean different things, so each has its own
+		// rule ID and routing decides scope and duration per rule. They must stay
+		// ahead of the generic rate rule and of provider.unavailable.v1.
+		mustRule(RuleOpenCodeFreeModelsPerDay, `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
+		mustRule(RuleOpenCodeModelPerDay, `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
+		mustRule(RuleOpenCodeRateTryLater, `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
+		mustRule(RuleOpenCodeUpstreamHostLimit, `(?im)^\s*(?:AI_APICallError:\s*)?[^\n]{0,160}\bis\s+temporarily\s+rate-limited\s+upstream\b`, CodeRateLimited, ConfHigh),
+		mustRule(RuleOpenCodeModelWithdrawn, `(?im)^\s*AI_APICallError:\s*(?:not\s+found\.?\s*$|no\s+endpoints\s+found\s+for\s+\S+|upstream\s+request\s+failed:\s*model\s+is\s+unavailable\b)`, CodeProviderUnavailable, ConfMedium),
+		mustRule(RuleOpenCodeGoAccountSetting, `(?im)^\s*(?:AI_APICallError:\s*)?upstream\s+request\s+failed:\s*this\s+go\s+model\s+(?:requires\s+global\s+regions|trains\s+on\s+request\s+data)\b`, CodeProviderUnavailable, ConfMedium),
+		mustRule(RuleOpenCodeEndpointUnavailable, `(?im)^\s*(?:AI_APICallError:\s*)?upstream\s+request\s+failed:\s*endpoint\s+is\s+unavailable\b`, CodeProviderUnavailable, ConfMedium),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),

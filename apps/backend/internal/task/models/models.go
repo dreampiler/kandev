@@ -156,11 +156,16 @@ const (
 	// time, before the feeder pull can publish task.moved, so the workflow
 	// auto-start chokepoint does not launch the same task a second time; the
 	// automation dispatch (or its ceiling replay) is the single start owner.
+	// Only its exact owner can release the marker after definitive admission or termination.
 	MetaKeyAutomationStartOwned = "automation_start_owned"
 	// MetaKeyCoordinatorID records the coordinator that owns a conversation
 	// task, set at creation and read by the startup cleanup pass that
 	// archives/deletes conversation tasks whose coordinator no longer exists.
 	MetaKeyCoordinatorID = "coordinator_id"
+	// MetaKeyCoordinatorPurpose marks a coordinator-origin task that is not a
+	// conversation. CoordinatorPurposeDream is the shadow dream episode task.
+	MetaKeyCoordinatorPurpose = "coordinator_purpose"
+	CoordinatorPurposeDream   = "dream"
 	// MetaKeyWorkflowInitialSession is a write-once task-local snapshot of
 	// the first session identity used by workflow session targeting.
 	MetaKeyWorkflowInitialSession = "workflow_initial_session"
@@ -567,12 +572,19 @@ func HasAutoStartOnCreateInFlight(metadata map[string]interface{}) bool {
 }
 
 // AutomationStartOwned reports whether task metadata marks the task's initial
-// agent start as owned by the automation run that created it. Only an explicit
-// true value counts. When set, the workflow auto-start chokepoint must not
+// agent start as owned by the automation run that created it. Legacy boolean
+// markers remain fenced until their ownership can be established. The workflow
+// auto-start chokepoint must not
 // launch the task; the automation dispatch owns the launch and its binding.
 func AutomationStartOwned(metadata map[string]interface{}) bool {
-	owned, ok := metadata[MetaKeyAutomationStartOwned].(bool)
-	return ok && owned
+	switch owner := metadata[MetaKeyAutomationStartOwned].(type) {
+	case string:
+		return owner != ""
+	case bool:
+		return owner
+	default:
+		return false
+	}
 }
 
 // TaskSession.Metadata key that records how the session came into existence.
@@ -840,6 +852,21 @@ const TurnMetaKeyLifecycleOnly = "lifecycle_only"
 // keeps the frontend from showing a spurious empty-turn notice for the failed
 // turn.
 const TurnMetaKeyErrorTerminated = "error_terminated"
+
+// TurnMetaKeyAutomationRunOutcome records the authoritative outcome the
+// automation completion handler decided for this exact turn. It is written
+// before the run's terminal row and read back by restart reconciliation, so the
+// run's outcome is never inferred from completion, session state, or transcript.
+const TurnMetaKeyAutomationRunOutcome = "automation_run_outcome"
+
+// TurnAutomationOutcome* are the closed set of values for
+// TurnMetaKeyAutomationRunOutcome. Any other stored value is treated as
+// unknown by reconciliation.
+const (
+	TurnAutomationOutcomeSucceeded = "succeeded"
+	TurnAutomationOutcomeFailed    = "failed"
+	TurnAutomationOutcomeCancelled = "cancelled"
+)
 
 // TurnMetaKeyPromptDispatchPending marks a successor created before agentctl
 // acknowledges its prompt. Empty marked turns are not current-turn authority
@@ -2055,6 +2082,9 @@ const (
 	PermissionActorPersonalAccessToken PermissionResolutionActorKind = "personal_access_token"
 	PermissionActorAutomation          PermissionResolutionActorKind = "automation"
 	PermissionActorSynthetic           PermissionResolutionActorKind = "synthetic"
+	// PermissionActorCoordinatorUnattended marks a denial made by the backend
+	// for a coordinator's unattended turn, where no person is present.
+	PermissionActorCoordinatorUnattended PermissionResolutionActorKind = "coordinator_unattended"
 )
 
 type PermissionResolutionSource string
@@ -2068,6 +2098,9 @@ const (
 	// fixed in-session coordinator surface. It is distinct from legacy
 	// backend automation and from the authenticated external MCP bridge.
 	PermissionSourceAutomationMCP PermissionResolutionSource = "automation_mcp"
+	// PermissionSourceCoordinatorWake identifies a denial made during a
+	// coordinator wake's unattended turn.
+	PermissionSourceCoordinatorWake PermissionResolutionSource = "coordinator_wake"
 )
 
 type PermissionResolutionResult string
@@ -2096,6 +2129,8 @@ type PermissionResolutionAudit struct {
 	SelectedAt  time.Time                     `json:"selected_at"`
 	FinalizedAt *time.Time                    `json:"finalized_at,omitempty"`
 	Result      PermissionResolutionResult    `json:"result"`
+	// UnattendedTurnID is the coordinator unattended turn row a denial belongs to.
+	UnattendedTurnID string `json:"unattended_turn_id,omitempty"`
 }
 
 type PermissionResolutionClaimOutcome string

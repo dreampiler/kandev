@@ -123,6 +123,12 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeSessionBusy, "Session is busy", nil)
 		case errors.Is(err, orchestrator.ErrSessionNotPromptable):
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeNotPromptable, "Session is not ready for input", nil)
+		case errors.Is(err, orchestrator.ErrSessionRecoveryRequired):
+			// The queue stays intact; a restart-interrupted turn is continued
+			// from history automatically and the queue drains after it.
+			h.logger.Info("queued message drain waits for session recovery",
+				zap.String(fieldSessionID, req.SessionID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeRecoveryRequired, err.Error(), nil)
 		case isQueueIdentityError(err):
 			return queueAccessDeniedResponse(msg), nil
 		default:

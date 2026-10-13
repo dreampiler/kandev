@@ -116,6 +116,39 @@ or unauthorized wakes.
   per-turn payload archive.
   Cleanup shall not permit replay to recreate an already resolved parent item.
 
+### REQ-TASKS-CHILD-STALL-004: Current-primary routing and idle-notice lifecycle
+
+**Intent:** Keep a delivered child-attention notice pointed at the parent's
+current promptable primary and bound the review backlog it can create, without
+ever touching a user message, a question, an answer, an approval, or another
+sender's queue entry.
+
+- **AC-TASKS-CHILD-STALL-004.1:** A delivered notice shall remain bound to the
+  parent's current promptable primary. While a candidate is delivered, the
+  producer's existing scan shall recheck whether its receiving session is still
+  that primary; when it is not, the producer shall reconcile the notice —
+  re-home it to the current promptable primary when one exists, otherwise
+  withdraw it from the session queue and hold the candidate for the parent's
+  next promptable primary.
+- **AC-TASKS-CHILD-STALL-004.2:** A notice shall be withdrawn from the queue when
+  the parent task is archived or terminal, or when the source child turn no
+  longer qualifies as a stall. Withdrawal removes only child-attention alert
+  entries.
+- **AC-TASKS-CHILD-STALL-004.3:** Equivalent notices for the same child task
+  under the same parent shall collapse to one pending item; a newer eligible
+  notice supersedes an older one, and the surviving item keeps the newest child
+  state, cause, and question reference. This reconciliation shall not create,
+  reorder, or remove user, agent, workflow, or non-alert server entries, and
+  shall not touch questions, answers, or approvals.
+- **AC-TASKS-CHILD-STALL-004.4:** Reconciliation shall run inside the existing
+  producer scan with no new watchdog, collector, or scheduler; it shall be
+  idempotent, and a read failure shall leave the notice retryable rather than
+  dropping it.
+- **AC-TASKS-CHILD-STALL-004.5:** Withdrawal and re-home shall be observable
+  through the existing child-attention outcome counters, using a bounded reason
+  set with no task, session, or turn identifier as a label, and through
+  structured logs.
+
 ## Exclusions
 
 No deployment, settings changes, public webhook, new autonomous recovery

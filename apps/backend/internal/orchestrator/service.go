@@ -36,6 +36,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -78,7 +79,11 @@ type ServiceConfig struct {
 	// ControlAgentProfileIDs names the agent profiles whose sessions belong to
 	// the control lane. Every other session, including one whose profile cannot
 	// be resolved, is a worker.
-	ControlAgentProfileIDs        []string
+	ControlAgentProfileIDs []string
+	// SessionMemoryGuard holds the host-memory pressure thresholds. When
+	// enabled, a new automatic worker launch is deferred while the host is
+	// under pressure; the control lane and Office coordinator are not.
+	SessionMemoryGuard            hostmemory.Gate
 	ClaudeBackgroundPromptHandoff bool
 
 	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
@@ -774,6 +779,15 @@ type Service struct {
 	// restart-interrupted turns (one in flight per session, with a cooldown).
 	interruptedTurnAutoRecoveryMu sync.Mutex
 	interruptedTurnAutoRecovery   map[string]interruptedTurnAutoRecoveryState
+	// routeActionContinuations records a manual route action whose successor
+	// launch was handed to continue_from_history because a restart-interrupted
+	// turn still blocks the session (sessionID -> taskID). ApplyRouteAction runs
+	// the continuation after releasing the route-action lock.
+	routeActionContinuations sync.Map
+	// startupFailuresNeedingContinuation records sessions whose asynchronous
+	// agent start was refused for a durable delivery reason that only
+	// continue_from_history settles (see resume_continuation_fallback.go).
+	startupFailuresNeedingContinuation sync.Map
 	// orphanedStartingRoutesStartupSwept marks that the boot pass of the
 	// orphaned-starting-route reconcile has run (STARTING/IDLE are only
 	// orphaned at boot; see reconcileOrphanedDynamicStartingRoutes).
@@ -878,6 +892,10 @@ type Service struct {
 	// (docs/specs/coordinator/system-design/copilot.md#standing-instructions).
 	// Nil = no block is attached. See SetCoordinatorStandingInstructionsReader.
 	coordinatorStandingInstructions func(ctx context.Context, coordinatorID, workspaceName, workspaceID string) (string, error)
+
+	// unattendedPermissionHandler denies a permission request of a coordinator's
+	// unattended turn; nil = requests wait for a person. Set once at wiring.
+	unattendedPermissionHandler UnattendedPermissionHandler
 
 	// backgroundProbeConfig holds the validated KANDEV_PARKED_PROBE_BUDGET /
 	// KANDEV_PARKED_PROBE_INTERVAL tuning knobs for the background-workload
@@ -1259,10 +1277,12 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
-	idleParkingMu         sync.Mutex
-	idleParkingCandidates map[idleParkingCandidateKey]time.Time
-	idleParkingFocusAt    map[string]time.Time
-	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+	idleParkingMu           sync.Mutex
+	replacedSessionReclaims sync.Map // map[sessionID]replacedSessionReclaim
+	primarySessionReclaimMu sync.Mutex
+	idleParkingCandidates   map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt      map[string]time.Time
+	idleParkingInFlight     map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow
@@ -1751,10 +1771,20 @@ func (s *Service) ApplyRouteAction(ctx context.Context, request RouteActionReque
 	if err := s.authorizeSession(ctx, request.SessionID); err != nil {
 		return nil, err
 	}
+	result, err := s.applyRouteActionUnderLock(ctx, request)
+	// A successor launch handed to continue_from_history runs after the
+	// route-action lock is released: the resume it performs takes that lock.
+	return s.finishRouteActionContinuation(ctx, request.SessionID, result, err)
+}
+
+func (s *Service) applyRouteActionUnderLock(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
 	releaseRouteAction := s.acquireRouteActionOperationLock(request.SessionID)
 	defer releaseRouteAction()
 	if err := s.rejectRouteActionDuringActiveTurn(ctx, request.SessionID); err != nil {
 		return nil, err
+	}
+	if request.Action == RouteActionRetry && s.handOffRetryToContinuation(ctx, request) {
+		return nil, nil
 	}
 	return s.routeActionHandler(ctx, request)
 }
@@ -1796,7 +1826,7 @@ func (s *Service) rejectRouteActionDuringActiveTurn(ctx context.Context, session
 	if err != nil && !isNoActiveTurnError(err) {
 		return fmt.Errorf("check active turn for route action: %w", err)
 	}
-	if activeTurn != nil {
+	if activeTurn != nil && !s.settleOrphanTurnForRouteAction(ctx, sessionID) {
 		return ErrRouteActionActiveTurn
 	}
 	return nil
@@ -1907,7 +1937,7 @@ func NewService(
 			WorkerCeiling:     cfg.SessionCapacity,
 			ControlCeiling:    cfg.ControlSessionCapacity,
 			ControlProfileIDs: cfg.ControlAgentProfileIDs,
-		}, svcLogger.Zap()),
+		}, cfg.SessionMemoryGuard, svcLogger.Zap()),
 		backgroundProbeConfig: LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:          make(map[string]*parkedSessionState),
 		taskParkedStates:      make(map[string]*taskParkedState),
@@ -2138,6 +2168,14 @@ func (s *Service) SetAttachmentReader(reader AttachmentReader) {
 func (s *Service) SetCanvasesEnabled(enabled bool) {
 	if s.executor != nil {
 		s.executor.SetCanvasesEnabled(enabled)
+	}
+}
+
+// SetOfficeCrossWorkspaceLookup forwards the Office cross-workspace access
+// setting to the executor's MCP profile builder.
+func (s *Service) SetOfficeCrossWorkspaceLookup(lookup executor.OfficeCrossWorkspaceLookup) {
+	if s.executor != nil {
+		s.executor.SetOfficeCrossWorkspaceLookup(lookup)
 	}
 }
 
@@ -3046,6 +3084,7 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
 		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
 	}
+	s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
 	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
 		if isNoActiveTurnError(err) {
@@ -3452,6 +3491,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 		return err
 	}
 	s.reconcileCIAutoFixAttemptsOnStartup(ctx)
+	s.releaseAbandonedAutomationStartOwnership(ctx)
 	// Recover routes orphaned at "starting" by a launch failure that never
 	// reached a terminal route status. Must run before
 	// reconcileExecutorSessionsOnStartup and scheduler.Start: the former
@@ -3700,6 +3740,9 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
+		// Last, so lifecycle recovery owns its sessions first: queued work on a
+		// primary that was idle at shutdown gets its one delivery trigger.
+		s.resumeQueuedSessionsOnStartup(sweepCtx)
 	}()
 	return true
 }
@@ -4416,7 +4459,8 @@ func (s *Service) QueueUserPrompt(
 		if err != nil {
 			return fmt.Errorf("load session before queueing user prompt: %w", err)
 		}
-		if session == nil || isTerminalSessionState(session.State) {
+		if session == nil || (isTerminalSessionState(session.State) &&
+			!s.CanAutoRecoverFailedSession(admittedCtx, taskID, sessionID)) {
 			return ErrSessionNotPromptable
 		}
 		if _, err := s.messageQueue.QueueMessageWithMetadata(

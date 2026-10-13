@@ -36,6 +36,7 @@ type mcpCreateTaskRequest struct {
 	StartWhenUnblocked     *bool                `json:"start_when_unblocked"`
 	AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"`
 	ExternalID             string               `json:"external_id"`
+	Priority               string               `json:"priority"`
 }
 
 type mcpCreateTaskAdmission struct {

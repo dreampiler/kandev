@@ -26,14 +26,19 @@ func DynamicRecoverableResourceWait(err error) (time.Time, bool) {
 	return noCandidate.RetryAt, true
 }
 
-// recordDynamicResourceOutput clears the suspension history of the profile
-// whose current attempt produced its first real output. Each attempt records
-// at most once, so streaming chunks do not repeat the write. The success
-// belongs to the profile the producing execution runs, which the stream event
-// carries; the route profile captured when the attempt began is the fallback
-// for an event without it. Neither needs a repository read in the raw stream
-// callback.
-func (s *Service) recordDynamicResourceOutput(
+// recordDynamicResourceTurnSuccess clears the suspension history of the
+// profile whose current attempt completed its turn without a provider error.
+// Output alone is not enough: a free model that streams for a while and then
+// fails would otherwise reset its strikes on every attempt and never climb its
+// ladder. The turn must have produced output or an effect (an empty turn is
+// routed as a failure) and carried no provider diagnostic. Each attempt
+// records at most once. The success belongs to the profile the producing
+// execution runs, which the stream event carries; the route profile captured
+// when the attempt began is the fallback for an event without it. A
+// fixed-profile attempt has no route profile, so only the producing
+// execution's profile from the event can name it. Clearing never lifts an
+// account hold or a block whose reset instant has not passed.
+func (s *Service) recordDynamicResourceTurnSuccess(
 	ctx context.Context,
 	sessionID, executionID, eventExecutionProfileID string,
 	promptGeneration uint64,
@@ -47,7 +52,12 @@ func (s *Service) recordDynamicResourceOutput(
 	}
 	attempt.mu.Lock()
 	executionProfileID := attempt.executionProfileID
-	claim := attempt.dynamic && executionProfileID != "" && !attempt.resourceSuccessClaimed &&
+	if !attempt.dynamic {
+		executionProfileID = eventExecutionProfileID
+	}
+	claim := executionProfileID != "" && !attempt.resourceSuccessClaimed &&
+		attempt.evidenceKnown && (attempt.output || attempt.effect) &&
+		attempt.providerDiagnosticCode == "" &&
 		attempt.promptIdentityMatchesForClearLocked(executionID, promptGeneration)
 	if claim {
 		attempt.resourceSuccessClaimed = true

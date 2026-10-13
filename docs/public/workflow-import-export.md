@@ -209,13 +209,13 @@ An event contains an ordered list of actions. Each action has a `type` and an op
 
 | Trigger | Runtime meaning | Recognized action types |
 |---------|-----------------|-------------------------|
-| `on_enter` | Step-entry processing. | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant` |
+| `on_enter` | Step-entry processing. | `enable_plan_mode`, `auto_start_agent`, `reset_agent_context`, `set_session_mode`, `clear_decisions`, `queue_run`, `queue_run_for_each_participant`, `run_code_review` |
 | `on_turn_start` | A user sends a message. | `move_to_next`, `move_to_previous`, `move_to_step` |
 | `on_turn_complete` | An agent turn completes. | `move_to_next`, `move_to_previous`, `move_to_step`, `disable_plan_mode` |
 | `on_exit` | A task leaves the step. | `disable_plan_mode` |
 | `on_comment`, `on_blocker_resolved`, `on_children_completed`, `on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, `on_agent_error` | Office/Phase-2 lifecycle events: a comment is added, a blocker is resolved, all child tasks complete, an approval is decided, a periodic heartbeat ticks, a budget threshold is crossed, or the agent errors. | `move_to_next`, `move_to_previous`, `move_to_step`, `auto_start_agent`, `queue_run`, `clear_decisions`, `queue_run_for_each_participant` |
 
-`set_session_mode` requires `config.mode` to be a non-empty string. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
+`set_session_mode` requires `config.mode` to be a non-empty string. `run_code_review` accepts an optional `config.agent_profile_id` string naming the reviewing agent profile; when it is omitted, the configured code-review utility agent is used, and the reviewer never resolves to the agent that wrote the change. `move_to_step` requires `config.step_position` pointing to a position in the same workflow:
 
 ```yaml
 on_turn_complete:

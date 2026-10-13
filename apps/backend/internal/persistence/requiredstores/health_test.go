@@ -252,9 +252,13 @@ func TestRuntimeHealthProbeFailureLogsBoundedStageAndRecovers(t *testing.T) {
 			reader.SetMaxOpenConns(1)
 			pool := db.NewPool(writer, reader)
 			t.Cleanup(func() { _ = pool.Close() })
-			for _, table := range []string{"first", "second"} {
-				if _, err := writer.Exec("CREATE TABLE " + table + " (id TEXT PRIMARY KEY)"); err != nil {
-					t.Fatalf("create %s table: %v", table, err)
+			// Separate in-memory databases stand in for one file: the table
+			// probe reads the schema through the reader pool.
+			for _, conn := range []*sqlx.DB{writer, reader} {
+				for _, table := range []string{"first", "second"} {
+					if _, err := conn.Exec("CREATE TABLE " + table + " (id TEXT PRIMARY KEY)"); err != nil {
+						t.Fatalf("create %s table: %v", table, err)
+					}
 				}
 			}
 

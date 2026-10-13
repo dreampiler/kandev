@@ -41,7 +41,7 @@ type promptAttemptEvidence struct {
 	streakResetComplete    bool
 	initiator              authn.Identity
 	initiatorKnown         bool
-	// resourceSuccessClaimed records that this attempt's first real output
+	// resourceSuccessClaimed records that this attempt's completed turn
 	// already cleared its resource suspension history.
 	resourceSuccessClaimed bool
 	// executionProfileID is the concrete profile that owns this attempt's route,

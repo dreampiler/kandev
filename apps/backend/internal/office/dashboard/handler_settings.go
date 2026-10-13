@@ -241,6 +241,11 @@ func (h *Handler) updateWorkspaceSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// Applied first so a refused or invalid setting leaves every other field
+	// of the request unapplied.
+	if h.applyCrossWorkspaceAccess(c, wsID, req.CrossWorkspaceAccess) {
+		return
+	}
 
 	if req.PermissionHandlingMode != nil {
 		mode := *req.PermissionHandlingMode

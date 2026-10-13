@@ -23,6 +23,10 @@ func (s automationRunLivenessTurnService) GetActiveTurn(context.Context, string)
 	return nil, s.err
 }
 
+func (s automationRunLivenessTurnService) GetTurn(context.Context, string) (*models.Turn, error) {
+	return nil, nil
+}
+
 // @covers AC-OFFICE-AUTOMATION-CONTINUITY-003.4
 func TestAutomationRunLiveNormalizesGoneExecutionErrors(t *testing.T) {
 	transientErr := errors.New("database temporarily unavailable")
@@ -60,13 +64,13 @@ func TestAutomationRunLiveNormalizesGoneExecutionErrors(t *testing.T) {
 				turnService: automationRunLivenessTurnService{err: tt.err},
 			}
 
-			live, err := svc.AutomationRunLive(ctx, "task", "session", "turn")
+			evidence, err := svc.AutomationRunEvidence(ctx, "task", "session", "turn")
 
-			if live {
-				t.Fatal("AutomationRunLive returned live for a failed liveness inspection")
+			if evidence.Live {
+				t.Fatal("AutomationRunEvidence returned live for a failed liveness inspection")
 			}
 			if !errors.Is(err, tt.wantErr) {
-				t.Fatalf("AutomationRunLive error = %v, want %v", err, tt.wantErr)
+				t.Fatalf("AutomationRunEvidence error = %v, want %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -114,13 +118,13 @@ func TestAutomationRunLiveNormalizesMissingTaskAndSession(t *testing.T) {
 			}
 
 			svc := &Service{repo: repo}
-			live, err := svc.AutomationRunLive(ctx, task.ID, session.ID, "turn")
+			evidence, err := svc.AutomationRunEvidence(ctx, task.ID, session.ID, "turn")
 
-			if live {
-				t.Fatal("AutomationRunLive returned live for a missing task or session")
+			if evidence.Live {
+				t.Fatal("AutomationRunEvidence returned live for a missing task or session")
 			}
 			if err != nil {
-				t.Fatalf("AutomationRunLive error = %v, want nil", err)
+				t.Fatalf("AutomationRunEvidence error = %v, want nil", err)
 			}
 		})
 	}

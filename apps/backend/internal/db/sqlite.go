@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/mattn/go-sqlite3"
@@ -62,10 +63,49 @@ func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
 	return err
 }
 
-func init() {
-	sql.Register(sqliteWriterDriverName, &sqlite3.SQLiteDriver{
-		ConnectHook: applyWriterPragmas,
+// sqliteWriterDriver is the driver instance registered under
+// sqliteWriterDriverName. SQLiteWriterCommitActivity compares against it so
+// only pools opened by OpenSQLite report writer commit activity.
+var sqliteWriterDriver = &sqlite3.SQLiteDriver{
+	ConnectHook: connectSQLiteWriter,
+}
+
+// sqliteWriterLastCommitUnixNano is the wall-clock time of the most recent
+// transaction commit on a writer connection opened by OpenSQLite. A process
+// runs one writer pool, so a single value is enough for liveness reporting.
+var sqliteWriterLastCommitUnixNano atomic.Int64
+
+func connectSQLiteWriter(conn *sqlite3.SQLiteConn) error {
+	if err := applyWriterPragmas(conn); err != nil {
+		return err
+	}
+	// The commit hook runs inside SQLite when a write transaction commits. It
+	// only stores a timestamp and always lets the commit proceed (returns 0).
+	conn.RegisterCommitHook(func() int {
+		sqliteWriterLastCommitUnixNano.Store(time.Now().UnixNano())
+		return 0
 	})
+	return nil
+}
+
+// SQLiteWriterCommitActivity reports when the writer connection last committed
+// a transaction. ok is false when conn was not opened by OpenSQLite or no
+// commit has been observed yet. Health probes use it to tell a writer that is
+// busy serving real writes from one that is stuck: a ping queued behind a
+// stream of committing writes is contention, not an unavailable database.
+func SQLiteWriterCommitActivity(conn *sql.DB) (last time.Time, ok bool) {
+	if conn == nil || conn.Driver() != driver.Driver(sqliteWriterDriver) {
+		return time.Time{}, false
+	}
+	nanos := sqliteWriterLastCommitUnixNano.Load()
+	if nanos == 0 {
+		return time.Time{}, false
+	}
+	return time.Unix(0, nanos), true
+}
+
+func init() {
+	sql.Register(sqliteWriterDriverName, sqliteWriterDriver)
 }
 
 // sqliteReaderConns resolves the read pool size. A missing, non-numeric, or
@@ -99,11 +139,11 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - foreign_keys=on: enforce FK constraints consistently.
 	// - busy_timeout: wait briefly on locks to reduce transient "database is locked".
 	// - journal_mode=WAL: better read concurrency with a single writer.
-	// - synchronous=NORMAL: reasonable durability/perf tradeoff for app workloads.
+	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
 	// - cache=shared: allow multiple connections to share a page cache.
 	// - txlock=immediate: acquire the writer before transaction predicate reads.
 	dsn := fmt.Sprintf(
-		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=NORMAL&_cache=shared&_txlock=immediate",
+		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
 		normalizedPath,
 		int(defaultBusyTimeout/time.Millisecond),
 	)
@@ -128,7 +168,7 @@ func OpenSQLiteReader(dbPath string) (*sql.DB, error) {
 	// Reader DSN: read-only mode and FK enforcement.
 	// Do not enable SQLite shared-cache mode: an active reader in that cache
 	// can make a later reader observe its stale snapshot after a writer commits.
-	// journal_mode and synchronous are database-level (set by the writer).
+	// WAL is persistent; synchronous is connection-local and only the writer commits.
 	dsn := fmt.Sprintf(
 		"file:%s?_foreign_keys=on&mode=ro&_busy_timeout=%d",
 		normalizedPath,

@@ -1874,7 +1874,6 @@ func registerSecondaryRoutes(
 
 	if p.features.Coordinator {
 		wireCoordinatorConversation(p)
-		registerCoordinatorRoutes(p)
 	}
 
 	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
@@ -2058,6 +2057,9 @@ func registerSecondaryRoutes(
 	}
 
 	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, clarificationResolver, planService, handoffSvc)
+	if p.features.Coordinator {
+		registerCoordinatorRoutes(p)
+	}
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -2103,6 +2105,11 @@ func registerSecondaryRoutes(
 			p.authSvc,
 			p.log,
 		)
+		if p.services.OfficeSvcs.CrossWorkspace != nil && p.gateway != nil {
+			p.services.OfficeSvcs.CrossWorkspaceGateway = newOfficeCrossWorkspaceGateway(
+				p.services.OfficeSvcs.CrossWorkspace, p.gateway.Dispatcher, p.taskSvc,
+			)
+		}
 		mountOfficeRoutes(p.router, p.services.OfficeSvcs, p.authSvc, p.taskSvc, p.officeRepo, handoffSvc, handoffDeps, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
@@ -2541,6 +2548,9 @@ func registerMCPAndDebugRoutes(
 			},
 		))
 	}
+	if p.services != nil && p.services.OfficeSvcs != nil && p.services.OfficeSvcs.CrossWorkspace != nil {
+		mcpHandlers.SetOfficeCrossWorkspace(p.services.OfficeSvcs.CrossWorkspace)
+	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
@@ -2636,6 +2646,9 @@ func registerMCPAndDebugRoutes(
 
 	if p.services.Coordinator != nil {
 		mcpHandlers.SetCoordinatorService(p.services.Coordinator)
+		wireCoordinatorLedger(p, p.services.Coordinator, mcpHandlers)
+		wireCoordinatorOutcomes(p, p.services.Coordinator)
+		wireCoordinatorDream(p, p.services.Coordinator)
 		p.services.Coordinator.SetKindDeps(coordinator.KindDeps{
 			Tasks:     &coordinatorKindReader{tasks: p.taskSvc, liveExec: p.lifecycleMgr.HasLiveAgentExecution},
 			Resumer:   &coordinatorResumer{resume: p.orchestratorSvc.ResumeTaskSession},

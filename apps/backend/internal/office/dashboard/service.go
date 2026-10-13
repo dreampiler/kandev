@@ -412,6 +412,9 @@ type WorkspaceSettings struct {
 	RequireApprovalForNewAgents      bool   `json:"require_approval_for_new_agents"`
 	RequireApprovalForTaskCompletion bool   `json:"require_approval_for_task_completion"`
 	RequireApprovalForSkillChanges   bool   `json:"require_approval_for_skill_changes"`
+	// CrossWorkspaceAccess is the opt-in reach of this Office workspace's
+	// agents into other workspaces; nil when the setting is unavailable.
+	CrossWorkspaceAccess *models.CrossWorkspaceAccess `json:"cross_workspace_access,omitempty"`
 }
 
 // DashboardService provides dashboard, inbox, activity, run, and task-search business logic.
@@ -453,6 +456,7 @@ type DashboardService struct {
 	accountLister         ProfileAccountLister            // optional; nil leaves models without a provider account
 	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
 	capacityReader        SessionCapacityReader           // optional; nil leaves the session capacities unreported rather than zero
+	crossWorkspace        CrossWorkspaceSettings          // optional; nil omits cross_workspace_access from settings and rejects updates
 	buildVersion          string                          // running binary version shown on the overview's server-start row
 	overview              *overviewCache                  // lazily created by overviewCacheOrInit
 	overviewOnce          sync.Once
@@ -747,6 +751,7 @@ func (s *DashboardService) GetWorkspaceSettings(ctx context.Context, workspaceNa
 		sc, _ := s.governanceStore.GetRequireApprovalForSkillChanges(ctx, workspaceID)
 		ws.RequireApprovalForSkillChanges = sc
 	}
+	ws.CrossWorkspaceAccess = s.crossWorkspaceAccess(ctx, workspaceID)
 	return ws, nil
 }
 

@@ -690,7 +690,7 @@ func (r *cursorMCPRecoveryCommandBarrierRunner) commands() []string {
 func newCursorMCPRecoveryFixture(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	profile := &AgentProfileInfo{
 		ProfileID: "cursor-recovery-profile", AgentName: "cursor-acp",

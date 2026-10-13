@@ -619,6 +619,18 @@ export * from "./office-runs-api";
 
 // --- Workspace Settings ---
 
+/**
+ * Opt-in reach of an Office workspace's agents into other workspaces.
+ * Empty allowed_workspace_ids means every workspace the owner can read;
+ * coordinator_task_ids maps a workspace id to the task Office agents address
+ * there.
+ */
+export type CrossWorkspaceAccessData = {
+  enabled: boolean;
+  allowed_workspace_ids: string[];
+  coordinator_task_ids: Record<string, string>;
+};
+
 export type WorkspaceSettingsData = {
   name: string;
   description?: string;
@@ -627,6 +639,7 @@ export type WorkspaceSettingsData = {
   require_approval_for_new_agents?: boolean;
   require_approval_for_task_completion?: boolean;
   require_approval_for_skill_changes?: boolean;
+  cross_workspace_access?: CrossWorkspaceAccessData;
 };
 
 export function getWorkspaceSettings(workspaceId: string, options?: ApiRequestOptions) {
@@ -643,6 +656,7 @@ export function updateWorkspaceSettings(
     require_approval_for_task_completion?: boolean;
     require_approval_for_skill_changes?: boolean;
     recovery_lookback_hours?: number;
+    cross_workspace_access?: CrossWorkspaceAccessData;
   },
   options?: ApiRequestOptions,
 ) {

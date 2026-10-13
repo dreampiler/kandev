@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-CHILD-STALL-001
   - REQ-TASKS-CHILD-STALL-002
   - REQ-TASKS-CHILD-STALL-003
+  - REQ-TASKS-CHILD-STALL-004
 ---
 
 # Child-turn Stalled Signal System Design
@@ -53,6 +54,7 @@ separate receipt storage is used.
 | REQ-TASKS-CHILD-STALL-001 | Settlement capture; producer classification; parent questions; delivery boundary |
 | REQ-TASKS-CHILD-STALL-002 | Durable admission; parent availability; folding; delivery boundary |
 | REQ-TASKS-CHILD-STALL-003 | Visibility and retention |
+| REQ-TASKS-CHILD-STALL-004 | Current-primary routing and idle-notice reconciliation |
 
 ## Settlement capture
 
@@ -223,6 +225,47 @@ turns completed within seven days, and a resolved marker prevents an old event
 or scan from recreating its item. Queue admission receipts follow the queue's
 existing task/session deletion. No transcript payload is copied into the queue
 item.
+
+## Current-primary routing and idle-notice reconciliation
+
+A delivered candidate is not fully resolved at queue admission: its source-turn
+marker stays scannable while its notice is still pending, so the producer's
+existing pass can keep it pointed at the parent's current promptable primary.
+This replaces the previous behavior where `delivered` was terminal and the queue
+item could be left on a session that later stopped being the parent's primary.
+
+Each pass reconciles every delivered candidate in the scan window:
+
+- A candidate whose source turn no longer qualifies as a stall is resolved, and
+  its notice entry is withdrawn.
+- When the parent task is archived or terminal, the notice can never be
+  delivered, so its entry is withdrawn and the candidate is resolved.
+- When the parent has no promptable primary, the notice is withdrawn from the
+  session queue and the candidate returns to `waiting_parent`, preserving the
+  single operator notification. The candidate stays on the source turn and is
+  delivered when the parent next has a promptable primary; it no longer occupies
+  a dashboard queue row meanwhile.
+- When the parent's current primary is promptable and is not the session holding
+  the notice, the notice is re-homed to that primary through the existing
+  keyed queue admission, so content, metadata, and the folded alert list are
+  preserved and the destination's own fold/merge rules apply. A re-home with no
+  remaining entry resolves the candidate.
+- When the notice is already on the promptable primary, it is kept; it is
+  resolved only once the entry is gone (dispatched, withdrawn, or consumed).
+
+Reconciliation is idempotent and bounded by the existing producer scan window
+(`childStallScanWindow`); a scan read failure leaves the candidate pending so
+the next pass retries. It is the same producer goroutine, so no second
+watchdog, collector, or scheduler is introduced.
+
+Alongside the per-candidate reconcile, each session that held a pending notice
+runs the existing stale/superseded prune, so equivalent notices for the same
+child collapse to one item even when the session never drains. Both paths are
+gated on `IsChildStallAlert`, so user, agent, workflow, and non-alert server
+entries, questions, answers, and approvals are never created, reordered, or
+removed. Withdrawal and re-home record bounded outcomes
+(`withdrawn_parent_gone`, `held_waiting_parent`, `rehomed_notice`) on the
+existing `task_child_stall_outcome_total` counter and stay out of metric labels.
 
 ## Decision status and compatibility
 

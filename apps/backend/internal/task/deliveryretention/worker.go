@@ -24,15 +24,18 @@ import (
 const BackgroundBatchRows = 50
 
 const (
-	initialDelay    = time.Minute
 	defaultInterval = time.Minute
 	passBudget      = 5 * time.Second
 	batchBudget     = 250 * time.Millisecond
-	betweenBatches  = 100 * time.Millisecond
 	defaultRows     = 200
 	defaultBytes    = 4 << 20
 	maxRetryBackoff = 5 * time.Minute
 	failureDeadline = "deadline"
+	// catchUpDelay paces the next pass after one that ran out of budget while
+	// removals still dominated its candidates. Each pass keeps the same batch
+	// and budget bounds; only the idle gap shrinks so cleanup can follow
+	// sustained inflow.
+	catchUpDelay = passBudget
 )
 
 var (
@@ -72,9 +75,11 @@ type Options struct {
 
 // Snapshot contains only aggregate values. It never carries session or stream identity.
 type Snapshot struct {
+	ContinuationPending      bool
 	Duration                 time.Duration
 	Batches                  int
 	CommittedBatches         int
+	DiscoveryBatches         int
 	BusyBatches              int
 	FailedBatches            int
 	Candidates               int
@@ -95,6 +100,9 @@ type Snapshot struct {
 	FailureReason            string
 	StructuralFailure        bool
 	ReadinessRecovered       bool
+	// BacklogRemaining reports a pass that exhausted its budget while it was
+	// still removing at least as many candidates as it skipped as protected.
+	BacklogRemaining bool
 }
 
 type Worker struct {
@@ -184,9 +192,6 @@ func (w *Worker) Stop() {
 
 func (w *Worker) loop(ctx context.Context) {
 	defer w.wg.Done()
-	if !wait(ctx, w.opts.After, initialDelay) {
-		return
-	}
 	for ctx.Err() == nil {
 		if w.suspended {
 			readiness := w.checkReadiness(ctx)
@@ -205,21 +210,37 @@ func (w *Worker) loop(ctx context.Context) {
 			snapshot.ReadinessRecovered = true
 		}
 		w.report(snapshot)
-		delay := w.opts.Interval
-		switch {
-		case snapshot.StructuralFailure:
-			w.suspended = true
-			w.retryAttempt++
-			delay = w.opts.RetryDelay(w.retryAttempt)
-		case snapshot.FailedBatches > 0 || w.suspended:
-			w.retryAttempt++
-			delay = w.opts.RetryDelay(w.retryAttempt)
-		default:
+		if snapshot.ContinuationPending && !snapshot.StructuralFailure && !w.suspended && snapshot.FailedBatches == 0 {
+			// The pass ran out of budget while it was still committing cleanup:
+			// continue at once instead of waiting for the next interval.
 			w.retryAttempt = 0
+			continue
 		}
-		if !wait(ctx, w.opts.After, delay) {
+		if !wait(ctx, w.opts.After, w.nextDelay(snapshot)) {
 			return
 		}
+	}
+}
+
+// nextDelay keeps the configured interval for quiet passes and backs off only
+// when a pass committed no cleanup. A transient deadline inside an otherwise
+// productive pass, or a pass that ran out of budget with work still flowing,
+// resumes after catchUpDelay so cleanup can keep pace with sustained inflow.
+func (w *Worker) nextDelay(snapshot Snapshot) time.Duration {
+	switch {
+	case snapshot.StructuralFailure:
+		w.suspended = true
+		w.retryAttempt++
+		return w.opts.RetryDelay(w.retryAttempt)
+	case w.suspended || (snapshot.FailedBatches > 0 && cleanupWork(snapshot) == 0):
+		w.retryAttempt++
+		return w.opts.RetryDelay(w.retryAttempt)
+	case snapshot.BacklogRemaining || snapshot.FailedBatches > 0:
+		w.retryAttempt = 0
+		return minDuration(catchUpDelay, w.opts.Interval)
+	default:
+		w.retryAttempt = 0
+		return w.opts.Interval
 	}
 }
 
@@ -258,22 +279,19 @@ func (w *Worker) runPass(ctx context.Context) Snapshot {
 	deadline := started.Add(passBudget)
 	snapshot := Snapshot{OldestEligibleAgeSeconds: -1}
 	phases := []string{"retention", "orphans", "retirements"}
-	for index := 0; len(phases) > 0; index++ {
+	budgetExhausted := false
+	for len(phases) > 0 {
+		if ctx.Err() != nil {
+			break
+		}
+		remaining := deadline.Sub(w.opts.Now())
+		if remaining < batchBudget {
+			budgetExhausted = true
+			snapshot.ContinuationPending = committedRetentionWork(snapshot) > 0
+			break
+		}
 		phase := phases[0]
 		phases = phases[1:]
-		remaining := deadline.Sub(w.opts.Now())
-		if remaining <= 0 || ctx.Err() != nil {
-			break
-		}
-		if index > 0 {
-			if remaining <= betweenBatches || !wait(ctx, w.opts.After, betweenBatches) {
-				break
-			}
-		}
-		remaining = deadline.Sub(w.opts.Now())
-		if remaining < batchBudget || ctx.Err() != nil {
-			break
-		}
 		before := committedRetentionWork(snapshot)
 		if !w.runPassBatch(ctx, phase, remaining, &snapshot) {
 			break
@@ -282,6 +300,7 @@ func (w *Worker) runPass(ctx context.Context) Snapshot {
 			phases = append(phases, phase)
 		}
 	}
+	snapshot.BacklogRemaining = budgetExhausted && ctx.Err() == nil && backlogRemaining(snapshot)
 	snapshot.Duration = w.opts.Now().Sub(started)
 	if !snapshot.BacklogSampleAvailable {
 		backlogRows.Set(-1)
@@ -359,6 +378,9 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 		if err != nil {
 			return false, err
 		}
+		if result.DiscoveryAdvanced {
+			snapshot.DiscoveryBatches++
+		}
 		snapshot.Candidates += result.Candidates
 		snapshot.BacklogSampleAvailable = true
 		snapshot.BacklogSampleRows += result.EligibleCandidates
@@ -409,6 +431,25 @@ func (w *Worker) runBatch(ctx context.Context, phase string, snapshot *Snapshot)
 }
 
 func committedRetentionWork(snapshot Snapshot) int {
+	return cleanupWork(snapshot) + snapshot.DiscoveryBatches
+}
+
+// backlogRemaining reports a pass whose cleanup was still dominated by removals
+// when its budget ran out. Once the frontier reaches recent rows, candidates
+// are mostly protected receipts or grace-period rows and the pass falls back to
+// the normal interval instead of rescanning them at the catch-up cadence.
+func backlogRemaining(snapshot Snapshot) bool {
+	if snapshot.RetirementRowsPurged+snapshot.RetirementJobsCompleted+snapshot.OrphanJobsScheduled > 0 {
+		return true
+	}
+	removed := snapshot.EventPayloadsPruned + snapshot.PromptPayloadsPruned + snapshot.EventRowsRetired
+	return removed > 0 && removed >= snapshot.ProtectedCandidates
+}
+
+// cleanupWork counts rows and jobs a pass actually removed or scheduled.
+// Discovery through protected candidates repeats a phase within a pass, but
+// alone it never shortens the idle gap between passes.
+func cleanupWork(snapshot Snapshot) int {
 	return snapshot.EventPayloadsPruned + snapshot.PromptPayloadsPruned + snapshot.EventRowsRetired +
 		snapshot.RetirementRowsPurged + snapshot.OrphanJobsScheduled + snapshot.RetirementJobsCompleted
 }
@@ -422,8 +463,10 @@ func (w *Worker) report(snapshot Snapshot) {
 	}
 	fields := []zap.Field{
 		zap.Duration("duration", snapshot.Duration),
+		zap.Bool("continuation_pending", snapshot.ContinuationPending),
 		zap.Int("batches", snapshot.Batches),
 		zap.Int("committed_batches", snapshot.CommittedBatches),
+		zap.Int("discovery_batches", snapshot.DiscoveryBatches),
 		zap.Int("busy_batches", snapshot.BusyBatches),
 		zap.Int("failed_batches", snapshot.FailedBatches),
 		zap.Int("candidate_sample_rows", snapshot.Candidates),
@@ -431,6 +474,7 @@ func (w *Worker) report(snapshot Snapshot) {
 		zap.Bool("backlog_sample_available", snapshot.BacklogSampleAvailable),
 		zap.Int("eligible_backlog_sample_rows", snapshot.BacklogSampleRows),
 		zap.Bool("readiness_recovered", snapshot.ReadinessRecovered),
+		zap.Bool("backlog_remaining", snapshot.BacklogRemaining),
 		zap.Int("protected_candidates", snapshot.ProtectedCandidates),
 		zap.Int("event_payloads_pruned", snapshot.EventPayloadsPruned),
 		zap.Int("prompt_payloads_pruned", snapshot.PromptPayloadsPruned),

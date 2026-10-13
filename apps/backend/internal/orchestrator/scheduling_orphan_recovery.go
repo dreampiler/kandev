@@ -179,6 +179,11 @@ func schedulingOrphanResumableSession(session *models.TaskSession) bool {
 // effects a re-entry is not meant to repeat. The entry-dispatch guard inside
 // processOnEnter still rejects a stale route, so a task whose committed route
 // no longer names this step is left for its owning path instead of forced.
+//
+// The entry runs detached, like the launch of a task without a session: it
+// resumes the agent and waits for readiness, and doing that inline would hold
+// the rest of the startup sweep (the lifecycle-token pass, dependency launches,
+// and queued-session delivery) for up to one launch timeout per orphan.
 func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.Task, session *models.TaskSession) {
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || step == nil {
@@ -188,7 +193,8 @@ func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
 		zap.String("step_id", step.ID))
-	s.processOnEnter(ctx, task.ID, session, step, task.Description, 0, nil)
+	entryCtx := context.WithoutCancel(ctx)
+	go s.processOnEnter(entryCtx, task.ID, session, step, task.Description, 0, nil)
 }
 
 // repairSchedulingOrphanTaskState clears a stale SCHEDULING state for a task

@@ -25,6 +25,10 @@ const (
 	ScopeCredential ResourceScope = "credential"
 	ScopeModel      ResourceScope = "model"
 	ScopeProfile    ResourceScope = "profile"
+	// ScopeAccountBlock holds one execution profile after its provider account
+	// was restricted. It never shares a key with a credential or model circuit,
+	// so the hold and its release cannot touch another profile.
+	ScopeAccountBlock ResourceScope = "account_block"
 )
 
 func ResourceKey(scope ResourceScope, fingerprint string) string {
@@ -36,21 +40,30 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
-	// strikes counts consecutive suspensions. Only a recorded success clears
-	// it, so a probe launch that starts but then hits the limit again still
-	// moves the next suspension up its ladder.
+	updatedAt  time.Time
+	// strikes counts consecutive suspensions. Only a turn that completed
+	// without a provider error clears it, so a probe launch that starts, or a
+	// turn that streams output and then fails, still moves the next suspension
+	// up its ladder.
 	strikes int
+}
+
+// held reports whether the circuit stays open until an owner release: it has
+// no expiry, admits no probe, and output from another attempt does not close it.
+func (c circuit) held() bool {
+	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
 }
 
 // CircuitSnapshot is the durable representation of one resource circuit.
 // Keys are opaque fingerprints and must already be safe to persist.
 type CircuitSnapshot struct {
-	Key        string
-	State      CircuitState
-	Until      time.Time
-	Code       routingerr.Code
-	ProbeUntil time.Time
-	Strikes    int
+	Key        string          `json:"resource_key"`
+	State      CircuitState    `json:"state"`
+	Until      time.Time       `json:"until"`
+	Code       routingerr.Code `json:"code"`
+	ProbeUntil time.Time       `json:"probe_until"`
+	Strikes    int             `json:"strikes"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // CircuitPersistence stores shared resource health across backend restarts.
@@ -117,16 +130,31 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, snapshot := range snapshots {
+		originalUntil := snapshot.Until
+		snapshot.Until = cappedCircuitUntil(snapshot)
 		r.circuits[snapshot.Key] = circuit{
 			state: snapshot.State, until: snapshot.Until,
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
-			strikes: snapshot.Strikes,
+			strikes:   snapshot.Strikes,
+			updatedAt: snapshot.UpdatedAt,
+		}
+		if !snapshot.Until.Equal(originalUntil) {
+			_ = r.persistSnapshotLocked(snapshot.Key)
 		}
 	}
 	return nil
 }
 
 func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code) {
+	r.open(key, until, code, false)
+}
+
+// OpenDaily uses a UTC-day strike window for ambiguous gateway rate limits.
+func (r *CircuitRegistry) OpenDaily(key string, until time.Time, code routingerr.Code) {
+	r.open(key, until, code, true)
+}
+
+func (r *CircuitRegistry) open(key string, until time.Time, code routingerr.Code, daily bool) {
 	if key == "" {
 		return
 	}
@@ -134,13 +162,21 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 	defer r.mu.Unlock()
 	r.flushPendingLocked(key)
 	previous := r.circuits[key]
+	if previous.held() {
+		// A timed suspension never replaces an owner-release hold.
+		return
+	}
 	strikes := previous.strikes + 1
+	if daily && !sameUTCDay(previous.updatedAt, r.now()) {
+		strikes = 1
+		previous.strikes = 1
+	}
 	if previous.state == CircuitOpen && r.now().Before(previous.until) {
 		// Another attempt hit the same running suspension: it is the same
 		// incident, so it does not count again.
 		strikes = previous.strikes
 	}
-	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, strikes: strikes}
+	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, strikes: strikes, updatedAt: r.now()}
 	_ = r.persistSnapshotLocked(key)
 	r.logger.Info("dynamic resource suspended",
 		zap.String("key", key),
@@ -148,6 +184,85 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 		zap.Time("until", until),
 		zap.Int("strikes", strikes),
 	)
+}
+
+// Hold opens a circuit that has no expiry and admits no probe. Only
+// an owner release closes it. Holding an already held circuit is the same incident.
+func (r *CircuitRegistry) Hold(key string, code routingerr.Code) {
+	if key == "" || !routingerr.HoldsUntilRelease(code) {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.flushPendingLocked(key)
+	previous := r.circuits[key]
+	if previous.held() {
+		if _, pending := r.pending[key]; pending {
+			_ = r.persistSnapshotLocked(key)
+		}
+		return
+	}
+	r.circuits[key] = circuit{state: CircuitOpen, code: code, strikes: previous.strikes + 1}
+	_ = r.persistSnapshotLocked(key)
+	r.logger.Info("dynamic resource held until owner release",
+		zap.String("key", key),
+		zap.String("code", string(code)),
+	)
+}
+
+// ReleaseHold closes a held circuit and reports whether one was held. Any
+// other circuit is left unchanged, so a repeated release is a no-op. The
+// release is durable: when the closed snapshot cannot be saved the hold stays
+// in place and the error is returned, so a restart cannot resurrect a hold the
+// caller was told is gone.
+func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
+	return r.release(key, true)
+}
+
+// Release closes exactly one owner's selected circuit, including a probe.
+func (r *CircuitRegistry) Release(key string) (bool, error) {
+	return r.release(key, false)
+}
+
+func (r *CircuitRegistry) release(key string, heldOnly bool) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || (heldOnly && !entry.held()) || (entry.state == CircuitClosed && entry.strikes == 0) {
+		return false, nil
+	}
+	r.flushPendingLocked(key)
+	r.circuits[key] = circuit{state: CircuitClosed}
+	if err := r.persistSnapshotLocked(key); err != nil {
+		r.circuits[key] = entry
+		return false, err
+	}
+	r.logger.Info("dynamic resource hold released by owner",
+		zap.String("key", key),
+		zap.String("code", string(entry.code)),
+	)
+	return true, nil
+}
+
+func sameUTCDay(a, b time.Time) bool {
+	return !a.IsZero() && nextUTCDay(a).Equal(nextUTCDay(b))
+}
+
+// NextDailyStrike resets the gateway ladder at the next UTC date.
+func (r *CircuitRegistry) NextDailyStrike(key string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry := r.circuits[key]
+	if !sameUTCDay(entry.updatedAt, r.now()) {
+		return 1
+	}
+	if entry.state == CircuitOpen && r.now().Before(entry.until) {
+		return entry.strikes
+	}
+	return entry.strikes + 1
 }
 
 // NextStrike returns the strike number a failure recorded now would carry.
@@ -161,10 +276,11 @@ func (r *CircuitRegistry) NextStrike(key string) int {
 	return entry.strikes + 1
 }
 
-// RecordSuccess clears the strike count after the resource produced real
-// output. An expired or probing circuit closes as well, because the output is
-// stronger evidence than the probe launch. A circuit whose block is still
-// running stays open: a concurrent failure reopened it after this output.
+// RecordSuccess clears the strike count after a turn on the resource completed
+// without a provider error. An expired or probing circuit closes as well,
+// because a completed turn is stronger evidence than the probe launch. A
+// circuit whose block is still running stays open: a concurrent failure
+// reopened it after this turn.
 func (r *CircuitRegistry) RecordSuccess(key string) {
 	if key == "" {
 		return
@@ -172,7 +288,7 @@ func (r *CircuitRegistry) RecordSuccess(key string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.circuits[key]
-	if !ok {
+	if !ok || entry.held() {
 		return
 	}
 	now := r.now()
@@ -229,6 +345,9 @@ func (r *CircuitRegistry) Inspect(key string, now time.Time) ResourceStatus {
 	}
 	status := ResourceStatus{Code: entry.code, Strikes: entry.strikes}
 	switch {
+	case entry.held():
+		// A hold has no end time: only the owner release lifts it.
+		status.State = ResourceWaiting
 	case entry.state == CircuitHalfOpen && now.Before(entry.probeUntil):
 		status.State, status.Until = ResourceProbing, entry.probeUntil
 	case now.Before(entry.until):
@@ -246,7 +365,7 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	if !ok || entry.state == CircuitClosed {
 		return false
 	}
-	if entry.state == CircuitHalfOpen {
+	if entry.state == CircuitHalfOpen || entry.held() {
 		return true
 	}
 	// An expired open circuit remains unavailable until one caller acquires
@@ -268,7 +387,7 @@ func (r *CircuitRegistry) AcquireProbe(key string, duration time.Duration) (Prob
 	defer r.mu.Unlock()
 	now := r.now()
 	entry, ok := r.circuits[key]
-	if !ok || entry.state == CircuitClosed || now.Before(entry.until) || now.Before(entry.probeUntil) {
+	if !ok || entry.state == CircuitClosed || entry.held() || now.Before(entry.until) || now.Before(entry.probeUntil) {
 		return ProbeLease{}, false
 	}
 	r.flushPendingLocked(key)
@@ -351,7 +470,7 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	}
 	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
 		Key: key, State: entry.state, Until: entry.until,
-		Code: entry.code, ProbeUntil: entry.probeUntil, Strikes: entry.strikes,
+		Code: entry.code, ProbeUntil: entry.probeUntil, Strikes: entry.strikes, UpdatedAt: entry.updatedAt,
 	})
 	if err != nil {
 		_, alreadyPending := r.pending[key]

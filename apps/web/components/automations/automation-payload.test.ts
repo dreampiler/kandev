@@ -9,9 +9,11 @@ vi.mock("@/app/actions/workspaces", () => ({
 import {
   buildCreatePayload,
   buildUpdatePayload,
+  normalizeRetryPolicyForTaskMode,
   resolveNormalizedRepositoryIds,
   resolveRepositoryIdsForMode,
   resolveRepositoryIds,
+  retryPolicyAfterModeChange,
 } from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
@@ -21,6 +23,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     description: "",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    parentTaskId: "",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",
     taskMode: "automation_run",
@@ -31,6 +34,13 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     enabled: true,
     maxConcurrentRuns: 1,
     continuationPolicy: "new_task",
+    retryPolicy: {
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    },
     ...overrides,
   };
 }
@@ -177,6 +187,16 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
     expect(payload.repository_ids).toEqual([]);
   });
 
+  it("sends the configured parent task on create and update, and empty when unset", () => {
+    const withParent = baseForm({ parentTaskId: "parent-1" });
+    expect(buildCreatePayload("ws-1", withParent, [], []).parent_task_id).toBe("parent-1");
+    expect(buildUpdatePayload(withParent, []).parent_task_id).toBe("parent-1");
+
+    const withoutParent = baseForm();
+    expect(buildCreatePayload("ws-1", withoutParent, [], []).parent_task_id).toBe("");
+    expect(buildUpdatePayload(withoutParent, []).parent_task_id).toBe("");
+  });
+
   it("sends the selected continuation policy on create and update", () => {
     const form = baseForm({ continuationPolicy: "reuse_thread" });
 
@@ -197,7 +217,9 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
       repository_mode: "selected",
     });
   });
+});
 
+describe("managed destination and retry payloads", () => {
   it("persists only the portable managed destination identity", () => {
     const form = baseForm({
       taskMode: "managed_conversation",
@@ -227,6 +249,28 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
       repository_ids: [],
     });
   });
+  it("serializes canonical disabled retry policy for managed create and update", () => {
+    const form = baseForm({
+      taskMode: "managed_conversation",
+      retryPolicy: {
+        mode: "finite",
+        max_retries: "4",
+        delay_seconds: "30",
+        backoff: "exponential",
+        history_mode: "timeline",
+      },
+    });
+    const disabledPolicy = {
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    };
+
+    expect(buildCreatePayload("ws-1", form, [], []).retry_policy).toEqual(disabledPolicy);
+    expect(buildUpdatePayload(form, []).retry_policy).toEqual(disabledPolicy);
+  });
 
   it("does not resolve stale repository selections for non-selected modes", async () => {
     const result = await resolveRepositoryIdsForMode(
@@ -238,5 +282,49 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
 
     expect(result.ids).toEqual([]);
     expect(createRepositoryAction).not.toHaveBeenCalled();
+  });
+  it("normalizes managed retry drafts and does not restore them for task targets", () => {
+    const enabled = {
+      mode: "finite" as const,
+      max_retries: "4",
+      delay_seconds: "30",
+      backoff: "exponential" as const,
+      history_mode: "timeline" as const,
+    };
+
+    const managed = normalizeRetryPolicyForTaskMode("managed_conversation", enabled);
+    expect(managed).toEqual({
+      mode: "disabled",
+      max_retries: "0",
+      delay_seconds: "0",
+      backoff: "fixed",
+      history_mode: "attempts",
+    });
+    expect(normalizeRetryPolicyForTaskMode("normal_task", managed)).toEqual(managed);
+  });
+  it("sends decimal retry policy values unchanged", () => {
+    const policy = {
+      mode: "finite" as const,
+      max_retries: "0007",
+      delay_seconds: "3600",
+      backoff: "exponential" as const,
+      history_mode: "timeline" as const,
+    };
+    const form = baseForm({ retryPolicy: policy });
+    expect(buildCreatePayload("ws-1", form, [], []).retry_policy).toEqual(policy);
+    expect(buildUpdatePayload(form, []).retry_policy).toEqual(policy);
+  });
+});
+
+describe("retryPolicyAfterModeChange", () => {
+  it("sets a valid finite retry count after disabled mode", () => {
+    const disabled = { ...baseForm().retryPolicy, mode: "disabled" as const, max_retries: "0" };
+    expect(retryPolicyAfterModeChange(disabled, "finite")).toMatchObject({
+      mode: "finite",
+      max_retries: "1",
+    });
+    expect(retryPolicyAfterModeChange({ ...disabled, max_retries: "00" }, "finite")).toMatchObject({
+      max_retries: "1",
+    });
   });
 });

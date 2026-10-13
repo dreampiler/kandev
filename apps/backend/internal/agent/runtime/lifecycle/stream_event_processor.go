@@ -33,6 +33,13 @@ type streamEventProcessor struct {
 	startupGeneration uint64
 	events            chan agentctl.AgentEvent
 	done              chan struct{}
+	// stopTransport detaches the updates stream this processor serves. It is
+	// set before the stream delivers its first event.
+	stopTransport func()
+	// detached closes when the transport is gone so a successor generation
+	// wait does not hold the disconnect path until its bound.
+	detached   chan struct{}
+	detachOnce sync.Once
 
 	closeOnce sync.Once
 	errMu     sync.Mutex
@@ -65,6 +72,7 @@ func newStreamEventProcessor(
 		startupGeneration: startupGeneration,
 		events:            make(chan agentctl.AgentEvent, streamProjectionQueueSize),
 		done:              make(chan struct{}),
+		detached:          make(chan struct{}),
 	}
 	go processor.run()
 	return processor
@@ -80,6 +88,7 @@ func (p *streamEventProcessor) enqueue(event agentctl.AgentEvent) bool {
 }
 
 func (p *streamEventProcessor) close() error {
+	p.detachOnce.Do(func() { close(p.detached) })
 	p.closeOnce.Do(func() {
 		close(p.events)
 	})
@@ -102,6 +111,17 @@ func (p *streamEventProcessor) fail(err error) {
 	p.cancel()
 }
 
+// stop records a processing failure and detaches the transport. A processor
+// that only cancelled itself would leave the reader attached: every later event
+// is then dropped as "processor unavailable" and the disconnect path that
+// reports the failure and recovers the execution never runs.
+func (p *streamEventProcessor) stop(err error) {
+	p.fail(err)
+	if p.stopTransport != nil {
+		p.stopTransport()
+	}
+}
+
 func (p *streamEventProcessor) run() {
 	defer close(p.done)
 	defer p.cancel()
@@ -115,12 +135,12 @@ func (p *streamEventProcessor) run() {
 				return
 			}
 			if err := p.handleEvent(batch, event); err != nil {
-				p.fail(err)
+				p.stop(err)
 				return
 			}
 		case <-batch.timerCh:
 			if err := p.flushBatch(batch); err != nil {
-				p.fail(err)
+				p.stop(err)
 				return
 			}
 		case <-p.ctx.Done():
@@ -130,7 +150,9 @@ func (p *streamEventProcessor) run() {
 }
 
 func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
-	prepared, err := p.manager.prepareAgentEvent(p.ctx, p.execution, p.client, p.delivery, event)
+	prepared, err := p.manager.prepareAgentEvent(
+		withDeliveryDetachSignal(p.ctx, p.detached), p.execution, p.client, p.delivery, event,
+	)
 	if err != nil {
 		return err
 	}
@@ -258,5 +280,6 @@ func (sm *StreamManager) processPreparedAgentEvent(
 	if !prepared.skipAcknowledgement {
 		sm.scheduleDurableDeliveryAck(execution, client, event)
 	}
+	sm.compactSupersededToolUpdates(delivery, prepared)
 	return nil
 }

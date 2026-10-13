@@ -80,6 +80,9 @@ type StreamManager struct {
 	wg         sync.WaitGroup
 	wgMu       sync.Mutex
 	stopped    bool
+	// toolUpdateSupersession hints which projected in-progress tool updates a
+	// later update for the same tool call makes redundant in the inbox.
+	toolUpdateSupersession toolUpdateSupersession
 }
 
 // stopChannelContext wraps a parent ctx with two auxiliary stop channels.
@@ -236,6 +239,9 @@ func (sm *StreamManager) ConnectAllAndWait(ctx context.Context, execution *Agent
 	connected := client.HasAgentStream()
 	releaseClient()
 	if !connected {
+		if err := execution.deliveryStreamFailureSnapshot(); err != nil {
+			return err
+		}
 		return errors.New("agent updates stream did not connect")
 	}
 	return nil
@@ -416,15 +422,8 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	if streamID == "" {
 		streamID = execution.SessionID
 	}
-	after, cursorErr := sm.deliveryReplayCursor(ctx, delivery, streamID)
-	if execution.DeliveryMode == DurableDeliveryV1 && delivery != nil {
-		status, statusErr := client.GetDeliveryStatus(ctx, streamID)
-		if statusErr != nil {
-			cursorErr = fmt.Errorf("read authenticated delivery descriptor: %w", statusErr)
-		} else {
-			after, cursorErr = authenticatedDeliveryReplayCursor(ctx, execution, delivery, status)
-		}
-	}
+	after, cursorErr := sm.initialDeliveryReplayCursor(ctx, execution, delivery, client, streamID)
+	execution.recordDeliveryStreamFailure(startupGeneration, cursorErr)
 	if cursorErr != nil {
 		sm.logger.Error("failed to load durable delivery replay cursor",
 			zap.String("instance_id", execution.ID),
@@ -442,7 +441,14 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}
 
 	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
-	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
+	processor.stopTransport = func() {
+		if execution.ownsUpdateStream(streamGeneration) {
+			client.CloseUpdatesStream()
+		}
+	}
+	// Processor failure cancels only this connection, including when no later
+	// frame arrives. Disconnect handling reports the original processing error.
+	err := client.StreamUpdatesFrom(processor.ctx, func(event agentctl.AgentEvent) {
 		if !execution.ownsUpdateStream(streamGeneration) {
 			return
 		}
@@ -457,7 +463,9 @@ func (sm *StreamManager) openUpdatesStream(execution *AgentExecution, startupGen
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		sm.handleUpdateStreamDisconnect(ctx, execution, client, processor, startupGeneration, streamGeneration, disconnectErr)
 	}, after)
+	execution.recordDeliveryStreamFailure(startupGeneration, err)
 	if err != nil {
+		processor.fail(err)
 		_ = processor.close()
 	}
 	return err

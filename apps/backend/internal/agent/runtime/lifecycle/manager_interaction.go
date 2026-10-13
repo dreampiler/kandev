@@ -116,7 +116,7 @@ func (m *Manager) RegisterInitialPromptDispatchCallbacks(executionID string, onD
 // StartAgentProcess.
 func (m *Manager) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	execution, exists := m.executionStore.Get(executionID)
@@ -206,7 +206,7 @@ func (m *Manager) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*PromptResult, error) {
 	return m.PromptAgentWithAdmissionCallbackAndSubmissionID(
@@ -222,7 +222,7 @@ func (m *Manager) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*PromptResult, error) {
@@ -2270,11 +2270,16 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 
 func (m *Manager) restoreRecoveredFailedExecution(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
 	if client == nil {
+		releaseClient()
 		return fmt.Errorf("agentctl client is unavailable")
 	}
 	status, err := client.GetStatus(ctx)
+	// Release the lease before marking the execution ready: that path takes
+	// the execution store lock and persists the row. Holding the lease across
+	// it ordered lease -> store lock, and a terminal stop waiting for the
+	// lease's write side then wedged both (recursive read lease deadlock).
+	releaseClient()
 	if err != nil {
 		return fmt.Errorf("failed to verify agent status after stream recovery: %w", err)
 	}

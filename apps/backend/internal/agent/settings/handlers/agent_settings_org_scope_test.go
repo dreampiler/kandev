@@ -35,6 +35,7 @@ var mutatingSettingsRoutes = []struct {
 	{http.MethodDelete, "/api/v1/agent-profiles/profile-1"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/duplicate"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/mcp-config"},
+	{http.MethodPost, "/api/v1/agent-profiles/profile-1/account-block/release"},
 	{http.MethodPut, "/api/v1/provider-limits/opencode-go"},
 }
 

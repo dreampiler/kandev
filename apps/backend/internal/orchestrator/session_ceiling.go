@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -87,6 +88,19 @@ const (
 	// operator reading a card or a log line can tell a full instance from a
 	// queue ordering decision.
 	ceilingReasonDeferredPrecedes = "ceiling_deferred_precedes"
+	// ceilingReasonReplacementHandOff admits the automatic successor of a
+	// session's own failed dynamic attempt after that attempt already left the
+	// counted population. The successor takes the place of the process that
+	// just ended, so the population returns to where it stood before the
+	// failure instead of growing; refusing it only strands the route in
+	// "starting" until manual recovery.
+	ceilingReasonReplacementHandOff = "ceiling_replacement_hand_off"
+	// ceilingReasonMemoryPressure refuses an automatic worker launch because the
+	// host is low on available memory or above its commit ceiling. It is
+	// distinct from ceiling/ceiling_control so an operator can tell a host
+	// resource limit from a session-count limit. The control lane and Office
+	// coordinator are never refused by this reason.
+	ceilingReasonMemoryPressure = "memory_pressure"
 )
 
 // deferredPrecedenceState is the closed set describing why a queued launch
@@ -153,6 +167,9 @@ type admissionRequest struct {
 	// only classification input; an empty value is read as worker.
 	agentProfileID  string
 	yieldToDeferred func(context.Context, ceilingClass) deferredPrecedence
+	// replacesFailedAttempt marks the automatic successor launched for the
+	// same session's own failed dynamic attempt. It is set only by that seam.
+	replacesFailedAttempt bool
 }
 
 // admissionDecision is the controller's answer.
@@ -211,15 +228,18 @@ type SessionCeilingCapacity struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
-	mu              sync.Mutex
-	ceiling         int
-	controlCeiling  int
-	controlProfiles map[string]struct{}
-	reservations    map[string]*ceilingReservation
-	lister          admittedSessionLister
-	logger          *zap.Logger
-	now             func() time.Time
-	newKey          func() string
+	mu               sync.Mutex
+	memoryGate       hostmemory.Gate
+	memoryReader     memoryPressureReader
+	memoryReadFailed bool
+	ceiling          int
+	controlCeiling   int
+	controlProfiles  map[string]struct{}
+	reservations     map[string]*ceilingReservation
+	lister           admittedSessionLister
+	logger           *zap.Logger
+	now              func() time.Time
+	newKey           func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -339,6 +359,13 @@ func (c *sessionCeilingController) freeCapacityByLane(ctx context.Context) (work
 		workerFree = true
 	} else {
 		workerFree = c.classPopulationLocked(counted, ceilingClassWorker) < c.ceiling
+	}
+	// While the host is under memory pressure the worker lane has no free
+	// capacity for the periodic sweep to spend, so records deferred for that
+	// reason are left untouched until the pressure clears. The control lane is
+	// never held by memory pressure.
+	if workerFree && c.memoryPressuredLocked(ctx, ceilingClassWorker) {
+		workerFree = false
 	}
 	if len(c.controlProfiles) > 0 {
 		controlFree = c.classPopulationLocked(counted, ceilingClassControl) < c.controlCeiling
@@ -544,7 +571,12 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	class := c.classOfLocked(req.agentProfileID)
-	if c.classCeilingLocked(class) == unlimitedSessionCeiling {
+	// The memory gate is consulted even when the lane ceiling is unlimited: it
+	// must hold worker launches regardless of the session count. Only a
+	// pressured worker lane needs the population read that recognizes an
+	// already-admitted session, so the unlimited fast path is kept otherwise.
+	pressured := c.memoryPressuredLocked(ctx, class)
+	if c.classCeilingLocked(class) == unlimitedSessionCeiling && !pressured {
 		return c.admitUnlimitedLocked(req, origin, class)
 	}
 
@@ -552,7 +584,7 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
-	return c.decideLocked(ctx, req, origin, class, counted)
+	return c.decideLocked(ctx, req, origin, class, counted, pressured)
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
@@ -580,7 +612,7 @@ func (c *sessionCeilingController) admitUnlimitedLocked(
 // ceiling: a saturated worker lane no longer refuses a control launch, and a
 // saturated control lane never consumes worker capacity.
 func (c *sessionCeilingController) decideLocked(
-	ctx context.Context, req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
+	ctx context.Context, req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass, pressured bool,
 ) admissionDecision {
 	population := c.populationLocked(counted)
 	classCeiling := c.classCeilingLocked(class)
@@ -599,6 +631,21 @@ func (c *sessionCeilingController) decideLocked(
 		class:           class,
 		classCeiling:    classCeiling,
 		classPopulation: classPopulation,
+	}
+	// Host memory pressure refuses a new worker launch before any free slot is
+	// offered: the launch would add a process the host cannot currently afford.
+	// The condition applies to every worker-lane origin, so a human manual
+	// launch is held too: the manual override passes the session-count ceiling
+	// but never the host-memory condition. An already-admitted session never
+	// reaches here, so a prompt into a live session is never held, and the
+	// control lane never reaches this branch because memoryPressuredLocked only
+	// reports the worker lane. The refusal carries no population reading, so its
+	// card note describes the host rather than session counts.
+	if pressured {
+		decision.reasonCode = ceilingReasonMemoryPressure
+		decision.populationKnown = false
+		c.logDecision(req, origin, decision)
+		return decision
 	}
 	// A free slot in the requesting lane is offered to the queued launches
 	// ahead of this request before it is consumed. That ordering is what the
@@ -829,7 +876,8 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	class := c.classOfLocked(req.agentProfileID)
-	if c.classCeilingLocked(class) == unlimitedSessionCeiling {
+	pressured := c.memoryPressuredLocked(ctx, class)
+	if c.classCeilingLocked(class) == unlimitedSessionCeiling && !pressured {
 		return c.admitUnlimitedLocked(req, origin, class)
 	}
 
@@ -838,8 +886,11 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		return c.decideUnknownPopulationLocked(req, origin, class, err)
 	}
 	rowClass, isCounted := counted[req.sessionID]
+	if req.sessionID != "" && !isCounted && req.replacesFailedAttempt && origin == launchOriginAutomatic {
+		return c.replacementHandOffLocked(req, origin, class, counted)
+	}
 	if req.sessionID == "" || !isCounted {
-		return c.decideLocked(ctx, req, origin, class, counted)
+		return c.decideLocked(ctx, req, origin, class, counted, pressured)
 	}
 	// A relaunch keeps the lane its counted row already occupies. Re-deriving the
 	// class from the caller's profile here could move a running control session
@@ -860,6 +911,34 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	c.reservations[req.sessionID] = &ceilingReservation{
 		sessionID: req.sessionID, class: class, takenAt: c.now(),
 	}
+	c.logDecision(req, origin, decision)
+	return decision
+}
+
+// replacementHandOffLocked admits the automatic successor of a session whose
+// failed dynamic attempt already left the counted population. A session that
+// is already reserved keeps its reservation; otherwise the session takes one
+// reservation in its own lane, which is the unit its failed attempt released.
+func (c *sessionCeilingController) replacementHandOffLocked(
+	req admissionRequest, origin launchOrigin, class ceilingClass, counted map[string]ceilingClass,
+) admissionDecision {
+	decision := admissionDecision{
+		admitted:        true,
+		handedOff:       true,
+		reservationKey:  req.sessionID,
+		ceiling:         c.ceiling,
+		class:           class,
+		classCeiling:    c.classCeilingLocked(class),
+		reasonCode:      ceilingReasonReplacementHandOff,
+		populationKnown: true,
+	}
+	if _, held := c.reservations[req.sessionID]; !held {
+		c.reservations[req.sessionID] = &ceilingReservation{
+			sessionID: req.sessionID, class: class, takenAt: c.now(),
+		}
+	}
+	decision.population = c.populationLocked(counted)
+	decision.classPopulation = c.classPopulationLocked(counted, class)
 	c.logDecision(req, origin, decision)
 	return decision
 }

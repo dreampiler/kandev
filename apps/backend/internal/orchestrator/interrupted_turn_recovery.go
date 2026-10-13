@@ -10,6 +10,7 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // A turn that was in flight when Kandev (and its agentctl runtime) restarted
@@ -60,6 +61,12 @@ func resumeNeedsContextContinuation(err error) bool {
 	if errors.Is(err, agentruntime.ErrDurableAdoptionBlocked) {
 		return true
 	}
+	// The journal still holds a stream SQL never received (for example output
+	// dropped before its first receipt). Native resume refuses that missing
+	// checkpoint by design; a fresh successor generation does not depend on it.
+	if errors.Is(err, repoerrors.ErrAgentDeliveryCheckpointMissing) {
+		return true
+	}
 	reason := recoveryReasonFromError(err)
 	return reason == unknownPromptOutcome || reason == durableDeliveryUnresolvedReason
 }
@@ -106,16 +113,21 @@ func (s *Service) RecoverSessionWithContinuationFallback(
 // the user message that was just recorded, so that message opens the next
 // turn. It returns true when a recovery was started.
 func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionID string, cause error) bool {
-	if s == nil || taskID == "" || sessionID == "" {
+	session := s.automaticContinuationSession(ctx, taskID, sessionID)
+	if session == nil {
 		return false
 	}
 	reason := recoveryReasonFromError(cause)
 	if reason == "" {
 		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-		if err != nil || block == nil {
+		if err != nil {
 			return false
 		}
-		reason = block.Reason
+		if block != nil {
+			reason = block.Reason
+		} else if session.State == models.TaskSessionStateFailed && startupFailureTextNeedsContinuation(session.ErrorMessage) {
+			reason = durableDeliveryUnresolvedReason
+		}
 	}
 	if !interruptedTurnRecoveryReasons[reason] {
 		return false
@@ -145,6 +157,48 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 			zap.String("session_id", sessionID))
 	}()
 	return true
+}
+
+func (s *Service) automaticContinuationSession(ctx context.Context, taskID, sessionID string) *models.TaskSession {
+	if s == nil || s.repo == nil || taskID == "" || sessionID == "" {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID ||
+		session.State == models.TaskSessionStateCancelled || session.State == models.TaskSessionStateCompleted {
+		return nil
+	}
+	if session.State == models.TaskSessionStateFailed && !s.CanAutoRecoverFailedSession(ctx, taskID, sessionID) {
+		return nil
+	}
+	return session
+}
+
+// CanAutoRecoverFailedSession admits a failed primary only when its canonical
+// block or classified startup refusal requires history continuation.
+// A runtime whose termination could not be proved retains that block; ordinary
+// startup failures, ended conversations, and live runtimes stay blocked.
+func (s *Service) CanAutoRecoverFailedSession(ctx context.Context, taskID, sessionID string) bool {
+	if s == nil || s.repo == nil {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || session.TaskID != taskID || !session.IsPrimary ||
+		session.State != models.TaskSessionStateFailed || s.sessionRuntimeLive(ctx, sessionID) {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || taskArchived(task) {
+		return false
+	}
+	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+	if err != nil {
+		return false
+	}
+	if block != nil {
+		return interruptedTurnRecoveryReasons[block.Reason]
+	}
+	return startupFailureTextNeedsContinuation(session.ErrorMessage)
 }
 
 type interruptedTurnAutoRecoveryState struct {

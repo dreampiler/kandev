@@ -158,9 +158,6 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
-	if observedOutput {
-		s.recordDynamicResourceOutput(ctx, payload.SessionID, eventExecutionID, payload.ExecutionProfileID, payload.Data.PromptGeneration)
-	}
 	if observedOutput || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
@@ -173,6 +170,12 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	if observedOutput && s.markForegroundGenerating(sessionID, eventExecutionID) {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+	if eventType == agentEventComplete && completedTurnWithoutProviderError(payload) {
+		// Strikes reset on a turn that finished cleanly, not on its first
+		// output: the prompt evidence is still current here because it is
+		// cleared only when this handler returns.
+		s.recordDynamicResourceTurnSuccess(ctx, payload.SessionID, eventExecutionID, payload.ExecutionProfileID, payload.Data.PromptGeneration)
 	}
 	if eventType == agentEventComplete {
 		defer s.clearPromptAttemptEvidence(
@@ -2085,10 +2088,9 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 		return
 	}
 
-	// Pick the best candidate. The shared selector prefers a session compatible
-	// with the task's current workflow step and never reuses a session an earlier
-	// profile switch parked, so a surviving predecessor cannot become primary
-	// again and receive the queue.
+	// Only a newest same-logical-profile successor compatible with the workflow
+	// can inherit the queue. Otherwise the failed primary retains ownership for
+	// its ordinary recovery path.
 	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySessionTransferringQueue(ctx, candidate); err != nil {
@@ -3508,6 +3510,12 @@ func (s *Service) reconcileCompleteEventRuntime(
 	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
 		return true
 	}
+	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
+		if !s.observeAutomationRetryTurnTerminal(ctx, payload.TaskID, payload.SessionID, completionTurnID, payload.ExecutionID) {
+			return false
+		}
+	}
+
 	return s.handleAutomationTurnCompleteForTurn(
 		ctx,
 		payload.TaskID,
@@ -3617,6 +3625,17 @@ func extractStopReason(payload *lifecycle.AgentStreamEventPayload) string {
 	}
 	sr, _ := data["stop_reason"].(string)
 	return sr
+}
+
+// completedTurnWithoutProviderError reports whether a complete frame ends its
+// turn normally: not flagged as an error, carrying no error text or provider
+// diagnostic, and not cancelled by the user.
+func completedTurnWithoutProviderError(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	return !extractCompleteIsError(payload) && extractCompleteErrorMessage(payload) == "" &&
+		payload.Data.ProviderError == nil && extractStopReason(payload) != stopReasonCancelled
 }
 
 func extractCompleteIsError(payload *lifecycle.AgentStreamEventPayload) bool {

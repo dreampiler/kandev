@@ -28,7 +28,7 @@ func (p *mockMcpConfigProvider) GetConfigByProfileID(ctx context.Context, profil
 
 func TestCursorPluginMCPPolicy_DeniesAndProtectsReservedNames(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setTestUserHome(t, tempHome)
 
 	// Create a plugin defining "blocked-srv" and "allowed-srv"
 	pluginDir := filepath.Join(tempHome, ".cursor", "plugins", "local", "policy-plugin")
@@ -115,7 +115,7 @@ func TestCursorPluginMCPPolicy_DeniesAndProtectsReservedNames(t *testing.T) {
 
 func TestCursorPluginMCPPrecedence_Matrix(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setTestUserHome(t, tempHome)
 
 	// 1. Global config defines "overlap-global" and "overlap-project"
 	require.NoError(t, os.MkdirAll(filepath.Join(tempHome, ".cursor"), 0o755))
@@ -212,7 +212,7 @@ func TestCursorPluginMCPPrecedence_Matrix(t *testing.T) {
 
 func TestCursorPluginMCPReconciliation_DisabledAndSourceRemoval(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setTestUserHome(t, tempHome)
 
 	pluginDir := filepath.Join(tempHome, ".cursor", "plugins", "local", "rec-plugin")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o755))
@@ -316,7 +316,7 @@ func TestCursorPluginMCPReconciliation_DisabledAndSourceRemoval(t *testing.T) {
 
 func TestCursorPluginMCPSafety_SymlinkAndMalformedIgnored(t *testing.T) {
 	tempHome := t.TempDir()
-	t.Setenv("HOME", tempHome)
+	setTestUserHome(t, tempHome)
 
 	workspaceDir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(workspaceDir, ".cursor"), 0o755))
@@ -353,7 +353,7 @@ func TestCursorPluginMCPSafety_SymlinkAndMalformedIgnored(t *testing.T) {
 
 func TestCursorPluginMCPImportedIdentityMatchesSharedOAuth(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	cursorHome := filepath.Join(home, ".cursor")
 	pluginDir := filepath.Join(cursorHome, "plugins", "local", "atlassian")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o700))
@@ -414,7 +414,7 @@ func TestCursorPluginMCPNativeProfileReservation(t *testing.T) {
 // Regression coverage for the existing ownership contract during identity migration.
 func TestCursorPluginMCPMigratesOwnedBareIdentity(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	pluginDir := filepath.Join(home, ".cursor", "plugins", "local", "atlassian")
 	require.NoError(t, os.MkdirAll(pluginDir, 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(pluginDir, "mcp.json"),

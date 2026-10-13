@@ -49,6 +49,10 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		AgentProfileID: profileID,
 		Prompt:         req.Prompt,
 		SpawnOrigin:    spawnOriginFromSession(spawner),
+		// An agent-initiated spawn is automatic for admission purposes: it must
+		// be subject to the session ceiling and the host-memory guard instead of
+		// riding the manual override reserved for a human's explicit launch.
+		Automatic: true,
 	})
 	if err != nil {
 		if errors.Is(err, models.ErrWorkspacePreparing) {

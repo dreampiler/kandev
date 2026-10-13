@@ -28,11 +28,19 @@ func newSeederTestLogger(t *testing.T) *logger.Logger {
 func seedTestHostHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	if runtime.GOOS == "windows" {
-		t.Setenv("USERPROFILE", tmp)
-	}
+	setTestUserHome(t, tmp)
 	return tmp
+}
+
+// setTestUserHome points os.UserHomeDir() at dir. Windows resolves the home
+// directory from USERPROFILE, so setting HOME alone would leave the code under
+// test reading the developer's real profile.
+func setTestUserHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
 }
 
 func writeFile(t *testing.T, root, rel string, contents []byte) {
@@ -123,8 +131,14 @@ func TestSeedAgentSessionDir_CopiesSelectedPortableConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("selected config mode = %o, want 600", info.Mode().Perm())
+	// Windows keeps only the owner-write bit of the requested 0600: a writable
+	// file reports 0666 and a read-only one 0444.
+	wantMode := os.FileMode(0o600)
+	if runtime.GOOS == "windows" {
+		wantMode = 0o666
+	}
+	if info.Mode().Perm() != wantMode {
+		t.Fatalf("selected config mode = %o, want %o", info.Mode().Perm(), wantMode)
 	}
 }
 

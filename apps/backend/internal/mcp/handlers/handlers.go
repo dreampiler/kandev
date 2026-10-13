@@ -384,6 +384,13 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
+
+	// Optional Office cross-workspace access setting (SetOfficeCrossWorkspace).
+	// nil leaves the Office surface confined to its own workspace and Kanban
+	// messages to Office tasks on their session path.
+	officeCrossWorkspace OfficeCrossWorkspace
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -599,13 +606,16 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
+	d.RegisterFunc(ws.ActionMCPReportToHandoffSource, h.handleReportToHandoffSource)
 	if h.coordinatorSvc != nil {
 		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 
@@ -834,6 +844,9 @@ func (h *Handlers) handleListByField(
 	resp, err := fn(ctx, value)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, errCoordinatorProjectsRead) {
+			clientErrMsg = clientErrMsg + ": " + err.Error()
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -917,6 +930,10 @@ func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 			if err != nil {
 				return nil, err
 			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
+			if err != nil {
+				return nil, err
+			}
 			dtos := make([]dto.TaskDTO, 0, len(tasks))
 			for _, t := range tasks {
 				dtos = append(dtos, dto.FromTask(t))
@@ -947,6 +964,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.AssigneeAgentProfileID != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "assignee_agent_profile_id is office-only and cannot be set via create_task_kandev", nil)
+	}
+	// An omitted priority takes the service default; a supplied one must be a
+	// canonical value. Rejected here so the caller gets a validation error
+	// naming the allowed values instead of a generic create failure.
+	if req.Priority != "" {
+		if err := models.ValidateTaskPriority(req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalidTaskPriorityMessage(req.Priority), nil)
+		}
 	}
 
 	// Default start_agent to true for backward compatibility
@@ -1111,6 +1136,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowStepID:         resolvedStepID,
 		Title:                  req.Title,
 		Description:            req.Description,
+		Priority:               req.Priority,
 		Autopilot:              req.Autopilot,
 		Repositories:           repos,
 		BlockedBy:              req.BlockedBy,
@@ -2164,6 +2190,11 @@ func metadataString(metadata map[string]interface{}, key string) string {
 	return ""
 }
 
+// invalidTaskPriorityMessage names the offending value and the allowed ones.
+func invalidTaskPriorityMessage(priority string) string {
+	return fmt.Sprintf("invalid priority %q: must be one of %s", priority, strings.Join(taskcontract.TaskPriorityValues(), ", "))
+}
+
 // handleUpdateTask updates an existing task.
 func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.UpdateTaskRequest lacks them
@@ -2172,6 +2203,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Title                *string `json:"title"`
 		Description          *string `json:"description"`
 		State                *string `json:"state"`
+		Priority             *string `json:"priority"`
 		DeferredLaunchPrompt *string `json:"deferred_launch_prompt"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -2179,6 +2211,13 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	// Checked before anything is applied so a bad priority cannot half-apply
+	// the call (the launch-prompt edit below is written first).
+	if req.Priority != nil {
+		if err := models.ValidateTaskPriority(*req.Priority); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, invalidTaskPriorityMessage(*req.Priority), nil)
+		}
 	}
 
 	// Applied before the ordinary field update so a rejected prompt edit does
@@ -2202,6 +2241,7 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	task, err := h.taskSvc.UpdateTask(ctx, req.TaskID, &service.UpdateTaskRequest{
 		Title:       req.Title,
 		Description: req.Description,
+		Priority:    req.Priority,
 		State:       state,
 	})
 	if err != nil {
@@ -3004,6 +3044,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"failed to look up target task: "+err.Error(), nil)
+	}
+
+	if resp := h.deliverToOfficeTask(ctx, msg, senderTask, targetTask, req.Prompt, req.ReplyToQuestionID); resp != nil {
+		return resp, nil
 	}
 
 	parentReply, err := h.validateParentQuestionReply(ctx, req.ReplyToQuestionID, req.TaskID, senderTask, targetTask)
@@ -4137,6 +4181,9 @@ func (h *Handlers) promptPreparedTaskMessage(
 	if err != nil {
 		var accepted interface{ DetachedResumeAccepted() bool }
 		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
+			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
+		}
+		if h.autoRecoverTaskMessagePrompt(ctx, taskID, session.ID, err) {
 			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 		}
 		h.deleteRecordedUserMessage(ctx, recorded, ownedTurnID)

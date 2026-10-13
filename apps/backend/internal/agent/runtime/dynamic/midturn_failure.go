@@ -2,7 +2,6 @@ package dynamic
 
 import (
 	"context"
-	"strings"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
@@ -43,7 +42,7 @@ func (e *Engine) ApplyInterruptedFailureContext(ctx context.Context, sessionID s
 	if err != nil {
 		return RouteDecision{}, err
 	}
-	chain = excludeInterruptedModel(chain.forProfile(profile.ID, generation), profile, candidateID)
+	chain = excludeInterruptedModel(chain.forProfile(profile.ID, generation), profile, candidateID, failure)
 	chain.Interrupted = true
 	oldStatus, oldPolicy := state.Status, state.PolicyStateJSON
 	state.Status = routeStatusRetrying
@@ -69,9 +68,12 @@ func (e *Engine) ApplyInterruptedFailureContext(ctx context.Context, sessionID s
 func (e *Engine) selectInterruptedSuccessor(ctx context.Context, state RouteState, profile Profile, candidateID string, failure *routingerr.Error, chain SelectionChain, inputs RankOptions) (RouteDecision, error) {
 	now := e.now()
 	generation := state.Generation + 1
+	// The search reads circuit health without claiming anything; only the
+	// winner claims its probe below, so expired candidates the search passes
+	// over stay available to other sessions and to this claim.
 	ineligible := make(map[string]string)
 	for _, candidate := range profile.Candidates {
-		if !e.candidateSelectable(candidate, state.SessionID, generation, "", "", now) {
+		if e.candidateBlockedNow(candidate, now) {
 			ineligible[candidate.ID] = IneligibleCircuit
 		}
 	}
@@ -122,39 +124,16 @@ func (e *Engine) persistInterruptedExhaustion(ctx context.Context, state RouteSt
 		PendingOutcome: routingpolicy.OutcomeStop}, ErrRecoveryPending
 }
 
-func excludeInterruptedModel(chain SelectionChain, profile Profile, candidateID string) SelectionChain {
-	chain = chain.withTried(candidateID)
-	failed, ok := candidateByID(profile, candidateID)
-	if !ok {
-		return chain
-	}
-	model := interruptionModelIdentity(failed.ModelID)
-	if model == "" {
-		return chain
-	}
-	for _, candidate := range profile.Candidates {
-		if interruptionModelIdentity(candidate.ModelID) == model {
-			chain = chain.withTried(candidate.ID)
-		}
+// excludeInterruptedModel spends the failed candidate in this chain and, when
+// the failure's cause can reach the model on every path, the same model's
+// other paths too. A cause bound to one path (a daily allowance, an
+// intermittent endpoint, a withdrawn model) leaves the model's other paths in
+// the search: they fail or succeed on their own.
+func excludeInterruptedModel(chain SelectionChain, profile Profile, candidateID string, failure *routingerr.Error) SelectionChain {
+	for _, id := range failureExclusions(profile, candidateID, failure) {
+		chain = chain.withTried(id)
 	}
 	return chain
-}
-
-func interruptionModelIdentity(model string) string {
-	model = strings.TrimSpace(model)
-	if unknownInterruptionModel(model) {
-		return ""
-	}
-	if suffix, ok := strings.CutPrefix(model, "opencode-go/"); ok {
-		if unknownInterruptionModel(suffix) {
-			return ""
-		}
-		return "opencode/" + suffix
-	}
-	if suffix, ok := strings.CutPrefix(model, "opencode/"); ok && unknownInterruptionModel(suffix) {
-		return ""
-	}
-	return model
 }
 
 func unknownInterruptionModel(model string) bool {

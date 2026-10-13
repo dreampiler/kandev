@@ -348,6 +348,60 @@ mod tests {
         assert_eq!((restored.x, restored.y), (PRIMARY.x, PRIMARY.y));
     }
 
+    const FRAME: (u32, u32) = (16, 39);
+
+    fn restart(saved: WindowBounds, frame: (u32, u32)) -> WindowBounds {
+        let restored = visible_restore(saved, &[PRIMARY]);
+        let (width, height) = client_size(restored.width, restored.height, frame.0, frame.1);
+        WindowBounds {
+            width: width + frame.0,
+            height: height + frame.1,
+            ..restored
+        }
+    }
+
+    #[test]
+    fn repeated_restarts_keep_the_saved_outer_size() {
+        let saved = WindowBounds {
+            x: 100,
+            y: 80,
+            width: 1280,
+            height: 900,
+            maximized: false,
+        };
+        let mut current = saved;
+        for _ in 0..3 {
+            current = restart(current, FRAME);
+        }
+        assert_eq!(current, saved);
+    }
+
+    #[test]
+    fn clamped_bounds_still_fit_the_monitor_once_the_frame_is_added() {
+        let saved = WindowBounds {
+            x: -5000,
+            y: -5000,
+            width: 4000,
+            height: 3000,
+            maximized: false,
+        };
+        let restored = restart(saved, FRAME);
+        assert_eq!(
+            (restored.width, restored.height),
+            (PRIMARY.width, PRIMARY.height)
+        );
+    }
+
+    #[test]
+    fn frameless_windows_keep_the_saved_size() {
+        assert_eq!(client_size(1280, 900, 0, 0), (1280, 900));
+    }
+
+    #[test]
+    fn a_frame_larger_than_the_saved_size_keeps_a_positive_size() {
+        assert_eq!(client_size(10, 20, 16, 39), (1, 1));
+    }
+
     #[test]
     fn newer_save_revisions_supersede_pending_work() {
         let mut schedule = SaveSchedule::default();

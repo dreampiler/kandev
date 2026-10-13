@@ -868,7 +868,7 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 // ownership check and acceptance callbacks to the lifecycle execution.
 func (a *lifecycleAdapter) RegisterInitialPromptAdmissionCallbacks(
 	executionID string,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched, onFailure func(),
 ) error {
 	return a.mgr.RegisterInitialPromptAdmissionCallbacks(
@@ -882,7 +882,7 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallback(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 ) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgentWithAdmissionCallback(
@@ -899,7 +899,7 @@ func (a *lifecycleAdapter) PromptAgentWithAdmissionCallbackAndSubmissionID(
 	agentInstanceID, prompt string,
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
-	beforeAdmission func() error,
+	beforeAdmission func(context.Context, string, []v1.MessageAttachment) error,
 	onDispatched func(),
 	submissionID string,
 ) (*executor.PromptResult, error) {
@@ -940,7 +940,7 @@ var _ interface {
 } = (*lifecycleAdapter)(nil)
 
 var _ interface {
-	RegisterInitialPromptAdmissionCallbacks(string, func() error, func(), func()) error
+	RegisterInitialPromptAdmissionCallbacks(string, func(context.Context, string, []v1.MessageAttachment) error, func(), func()) error
 	RegisterInitialPromptDispatchCallbacks(string, func(), func()) error
 } = (*lifecycleAdapter)(nil)
 
@@ -1363,6 +1363,10 @@ func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Con
 // seam used when a recorded message is refused for session recovery.
 func (w *orchestratorWrapper) AutoRecoverBlockedPrompt(ctx context.Context, taskID, taskSessionID string, cause error) bool {
 	return w.svc.AutoRecoverBlockedPrompt(ctx, taskID, taskSessionID, cause)
+}
+
+func (w *orchestratorWrapper) CanAutoRecoverFailedSession(ctx context.Context, taskID, taskSessionID string) bool {
+	return w.svc.CanAutoRecoverFailedSession(ctx, taskID, taskSessionID)
 }
 
 // ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt

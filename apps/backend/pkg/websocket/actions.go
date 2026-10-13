@@ -243,6 +243,7 @@ const (
 	// Native code review. The *.run / *.cancel / *.get / *.finding.update /
 	// *.clear actions are client requests; the rest are server notifications.
 	ActionTaskReviewRun                 = "task.review.run"
+	ActionTaskReviewSourceSet           = "task.review.source.set"
 	ActionTaskReviewCancel              = "task.review.cancel"
 	ActionTaskReviewGet                 = "task.review.get"
 	ActionTaskReviewFindingUpdate       = "task.review.finding.update"
@@ -586,6 +587,7 @@ const (
 	ActionMCPListTaskSessions            = "mcp.list_task_sessions"
 	ActionMCPListPendingAgentPermissions = "mcp.list_pending_agent_permissions"
 	ActionMCPResolveAgentPermission      = "mcp.resolve_agent_permission"
+	ActionMCPReportToHandoffSource       = "mcp.report_to_handoff_source"
 )
 
 const (

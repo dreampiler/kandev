@@ -37,7 +37,7 @@ func TestDeliveryRetentionEvents(t *testing.T) {
 
 			types := []string{
 				streams.EventTypeMessageChunk,
-				streams.EventTypePermissionRequest,
+				unknownRetentionEventType,
 				streams.EventTypeMessageChunk,
 				streams.EventTypeMessageChunk,
 				streams.EventTypeMessageChunk,
@@ -103,8 +103,9 @@ func TestDeliveryRetentionEvents(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run retention batch: %v", err)
 			}
-			if result.Candidates != 5 || result.EventPayloadsPruned != 2 || result.EventRowsRetired != 1 {
-				t.Fatalf("retention result = %+v, want five projected candidates, two payloads pruned, one event retired", result)
+			// Discovery skips the unclassified event type, which the proof never compacts.
+			if result.Candidates != 4 || result.EventPayloadsPruned != 2 || result.EventRowsRetired != 1 {
+				t.Fatalf("retention result = %+v, want four projected output candidates, two payloads pruned, one event retired", result)
 			}
 
 			var payload []byte
@@ -170,6 +171,10 @@ func TestDeliveryRetentionEvents(t *testing.T) {
 		})
 	}
 }
+
+// unknownRetentionEventType is outside the retention classifier, as a type
+// added by a newer agentctl would be. It must stay intact and stop retirement.
+const unknownRetentionEventType = "future_unclassified_event"
 
 func completedRetentionEventEffect(event *models.AgentDeliveryEvent) *models.AgentDeliveryEffect {
 	completedAt := event.ReceivedAt

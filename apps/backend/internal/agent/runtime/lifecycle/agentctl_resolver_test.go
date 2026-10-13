@@ -80,8 +80,18 @@ func TestAgentctlResolverManifestDownloadsExactHelperAndReusesCache(t *testing.T
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("download requests = %d, want 1", got)
 	}
-	if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o111 == 0 {
-		t.Fatalf("cached helper mode = %v, err=%v; want executable", info, err)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat cached helper: %v", err)
+	}
+	// Windows has no execute bit; of the restored 0755 it keeps only the
+	// owner-write bit, so a cached helper that stays rewritable reports 0666.
+	if runtime.GOOS == "windows" {
+		if info.Mode().Perm() != 0o666 {
+			t.Fatalf("cached helper mode = %v; want writable 0666", info.Mode().Perm())
+		}
+	} else if info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("cached helper mode = %v; want executable", info.Mode().Perm())
 	}
 }
 
@@ -882,6 +892,9 @@ func TestAgentctlResolverLinuxAMD64BadPrimaryEnvDoesNotUseLegacyFallback(t *test
 
 func TestAgentctlResolverRemoteBinaryNotFoundErrorNamesPlatformAndEnv(t *testing.T) {
 	t.Setenv("KANDEV_AGENTCTL_DARWIN_AMD64_BINARY", "")
+	// A test process started by a Kandev agent inherits the host bundle, which
+	// may ship a real darwin helper.
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
 
 	resolver := NewAgentctlResolver(newResolverTestLogger(t))
 	_, err := resolver.ResolveRemoteBinary(SSHRemotePlatform{GOOS: "darwin", GOARCH: "amd64"})

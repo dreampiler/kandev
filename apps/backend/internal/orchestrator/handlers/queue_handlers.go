@@ -38,6 +38,7 @@ const (
 	queueErrorCodeEntryNotFound       = "entry_not_found"
 	queueErrorCodeSessionBusy         = "session_busy"
 	queueErrorCodeNotPromptable       = "session_not_promptable"
+	queueErrorCodeRecoveryRequired    = "session_recovery_required"
 	queueErrorCodeSendNowQueueEmpty   = "queue_empty"
 	queueErrorCodeSendNowQueueChanged = "queue_changed"
 	// queueErrorCodeQueueChanged is the shared "your snapshot is stale" signal

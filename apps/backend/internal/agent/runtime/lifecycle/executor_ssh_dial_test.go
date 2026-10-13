@@ -23,7 +23,7 @@ import (
 func newTestHomeDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	previousSystemConfig := sshSystemConfigPath
 	sshSystemConfigPath = filepath.Join(home, "missing-system-ssh-config")
 	t.Cleanup(func() { sshSystemConfigPath = previousSystemConfig })
@@ -818,7 +818,7 @@ Host jump-fallback
 
 func TestEffectiveSSHConfigReadsUserAndSystemFresh(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
 	}

@@ -558,5 +558,9 @@
   "profileDragStart": "已選取設定檔 {{name}}。第 {{position}} 個，共 {{total}} 個。",
   "profileDragOver": "設定檔 {{name}} 已移動到第 {{position}} 個位置，共 {{total}} 個。",
   "profileDragEnd": "設定檔 {{name}} 已放到第 {{position}} 個位置，共 {{total}} 個。",
-  "profileDragCancel": "已取消設定檔 {{name}} 的重新排序。"
+  "profileDragCancel": "已取消設定檔 {{name}} 的重新排序。",
+  "resourceCircuitsTitle": "資源暫停",
+  "releaseResourceCircuit": "解除此暫停",
+  "noResourceCircuits": "沒有暫停的資源",
+  "resourceCircuitOperationFailed": "無法讀取或解除暫停。請刷新後重試。"
 }

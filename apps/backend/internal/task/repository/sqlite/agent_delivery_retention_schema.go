@@ -18,6 +18,15 @@ const agentDeliveryEligibleIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_de
 	ON agent_delivery_inbox(projected_at, stream_id, sequence)
 	WHERE payload_pruned_at IS NULL AND projected_at IS NOT NULL`
 
+const agentDeliveryPendingSettlementIndexName = "idx_agent_delivery_effects_pending_settlement"
+const agentDeliveryPendingSettlementIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending_settlement
+	ON agent_delivery_effects(effect_type, created_at, stream_id, sequence)
+	WHERE effect_type = 'agent_delivery.terminal_settlement' AND state <> 'completed'`
+
+// agentDeliveryLegacyPendingIndexName indexed every effect row by type and age
+// to serve the same scan; the partial pending-settlement index replaces it.
+const agentDeliveryLegacyPendingIndexName = "idx_agent_delivery_effects_pending"
+
 const agentDeliveryOwnershipIndexName = "idx_agent_delivery_effects_retirement"
 const agentDeliveryOwnershipIndexQuery = `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_retirement
 	ON agent_delivery_effects(session_id, incarnation_id) WHERE session_id <> ''`
@@ -113,9 +122,11 @@ var agentDeliveryRetentionIndexes = []struct {
 		query: agentDeliveryOwnedOrderedIndexQuery,
 	},
 	{
-		name: "idx_agent_delivery_effects_pending",
-		query: `CREATE INDEX IF NOT EXISTS idx_agent_delivery_effects_pending
-			ON agent_delivery_effects(effect_type, created_at, stream_id, sequence)`,
+		// Unsettled terminal settlements are the only rows the pending
+		// settlement scan reads; a partial index keeps it O(pending) instead of
+		// O(lifetime turns) without indexing every completed receipt.
+		name:  agentDeliveryPendingSettlementIndexName,
+		query: agentDeliveryPendingSettlementIndexQuery,
 	},
 	{
 		name: "idx_agent_delivery_terminal_lookup",
@@ -180,6 +191,10 @@ func (r *Repository) initAgentDeliveryRetentionSchema() error {
 		return err
 	}
 	if err := r.upgradeAgentDeliveryUnprojectedIndex(); err != nil {
+		return err
+	}
+	if err := r.migrate.Apply("agent_delivery_retention.index.drop."+agentDeliveryLegacyPendingIndexName,
+		"DROP INDEX IF EXISTS "+agentDeliveryLegacyPendingIndexName); err != nil {
 		return err
 	}
 	for _, index := range agentDeliveryRetentionIndexes {

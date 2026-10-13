@@ -55,22 +55,22 @@ func NewACPInferenceExecutor(logger *zap.Logger) *ACPInferenceExecutor {
 // Execute runs a one-shot prompt using the ACP protocol.
 func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) (*PromptResponse, error) {
 	if req.InferenceConfig == nil {
-		return &PromptResponse{Success: false, Error: "inference config is required"}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: "inference config is required"}, nil
 	}
 
 	cfg := req.InferenceConfig
 	if len(cfg.Command) == 0 {
-		return &PromptResponse{Success: false, Error: "inference command is empty"}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: "inference command is empty"}, nil
 	}
 
 	workDir := cfg.WorkDir
 	if workDir == "" {
-		return &PromptResponse{Success: false, Error: "work_dir is required for ACP inference"}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: "work_dir is required for ACP inference"}, nil
 	}
 	model, modelConfigOptions, _ := acpcompat.MigrateCursorModel(req.AgentID, req.Model, nil)
 	resolvedCmd, cmdErr := resolveSpawnCommand(cfg)
 	if cmdErr != "" {
-		return &PromptResponse{Success: false, Error: cmdErr}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: cmdErr}, nil
 	}
 
 	startTime := time.Now()
@@ -87,14 +87,14 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 		args = append(append([]string{}, cfg.CommandPrefix...), args...)
 		resolvedCmd = resolveACPCommandPrefix(args[0])
 		if resolvedCmd == "" {
-			return &PromptResponse{Success: false, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
+			return &PromptResponse{Success: false, LaunchFailed: true, Error: fmt.Sprintf("command prefix %q is not an allowed ACP command", args[0])}, nil
 		}
 		cmdArgs = args[1:]
 	}
 	cmdArgs = append(cmdArgs, cfg.CLIFlags...)
 	env := sanitizeEnvForAgent(req.InferenceConfig)
 	if err := managedruntime.PrepareNPMProjectPrefix(cmdArgs); err != nil {
-		return &PromptResponse{Success: false, Error: "managed npm project prefix could not be prepared"}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: "managed npm project prefix could not be prepared"}, nil
 	}
 	// Use resolvedCmd (not args[0]) so the executable name the taint tracker
 	// sees is an allow-list literal, a validated command prefix, or the
@@ -112,16 +112,16 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: fmt.Sprintf("stdin pipe: %v", err)}, nil
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: fmt.Sprintf("stdout pipe: %v", err)}, nil
 	}
 
 	if err := cmd.Start(); err != nil {
-		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
+		return &PromptResponse{Success: false, LaunchFailed: true, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
 	lifecycle, err := installACPCommandLifecycle(cmd)
 	if err != nil {
@@ -144,9 +144,10 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 			zap.Error(err),
 			zap.String("stderr", stderr.tail()))
 		return &PromptResponse{
-			Success:    false,
-			Error:      withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
-			DurationMs: int(time.Since(startTime).Milliseconds()),
+			Success:      false,
+			LaunchFailed: errors.Is(err, ErrLaunchUnavailable),
+			Error:        withUpstreamHint(err, cfg.ProviderGatewayAuth, stderr.tail()),
+			DurationMs:   int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
 
@@ -1447,6 +1448,9 @@ func describeACPFailure(ctx context.Context, phase string, err error) error {
 	case errors.Is(ctx.Err(), context.Canceled):
 		return fmt.Errorf("ACP %s cancelled: %w", phase, ctx.Err())
 	default:
+		if phase == "initialize" || phase == "session/new" {
+			return fmt.Errorf("%w: ACP %s failed: %w", ErrLaunchUnavailable, phase, err)
+		}
 		return fmt.Errorf("ACP %s failed: %w", phase, err)
 	}
 }

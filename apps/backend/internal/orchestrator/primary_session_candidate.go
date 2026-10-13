@@ -6,11 +6,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// primaryCandidateRank orders sessions for an automatic primary promotion.
-// The ranking is deliberately preference-only: an unmatched session still wins
-// when nothing matches, because a task with no primary at all strands its queue
-// and its session list, which is a worse outcome than promoting a session the
-// workflow has merely moved past.
+// primaryCandidateRank orders sessions after removal of the primary.
+// Removal uses this preference ordering when the former primary no longer
+// exists. Terminal-state promotion instead requires a current-profile successor.
 type primaryCandidateRank int
 
 const (
@@ -40,10 +38,9 @@ func sessionStatePreference(state models.TaskSessionState) int {
 }
 
 // workflowCompatibleSession reports whether a session's profile equals the
-// current workflow step's effective profile. A task with no step, an
-// unresolvable step, or a step without its own profile imposes no constraint,
-// and neither does a dynamic profile whose concrete resolution is chosen at
-// launch: an unmatched session stays eligible, it merely ranks lower.
+// current workflow step's effective profile. A task with no step or a
+// step without its own profile imposes no constraint. Dynamic profiles are
+// compared by logical identity; execution candidates do not define ownership.
 func workflowCompatibleSession(
 	task *models.Task, session *models.TaskSession, effectiveProfileID string,
 ) bool {
@@ -59,27 +56,26 @@ func workflowCompatibleSession(
 // effectiveWorkflowProfileForTask resolves the profile the task's current step
 // expects, or "" when the task is not workflow-owned or the step declares no
 // profile of its own.
-func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *models.Task) string {
-	if task == nil || task.WorkflowStepID == "" || s.workflowStepGetter == nil {
-		return ""
+func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *models.Task) (string, bool) {
+	if task == nil || task.WorkflowStepID == "" {
+		return "", true
+	}
+	if s.workflowStepGetter == nil {
+		return "", false
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || step == nil {
-		return ""
+		return "", false
 	}
-	return s.resolveStepAgentProfileForTask(ctx, task, step)
+	return s.resolveStepAgentProfileForTask(ctx, task, step), true
 }
 
 // bestPrimarySessionCandidate returns the session an automatic promotion should
 // take, or "" when no eligible session remains.
 //
-// activeOnly preserves each caller's prior eligibility. maybePromotePrimary
-// passes true, so it keeps its historical rule that only a RUNNING or otherwise
-// active session can inherit the primary role: an IDLE session is the case the
-// reported incident turned on, and promoting one would hand it the queue.
-// promoteNextPrimaryAfterRemoval passes false, so it falls back to any
-// non-terminal session, which is still narrower than its previous behaviour of
-// accepting a completed one.
+// Terminal-state promotion requires a newest same-profile active successor.
+// Removal can fall back to any nonterminal session once the former primary
+// no longer exists.
 //
 // Terminal sessions are never candidates under either rule: a completed
 // predecessor cannot answer for the task.
@@ -90,7 +86,13 @@ func (s *Service) bestPrimarySessionCandidate(
 	if err != nil {
 		task = nil
 	}
-	effectiveProfileID := s.effectiveWorkflowProfileForTask(ctx, task)
+	effectiveProfileID, profileKnown := s.effectiveWorkflowProfileForTask(ctx, task)
+	if activeOnly {
+		if !profileKnown {
+			return ""
+		}
+		return currentProfilePrimarySuccessor(task, sessions, excludeSessionID, effectiveProfileID)
+	}
 
 	var (
 		bestSession *models.TaskSession
@@ -102,9 +104,6 @@ func (s *Service) bestPrimarySessionCandidate(
 			continue
 		}
 		if isTerminalSessionState(session.State) {
-			continue
-		}
-		if activeOnly && !isActiveSessionState(session.State) {
 			continue
 		}
 		rank := primaryCandidateOther
@@ -122,4 +121,49 @@ func (s *Service) bestPrimarySessionCandidate(
 		return ""
 	}
 	return bestSession.ID
+}
+
+// currentProfilePrimarySuccessor keeps the logical profile and never moves
+// primary ownership backwards to an older conversation. The newest same-profile
+// session is authoritative even when terminal or parked; an older live runtime
+// must not reclaim work from its replacement.
+func currentProfilePrimarySuccessor(
+	task *models.Task, sessions []*models.TaskSession, stoppedID, effectiveProfileID string,
+) string {
+	if task == nil {
+		return ""
+	}
+	var stopped *models.TaskSession
+	for _, session := range sessions {
+		if session != nil && session.ID == stoppedID {
+			stopped = session
+			break
+		}
+	}
+	if stopped == nil || stopped.AgentProfileID == "" ||
+		!workflowCompatibleSession(task, stopped, effectiveProfileID) {
+		return ""
+	}
+	newest := newestSameProfileSession(sessions, stopped)
+	if newest.ID == stoppedID || !isActiveSessionState(newest.State) {
+		return ""
+	}
+	if _, parked := models.LoadWorkflowParking(newest.Metadata); parked {
+		return ""
+	}
+	return newest.ID
+}
+
+func newestSameProfileSession(sessions []*models.TaskSession, stopped *models.TaskSession) *models.TaskSession {
+	newest := stopped
+	for _, session := range sessions {
+		if session == nil || session.AgentProfileID != stopped.AgentProfileID {
+			continue
+		}
+		if session.StartedAt.After(newest.StartedAt) ||
+			(session.StartedAt.Equal(newest.StartedAt) && sessionStatePreference(session.State) > sessionStatePreference(newest.State)) {
+			newest = session
+		}
+	}
+	return newest
 }

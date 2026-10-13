@@ -746,8 +746,8 @@ type LaunchOptions struct {
 	// DeliverySubmissionID binds a persisted direct first message to the
 	// initial agentctl prompt.
 	DeliverySubmissionID string
-	// BeforeAgentStart admits durable first-prompt state after the execution
-	// exists and before any harness prompt can be dispatched.
+	// BeforeAgentStart binds the first-prompt identity after the execution
+	// exists. Final payload admission runs after runtime preparation.
 	BeforeAgentStart func(context.Context, string, string) error
 	// OnExecutionAdmitted runs after the launch path has identified and
 	// persisted the execution that will receive this turn, but before its
@@ -759,7 +759,7 @@ type LaunchOptions struct {
 	// closes that ownership when delivery fails before acceptance.
 	OnInitialPromptAccepted     func(executionID string)
 	OnInitialPromptFailed       func()
-	BeforeInitialPromptDispatch func(executionID string) error
+	BeforeInitialPromptDispatch func(context.Context, string, string, []v1.MessageAttachment) error
 	Prompt                      string
 	PriorACPSession             string // ACP session ID to resume for the same concrete profile
 	WorkflowStepID              string
@@ -1108,6 +1108,11 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 	canvasesEnabled   bool
+
+	// officeCrossWorkspace adds the Office cross-workspace MCP capabilities
+	// to task profiles whose workspace takes part in the opt-in setting. nil
+	// (the default) adds none.
+	officeCrossWorkspace OfficeCrossWorkspaceLookup
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed
@@ -1491,6 +1496,24 @@ func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
 // before any new agent session is launched.
 func (e *Executor) SetCanvasesEnabled(enabled bool) {
 	e.canvasesEnabled = enabled
+}
+
+// OfficeCrossWorkspaceLookup reports a workspace's part in the Office
+// cross-workspace access setting when a session's MCP profile is built. The
+// backend re-decides reach on every tool call; this only decides which tools
+// a session advertises.
+type OfficeCrossWorkspaceLookup interface {
+	// Enabled reports whether an Office workspace turned the setting on.
+	Enabled(ctx context.Context, workspaceID string) bool
+	// ReceivesHandoffReports reports whether an Office workspace with the
+	// setting on reaches workspaceID.
+	ReceivesHandoffReports(ctx context.Context, workspaceID string) bool
+}
+
+// SetOfficeCrossWorkspaceLookup wires the Office cross-workspace access
+// setting into task MCP profiles.
+func (e *Executor) SetOfficeCrossWorkspaceLookup(lookup OfficeCrossWorkspaceLookup) {
+	e.officeCrossWorkspace = lookup
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

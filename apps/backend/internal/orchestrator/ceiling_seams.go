@@ -38,6 +38,17 @@ func originFromAutoStart(autoStart bool) launchOrigin {
 	return launchOriginManual
 }
 
+// ceilingLaunchOrigin selects the class the admission controller uses. A
+// server-classified automatic launch (automatic=true) is admitted as automatic
+// whatever its creation authority, so an agent/MCP-initiated launch cannot ride
+// the manual override past the session ceiling or the host-memory guard.
+func ceilingLaunchOrigin(base launchOrigin, automatic bool) launchOrigin {
+	if automatic {
+		return launchOriginAutomatic
+	}
+	return base
+}
+
 // seam1Reservation tracks the launch-scoped admission reservation seam 1 takes
 // before a session exists (AC-6a). Every return path releases it, by
 // deferring releaseIfNotConsumed at the point of admission, until the launch
@@ -155,6 +166,11 @@ func seam1StartPayload(
 	attachments []v1.MessageAttachment,
 	opts startTaskOptions,
 ) map[string]interface{} {
+	origin := opts.Origin
+	if origin == "" {
+		origin = originFromAutoStart(autoStart)
+	}
+	origin = ceilingLaunchOrigin(origin, opts.Automatic)
 	payload := map[string]interface{}{
 		metaKeyAgentProfileID:    agentProfileID,
 		"executor_id":            executorID,
@@ -171,7 +187,7 @@ func seam1StartPayload(
 		"additional_skill_slugs": opts.AdditionalSkillSlugs,
 		"entry_options":          opts.EntryOptions,
 		"workflow_entry_id":      opts.WorkflowEntryID,
-		"origin":                 string(opts.Origin),
+		"origin":                 string(origin),
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{
@@ -184,7 +200,7 @@ func seam1StartPayload(
 		payload[models.CeilingLaunchEntryBindingKey] = ceilingEntryBindingValue(*opts.ceilingEntryBinding)
 	}
 	if opts.AutomationRun != nil {
-		payload[ceilingPayloadAutomationRunKey] = opts.AutomationRun
+		payload[ceilingPayloadAutomationRunKey] = automationRunForCeilingPayload(opts.AutomationRun)
 	}
 	return payload
 }

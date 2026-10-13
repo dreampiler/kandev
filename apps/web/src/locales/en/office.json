@@ -1220,5 +1220,14 @@
   "overviewReasonSessionEnded": "The receiving session has ended",
   "overviewUsageStaleObserved": "Last-known value, read {{relative}}",
   "overviewUsageObserved": "Observed while the agent ran, {{relative}}",
-  "overviewUsageMeasuredCall": "Measured via minimal invocation, {{relative}}"
+  "overviewUsageMeasuredCall": "Measured via minimal invocation, {{relative}}",
+  "crossWorkspaceAccess": "Cross-workspace access",
+  "crossWorkspaceAccessToggle": "Let Office agents work with other workspaces",
+  "crossWorkspaceAccessDescription": "When on, agents in this Office workspace can read tasks, sessions, plans and conversations in other workspaces and send messages to their tasks. Stopping, moving and reprioritizing tasks stay with each workspace's coordinator. Off by default.",
+  "crossWorkspaceReachableWorkspaces": "Reachable workspaces",
+  "crossWorkspaceReachableHint": "Leave every box unchecked to allow all workspaces you can read. Add a coordinator task ID to tell Office agents which task to message there.",
+  "crossWorkspaceCoordinatorPlaceholder": "Coordinator task ID (optional)",
+  "crossWorkspaceCoordinatorTask": "Coordinator task ID for {{workspace}}",
+  "crossWorkspaceNoOtherWorkspaces": "There are no other workspaces yet.",
+  "crossWorkspaceSettingsSaved": "Cross-workspace access saved"
 }

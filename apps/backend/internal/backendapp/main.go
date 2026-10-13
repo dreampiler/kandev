@@ -1192,6 +1192,7 @@ func startGatewayAndServe(
 	})
 	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
+	hostUtilityMgr.SetUtilityLaunchResolvers(lifecycleMgr.ResolveUtilityEnvironment, lifecycleMgr.ResolveHostUtilityCommand)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.
@@ -1500,13 +1501,11 @@ func startGatewayAndServe(
 	// editor and a real selection answer from the same evidence including a
 	// paused binding. The resolver is the same instance routing uses, so a
 	// candidate's binding key resolves identically on both paths.
-	previewSnapshot := newDynamicUsageSnapshot(services.UsageAdapter, repos.Task, time.Now).
-		WithInternalUsage(newAccountUsageReader(services.UsageAdapter, repos.Task)).
-		WithSelectionHistory(routeSelectionHistory{repo: repos.Task})
-	if services.DynamicProfileResolver != nil {
-		previewSnapshot.WithPreviewHealth(services.DynamicProfileResolver)
-	}
+	previewSnapshot := newDynamicSelectionPreview(services, repos.Task)
 	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
+	if services.DynamicProfileResolver != nil {
+		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+	}
 	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
 	agentSettingsController.SetProviderLimitService(newProviderLimitService(
 		repos.Task, repos.AgentSettings,
@@ -1732,10 +1731,13 @@ func constructOfficeServices(
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is
 	// constructed and started before the Office early return.
-	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
+	usageWriter, err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup)
+	if err != nil {
 		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
 		return nil, false
 	}
+	services.UsageWriter = usageWriter
+	services.Pricing = pricingLookup
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
@@ -1786,6 +1788,7 @@ func constructOfficeServices(
 		)
 	}
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
+	wireOfficeCrossWorkspace(services, orchestratorSvc, eventBus, log)
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written
 	// to disk by EnsureBundledSkills above) into office_skills as
@@ -2872,6 +2875,10 @@ func buildOfficeFeatureServices(
 		services.Office.SetPauseGate(pauseSvc)
 		pauseSvc.SetAssignmentReplayer(services.Office)
 	}
+	crossWorkspaceSvc := buildOfficeCrossWorkspaceService(repo, taskRepo, dashboardSvc, services, log)
+	if crossWorkspaceSvc != nil {
+		dashboardSvc.SetCrossWorkspaceSettings(crossWorkspaceSvc)
+	}
 
 	return &office.Services{
 		Agents:       agentSvc,
@@ -2894,6 +2901,8 @@ func buildOfficeFeatureServices(
 		Repo:         repo,
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,
+
+		CrossWorkspace: crossWorkspaceSvc,
 	}
 }
 

@@ -5,6 +5,7 @@ import type {
   ContinuationPolicy,
   ManagedConversationDestination,
   RepositoryMode,
+  RetryPolicy,
   TaskMode,
   TriggerType,
   UpdateAutomationRequest,
@@ -15,30 +16,58 @@ import {
   type RepositorySelection,
 } from "./automation-repository-selection";
 
-// Shared form state + pending trigger types used by the editor and its
-// save handler. Lifted out of automation-editor.tsx so the editor stays
-// under the file-length lint cap.
+// Managed conversations do not expose retry policy controls. Keep their wire
+// value canonical even when an older saved record hydrates an enabled policy.
+export const DEFAULT_RETRY_POLICY: RetryPolicy = {
+  mode: "disabled",
+  max_retries: "0",
+  delay_seconds: "0",
+  backoff: "fixed",
+  history_mode: "attempts",
+};
+// Shared form state and pending trigger types keep the editor and save handler
+// aligned while keeping automation-editor.tsx under its file-length limit.
 
 export type FormState = {
   name: string;
   description: string;
   workflowId: string;
   workflowStepId: string;
+  parentTaskId: string;
   agentProfileId: string;
   executorProfileId: string;
   taskMode: TaskMode;
   managedDestination?: ManagedConversationDestination;
   repositoryMode: RepositoryMode;
-  // repositorySelections captures an ordered list of registered workspace
-  // repos (id), discovered local repos (path — registered at save time to
-  // obtain an id), or an empty list for repo-less automations.
   repositorySelections: RepositorySelection[];
   prompt: string;
   taskTitleTemplate: string;
   enabled: boolean;
   maxConcurrentRuns: number;
   continuationPolicy: ContinuationPolicy;
+  retryPolicy: RetryPolicy;
 };
+
+export function retryPolicyAfterModeChange(
+  policy: RetryPolicy,
+  mode: RetryPolicy["mode"],
+): RetryPolicy {
+  const maxRetries = Number(policy.max_retries);
+  return {
+    ...policy,
+    mode,
+    ...(mode === "finite" && (!Number.isSafeInteger(maxRetries) || maxRetries < 1)
+      ? { max_retries: "1" }
+      : {}),
+  };
+}
+
+export function normalizeRetryPolicyForTaskMode(
+  taskMode: TaskMode,
+  policy: RetryPolicy,
+): RetryPolicy {
+  return taskMode === "managed_conversation" ? DEFAULT_RETRY_POLICY : policy;
+}
 
 export type PendingTrigger = {
   tempId: string;
@@ -152,6 +181,7 @@ async function resolveOneRepositoryId(
   return created.id;
 }
 
+// The save boundary carries decimal strings without number coercion.
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
@@ -161,13 +191,11 @@ export function buildCreatePayload(
   // i18n-exempt: persisted automation name. See the comment below.
   return {
     workspace_id: workspaceId,
-    // Persisted as the automation's name — user data, so it stays English
-    // rather than writing a locale-dependent value into the record. (Unreachable
-    // in practice: canSave requires a non-empty name.)
     name: form.name || "New Automation",
     description: form.description,
     workflow_id: form.workflowId,
     workflow_step_id: "",
+    parent_task_id: form.parentTaskId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
@@ -180,7 +208,12 @@ export function buildCreatePayload(
     task_title_template: form.taskTitleTemplate,
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
-    triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
+    triggers: pending.map((trigger) => ({
+      type: trigger.type,
+      config: trigger.config,
+      enabled: trigger.enabled,
+    })),
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
   };
 }
 
@@ -193,6 +226,7 @@ export function buildUpdatePayload(
     description: form.description,
     workflow_id: form.workflowId,
     workflow_step_id: "",
+    parent_task_id: form.parentTaskId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
     task_mode: form.taskMode,
@@ -206,6 +240,7 @@ export function buildUpdatePayload(
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
     continuation_policy: form.continuationPolicy,
+    retry_policy: normalizeRetryPolicyForTaskMode(form.taskMode, form.retryPolicy),
   };
 }
 

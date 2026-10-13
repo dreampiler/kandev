@@ -59,11 +59,27 @@ var redactions = append(append([]redaction{
 	literalRedaction(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`, "$1$2"),
 	literalRedaction(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`, "[redacted-id]"),
 }, credentialRedactions...), []redaction{
-	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
-	literalRedaction(`/Users/[^/\s]+/`, "/Users/<redacted>/"),
-	literalRedaction(`/home/[^/\s]+/`, "/home/<redacted>/"),
-	redactLocalPaths,
+	redactOpaqueRunsAndPaths,
 }...)
+
+var (
+	opaqueRunPattern = regexp.MustCompile(`[A-Za-z0-9+/=_-]{32,}`)
+	usersHomePattern = regexp.MustCompile(`/Users/[^/\s]+/`)
+	homeDirPattern   = regexp.MustCompile(`/home/[^/\s]+/`)
+)
+
+// redactOpaqueRunsAndPaths applies the opaque-run catch-all, home-path
+// normalization and local-path collapse while keeping the provider wording a
+// routing decision needs. Credentials were already masked by the earlier
+// rules; what this pass protects carries no account or workspace identifier.
+func redactOpaqueRunsAndPaths(s string) string {
+	masked, kept := maskProtectedTokens(s)
+	masked = opaqueRunPattern.ReplaceAllString(masked, redactionMask)
+	masked = usersHomePattern.ReplaceAllString(masked, "/Users/<redacted>/")
+	masked = homeDirPattern.ReplaceAllString(masked, "/home/<redacted>/")
+	masked = redactLocalPathsMasked(masked)
+	return unmaskProtectedTokens(masked, kept)
+}
 
 // credentialAssignmentKey matches a password/secret/token/api-key field name
 // plus its `:`/`=` separator, but not the value: the value is consumed
@@ -328,51 +344,54 @@ var (
 // "blocked until 10/7/2026" otherwise loses its date to [path-redacted]. Dates
 // carry no account or workspace identifier, so they are masked out of the path
 // pass and restored afterwards.
-var dateTokenPattern = regexp.MustCompile(`\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b`)
+//
+// limitReasonTokenPattern matches the reason code a gateway appends to a rate
+// limit notice: OpenRouter's account-wide "free-models-per-day" (and its
+// 32-character "-high-balance" variant, which the opaque-run catch-all would
+// otherwise turn into "***") and the per-model "limit_rpd/<model>" form, whose
+// model path the path pass would otherwise collapse. Routing decides how far a
+// limit reaches from this code, and it names a public model, never an account.
+// The model part is lowercase-only so a mixed-case opaque value cannot ride on
+// the prefix.
+var (
+	dateTokenPattern        = regexp.MustCompile(`\b(?:\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4})\b`)
+	limitReasonTokenPattern = regexp.MustCompile(`\b(?:free-models-per-(?:day|min)(?:-high-balance)?|limit_rp[dm]/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*(?::[a-z]+)?)`)
+)
 
-// dateMaskPrefix builds a mask token no other redaction rule can match: it
+// protectedTokenMask builds a mask token no other redaction rule can match: it
 // carries no '/', ':' or 32-plus-character run, so the path, assignment and
 // opaque-id passes all leave it untouched.
-func dateMaskPrefix(index int) string { return "kandevdatemask" + strconv.Itoa(index) + "x" }
+func protectedTokenMask(index int) string { return "kandevkeepmask" + strconv.Itoa(index) + "x" }
 
-var dateMaskPattern = regexp.MustCompile(`kandevdatemask(\d+)x`)
+var protectedMaskPattern = regexp.MustCompile(`kandevkeepmask(\d+)x`)
 
-// maskDateTokens replaces every date with a positional mask token and returns
-// the original dates in the same order.
-func maskDateTokens(s string) (string, []string) {
-	dates := dateTokenPattern.FindAllString(s, -1)
-	if len(dates) == 0 {
-		return s, nil
+// maskProtectedTokens replaces every date and limit reason code with a
+// positional mask token and returns the originals in the same order.
+func maskProtectedTokens(s string) (string, []string) {
+	var kept []string
+	for _, pattern := range []*regexp.Regexp{dateTokenPattern, limitReasonTokenPattern} {
+		s = pattern.ReplaceAllStringFunc(s, func(token string) string {
+			kept = append(kept, token)
+			return protectedTokenMask(len(kept) - 1)
+		})
 	}
-	index := 0
-	masked := dateTokenPattern.ReplaceAllStringFunc(s, func(string) string {
-		token := dateMaskPrefix(index)
-		index++
-		return token
-	})
-	return masked, dates
+	return s, kept
 }
 
-// unmaskDateTokens restores the masked dates. A token that no longer resolves
-// (for example one left by a truncated excerpt) is left in place: it exposes
-// nothing, and dropping it would corrupt unrelated text.
-func unmaskDateTokens(s string, dates []string) string {
-	if len(dates) == 0 {
+// unmaskProtectedTokens restores the masked tokens. A token that no longer
+// resolves (for example one left by a truncated excerpt) is left in place: it
+// exposes nothing, and dropping it would corrupt unrelated text.
+func unmaskProtectedTokens(s string, kept []string) string {
+	if len(kept) == 0 {
 		return s
 	}
-	return dateMaskPattern.ReplaceAllStringFunc(s, func(token string) string {
-		index, err := strconv.Atoi(dateMaskPattern.FindStringSubmatch(token)[1])
-		if err != nil || index < 0 || index >= len(dates) {
+	return protectedMaskPattern.ReplaceAllStringFunc(s, func(token string) string {
+		index, err := strconv.Atoi(protectedMaskPattern.FindStringSubmatch(token)[1])
+		if err != nil || index < 0 || index >= len(kept) {
 			return token
 		}
-		return dates[index]
+		return kept[index]
 	})
-}
-
-func redactLocalPaths(s string) string {
-	masked, dates := maskDateTokens(s)
-	s = redactLocalPathsMasked(masked)
-	return unmaskDateTokens(s, dates)
 }
 
 func redactLocalPathsMasked(s string) string {

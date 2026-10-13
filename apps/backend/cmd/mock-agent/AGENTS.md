@@ -57,6 +57,8 @@ reached the ACP agent.
 native session. Use it when a recovery fixture must avoid the automatic
 session-open resume path; remove the variable before the recovery attempt.
 
+`/provider-failure:<model>:<unavailable|header-timeout>` (`provider_failure_by_model.go`) fails every prompt of a session running `<model>` with a provider error and lets sessions on any other model answer. The command is matched anywhere in the prompt, so it survives the continuation package a dynamic profile appends; use it to watch a dynamic profile skip one model and its other routes.
+
 `/transport-lost[:N]` (`handler.go: handleTransportLost`) follows the same shape for the ACP wire-level transport-death signature (`peer disconnected before response` — the acp-go-sdk's own `ErrPeerDisconnected` payload shape), carried only in the error's `Data` the same way the SDK itself constructs it. The generic prompt-error projection classifies on `Message` alone, so `routingerr`'s `acp.transport_lost.v1` rule never sees it here: the failure presents as terminal and exposes manual recovery on the first occurrence, not the short-retry ladder. `N` still controls how many consecutive prompts fail before the mock recovers, but no automatic retry drives through them on this command.
 
 ## Emitter helpers worth knowing

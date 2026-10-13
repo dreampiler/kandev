@@ -226,6 +226,9 @@ func (r *Repository) createExtensionTables() error {
 	if err := r.createWorkspaceGovernanceTable(); err != nil {
 		return err
 	}
+	if err := r.createWorkspaceCrossAccessTable(); err != nil {
+		return err
+	}
 	if err := r.createContinuationSummaryTable(); err != nil {
 		return err
 	}

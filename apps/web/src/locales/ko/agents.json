@@ -558,5 +558,9 @@
   "profileDragStart": "프로필 {{name}}을 선택했습니다. {{total}}개 중 {{position}}번째입니다.",
   "profileDragOver": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치로 이동했습니다.",
   "profileDragEnd": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치에 놓았습니다.",
-  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다."
+  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다.",
+  "resourceCircuitsTitle": "리소스 차단",
+  "releaseResourceCircuit": "이 차단 해제",
+  "noResourceCircuits": "차단된 리소스 없음",
+  "resourceCircuitOperationFailed": "차단을 읽거나 해제하지 못했습니다. 새로고침 후 다시 시도하세요."
 }

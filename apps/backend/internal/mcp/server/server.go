@@ -1224,6 +1224,7 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "rich-output", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRichOutputTool() }},
 		{name: "walkthrough", enabled: kanban, register: func(s *Server) { s.registerWalkthroughTools() }},
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
+		{name: "review-source", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) || external(ctx) }, register: func(s *Server) { s.registerReviewSourceTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
@@ -1235,6 +1236,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "task-title", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityTaskTitle)), register: func(s *Server) { s.registerSetTaskTitleTool() }},
 		{name: "diagnostics", enabled: kanban, register: func(s *Server) { s.registerDiagnosticBundleTool() }},
 		{name: "canvas-authoring", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityCanvas)), register: func(s *Server) { s.registerCanvasTools() }},
+		{name: "office-cross-workspace", enabled: andProfilePredicates(office, capabilityEnabled(mcpprofile.CapabilityOfficeCrossWorkspace)), register: func(s *Server) { s.registerOfficeCrossWorkspaceTools() }},
+		{name: "office-handoff-report", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityOfficeHandoffReport)), register: func(s *Server) { s.registerHandoffReportTool() }},
 	}
 }
 
@@ -1360,34 +1363,10 @@ func (s *Server) registerKanbanTools() {
 	// includes "properties": {}. The default ToolInputSchema type in mcp-go uses
 	// omitempty which drops empty properties maps, causing OpenAI API validation
 	// errors ("object schema missing properties").
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("list_workspaces_kandev",
-			"List all workspaces. Use this first to get workspace IDs.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflows_kandev",
-			mcp.WithDescription("List all workflows in a workspace. Omit workspace_id to list the workflows of the current task's own workspace."),
-			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Optional: defaults to the current task's workspace. Use list_workspaces_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_workflow_steps_kandev",
-			mcp.WithDescription("List all workflow steps in a workflow. Omit workflow_id to list the steps of the current task's own workflow."),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("list_tasks_kandev",
-			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
-			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
-		),
-		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
-	)
+	s.registerListWorkspacesTool()
+	s.registerListWorkflowsTool()
+	s.registerListWorkflowStepsTool()
+	s.registerListTasksTool()
 	s.registerCreateTaskTool()
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("list_agents_kandev",
@@ -1410,6 +1389,7 @@ func (s *Server) registerKanbanTools() {
 			mcp.WithString("title", mcp.MaxLength(taskcontract.TaskTitleMaxLength), mcp.Description("New concise task title (maximum 60 characters)")),
 			mcp.WithString("description", mcp.Description("New description")),
 			mcp.WithString("state", mcp.Description("New state: not_started, in_progress, etc.")),
+			mcp.WithString(taskPriorityArg, mcp.Enum(taskcontract.TaskPriorityValues()...), mcp.Description(updateTaskPriorityParamDesc)),
 			mcp.WithString("deferred_launch_prompt", mcp.Description("Replace the prompt a not-yet-started task will launch with. Only valid for a task created with blocked_by (+ start_agent), whose launch is still waiting on its dependencies — use it to refresh a brief that went stale while the chain ran. Rejected once the task has started; send new context with message_task_kandev instead. When this is rejected, no other field in the same call is applied.")),
 		),
 		s.wrapHandler("update_task_kandev", s.updateTaskHandler()),
@@ -1448,6 +1428,64 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
+	s.registerMessageTaskTool()
+	s.mcpServer.AddTool(
+		mcp.NewTool("stop_task_kandev",
+			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
+			mcp.WithReadOnlyHintAnnotation(false),
+			mcp.WithDestructiveHintAnnotation(true),
+			mcp.WithIdempotentHintAnnotation(true),
+			mcp.WithOpenWorldHintAnnotation(false),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
+		),
+		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
+	)
+	s.registerSpawnSessionTool()
+	s.registerGetTaskConversationTool()
+	s.registerListTaskSessionsTool()
+}
+
+func (s *Server) registerListWorkspacesTool() {
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("list_workspaces_kandev",
+			"List all workspaces. Use this first to get workspace IDs.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("list_workspaces_kandev", s.listWorkspacesHandler()),
+	)
+}
+
+func (s *Server) registerListWorkflowsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_workflows_kandev",
+			mcp.WithDescription("List all workflows in a workspace. Omit workspace_id to list the workflows of the current task's own workspace."),
+			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Optional: defaults to the current task's workspace. Use list_workspaces_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_workflows_kandev", s.listWorkflowsHandler()),
+	)
+}
+
+func (s *Server) registerListWorkflowStepsTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_workflow_steps_kandev",
+			mcp.WithDescription("List all workflow steps in a workflow. Omit workflow_id to list the steps of the current task's own workflow."),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_workflow_steps_kandev", s.listWorkflowStepsHandler()),
+	)
+}
+
+func (s *Server) registerListTasksTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("list_tasks_kandev",
+			mcp.WithDescription("List all tasks in a workflow. Each task includes its associated GitHub pull requests (number, url, title, state) under the \"prs\" field when any exist — use the PR state (open/closed/merged) to find tasks whose work has landed."),
+			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Optional: defaults to the current task's workflow. Use list_workflows_kandev to pick another one.")),
+		),
+		s.wrapHandler("list_tasks_kandev", s.listTasksHandler()),
+	)
+}
+
+func (s *Server) registerMessageTaskTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
 			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question, and operation_id to name a send. Returns "queued", "sent", or "started".`),
@@ -1464,18 +1502,9 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("stop_task_kandev",
-			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),
-			mcp.WithReadOnlyHintAnnotation(false),
-			mcp.WithDestructiveHintAnnotation(true),
-			mcp.WithIdempotentHintAnnotation(true),
-			mcp.WithOpenWorldHintAnnotation(false),
-			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
-		),
-		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
-	)
-	s.registerSpawnSessionTool()
+}
+
+func (s *Server) registerGetTaskConversationTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",
 			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
@@ -1489,7 +1518,6 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
 	)
-	s.registerListTaskSessionsTool()
 }
 
 func (s *Server) registerPRAutomationTools() {
@@ -1623,6 +1651,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
+			mcp.WithString(taskPriorityArg, mcp.Enum(taskcontract.TaskPriorityValues()...), mcp.Description(createTaskPriorityParamDesc)),
 			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
@@ -1638,6 +1667,19 @@ func (s *Server) registerCreateTaskTool() {
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
 	)
 }
+
+// Task priority parameter descriptions. The urgency guidance is shared so the
+// create and update tools cannot drift: a controller that raises an existing
+// task and one that creates an urgent task must read the same rule.
+const (
+	taskPriorityGuidance = "Priority orders queued work: critical first, then high, medium, low. " +
+		"Use critical only for the owner's direct orders, outages or operational blockers, or work that blocks other work; " +
+		"leave everything else at medium (or high/low when it clearly differs)."
+
+	createTaskPriorityParamDesc = "Task priority: critical, high, medium, or low. Omit it for the default, medium. " + taskPriorityGuidance
+
+	updateTaskPriorityParamDesc = "New task priority: critical, high, medium, or low. Omit it to leave the priority unchanged. " + taskPriorityGuidance
+)
 
 // Dependency parameter descriptions for create_task_kandev. Extracted as
 // constants because the same guidance has to appear on the two dependency tools

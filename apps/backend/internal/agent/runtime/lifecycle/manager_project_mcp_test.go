@@ -162,7 +162,7 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *testing.T) {
 	const revision = "1111111111111111111111111111111111111111"
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	workspace := t.TempDir()
 	cursorHome := filepath.Join(home, ".cursor")
 	projects := filepath.Join(cursorHome, "projects")
@@ -236,7 +236,7 @@ func TestPromoteWorkspaceExecutionUsesResolvedExecutionProfileForCursorAuth(t *t
 
 func TestMaterializeRuntimeProjectMCP_DiscoversPluginServers(t *testing.T) {
 	cursorHome := t.TempDir()
-	t.Setenv("HOME", cursorHome)
+	setTestUserHome(t, cursorHome)
 
 	pluginDir := filepath.Join(cursorHome, ".cursor", "plugins", "local", "atlassian")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {

@@ -4,6 +4,19 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	// A gateway that restricted an account rejects every request with 403 and
+	// an account-restriction code or message. The envelope must open the line,
+	// optionally inside a labeled JSON message, so an agent quoting the error
+	// in prose cannot take its own profile out of rotation; a plain 403 or the
+	// code on any other status is a different failure.
+	mustRule(
+		"provider.account_blocked.v1",
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*(?:"code"\s*:\s*-?\d+\s*,\s*)?"message"\s*:\s*")?`+
+			`Error\s+from\s+provider\s+[^\s:]+:\s*403\s+Forbidden\b[^\n]*?`+
+			`(?:\\?"code\\?"\s*:\s*\\?"user_blocked\\?"|\byour\s+access\s+has\s+been\s+restricted\b)`,
+		CodeAccountBlocked,
+		ConfHigh,
+	),
 	// Some providers announce an exhausted quota as an ordinary assistant
 	// message and then never settle the prompt, so the notice is the only
 	// failure signal. The high-confidence rule is anchored to the whole text and
@@ -31,10 +44,74 @@ var providerNeutralRules = []rule{
 		CodeModelCapacity,
 		ConfHigh,
 	),
+	// Model-host failures. Gateways relay them in the AI-SDK envelope or a
+	// streamed-response error, so each is anchored to that envelope or to a
+	// host-specific error name an agent does not write in prose. They precede
+	// provider.unavailable.v1 so routing can tell a slow or failing model host
+	// from a generic unavailable notice.
+	mustRule(
+		RuleProviderHeaderTimeout,
+		`(?i)\bProviderHeaderTimeoutError:\s*Provider\s+response\s+headers\s+timed\s+out\b`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderStreamServerError,
+		`(?i)\bStreaming\s+response\s+failed:\s*\[(?:500|502|503|504|server_error)\]`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderInternalServerError,
+		`(?im)^\s*AI_APICallError:\s*Internal\s+Server\s+Error\.?\s*$`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderNvidiaHost,
+		`(?i)(?:\bUpstream\s+error\s+from\s+Nvidia:\s*Service\s+temporarily\s+overloaded\b|\[Nvidia\]\s+(?:Failed\s+to\s+generate\s+completions|Service\s+is\s+not\s+ready|error\s+code:\s*\d+))`,
+		CodeProviderUnavailable,
+		ConfMedium,
+	),
+	mustRule(
+		RuleProviderCannotConnect,
+		`(?im)^\s*AI_APICallError:\s*Cannot\s+connect\s+to\s+API:`,
+		CodeNetworkUnavailable,
+		ConfHigh,
+	),
 	mustRule(
 		"provider.network_unavailable.v1",
 		`(?i)(?:\b(?:ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND)\b|network\s+is\s+unreachable|no\s+route\s+to\s+host|connection\s+(?:reset|refused|timed\s+out)|temporary\s+failure\s+in\s+name\s+resolution|i/o\s+timeout|failed\s+to\s+fetch)`,
 		CodeNetworkUnavailable,
+		ConfHigh,
+	),
+	// An AI-SDK error envelope carries the provider's own classification in a
+	// structured field. Its underscore-joined value ("provider_unavailable")
+	// does not match the space-separated prose in provider.unavailable.v1, and
+	// the field is emitted by the adapter rather than written by the model, so
+	// it classifies at high confidence. The error label is required, not
+	// optional: an assistant chunk is classified on its own, so a bare JSON
+	// object that merely carries the field must not count as a provider
+	// diagnostic. It sits immediately before the generic rule so a structured
+	// provider_unavailable outranks bare prose. The line may open with the
+	// "Agent encountered an error:" status prefix the agent error surface adds
+	// in front of the envelope.
+	mustRule(
+		RuleProviderStructuredErrorType,
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		CodeProviderUnavailable,
+		ConfHigh,
+	),
+	// A model rejects a request whose input exceeds its context window. The same
+	// candidate cannot succeed by retrying, but the failure stays a runtime
+	// error so the repeated-unclassified-failure route can still try a candidate
+	// with a larger context window. Naming the rule removes the failure from the
+	// anonymous phase default without changing routing: the code stays
+	// agent_runtime_error and keeps FallbackAllowed and AutoRetryable false.
+	mustRule(
+		RuleProviderContextLengthExceeded,
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
 		ConfHigh,
 	),
 	mustRule(

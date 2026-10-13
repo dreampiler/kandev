@@ -142,6 +142,15 @@ not resend the prompt or start a replacement conversation. Legacy streams use
 bounded intake and can show the same uncertain state when their missing output
 cannot be replayed.
 
+An older session can already have its conversation loaded while a delivery block
+still prevents new messages. For an empty historical delivery block, the card
+also offers **Resume**. Resume checks and reconciles the saved delivery against
+the same native conversation without resending the old prompt. **Retry connection**
+and **Stop** remain available. A successful load alone cannot replace missing
+proof about the original process, so automatic recovery may leave this action
+to you. If Resume cannot verify the saved evidence, it keeps the session blocked
+and reports the cause.
+
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session
 when its agentctl process has terminated. It does not send another prompt, add
@@ -162,6 +171,17 @@ native conversation, generation, or journal. A missing native conversation,
 unknown or changed owner, or locked or corrupt journal does not start a
 replacement conversation. The session keeps its safe recovery controls, such
 as **Stop**, while other eligible sessions can recover independently.
+
+A new message or pending queue work can continue an interrupted primary from
+saved Kandev history, including a failed session whose old runtime termination
+could not be proved on Windows. This requires a classified interrupted-delivery
+recovery block or a classified delivery-related startup refusal, and no live
+runtime. It uses a new native conversation, preserves
+the logical agent profile, and never resends the instruction with an unknown
+outcome. Completed, cancelled, and unrelated failed sessions do not restart this
+way. Automatic primary promotion uses only the newest active session with the
+same logical profile that also matches the current workflow step; otherwise
+the primary and its queue retain their recovery owner.
 
 **Stop** remains available while Retry is pending. The card reports a failed
 Stop request or an unconfirmed cancellation. Retry reconnects and reconciles
@@ -563,6 +583,14 @@ If sending fails or the connection is unavailable, Kandev shows an error and pre
 
 You can still close Review while waiting. Reopen the current diff before sending old feedback: a valid line number can still refer to different code after a rewrite.
 
+### Review changes in a gate-slot worktree
+
+Before entering a workflow step with `run_code_review`, call `set_review_source_kandev` with `worktree_path` (the absolute Git worktree path on the Kandev backend host) and `base_ref` (for example, `origin/main`). This task source is used when the Kandev workspace has no reviewable changes or is unavailable. Omit `head_ref` to review the working tree, including untracked files, against the base; supply a commit or branch as `head_ref` to review `base_ref...head_ref`. For an immediate review, call `run_code_review_kandev` with the same source fields, or omit them to use the saved task source. Read the stored run status and findings with `get_code_review_kandev` (`task.review.get`); a pending or running pass has not finished. The reviewer must use a different model from the identified writer. Change the saved source when a gate slot changes, or remove it with `set_review_source_kandev(clear=true)`.
+
+The path must exist and be a local Git worktree on the backend host, rather than a URL or remote executor path. Local and worktree executors can collect changes directly from disk when their session's agentctl is unreachable. Collection and prompt size limits are unchanged.
+
+Reviewers use their selected profile's resolved credentials and the same runtime command selection as task sessions. If a dynamic reviewer cannot start or initialize, Kandev tries the next eligible candidate through the same route, still excluding the writer's model. An explicit response that there are no findings completes successfully with zero findings. Missing or malformed review output remains an error.
+
 ## Generate a walkthrough
 
 Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle, it starts a new turn immediately. A running Claude Code session that is only waiting on recognized background work also starts immediately when the high-risk **Claude background prompt handoff** experiment is enabled; the default behavior queues it. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
@@ -691,3 +719,9 @@ Related: [Use Kandev](use-kandev.md), [Tasks and workflows](tasks-and-workflows.
 On desktop, the X on a deletable Agent tab deletes the session after confirmation by default. In **Settings > Preferences > Task Behavior > Conversation**, choose **Hide panel** when the X should only remove that panel. The conversation remains available from **+ > Agents**, where selecting it reopens the panel.
 
 Hidden panels remain hidden when you reload the same browser tab. They are local to that browser tab and task environment. Mobile Sessions controls continue to use the existing Delete action.
+
+### Resume cannot stop the previous runtime
+
+If Resume says the previous runtime could not be stopped, check the task executor's connectivity, then retry **Resume** in the same session. Kandev keeps the runtime registration until it can confirm cleanup, so this error does not mean another session started or that the previous runtime is definitely stopped.
+
+The recovery card shows the cause and keeps technical details collapsed. The explanation remains after reloading. **Start fresh** is not a connectivity repair and can encounter the same unavailable executor.

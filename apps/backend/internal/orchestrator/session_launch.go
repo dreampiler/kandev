@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -237,6 +238,13 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// Automatic marks a launcher that is server-classified automatic even
+	// though it is not an autoStart: an agent/MCP-initiated launch (for example
+	// spawn_session_kandev) that must be subject to the session ceiling and the
+	// host-memory guard rather than riding the manual override. It is kept off
+	// the wire protocol (`json:"-"`) so a client cannot misclassify its own
+	// request; only server-side handlers set it.
+	Automatic bool `json:"-"`
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement           bool   `json:"-"`
@@ -481,6 +489,9 @@ func (s *Service) checkSessionRecoveryBlock(ctx context.Context, sessionID strin
 	if err != nil {
 		return fmt.Errorf("check session recovery block: %w", err)
 	}
+	if resolved, _ := s.finishLoadedNativeDeliveryBlock(ctx, block); resolved {
+		return nil
+	}
 	return &sessionRecoveryRequiredError{Block: block}
 }
 
@@ -548,12 +559,19 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 	if err != nil {
 		return fmt.Errorf("load session recovery block for resolution: %w", err)
 	}
-	resolved, err := store.ResolveSessionRecoveryBlock(ctx, block.ID, action, time.Now().UTC())
+	completedAt := time.Now().UTC()
+	resolved, handled := false, false
+	if action == recoveryActionResume {
+		resolved, handled, err = s.resolveNativeDeliveryBlock(ctx, block, completedAt)
+	}
+	if !handled {
+		resolved, err = store.ResolveSessionRecoveryBlock(ctx, block.ID, action, completedAt)
+	}
 	if err != nil {
 		return fmt.Errorf("resolve session recovery block: %w", err)
 	}
 	if !resolved {
-		return fmt.Errorf("resolve session recovery block: block is no longer open")
+		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
@@ -809,6 +827,11 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	manualTaskID := ""
+	if launchOriginForActivation(req) == launchOriginManual && retryLaunchInContext(ctx) == nil {
+		manualTaskID = req.TaskID
+	}
+	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
 	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	prepareCtx = withInitialPromptSubmission(prepareCtx, req.InitialPromptSubmission)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
@@ -884,7 +907,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin, Automatic: req.Automatic || req.SpawnOrigin != nil},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -1354,7 +1377,7 @@ func (s *Service) RecoverSessionWithOptions(
 	ctx context.Context,
 	taskID, sessionID, action string,
 	options RecoverSessionOptions,
-) (*LaunchSessionResponse, error) {
+) (_ *LaunchSessionResponse, err error) {
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
@@ -1362,11 +1385,17 @@ func (s *Service) RecoverSessionWithOptions(
 	if err != nil {
 		return nil, err
 	}
+	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
+		return nil, automation.ErrRetryLaunchUncertain
+	}
 	action, err = normalizeSessionRecoveryAction(ctx, sessionID, action, s.wasResumeAttempt)
 	if err != nil {
 		return nil, err
 	}
 	if action == recoveryActionResume {
+		if response, handled, err := s.resumePrunedDelivery(ctx, session); handled || err != nil {
+			return response, err
+		}
 		if err := s.checkNativeResumeDeliveryBlock(ctx, taskID, sessionID); err != nil {
 			return nil, err
 		}
@@ -1457,6 +1486,18 @@ func (s *Service) RecoverSessionWithOptions(
 			}
 		}
 		return nil, normalizeRecoverSessionError(err)
+	}
+
+	// An explicit recovery owns a dynamic route a restart left parked at
+	// action_required: the recovery block this action settles can only be
+	// settled here, so refusing the route as dynamic_route_pending would leave
+	// the session with no admissible recovery path.
+	if generation, reclaimed := s.reclaimActionRequiredRouteForRecovery(launchCtx, sessionID, action); reclaimed {
+		defer func() {
+			if err != nil {
+				s.restoreRouteAfterFailedRecovery(ctx, sessionID, generation)
+			}
+		}()
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{

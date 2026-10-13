@@ -166,20 +166,50 @@ func (r *Resolver) scope(ctx context.Context, taskID string, preserveExistingIde
 	if err != nil {
 		return nil, err
 	}
+	return r.withOwnerIdentity(ctx, ownerID, "task "+taskID)
+}
+
+// ScopeWorkspaceOwner returns ctx carrying the identity of the user who owns
+// workspaceID, replacing any identity already on ctx. It is the workspace
+// analogue of ScopeOverridingIdentity for callers that hold a workspace but no
+// task, such as a taskless Office run. Like Scope, it leaves ctx unchanged
+// while authentication is disabled, and it denies (returns an error) when the
+// workspace row or the owner's active account cannot be resolved.
+func (r *Resolver) ScopeWorkspaceOwner(ctx context.Context, workspaceID string) (context.Context, error) {
+	if r == nil || r.enforced == nil || !r.enforced() {
+		return ctx, nil
+	}
+	if workspaceID == "" {
+		return nil, fmt.Errorf("resolve owner of workspace: workspace is required")
+	}
+	workspace, err := r.tasks.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve owner of workspace %s: %w", workspaceID, err)
+	}
+	if workspace == nil {
+		return nil, fmt.Errorf("resolve owner of workspace %s: workspace not found", workspaceID)
+	}
+	return r.withOwnerIdentity(ctx, workspace.OwnerID, "workspace "+workspaceID)
+}
+
+// withOwnerIdentity installs ownerID's real identity on ctx, or the
+// unowned-rows identity when the owner is empty. subject names what was
+// resolved, for errors and logs.
+func (r *Resolver) withOwnerIdentity(ctx context.Context, ownerID, subject string) (context.Context, error) {
 	if ownerID == "" {
 		r.logger.Warn("in-session MCP stream has no workspace owner; limiting it to unowned rows",
-			zap.String("task_id", taskID))
+			zap.String("subject", subject))
 		return authn.WithIdentity(ctx, authn.Identity{UserID: unownedScopeUserID, Role: authn.RoleMember}), nil
 	}
 	if r.identities == nil {
-		return nil, fmt.Errorf("resolve owner of task %s: no identity lookup wired", taskID)
+		return nil, fmt.Errorf("resolve owner of %s: no identity lookup wired", subject)
 	}
 	// A disabled or deleted account must not keep serving its agent: disabling
 	// a user revokes their sessions and PATs, so an in-flight agent session is
 	// the one remaining way in. Deny instead of minting an identity for them.
 	identity, ok := r.identities.IdentityForUser(ctx, ownerID)
 	if !ok {
-		return nil, fmt.Errorf("resolve owner of task %s: user %s has no active account", taskID, ownerID)
+		return nil, fmt.Errorf("resolve owner of %s: user %s has no active account", subject, ownerID)
 	}
 	return authn.WithIdentity(ctx, identity), nil
 }

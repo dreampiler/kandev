@@ -15,6 +15,7 @@ Use this skill for task communication and task-level operations outside the sing
 
 - List tasks or read task conversations: read `references/tasks.md`.
 - Post an agent-authored comment to your current task or another task: read `references/comments.md`.
+- Read or message another workspace (only when cross-workspace access is on): read `references/cross-workspace.md`.
 
 ## Rules
 

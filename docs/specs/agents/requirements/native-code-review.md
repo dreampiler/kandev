@@ -36,7 +36,7 @@ Kandev, including local-only and non-GitHub work.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.12:** A single current disposition action shall retain immediate optimistic feedback, publish the complete acknowledged finding on success, and restore its prior state on failure. Every rejected action shall retain the existing localized error toast and error description, including an older rejected action whose rollback is suppressed.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.13:** When review clear, snapshot replacement, or supersession removes or replaces the locally action-owned finding before completion, that local completion shall not recreate or overwrite it. Ordinary snapshot replacement, unrelated finding updates, and updates for previously unseen findings shall retain their existing behavior.
 
-The local action publication design is [defined here](../system-design/native-code-review-action-publication.md).
+The local action publication design is [defined here](../system-design/native-code-review-action-publication.md). Local review sources are [defined here](../system-design/native-code-review-local-source.md).
 
 ## Migrated source detail
 

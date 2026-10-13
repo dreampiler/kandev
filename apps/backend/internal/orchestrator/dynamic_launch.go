@@ -363,6 +363,7 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 ) {
+	s.startupFailuresNeedingContinuation.Delete(sessionID)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
@@ -406,8 +407,9 @@ func (s *Service) handleAgentProcessStarted(
 func (s *Service) handleAgentProcessStartFailed(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
-	_ error,
+	startErr error,
 ) {
+	s.noteStartupFailureNeedingContinuation(sessionID, startErr)
 	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
 		return
 	}
@@ -538,6 +540,9 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -871,11 +876,15 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		s.recordSupersededCandidateFailure(ctx, data, classified)
 		return dynamicFailureRouteResult{}
 	}
+	s.holdBlockedAccount(ctx, data, session, classified)
 	if s.supersededInterruptedDynamicAttempt(data, session) {
 		return dynamicFailureRouteResult{handled: true}
 	}
@@ -1010,6 +1019,32 @@ func (s *Service) prepareDynamicFailureEvidence(
 		s.profileExecutionResolver.RecordResourceFailure(ctx, session.ExecutionProfileID, classified)
 	}
 	return dynamicruntime.UnclassifiedFailureEvidence{}, eligible
+}
+
+// holdBlockedAccount holds the execution profile whose provider account was
+// restricted, whether or not this failure is routed. The hold only keeps that
+// profile out of later selections; it never replays or advances this turn, so
+// output and effect safety still decide what happens to the failed attempt.
+// The failed execution's own profile is held; the route's current profile is
+// used only when the failure carries the route's current execution.
+func (s *Service) holdBlockedAccount(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+	classified *routingerr.Error,
+) {
+	if classified == nil || !routingerr.HoldsUntilRelease(classified.Code) || s.profileExecutionResolver == nil {
+		return
+	}
+	profileID := data.ExecutionProfileID
+	if profileID == "" && session != nil && data.AgentExecutionID != "" &&
+		session.AgentExecutionID == data.AgentExecutionID {
+		profileID = session.ExecutionProfileID
+	}
+	if profileID == "" {
+		return
+	}
+	s.profileExecutionResolver.RecordResourceFailure(ctx, profileID, classified)
 }
 
 func isUsageLimitFailure(classified *routingerr.Error) bool {
@@ -1294,6 +1329,11 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
 	ctx = withCancelInFlightGuardHeld(ctx)
+	// The successor replaces this session's own failed attempt, which has
+	// usually left the counted population by now (its session is no longer
+	// starting or running), so the ceiling hands its unit over instead of
+	// refusing the replacement.
+	ctx = withReplacesFailedDynamicAttempt(ctx)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return
@@ -1465,6 +1505,13 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
+	// A restart-interrupted turn still blocks this session: re-sending the last
+	// prompt would repeat a prompt whose outcome is unknown and is refused by the
+	// recovery block anyway. Continue from history on the claimed candidate.
+	if origin == launchOriginManual && s.handOffRouteActionToContinuation(ctx, session) {
+		succeeded = true
+		return nil
+	}
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err

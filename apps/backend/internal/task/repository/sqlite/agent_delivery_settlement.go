@@ -360,17 +360,22 @@ func (r *Repository) loadTerminalDeliveryEffectTx(
 	return &effect, nil
 }
 
+// agentDeliveryPendingSettlementsQuery spells the effect type and state as
+// literals so both engines can prove the partial pending-settlement index
+// predicate and read only unsettled terminals in creation order.
+const agentDeliveryPendingSettlementsQuery = `
+		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
+		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
+		FROM agent_delivery_effects
+		WHERE effect_type = '` + models.DeliveryTerminalEffectType + `' AND state <> '` + models.DeliveryEffectCompleted + `'
+		  AND (? = '' OR session_id = ?)
+		ORDER BY created_at, stream_id, sequence`
+
 func (r *Repository) ListPendingAgentDeliverySettlements(
 	ctx context.Context,
 	sessionID string,
 ) ([]*models.AgentDeliveryEffect, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT effect_key, stream_id, sequence, effect_type, state, created_at, completed_at,
-		       session_id, incarnation_id, harness_generation, submission_id, turn_id, outcome
-		FROM agent_delivery_effects
-		WHERE effect_type = ? AND state != ? AND (? = '' OR session_id = ?)
-		ORDER BY created_at, stream_id, sequence`),
-		models.DeliveryTerminalEffectType, models.DeliveryEffectCompleted, sessionID, sessionID)
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(agentDeliveryPendingSettlementsQuery), sessionID, sessionID)
 	if err != nil {
 		return nil, err
 	}

@@ -230,6 +230,7 @@ var (
 		string(models.OnEnterQueueRunForEachParticipant): true,
 		string(models.OnEnterQueueRun):                   true,
 		string(models.OnEnterEnsureParticipantSeat):      true,
+		string(models.OnEnterRunCodeReview):              true,
 	}
 	validOnTurnStart = map[string]bool{
 		string(models.OnTurnStartMoveToNext):     true,
@@ -261,6 +262,19 @@ func convertEvents(e stepEventsYAML) (models.StepEvents, error) {
 		if a.Type == string(models.OnEnterSetSessionMode) {
 			if mode, _ := a.Config["mode"].(string); mode == "" {
 				return events, fmt.Errorf("on_enter set_session_mode requires a non-empty string \"mode\" config")
+			}
+		}
+		// run_code_review carries an optional agent_profile_id. A missing key
+		// means "use the configured code-review utility agent", but a present
+		// non-string value would otherwise be silently dropped at compile time,
+		// so reject it here to fail misconfigured templates loudly.
+		if a.Type == string(models.OnEnterRunCodeReview) {
+			if raw, ok := a.Config[models.ReviewAgentProfileConfigKey]; ok {
+				if _, isString := raw.(string); !isString {
+					return events, fmt.Errorf(
+						"on_enter run_code_review %q config must be a string",
+						models.ReviewAgentProfileConfigKey)
+				}
 			}
 		}
 		events.OnEnter = append(events.OnEnter, models.OnEnterAction{

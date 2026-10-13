@@ -45,6 +45,7 @@ session-activity authority remain with Tasks and Platform.
 - [Dynamic Agent Routing](requirements/dynamic-agent-routing.md)
 - [Dynamic Provider Model Options](requirements/dynamic-provider-options.md)
 - [External Agent Permission Resolution](requirements/external-permission-resolution.md)
+- [Fixed-Profile Resource Suspension](requirements/fixed-profile-resource-suspension.md) (draft)
 - [Pending Permission Lookup Bounds](requirements/pending-permission-lookup-bounds.md)
 - [Agent Git permission boundary](requirements/git-operations-permission-boundary.md)
 - [Agent Creation Governance](requirements/governance.md)
@@ -55,6 +56,7 @@ session-activity authority remain with Tasks and Platform.
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
+- [Native Code Review Reviewer Exclusion](requirements/native-code-review-reviewer-exclusion.md)
 - [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
   profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
@@ -82,6 +84,7 @@ session-activity authority remain with Tasks and Platform.
 - [Injected Skill Naming Migration](system-design/injected-skill-naming-migration.md)
 - [Dynamic Agent Routing System Design Part 1](system-design/dynamic-agent-routing-01.md)
 - [Dynamic Agent Routing System Design Part 2](system-design/dynamic-agent-routing-02.md)
+- [Fixed-Profile Resource Suspension](system-design/fixed-profile-resource-suspension.md) (draft)
 - [Agent Profile Recent Use](system-design/profile-recent-use.md)
 - [No Silent Model Fallback System Design Part 1](system-design/no-silent-model-fallback-01.md)
 - [No Silent Model Fallback System Design Part 2](system-design/no-silent-model-fallback-02.md)
@@ -105,6 +108,7 @@ session-activity authority remain with Tasks and Platform.
 - [Plan injection budget System Design Part 1](system-design/plan-injection-budget-01.md)
 - [Plan injection budget System Design Part 2](system-design/plan-injection-budget-02.md)
 - [Pending Permission Lookup Bounds](system-design/pending-permission-lookup-bounds.md)
+- [Native Code Review Reviewer Exclusion](system-design/native-code-review-reviewer-exclusion.md)
 
 ## Migration record
 

@@ -1220,5 +1220,14 @@
   "overviewRefreshSeconds_other": "每{{seconds}}秒",
   "overviewUsageStaleObserved": "最后已知值，读取于 {{relative}}",
   "overviewUsageObserved": "代理运行时观测到，{{relative}}",
-  "overviewUsageMeasuredCall": "通过最小调用测量，{{relative}}"
+  "overviewUsageMeasuredCall": "通过最小调用测量，{{relative}}",
+  "crossWorkspaceAccess": "跨工作区访问",
+  "crossWorkspaceAccessToggle": "允许 Office 智能体与其他工作区协作",
+  "crossWorkspaceAccessDescription": "开启后，此 Office 工作区的智能体可以读取其他工作区的任务、会话、计划和对话，并向这些任务发送消息。停止、移动任务和调整优先级仍由各工作区的协调者负责。默认关闭。",
+  "crossWorkspaceReachableWorkspaces": "可访问的工作区",
+  "crossWorkspaceReachableHint": "全部不勾选则允许你可读取的所有工作区。填写协调者任务 ID，Office 智能体即可知道在该工作区应向哪个任务发送消息。",
+  "crossWorkspaceCoordinatorPlaceholder": "协调者任务 ID（可选）",
+  "crossWorkspaceCoordinatorTask": "{{workspace}} 的协调者任务 ID",
+  "crossWorkspaceNoOtherWorkspaces": "暂无其他工作区。",
+  "crossWorkspaceSettingsSaved": "跨工作区访问已保存"
 }

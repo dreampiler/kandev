@@ -24,6 +24,10 @@ type exportDocument struct {
 // task_mode, managed_destination, repository_mode, task_title_template, prompt,
 // agent_profile, executor_profile, workflow, repositories, triggers.
 //
+// ParentTaskID is deliberately not exported: it names a task row in this install,
+// so it is a workspace-local runtime pointer (like continuation_task_id), not
+// portable configuration. A round trip must not carry it to another install.
+//
 // Prompt and every trigger's Config are *yaml.Node rather than string/json.RawMessage
 // because both need explicit control over emitted Tag/Style that struct-tag marshaling
 // cannot express: Prompt per the prompt-fidelity rules (AC-15/16/17/46/47/49), Config
@@ -37,6 +41,7 @@ type exportAutomation struct {
 	TaskMode           TaskMode                              `yaml:"task_mode"`
 	ManagedDestination *exportManagedConversationDestination `yaml:"managed_destination,omitempty"`
 	RepositoryMode     RepositoryMode                        `yaml:"repository_mode"`
+	RetryPolicy        exportRetryPolicy                     `yaml:"retry_policy"`
 	TaskTitleTemplate  string                                `yaml:"task_title_template,omitempty"`
 	Prompt             *yaml.Node                            `yaml:"prompt,omitempty"`
 	AgentProfile       *exportAgentProfile                   `yaml:"agent_profile,omitempty"`
@@ -49,6 +54,14 @@ type exportAutomation struct {
 type exportManagedConversationDestination struct {
 	PluginID    string `yaml:"plugin_id"`
 	InstanceKey string `yaml:"instance_key"`
+}
+
+type exportRetryPolicy struct {
+	Mode         RetryMode        `yaml:"mode"`
+	MaxRetries   string           `yaml:"max_retries"`
+	DelaySeconds string           `yaml:"delay_seconds"`
+	Backoff      RetryBackoff     `yaml:"backoff"`
+	HistoryMode  RetryHistoryMode `yaml:"history_mode"`
 }
 
 // exportAgentProfile is the portable {agent_name, model, mode} descriptor resolved

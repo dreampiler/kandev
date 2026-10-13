@@ -249,6 +249,7 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 				zap.String("plugin_id", rec.ID), zap.Error(setErr))
 		}
 		s.notifyDeliverer()
+		s.notifyAgentToolCatalogChanged()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}
 	return nil

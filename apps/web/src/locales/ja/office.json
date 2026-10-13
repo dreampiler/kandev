@@ -1220,5 +1220,14 @@
   "overviewRefreshSeconds_other": "{{seconds}}秒ごと",
   "overviewUsageStaleObserved": "最後に確認された値 ({{relative}}に取得)",
   "overviewUsageObserved": "エージェント実行中に観測、{{relative}}",
-  "overviewUsageMeasuredCall": "最小呼び出しで測定、{{relative}}"
+  "overviewUsageMeasuredCall": "最小呼び出しで測定、{{relative}}",
+  "crossWorkspaceAccess": "ワークスペース間アクセス",
+  "crossWorkspaceAccessToggle": "Office エージェントが他のワークスペースと連携できるようにする",
+  "crossWorkspaceAccessDescription": "オンにすると、この Office ワークスペースのエージェントが他のワークスペースのタスク、セッション、計画、会話を読み、そのタスクにメッセージを送れます。タスクの停止、移動、優先度の変更は各ワークスペースのコーディネーターが行います。既定ではオフです。",
+  "crossWorkspaceReachableWorkspaces": "アクセスできるワークスペース",
+  "crossWorkspaceReachableHint": "すべて未選択のままにすると、読み取れるすべてのワークスペースを許可します。コーディネーターのタスク ID を入力すると、Office エージェントがそのワークスペースでどのタスクにメッセージを送るかがわかります。",
+  "crossWorkspaceCoordinatorPlaceholder": "コーディネーターのタスク ID(任意)",
+  "crossWorkspaceCoordinatorTask": "{{workspace}} のコーディネーターのタスク ID",
+  "crossWorkspaceNoOtherWorkspaces": "他のワークスペースはまだありません。",
+  "crossWorkspaceSettingsSaved": "ワークスペース間アクセスを保存しました"
 }

@@ -33,7 +33,7 @@ func TestPassthroughMCPUsesStandaloneListenHost(t *testing.T) {
 
 func TestCursorProjectMCPUsesStandaloneListenHost(t *testing.T) {
 	const host = "192.0.2.10"
-	t.Setenv("HOME", t.TempDir())
+	setTestUserHome(t, t.TempDir())
 	mgr := newTestManager(t)
 	mgr.executorRegistry = NewExecutorRegistry(newTestRegistryLogger())
 	mgr.executorRegistry.Register(NewStandaloneExecutor(nil, host, 0, newTestRegistryLogger()))

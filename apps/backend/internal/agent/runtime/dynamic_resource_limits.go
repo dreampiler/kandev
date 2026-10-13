@@ -177,6 +177,7 @@ func (r *ProfileExecutionResolver) resourceCandidate(ctx context.Context, execut
 			r.bindingResolver.Resolve(profileCredentialBindingDescriptor(profile), executionProfileID),
 		)
 	}
+	candidate.AccountKey = candidateAccountKey(candidate.BindingKey, profile, candidate.ModelID)
 	candidates := []dynamic.Candidate{candidate}
 	r.applyResourceLimits(ctx, candidates)
 	return candidates[0], true
@@ -197,13 +198,38 @@ func (r *ProfileExecutionResolver) CandidateSuspension(
 }
 
 // RecordResourceSuccess clears the suspension history of a concrete profile
-// whose attempt produced real output.
+// whose turn completed without a provider error.
 func (r *ProfileExecutionResolver) RecordResourceSuccess(ctx context.Context, executionProfileID string) {
 	candidate, ok := r.resourceCandidate(ctx, executionProfileID)
 	if !ok {
 		return
 	}
 	r.engine.RecordResourceSuccess(candidate)
+}
+
+// ReleaseAccountBlock closes the owner-release hold that a provider account
+// restriction placed on one concrete profile, and reports whether one was held.
+func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {
+	if r == nil || r.engine == nil {
+		return false, nil
+	}
+	return r.engine.ReleaseAccountBlock(executionProfileID)
+}
+
+// ReleaseResourceCircuit releases exactly the key selected in agent settings.
+func (r *ProfileExecutionResolver) ReleaseResourceCircuit(_ context.Context, key string) (bool, error) {
+	if r == nil || r.engine == nil {
+		return false, nil
+	}
+	return r.engine.Circuits().Release(key)
+}
+
+// ListResourceCircuits reads the same live registry used for admission.
+func (r *ProfileExecutionResolver) ListResourceCircuits(_ context.Context) ([]dynamic.CircuitSnapshot, error) {
+	if r == nil || r.engine == nil {
+		return nil, nil
+	}
+	return r.engine.Circuits().ListSuspended(), nil
 }
 
 // RecordResourceFailure suspends a concrete profile's resource after a failure

@@ -39,6 +39,14 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
+	// CapabilityOfficeCrossWorkspace adds the cross-workspace read and message
+	// tools to an Office task session whose workspace turned on cross-workspace
+	// access. The backend re-checks reach on every call.
+	CapabilityOfficeCrossWorkspace Capability = "office-cross-workspace"
+	// CapabilityOfficeHandoffReport adds report_to_handoff_source_kandev to a
+	// Kanban task session whose workspace an Office workspace with
+	// cross-workspace access on can reach.
+	CapabilityOfficeHandoffReport Capability = "office-handoff-report"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

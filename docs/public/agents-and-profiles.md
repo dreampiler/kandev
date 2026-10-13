@@ -26,6 +26,26 @@ profiles from the Settings navigation tree. Disabled profiles remain available
 on the Agents page, and the preference applies immediately in this browser
 profile.
 
+## Release a resource suspension
+
+Administrators can open **Settings > Agents > Resource suspensions** and select
+**Release this suspension** on one row. This clears that circuit and its retry
+history without changing another suspension, profile setting, or credential.
+It permits a later attempt; it does not start or replay a turn. Refresh the list
+to read current suspensions. The same action is available on phones.
+
+The API is `GET /api/v1/agent-circuits` and
+`POST /api/v1/agent-circuits/release` with
+`{"resource_key":"<exact key from the list>"}`. The POST uses the existing
+agent-settings permission and settings interlock, and reports whether it
+released a circuit. A save failure leaves the suspension in place.
+
+OpenRouter's generic try-later notice starts with a short 5/15/30-minute
+backoff; repeated failures on the same UTC date can escalate to the daily
+reset. Explicit daily-limit notices and Zen's daily-reset behavior still wait
+for 00:00 UTC. On load, older Go quota suspensions longer than the current
+policy maximum are capped at the original failure time plus seven days.
+
 ## Install or detect an agent
 
 Open **Settings > Agents** (`/settings/agents`). Kandev scans the host on which its backend runs, not the browser computer.
@@ -301,6 +321,11 @@ does not guarantee a rollback.
 When an existing native OpenCode v1 installation remains selected, same-family
 updates can still update that native executable. A v2 migration always uses
 the managed `@opencode/cli` package and does not run a global npm install.
+
+If a native OpenCode version check still fails after retries, Kandev can use a
+recent supported detection or the selected supported version. Cancelling the
+launch stops it. An observed unsupported major blocks launch until a later
+check reports a supported version; a transient probe failure cannot clear it.
 
 Kandev enables the action only after the backend validates the selected version
 against the trusted package catalogue. It does not accept package names, npm
@@ -598,12 +623,33 @@ exclusive health probe before it becomes eligible again. This shared error
 classification is used by task/Kanban and Office routing, while the per-
 candidate policies are configured on dynamic profiles.
 
+A provider account restriction is different: when a provider reports
+`403 Forbidden` with `user_blocked` or "Your access has been restricted",
+Kandev classifies it as `account_blocked`. It never retries or waits on that
+candidate, applies the candidate's hard-error **Skip candidate** or **Stop for
+manual recovery** outcome, and holds only the failing execution profile. Other
+profiles, including profiles that share its credentials, and the candidate
+order are unchanged. The hold has no expiry or health probe and survives a
+restart; enabling, disabling, or editing the profile does not release it. After
+the account owner resolves the restriction with the provider, release the
+profile with `POST /api/v1/agent-profiles/:id/account-block/release`. The
+response reports `released: true` when a hold was closed and `false` when there
+was none. The settings preview shows a held profile as suspended without an end
+time.
+
 When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
 resume, or message the session.
+
+Opening or refocusing a conversation parked by the ACP idle policy also uses
+automatic admission. With **Limit automatic sessions** enabled and capacity
+full, it stays parked without a manual-override notice. A queued focus resume,
+including a completed conversation, retries when capacity is available and
+only while the same conversation remains idle-suspended. Explicit **Resume**
+and message delivery keep manual admission.
 
 Provider errors that occur before a result can use the configured action, such
 as retrying the current candidate or trying the next candidate. A started turn

@@ -39,6 +39,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -105,12 +106,17 @@ func provideOrchestrator(
 	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
 	serviceCfg.ControlSessionCapacity = sessionCapacityResolution.Effective.ControlMaxSessions
 	serviceCfg.ControlAgentProfileIDs = sessionCapacityResolution.Effective.ControlProfileIDs
+	serviceCfg.SessionMemoryGuard = hostmemory.ReadConfig()
 	log.Info("Session capacity initialized",
 		zap.Int("ceiling", serviceCfg.SessionCapacity),
 		zap.Int("control_ceiling", serviceCfg.ControlSessionCapacity),
 		zap.Int("control_profiles", len(serviceCfg.ControlAgentProfileIDs)),
 		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
 		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
+	log.Info("Session memory guard initialized",
+		zap.Bool("enabled", serviceCfg.SessionMemoryGuard.Enabled),
+		zap.Uint64("min_available_bytes", serviceCfg.SessionMemoryGuard.MinAvailableBytes),
+		zap.Float64("max_commit_percent", serviceCfg.SessionMemoryGuard.MaxCommitPercent))
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"
@@ -807,17 +813,26 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
+		ParentID:       req.ParentID,
 		Title:          req.Title,
 		Description:    req.Description,
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
+
+		AutomationStartOwned: req.AutomationStartOwned,
+		AutomationStartOwner: req.AutomationStartOwner,
+		ExternalID:           req.ExternalID,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return result.Task, nil
+}
+
+func (a *reviewTaskCreatorAdapter) GetReviewTaskByExternalID(ctx context.Context, workspaceID, externalID string) (*taskmodels.Task, error) {
+	return a.svc.GetTaskByExternalID(ctx, workspaceID, externalID)
 }
 
 // issueTaskCreatorAdapter adapts the task service to the orchestrator's IssueTaskCreator interface.

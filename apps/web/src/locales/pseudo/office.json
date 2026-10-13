@@ -1220,5 +1220,14 @@
   "overviewReasonSessionEnded": "Ţĥē ŕēćēĩvĩńĝ śēśśĩōń ĥàś ēńďēď",
   "overviewUsageStaleObserved": "Ĺàśţ-ķńōŵń vàĺũē, ŕēàď {{relative}}",
   "overviewUsageObserved": "Ōƀśēŕvēď ŵĥĩĺē ţĥē àĝēńţ ŕàń, {{relative}}",
-  "overviewUsageMeasuredCall": "Ḿēàśũŕēď vĩà ḿĩńĩḿàĺ ĩńvōćàţĩōń, {{relative}}"
+  "overviewUsageMeasuredCall": "Ḿēàśũŕēď vĩà ḿĩńĩḿàĺ ĩńvōćàţĩōń, {{relative}}",
+  "crossWorkspaceAccess": "Ćŕōśś-ŵōŕķśƥàćē àććēśś",
+  "crossWorkspaceAccessToggle": "Ĺēţ Ōƒƒĩćē àĝēńţś ŵōŕķ ŵĩţĥ ōţĥēŕ ŵōŕķśƥàćēś",
+  "crossWorkspaceAccessDescription": "Ŵĥēń ōń, àĝēńţś ĩń ţĥĩś Ōƒƒĩćē ŵōŕķśƥàćē ćàń ŕēàď ţàśķś, śēśśĩōńś, ƥĺàńś àńď ćōńvēŕśàţĩōńś ĩń ōţĥēŕ ŵōŕķśƥàćēś àńď śēńď ḿēśśàĝēś ţō ţĥēĩŕ ţàśķś. Śţōƥƥĩńĝ, ḿōvĩńĝ àńď ŕēƥŕĩōŕĩţĩźĩńĝ ţàśķś śţàŷ ŵĩţĥ ēàćĥ ŵōŕķśƥàćē'ś ćōōŕďĩńàţōŕ. Ōƒƒ ƀŷ ďēƒàũĺţ.",
+  "crossWorkspaceReachableWorkspaces": "Ŕēàćĥàƀĺē ŵōŕķśƥàćēś",
+  "crossWorkspaceReachableHint": "Ĺēàvē ēvēŕŷ ƀōx ũńćĥēćķēď ţō àĺĺōŵ àĺĺ ŵōŕķśƥàćēś ŷōũ ćàń ŕēàď. Àďď à ćōōŕďĩńàţōŕ ţàśķ ĨĎ ţō ţēĺĺ Ōƒƒĩćē àĝēńţś ŵĥĩćĥ ţàśķ ţō ḿēśśàĝē ţĥēŕē.",
+  "crossWorkspaceCoordinatorPlaceholder": "Ćōōŕďĩńàţōŕ ţàśķ ĨĎ (ōƥţĩōńàĺ)",
+  "crossWorkspaceCoordinatorTask": "Ćōōŕďĩńàţōŕ ţàśķ ĨĎ ƒōŕ {{workspace}}",
+  "crossWorkspaceNoOtherWorkspaces": "Ţĥēŕē àŕē ńō ōţĥēŕ ŵōŕķśƥàćēś ŷēţ.",
+  "crossWorkspaceSettingsSaved": "Ćŕōśś-ŵōŕķśƥàćē àććēśś śàvēď"
 }

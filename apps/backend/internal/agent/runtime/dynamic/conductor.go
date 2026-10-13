@@ -318,13 +318,22 @@ func (c *Conductor) launchWithFallback(
 			c.engine.ReleaseProbe(current, true)
 			return execution, current, nil
 		}
-		// Every probe attempt has a terminal launch result. Release it before
-		// applying policy so unclassified or post-start failures do not leave a
-		// half-open circuit lease stranded until its timeout.
-		c.engine.ReleaseProbe(current, false)
+		// The failure is recorded before the probe is released. Releasing first
+		// writes a one-minute block, and the failure recorded inside it reads as
+		// the same incident, so the strike count would never climb its ladder.
 		next, shouldFallback, fallbackErr := c.nextAfterLaunchFailure(
 			ctx, profile, current, request.SessionID, err,
 		)
+		if !shouldFallback {
+			if classified := classifiedLaunchFailure(err); classified != nil {
+				c.engine.RecordResourceFailure(ctx, profile, current.ExecutionProfileID, classified)
+			}
+		}
+		// Every probe attempt has a terminal launch result. A failure applied
+		// above already released its lease; this releases any lease an
+		// unclassified or unrouted failure still holds, so none is stranded
+		// until its timeout.
+		c.engine.ReleaseProbe(current, false)
 		if fallbackErr != nil {
 			if errors.Is(fallbackErr, ErrNoEligibleCandidate) {
 				return DownstreamExecution{}, current, err
