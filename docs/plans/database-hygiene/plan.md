@@ -90,6 +90,13 @@ Task 02 adds failure-warning and concurrent-sweep coverage. Task 03 fixes
 invalid UTF-8 expanding the stored diagnostic past its byte limit and covers
 diagnostic lifecycle and stale completion guards.
 
+Error logging is also gated on committing the matching preparation failure,
+with expected cancellation and stale completion warnings suppressed. The known
+shared goal-section fixture failure is addressed by the independently audited
+single-file upstream test fix: settle its initial response before editing and
+retain its field-error and draft assertions. It changes no frontend product
+behavior; final full frontend verification still applies to this PR's candidate.
+
 Local execution is limited to tiny exact-source proofs and static validators
 inside an isolated task sandbox. Full backend, frontend, E2E, database, and
 static gates are hosted delivery requirements. Their exact head and run

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/jmoiron/sqlx"
@@ -135,7 +136,39 @@ func TestStalePreparationFailurePreservesCurrentDetail(t *testing.T) {
 			require.Equal(t, current.Policy.Revision, stored.Policy.Revision)
 			require.Equal(t, current.Operation.ID, stored.Operation.ID)
 			require.Equal(t, stateRunning, stored.Preparation.State)
-			require.Equal(t, 1, logs)
+			require.Zero(t, logs, "stale failures must not be logged as current failures")
+		})
+	}
+}
+
+// @covers AC-SYSTEM-PAGE-TOOL-PAYLOAD-RETENTION-002.9
+func TestPreparationFailureLoggingRequiresCommittedFailure(t *testing.T) {
+	for _, failure := range []string{"cancelled", "deadline", "persistence"} {
+		t.Run(failure, func(t *testing.T) {
+			s, _ := failedPreparation(t)
+			prepared, err := s.change(t.Context(), func(r *record, _ *sqlx.Tx) error {
+				r.Preparation.State = stateRunning
+				r.Operation.State = stateRunning
+				return nil
+			})
+			require.NoError(t, err)
+			backupErr := errors.New("snapshot failed")
+			ctx := t.Context()
+			if failure == "cancelled" {
+				backupErr = context.Canceled
+			} else if failure == "deadline" {
+				backupErr = context.DeadlineExceeded
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Hour))
+				defer cancel()
+			} else {
+				_, err := s.pool.Writer().Exec(`CREATE TRIGGER fail_retention_write BEFORE UPDATE ON settings BEGIN SELECT RAISE(ABORT, 'write rejected'); END`)
+				require.NoError(t, err)
+			}
+			var logs int
+			s.opts.Log = func(context.Context, string, error) { logs++ }
+			require.Error(t, s.finishPreparation(ctx, prepared, "", backupErr))
+			require.Zero(t, logs)
 		})
 	}
 }

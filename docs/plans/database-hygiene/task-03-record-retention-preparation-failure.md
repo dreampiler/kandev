@@ -93,6 +93,12 @@ and the actual stored record while retaining the original callback error and
 public status code. Additional tests cover clearing on retry, success, and
 recovery, and preservation under stale revision and operation identities.
 
+The review also identified failure logging before the guarded state transaction.
+Log only after a matching failure commits, and suppress cancellation errors.
+Regressions cover stale revision and operation completions, cancellation,
+expired contexts, and rejected settings writes while retaining a positive
+current-failure logging control.
+
 Focused command:
 
 ```bash
@@ -101,5 +107,7 @@ Focused command:
 
 The tiny exact-source limiter proof fails before normalization, including a
 3,072-byte decoded stored value, and passes afterward in the task sandbox.
+The guarded logging proof also fails before the fix and passes afterward, using
+exact production methods and an explicit transaction boundary fake.
 Full SQLite persistence and service regressions run in hosted CI; no local
 backend dependency rebuild is required.

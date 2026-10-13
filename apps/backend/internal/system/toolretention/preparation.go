@@ -53,8 +53,8 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 	if backupErr != nil {
 		code = "backup_failed"
 		detail = limitPreparationDetail(backupErr.Error())
-		s.logFailure(ctx, "tool payload retention backup preparation failed", backupErr)
 	}
+	failed := false
 	_, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
 		if r.Policy.Revision != prepared.Policy.Revision || r.Preparation.State != stateRunning || r.Operation == nil || r.Operation.ID != prepared.Operation.ID {
 			return nil
@@ -64,6 +64,7 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 			r.Preparation.Error = code
 			r.PreparationDetail = detail
 			finishOperation(r, stateFailed, code, s.opts.Now())
+			failed = true
 			return nil
 		}
 		r.Preparation.State = stateReady
@@ -78,6 +79,9 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 		return err
 	}
 	if backupErr != nil {
+		if failed && !errors.Is(backupErr, context.Canceled) {
+			s.logFailure(ctx, "tool payload retention backup preparation failed", backupErr)
+		}
 		return errors.New(code)
 	}
 	return nil
