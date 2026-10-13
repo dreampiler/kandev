@@ -23,6 +23,7 @@ function baseForm(overrides: Partial<FormState> = {}): FormState {
     description: "",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    parentTaskId: "",
     agentProfileId: "agent-1",
     executorProfileId: "exec-1",
     taskMode: "automation_run",
@@ -184,6 +185,16 @@ describe("buildCreatePayload / buildUpdatePayload", () => {
   it("sends an empty repository_ids array when no repositories are selected", () => {
     const payload = buildCreatePayload("ws-1", baseForm(), [], []);
     expect(payload.repository_ids).toEqual([]);
+  });
+
+  it("sends the configured parent task on create and update, and empty when unset", () => {
+    const withParent = baseForm({ parentTaskId: "parent-1" });
+    expect(buildCreatePayload("ws-1", withParent, [], []).parent_task_id).toBe("parent-1");
+    expect(buildUpdatePayload(withParent, []).parent_task_id).toBe("parent-1");
+
+    const withoutParent = baseForm();
+    expect(buildCreatePayload("ws-1", withoutParent, [], []).parent_task_id).toBe("");
+    expect(buildUpdatePayload(withoutParent, []).parent_task_id).toBe("");
   });
 
   it("sends the selected continuation policy on create and update", () => {
