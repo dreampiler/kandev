@@ -136,6 +136,36 @@ function Assert-SafeIsolatedHomePaths {
   }
 }
 
+function Assert-OperationalBinaryPath {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string[]]$OperationalRoots
+  )
+  foreach ($root in $OperationalRoots) {
+    if ([string]::IsNullOrWhiteSpace($root)) { continue }
+    if (Test-PathWithin -Path $Path -Root $root) {
+      throw "dev-isolated: refusing binary '$Path' inside operational path '$root'."
+    }
+  }
+}
+
+function Assert-IsolatedLaunchRoot {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string]$IsolatedRoot
+  )
+  # The declared isolated root is the only sanctioned home for launched build
+  # outputs that cannot sit under the repo checkout (a task copy under the live
+  # home is refused as an operational path). It must be named explicitly so the
+  # public script never hardcodes a machine-local path.
+  if ([string]::IsNullOrWhiteSpace($IsolatedRoot)) {
+    throw "dev-isolated: -BinDir needs KANDEV_ISO_ROOT to name the isolated-instance root."
+  }
+  if (-not (Test-PathWithin -Path $Path -Root $IsolatedRoot)) {
+    throw "dev-isolated: -BinDir '$Path' is outside the declared isolated root '$IsolatedRoot'."
+  }
+}
+
 function Get-IsolatedMockAgentMode {
   param([switch]$RealAgents)
   # The isolated dev/mock instance must not run real provider discovery probes,
@@ -212,4 +242,4 @@ function Invoke-WithIsolatedEnvironment {
   }
 }
 
-Export-ModuleMember -Function Resolve-SafeIsolatedHome, Assert-SafeIsolatedHomePaths, Get-IsolatedMockAgentMode, New-KandevIsolatedChildEnvironment, Invoke-WithIsolatedEnvironment
+Export-ModuleMember -Function Resolve-SafeIsolatedHome, Assert-SafeIsolatedHomePaths, Assert-OperationalBinaryPath, Assert-IsolatedLaunchRoot, Get-IsolatedMockAgentMode, New-KandevIsolatedChildEnvironment, Invoke-WithIsolatedEnvironment

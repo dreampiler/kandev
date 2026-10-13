@@ -180,13 +180,27 @@ type UtilityAgentReference struct {
 	Name string `json:"name"`
 }
 
+// DynamicProfileRouteRef names one route row that references the concrete
+// profile: its position and its 1-based tier, so a resolution confirmation can
+// say which grade contains the candidate.
+type DynamicProfileRouteRef struct {
+	Position int  `json:"position"`
+	Tier     int  `json:"tier"`
+	Enabled  bool `json:"enabled"`
+}
+
 // DynamicProfileReference identifies a dynamic profile that contains the
 // concrete profile as a candidate. The route remains stored after a forced
 // disable or delete so the router can skip it and the user can repair it.
+// Version is the document's optimistic version at read time and Routes lists
+// every referencing position, so a caller can echo the version and name the
+// grade.
 type DynamicProfileReference struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Deleted bool   `json:"deleted"`
+	ID      string                   `json:"id"`
+	Name    string                   `json:"name"`
+	Deleted bool                     `json:"deleted"`
+	Version int64                    `json:"version"`
+	Routes  []DynamicProfileRouteRef `json:"routes"`
 }
 
 type UtilityDependencyChecker interface {

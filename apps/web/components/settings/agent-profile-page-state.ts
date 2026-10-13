@@ -11,11 +11,19 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { permissionsToProfilePatch } from "@/lib/agent-permissions";
-import { deleteAgentProfileAction, updateAgentProfileAction } from "@/app/actions/agents";
+import {
+  deleteAgentProfileAction,
+  dynamicProfilesFromApiError,
+  updateAgentProfileAction,
+} from "@/app/actions/agents";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { isProfileDirty } from "@/components/settings/agent-profile-dirty";
 import type { useToast } from "@/components/toast-provider";
 import type { AgentProfileDeleteConflict } from "@/components/settings/agent-profile-delete-dialog";
+import {
+  useDynamicReferenceDialog,
+  type DynamicReferenceRequest,
+} from "@/components/settings/agent-profile-dynamic-reference-dialog";
 import { t as translate } from "@/lib/i18n";
 import {
   mergeOptionsByNewest,
@@ -24,6 +32,15 @@ import {
 } from "@/lib/state/slices/settings/types";
 import { ApiError, isHandledApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile, PermissionSetting } from "@/lib/types/http";
+import type {
+  ActiveSessionInfo,
+  AutomationReference,
+  DynamicProfileReference,
+  DynamicReferenceConflictLists,
+  RoutingTierReference,
+  UtilityAgentReference,
+  WatcherReference,
+} from "@/lib/types/agent-profile-errors";
 import {
   isProfileRevisionNewer,
   reconcileAgentProfileSnapshot,
@@ -186,6 +203,7 @@ type ProfileEditorActionsOptions = {
   acceptProfileSaveResponse: (response: AgentProfile, submitted: AgentProfile) => boolean;
   toast: ReturnType<typeof useToast>["toast"];
   onUtilityConflict?: (agents: Array<{ id: string; name: string }>) => void;
+  onDynamicConflict?: (references: DynamicProfileReference[]) => void;
 };
 
 function providerUpdateFields(draft: AgentProfile) {
@@ -243,6 +261,7 @@ export function useProfileSave({
   acceptProfileSaveResponse,
   toast,
   onUtilityConflict,
+  onDynamicConflict,
 }: ProfileEditorActionsOptions) {
   const storeApi = useAppStoreApi();
   // eslint-disable-next-line complexity
@@ -280,17 +299,18 @@ export function useProfileSave({
       setSaveStatus("success");
     } catch (error) {
       markProfileSubmitted(null);
-      if (
-        error instanceof ApiError &&
-        error.status === 409 &&
-        Array.isArray((error.body as { utility_agents?: unknown[] } | null)?.utility_agents)
-      ) {
-        onUtilityConflict?.(
-          (error.body as { utility_agents: Array<{ id: string; name: string }> }).utility_agents,
-        );
-      }
       setSaveStatus("error");
-      if (!isHandledApiError(error)) {
+      const dynamicRefs = dynamicProfilesFromApiError(error);
+      const utilityRefs =
+        error instanceof ApiError && error.status === 409
+          ? utilityAgentsFromApiError(error.body)
+          : [];
+      // A dynamic-reference conflict opens the resolution confirmation instead
+      // of a dead-end toast; a co-occurring utility conflict keeps its own
+      // confirmation. Only a conflict with neither keeps the generic toast.
+      if (dynamicRefs.length > 0) onDynamicConflict?.(dynamicRefs);
+      if (utilityRefs.length > 0) onUtilityConflict?.(utilityRefs);
+      if (dynamicRefs.length === 0 && utilityRefs.length === 0 && !isHandledApiError(error)) {
         toast({
           title: translate("agents:failedToSaveProfile"),
           description: errorMessage(error),
@@ -302,7 +322,14 @@ export function useProfileSave({
   };
 }
 
-function publishProfileSaveResponse(
+function utilityAgentsFromApiError(body: unknown): Array<{ id: string; name: string }> {
+  const value = body && typeof body === "object" ? (body as { utility_agents?: unknown }) : null;
+  return Array.isArray(value?.utility_agents)
+    ? (value.utility_agents as Array<{ id: string; name: string }>)
+    : [];
+}
+
+export function publishProfileSaveResponse(
   storeApi: ReturnType<typeof useAppStoreApi>,
   agentId: string,
   updated: AgentProfile,
@@ -331,6 +358,67 @@ export function preserveNewerProfileDraft(
   return current === submitted ? saved : current;
 }
 
+// profileConflictFromResult maps the typed conflict lists onto the delete
+// dialog's prop shape.
+function profileConflictFromResult(result: {
+  activeSessions: ActiveSessionInfo[];
+  watchers: WatcherReference[];
+  routingTiers: RoutingTierReference[];
+  automations: AutomationReference[];
+  utilityAgents: UtilityAgentReference[];
+}): AgentProfileDeleteConflict {
+  return {
+    activeSessions: result.activeSessions,
+    watchers: result.watchers,
+    routingTiers: result.routingTiers,
+    automations: result.automations,
+    utilityAgents: result.utilityAgents,
+  };
+}
+
+// A dynamic-only conflict opens the resolution dialog; any other reference keeps
+// the existing conflict surface.
+function isDynamicOnlyConflict(
+  result: DynamicReferenceConflictLists & { dynamicProfiles: DynamicProfileReference[] },
+): boolean {
+  return (
+    result.dynamicProfiles.length > 0 &&
+    result.activeSessions.length === 0 &&
+    result.watchers.length === 0 &&
+    result.routingTiers.length === 0 &&
+    result.automations.length === 0 &&
+    result.utilityAgents.length === 0
+  );
+}
+
+function withDisabledProfile(
+  settingsAgents: Agent[],
+  agentId: string,
+  updated: AgentProfile,
+): Agent[] {
+  return settingsAgents.map((agentItem: Agent) =>
+    agentItem.id === agentId
+      ? {
+          ...agentItem,
+          profiles: agentItem.profiles.map((p: AgentProfile) =>
+            p.id === updated.id ? updated : p,
+          ),
+        }
+      : agentItem,
+  );
+}
+
+function withoutProfile(settingsAgents: Agent[], agentId: string, profileId: string): Agent[] {
+  return settingsAgents.map((agentItem: Agent) =>
+    agentItem.id === agentId
+      ? {
+          ...agentItem,
+          profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== profileId),
+        }
+      : agentItem,
+  );
+}
+
 export function useProfileDelete(
   agent: Agent,
   draft: AgentProfile,
@@ -342,36 +430,59 @@ export function useProfileDelete(
   const [conflict, setConflict] = useState<AgentProfileDeleteConflict | null>(null);
 
   const removeProfileFromStore = () => {
-    const nextAgents = settingsAgents.map((agentItem: Agent) =>
-      agentItem.id === agent.id
-        ? {
-            ...agentItem,
-            profiles: agentItem.profiles.filter((p: AgentProfile) => p.id !== draft.id),
-          }
-        : agentItem,
-    );
-    syncAgentsToStore(nextAgents);
+    syncAgentsToStore(withoutProfile(settingsAgents, agent.id, draft.id));
     window.location.assign("/settings/agents");
   };
 
-  const requestDelete = () => {
-    setShowDeleteConfirm(true);
-  };
+  // The delete entry's dynamic conflict opens the resolution confirmation: the
+  // two positive choices are "disable instead of deleting" (operation=disable)
+  // and "remove then delete" (operation=delete).
+  const resolution = useDynamicReferenceDialog({
+    onResolved: ({ operation, profile }) => {
+      if (operation === "delete") {
+        removeProfileFromStore();
+        return;
+      }
+      if (profile) syncAgentsToStore(withDisabledProfile(settingsAgents, agent.id, profile));
+    },
+    onBlocked: (lists) => {
+      // A resolution delete re-check found routing tiers, sessions, watchers, or
+      // automations; hand them to the existing delete conflict surface.
+      setConflict(lists);
+    },
+    onError: (message) => {
+      toast({
+        title: translate("agents:dynamicReferenceFailed"),
+        description: message,
+        variant: "error",
+      });
+    },
+  });
+
+  const requestDelete = () => setShowDeleteConfirm(true);
 
   const handleDeleteProfile = async () => {
     setShowDeleteConfirm(false);
     const result = await deleteAgentProfileAction(draft.id);
     if (result.status === "ok") {
       removeProfileFromStore();
-    } else if (result.status === "conflict") {
-      setConflict({
-        activeSessions: result.activeSessions,
-        watchers: result.watchers,
-        routingTiers: result.routingTiers,
-        automations: result.automations,
-        utilityAgents: result.utilityAgents,
-      });
-    } else if (!result.handled) {
+      return;
+    }
+    if (result.status === "conflict") {
+      if (isDynamicOnlyConflict(result)) {
+        const request: DynamicReferenceRequest = {
+          profileId: draft.id,
+          profileName: draft.name,
+          operation: "delete",
+          references: result.dynamicProfiles,
+        };
+        resolution.open(request);
+        return;
+      }
+      setConflict(profileConflictFromResult(result));
+      return;
+    }
+    if (!result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
         description: result.message,
@@ -386,13 +497,7 @@ export function useProfileDelete(
     if (result.status === "ok") {
       removeProfileFromStore();
     } else if (result.status === "conflict") {
-      setConflict({
-        activeSessions: result.activeSessions,
-        watchers: result.watchers,
-        routingTiers: result.routingTiers,
-        automations: result.automations,
-        utilityAgents: result.utilityAgents,
-      });
+      setConflict(profileConflictFromResult(result));
     } else if (result.status === "error" && !result.handled) {
       toast({
         title: translate("agents:failedToDeleteProfile"),
@@ -410,5 +515,6 @@ export function useProfileDelete(
     conflict,
     setConflict,
     handleForceDelete,
+    resolutionDialog: resolution.dialog,
   };
 }

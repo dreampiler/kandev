@@ -69,6 +69,15 @@
   link or junction, or inside a git workspace. Existing git configuration and
   -CopyDb destination files are never replaced.
 
+.PARAMETER BinDir
+  Launch the binaries from this directory instead of <repo>\apps\backend\bin.
+  The directory must sit inside the isolated root named by the KANDEV_ISO_ROOT
+  environment variable. A task copy the path guard refuses (for example one
+  under the live home) can hand only its build outputs to a declared location
+  outside the operational paths. A rebuild still runs in the repo checkout and
+  the three binaries are copied into -BinDir before launch. KANDEV_ISO_ROOT is
+  not defaulted because it names a machine-local path.
+
 .EXAMPLE
   scripts\dev-isolated.ps1
 
@@ -91,7 +100,8 @@ param(
   [int]$WebPort,
   [string]$WebHost = '127.0.0.1',
   [int]$AgentctlPort,
-  [string]$HomeDir
+  [string]$HomeDir,
+  [string]$BinDir
 )
 
 Set-StrictMode -Version Latest
@@ -102,30 +112,45 @@ $RepoRoot = Split-Path -Parent $ScriptDir
 Import-Module (Join-Path $ScriptDir 'isolated-instance.psm1') -Force
 $ConfiguredProductionHome = $env:KANDEV_HOME_DIR
 $BackendDir = Join-Path $RepoRoot 'apps\backend'
-$BinDir = Join-Path $BackendDir 'bin'
-$BackendBin = Join-Path $BinDir 'kandev.exe'
-$AgentctlBin = Join-Path $BinDir 'agentctl.exe'
-$MockAgentBin = Join-Path $BinDir 'mock-agent.exe'
+$BuildBinDir = Join-Path $BackendDir 'bin'
+
+# Operational paths we must never launch from or shut down: the production
+# Kandev install and the live user home. Isolation requires the launched
+# binary to live under this repo checkout (the task worktree/copy), or under a
+# declared isolated-instance root that sits outside those operational paths.
+$OperationalRoots = @('C:\AIWS\Kandev', (Join-Path $env:USERPROFILE '.kandev'))
+
+# A task copy created under the live home cannot host the launched binary, so
+# -BinDir hands the build outputs to a declared isolated root outside it (and
+# outside the production install). The root is named by KANDEV_ISO_ROOT, a
+# machine-local path that never belongs in this public repository.
+$IsolatedRoot = $env:KANDEV_ISO_ROOT
+if ($BinDir) {
+  Assert-IsolatedLaunchRoot -Path $BinDir -IsolatedRoot $IsolatedRoot
+  $LaunchBinDir = [System.IO.Path]::GetFullPath($BinDir)
+} else {
+  $LaunchBinDir = $BuildBinDir
+}
+$BackendBin = Join-Path $LaunchBinDir 'kandev.exe'
+$AgentctlBin = Join-Path $LaunchBinDir 'agentctl.exe'
+$MockAgentBin = Join-Path $LaunchBinDir 'mock-agent.exe'
 $WebDir = Join-Path $RepoRoot 'apps\web'
 $ViteCli = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
 $NodeModules = Join-Path $RepoRoot 'apps\node_modules'
 $RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin)
+$BuildBins = @(
+  (Join-Path $BuildBinDir 'kandev.exe'),
+  (Join-Path $BuildBinDir 'agentctl.exe'),
+  (Join-Path $BuildBinDir 'mock-agent.exe')
+)
 
 # Ports we must never reuse (the well-known production ports). 38430 is the
 # observed production backend port on this fork's host in addition to the
 # documented defaults.
 $GuardedPorts = @(38429, 37429, 39429, 38430)
 
-# Operational paths we must never launch from or shut down: the production
-# Kandev install and the live user home. Isolation requires the launched
-# binary to live under this repo checkout (the task worktree/copy).
-$OperationalRoots = @('C:\AIWS\Kandev', (Join-Path $env:USERPROFILE '.kandev'))
-foreach ($backendCandidate in @($BackendBin, $AgentctlBin, $MockAgentBin)) {
-  foreach ($operationalRoot in $OperationalRoots) {
-    if ($backendCandidate.StartsWith($operationalRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-      throw "dev-isolated: refusing binary '$backendCandidate' inside operational path '$operationalRoot'."
-    }
-  }
+foreach ($candidate in @($BackendBin, $AgentctlBin, $MockAgentBin)) {
+  Assert-OperationalBinaryPath -Path $candidate -OperationalRoots $OperationalRoots
 }
 
 # Isolated defaults — deliberately far from production.
@@ -250,26 +275,27 @@ if ($Install) {
 }
 
 # --- Ensure the backend binaries a live instance needs ---
-function Test-RequiredBinsPresent {
-  foreach ($bin in $RequiredBins) {
+function Test-BinsPresent {
+  param([string[]]$Bins)
+  foreach ($bin in $Bins) {
     if (-not (Test-Path -LiteralPath $bin)) { return $false }
   }
   return $true
 }
 
 if ($NoBuild) {
-  if (-not (Test-RequiredBinsPresent)) {
+  if (-not (Test-BinsPresent -Bins $RequiredBins)) {
     $missing = $RequiredBins | Where-Object { -not (Test-Path -LiteralPath $_) }
     $list = $missing -join [Environment]::NewLine
     throw "dev-isolated: -NoBuild set but required binaries are missing:`n$list`nBuild them with 'make -C apps/backend build' (or drop -NoBuild)."
   }
 } else {
   $needBuild = $false
-  if (-not (Test-RequiredBinsPresent)) {
+  if (-not (Test-BinsPresent -Bins $BuildBins)) {
     $needBuild = $true
   } else {
     # Go source and embedded runtime inputs must match the binary we launch.
-    $oldest = ($RequiredBins | ForEach-Object { Get-Item -LiteralPath $_ } | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime
+    $oldest = ($BuildBins | ForEach-Object { Get-Item -LiteralPath $_ } | Sort-Object LastWriteTime | Select-Object -First 1).LastWriteTime
     $newer = Get-ChildItem -LiteralPath $BackendDir -Recurse -Filter '*.go' -File -ErrorAction SilentlyContinue |
       Where-Object { $_.LastWriteTime -gt $oldest } |
       Select-Object -First 1
@@ -321,10 +347,23 @@ if ($NoBuild) {
     }
     if ($buildExit -ne 0) { throw "dev-isolated: build failed (exit $buildExit)." }
     Write-Host "dev-isolated: build complete."
-    if (-not (Test-RequiredBinsPresent)) {
+    if (-not (Test-BinsPresent -Bins $BuildBins)) {
       throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe after build, but one is missing."
     }
   }
+}
+
+if ($LaunchBinDir -ne $BuildBinDir) {
+  # Hand the build outputs to the declared isolated root. The repo checkout
+  # under the live home is refused as an operational launch path, so the
+  # binaries live outside it and the script launches them from there.
+  New-Item -ItemType Directory -Path $LaunchBinDir -Force | Out-Null
+  foreach ($sourceBin in $BuildBins) {
+    Copy-Item -LiteralPath $sourceBin -Destination $LaunchBinDir -Force
+  }
+}
+if (-not (Test-BinsPresent -Bins $RequiredBins)) {
+  throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe in $LaunchBinDir, but one is missing."
 }
 
 # --- Preflight: web prerequisites ---
@@ -438,7 +477,7 @@ $backendOverrides = [ordered]@{
   'KANDEV_MOCK_LINEAR'            = 'true'
   'KANDEV_LOG_LEVEL'              = $(if ($env:KANDEV_LOG_LEVEL) { $env:KANDEV_LOG_LEVEL } else { 'info' })
 }
-$BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
+$BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $LaunchBinDir `
   -IsolatedHome $IsolatedHome -Overrides $backendOverrides
 
 # One outer quote pair: cmd's /c rule strips the first and last quote when the
@@ -596,6 +635,7 @@ if ($webStarted) {
   Write-Host '  browser URL : (not started; pass -Web to launch the frontend)'
 }
 Write-Host "  agentctl    : http://127.0.0.1:$EffectiveAgentctlPort  (range $AgentctlRangeBase-$AgentctlRangeMax)"
+Write-Host "  binaries    : $LaunchBinDir"
 Write-Host "  KANDEV_HOME : $IsolatedHome"
 Write-Host "  DB          : $DbPath"
 Write-Host "  backend log : $BackendErrLog"

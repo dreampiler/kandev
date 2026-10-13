@@ -84,8 +84,13 @@ func TestAgentctlResolverManifestDownloadsExactHelperAndReusesCache(t *testing.T
 	if err != nil {
 		t.Fatalf("stat cached helper: %v", err)
 	}
-	// Windows has no execute permission bit to restore.
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+	// Windows has no execute bit; of the restored 0755 it keeps only the
+	// owner-write bit, so a cached helper that stays rewritable reports 0666.
+	if runtime.GOOS == "windows" {
+		if info.Mode().Perm() != 0o666 {
+			t.Fatalf("cached helper mode = %v; want writable 0666", info.Mode().Perm())
+		}
+	} else if info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("cached helper mode = %v; want executable", info.Mode().Perm())
 	}
 }

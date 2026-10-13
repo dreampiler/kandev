@@ -166,6 +166,11 @@ func (s *Service) writeCeilingSurfaceNote(ctx context.Context, taskID, sessionID
 		// was queued earlier, so the population reading would misdescribe it.
 		content = "This session's launch is queued: a launch queued earlier takes this free slot first."
 	}
+	if deferral.ReasonCode == ceilingReasonMemoryPressure {
+		// A host-resource refusal carries no population reading; naming the
+		// host condition keeps the note from claiming a session-count limit.
+		content = "This session's launch is queued: the host is low on available memory or above its commit ceiling."
+	}
 	return s.messageCreator.CreateSessionMessageIdempotent(
 		admissionCtx, messageID, taskID, content, sessionID, string(v1.MessageTypeStatus), "", metadata, false,
 	)

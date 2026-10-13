@@ -146,7 +146,7 @@ func TestVerifyCreatedKubernetesPodRejectsAdmissionMutatedAgentctlFields(t *test
 
 func TestKubernetesCreateInstanceMaterializesSkillsCredentialsAndPortableConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".codex"), 0o700))
 	require.NoError(t, os.MkdirAll(filepath.Join(home, ".mock-agent"), 0o700))
 	require.NoError(t, os.WriteFile(filepath.Join(home, ".codex", "auth.json"), []byte("auth-data"), 0o600))

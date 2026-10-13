@@ -31,3 +31,33 @@ export type AutomationReference = {
 };
 
 export type UtilityAgentReference = { id: string; name: string };
+
+// DynamicProfileRouteRef names one route row of a dynamic profile that
+// references the concrete profile: its zero-based position and 1-based tier.
+export type DynamicProfileRouteRef = {
+  position: number;
+  tier: number;
+  enabled: boolean;
+};
+
+// DynamicProfileReference is one dynamic profile that contains the concrete
+// profile as a candidate. `version` is echoed back on a resolution request so
+// the server can fence a stale confirmation.
+export type DynamicProfileReference = {
+  id: string;
+  name: string;
+  deleted: boolean;
+  version: number;
+  routes: DynamicProfileRouteRef[];
+};
+
+// DynamicReferenceConflictLists carries the non-dynamic blockers returned when a
+// resolution delete re-check finds routing tiers, sessions, watchers, or
+// automations that still reference the profile.
+export type DynamicReferenceConflictLists = {
+  activeSessions: ActiveSessionInfo[];
+  watchers: WatcherReference[];
+  routingTiers: RoutingTierReference[];
+  automations: AutomationReference[];
+  utilityAgents: UtilityAgentReference[];
+};
