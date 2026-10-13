@@ -295,7 +295,7 @@ func newSSHLaunchHarness(t *testing.T, pid string) *sshLaunchHarness {
 		case command == "git --version":
 			return sshOut("git version 2.44.0\n")
 		case strings.Contains(command, remoteHomeCommand):
-			return sshOut(h.remoteHome)
+			return sshOut(sftpRemotePath(h.remoteHome))
 		case strings.Contains(command, "agentctl.sha256"):
 			return sshOut(sha + "\n")
 		case strings.Contains(command, "test -x"):
@@ -350,7 +350,7 @@ func TestSSHExecutorCreateInstanceProvisionsAndTracksTheSession(t *testing.T) {
 		t.Fatalf("CreateInstance: %v", err)
 	}
 
-	wantTaskDir := harness.remoteHome + "/.kandev/tasks/task-task-1"
+	wantTaskDir := sftpRemotePath(harness.remoteHome) + "/.kandev/tasks/task-task-1"
 	wantSessionDir := wantTaskDir + "/.kandev/sessions/session-1"
 	if instance.InstanceID != "instance-1" || instance.TaskID != "task-1" || instance.SessionID != "session-1" {
 		t.Fatalf("instance identity = %+v", instance)
