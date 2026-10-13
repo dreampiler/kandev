@@ -40,6 +40,7 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
+	updatedAt  time.Time
 	// strikes counts consecutive suspensions. Only a turn that completed
 	// without a provider error clears it, so a probe launch that starts, or a
 	// turn that streams output and then fails, still moves the next suspension
@@ -56,12 +57,13 @@ func (c circuit) held() bool {
 // CircuitSnapshot is the durable representation of one resource circuit.
 // Keys are opaque fingerprints and must already be safe to persist.
 type CircuitSnapshot struct {
-	Key        string
-	State      CircuitState
-	Until      time.Time
-	Code       routingerr.Code
-	ProbeUntil time.Time
-	Strikes    int
+	Key        string          `json:"resource_key"`
+	State      CircuitState    `json:"state"`
+	Until      time.Time       `json:"until"`
+	Code       routingerr.Code `json:"code"`
+	ProbeUntil time.Time       `json:"probe_until"`
+	Strikes    int             `json:"strikes"`
+	UpdatedAt  time.Time       `json:"updated_at"`
 }
 
 // CircuitPersistence stores shared resource health across backend restarts.
@@ -128,16 +130,31 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, snapshot := range snapshots {
+		originalUntil := snapshot.Until
+		snapshot.Until = cappedCircuitUntil(snapshot)
 		r.circuits[snapshot.Key] = circuit{
 			state: snapshot.State, until: snapshot.Until,
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
-			strikes: snapshot.Strikes,
+			strikes:   snapshot.Strikes,
+			updatedAt: snapshot.UpdatedAt,
+		}
+		if !snapshot.Until.Equal(originalUntil) {
+			_ = r.persistSnapshotLocked(snapshot.Key)
 		}
 	}
 	return nil
 }
 
 func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code) {
+	r.open(key, until, code, false)
+}
+
+// OpenDaily uses a UTC-day strike window for ambiguous gateway rate limits.
+func (r *CircuitRegistry) OpenDaily(key string, until time.Time, code routingerr.Code) {
+	r.open(key, until, code, true)
+}
+
+func (r *CircuitRegistry) open(key string, until time.Time, code routingerr.Code, daily bool) {
 	if key == "" {
 		return
 	}
@@ -150,12 +167,16 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 		return
 	}
 	strikes := previous.strikes + 1
+	if daily && !sameUTCDay(previous.updatedAt, r.now()) {
+		strikes = 1
+		previous.strikes = 1
+	}
 	if previous.state == CircuitOpen && r.now().Before(previous.until) {
 		// Another attempt hit the same running suspension: it is the same
 		// incident, so it does not count again.
 		strikes = previous.strikes
 	}
-	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, strikes: strikes}
+	r.circuits[key] = circuit{state: CircuitOpen, until: until, code: code, strikes: strikes, updatedAt: r.now()}
 	_ = r.persistSnapshotLocked(key)
 	r.logger.Info("dynamic resource suspended",
 		zap.String("key", key),
@@ -166,7 +187,7 @@ func (r *CircuitRegistry) Open(key string, until time.Time, code routingerr.Code
 }
 
 // Hold opens a circuit that has no expiry and admits no probe. Only
-// ReleaseHold closes it. Holding an already held circuit is the same incident.
+// an owner release closes it. Holding an already held circuit is the same incident.
 func (r *CircuitRegistry) Hold(key string, code routingerr.Code) {
 	if key == "" || !routingerr.HoldsUntilRelease(code) {
 		return
@@ -195,13 +216,22 @@ func (r *CircuitRegistry) Hold(key string, code routingerr.Code) {
 // in place and the error is returned, so a restart cannot resurrect a hold the
 // caller was told is gone.
 func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
+	return r.release(key, true)
+}
+
+// Release closes exactly one owner's selected circuit, including a probe.
+func (r *CircuitRegistry) Release(key string) (bool, error) {
+	return r.release(key, false)
+}
+
+func (r *CircuitRegistry) release(key string, heldOnly bool) (bool, error) {
 	if key == "" {
 		return false, nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	entry, ok := r.circuits[key]
-	if !ok || !entry.held() {
+	if !ok || (heldOnly && !entry.held()) || (entry.state == CircuitClosed && entry.strikes == 0) {
 		return false, nil
 	}
 	r.flushPendingLocked(key)
@@ -215,6 +245,24 @@ func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
 		zap.String("code", string(entry.code)),
 	)
 	return true, nil
+}
+
+func sameUTCDay(a, b time.Time) bool {
+	return !a.IsZero() && nextUTCDay(a).Equal(nextUTCDay(b))
+}
+
+// NextDailyStrike resets the gateway ladder at the next UTC date.
+func (r *CircuitRegistry) NextDailyStrike(key string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry := r.circuits[key]
+	if !sameUTCDay(entry.updatedAt, r.now()) {
+		return 1
+	}
+	if entry.state == CircuitOpen && r.now().Before(entry.until) {
+		return entry.strikes
+	}
+	return entry.strikes + 1
 }
 
 // NextStrike returns the strike number a failure recorded now would carry.
@@ -422,7 +470,7 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	}
 	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
 		Key: key, State: entry.state, Until: entry.until,
-		Code: entry.code, ProbeUntil: entry.probeUntil, Strikes: entry.strikes,
+		Code: entry.code, ProbeUntil: entry.probeUntil, Strikes: entry.strikes, UpdatedAt: entry.updatedAt,
 	})
 	if err != nil {
 		_, alreadyPending := r.pending[key]
