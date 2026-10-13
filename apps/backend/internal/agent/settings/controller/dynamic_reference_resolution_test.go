@@ -302,6 +302,39 @@ func TestResolveDynamicReferencesRemoveSoleCandidateRejectsAndChangesNothing(t *
 	}
 }
 
+// TestResolveDynamicReferencesStaleVersionDeleteSkipsAutomation pins the
+// delete-path preflight ordering: the read-only resolution builder runs before
+// disableReferencingAutomations, so a stale version makes the whole delete
+// request fail with the conflict contract without ever disabling a referencing
+// automation.
+func TestResolveDynamicReferencesStaleVersionDeleteSkipsAutomation(t *testing.T) {
+	ctrl, repo, fixture := newResolutionFixture(t)
+	dynamicRepo := repo.(store.DynamicProfileRepository)
+	automations := &fakeAutomationDependencyChecker{refs: []AutomationReference{{ID: "auto-1", Name: "Weekly"}}}
+	ctrl.automationDeps = automations
+
+	_, err := ctrl.ResolveDynamicReferences(context.Background(), DynamicReferenceResolutionRequest{
+		ProfileID: fixture.candidateID,
+		Operation: "delete",
+		Action:    "remove_candidate",
+		Versions:  map[string]int64{fixture.dynamicID: 99},
+	})
+	if !errors.Is(err, ErrDynamicProfileVersionConflict) {
+		t.Fatalf("err = %v, want ErrDynamicProfileVersionConflict", err)
+	}
+	if automations.disableCalls != 0 {
+		t.Fatalf("automation disable calls = %d, want 0 (preflight must precede the mutation)", automations.disableCalls)
+	}
+	profile, err := repo.GetAgentProfile(context.Background(), fixture.candidateID)
+	if err != nil || !profile.Enabled {
+		t.Fatalf("target profile = %#v err = %v, want unchanged enabled", profile, err)
+	}
+	stored, routes, err := dynamicRepo.GetDynamicAgentProfile(context.Background(), fixture.dynamicID)
+	if err != nil || stored.Version != 1 || len(routes) != 2 {
+		t.Fatalf("dynamic profile changed: version=%d routes=%#v err=%v", stored.Version, routes, err)
+	}
+}
+
 func TestResolveDynamicReferencesReferenceSetChangeRejects(t *testing.T) {
 	ctrl, _, fixture := newResolutionFixture(t)
 	_, err := ctrl.ResolveDynamicReferences(context.Background(), DynamicReferenceResolutionRequest{

@@ -63,6 +63,7 @@ export function useProfileEnabledToggle(options?: {
 }) {
   const { toast } = useToast();
   const storeApi = useAppStoreApi();
+  const onDynamicConflict = options?.onDynamicConflict;
 
   return useCallback(
     async (profile: AgentProfile, enabled: boolean) => {
@@ -73,7 +74,7 @@ export function useProfileEnabledToggle(options?: {
         if (isHandledApiError(error)) return;
         const dynamicRefs = dynamicProfilesFromApiError(error);
         if (dynamicRefs.length > 0) {
-          options?.onDynamicConflict?.(profile, dynamicRefs);
+          onDynamicConflict?.(profile, dynamicRefs);
           return;
         }
         toast({
@@ -83,6 +84,6 @@ export function useProfileEnabledToggle(options?: {
         });
       }
     },
-    [options, storeApi, toast],
+    [onDynamicConflict, storeApi, toast],
   );
 }

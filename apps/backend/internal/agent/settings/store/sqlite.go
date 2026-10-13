@@ -971,12 +971,12 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
 	refs := make([]models.DynamicProfileReference, 0)
 	seen := make(map[string]struct{})
 	for rows.Next() {
 		var ref models.DynamicProfileReference
 		if err := rows.Scan(&ref.ProfileID, &ref.Name, &ref.DeletedAt, &ref.Version); err != nil {
+			_ = rows.Close()
 			return nil, err
 		}
 		if _, ok := seen[ref.ProfileID]; ok {
@@ -986,6 +986,12 @@ func (r *sqliteRepository) ListDynamicProfileReferencesByExecutionProfile(
 		refs = append(refs, ref)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	// Close the outer cursor before the per-profile follow-up queries so the
+	// read connection is not held open across N additional statements.
+	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	for index := range refs {
