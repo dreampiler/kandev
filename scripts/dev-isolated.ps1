@@ -378,11 +378,6 @@ $WebStartedFile = $Pidfile -replace '\.pid$', '.web.started'
 # feature flags) from profiles.yaml. We also force mock providers so the
 # isolated instance needs no real GitHub/agents, and bind to loopback to avoid
 # Windows Firewall prompts.
-# cmd /c with internal file redirection keeps the backend and its children
-# (agentctl, mock-agent) writing to files. Start-Process without -Redirect*
-# uses ShellExecute (its own hidden console), so cmd.exe does not inherit the
-# caller's stdout/stderr pipe and `2>&1 | Select-Object` returns when this
-# script finishes.
 $BackendUrl = "http://127.0.0.1:$EffectiveBackendPort"
 $WebInternalHost = if ($WebHost -in @('0.0.0.0', '::', '[::]')) { '127.0.0.1' } else { $WebHost }
 if ($WebInternalHost.Contains(':') -and -not $WebInternalHost.StartsWith('[')) { $WebInternalHost = "[$WebInternalHost]" }
@@ -415,32 +410,45 @@ $backendOverrides = [ordered]@{
 $BackendEnvironment = New-KandevIsolatedChildEnvironment -BinaryDirectory $BinDir `
   -IsolatedHome $IsolatedHome -Overrides $backendOverrides
 
+# cmd /c with internal file redirection keeps the backend and its children
+# (agentctl, mock-agent) writing to files. Start-Process without -Redirect*
+# uses ShellExecute (its own hidden console), so cmd.exe does not inherit the
+# caller's stdout/stderr pipe and `2>&1 | Select-Object` returns when this
+# script finishes.
 # One outer quote pair: cmd's /c rule strips the first and last quote when the
 # line contains more than two, so the outer pair reconstructs the intended
 # `"<bin>" __backend > "<out>" 2> "<err>"`; without it the bin path and the err
 # redirect are mangled and cmd exits with a syntax error.
 $backendCmd = "`"$BackendBin`" __backend > `"$BackendOutLog`" 2> `"$BackendErrLog`""
+$backendLaunchTime = Get-Date
 $backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -Action {
   Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$backendCmd`"" `
     -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru
 }
 $CmdPid = $backendProc.Id
-# The actual backend (kandev.exe) is a child of cmd.exe. Since cmd.exe may exit
-# or the child may be reparented, we find the backend by its listening port.
-# Use the same $Timeout budget as the health loop for discovery.
+# The actual backend (kandev.exe) is launched by cmd.exe and cannot be read from
+# Start-Process, so we find it by its listening port. Only a listener created
+# after this launch is accepted, so a leftover kandev.exe from an earlier run is
+# never adopted. Use the same $Timeout budget as the health loop for discovery.
 $discoverDeadline = (Get-Date).AddSeconds($Timeout)
 $backendInfo = $null
 while (-not $backendInfo -and (Get-Date) -lt $discoverDeadline) {
   $listenerConn = Get-NetTCPConnection -State Listen -LocalPort $EffectiveBackendPort -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($listenerConn) {
     $listenerPid = $listenerConn.OwningProcess
-    $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid AND Name = 'kandev.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid AND Name = 'kandev.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($candidate -and $candidate.CreationDate -ge $backendLaunchTime) {
+      $backendInfo = $candidate
+    }
   }
   if (-not $backendInfo) {
     Start-Sleep -Milliseconds 500
   }
 }
 if (-not $backendInfo) {
+  Write-Host "dev-isolated: backend did not appear within ${Timeout}s. Last log lines:" -ForegroundColor Red
+  if (Test-Path -LiteralPath $BackendErrLog) { Get-Content -LiteralPath $BackendErrLog -Tail 30 }
+  if (Test-Path -LiteralPath $BackendOutLog) { Get-Content -LiteralPath $BackendOutLog -Tail 30 }
   # Clean up the cmd.exe parent tree before throwing
   $cmdTree = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $CmdPid" -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessId })
   foreach ($treePid in @($CmdPid) + $cmdTree) {
@@ -507,24 +515,26 @@ if ($Web) {
   try {
     # Same outer-quote and no -Redirect* shape as the backend launch.
     $viteCmd = "`"$($nodeCmd.Source)`" `"$WebDir\node_modules\vite\bin\vite.js`" --host $WebHost --port $EffectiveWebPort --strictPort > `"$WebOutLog`" 2> `"$WebErrLog`""
+    $webLaunchTime = Get-Date
     $webProc = Invoke-WithIsolatedEnvironment -Environment $WebEnvironment -Action {
       Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$viteCmd`"" `
         -WorkingDirectory $WebDir -WindowStyle Hidden -PassThru
     }
     $CmdPid = $webProc.Id
-    # The actual Vite process (node.exe) is a child of cmd.exe. Since cmd.exe may exit
-    # or the child may be reparented, we find Vite by its listening port.
-    # Use the same $Timeout budget as the health loop for discovery.
+    # The actual Vite process (node.exe) is launched by cmd.exe and cannot be read
+    # from Start-Process, so we find it by its listening port. Only a listener
+    # created after this launch, running vite, is accepted; a leftover node.exe
+    # from an earlier run is never adopted. Use the same $Timeout budget as health.
     $webDiscoverDeadline = (Get-Date).AddSeconds($Timeout)
     $webInfo = $null
     while (-not $webInfo -and (Get-Date) -lt $webDiscoverDeadline) {
       $webConn = Get-NetTCPConnection -State Listen -LocalPort $EffectiveWebPort -ErrorAction SilentlyContinue | Select-Object -First 1
       if ($webConn) {
         $webListenerPid = $webConn.OwningProcess
-        $webInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $webListenerPid AND Name = 'node.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
-        # Verify it's the Vite process by checking command line contains vite
-        if ($webInfo -and $webInfo.CommandLine -notmatch 'vite') {
-          $webInfo = $null
+        $candidate = Get-CimInstance Win32_Process -Filter "ProcessId = $webListenerPid AND Name = 'node.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+        # Verify it is the Vite process started by this launch.
+        if ($candidate -and $candidate.CreationDate -ge $webLaunchTime -and $candidate.CommandLine -match 'vite') {
+          $webInfo = $candidate
         }
       }
       if (-not $webInfo) {
@@ -532,6 +542,9 @@ if ($Web) {
       }
     }
     if (-not $webInfo) {
+      Write-Host "dev-isolated: web server did not appear within ${Timeout}s. Last log lines:" -ForegroundColor Red
+      if (Test-Path -LiteralPath $WebErrLog) { Get-Content -LiteralPath $WebErrLog -Tail 30 }
+      if (Test-Path -LiteralPath $WebOutLog) { Get-Content -LiteralPath $WebOutLog -Tail 30 }
       # Clean up the cmd.exe parent tree before throwing
       $cmdTree = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $CmdPid" -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessId })
       foreach ($treePid in @($CmdPid) + $cmdTree) {
