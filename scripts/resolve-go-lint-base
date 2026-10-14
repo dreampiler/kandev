@@ -54,18 +54,22 @@ else
 	origin_head=$(git symbolic-ref --quiet refs/remotes/origin/HEAD || true)
 	[ -n "$origin_head" ] || die "origin's default branch is unavailable; set kandev.lintBaseRef to a local remote-tracking ref"
 	case "$origin_head" in
-		refs/remotes/origin/*) base_branch=${origin_head#refs/remotes/origin/} ;;
+		refs/remotes/origin/*) ;;
 		*) die "origin's default ref is invalid: $origin_head" ;;
 	esac
-	[ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
 
 	# Lint against the default branch this checkout is nearest to: a fork opens
 	# PRs against its own origin, while a branch tracking the canonical upstream
-	# is measured against upstream. Pick the candidate whose merge base with HEAD
-	# is closest (fewest commits HEAD is ahead of it); a tie favors origin.
+	# is measured against upstream. Each remote contributes the default branch
+	# its own HEAD publishes, so an upstream whose default differs from origin's
+	# is not skipped. Pick the candidate whose merge base with HEAD is closest
+	# (fewest commits HEAD is ahead of it); a tie favors origin.
 	candidate_refs=("$(normalize_remote_ref "$origin_head")")
 	if git remote get-url upstream >/dev/null 2>&1; then
-		candidate_refs+=("refs/remotes/upstream/$base_branch")
+		upstream_head=$(git symbolic-ref --quiet refs/remotes/upstream/HEAD || true)
+		if [ -n "$upstream_head" ]; then
+			candidate_refs+=("$(normalize_remote_ref "$upstream_head")")
+		fi
 	fi
 
 	base_ref=""
