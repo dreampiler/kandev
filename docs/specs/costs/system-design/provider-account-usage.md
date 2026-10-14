@@ -186,7 +186,13 @@ never suspend a candidate.
 
 A failed read is cached for fifteen seconds and logged as `usage.fetch_failed`
 with the profile, account kind, reason and status, once per account per
-fifteen minutes. Selection treats a failed reading as unknown.
+fifteen minutes. During backoff, the existing cache may serve a last success
+younger than 30 minutes, marked stale with its original observation timestamp
+(AC-COSTS-PROVIDER-USAGE-001.5). The
+[Agents selection consumer](../../agents/system-design/dynamic-profile-tier-selection.md#usage-input-and-ranking)
+also bounds the original observation age and validates account/model windows;
+unusable evidence remains unknown. This does not convert the failed fetch into
+a success or change cache, circuit, or retry ownership.
 
 ## Persistence
 

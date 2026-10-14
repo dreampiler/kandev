@@ -159,8 +159,17 @@ boundary. Fetch outside `Engine.mu`; use one observation time and one bounded
 snapshot for a decision, then recheck generation and circuit eligibility during
 the existing atomic claim. Do not add a background rerouting scheduler.
 Reuse `UsageService` caching (five minutes, failed fetch cache fifteen seconds)
-and coalescing. A failed refresh becomes unknown; preview may retain a visibly
-stale last observation but selection does not treat it as fresh.
+and coalescing, including its bounded last-success response during backoff.
+Collect the candidate account readings before sampling one shared decision
+clock, so a freshly fetched timestamp cannot appear future-dated relative to
+the beginning of its own lookup. The per-decision observations are transient
+inputs, not a second cache.
+`dynamicUsageSnapshot.profileScore` accepts a reading only when its original
+`FetchedAt` is nonzero, not in the future, and less than 30 minutes old at the
+decision clock. Cache receipt time is not observation time. A cached stale
+reading remains a last observation, not evidence of a successful refresh; its
+original timestamp and source remain intact. No second cache or persistent
+last-value store is introduced. Missing or invalid evidence remains unknown.
 
 Extend normalized windows additively with numeric duration/start and, for
 model-specific windows, applicability. Codex retains its numeric duration;
@@ -250,10 +259,20 @@ optimization. No numerical price or workload mix is configured for this rule.
 For a nonzero reservation, leave raw pace unchanged; use
 `observed_usage_fraction >= 1 - reserved_share` as an admission exclusion when
 the share is positive and a usable limit exists. Zero adds no new quota gate.
-Unknown usage cannot enforce a nonzero reserve and must be shown as unknown;
-exclude the candidate until evidence returns. A positive
+Unknown usage cannot enforce a partial reserve and must be shown as unknown;
+for shares from 1 through 99, defer only the reservation check and retain the
+candidate under the existing known-before-unknown ordering. A 100% reserve
+excludes new selections even when usage is unknown. A positive
 reserve with `none` is invalid. Values are 0 through 100 inclusive; 100 excludes
 new selections. This rule does not seed an operational preset.
+
+The October 14 repair follows the owner's decision to apply the operational
+zero-reserve mitigation first and implement the code repair afterward. Its
+[delivery plan](../../../plans/dynamic-usage-reservation-recovery/plan.md#user-decision-and-design-alignment)
+records the decision, alternatives, and compatibility change from excluding
+unknown partially reserved candidates. During an observation gap, their reserved
+share cannot be guaranteed. Actual resource suspensions and atomic eligibility
+checks remain authoritative.
 
 ## Manual accounting
 
