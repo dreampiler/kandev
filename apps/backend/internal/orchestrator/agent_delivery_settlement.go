@@ -31,6 +31,10 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 			}
 		}
 	}
+	// The startup (sessionID == "") and per-turn reconcile call sites are the
+	// existing entry points for the two residual passes; they are bounded and
+	// idempotent, so running them here never changes the settlement result.
+	s.reconcileResidualDeliverySettlements(ctx, sessionID)
 	return nil
 }
 
