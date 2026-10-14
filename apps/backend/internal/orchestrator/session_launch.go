@@ -1507,10 +1507,12 @@ func (s *Service) RecoverSessionWithOptions(
 	// action_required: the recovery block this action settles can only be
 	// settled here, so refusing the route as dynamic_route_pending would leave
 	// the session with no admissible recovery path.
+	reclaimedRouteGeneration, reclaimedRoute := int64(0), false
 	if generation, reclaimed := s.reclaimActionRequiredRouteForRecovery(launchCtx, sessionID, action); reclaimed {
+		reclaimedRouteGeneration, reclaimedRoute = generation, true
 		defer func() {
 			if err != nil {
-				s.restoreRouteAfterFailedRecovery(ctx, sessionID, generation)
+				s.restoreRouteAfterFailedRecovery(ctx, sessionID, reclaimedRouteGeneration)
 			}
 		}()
 	}
@@ -1539,6 +1541,12 @@ func (s *Service) RecoverSessionWithOptions(
 		// operator surface.
 		if settleErr := s.settleCeilingDeferredRecovery(ctx, launchCtx, checkpoint, recoveryAdmission); settleErr != nil {
 			return nil, normalizeRecoverSessionError(settleErr)
+		}
+		if reclaimedRoute {
+			// The launch did not happen, so do not keep the reclaimed route
+			// claim with no runtime behind it. Restoring it lets a later
+			// recovery reclaim the same route instead of stranding it.
+			s.restoreRouteAfterFailedRecovery(ctx, sessionID, reclaimedRouteGeneration)
 		}
 		return resp, nil
 	}
