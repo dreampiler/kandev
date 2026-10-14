@@ -5,7 +5,8 @@
 
 .DESCRIPTION
   Windows/PowerShell companion to scripts/kandev-instances. For each backend
-  process (a `kandev` executable with a listening TCP socket) it prints:
+  process (a `kandev` or `kandev-dev` executable with a listening TCP socket)
+  it prints:
 
     PID  BACKEND_PORT  AGENTCTL_PORT  HOME_DIR  REPO_PATH  MARKER
 
@@ -58,7 +59,7 @@ foreach ($conn in $listeners) {
   $pidValue = [int]$conn.OwningProcess
   $proc = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
   if (-not $proc) { continue }
-  if ($proc.ProcessName -ine 'kandev') { continue }
+  if (@('kandev', 'kandev-dev') -notcontains $proc.ProcessName.ToLowerInvariant()) { continue }
   $port = [int]$conn.LocalPort
   if (-not $pairs.ContainsKey($pidValue) -or $port -lt $pairs[$pidValue]) {
     $pairs[$pidValue] = $port
@@ -114,7 +115,7 @@ $rows = foreach ($pidValue in ($pairs.Keys | Sort-Object)) {
   $homeDir = Get-IsolatedHome -BackendPid $pidValue
   $proc = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
   $repoPath = '?'
-  if ($proc -and $proc.Path -and ($proc.Path -match '(\\|/)apps(\\|/)backend(\\|/)bin(\\|/)kandev(\.exe)?$')) {
+  if ($proc -and $proc.Path -and ($proc.Path -match '(\\|/)apps(\\|/)backend(\\|/)bin(\\|/)kandev(-dev)?(\.exe)?$')) {
     $repoPath = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $proc.Path)))
   }
   $marker = if (Test-GuardedPort -Port $backendPort) { 'PRODUCTION' } else { 'isolated' }
