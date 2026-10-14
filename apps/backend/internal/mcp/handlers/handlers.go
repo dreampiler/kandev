@@ -1053,6 +1053,15 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// normalization so the profile reported to the caller (task metadata and the
 	// deferred-launch record) matches the one that will actually run.
 	if replacement, replaced, overrideErr := h.resolveMCPWorkflowAgentOverride(ctx, &req, resolvedStepID); overrideErr != nil {
+		// The preflight above already returned a held identity, but a
+		// concurrent create can settle between that miss and this
+		// validation. Recover it through the service lookup/backstop
+		// contract before surfacing the override error, so a retry still
+		// recovers the existing task instead of failing on a selection
+		// that drifted after the first attempt.
+		if recovered, ok := h.recoverMCPFoundAfterPreCreateFailure(ctx, msg, &req, admission); ok {
+			return recovered, nil
+		}
 		code := ws.ErrorCodeInternalError
 		if errors.Is(overrideErr, models.ErrInvalidWorkflowAgentOverrides) {
 			code = ws.ErrorCodeValidation
