@@ -179,7 +179,11 @@ func persistDynamicRouteSelection(
 	session.DownstreamACPSessionID = ""
 	if previousExecutionProfileID == decision.ExecutionProfileID {
 		// Same-candidate retry: provider state and explicit user selections stay.
-		return repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+		changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+		if err != nil {
+			return false, routeActionPersistenceError(ctx, repo, session, err)
+		}
+		return changed, nil
 	}
 	// The candidate changed, so the previous candidate's provider-owned state
 	// must be cleared here just as the conductor launch path does. Otherwise the
@@ -194,14 +198,17 @@ func persistDynamicRouteSelection(
 	if newAgentID == "" {
 		newAgentID = dynamicProfileAgentID(ctx, profileRepo, decision.ExecutionProfileID)
 	}
-	if previousModel, candidateModel, stale := dynamicCandidateModelReplacement(session, decision); stale {
-		logDynamicCandidateModelReplacement(log, session.ID, previousModel, candidateModel)
-	}
+	// Read the previous/candidate models before the write; only report a
+	// replacement once the write actually commits and reports a change.
+	previousModel, candidateModel, stale := dynamicCandidateModelReplacement(session, decision)
 	changed, err := repo.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 		ctx, session, expectedState, orchestrator.DynamicCandidateProviderStateKeys(previousAgentID, newAgentID),
 	)
 	if err != nil {
 		return false, routeActionPersistenceError(ctx, repo, session, err)
+	}
+	if changed && stale {
+		logDynamicCandidateModelReplacement(log, session.ID, previousModel, candidateModel)
 	}
 	return changed, nil
 }
