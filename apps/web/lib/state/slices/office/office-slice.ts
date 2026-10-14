@@ -422,11 +422,15 @@ function createPauseActions(set: SetFn) {
       set((draft) => {
         const pause = draft.office.pause;
         if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
+        // A newer pending request owns the read outcome; an earlier failure
+        // must not turn its loading state into an unavailable warning.
+        if (outcome.kind === "read-failure" && tag < pause.requestSeq) return;
         applied = true;
         pause.appliedSeq = tag;
         switch (outcome.kind) {
           case "read-success":
           case "mutate-success":
+            pause.workspaceId = responseWorkspaceId;
             pause.status = "known";
             pause.record = outcome.paused ? outcome.record : null;
             return;

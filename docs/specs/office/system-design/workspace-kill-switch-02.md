@@ -188,9 +188,9 @@ not in this table is a defect in the table, not a decision for the call site.
 | Mount, and every change of selected workspace | status `loading`; **clear the record only when the workspace changed** (a same-workspace remount re-reads while the last state stays on screen); issue a read |
 | WS reconnect | issue a read; status unchanged, the last known state still being the best available |
 | Refresh control (-006.13) | issue a read; status unchanged until it answers |
-| `GET` success | apply only if `workspace_id` matches the selected workspace **and** the tag exceeds last-applied; then status `known` |
-| `GET` failure | status `error`; the record is **not** cleared, so a pause already read stays on screen |
-| `POST` pause or resume success | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; then status `known` |
+| `GET` success | apply only if `workspace_id` matches the selected workspace **and** the tag exceeds last-applied; store the accepted workspace as the cached owner, then status `known` |
+| `GET` failure | apply under the workspace and last-applied guards only when no newer request is pending; status `error`, and the record is **not** cleared, so a pause already read stays on screen |
+| `POST` pause or resume success | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; store the accepted workspace as the cached owner, then status `known` |
 | `POST` pause or resume failure | status and record unchanged; surface the failure (-006.6) |
 
 The pause response also carries its sweep outcome. When `sweep.failures` is
@@ -398,7 +398,7 @@ a `GET` response naming another workspace discarded, and a lower-sequence one
 discarded; a **`POST` success naming another workspace** discarded, kept as a
 test distinct from the `GET` case because it is the check most easily dropped,
 and a lower-sequence `POST` success discarded; a **failed `GET`** leaving an
-already-read record on screen under status `unknown`; a failed `GET` with no
+already-read record on screen under status `error`; a failed `GET` with no
 record rendering the unavailable affordance rather than nothing, with the pause
 control still reachable; and the refresh control's response applying over an
 older read still in flight.

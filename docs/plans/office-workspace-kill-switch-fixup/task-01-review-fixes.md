@@ -38,6 +38,8 @@ system_design:
 - Preserve the cached pause record while re-reading the same workspace after
   a remount. Clear it when the workspace changes, and distinguish a pending
   read from a failed read so only failures show the unavailable warning.
+- Update the cached workspace owner on an accepted response, and ignore an
+  older failed read while a newer request is pending.
 
 ## Verification
 
