@@ -206,6 +206,10 @@ Preview, entry, re-registration, repository validation and shared preview revisi
 use the same history rule. Temporary deletion/fallback/chain checks and a real
 legacy WS-to-next-prompt check cover it outside normal collectors; exact RED/GREEN
 and publication/review evidence is retained in the plan and native Task Plan.
+The first-session insert also checks recorded history before election, preserving
+the legacy binding when every old session was deleted and fallback creates a new
+session. Its temporary normal-delete/create check protects snapshot and marker
+absence without adding a standing case.
 
 Publication and independent review follow this work order through the native Task
 Plan's actual PR/head/base/worktree records. Fork-main merge requires controller GO.

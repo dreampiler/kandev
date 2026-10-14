@@ -126,6 +126,10 @@ its profile/model as the original snapshot. The binding supplies only the
 historical ID and the successor's separate logical profile. Existing snapshot
 identity and mismatch checks retain their meaning. The frontend revision's
 historical-original reference follows the same ID-only rule.
+The first-session persistence producer uses that same lookup within its existing
+transaction: zero remaining rows does not erase a recorded initial identity.
+Fresh fallback sessions receive neither a new initial snapshot nor a copied
+initial-origin marker when historical identity is already recorded.
 
 ## Routing
 

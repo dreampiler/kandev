@@ -352,6 +352,16 @@ The frontend preview revision uses the same historical ID rather than re-electin
 the remaining successor. This adds no type, table, authority/identity gate, UI,
 flag, standing case or collector.
 
+The same rule also applies to the first-session persistence producer. The first
+correction missed the zero-row case after deleting all registered legacy task
+sessions: normal fresh creation still produced a replacement-profile initial
+snapshot. A temporary repository check observed that exact RED. The producer now
+reads recorded identity in its existing transaction before first election, and
+otherwise follows its existing later-session marker cleanup. The targeted
+repository checks, including ordinary first-snapshot/runtime-seed/workspace
+creation and recovery paths, passed after this producer correction. No SQL schema,
+new identity gate or stored-history rewrite is introduced.
+
 Verification ran only in an explicit standalone backend archive and an explicitly
 selected frontend test/config outside normal collectors:
 
