@@ -173,10 +173,19 @@ var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is requ
 // an inherited default or by a selection that never applies to the step the
 // task actually lands on.
 //
+// destinationStepID and resolveErr are the step prepareTaskForCreation
+// already resolved for this create and its resolver outcome: passing them in
+// (instead of re-resolving here) keeps the policy check and the task row on
+// the same step. A resolver failure is propagated only when the destination
+// is actually needed (opt-in workflow with validated overrides); every other
+// create keeps the historical tolerant behavior, so a transient lookup
+// failure outside this policy never fails the create. It is never reported
+// as a missing explicit profile.
+//
 // It runs after validateWorkflowAgentOverrides so normalized overrides are
 // available, and after CreateTask's external_id short-circuit, so a duplicate
 // retry returns the existing task without re-evaluating this policy.
-func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *CreateTaskRequest) error {
+func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *CreateTaskRequest, destinationStepID string, resolveErr error) error {
 	if req.WorkflowID == "" || s.workflows == nil {
 		return nil
 	}
@@ -191,7 +200,10 @@ func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *Cr
 		return nil
 	}
 	if req.normalizedWorkflowAgentOverrides != nil && len(req.normalizedWorkflowAgentOverrides.Steps) > 0 {
-		if destinationStepID := s.resolveWorkflowStep(ctx, req); destinationStepID != "" {
+		if resolveErr != nil {
+			return resolveErr
+		}
+		if destinationStepID != "" {
 			if _, ok := req.normalizedWorkflowAgentOverrides.ReplacementFor(req.WorkflowID, destinationStepID); ok {
 				return nil
 			}
