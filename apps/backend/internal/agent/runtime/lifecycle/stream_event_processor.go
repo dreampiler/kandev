@@ -2,17 +2,26 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"go.uber.org/zap"
 )
 
 const (
 	streamProjectionBatchBytes = 64 << 10
 	streamProjectionBatchWait  = 20 * time.Millisecond
 	streamProjectionQueueSize  = 4096
+
+	// streamAdmissionRetryAttempts bounds in-place retries of a durable
+	// admission that failed with a retryable deadline, so transient writer
+	// contention does not tear down the shared transport mid-handshake.
+	streamAdmissionRetryAttempts = 3
+	// streamAdmissionRetryBackoff is the drain-aware pause between attempts.
+	streamAdmissionRetryBackoff = 200 * time.Millisecond
 )
 
 var errStreamEventProcessorQueueFull = fmt.Errorf(
@@ -150,8 +159,18 @@ func (p *streamEventProcessor) run() {
 }
 
 func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
-	prepared, err := p.manager.prepareAgentEvent(
-		withDeliveryDetachSignal(p.ctx, p.detached), p.execution, p.client, p.delivery, event,
+	admissionCtx := withDeliveryDetachSignal(p.ctx, p.detached)
+	prepared, err := p.manager.prepareAgentEventWithRetry(
+		admissionCtx, p.execution, p.client, p.delivery, event,
+		streamAdmissionRetry{
+			ctx:   p.ctx,
+			sleep: func(d time.Duration) bool { return p.manager.sleepOrStopContext(p.ctx, d) },
+			logRetry: func(attempt int) {
+				p.manager.logger.Warn("retrying durable agent event admission after deadline",
+					zap.String("instance_id", p.execution.ID),
+					zap.Int("attempt", attempt))
+			},
+		},
 	)
 	if err != nil {
 		return err
@@ -183,6 +202,45 @@ func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentc
 		return p.flushBatch(batch)
 	}
 	return nil
+}
+
+// streamAdmissionRetryable reports whether a durable admission failure is a
+// transient deadline worth retrying in place. A cancelled processor or parent
+// context is never retried: shutdown keeps its existing stop path, and any
+// permanent cause (identity mismatch, corruption, missing checkpoint) still
+// fails closed immediately.
+func streamAdmissionRetryable(ctx context.Context, err error) bool {
+	return ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
+// retryStreamAdmission runs prepare, retrying in place while it returns a
+// retryable deadline and the processor is live, up to a bounded number of
+// attempts. The same admission is re-run, so later events are never overtaken
+// and delivery order is preserved; sleep is drain-aware and aborts the retry on
+// a stop signal. The context is re-checked after the pause so a cancellation
+// that lands mid-backoff never reaches another attempt, and the final error is
+// returned unchanged so the stop path and its log wording stay the same.
+func retryStreamAdmission(
+	ctx context.Context,
+	sleep func(time.Duration) bool,
+	logRetry func(attempt int),
+	prepare func() error,
+) error {
+	err := prepare()
+	for attempt := 1; err != nil && attempt < streamAdmissionRetryAttempts; attempt++ {
+		if !streamAdmissionRetryable(ctx, err) {
+			return err
+		}
+		if !sleep(streamAdmissionRetryBackoff) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return err
+		}
+		logRetry(attempt)
+		err = prepare()
+	}
+	return err
 }
 
 func (p *streamEventProcessor) mustFlushBefore(batch *streamEventBatch, prepared preparedAgentEvent) bool {

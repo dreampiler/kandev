@@ -325,13 +325,14 @@ func (sm *StreamManager) receiveDurableAgentEvent(
 	if event.DeliverySequence > math.MaxInt64 {
 		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
 	}
-	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
+	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository, streamAdmissionRetry{})
 }
 
 func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	ctx context.Context,
 	deliveryEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
+	retry streamAdmissionRetry,
 ) (bool, error) {
 	if deliveryEvent == nil || deliveryEvent.StreamID == "" || deliveryEvent.Sequence == 0 {
 		return true, nil
@@ -339,7 +340,14 @@ func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
 	if deliveryEvent.Sequence < 0 {
 		return false, fmt.Errorf("delivery sequence %d exceeds backend range", deliveryEvent.Sequence)
 	}
-	inserted, err := repository.ReceiveAgentDeliveryEvent(ctx, deliveryEvent, 0)
+	// Only the admission insert is retried. The cursor follow-up below keeps its
+	// existing single-shot failure semantics.
+	var inserted bool
+	err := retry.admit(func() error {
+		var receiveErr error
+		inserted, receiveErr = repository.ReceiveAgentDeliveryEvent(ctx, deliveryEvent, 0)
+		return receiveErr
+	})
 	if err != nil {
 		return false, err
 	}
