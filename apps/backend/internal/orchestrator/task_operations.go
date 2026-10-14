@@ -4649,26 +4649,32 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
 	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
-		return fmt.Errorf(
-			"execution %s teardown is already owned for session %s",
-			executionID,
-			sessionID,
-		)
+		// A concurrent lifecycle path (for example a provider-failure cleanup)
+		// may already own this exact execution's teardown. A completed claim
+		// means the prompt-unready execution is already stopped, so skip the
+		// duplicate stop and continue; only an unfinished owner is a hard error.
+		if claim, ok := s.executionTeardownClaimFor(sessionID, executionID); !ok || !claim.cleanupCompleted {
+			return fmt.Errorf(
+				"execution %s teardown is already owned for session %s",
+				executionID,
+				sessionID,
+			)
+		}
+	} else {
+		s.logger.Warn("stopping prompt-unready agent execution before resume",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(cause))
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+		defer cancelCleanup()
+		if s.lspLeases != nil {
+			s.lspLeases.StopLSPLeasesForExecution(executionID)
+		}
+		if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
+			return err
+		}
+		s.markExecutionFailed(sessionID, executionID)
 	}
-
-	s.logger.Warn("stopping prompt-unready agent execution before resume",
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", executionID),
-		zap.Error(cause))
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
-	defer cancelCleanup()
-	if s.lspLeases != nil {
-		s.lspLeases.StopLSPLeasesForExecution(executionID)
-	}
-	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
-		return err
-	}
-	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	taskID := ""
 	if refreshed != nil {
