@@ -1,0 +1,2062 @@
+From 12f4de2619486340969c2aa383b49b74d90d1fbb Mon Sep 17 00:00:00 2001
+From: dreampiler <dreampiler@gmail.com>
+Date: Thu, 15 Oct 2026 01:24:54 +0900
+Subject: [PATCH] fork(23-peer-batch): D09 peer report batch delivery
+
+Overlay patch 23-peer-batch.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+---
+ .../mcp/handlers/message_task_recovery.go     |  20 ++
+ .../handlers/message_task_recovery_test.go    |  72 ++++
+ ...rs_workflow_profile_session_policy_test.go |   1 +
+ .../messagequeue/peer_report_batch.go         | 162 +++++++++
+ .../messagequeue/peer_report_batch_test.go    | 309 ++++++++++++++++++
+ .../repository_dispatch_recovery.go           |  33 ++
+ .../orchestrator/peer_report_batch.go         | 204 ++++++++++++
+ .../orchestrator/peer_report_batch_test.go    | 254 ++++++++++++++
+ .../workflow_profile_session_lifecycle.go     |  33 +-
+ .../workflow_terminal_predecessor_test.go     |  59 ++++
+ .../orchestrator/workflow_unlaunched_entry.go |  36 ++
+ .../workflow_unlaunched_entry_test.go         |  88 +++++
+ .../task-01-workflow-entry.md                 |  78 +++++
+ .../task-02-peer-message-recovery.md          |  56 ++++
+ .../task-03-automation-evidence.md            |  39 +++
+ docs/plans/peer-report-batch-delivery/plan.md |  59 ++++
+ .../task-01-batch-peer-reports.md             |  56 ++++
+ .../task-02-deliver-peer-report-batch.md      |  57 ++++
+ .../peer-report-batch-delivery.md             |  81 +++++
+ .../peer-report-batch-delivery.md             | 129 ++++++++
+ 20 files changed, 1823 insertions(+), 3 deletions(-)
+ create mode 100644 apps/backend/internal/mcp/handlers/message_task_recovery.go
+ create mode 100644 apps/backend/internal/mcp/handlers/message_task_recovery_test.go
+ create mode 100644 apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go
+ create mode 100644 apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go
+ create mode 100644 apps/backend/internal/orchestrator/peer_report_batch.go
+ create mode 100644 apps/backend/internal/orchestrator/peer_report_batch_test.go
+ create mode 100644 apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go
+ create mode 100644 apps/backend/internal/orchestrator/workflow_unlaunched_entry.go
+ create mode 100644 apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go
+ create mode 100644 docs/plans/launch-durability-1013/task-01-workflow-entry.md
+ create mode 100644 docs/plans/launch-durability-1013/task-02-peer-message-recovery.md
+ create mode 100644 docs/plans/launch-durability-1013/task-03-automation-evidence.md
+ create mode 100644 docs/plans/peer-report-batch-delivery/plan.md
+ create mode 100644 docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md
+ create mode 100644 docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md
+ create mode 100644 docs/specs/tasks/requirements/peer-report-batch-delivery.md
+ create mode 100644 docs/specs/tasks/system-design/peer-report-batch-delivery.md
+
+diff --git a/apps/backend/internal/mcp/handlers/message_task_recovery.go b/apps/backend/internal/mcp/handlers/message_task_recovery.go
+new file mode 100644
+index 0000000000..cd310614c4
+--- /dev/null
++++ b/apps/backend/internal/mcp/handlers/message_task_recovery.go
+@@ -0,0 +1,20 @@
++package handlers
++
++import (
++	"context"
++	"errors"
++
++	"github.com/kandev/kandev/internal/orchestrator"
++)
++
++type blockedTaskMessageRecoverer interface {
++	AutoRecoverBlockedPrompt(context.Context, string, string, error) bool
++}
++
++func (h *Handlers) autoRecoverTaskMessagePrompt(ctx context.Context, taskID, sessionID string, cause error) bool {
++	if !errors.Is(cause, orchestrator.ErrSessionRecoveryRequired) {
++		return false
++	}
++	recoverer, ok := h.sessionLauncher.(blockedTaskMessageRecoverer)
++	return ok && recoverer.AutoRecoverBlockedPrompt(ctx, taskID, sessionID, cause)
++}
+diff --git a/apps/backend/internal/mcp/handlers/message_task_recovery_test.go b/apps/backend/internal/mcp/handlers/message_task_recovery_test.go
+new file mode 100644
+index 0000000000..0116c9b819
+--- /dev/null
++++ b/apps/backend/internal/mcp/handlers/message_task_recovery_test.go
+@@ -0,0 +1,72 @@
++package handlers
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"testing"
++
++	"github.com/kandev/kandev/internal/orchestrator"
++	"github.com/kandev/kandev/internal/task/models"
++	ws "github.com/kandev/kandev/pkg/websocket"
++	"github.com/stretchr/testify/require"
++)
++
++type messageRecoveryLauncher struct {
++	*fakeOrchestrator
++	recoveredSession string
++	recoveryAccepted bool
++}
++
++func (f *messageRecoveryLauncher) AutoRecoverBlockedPrompt(_ context.Context, _, sessionID string, _ error) bool {
++	f.recoveredSession = sessionID
++	return f.recoveryAccepted
++}
++
++func TestTaskMessageRecoveryKeepsRecordedMessageAfterSetPrimary(t *testing.T) {
++	ctx := context.Background()
++	svc, repo := newTestTaskService(t)
++	sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
++	require.NoError(t, repo.SetSessionPrimary(ctx, session.ID))
++	h, base := newMessageTaskHandler(t, svc, repo)
++	launcher := &messageRecoveryLauncher{fakeOrchestrator: base, recoveryAccepted: true}
++	launcher.promptErrFirst = fmt.Errorf("%w: unresolved_durable_work", orchestrator.ErrSessionRecoveryRequired)
++	h.sessionLauncher = launcher
++	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "Continue the interrupted work", sender.ID))
++	resp, err := h.handleMessageTask(ctx, msg)
++	require.NoError(t, err)
++	require.Equal(t, session.ID, launcher.recoveredSession, "message wake must reach the existing history-continuation recovery")
++	require.NotEqual(t, ws.MessageTypeError, resp.Type)
++	messages, err := svc.ListMessages(ctx, session.ID)
++	require.NoError(t, err)
++	require.Len(t, messages, 1, "history continuation needs the newly recorded message")
++	require.Equal(t, sender.ID, messages[0].Metadata["sender_task_id"])
++}
++
++func TestTaskMessageRecoveryRejectionRemovesUnsentMessage(t *testing.T) {
++	for _, tc := range []struct {
++		name         string
++		cause        error
++		wantRecovery bool
++	}{
++		{name: "blocked recovery declined", cause: orchestrator.ErrSessionRecoveryRequired, wantRecovery: true},
++		{name: "ordinary error", cause: errors.New("provider refused the prompt")},
++	} {
++		t.Run(tc.name, func(t *testing.T) {
++			ctx := context.Background()
++			svc, repo := newTestTaskService(t)
++			sender, target, session := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
++			h, base := newMessageTaskHandler(t, svc, repo)
++			launcher := &messageRecoveryLauncher{fakeOrchestrator: base}
++			launcher.promptErrFirst = tc.cause
++			h.sessionLauncher = launcher
++			resp, err := h.handleMessageTask(ctx, makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(target.ID, "New instruction", sender.ID)))
++			require.NoError(t, err)
++			require.Equal(t, ws.MessageTypeError, resp.Type)
++			require.Equal(t, tc.wantRecovery, launcher.recoveredSession != "")
++			messages, err := svc.ListMessages(ctx, session.ID)
++			require.NoError(t, err)
++			require.Empty(t, messages)
++		})
++	}
++}
+diff --git a/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go b/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
+index 957eab7c8b..afe6603e71 100644
+--- a/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
++++ b/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
+@@ -512,6 +512,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
+ 				withWorkflowProfileSwitchGuardHeld(ctx, fixture.current.ID, ""),
+ 				"t1",
+ 				fixture.current,
++				false,
+ 			)
+ 			if err != nil {
+ 				t.Fatalf("park before delayed %s event: %v", tt.name, err)
+diff --git a/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go
+new file mode 100644
+index 0000000000..ce19d8445b
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go
+@@ -0,0 +1,162 @@
++package messagequeue
++
++import (
++	"context"
++	"fmt"
++	"strings"
++)
++
++const (
++	// MaxPeerReportBatchEntries bounds how many ordinary peer reports one
++	// dispatch may deliver as a single turn.
++	MaxPeerReportBatchEntries = 8
++	// MaxPeerReportBatchBytes bounds the combined report content of one
++	// batch, so a batch can never grow a prompt without limit.
++	MaxPeerReportBatchBytes = 256 * 1024
++)
++
++// IsOrdinaryPeerReport reports whether an entry is an agent-authored peer
++// report that may share a turn with the entries ahead of it. Everything else is
++// an ordering boundary: user and operator instructions, managed input, durable
++// delivery and lifecycle rows, plan comments, retained reservations, entries
++// without a sender task, and entries whose attachments, entity references, or
++// context files must stay separable.
++func IsOrdinaryPeerReport(message *QueuedMessage) bool {
++	if message == nil || message.QueuedBy != QueuedByAgent {
++		return false
++	}
++	if message.IsDurableDelivery() || message.IsReservedInFlight() || len(message.Attachments) > 0 {
++		return false
++	}
++	if PeerReportSenderTaskID(message) == "" {
++		return false
++	}
++	return !hasBatchSeparableMetadata(message)
++}
++
++func hasBatchSeparableMetadata(message *QueuedMessage) bool {
++	if message.Metadata == nil {
++		return false
++	}
++	for _, key := range []string{MetadataEntityReferences, MetadataContextFiles} {
++		if value, ok := message.Metadata[key]; ok && value != nil {
++			return true
++		}
++	}
++	return false
++}
++
++// ComposePeerReportBatch folds reports into the entry that leads them. The
++// result keeps the first entry's identity, model, plan mode, and sender
++// attribution, and renders every report separately with its own sender so no
++// report loses its provenance.
++func ComposePeerReportBatch(batch []*QueuedMessage) *QueuedMessage {
++	if len(batch) == 0 {
++		return nil
++	}
++	leader := *batch[0]
++	if len(batch) == 1 {
++		return &leader
++	}
++	var composed strings.Builder
++	total := len(batch)
++	for index, entry := range batch {
++		if index > 0 {
++			composed.WriteString("\n\n")
++		}
++		fmt.Fprintf(&composed, "[peer report %d/%d] from task %s\n%s",
++			index+1, total, PeerReportSenderTaskID(entry), entry.Content)
++	}
++	leader.Content = composed.String()
++	return &leader
++}
++
++// PeerReportSenderTaskID returns the attributed sender of a peer report.
++func PeerReportSenderTaskID(message *QueuedMessage) string {
++	if message == nil {
++		return ""
++	}
++	return metadataString(message.Metadata, MetadataSenderTaskID)
++}
++
++// ReservePeerReportBatchWithAutoRunForSession reserves the FIFO head plus any
++// consecutive ordinary peer reports behind it for a single dispatch. The head is
++// reserved exactly as ReserveQueuedWithAutoRunForSession reserves it, so a
++// non-batchable head keeps today's behavior, and autoRun keeps the same meaning:
++// false only when Auto-run is OFF.
++//
++// A reserve that stops part-way returns the rows it already took alongside its
++// error, because those rows have left the queue and only the caller can return
++// them. Discarding them would lose their reports.
++func (s *Service) ReservePeerReportBatchWithAutoRunForSession(
++	ctx context.Context,
++	identity QueueSessionIdentity,
++) ([]*QueuedMessage, bool, error) {
++	var batch []*QueuedMessage
++	autoRun := true
++	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
++		var err error
++		batch, autoRun, err = s.reservePeerReportBatch(admittedCtx, identity)
++		return err
++	})
++	if err != nil {
++		return batch, autoRun, err
++	}
++	return batch, autoRun, nil
++}
++
++func (s *Service) reservePeerReportBatch(
++	ctx context.Context,
++	identity QueueSessionIdentity,
++) ([]*QueuedMessage, bool, error) {
++	batch := make([]*QueuedMessage, 0, MaxPeerReportBatchEntries)
++	batchBytes := 0
++	for len(batch) < MaxPeerReportBatchEntries {
++		message, autoRun, err := s.repo.ReserveHeadIfAutoRunForSession(ctx, identity)
++		if err != nil {
++			return batch, true, err
++		}
++		if !autoRun || message == nil {
++			return batch, autoRun, nil
++		}
++		if len(batch) > 0 && message.ID == batch[len(batch)-1].ID {
++			// A durable row keeps its queue position while its reservation is
++			// in flight, so reserving again returns the same entry. The head is
++			// already reserved; stop without releasing that reservation.
++			return batch, true, nil
++		}
++		if len(batch) > 0 && !peerReportFitsBatch(batch[0], message, batchBytes) {
++			// This entry cannot join the batch. Return it to its own position so
++			// the next dispatch settles it in its own turn.
++			if err := s.RequeueAtHeadForSession(ctx, identity, message); err != nil {
++				// The entry left the queue and did not go back, so the caller has
++				// to return it along with the rows this reserve already owns.
++				// Appending keeps the walk order, which is the order the caller
++				// replays the batch in.
++				return append(batch, message), true, err
++			}
++			return batch, true, nil
++		}
++		batch = append(batch, message)
++		if !IsOrdinaryPeerReport(message) {
++			// The head is not an ordinary peer report, so it is delivered alone
++			// exactly as the single-row path delivers it.
++			return batch, true, nil
++		}
++		batchBytes += len(message.Content)
++	}
++	return batch, true, nil
++}
++
++// peerReportFitsBatch reports whether message can share one turn with leader:
++// it must be an ordinary peer report that also agrees with the leading entry on
++// the dispatch shape, and the batch must stay inside its byte ceiling.
++func peerReportFitsBatch(leader, message *QueuedMessage, batchBytes int) bool {
++	if !IsOrdinaryPeerReport(message) {
++		return false
++	}
++	if message.Model != leader.Model || message.PlanMode != leader.PlanMode {
++		return false
++	}
++	return batchBytes+len(message.Content) <= MaxPeerReportBatchBytes
++}
+diff --git a/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go
+new file mode 100644
+index 0000000000..043c59193f
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go
+@@ -0,0 +1,309 @@
++package messagequeue
++
++import (
++	"context"
++	"fmt"
++	"strings"
++	"testing"
++
++	"github.com/kandev/kandev/internal/common/logger"
++	"github.com/stretchr/testify/require"
++)
++
++func newPeerReportBatchService(t *testing.T, repo Repository) *Service {
++	t.Helper()
++	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
++	if err != nil {
++		t.Fatalf("create logger: %v", err)
++	}
++	return NewService(repo, 10, log)
++}
++
++func newPeerReportBatchFixture(t *testing.T, repo Repository) *Service {
++	t.Helper()
++	seedQueueSessionIdentity(t, repo, QueueSessionIdentity{
++		TaskID:               "task",
++		SessionID:            "session",
++		SessionIncarnationID: "incarnation",
++	})
++	return newPeerReportBatchService(t, repo)
++}
++
++func queuePeerReport(t *testing.T, svc *Service, sender, content string) {
++	t.Helper()
++	_, err := svc.QueueMessageWithMetadata(context.Background(), "session", "task", content, "model",
++		QueuedByAgent, false, nil, map[string]interface{}{MetadataSenderTaskID: sender})
++	require.NoError(t, err)
++}
++
++func reservePeerReportBatch(t *testing.T, svc *Service, repo Repository) []*QueuedMessage {
++	t.Helper()
++	ctx := context.Background()
++	identity, err := repo.ResolveSessionIdentity(ctx, "task", "session")
++	require.NoError(t, err)
++	batch, autoRun, err := svc.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
++	require.NoError(t, err)
++	require.True(t, autoRun)
++	return batch
++}
++
++func reserveNextEntry(t *testing.T, repo Repository) *QueuedMessage {
++	t.Helper()
++	entry, ok, err := repo.ReserveHeadIfAutoRun(context.Background(), "session")
++	require.NoError(t, err)
++	require.True(t, ok)
++	return entry
++}
++
++func TestReservePeerReportBatch_GroupsDifferentChildReportsInFIFOOrder(t *testing.T) {
++	for name, repo := range repositoriesUnderTest(t) {
++		t.Run(name, func(t *testing.T) {
++			svc := newPeerReportBatchFixture(t, repo)
++			queuePeerReport(t, svc, "child-a", "first report")
++			queuePeerReport(t, svc, "child-b", "second report")
++			queuePeerReport(t, svc, "child-c", "third report")
++
++			batch := reservePeerReportBatch(t, svc, repo)
++
++			require.Len(t, batch, 3)
++			require.Equal(t, "child-a", PeerReportSenderTaskID(batch[0]))
++			require.Equal(t, "child-b", PeerReportSenderTaskID(batch[1]))
++			require.Equal(t, "child-c", PeerReportSenderTaskID(batch[2]))
++		})
++	}
++}
++
++func TestReservePeerReportBatch_StopsAtUserInstructionAndKeepsItQueued(t *testing.T) {
++	for name, repo := range repositoriesUnderTest(t) {
++		t.Run(name, func(t *testing.T) {
++			svc := newPeerReportBatchFixture(t, repo)
++			queuePeerReport(t, svc, "child-a", "report one")
++			_, err := svc.QueueMessage(context.Background(), "session", "task", "operator instruction",
++				"model", QueuedByUser, false, nil)
++			require.NoError(t, err)
++			queuePeerReport(t, svc, "child-b", "report two")
++
++			batch := reservePeerReportBatch(t, svc, repo)
++
++			require.Len(t, batch, 1)
++			require.Equal(t, "report one", batch[0].Content)
++			require.Equal(t, "operator instruction", reserveNextEntry(t, repo).Content)
++		})
++	}
++}
++
++func TestReservePeerReportBatch_StopsAtEntryBoundAndLeavesRemainderQueued(t *testing.T) {
++	for name, repo := range repositoriesUnderTest(t) {
++		t.Run(name, func(t *testing.T) {
++			svc := newPeerReportBatchFixture(t, repo)
++			total := MaxPeerReportBatchEntries + 2
++			for index := range total {
++				queuePeerReport(t, svc, fmt.Sprintf("child-%d", index), fmt.Sprintf("report %d", index))
++			}
++
++			batch := reservePeerReportBatch(t, svc, repo)
++
++			require.Len(t, batch, MaxPeerReportBatchEntries)
++			require.Equal(t, fmt.Sprintf("report %d", MaxPeerReportBatchEntries),
++				reserveNextEntry(t, repo).Content)
++		})
++	}
++}
++
++func TestReservePeerReportBatch_StopsAtByteCeiling(t *testing.T) {
++	for name, repo := range repositoriesUnderTest(t) {
++		t.Run(name, func(t *testing.T) {
++			svc := newPeerReportBatchFixture(t, repo)
++			half := strings.Repeat("a", MaxPeerReportBatchBytes/2)
++			queuePeerReport(t, svc, "child-a", half)
++			queuePeerReport(t, svc, "child-b", half)
++			queuePeerReport(t, svc, "child-c", "small")
++
++			batch := reservePeerReportBatch(t, svc, repo)
++
++			require.Len(t, batch, 2)
++			require.Equal(t, "small", reserveNextEntry(t, repo).Content)
++		})
++	}
++}
++
++func TestReservePeerReportBatch_ReportsAutoRunOffWithoutReserving(t *testing.T) {
++	for name, repo := range repositoriesUnderTest(t) {
++		t.Run(name, func(t *testing.T) {
++			svc := newPeerReportBatchFixture(t, repo)
++			queuePeerReport(t, svc, "child-a", "report one")
++			require.NoError(t, svc.SetAutoRun(context.Background(), "session", false))
++			identity, err := repo.ResolveSessionIdentity(context.Background(), "task", "session")
++			require.NoError(t, err)
++
++			batch, autoRun, err := svc.ReservePeerReportBatchWithAutoRunForSession(
++				context.Background(), identity)
++
++			require.NoError(t, err)
++			require.False(t, autoRun)
++			require.Empty(t, batch)
++		})
++	}
++}
++
++func TestComposePeerReportBatch_KeepsPerSenderAttribution(t *testing.T) {
++	batch := []*QueuedMessage{
++		{ID: "one", TaskID: "task", SessionID: "session", QueuedBy: QueuedByAgent,
++			Content:  "alpha",
++			Metadata: map[string]interface{}{MetadataSenderTaskID: "child-a"}},
++		{ID: "two", TaskID: "task", SessionID: "session", QueuedBy: QueuedByAgent,
++			Content:  "beta",
++			Metadata: map[string]interface{}{MetadataSenderTaskID: "child-b"}},
++	}
++
++	composed := ComposePeerReportBatch(batch)
++
++	require.Equal(t, "one", composed.ID)
++	require.Equal(t, "child-a", PeerReportSenderTaskID(composed))
++	require.Contains(t, composed.Content, "[peer report 1/2] from task child-a\nalpha")
++	require.Contains(t, composed.Content, "[peer report 2/2] from task child-b\nbeta")
++	require.Equal(t, "alpha", batch[0].Content)
++}
++
++func TestIsOrdinaryPeerReport_RejectsNonAgentAndUnattributedEntries(t *testing.T) {
++	require.False(t, IsOrdinaryPeerReport(nil))
++	require.False(t, IsOrdinaryPeerReport(&QueuedMessage{QueuedBy: QueuedByUser}))
++	require.False(t, IsOrdinaryPeerReport(&QueuedMessage{QueuedBy: QueuedByAgent}))
++	require.False(t, IsOrdinaryPeerReport(&QueuedMessage{
++		QueuedBy:    QueuedByAgent,
++		Metadata:    map[string]interface{}{MetadataSenderTaskID: "child-a"},
++		Attachments: []MessageAttachment{{AttachmentID: "attachment"}},
++	}))
++	require.True(t, IsOrdinaryPeerReport(&QueuedMessage{
++		QueuedBy: QueuedByAgent,
++		Metadata: map[string]interface{}{MetadataSenderTaskID: "child-a"},
++	}))
++}
++
++// A batch has one prompt but N reserved rows, and an ordinary reserve keeps
++// at-least-once recovery in a dispatch claim that startup restores while it is
++// unaccepted. Only the in-memory repository is covered by the ordering tests
++// above, so this settles the claim contract against the shipped SQLite store.
++func TestReservePeerReportBatch_SettlesEveryReservedDispatchClaim(t *testing.T) {
++	repo := newTestSQLiteRepo(t).(*sqliteRepository)
++	svc := newPeerReportBatchFixture(t, repo)
++	queuePeerReport(t, svc, "child-a", "first report")
++	queuePeerReport(t, svc, "child-b", "second report")
++	queuePeerReport(t, svc, "child-c", "third report")
++
++	ctx := context.Background()
++	batch := reservePeerReportBatch(t, svc, repo)
++	require.Len(t, batch, 3)
++
++	pending, err := repo.ListPendingQueueDispatches(ctx)
++	require.NoError(t, err)
++	require.Len(t, pending, 3, "every reserved row owns a dispatch claim")
++
++	// Folding a row into the leading entry's prompt settles its claim, because
++	// its report now travels inside the leading row.
++	for _, entry := range batch[1:] {
++		require.NoError(t, svc.MarkPendingQueueDispatchAccepted(ctx, entry))
++	}
++	require.NoError(t, svc.MarkPendingQueueDispatchAccepted(ctx, batch[0]))
++
++	pending, err = repo.ListPendingQueueDispatches(ctx)
++	require.NoError(t, err)
++	for _, claim := range pending {
++		require.True(t, claim.Accepted,
++			"an unaccepted claim is restored at startup and re-delivers a report the batch already carried")
++	}
++}
++
++// The leading row's claim is written at reserve time, when it still holds only
++// its own report. A restart that restores it before the rewrite would replay the
++// batch without the folded reports, so the composed prompt has to be recorded on
++// the claim before the batch starts.
++func TestReservePeerReportBatch_LeadingClaimCarriesTheComposedPrompt(t *testing.T) {
++	repo := newTestSQLiteRepo(t).(*sqliteRepository)
++	svc := newPeerReportBatchFixture(t, repo)
++	queuePeerReport(t, svc, "child-a", "first report")
++	queuePeerReport(t, svc, "child-b", "second report")
++
++	ctx := context.Background()
++	batch := reservePeerReportBatch(t, svc, repo)
++	require.Len(t, batch, 2)
++
++	pending, err := repo.ListPendingQueueDispatches(ctx)
++	require.NoError(t, err)
++	leading := findDispatchClaim(t, pending, batch[0].ID)
++	require.NotContains(t, leading.Message.Content, "second report",
++		"the claim stored at reserve time predates the composed prompt")
++
++	composed := ComposePeerReportBatch(batch)
++	require.NoError(t, svc.RewritePendingQueueDispatchMessage(ctx, composed))
++
++	pending, err = repo.ListPendingQueueDispatches(ctx)
++	require.NoError(t, err)
++	leading = findDispatchClaim(t, pending, batch[0].ID)
++	require.Contains(t, leading.Message.Content, "first report")
++	require.Contains(t, leading.Message.Content, "second report")
++}
++
++func findDispatchClaim(t *testing.T, pending []PendingQueueDispatch, entryID string) *PendingQueueDispatch {
++	t.Helper()
++	for i := range pending {
++		if pending[i].Message.ID == entryID {
++			return &pending[i]
++		}
++	}
++	t.Fatalf("no dispatch claim for entry %s", entryID)
++	return nil
++}
++
++// settlementOnlyClaimRepository persists dispatch claims but cannot rewrite one,
++// which is every repository that implemented the settlement contract before the
++// batch rewrite existed. Folding a batch needs that rewrite, but losing the
++// settlement interface would silently turn every acceptance into a no-op.
++type settlementOnlyClaimRepository struct {
++	Repository
++	accepted []string
++	deleted  []string
++}
++
++func (r *settlementOnlyClaimRepository) ListPendingQueueDispatches(context.Context) ([]PendingQueueDispatch, error) {
++	return nil, nil
++}
++
++func (r *settlementOnlyClaimRepository) MarkPendingQueueDispatchAccepted(_ context.Context, msg *QueuedMessage) error {
++	r.accepted = append(r.accepted, msg.ID)
++	return nil
++}
++
++func (r *settlementOnlyClaimRepository) DeletePendingQueueDispatch(_ context.Context, msg *QueuedMessage) error {
++	r.deleted = append(r.deleted, msg.ID)
++	return nil
++}
++
++func TestRewritePendingQueueDispatchMessage_KeepsSettlementForARepositoryWithoutRewrite(t *testing.T) {
++	memory := newPeerReportBatchFixture(t, NewMemoryRepository()).repo
++	repo := &settlementOnlyClaimRepository{Repository: memory}
++	svc := newPeerReportBatchService(t, repo)
++	msg := &QueuedMessage{ID: "entry", TaskID: "task", SessionID: "session"}
++
++	require.NoError(t, svc.MarkPendingQueueDispatchAccepted(context.Background(), msg))
++	require.NoError(t, svc.DeletePendingQueueDispatch(context.Background(), msg))
++	require.Equal(t, []string{"entry"}, repo.accepted)
++	require.Equal(t, []string{"entry"}, repo.deleted)
++
++	require.ErrorIs(t,
++		svc.RewritePendingQueueDispatchMessage(context.Background(), msg),
++		ErrQueueDispatchClaimRewriteUnsupported,
++		"an absent rewrite must be reported, not reported as a settled claim")
++	require.False(t, svc.PeerReportBatchClaimRewriteSupported())
++}
++
++// A repository that persists no dispatch claims has nothing a restart could
++// restore, so folding stays available and every settlement stays a no-op.
++func TestRewritePendingQueueDispatchMessage_AllowsFoldingWithoutClaimPersistence(t *testing.T) {
++	svc := newPeerReportBatchFixture(t, NewMemoryRepository())
++	msg := &QueuedMessage{ID: "entry", TaskID: "task", SessionID: "session"}
++
++	require.False(t, svc.PendingQueueDispatchPersistenceAvailable())
++	require.NoError(t, svc.RewritePendingQueueDispatchMessage(context.Background(), msg))
++	require.True(t, svc.PeerReportBatchClaimRewriteSupported())
++}
+diff --git a/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go b/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
+index 0601771267..f7640635de 100644
+--- a/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
++++ b/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
+@@ -307,6 +307,39 @@ func (r *sqliteRepository) deletePendingQueueDispatchesBySessionTx(
+ 	return nil
+ }
+ 
++func (r *sqliteRepository) RewritePendingQueueDispatchMessage(
++	ctx context.Context,
++	msg *QueuedMessage,
++) error {
++	if err := r.ensureQueueDispatchRecoverySchema(ctx); err != nil {
++		return err
++	}
++	messageJSON, err := json.Marshal(msg)
++	if err != nil {
++		return fmt.Errorf("marshal rewritten queue dispatch claim: %w", err)
++	}
++	tx, err := r.beginSessionMutationTx(ctx, msg.SessionID, "rewrite queue dispatch claim")
++	if err != nil {
++		return err
++	}
++	defer func() { _ = tx.Rollback() }()
++	result, err := tx.ExecContext(ctx, r.db.Rebind(`
++		UPDATE queue_dispatch_claims SET message_json = ?
++		WHERE entry_id = ? AND session_id = ? AND attempt_id = ? AND accepted = 0
++	`), string(messageJSON), msg.ID, msg.SessionID, msg.dispatchAttemptID)
++	if err != nil {
++		return fmt.Errorf("rewrite queue dispatch claim: %w", err)
++	}
++	affected, err := result.RowsAffected()
++	if err != nil {
++		return fmt.Errorf("rewrite queue dispatch claim rows affected: %w", err)
++	}
++	if affected != 1 {
++		return ErrQueueDispatchClaimChanged
++	}
++	return tx.Commit()
++}
++
+ func (r *sqliteRepository) MarkPendingQueueDispatchAccepted(
+ 	ctx context.Context,
+ 	msg *QueuedMessage,
+diff --git a/apps/backend/internal/orchestrator/peer_report_batch.go b/apps/backend/internal/orchestrator/peer_report_batch.go
+new file mode 100644
+index 0000000000..66b5fbbd79
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/peer_report_batch.go
+@@ -0,0 +1,204 @@
++package orchestrator
++
++import (
++	"context"
++	"errors"
++
++	"go.uber.org/zap"
++
++	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
++	"github.com/kandev/kandev/internal/task/models"
++)
++
++// reserveAndDispatchQueueHead reserves the FIFO head for identity and dispatches
++// it. A consecutive run of ordinary peer reports behind the head is delivered in
++// the same turn, so a burst of child reports does not consume one queue slot and
++// one turn each. Returns whether a dispatch happened and whether Auto-run is
++// still enabled; the second value is false only when Auto-run is OFF.
++func (s *Service) reserveAndDispatchQueueHead(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++) (bool, bool, error) {
++	return s.reserveAndDispatchQueueHeadWithCompletion(ctx, identity, nil)
++}
++
++func (s *Service) reserveAndDispatchQueueHeadWithCompletion(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++	completionEffect *models.AgentDeliveryEffect,
++) (bool, bool, error) {
++	batch, autoRun, err := s.messageQueue.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
++	if err != nil || !autoRun {
++		// A reserve that stops part-way still owns the rows it took. They are
++		// already out of the queue, so they have to go back rather than be
++		// dropped with the error.
++		if len(batch) > 0 {
++			s.requeuePeerReportBatch(ctx, identity, batch)
++		}
++		return false, autoRun, err
++	}
++	if len(batch) == 0 {
++		return false, autoRun, nil
++	}
++	if completionEffect != nil {
++		hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, batch[0])
++		if hasInput && inputErr == nil {
++			if err := s.settleQueuedDeliveryPredecessor(ctx, identity.TaskID, identity.SessionID, completionEffect); err != nil {
++				s.logger.Warn("failed to settle delivery before queued successor",
++					zap.String("session_id", identity.SessionID), zap.Error(err))
++				s.requeuePeerReportBatch(ctx, identity, batch)
++				return false, true, err
++			}
++		}
++	}
++	if len(batch) == 1 {
++		return s.dispatchTakenQueuedMessageForSession(ctx, identity, batch[0], true), true, nil
++	}
++	return s.dispatchPeerReportBatchForSession(ctx, identity, batch), true, nil
++}
++
++// dispatchPeerReportBatchForSession delivers a reserved peer-report batch as one
++// prompt. The batch is settled by the ordinary dispatch path under the leading
++// entry's identity; a pre-dispatch failure returns every reserved entry to the
++// head in its original order.
++func (s *Service) dispatchPeerReportBatchForSession(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++	batch []*messagequeue.QueuedMessage,
++) bool {
++	composed := messagequeue.ComposePeerReportBatch(batch)
++	if !s.messageQueue.PeerReportBatchClaimRewriteSupported() {
++		// Folding needs the leading claim to be rewritten to the composed
++		// prompt, so a repository that cannot rewrite it delivers the batch one
++		// row at a time instead of risking a restart that restores only the
++		// leading report.
++		s.requeuePeerReportBatch(ctx, identity, batch[1:])
++		return s.dispatchTakenQueuedMessageForSession(ctx, identity, batch[0], true)
++	}
++	if !s.peerReportBatchStillDispatchable(ctx, identity, composed, batch) {
++		s.requeuePeerReportBatch(ctx, identity, batch)
++		return false
++	}
++	if !s.settlePeerReportBatchClaims(ctx, identity, composed, batch) {
++		s.requeuePeerReportBatch(ctx, identity, batch)
++		return false
++	}
++	s.publishQueueStatusEventForIdentity(ctx, identity)
++	reservation := s.markQueuedDispatchInFlightWithIdentityLocked(identity, composed.ID, composed)
++	if s.agentManager != nil && s.agentManager.IsPassthroughSession(ctx, identity.SessionID) {
++		go s.executeQueuedPassthroughMessageWithReservation(identity, composed, reservation)
++		return true
++	}
++	go s.executeQueuedMessageWithReservation(identity.SessionID, composed, reservation)
++	return true
++}
++
++// settlePeerReportBatchClaims gives the batch exactly one settlement owner before
++// its worker starts.
++//
++// An ordinary reserve deletes its row and keeps at-least-once recovery in a
++// dispatch claim, and startup restores a claim that was never accepted. Two
++// writes therefore have to happen, in this order:
++//
++//  1. The leading row's claim is rewritten to the composed prompt. The claim was
++//     written at reserve time, when the leading row still held only its own
++//     report, so a restart would otherwise restore the batch without the folded
++//     reports.
++//  2. Every folded row's claim is accepted. A folded row's report now travels
++//     inside the leading row, so the leading row's claim alone must decide
++//     delivery; leaving a folded claim unsettled would restore that report a
++//     second time.
++//
++// If either write fails the batch returns to the queue with every claim still
++// unsettled, so nothing is lost. Accepting the folded claims is deliberately
++// earlier than the leading row's acceptance: a crash in that window leaves the
++// leading claim unaccepted, so startup restores one row holding the whole batch.
++func (s *Service) settlePeerReportBatchClaims(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++	composed *messagequeue.QueuedMessage,
++	batch []*messagequeue.QueuedMessage,
++) bool {
++	settleCtx := context.WithoutCancel(ctx)
++	if err := s.messageQueue.RewritePendingQueueDispatchMessage(settleCtx, composed); err != nil {
++		s.logger.Error("failed to record the composed peer report batch as the leading dispatch claim",
++			zap.String("session_id", identity.SessionID),
++			zap.String("task_id", identity.TaskID),
++			zap.String("queue_id", composed.ID),
++			zap.Int("batch_size", len(batch)),
++			zap.Error(err))
++		return false
++	}
++	for _, entry := range batch[1:] {
++		if err := s.messageQueue.MarkPendingQueueDispatchAccepted(settleCtx, entry); err != nil {
++			s.logger.Error("failed to settle folded peer report dispatch claim; a restart may re-deliver this report",
++				zap.String("session_id", identity.SessionID),
++				zap.String("task_id", identity.TaskID),
++				zap.String("queue_id", entry.ID),
++				zap.Error(err))
++			return false
++		}
++	}
++	return true
++}
++
++// peerReportBatchStillDispatchable reports whether the reserved batch may be
++// handed to an agent now: the session incarnation must still match and the
++// composed prompt must carry dispatchable input.
++func (s *Service) peerReportBatchStillDispatchable(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++	composed *messagequeue.QueuedMessage,
++	batch []*messagequeue.QueuedMessage,
++) bool {
++	if identity.SessionIncarnationID != "" {
++		current, err := s.messageQueue.ResolveSessionIdentity(ctx, identity.TaskID, identity.SessionID)
++		if err != nil || current != identity {
++			s.logger.Warn("peer report batch dropped for replaced session",
++				zap.String("session_id", identity.SessionID),
++				zap.String("queue_id", composed.ID),
++				zap.Int("batch_size", len(batch)),
++				zap.Error(err))
++			return false
++		}
++	}
++	hasInput, inputErr := s.queuedMessageHasDispatchInput(ctx, composed)
++	if inputErr != nil {
++		s.logger.Warn("failed to inspect peer report batch input; returning reservation",
++			zap.String("session_id", identity.SessionID),
++			zap.String("queue_id", composed.ID),
++			zap.Error(inputErr))
++		return false
++	}
++	if !hasInput {
++		s.logger.Warn("skipping empty peer report batch after transition",
++			zap.String("session_id", identity.SessionID),
++			zap.String("queue_id", composed.ID))
++	}
++	return hasInput
++}
++
++// requeuePeerReportBatch returns reserved entries to the head in their original
++// order. Requeue-at-head inserts ahead of the remaining queue, so the batch is
++// replayed from its last entry.
++func (s *Service) requeuePeerReportBatch(
++	ctx context.Context,
++	identity messagequeue.QueueSessionIdentity,
++	batch []*messagequeue.QueuedMessage,
++) {
++	for index := len(batch) - 1; index >= 0; index-- {
++		entry := batch[index]
++		if identity.SessionIncarnationID == "" {
++			s.requeueMessage(ctx, entry, entry.QueuedBy)
++			continue
++		}
++		if err := s.requeueMessageForSession(ctx, identity, entry, entry.QueuedBy); err != nil &&
++			errors.Is(err, messagequeue.ErrSessionIdentityMismatch) {
++			s.logger.Warn("dropping peer report batch entry for replaced session",
++				zap.String("session_id", identity.SessionID),
++				zap.String("queue_id", entry.ID),
++				zap.Error(err))
++		}
++	}
++	s.publishQueueStatusEventForIdentity(ctx, identity)
++}
+diff --git a/apps/backend/internal/orchestrator/peer_report_batch_test.go b/apps/backend/internal/orchestrator/peer_report_batch_test.go
+new file mode 100644
+index 0000000000..2466dc3992
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/peer_report_batch_test.go
+@@ -0,0 +1,254 @@
++package orchestrator
++
++import (
++	"context"
++	"sync"
++	"testing"
++	"time"
++
++	"github.com/jmoiron/sqlx"
++	"github.com/stretchr/testify/require"
++
++	"github.com/kandev/kandev/internal/orchestrator/executor"
++	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
++	"github.com/kandev/kandev/internal/task/models"
++	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
++)
++
++func newPeerReportFixture(t *testing.T) (*Service, *mockAgentManager, chan struct{}) {
++	t.Helper()
++	svc, agentMgr, promptDone, repo := newPeerReportFixtureWithRepo(t)
++	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
++	return svc, agentMgr, promptDone
++}
++
++func newPeerReportFixtureWithRepo(t *testing.T) (*Service, *mockAgentManager, chan struct{}, *sqliterepo.Repository) {
++	t.Helper()
++	ctx := context.Background()
++	repo := setupTestRepo(t)
++	seedSession(t, repo, "t-peer", "s-peer", "step1")
++	seedExecutorRunning(t, repo, "s-peer", "t-peer", "exec-peer")
++	session, err := repo.GetTaskSession(ctx, "s-peer")
++	require.NoError(t, err)
++	session.State = models.TaskSessionStateWaitingForInput
++	require.NoError(t, repo.UpdateTaskSession(ctx, session))
++
++	promptDone := make(chan struct{})
++	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: promptDone}
++	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
++	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
++	return svc, agentMgr, promptDone, repo
++}
++
++func queuePeerReport(t *testing.T, svc *Service, sender, content string) {
++	t.Helper()
++	_, err := svc.messageQueue.QueueMessageWithMetadata(
++		context.Background(),
++		"s-peer",
++		"t-peer",
++		content,
++		"",
++		messagequeue.QueuedByAgent,
++		false,
++		nil,
++		map[string]interface{}{messagequeue.MetadataSenderTaskID: sender},
++	)
++	require.NoError(t, err)
++}
++
++func waitForQueuedPrompt(t *testing.T, promptDone chan struct{}) {
++	t.Helper()
++	select {
++	case <-promptDone:
++	case <-time.After(10 * time.Second):
++		t.Fatal("timed out waiting for the queued prompt")
++	}
++}
++
++func TestDrainQueuedMessage_DeliversChildReportBurstAsOnePrompt(t *testing.T) {
++	svc, agentMgr, promptDone := newPeerReportFixture(t)
++	queuePeerReport(t, svc, "child-a", "report one")
++	queuePeerReport(t, svc, "child-b", "report two")
++	queuePeerReport(t, svc, "child-c", "report three")
++
++	require.True(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"))
++	waitForQueuedPrompt(t, promptDone)
++
++	require.Len(t, agentMgr.capturedPrompts, 1)
++	prompt := agentMgr.capturedPrompts[0]
++	require.Contains(t, prompt, "from task child-a")
++	require.Contains(t, prompt, "from task child-b")
++	require.Contains(t, prompt, "from task child-c")
++	require.Contains(t, prompt, "report one")
++	require.Contains(t, prompt, "report three")
++	// An ordinary reserve removes its row when the batch is taken, so an empty
++	// queue here reports the reserve, not the settlement. Claim settlement for
++	// the same batch is asserted against SQLite in the messagequeue package.
++	require.Zero(t, svc.messageQueue.GetStatus(context.Background(), "s-peer").Count)
++	require.False(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"),
++		"the whole burst was consumed by one turn")
++}
++
++func TestDrainQueuedMessage_KeepsUserInstructionBehindReports(t *testing.T) {
++	svc, agentMgr, promptDone := newPeerReportFixture(t)
++	queuePeerReport(t, svc, "child-a", "report one")
++	_, err := svc.messageQueue.QueueMessage(
++		context.Background(), "s-peer", "t-peer", "operator instruction", "", "user", false, nil)
++	require.NoError(t, err)
++	queuePeerReport(t, svc, "child-b", "report two")
++
++	require.True(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"))
++	waitForQueuedPrompt(t, promptDone)
++	require.Len(t, agentMgr.capturedPrompts, 1)
++	require.Contains(t, agentMgr.capturedPrompts[0], "report one")
++	require.NotContains(t, agentMgr.capturedPrompts[0], "report two")
++	require.NotContains(t, agentMgr.capturedPrompts[0], "operator instruction")
++	require.Equal(t, 2, svc.messageQueue.GetStatus(context.Background(), "s-peer").Count)
++}
++
++// peerReportClaimRepository is the full dispatch-claim contract a durable queue
++// repository offers, which the memory repository deliberately does not.
++type peerReportClaimRepository interface {
++	messagequeue.Repository
++	ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error)
++	MarkPendingQueueDispatchAccepted(context.Context, *messagequeue.QueuedMessage) error
++	RewritePendingQueueDispatchMessage(context.Context, *messagequeue.QueuedMessage) error
++	DeletePendingQueueDispatch(context.Context, *messagequeue.QueuedMessage) error
++}
++
++type recordedClaimOperation struct {
++	operation string
++	entryID   string
++	payload   string
++}
++
++type recordingPeerReportClaimRepository struct {
++	peerReportClaimRepository
++	mu         sync.Mutex
++	operations []recordedClaimOperation
++}
++
++func (r *recordingPeerReportClaimRepository) record(operation string, msg *messagequeue.QueuedMessage) {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	entry := recordedClaimOperation{operation: operation, entryID: msg.ID}
++	if operation == "rewrite" {
++		entry.payload = msg.Content
++	}
++	r.operations = append(r.operations, entry)
++}
++
++func (r *recordingPeerReportClaimRepository) RewritePendingQueueDispatchMessage(
++	ctx context.Context,
++	msg *messagequeue.QueuedMessage,
++) error {
++	r.record("rewrite", msg)
++	return r.peerReportClaimRepository.RewritePendingQueueDispatchMessage(ctx, msg)
++}
++
++func (r *recordingPeerReportClaimRepository) MarkPendingQueueDispatchAccepted(
++	ctx context.Context,
++	msg *messagequeue.QueuedMessage,
++) error {
++	r.record("accept", msg)
++	return r.peerReportClaimRepository.MarkPendingQueueDispatchAccepted(ctx, msg)
++}
++
++func (r *recordingPeerReportClaimRepository) DeletePendingQueueDispatch(
++	ctx context.Context,
++	msg *messagequeue.QueuedMessage,
++) error {
++	r.record("delete", msg)
++	return r.peerReportClaimRepository.DeletePendingQueueDispatch(ctx, msg)
++}
++
++func (r *recordingPeerReportClaimRepository) recorded() []recordedClaimOperation {
++	r.mu.Lock()
++	defer r.mu.Unlock()
++	return append([]recordedClaimOperation(nil), r.operations...)
++}
++
++func newSQLitePeerReportFixture(t *testing.T) (*Service, *mockAgentManager, chan struct{}, *recordingPeerReportClaimRepository) {
++	t.Helper()
++	svc, agentMgr, promptDone, repo := newPeerReportFixtureWithRepo(t)
++	db := sqlx.NewDb(repo.DB(), "sqlite3")
++	persistentRepo, err := messagequeue.NewSQLiteRepository(db, db)
++	require.NoError(t, err)
++	claimRepo, ok := persistentRepo.(peerReportClaimRepository)
++	require.True(t, ok, "the SQLite queue repository must persist dispatch claims")
++	recorder := &recordingPeerReportClaimRepository{peerReportClaimRepository: claimRepo}
++	svc.messageQueue = messagequeue.NewService(recorder, messagequeue.DefaultMaxPerSession, testLogger())
++	return svc, agentMgr, promptDone, recorder
++}
++
++// peerReportSettlementOnlyRepository persists dispatch claims but cannot rewrite
++// an unsettled one, so a folded batch would replay only its leading report after
++// a restart.
++type peerReportSettlementOnlyRepository struct {
++	messagequeue.Repository
++}
++
++func (r *peerReportSettlementOnlyRepository) ListPendingQueueDispatches(context.Context) ([]messagequeue.PendingQueueDispatch, error) {
++	return nil, nil
++}
++
++func (r *peerReportSettlementOnlyRepository) MarkPendingQueueDispatchAccepted(context.Context, *messagequeue.QueuedMessage) error {
++	return nil
++}
++
++func (r *peerReportSettlementOnlyRepository) DeletePendingQueueDispatch(context.Context, *messagequeue.QueuedMessage) error {
++	return nil
++}
++
++func TestDrainQueuedMessage_DeliversOneReportAtATimeWithoutClaimRewrite(t *testing.T) {
++	svc, agentMgr, promptDone, recorder := newSQLitePeerReportFixture(t)
++	svc.messageQueue = messagequeue.NewService(
++		&peerReportSettlementOnlyRepository{Repository: recorder.peerReportClaimRepository},
++		messagequeue.DefaultMaxPerSession,
++		testLogger(),
++	)
++	queuePeerReport(t, svc, "child-a", "report one")
++	queuePeerReport(t, svc, "child-b", "report two")
++
++	require.True(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"))
++	waitForQueuedPrompt(t, promptDone)
++
++	require.Len(t, agentMgr.capturedPrompts, 1)
++	require.Contains(t, agentMgr.capturedPrompts[0], "report one")
++	require.NotContains(t, agentMgr.capturedPrompts[0], "report two",
++		"folding requires a rewritable claim")
++	require.Equal(t, 1, svc.messageQueue.GetStatus(context.Background(), "s-peer").Count,
++		"the folded row returns to the head instead of being lost")
++}
++
++func TestDrainQueuedMessage_RecordsTheComposedBatchBeforeSettlingFoldedClaims(t *testing.T) {
++	svc, _, promptDone, recorder := newSQLitePeerReportFixture(t)
++	queuePeerReport(t, svc, "child-a", "report one")
++	queuePeerReport(t, svc, "child-b", "report two")
++	queuePeerReport(t, svc, "child-c", "report three")
++
++	require.True(t, svc.drainQueuedMessageForPromptableSession(context.Background(), "s-peer"))
++	waitForQueuedPrompt(t, promptDone)
++
++	operations := recorder.recorded()
++	require.NotEmpty(t, operations)
++	require.Equal(t, "rewrite", operations[0].operation,
++		"the leading claim must carry the composed prompt before any folded claim is settled")
++	require.Contains(t, operations[0].payload, "report one")
++	require.Contains(t, operations[0].payload, "report two")
++	require.Contains(t, operations[0].payload, "report three")
++	require.GreaterOrEqual(t, len(operations), 3,
++		"one rewrite and one acceptance per folded row settle the whole batch before the worker runs")
++	leadingID := operations[0].entryID
++	for index, operation := range operations[1:] {
++		if operation.entryID == leadingID {
++			// The leading claim is settled later by the ordinary post-dispatch
++			// path, which runs after the worker accepted the composed prompt.
++			require.GreaterOrEqual(t, index, 2,
++				"the leading claim is settled after every folded row")
++			continue
++		}
++		require.Less(t, index, 2, "every folded row's claim is settled before the worker runs")
++		require.Equal(t, "accept", operation.operation)
++	}
++}
+diff --git a/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go b/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
+index 1e3e8887b9..c5a011f057 100644
+--- a/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
++++ b/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
+@@ -60,6 +60,14 @@ func workflowProfileSwitchTerminalEventMatches(ctx context.Context, executionID
+ 	return state.terminalExecutionID != "" && state.terminalExecutionID == executionID
+ }
+ 
++func (s *Service) finishParkedWorkflowProfileSwitchSource(
++	ctx context.Context,
++	taskID string,
++	session *models.TaskSession,
++) (bool, error) {
++	return s.parkSessionForProfileSwitchWithTerminalSource(ctx, taskID, session, true)
++}
++
+ // parkSessionForProfileSwitch keeps the source answerable while ensuring the
+ // old runtime's terminal event cannot advance the destination workflow step.
+ // The bool reports whether the source was durably parked. Runtime teardown is
+@@ -68,12 +76,21 @@ func (s *Service) parkSessionForProfileSwitch(
+ 	ctx context.Context,
+ 	taskID string,
+ 	session *models.TaskSession,
++) (bool, error) {
++	return s.parkSessionForProfileSwitchWithTerminalSource(ctx, taskID, session, false)
++}
++
++func (s *Service) parkSessionForProfileSwitchWithTerminalSource(
++	ctx context.Context,
++	taskID string,
++	session *models.TaskSession,
++	acceptTerminalSource bool,
+ ) (bool, error) {
+ 	if session == nil {
+ 		return false, errors.New("cannot park a nil workflow profile session")
+ 	}
+ 	if workflowProfileSwitchGuardIsHeld(ctx, session.ID) {
+-		parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
++		parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session, acceptTerminalSource)
+ 		if err != nil || !parked || executionID == "" {
+ 			return parked, err
+ 		}
+@@ -88,7 +105,7 @@ func (s *Service) parkSessionForProfileSwitch(
+ 	lock, release := s.acquireCancelInFlightGuard(session.ID)
+ 	lock.Lock()
+ 	ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+-	parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session)
++	parked, executionID, err := s.parkSessionForProfileSwitchClaimLocked(ctx, taskID, session, acceptTerminalSource)
+ 	lock.Unlock()
+ 	release()
+ 	if err != nil || !parked || executionID == "" {
+@@ -111,6 +128,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
+ 	ctx context.Context,
+ 	taskID string,
+ 	session *models.TaskSession,
++	acceptTerminalSource bool,
+ ) (bool, string, error) {
+ 	if session == nil {
+ 		return false, "", errors.New("cannot park a nil workflow profile session")
+@@ -123,10 +141,15 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
+ 		defer lock.Unlock()
+ 		ctx = withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+ 	}
+-	currentSession, executionID, err := s.loadProfileSwitchParkCandidate(ctx, session.ID)
++	currentSession, executionID, err := s.loadProfileSwitchParkCandidate(ctx, session.ID, acceptTerminalSource)
+ 	if err != nil {
+ 		return false, "", err
+ 	}
++	// A predecessor that ended during destination preparation needs no park.
++	// Preserve its terminal state and the already prepared destination.
++	if isTerminalSessionState(currentSession.State) {
++		return true, "", nil
++	}
+ 
+ 	// Claim the exact runtime while the source session guard is still held.
+ 	// This is the linearization point shared with terminal callbacks: a
+@@ -189,6 +212,7 @@ func (s *Service) parkSessionForProfileSwitchClaimLocked(
+ func (s *Service) loadProfileSwitchParkCandidate(
+ 	ctx context.Context,
+ 	sessionID string,
++	acceptTerminalSource bool,
+ ) (*models.TaskSession, string, error) {
+ 	currentSession, err := s.repo.GetTaskSession(ctx, sessionID)
+ 	if err != nil {
+@@ -198,6 +222,9 @@ func (s *Service) loadProfileSwitchParkCandidate(
+ 		return nil, "", fmt.Errorf("reload workflow profile session %q before park: session is nil", sessionID)
+ 	}
+ 	if isTerminalSessionState(currentSession.State) {
++		if acceptTerminalSource {
++			return currentSession, "", nil
++		}
+ 		return nil, "", fmt.Errorf("cannot park workflow profile session %q after it became %s", sessionID, currentSession.State)
+ 	}
+ 
+diff --git a/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go b/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go
+new file mode 100644
+index 0000000000..ea335bcaa6
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go
+@@ -0,0 +1,59 @@
++package orchestrator
++
++import (
++	"context"
++	"testing"
++	"testing/synctest"
++
++	"github.com/kandev/kandev/internal/task/models"
++	"github.com/stretchr/testify/require"
++)
++
++func TestWorkflowReplacementSurvivesTerminalPredecessor(t *testing.T) {
++	for _, terminal := range []models.TaskSessionState{
++		models.TaskSessionStateCancelled, models.TaskSessionStateCompleted, models.TaskSessionStateFailed,
++	} {
++		t.Run(string(terminal), func(t *testing.T) {
++			ctx := context.Background()
++			fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
++			fixture.svc.messageQueue = nil
++			require.NoError(t, fixture.repo.UpdateTaskSessionState(ctx, fixture.current.ID, terminal, "source ended"))
++			destination, err := fixture.svc.createNewSessionForStepWithEndPolicy(ctx, "t1", fixture.current, "profile-b", models.WorkflowProfileSessionEndPolicyPark)
++			require.NoError(t, err, "a terminal predecessor already satisfies its departure without being parked again")
++			require.NotNil(t, destination)
++			primary, err := fixture.repo.GetActiveTaskSessionByTaskID(ctx, "t1")
++			require.NoError(t, err)
++			require.Equal(t, destination.ID, primary.ID)
++			source, err := fixture.repo.GetTaskSession(ctx, fixture.current.ID)
++			require.NoError(t, err)
++			require.Equal(t, terminal, source.State, "the predecessor must never be reopened")
++		})
++	}
++}
++
++func TestWorkflowDepartureWaitsForNonterminalSourceStop(t *testing.T) {
++	synctest.Test(t, func(t *testing.T) {
++		ctx := context.Background()
++		f := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyNew, models.WorkflowProfileSessionEndPolicyPark)
++		stopEntered := make(chan struct{})
++		stopRelease := make(chan struct{})
++		defer close(stopRelease)
++		f.agentMgr.stopAgentFunc = func(context.Context, string, bool) error {
++			close(stopEntered)
++			<-stopRelease
++			return nil
++		}
++		done := make(chan error, 1)
++		go func() {
++			_, err := f.svc.finishWorkflowProfileSwitchSource(ctx, "t1", f.current, models.WorkflowProfileSessionEndPolicyPark)
++			done <- err
++		}()
++		<-stopEntered
++		synctest.Wait()
++		select {
++		case <-done:
++			t.Fatal("unguarded departure returned before its source teardown completed")
++		default:
++		}
++	})
++}
+diff --git a/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go b/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go
+new file mode 100644
+index 0000000000..e08273e863
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go
+@@ -0,0 +1,36 @@
++package orchestrator
++
++import (
++	"context"
++	"errors"
++
++	"github.com/kandev/kandev/internal/task/models"
++)
++
++func (s *Service) workflowEntryLaunchSession(ctx context.Context, session *models.TaskSession) (*models.TaskSession, error) {
++	if session.State != models.TaskSessionStateWaitingForInput || session.AgentExecutionID != "" ||
++		session.DownstreamACPSessionID != "" {
++		return session, nil
++	}
++	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
++	if err != nil && !errors.Is(err, models.ErrExecutorRunningNotFound) {
++		return nil, err
++	}
++	if running != nil {
++		return session, nil
++	}
++	hasHistory, err := s.repo.HasUserPromptHistory(ctx, session.ID)
++	if err != nil {
++		return nil, err
++	}
++	unselectedRoute := session.RouteState == dynamicRouteStatusWaiting &&
++		session.ExecutionProfileID == "" && session.RouteReason == "no_eligible_candidate"
++	if hasHistory && !unselectedRoute {
++		return session, nil
++	}
++	// Workflow moves can idle a prepared session before it has any executor.
++	// Keep persistence unchanged; the existing created-session start admits it.
++	launchSession := *session
++	launchSession.State = models.TaskSessionStateCreated
++	return &launchSession, nil
++}
+diff --git a/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go b/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go
+new file mode 100644
+index 0000000000..20a4e158b4
+--- /dev/null
++++ b/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go
+@@ -0,0 +1,88 @@
++package orchestrator
++
++import (
++	"context"
++	"testing"
++
++	"github.com/kandev/kandev/internal/orchestrator/executor"
++	"github.com/kandev/kandev/internal/task/models"
++	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
++	wfmodels "github.com/kandev/kandev/internal/workflow/models"
++	v1 "github.com/kandev/kandev/pkg/api/v1"
++	"github.com/stretchr/testify/require"
++)
++
++type unlaunchedWorkflowEntryFixture struct {
++	svc             *Service
++	repo            *sqliterepo.Repository
++	session         *models.TaskSession
++	launchedSession *string
++}
++
++func newUnlaunchedWorkflowEntryFixture(t *testing.T) unlaunchedWorkflowEntryFixture {
++	t.Helper()
++	ctx := context.Background()
++	repo := setupTestRepo(t)
++	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
++	session, err := repo.GetTaskSession(ctx, "session1")
++	require.NoError(t, err)
++	session.AgentProfileID = "profile1"
++	require.NoError(t, repo.UpdateTaskSession(ctx, session))
++	getter := newMockStepGetter()
++	step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Work"}
++	getter.steps[step.ID] = step
++	tasks := newMockTaskRepo()
++	tasks.tasks["task1"] = &v1.Task{ID: "task1", Title: "Task", State: v1.TaskStateCreated}
++	launchedSession := ""
++	manager := &mockAgentManager{
++		repoForExecutionLookup: repo,
++		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
++			launchedSession = req.SessionID
++			return &executor.LaunchAgentResponse{AgentExecutionID: "execution1"}, nil
++		},
++	}
++	svc := createTestServiceWithScheduler(repo, getter, tasks, manager)
++	svc.messageCreator = &mockMessageCreator{}
++	return unlaunchedWorkflowEntryFixture{svc: svc, repo: repo, session: session, launchedSession: &launchedSession}
++}
++
++func TestWorkflowEntryStartsWaitingSessionWithoutExecutor(t *testing.T) {
++	for _, withRecordedPrompt := range []bool{false, true} {
++		t.Run(map[bool]string{false: "empty conversation", true: "initial route selection refused"}[withRecordedPrompt], func(t *testing.T) {
++			ctx := context.Background()
++			f := newUnlaunchedWorkflowEntryFixture(t)
++			if withRecordedPrompt {
++				f.session.RouteState = dynamicRouteStatusWaiting
++				f.session.RouteReason = "no_eligible_candidate"
++				require.NoError(t, f.repo.UpdateTaskSession(ctx, f.session))
++				recordUnlaunchedEntryPrompt(t, f, "initial-prompt")
++			}
++			step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Work"}
++			err := f.svc.autoStartStepPrompt(ctx, "task1", f.session, step, "Do the work", false, false, nil)
++			require.NoError(t, err, "a never-launched waiting session needs StartCreatedSession, not native resume")
++			require.Equal(t, "session1", *f.launchedSession)
++			sessions, err := f.repo.ListTaskSessions(ctx, "task1")
++			require.NoError(t, err)
++			require.Len(t, sessions, 1)
++		})
++	}
++}
++
++func TestWorkflowEntryDoesNotColdStartHistoricalConversationWithoutExecutor(t *testing.T) {
++	ctx := context.Background()
++	f := newUnlaunchedWorkflowEntryFixture(t)
++	recordUnlaunchedEntryPrompt(t, f, "previous-prompt")
++	step := &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1", Name: "Work"}
++	err := f.svc.autoStartStepPrompt(ctx, "task1", f.session, step, "Do the work", false, false, nil)
++	require.Error(t, err)
++	require.Empty(t, *f.launchedSession)
++}
++
++func recordUnlaunchedEntryPrompt(t *testing.T, f unlaunchedWorkflowEntryFixture, id string) {
++	t.Helper()
++	ctx := context.Background()
++	require.NoError(t, f.repo.CreateTurn(ctx, &models.Turn{ID: id + "-turn", TaskID: "task1", TaskSessionID: "session1"}))
++	require.NoError(t, f.repo.CreateMessage(ctx, &models.Message{
++		ID: id, TurnID: id + "-turn", TaskID: "task1", TaskSessionID: "session1", AuthorType: "user", Content: "Initial instruction",
++	}))
++}
+diff --git a/docs/plans/launch-durability-1013/task-01-workflow-entry.md b/docs/plans/launch-durability-1013/task-01-workflow-entry.md
+new file mode 100644
+index 0000000000..5eb8b75e0b
+--- /dev/null
++++ b/docs/plans/launch-durability-1013/task-01-workflow-entry.md
+@@ -0,0 +1,78 @@
++---
++id: "01-workflow-entry"
++title: "Preserve destination entry after an ended or unlaunched source"
++status: done
++wave: 1
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-001
++  - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
++acceptance_criteria:
++  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.2
++  - AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14
++  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.1
++  - AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.3
++system_design:
++  - ../../specs/tasks/system-design/workflow-profile-session-lifecycle.md
++  - ../../specs/agents/system-design/dynamic-agent-routing-01.md
++---
++
++# Workflow entry repair
++
++## Scope and ownership
++
++Own `event_handlers_workflow.go`, `task_operations.go`, `workflow_profile_session_lifecycle.go`,
++`workflow_unlaunched_entry.go`, and the two corresponding regression files.
++Update the existing private park-claim test call for its explicit terminal-source
++policy argument.
++Reuse the existing session guard and created-session launch. Leave ceiling
++admission, deferred-launch claims, queue-promotion ownership, and task-stop
++semantics in their existing owners.
++
++## Acceptance
++
++- A terminal predecessor is not reopened or parked again. A prepared
++  destination remains primary when its predecessor already ended.
++- Natural terminal-execution evidence on a nonterminal predecessor retains
++  the existing park refusal, and metadata or queue-transfer failures retain
++  rollback behavior.
++- A waiting conversation without executor or native identity uses initial
++  start only if it has no prompt history, or its recorded initial dynamic
++  selection has never chosen an execution profile. Preserve the same session.
++- A historical conversation without executor evidence is not cold-started.
++
++## Verification and results
++
++RED: `TestWorkflowReplacementSurvivesTerminalPredecessor` failed for CANCELLED,
++COMPLETED, and FAILED sources with `cannot park workflow profile session`.
++`TestWorkflowEntryStartsWaitingSessionWithoutExecutor` failed with
++`session is not resumable: no executor record (state: WAITING_FOR_INPUT)`.
++
++Focused command:
++
++```text
++go test -trimpath ./internal/orchestrator -run 'TestWorkflowEntry|TestWorkflowReplacementSurvivesTerminalPredecessor|TestParkSessionForProfileSwitch' -count=1
++```
++
++Run the changed orchestrator package, compare any Windows baseline failures
++against unmodified main, and run the entry/lifecycle boundary regressions with
++`-race`. Final results are recorded when these checks finish.
++
++The non-race main comparison also reproduces
++`TestAutoPromotionPreservesLogicalProfileAndNewestSession` in addition to the
++two known passthrough attachment tests. A new terminal-admission regression
++found by the full suite was repaired through the existing workflow-terminalized
++error, preserving its queued handoff. A deterministic channel/synctest check
++also preserves unguarded departure's synchronous source teardown.
++
++Final GREEN (race):
++
++```text
++go test -trimpath -race -p 2 ./internal/orchestrator -run 'TestWorkflowEntry|TestWorkflowDeparture|TestWorkflowReplacementSurvivesTerminalPredecessor|TestWorkflowAutoStartRejectsSessionTerminalizedBeforeResume|TestParkSessionForProfileSwitch|TestAutoStartCreatedLaunch' -count=1
++```
++
++Passed. The full `go test -trimpath ./internal/orchestrator -count=1` comparison
++has exactly the three failures also observed on unmodified main; there are no
++new failures. The final admission-boundary correction preserves the existing
++busy-launch error and merged-handoff queue path.
+diff --git a/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md b/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md
+new file mode 100644
+index 0000000000..55a526ed76
+--- /dev/null
++++ b/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md
+@@ -0,0 +1,56 @@
++---
++id: "02-peer-message-recovery"
++title: "Apply release-d history continuation to idle peer messages"
++status: done
++wave: 2
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006
++acceptance_criteria:
++  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.8
++  - AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.9
++system_design:
++  - ../../specs/platform/system-design/interrupted-prompt-recovery.md
++---
++
++# Peer-message recovery repair
++
++## Scope and ownership
++
++Own `mcp/handlers/handlers.go`, `message_task_recovery.go`, and
++`message_task_recovery_test.go`. The MCP adapter recognizes the existing typed
++recovery-required error and delegates classification, recovery admission,
++cooldown, and launch to `orchestrator.Service.AutoRecoverBlockedPrompt`.
++
++## Acceptance
++
++After primary-session selection, an idle peer message refused for interrupted
++durable work reaches the existing continuation recovery. Accepted recovery
++retains the newly recorded message and its sender metadata. A declined recovery
++or ordinary dispatch failure preserves the existing unsent-message and
++owned-turn rollback. Do not retry the old interrupted prompt, clear blocks
++directly, or send the new prompt twice.
++
++## Verification and results
++
++RED: the full `handleMessageTask` regression failed because the recovery
++adapter saw no session ID after a primary session received a blocked prompt.
++GREEN: message retention and rejection cleanup regressions passed, including
++the existing REVIEW rollback test.
++
++```text
++go test -trimpath ./internal/mcp/handlers -run 'TestTaskMessageRecovery|TestHandleMessageTask_DispatchErrorRestoresReview' -count=1
++go test -trimpath ./internal/mcp/handlers -count=1
++```
++
++Run the changed handler boundary regressions with `-race`. Final package and
++race results are recorded when these checks finish.
++
++Final GREEN: the complete handler package passed. The latest message retention,
++sender attribution, rejection cleanup, and existing REVIEW rollback checks
++passed under race:
++
++```text
++go test -trimpath -race -p 2 ./internal/mcp/handlers -run 'TestTaskMessageRecovery|TestHandleMessageTask_DispatchErrorRestoresReview' -count=1
++```
+diff --git a/docs/plans/launch-durability-1013/task-03-automation-evidence.md b/docs/plans/launch-durability-1013/task-03-automation-evidence.md
+new file mode 100644
+index 0000000000..9702aef12f
+--- /dev/null
++++ b/docs/plans/launch-durability-1013/task-03-automation-evidence.md
+@@ -0,0 +1,39 @@
++---
++id: "03-automation-evidence"
++title: "Classify historical automation recovery and disabled retry policy"
++status: done
++wave: 1
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-OFFICE-AUTOMATION-CONTINUITY-003
++  - REQ-OFFICE-AUTOMATION-RETRIES-001
++acceptance_criteria:
++  - AC-OFFICE-AUTOMATION-CONTINUITY-003.7
++  - AC-OFFICE-AUTOMATION-RETRIES-001.1
++  - AC-OFFICE-AUTOMATION-RETRIES-001.3
++system_design:
++  - ../../specs/office/system-design/automation-runs.md
++  - ../../specs/office/system-design/automation-retries.md
++---
++
++# Automation diagnosis
++
++Read-only production evidence shows disabled retry policy (`{}`), no retry
++group, and no authoritative outcome on the historical failed run's exact turn.
++Installing retry support does not enable a policy or retroactively admit this
++run into a group. Changing that policy or rewriting the terminal historical
++record is outside this code repair.
++
++The current main implementation already preserves an open legacy run with an
++unknown exact-turn outcome. Retry-group recovery already retains uncertain
++acceptance instead of scheduling duplicate work. Existing tests passed:
++
++```text
++go test -trimpath ./internal/automation -run 'TestReconcileOpenRuns|TestReconcileOpenRetryRunsChecksExactTurnLiveness|TestReconcileStaleLegacyRetryRunCannotScheduleWithoutTerminalEvidence|TestNormalizeRetryPolicyDefaultsDisabledValues' -count=1
++```
++
++No automation production code or permanent test was changed. The requested
++new failing-before proof cannot honestly be claimed for behavior already
++correct on the assigned baseline. Preserve the existing exact-turn and
++retry-group paths.
+diff --git a/docs/plans/peer-report-batch-delivery/plan.md b/docs/plans/peer-report-batch-delivery/plan.md
+new file mode 100644
+index 0000000000..c2741537c6
+--- /dev/null
++++ b/docs/plans/peer-report-batch-delivery/plan.md
+@@ -0,0 +1,59 @@
++---
++created: 2026-10-04
++status: completed
++requirements:
++  - REQ-TASKS-PEER-REPORT-BATCH-001
++system_design:
++  - ../../specs/tasks/system-design/peer-report-batch-delivery.md
++legacy_specs: []
++---
++
++# Implementation Plan: Peer report batch delivery
++
++## Overview
++
++A controller session supervising a wide fan-out receives one peer report per
++child completion. Each report consumed one queue slot and one turn, so a burst
++reached the per-session cap while the controller was still busy and the operator
++saw `queue_full` for reports the controller would have consumed shortly after.
++
++The selected design delivers a bounded, consecutive FIFO run of ordinary peer
++reports as a single prompt, keeping per-report attribution, and settles every
++reserved row exactly as the single-row path settles its one row.
++
++## Requirement conformance and assumptions
++
++The task system owns this capability because it owns the controller prompt queue
++and its drain path. Queue admission and queued post-dispatch recovery remain
++authoritative for their own concerns and are unchanged.
++
++`queue_full` remains reachable while a controller turn is long-running and only
++one batch has been dispatched. This limitation is stated in the requirement and
++the design and is not claimed away.
++
++No user-facing copy changes, so no i18n work is in scope.
++
++## Work packages
++
++- [Task 01: Batch reservation and eligibility](task-01-batch-peer-reports.md)
++- [Task 02: Batch dispatch from the drain path](task-02-deliver-peer-report-batch.md)
++
++## Results
++
++Both work orders are implemented. The batch reserve, the shared eligibility rule,
++the composition with per-report attribution, the all-rows requeue, and both drain
++integrations landed together, because the eligibility rule has to be shared by
++reservation and by the drain helper.
++
++## Verification
++
++Run from `apps/backend` in the worktree, restricted to changed packages.
++
++```bash
++go test -p 2 -tags fts5 ./internal/orchestrator/messagequeue/... -count=1
++go test -p 2 -tags fts5 ./internal/orchestrator/ -run "Drain|Queue|PeerReportBatch" -count=1
++golangci-lint run ./... --new-from-rev="origin/main" --timeout=5m
++```
++
++`TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt` fails
++on the base branch as well and is unrelated to this change.
+\ No newline at end of file
+diff --git a/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md b/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md
+new file mode 100644
+index 0000000000..fe7da50749
+--- /dev/null
++++ b/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md
+@@ -0,0 +1,56 @@
++---
++id: "01-batch-peer-reports"
++title: "Batch peer report reservation"
++status: completed
++wave: 1
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-TASKS-PEER-REPORT-BATCH-001
++acceptance_criteria:
++  - AC-TASKS-PEER-REPORT-BATCH-001.1
++  - AC-TASKS-PEER-REPORT-BATCH-001.3
++  - AC-TASKS-PEER-REPORT-BATCH-001.4
++  - AC-TASKS-PEER-REPORT-BATCH-001.5
++system_design:
++  - ../../specs/tasks/system-design/peer-report-batch-delivery.md
++---
++
++# Task 01: Batch peer report reservation
++
++## Summary
++
++Add one shared eligibility rule and a bounded FIFO batch reserve to the
++`messagequeue` service, reusing the existing per-session admission critical
++section.
++
++## In scope
++
++- `IsOrdinaryPeerReport` as the single definition of an eligible row.
++- `ReservePeerReportBatchWithAutoRunForSession` walking ordered pending rows under
++  the existing admission lock and the existing repository lock or transaction.
++- Stop conditions: ineligible row, model or plan-mode mismatch, byte ceiling,
++  entry bound, repeated durable head, empty queue, and Auto-run OFF.
++- Requeue of a non-joining row to its own position, so queue accounting and
++  `ErrQueueFull` behavior are unchanged.
++- Named bounds for maximum entries and maximum combined bytes.
++- `messagequeue` tests covering the FIFO prefix, every stop condition, memory and
++  SQLite repository agreement, and multi-row all-or-nothing settlement.
++
++## Out of scope
++
++Prompt composition, the drain integration, and any change to admission or
++capacity rules.
++
++## Acceptance
++
++1. A run of N eligible reports reserves N rows in order and stops at the first
++   row that is not an ordinary peer report.
++2. A non-joining row is back in the queue at its own position after the reserve.
++3. Memory and SQLite repositories reserve the same prefix for the same queue.
++
++## Verification
++
++```bash
++(cd apps/backend && go test -p 2 -tags fts5 ./internal/orchestrator/messagequeue/... -count=1)
++```
+\ No newline at end of file
+diff --git a/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md b/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md
+new file mode 100644
+index 0000000000..41bebae751
+--- /dev/null
++++ b/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md
+@@ -0,0 +1,57 @@
++---
++id: "02-deliver-peer-report-batch"
++title: "Deliver a peer report batch from the drain path"
++status: completed
++wave: 2
++depends_on:
++  - 01-batch-peer-reports
++plan: "plan.md"
++requirements:
++  - REQ-TASKS-PEER-REPORT-BATCH-001
++acceptance_criteria:
++  - AC-TASKS-PEER-REPORT-BATCH-001.2
++  - AC-TASKS-PEER-REPORT-BATCH-001.6
++  - AC-TASKS-PEER-REPORT-BATCH-001.7
++  - AC-TASKS-PEER-REPORT-BATCH-001.8
++system_design:
++  - ../../specs/tasks/system-design/peer-report-batch-delivery.md
++---
++
++# Task 02: Deliver a peer report batch from the drain path
++
++## Summary
++
++Compose a reserved batch into one prompt and dispatch it from both drain paths,
++with an all-rows requeue when the dispatch cannot start.
++
++## In scope
++
++- `ComposePeerReportBatch` rendering each report with its index and sender task
++  id, in queue order, into the leading entry.
++- `reserveAndDispatchQueueHead` shared by both drain variants, falling through to
++  the unchanged single-row dispatch for a one-row result.
++- Incarnation and dispatch-input checks before the batch is handed to an agent,
++  with every reserved row returned to the queue when a check fails.
++- `orchestrator` tests: N reports in one prompt with per-sender attribution and N
++  rows consumed, a `report, user, report` queue delivering only the first report,
++  and a long-running turn leaving later rows queued.
++
++## Out of scope
++
++Any change to queue capacity, admission order, or the ordering of a direct
++`message.add` behind queued messages.
++
++## Acceptance
++
++1. A drain of N same-turn peer reports produces one prompt containing all N with
++   per-sender attribution and consumes N rows.
++2. `report, user, report` delivers the report, then the user row on the next
++   drain; the trailing report is untouched.
++3. A replaced session incarnation or an unreadable dispatch-input check returns
++   every reserved row in its original order.
++
++## Verification
++
++```bash
++(cd apps/backend && go test -p 2 -tags fts5 ./internal/orchestrator/ -run "Drain|Queue|PeerReportBatch" -count=1)
++```
+\ No newline at end of file
+diff --git a/docs/specs/tasks/requirements/peer-report-batch-delivery.md b/docs/specs/tasks/requirements/peer-report-batch-delivery.md
+new file mode 100644
+index 0000000000..42ddbf1b22
+--- /dev/null
++++ b/docs/specs/tasks/requirements/peer-report-batch-delivery.md
+@@ -0,0 +1,81 @@
++---
++status: active
++system: tasks
++created: 2026-10-04
++owners:
++  - kandev
++---
++
++# Peer Report Batch Delivery Requirements
++
++## Overview
++
++A controller session that supervises child agents receives one peer report per
++child completion. Each report occupies a queue slot and one turn on its own, so a
++burst of reports from a wide fan-out can exhaust the queue while the controller
++is still busy, and the operator sees `queue_full` rejections for reports that the
++controller would have consumed minutes later.
++
++The task system owns the controller's prompt queue, so it owns how a run of
++already-accepted peer reports is handed to the controller. This requirement
++defines that batching contract; it does not change admission, capacity, or
++ordering for any other queue row.
++
++## Requirements
++
++### REQ-TASKS-PEER-REPORT-BATCH-001: Bounded batch delivery of ordinary peer reports
++
++**Intent:** Deliver a burst of ordinary peer reports to a controller session
++without spending one queue slot and one turn per report.
++
++#### Acceptance criteria
++
++- **AC-TASKS-PEER-REPORT-BATCH-001.1:** When a session drains its queue, a
++  consecutive run of ordinary peer reports at the head shall be reserved and
++  delivered as a single prompt containing every report of the run, in queue
++  order.
++- **AC-TASKS-PEER-REPORT-BATCH-001.2:** Every report in a batch shall keep its
++  own attribution in the delivered prompt. A recipient shall be able to tell
++  which task sent each report without inspecting queue internals.
++- **AC-TASKS-PEER-REPORT-BATCH-001.3:** Batching shall stop at the first row that
++  is not an ordinary peer report. User and operator instructions, managed input,
++  durable delivery rows, lifecycle rows, plan comments, already reserved rows,
++  edit-leased rows, and rows without a sender task shall each remain ordering
++  boundaries that are delivered in their own turn.
++- **AC-TASKS-PEER-REPORT-BATCH-001.4:** A batch shall be bounded by a maximum
++  report count and a maximum combined report size. Reports beyond either bound
++  shall remain queued for a later turn rather than being dropped or truncated.
++- **AC-TASKS-PEER-REPORT-BATCH-001.5:** Reserving a batch shall not change queue
++  accounting. A reserved row leaves the queue and is tracked in its dispatch
++  claim, and a batch shall be settled exactly as a single reserved row is
++  settled today, so `queue_full` accounting shall be unchanged by reservation.
++- **AC-TASKS-PEER-REPORT-BATCH-001.6:** A dispatch that cannot start shall return
++  every reserved row of the batch to the queue in its original order, so no
++  report is lost and no later row overtakes an undelivered report.
++- **AC-TASKS-PEER-REPORT-BATCH-001.7:** Both session-identity drain paths shall
++  behave identically. A session replaced between reservation and dispatch shall
++  discard the batch as the single-row path discards one row.
++- **AC-TASKS-PEER-REPORT-BATCH-001.8:** `queue_full` remains reachable while a
++  controller turn is long-running and more reports arrive than one turn can
++  absorb. Batching reduces how often the queue fills; it does not make queue
++  exhaustion impossible.
++
++## Compatibility and exclusions
++
++No user-facing copy changes: the batch is delivered to the agent, not rendered
++in the composer. Sessions with a single queued row, or a head row that is not an
++ordinary peer report, keep today's behavior. Raising the per-session queue cap,
++periodically delivering idle-session auto-runs, bounding manual over-ceiling
++starts, indexing the clarification inbox, aging ceiling holds, and the ordering
++of a direct `message.add` behind queued messages are separate candidates and are
++not part of this requirement.
++
++## Related contracts
++
++- [Queue admission](queue-admission.md) owns durable prompt admission.
++- [Resume prompt queue](resume-prompt-queue.md) owns startup eligibility and deferred dispatch.
++- [Queued post-dispatch recovery](queued-post-dispatch-recovery.md) owns reserved-row settlement after dispatch.
++
++## Implementation plans
++
++- [Peer report batch delivery](../../../plans/peer-report-batch-delivery/plan.md)
+\ No newline at end of file
+diff --git a/docs/specs/tasks/system-design/peer-report-batch-delivery.md b/docs/specs/tasks/system-design/peer-report-batch-delivery.md
+new file mode 100644
+index 0000000000..561d3a0a39
+--- /dev/null
++++ b/docs/specs/tasks/system-design/peer-report-batch-delivery.md
+@@ -0,0 +1,129 @@
++---
++status: current
++system: tasks
++requirements:
++  - REQ-TASKS-PEER-REPORT-BATCH-001
++---
++
++# Peer Report Batch Delivery System Design
++
++## Boundary and mapping
++
++The task system owns the controller prompt queue. This design extends the
++existing drain path in `internal/orchestrator` and the queue service; it adds no
++new persistence and no new admission rules.
++
++| Criteria (AC-TASKS-PEER-REPORT-BATCH-001) | Sections |
++| --- | --- |
++| .1, .2, .4 | Batch reservation and composition |
++| .3 | Eligibility boundary |
++| .5, .6 | Settlement |
++| .7 | Drain integration |
++| .8 | Known limits |
++
++## Batch reservation
++
++`messagequeue.Service.ReservePeerReportBatchWithAutoRunForSession` mirrors
++`ReserveQueuedWithAutoRunForSession`: it runs under `WithSessionAdmission`, it
++returns the same `autoRun` meaning (false only when Auto-run is OFF), and it
++reserves the head exactly as the single-row reserve does.
++
++The reservation walks the session's ordered pending rows by repeatedly calling
++the existing `ReserveHeadIfAutoRunForSession`, so both the in-memory mutex and
++the SQLite session lock and write transaction already in place keep ordering and
++staleness handling. An ordinary row leaves `queued_messages` at reserve time and
++keeps its at-least-once recovery in a `queue_dispatch_claims` row, so this
++capability introduces no new queue column and no new settlement mechanism.
++
++The walk stops at the first row that cannot join the batch. That row is returned
++to its own position with `RequeueAtHeadForSession` so the next drain settles it
++in its own turn. A durable row keeps its queue position while its reservation is
++in flight, so reserving it again returns the same entry; the walk stops on that
++repeat instead of releasing a live reservation.
++
++A reserve that stops part-way owns the rows it already took, because those rows
++have left the queue. `ReservePeerReportBatchWithAutoRunForSession` therefore
++returns them alongside its error, and the caller returns them to the queue rather
++than dropping them with the error.
++
++## Eligibility boundary
++
++`IsOrdinaryPeerReport` is the single definition of an eligible row, shared by
++reservation and tests. A row is eligible when it was queued by an agent, carries
++a non-empty sender task id, is not managed input, is not a durable delivery row,
++is not already reserved in flight, has no attachments, and carries no entity
++references or context files that must stay separable. A non-eligible head is
++delivered alone through the unchanged single-row path.
++
++A joining report must also agree with the leading entry on model and plan mode,
++so one batch is one dispatch shape.
++
++## Bounds
++
++`MaxPeerReportBatchEntries` (8) and `MaxPeerReportBatchBytes` are named
++constants in `messagequeue`, not configuration. Reports beyond either bound stay
++queued in order.
++
++## Composition
++
++`ComposePeerReportBatch` renders each report with its index and sender task id,
++in queue order, into the leading entry's content. The composed entry keeps the
++leading entry's identity, model, plan mode, and reservation bookkeeping, so the
++existing dispatch, in-flight marking, and lifecycle claim paths apply unchanged.
++
++## Settlement
++
++A batch has one prompt but N reserved rows, and only the leading row's dispatch
++claim would otherwise decide delivery. Startup restores any claim that was never
++accepted, so an unsettled trailing claim would re-deliver a report the controller
++had already received.
++
++Because a folded row's report is physically inside the leading row, the leading
++row's claim is the only claim that must decide delivery. Once the batch passes
++its incarnation and dispatch-input checks, `settlePeerReportBatchClaims`
++records the composed prompt on the leading row's claim and then accepts every
++trailing row's claim, before the worker is launched. The order matters: the
++claim was written at reserve time, when the leading row still held only its own
++report, so a restart before the rewrite would replay the batch without the
++folded reports. From then on the batch has a single settlement owner:
++
++- If the turn is accepted, the leading row's claim is accepted by the existing
++  post-dispatch path and every claim in the batch is settled.
++- If the turn fails, the leading row is requeued carrying the composed content of
++  the whole batch, so no report is lost, and the already-accepted trailing claims
++  cannot restore the folded rows as duplicates of it.
++
++Accepting the trailing claims before launch is deliberately earlier than the
++leading row's acceptance. A crash in that window leaves the leading claim
++unaccepted, so startup restores one row holding every report in the batch.
++
++If the batch cannot start (replaced session incarnation, or an unreadable
++dispatch-input check), no claim has been accepted and `requeuePeerReportBatch`
++returns every reserved entry from the last one to the first. Requeue-at-position
++restores each row ahead of later rows, so no report is lost and FIFO order is
++preserved.
++
++## Drain integration
++
++Both `drainQueuedMessageForPromptableSessionLockedForIdentity` and
++`drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity` call
++one helper, `reserveAndDispatchQueueHead`, which reserves a batch and dispatches
++it. A single-row result takes the unchanged `dispatchTakenQueuedMessageForSession`
++path, so non-batchable heads behave exactly as before.
++
++## Known limits
++
++Batching does not remove `queue_full`. While one controller turn is long-running
++and more reports arrive than a single bounded turn can absorb, admission still
++rejects the surplus. Batching reduces how quickly a fan-out burst fills the
++queue; it does not make exhaustion impossible, and no requirement claims
++otherwise.
++
++Folding also depends on the queue repository. `RewritePendingQueueDispatchMessage`
++is an optional capability asserted separately from the dispatch-claim settlement
++contract, so a repository that keeps the settlement but cannot rewrite an
++unsettled claim returns `ErrQueueDispatchClaimRewriteUnsupported` instead of a
++silent success. `PeerReportBatchClaimRewriteSupported` then reports that
++folding is unavailable, and the drain dispatches the leading row alone and
++returns the folded rows to the head. A repository that persists no dispatch
++claims at all needs no rewrite, so it keeps folding.
+\ No newline at end of file

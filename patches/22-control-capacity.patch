@@ -1,0 +1,2838 @@
+From 54bf6a82f7045d305c987a4484f9cf742c4234d6 Mon Sep 17 00:00:00 2001
+From: dreampiler <dreampiler@gmail.com>
+Date: Thu, 15 Oct 2026 01:24:53 +0900
+Subject: [PATCH] fork(22-control-capacity): D06 control-session capacity
+
+Overlay patch 22-control-capacity.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+---
+ .../session_capacity_settings_test.go         |   6 +-
+ .../base_migrations_session_ceiling_park.go   | 143 ++++++++
+ ...se_migrations_session_ceiling_park_test.go | 199 +++++++++++
+ .../internal/orchestrator/ceiling_seam2.go    |   5 +-
+ .../orchestrator/ceiling_seam2_test.go        |  12 +-
+ .../orchestrator/ceiling_seam3_test.go        |  18 +-
+ .../internal/orchestrator/ceiling_seam4.go    |   5 +-
+ .../orchestrator/ceiling_seam4_test.go        |  16 +-
+ .../orchestrator/ceiling_seam5_test.go        |  16 +-
+ .../orchestrator/ceiling_seams_test.go        |  12 +-
+ .../session_ceiling_settings_test.go          |   6 +-
+ .../orchestrator/session_ceiling_test.go      |  19 +-
+ .../system/sessioncapacity/handler.go         |  17 +-
+ .../system/sessioncapacity/handler_test.go    |  15 +-
+ .../system/sessioncapacity/resolver.go        | 104 +++++-
+ .../system/sessioncapacity/service.go         |  77 +++--
+ .../system/sessioncapacity/service_test.go    |  50 ++-
+ .../system/sessioncapacity/store_test.go      |   7 +-
+ .../internal/system/sessioncapacity/types.go  | 124 ++++++-
+ .../system/sessioncapacity/types_test.go      |  74 +++--
+ .../internal/task/models/admitted_session.go  |  13 +
+ .../task/repository/sqlite/session_ceiling.go |  22 +-
+ .../repository/sqlite/session_ceiling_test.go |  16 +-
+ .../system/session-capacity-settings.test.tsx |  72 +++-
+ .../system/session-capacity-settings.tsx      | 311 ++++++++++++------
+ .../system/use-session-capacity-settings.ts   | 213 +++++++++---
+ docs/plans/control-session-capacity/plan.md   |  61 ++++
+ .../task-01-control-lane-admission.md         |  82 +++++
+ docs/specs/office/system-design/routing-01.md |   2 +-
+ 29 files changed, 1416 insertions(+), 301 deletions(-)
+ create mode 100644 apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park.go
+ create mode 100644 apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park_test.go
+ create mode 100644 apps/backend/internal/task/models/admitted_session.go
+ create mode 100644 docs/plans/control-session-capacity/plan.md
+ create mode 100644 docs/plans/control-session-capacity/task-01-control-lane-admission.md
+
+diff --git a/apps/backend/internal/backendapp/session_capacity_settings_test.go b/apps/backend/internal/backendapp/session_capacity_settings_test.go
+index 1a02e6b774..73f94479ea 100644
+--- a/apps/backend/internal/backendapp/session_capacity_settings_test.go
++++ b/apps/backend/internal/backendapp/session_capacity_settings_test.go
+@@ -20,7 +20,7 @@ func TestResolveSessionCapacityStartupRestoresSavedSetting(t *testing.T) {
+ 		t.Fatalf("save session capacity: %v", err)
+ 	}
+ 
+-	resolution, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, testLogger(t))
++	resolution, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t))
+ 	if err != nil {
+ 		t.Fatalf("resolve session capacity: %v", err)
+ 	}
+@@ -34,7 +34,7 @@ func TestResolveSessionCapacityStartupRestoresSavedSetting(t *testing.T) {
+ }
+ 
+ func TestResolveSessionCapacityStartupDefaultsToDisabled(t *testing.T) {
+-	resolution, err := resolveSessionCapacityWithStore(nil, sessioncapacity.Environment{}, testLogger(t))
++	resolution, err := resolveSessionCapacityWithStore(nil, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t))
+ 	if err != nil {
+ 		t.Fatalf("resolve default session capacity: %v", err)
+ 	}
+@@ -54,7 +54,7 @@ func TestResolveSessionCapacityStartupSurfacesInvalidPersistedSetting(t *testing
+ 		t.Fatalf("save invalid session capacity: %v", err)
+ 	}
+ 
+-	if _, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, testLogger(t)); err == nil {
++	if _, err := resolveSessionCapacityWithStore(settingsStore, sessioncapacity.Environment{}, sessioncapacity.Environment{}, testLogger(t)); err == nil {
+ 		t.Fatal("invalid persisted session capacity was silently ignored")
+ 	}
+ }
+diff --git a/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park.go b/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park.go
+new file mode 100644
+index 0000000000..b78e9c4a81
+--- /dev/null
++++ b/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park.go
+@@ -0,0 +1,143 @@
++package sqlite
++
++import (
++	"database/sql"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"time"
++
++	"go.uber.org/zap"
++
++	"github.com/kandev/kandev/internal/office/routing"
++	runsmodels "github.com/kandev/kandev/internal/runs/models"
++)
++
++// The payload fields the launch-deferral disposition writes on the durable
++// run event immediately before it parks the run. Two sites write them —
++// scheduler/dispatch_routing.go and service/scheduler_integration.go — and
++// nothing else in the codebase writes this payload.
++const (
++	sessionCeilingDeferralPhase  = "deferred"
++	sessionCeilingDeferralReason = "session_ceiling"
++)
++
++// backfillSessionCeilingParkedRuns moves runs that a build from before the
++// waiting_for_session_capacity park status existed left under
++// blocked_provider_action_required onto that status with an automatic
++// retry deadline, so the scheduler's timed lift (ListPendingProviderCapacityRuns
++// feeding LiftParkedRuns) can return them to dispatch instead of leaving
++// them queued until an operator clears the block by hand.
++//
++// The discriminating evidence is durable rather than inferred: the
++// launch-deferral disposition appends an adapter.invoke run event carrying
++// {"phase":"deferred","reason":"session_ceiling"} immediately before it
++// parks the run. The dispositions that park under
++// blocked_provider_action_required for a genuine provider fault
++// (parkRunMaxAttempts, parkRunBlocked) record a route attempt and never
++// append a run event, so a run whose latest event is the deferral marker is
++// one the orchestrator's session ceiling deferred and nothing has happened
++// to since. A run with any other latest event, or with no events at all,
++// is left for an operator to settle.
++//
++// Runs once per boot from runMigrations. Idempotent by construction: a
++// migrated row no longer matches the candidate filter, so a replay is a
++// no-op and no guard column is required.
++func (r *Repository) backfillSessionCeilingParkedRuns() error {
++	runIDs, err := r.selectSessionCeilingParkCandidates()
++	if err != nil {
++		return err
++	}
++	if len(runIDs) == 0 {
++		return nil
++	}
++	retryAt := time.Now().UTC().Add(routing.SessionCeilingRetryDelay)
++	migrated := 0
++	for _, runID := range runIDs {
++		moved, err := r.migrateSessionCeilingParkedRun(runID, retryAt)
++		if err != nil {
++			return err
++		}
++		if moved {
++			migrated++
++		}
++	}
++	if r.log != nil && migrated > 0 {
++		r.log.Info("session ceiling park backfill applied",
++			zap.Int("migrated_runs", migrated),
++			zap.Time("earliest_retry_at", retryAt))
++	}
++	return nil
++}
++
++// selectSessionCeilingParkCandidates returns the queued runs still parked
++// under blocked_provider_action_required. Only the id is read so the scan
++// stays narrow on a run-history table.
++func (r *Repository) selectSessionCeilingParkCandidates() ([]string, error) {
++	var runIDs []string
++	if err := r.db.Select(&runIDs, r.db.Rebind(`
++		SELECT id FROM runs
++		WHERE routing_blocked_status = ?
++		  AND status = 'queued'
++	`), runsmodels.RoutingBlockedActionRequired); err != nil {
++		return nil, fmt.Errorf("session ceiling park backfill: list candidates: %w", err)
++	}
++	return runIDs, nil
++}
++
++// migrateSessionCeilingParkedRun moves one candidate run when its latest
++// run event is the session-ceiling deferral marker, and reports whether the
++// row was actually updated. The status predicate in the UPDATE keeps the
++// write scoped to a row nobody else has re-parked since the candidate read.
++func (r *Repository) migrateSessionCeilingParkedRun(runID string, retryAt time.Time) (bool, error) {
++	var event struct {
++		EventType string `db:"event_type"`
++		Payload   string `db:"payload"`
++	}
++	err := r.db.Get(&event, r.db.Rebind(`
++		SELECT event_type, payload FROM run_events
++		WHERE run_id = ? ORDER BY seq DESC LIMIT 1
++	`), runID)
++	if err != nil {
++		if errors.Is(err, sql.ErrNoRows) {
++			return false, nil
++		}
++		return false, fmt.Errorf("session ceiling park backfill: latest event for %q: %w", runID, err)
++	}
++	if event.EventType != string(runsmodels.RunEventTypeAdapterInvoke) ||
++		!isSessionCeilingDeferralPayload(event.Payload) {
++		return false, nil
++	}
++	result, err := r.db.Exec(r.db.Rebind(`
++		UPDATE runs
++		SET routing_blocked_status = ?,
++		    earliest_retry_at = ?,
++		    scheduled_retry_at = ?
++		WHERE id = ?
++		  AND routing_blocked_status = ?
++	`), runsmodels.RoutingBlockedWaitingForSessionCapacity, retryAt, retryAt,
++		runID, runsmodels.RoutingBlockedActionRequired)
++	if err != nil {
++		return false, fmt.Errorf("session ceiling park backfill: update %q: %w", runID, err)
++	}
++	affected, err := result.RowsAffected()
++	if err != nil {
++		return false, fmt.Errorf("session ceiling park backfill: rows affected for %q: %w", runID, err)
++	}
++	return affected > 0, nil
++}
++
++// isSessionCeilingDeferralPayload reports whether a run event payload is the
++// marker the launch-deferral disposition wrote. The payload is parsed in Go
++// rather than through a JSON SQL function so the migration stays portable
++// across the SQLite and PostgreSQL engines the office store runs on.
++func isSessionCeilingDeferralPayload(payload string) bool {
++	var body struct {
++		Phase  string `json:"phase"`
++		Reason string `json:"reason"`
++	}
++	if err := json.Unmarshal([]byte(payload), &body); err != nil {
++		return false
++	}
++	return body.Phase == sessionCeilingDeferralPhase && body.Reason == sessionCeilingDeferralReason
++}
+diff --git a/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park_test.go b/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park_test.go
+new file mode 100644
+index 0000000000..6d99e0553e
+--- /dev/null
++++ b/apps/backend/internal/office/repository/sqlite/base_migrations_session_ceiling_park_test.go
+@@ -0,0 +1,199 @@
++package sqlite_test
++
++import (
++	"context"
++	"testing"
++	"time"
++
++	"github.com/jmoiron/sqlx"
++	_ "github.com/mattn/go-sqlite3"
++
++	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
++	"github.com/kandev/kandev/internal/office/repository/sqlite"
++	runsmodels "github.com/kandev/kandev/internal/runs/models"
++)
++
++// openSessionCeilingParkDB opens a single-connection in-memory database so
++// a second NewWithDB call replays the migrations against the same schema
++// and rows, exactly as a restart would.
++func openSessionCeilingParkDB(t *testing.T) (*sqlite.Repository, *sqlx.DB) {
++	t.Helper()
++	db, err := sqlx.Open("sqlite3", ":memory:")
++	if err != nil {
++		t.Fatalf("open sqlite: %v", err)
++	}
++	db.SetMaxOpenConns(1)
++	t.Cleanup(func() { _ = db.Close() })
++
++	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
++		t.Fatalf("settings store init: %v", err)
++	}
++	repo, err := sqlite.NewWithDB(db, db, nil)
++	if err != nil {
++		t.Fatalf("first init: %v", err)
++	}
++	return repo, db
++}
++
++// seedParkedRun creates a queued run, appends the given run events in
++// order, then parks it under blocked_provider_action_required with no retry
++// deadline — the state a pre-waiting_for_session_capacity build left behind
++// after the orchestrator's session ceiling deferred the launch.
++func seedParkedRun(
++	t *testing.T,
++	repo *sqlite.Repository,
++	agentProfileID, runID string,
++	events [][2]string,
++) {
++	t.Helper()
++	ctx := context.Background()
++	run := &runsmodels.Run{
++		ID:             runID,
++		AgentProfileID: agentProfileID,
++		Reason:         "task_assigned",
++		Payload:        `{}`,
++		Status:         "queued",
++		CoalescedCount: 1,
++	}
++	if err := repo.CreateRun(ctx, run); err != nil {
++		t.Fatalf("create run %s: %v", runID, err)
++	}
++	for _, event := range events {
++		if _, err := repo.AppendRunEvent(ctx, runID, event[0], "info", event[1]); err != nil {
++			t.Fatalf("append event for %s: %v", runID, err)
++		}
++	}
++	if err := repo.ParkRunForProviderCapacity(ctx, runID,
++		string(runsmodels.RoutingBlockedActionRequired), time.Time{}); err != nil {
++		t.Fatalf("park %s: %v", runID, err)
++	}
++}
++
++// TestBackfillSessionCeilingParkedRuns_MigratesLegacyDeferredRunToTimedLift
++// reproduces a run parked under blocked_provider_action_required by a build
++// from before the waiting_for_session_capacity status existed, and asserts
++// the boot-time backfill moves it onto that status with a retry deadline so
++// the scheduler's timed lift returns it to dispatch.
++func TestBackfillSessionCeilingParkedRuns_MigratesLegacyDeferredRunToTimedLift(t *testing.T) {
++	repo, db := openSessionCeilingParkDB(t)
++	ctx := context.Background()
++
++	seedAgentProfile(t, db, "agent-ceiling", "ws-ceiling")
++	seedParkedRun(t, repo, "agent-ceiling", "run-legacy-deferred", [][2]string{
++		{"adapter.invoke", `{"agent":"cto","task_id":"t1","executor_type":"local_pc"}`},
++		{"adapter.invoke", `{"phase":"deferred","reason":"session_ceiling"}`},
++	})
++
++	before, err := repo.GetRunByID(ctx, "run-legacy-deferred")
++	if err != nil {
++		t.Fatalf("read pre-backfill run: %v", err)
++	}
++	if before.EarliestRetryAt != nil {
++		t.Fatalf("pre-backfill earliest_retry_at = %v, want NULL", before.EarliestRetryAt)
++	}
++
++	// Replay migrations on the same DB handle, as a restart would.
++	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
++		t.Fatalf("replay migrations: %v", err)
++	}
++
++	got, err := repo.GetRunByID(ctx, "run-legacy-deferred")
++	if err != nil {
++		t.Fatalf("read post-backfill run: %v", err)
++	}
++	if got.RoutingBlockedStatus == nil ||
++		*got.RoutingBlockedStatus != runsmodels.RoutingBlockedWaitingForSessionCapacity {
++		t.Fatalf("routing_blocked_status = %v, want waiting_for_session_capacity", got.RoutingBlockedStatus)
++	}
++	if got.Status != "queued" {
++		t.Fatalf("status = %q, want queued", got.Status)
++	}
++	if got.EarliestRetryAt == nil {
++		t.Fatal("earliest_retry_at = NULL, want the retry deadline the new park status carries")
++	}
++	deadline := *got.EarliestRetryAt
++	now := time.Now().UTC()
++	if deadline.Before(now.Add(10*time.Second)) || deadline.After(now.Add(40*time.Second)) {
++		t.Fatalf("earliest_retry_at = %v, want about 20s after boot (%v)", deadline, now)
++	}
++	if got.ScheduledRetryAt == nil || !got.ScheduledRetryAt.Equal(deadline) {
++		t.Fatalf("scheduled_retry_at = %v, want %v", got.ScheduledRetryAt, deadline)
++	}
++
++	// The recovered goal: the run is on the timed-lift path once its
++	// deadline passes, and not before it.
++	notYetPending, err := repo.ListPendingProviderCapacityRuns(ctx, now)
++	if err != nil {
++		t.Fatalf("list pending before deadline: %v", err)
++	}
++	for _, candidate := range notYetPending {
++		if candidate.ID == got.ID {
++			t.Fatal("run listed as timed pending before its deadline passed")
++		}
++	}
++	afterDeadline, err := repo.ListPendingProviderCapacityRuns(ctx, deadline.Add(time.Second))
++	if err != nil {
++		t.Fatalf("list pending after deadline: %v", err)
++	}
++	found := false
++	for _, candidate := range afterDeadline {
++		if candidate.ID == got.ID {
++			found = true
++		}
++	}
++	if !found {
++		t.Fatal("recovered run is not on the timed-lift list after its deadline")
++	}
++
++	// A second replay must not re-stamp the deadline: the migrated row no
++	// longer matches the candidate filter.
++	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
++		t.Fatalf("second replay: %v", err)
++	}
++	replayed, err := repo.GetRunByID(ctx, "run-legacy-deferred")
++	if err != nil {
++		t.Fatalf("read after second replay: %v", err)
++	}
++	if replayed.EarliestRetryAt == nil || !replayed.EarliestRetryAt.Equal(deadline) {
++		t.Fatalf("earliest_retry_at after replay = %v, want unchanged %v", replayed.EarliestRetryAt, deadline)
++	}
++}
++
++// TestBackfillSessionCeilingParkedRuns_LeavesNonDeferredRuns pins the
++// discriminator: a run parked under blocked_provider_action_required whose
++// latest event is not the session-ceiling deferral marker — a real launch
++// event, no events at all, or anything that happened after the deferral —
++// stays parked for an operator and is never given an automatic deadline.
++func TestBackfillSessionCeilingParkedRuns_LeavesNonDeferredRuns(t *testing.T) {
++	repo, db := openSessionCeilingParkDB(t)
++	ctx := context.Background()
++
++	seedAgentProfile(t, db, "agent-action", "ws-action")
++	seedParkedRun(t, repo, "agent-action", "run-launched", [][2]string{
++		{"adapter.invoke", `{"agent":"cto","task_id":"t2","executor_type":"local_pc"}`},
++	})
++	seedParkedRun(t, repo, "agent-action", "run-no-events", nil)
++	seedParkedRun(t, repo, "agent-action", "run-events-after-deferral", [][2]string{
++		{"adapter.invoke", `{"phase":"deferred","reason":"session_ceiling"}`},
++		{"complete", `{"summary":"done"}`},
++	})
++
++	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
++		t.Fatalf("replay migrations: %v", err)
++	}
++
++	for _, runID := range []string{"run-launched", "run-no-events", "run-events-after-deferral"} {
++		got, err := repo.GetRunByID(ctx, runID)
++		if err != nil {
++			t.Fatalf("read %s: %v", runID, err)
++		}
++		if got.RoutingBlockedStatus == nil ||
++			*got.RoutingBlockedStatus != runsmodels.RoutingBlockedActionRequired {
++			t.Errorf("%s routing_blocked_status = %v, want blocked_provider_action_required", runID, got.RoutingBlockedStatus)
++		}
++		if got.EarliestRetryAt != nil || got.ScheduledRetryAt != nil {
++			t.Errorf("%s retry schedule = %v/%v, want NULL/NULL",
++				runID, got.EarliestRetryAt, got.ScheduledRetryAt)
++		}
++	}
++}
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam2.go b/apps/backend/internal/orchestrator/ceiling_seam2.go
+index f0301439da..a17a1c74e0 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam2.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam2.go
+@@ -61,8 +61,9 @@ func seam2StartCreatedPayload(
+ // calling reservation.rekeyToSession if the on_turn_start redirect switches
+ // sessions, and for calling reservation.consume once the launch succeeds.
+ func (s *Service) admitOrDeferSeam2(
+-	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
++	ctx context.Context, taskID, sessionID, agentProfileID string,
++	origin launchOrigin, startPayload map[string]interface{},
+ ) (*sessionKeyedCeilingReservation, bool, error) {
+-	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "startCreatedSession",
++	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, agentProfileID, origin, "startCreatedSession",
+ 		models.CeilingLaunchStartCreated, startPayload, "the launch could not be admitted or recorded")
+ }
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam2_test.go b/apps/backend/internal/orchestrator/ceiling_seam2_test.go
+index d74499048c..7d0c5eb0b2 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam2_test.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam2_test.go
+@@ -17,7 +17,7 @@ func TestAdmitOrDeferSeam2AdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-admit", "seam2-admit-session", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
++	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-admit", "seam2-admit-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam2: %v", err)
+ 	}
+@@ -46,11 +46,11 @@ func TestAdmitOrDeferSeam2DefersAutomaticOverCeiling(t *testing.T) {
+ 		}
+ 	}
+ 
+-	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-first", "seam2-first-session", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-first", "seam2-first-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+ 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-second", "seam2-second-session", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
++	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-second", "seam2-second-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam2: %v", err)
+ 	}
+@@ -84,11 +84,11 @@ func TestAdmitOrDeferSeam2AdmitsManualOverCeiling(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-first", "seam2-manual-first-session", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-first", "seam2-manual-first-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+ 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-second", "seam2-manual-second-session", launchOriginManual, map[string]interface{}{"prompt": "second"})
++	reservation, deferred, err := svc.admitOrDeferSeam2(ctx, "seam2-manual-second", "seam2-manual-second-session", "", launchOriginManual, map[string]interface{}{"prompt": "second"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam2: %v", err)
+ 	}
+@@ -153,7 +153,7 @@ func TestAdmitOrDeferSeam2ReportsWriteFailure(t *testing.T) {
+ 	ctx := context.Background()
+ 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "startCreatedSession"})
+ 
+-	_, _, err := svc.admitOrDeferSeam2(ctx, "missing-task", "missing-session", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
++	_, _, err := svc.admitOrDeferSeam2(ctx, "missing-task", "missing-session", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+ 	if err == nil {
+ 		t.Fatal("expected an error when the refusal could not be persisted")
+ 	}
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam3_test.go b/apps/backend/internal/orchestrator/ceiling_seam3_test.go
+index 1088172616..562f67af6b 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam3_test.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam3_test.go
+@@ -19,7 +19,7 @@ func TestAdmitSeam3AdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, refusal := svc.admitSeam3(ctx, "seam3-admit", "seam3-admit-session", launchOriginAutomatic)
++	reservation, refusal := svc.admitSeam3(ctx, "seam3-admit", "seam3-admit-session", "", launchOriginAutomatic)
+ 	if refusal != nil {
+ 		t.Fatalf("ensureSessionRunning's own gate refused while under the ceiling: %v", refusal)
+ 	}
+@@ -41,11 +41,11 @@ func TestAdmitSeam3RefusesAutomaticOverCeiling(t *testing.T) {
+ 		}
+ 	}
+ 
+-	if _, refusal := svc.admitSeam3(ctx, "seam3-first", "seam3-first-session", launchOriginAutomatic); refusal != nil {
++	if _, refusal := svc.admitSeam3(ctx, "seam3-first", "seam3-first-session", "", launchOriginAutomatic); refusal != nil {
+ 		t.Fatalf("first ensure was not admitted: %v", refusal)
+ 	}
+ 
+-	reservation, refusal := svc.admitSeam3(ctx, "seam3-second", "seam3-second-session", launchOriginAutomatic)
++	reservation, refusal := svc.admitSeam3(ctx, "seam3-second", "seam3-second-session", "", launchOriginAutomatic)
+ 	if refusal == nil {
+ 		t.Fatal("second automatic ensure over the ceiling was admitted, want refused")
+ 	}
+@@ -73,11 +73,11 @@ func TestAdmitSeam3AdmitsManualOverCeiling(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, refusal := svc.admitSeam3(ctx, "seam3-manual-first", "seam3-manual-first-session", launchOriginAutomatic); refusal != nil {
++	if _, refusal := svc.admitSeam3(ctx, "seam3-manual-first", "seam3-manual-first-session", "", launchOriginAutomatic); refusal != nil {
+ 		t.Fatalf("first ensure was not admitted: %v", refusal)
+ 	}
+ 
+-	reservation, refusal := svc.admitSeam3(ctx, "seam3-manual-second", "seam3-manual-second-session", launchOriginManual)
++	reservation, refusal := svc.admitSeam3(ctx, "seam3-manual-second", "seam3-manual-second-session", "", launchOriginManual)
+ 	if refusal != nil {
+ 		t.Fatalf("a manual ensure was refused; AC-14 requires it always be admitted: %v", refusal)
+ 	}
+@@ -95,7 +95,7 @@ func TestAdmitOrDeferWorkflowStepEnsureAdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-admit", "seam3-wf-admit-session", "step-1")
++	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-admit", "seam3-wf-admit-session", "", "step-1")
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferWorkflowStepEnsure: %v", err)
+ 	}
+@@ -123,11 +123,11 @@ func TestAdmitOrDeferWorkflowStepEnsureDefersOverCeilingAndRecords(t *testing.T)
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-first", "seam3-wf-first-session", "step-1"); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-first", "seam3-wf-first-session", "", "step-1"); err != nil || deferred {
+ 		t.Fatalf("first pre-consultation was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-second", "seam3-wf-second-session", "step-2")
++	reservation, deferred, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "seam3-wf-second", "seam3-wf-second-session", "", "step-2")
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferWorkflowStepEnsure: %v", err)
+ 	}
+@@ -158,7 +158,7 @@ func TestAdmitOrDeferWorkflowStepEnsureReportsWriteFailure(t *testing.T) {
+ 	ctx := context.Background()
+ 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "startSessionForWorkflowStepPreConsult"})
+ 
+-	_, _, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "missing-task", "missing-session", "step-1")
++	_, _, err := svc.admitOrDeferWorkflowStepEnsure(ctx, "missing-task", "missing-session", "", "step-1")
+ 	if err == nil {
+ 		t.Fatal("expected an error when the refusal could not be persisted")
+ 	}
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam4.go b/apps/backend/internal/orchestrator/ceiling_seam4.go
+index 687c31d240..3be0f120cf 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam4.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam4.go
+@@ -62,8 +62,9 @@ func deferredIdleFocusResumeOfCompleted(deferral models.CeilingDeferral, state m
+ // caller is responsible for deferring reservation.releaseIfNotConsumed and for
+ // calling reservation.consume once the resume succeeds.
+ func (s *Service) admitOrDeferSeam4(
+-	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
++	ctx context.Context, taskID, sessionID, agentProfileID string,
++	origin launchOrigin, startPayload map[string]interface{},
+ ) (*sessionKeyedCeilingReservation, bool, error) {
+-	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "resumeTaskSession",
++	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, agentProfileID, origin, "resumeTaskSession",
+ 		models.CeilingLaunchResume, startPayload, "the resume could not be admitted or recorded")
+ }
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam4_test.go b/apps/backend/internal/orchestrator/ceiling_seam4_test.go
+index 845cf2322c..a2448d2891 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam4_test.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam4_test.go
+@@ -18,7 +18,7 @@ func TestAdmitOrDeferSeam4AdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-admit", "seam4-admit-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-admit-session"})
++	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-admit", "seam4-admit-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-admit-session"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam4: %v", err)
+ 	}
+@@ -47,11 +47,11 @@ func TestAdmitOrDeferSeam4DefersAutomaticOverCeiling(t *testing.T) {
+ 		}
+ 	}
+ 
+-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-first", "seam4-first-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-first-session"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-first", "seam4-first-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-first-session"}); err != nil || deferred {
+ 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-second", "seam4-second-session", launchOriginAutomatic, seam4ResumePayload("seam4-second-session", executor.ResumeOptions{AllowBranchReplacement: true}))
++	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-second", "seam4-second-session", "", launchOriginAutomatic, seam4ResumePayload("seam4-second-session", executor.ResumeOptions{AllowBranchReplacement: true}))
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam4: %v", err)
+ 	}
+@@ -85,11 +85,11 @@ func TestAdmitOrDeferSeam4AdmitsManualOverCeiling(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-first", "seam4-manual-first-session", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-manual-first-session"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-first", "seam4-manual-first-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "seam4-manual-first-session"}); err != nil || deferred {
+ 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-second", "seam4-manual-second-session", launchOriginManual, map[string]interface{}{"session_id": "seam4-manual-second-session"})
++	reservation, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-manual-second", "seam4-manual-second-session", "", launchOriginManual, map[string]interface{}{"session_id": "seam4-manual-second-session"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam4: %v", err)
+ 	}
+@@ -111,7 +111,7 @@ func TestAdmitOrDeferSeam4ReportsWriteFailure(t *testing.T) {
+ 	ctx := context.Background()
+ 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "resumeTaskSession"})
+ 
+-	_, _, err := svc.admitOrDeferSeam4(ctx, "missing-task", "missing-session", launchOriginAutomatic, map[string]interface{}{"session_id": "missing-session"})
++	_, _, err := svc.admitOrDeferSeam4(ctx, "missing-task", "missing-session", "", launchOriginAutomatic, map[string]interface{}{"session_id": "missing-session"})
+ 	if err == nil {
+ 		t.Fatal("expected an error when the refusal could not be persisted")
+ 	}
+@@ -129,12 +129,12 @@ func TestAdmitOrDeferSeam4UnsetOriginDefaultsAutomatic(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-first", "seam4-unset-first-session", launchOriginAutomatic, map[string]interface{}{}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-first", "seam4-unset-first-session", "", launchOriginAutomatic, map[string]interface{}{}); err != nil || deferred {
+ 		t.Fatalf("first resume was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+ 	// launchOrigin("") is neither "manual" nor "automatic".
+-	_, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-second", "seam4-unset-second-session", launchOrigin(""), map[string]interface{}{})
++	_, deferred, err := svc.admitOrDeferSeam4(ctx, "seam4-unset-second", "seam4-unset-second-session", "", launchOrigin(""), map[string]interface{}{})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam4: %v", err)
+ 	}
+diff --git a/apps/backend/internal/orchestrator/ceiling_seam5_test.go b/apps/backend/internal/orchestrator/ceiling_seam5_test.go
+index b1b7d8edab..adc63de99b 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seam5_test.go
++++ b/apps/backend/internal/orchestrator/ceiling_seam5_test.go
+@@ -32,7 +32,7 @@ func TestAdmitOrDeferSeam5AdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-admit", launchOriginAutomatic, seam5Payload("seam5-admit-session"))
++	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-admit", "", launchOriginAutomatic, seam5Payload("seam5-admit-session"))
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam5: %v", err)
+ 	}
+@@ -63,11 +63,11 @@ func TestAdmitOrDeferSeam5DefersAutomaticOverCeiling(t *testing.T) {
+ 		}
+ 	}
+ 
+-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-first", launchOriginAutomatic, seam5Payload("seam5-first-session")); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-first", "", launchOriginAutomatic, seam5Payload("seam5-first-session")); err != nil || deferred {
+ 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-second", launchOriginAutomatic, seam5Payload("seam5-second-session"))
++	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-second", "", launchOriginAutomatic, seam5Payload("seam5-second-session"))
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam5: %v", err)
+ 	}
+@@ -102,11 +102,11 @@ func TestAdmitOrDeferSeam5AdmitsManualOverCeiling(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-first", launchOriginAutomatic, seam5Payload("seam5-manual-first-session")); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-first", "", launchOriginAutomatic, seam5Payload("seam5-manual-first-session")); err != nil || deferred {
+ 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-second", launchOriginManual, seam5Payload("seam5-manual-second-session"))
++	reservation, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-manual-second", "", launchOriginManual, seam5Payload("seam5-manual-second-session"))
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam5: %v", err)
+ 	}
+@@ -128,7 +128,7 @@ func TestAdmitOrDeferSeam5ReportsWriteFailure(t *testing.T) {
+ 	ctx := context.Background()
+ 	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "relaunchDynamicTaskAfterFailure"})
+ 
+-	_, _, err := svc.admitOrDeferSeam5(ctx, "missing-task", launchOriginAutomatic, seam5Payload("missing-session"))
++	_, _, err := svc.admitOrDeferSeam5(ctx, "missing-task", "", launchOriginAutomatic, seam5Payload("missing-session"))
+ 	if err == nil {
+ 		t.Fatal("expected an error when the refusal could not be persisted")
+ 	}
+@@ -145,12 +145,12 @@ func TestAdmitOrDeferSeam5UnsetOriginDefaultsAutomatic(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-first", launchOriginAutomatic, seam5Payload("seam5-unset-first-session")); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-first", "", launchOriginAutomatic, seam5Payload("seam5-unset-first-session")); err != nil || deferred {
+ 		t.Fatalf("first relaunch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+ 	// launchOrigin("") is neither "manual" nor "automatic".
+-	_, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-second", launchOrigin(""), seam5Payload("seam5-unset-second-session"))
++	_, deferred, err := svc.admitOrDeferSeam5(ctx, "seam5-unset-second", "", launchOrigin(""), seam5Payload("seam5-unset-second-session"))
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam5: %v", err)
+ 	}
+diff --git a/apps/backend/internal/orchestrator/ceiling_seams_test.go b/apps/backend/internal/orchestrator/ceiling_seams_test.go
+index 3c2376affd..9e115793fd 100644
+--- a/apps/backend/internal/orchestrator/ceiling_seams_test.go
++++ b/apps/backend/internal/orchestrator/ceiling_seams_test.go
+@@ -24,7 +24,7 @@ func TestAdmitOrDeferSeam1AdmitsUnderCeiling(t *testing.T) {
+ 		t.Fatalf("CreateTask: %v", err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-admit", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
++	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-admit", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam1: %v", err)
+ 	}
+@@ -52,11 +52,11 @@ func TestAdmitOrDeferSeam1DefersAutomaticOverCeiling(t *testing.T) {
+ 		}
+ 	}
+ 
+-	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-first", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-first", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+ 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-second", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
++	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-second", "", launchOriginAutomatic, map[string]interface{}{"prompt": "second"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam1: %v", err)
+ 	}
+@@ -87,11 +87,11 @@ func TestAdmitOrDeferSeam1AdmitsManualOverCeiling(t *testing.T) {
+ 			t.Fatalf("CreateTask(%s): %v", id, err)
+ 		}
+ 	}
+-	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-first", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
++	if _, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-first", "", launchOriginAutomatic, map[string]interface{}{"prompt": "first"}); err != nil || deferred {
+ 		t.Fatalf("first launch was not admitted: deferred=%v err=%v", deferred, err)
+ 	}
+ 
+-	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-second", launchOriginManual, map[string]interface{}{"prompt": "second"})
++	reservation, deferred, err := svc.admitOrDeferSeam1(ctx, "seam1-manual-second", "", launchOriginManual, map[string]interface{}{"prompt": "second"})
+ 	if err != nil {
+ 		t.Fatalf("admitOrDeferSeam1: %v", err)
+ 	}
+@@ -117,7 +117,7 @@ func TestAdmitOrDeferSeam1ReportsWriteFailure(t *testing.T) {
+ 
+ 	// "missing-task" was never created, so the CAS read fails and the refusal
+ 	// cannot be persisted.
+-	_, _, err := svc.admitOrDeferSeam1(ctx, "missing-task", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
++	_, _, err := svc.admitOrDeferSeam1(ctx, "missing-task", "", launchOriginAutomatic, map[string]interface{}{"prompt": "p"})
+ 	if err == nil {
+ 		t.Fatal("expected an error when the refusal could not be persisted")
+ 	}
+diff --git a/apps/backend/internal/orchestrator/session_ceiling_settings_test.go b/apps/backend/internal/orchestrator/session_ceiling_settings_test.go
+index af1eb70dd7..b120086778 100644
+--- a/apps/backend/internal/orchestrator/session_ceiling_settings_test.go
++++ b/apps/backend/internal/orchestrator/session_ceiling_settings_test.go
+@@ -18,7 +18,7 @@ func TestSessionCapacityLiveChangePreservesReservations(t *testing.T) {
+ 	require.True(t, decision.admitted)
+ 	require.Equal(t, "capacity-session", decision.reservationKey)
+ 
+-	svc.SetSessionCapacity(0)
++	svc.SetSessionCapacity(0, 0, nil)
+ 
+ 	require.Equal(t, 0, svc.SessionCapacity())
+ 	svc.sessionCeiling.mu.Lock()
+@@ -38,14 +38,14 @@ func TestSessionCapacityChangeSignalsSweepForRefresh(t *testing.T) {
+ 		ceilingSweeper: newCeilingSweeper(),
+ 	}
+ 
+-	svc.SetSessionCapacity(1)
++	svc.SetSessionCapacity(1, 0, nil)
+ 	select {
+ 	case <-svc.ceilingSweeper.signal:
+ 	default:
+ 		t.Fatal("lowering capacity must request a status refresh sweep")
+ 	}
+ 
+-	svc.SetSessionCapacity(3)
++	svc.SetSessionCapacity(3, 0, nil)
+ 	select {
+ 	case <-svc.ceilingSweeper.signal:
+ 	default:
+diff --git a/apps/backend/internal/orchestrator/session_ceiling_test.go b/apps/backend/internal/orchestrator/session_ceiling_test.go
+index b81c20ae55..ab51a57c83 100644
+--- a/apps/backend/internal/orchestrator/session_ceiling_test.go
++++ b/apps/backend/internal/orchestrator/session_ceiling_test.go
+@@ -8,21 +8,30 @@ import (
+ 	"testing"
+ 
+ 	"go.uber.org/zap"
++
++	"github.com/kandev/kandev/internal/task/models"
+ )
+ 
+ type fakeAdmittedLister struct {
+-	mu  sync.Mutex
+-	ids []string
+-	err error
++	mu sync.Mutex
++	// ids and profiles are separate so a test can express a persisted session
++	// that carries no agent profile at all.
++	ids      []string
++	profiles map[string]string
++	err      error
+ }
+ 
+-func (f *fakeAdmittedLister) ListAdmittedSessionIDs(context.Context) ([]string, error) {
++func (f *fakeAdmittedLister) ListAdmittedSessionRefs(context.Context) ([]models.AdmittedSessionRef, error) {
+ 	f.mu.Lock()
+ 	defer f.mu.Unlock()
+ 	if f.err != nil {
+ 		return nil, f.err
+ 	}
+-	return append([]string(nil), f.ids...), nil
++	refs := make([]models.AdmittedSessionRef, 0, len(f.ids))
++	for _, id := range f.ids {
++		refs = append(refs, models.AdmittedSessionRef{ID: id, ProfileID: f.profiles[id]})
++	}
++	return refs, nil
+ }
+ 
+ func (f *fakeAdmittedLister) set(ids ...string) {
+diff --git a/apps/backend/internal/system/sessioncapacity/handler.go b/apps/backend/internal/system/sessioncapacity/handler.go
+index c6ed9efba5..bb5c947d73 100644
+--- a/apps/backend/internal/system/sessioncapacity/handler.go
++++ b/apps/backend/internal/system/sessioncapacity/handler.go
+@@ -25,7 +25,7 @@ func handleGet(service *Service) gin.HandlerFunc {
+ 			})
+ 			return
+ 		}
+-		ctx.JSON(http.StatusOK, response)
++		ctx.JSON(http.StatusOK, wireResponse(response))
+ 	}
+ }
+ 
+@@ -56,7 +56,7 @@ func handleUpdate(service *Service) gin.HandlerFunc {
+ 			}
+ 			return
+ 		}
+-		ctx.JSON(http.StatusOK, response)
++		ctx.JSON(http.StatusOK, wireResponse(response))
+ 	}
+ }
+ 
+@@ -78,3 +78,16 @@ func decodePatch(body io.Reader) (SettingsPatch, error) {
+ 	}
+ 	return patch, nil
+ }
++
++// wireResponse keeps control_profile_ids an array on the wire. The service uses
++// nil for "no control profiles", which encodes as null, and the settings screen
++// reads its length.
++func wireResponse(response Response) Response {
++	if response.Settings.ControlProfileIDs == nil {
++		response.Settings.ControlProfileIDs = []string{}
++	}
++	if response.Effective.ControlProfileIDs == nil {
++		response.Effective.ControlProfileIDs = []string{}
++	}
++	return response
++}
+diff --git a/apps/backend/internal/system/sessioncapacity/handler_test.go b/apps/backend/internal/system/sessioncapacity/handler_test.go
+index ed846a8ae2..44f1bfc89b 100644
+--- a/apps/backend/internal/system/sessioncapacity/handler_test.go
++++ b/apps/backend/internal/system/sessioncapacity/handler_test.go
+@@ -6,6 +6,7 @@ import (
+ 	"errors"
+ 	"net/http"
+ 	"net/http/httptest"
++	"reflect"
+ 	"strings"
+ 	"testing"
+ 
+@@ -29,7 +30,12 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
+ 	if err := json.Unmarshal(getResponse.Body.Bytes(), &initial); err != nil {
+ 		t.Fatalf("decode GET: %v", err)
+ 	}
+-	if initial.Settings != (Settings{Enabled: false, MaxSessions: DefaultMaxSessions}) {
++	if !reflect.DeepEqual(initial.Settings, Settings{
++		Enabled:            false,
++		MaxSessions:        DefaultMaxSessions,
++		ControlMaxSessions: DefaultControlMaxSessions,
++		ControlProfileIDs:  []string{},
++	}) {
+ 		t.Fatalf("initial settings = %+v", initial.Settings)
+ 	}
+ 
+@@ -47,7 +53,12 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
+ 	if err := json.Unmarshal(patchResponse.Body.Bytes(), &updated); err != nil {
+ 		t.Fatalf("decode PATCH: %v", err)
+ 	}
+-	if updated.Settings != (Settings{Enabled: true, MaxSessions: 6}) {
++	if !reflect.DeepEqual(updated.Settings, Settings{
++		Enabled:            true,
++		MaxSessions:        6,
++		ControlMaxSessions: DefaultControlMaxSessions,
++		ControlProfileIDs:  []string{},
++	}) {
+ 		t.Fatalf("updated settings = %+v", updated.Settings)
+ 	}
+ }
+diff --git a/apps/backend/internal/system/sessioncapacity/resolver.go b/apps/backend/internal/system/sessioncapacity/resolver.go
+index 51d78af379..52e5015c0c 100644
+--- a/apps/backend/internal/system/sessioncapacity/resolver.go
++++ b/apps/backend/internal/system/sessioncapacity/resolver.go
+@@ -14,9 +14,35 @@ func ReadEnvironment() Environment {
+ 	return Environment{Value: value, Present: present}
+ }
+ 
++// ReadControlEnvironment reads the control lane's own ceiling variable. It is
++// separate from ReadEnvironment so either lane can be locked independently.
++func ReadControlEnvironment() Environment {
++	value, present := os.LookupEnv(ControlEnvironmentVariable)
++	return Environment{Value: value, Present: present}
++}
++
+ // Resolve applies the precedence environment > saved setting > default.
+ // Invalid nonblank environment values are ignored and reported in the result.
+ func Resolve(configured *Settings, environment Environment) (Resolution, error) {
++	return resolve(configured, environment, Environment{})
++}
++
++// ResolveWithControl resolves both lanes. The worker lane keeps Resolve's exact
++// contract; the control lane adds its own environment override and its own
++// invalid-value report.
++func ResolveWithControl(
++	configured *Settings,
++	environment Environment,
++	controlEnvironment Environment,
++) (Resolution, error) {
++	return resolve(configured, environment, controlEnvironment)
++}
++
++func resolve(
++	configured *Settings,
++	environment Environment,
++	controlEnvironment Environment,
++) (Resolution, error) {
+ 	settings := DefaultSettings()
+ 	source := SourceDefault
+ 	if configured != nil {
+@@ -24,6 +50,7 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error)
+ 			return Resolution{}, err
+ 		}
+ 		settings = *configured
++		settings.ControlProfileIDs = normalizeControlProfileIDs(settings.ControlProfileIDs)
+ 		source = SourceSetting
+ 	}
+ 
+@@ -31,30 +58,85 @@ func Resolve(configured *Settings, environment Environment) (Resolution, error)
+ 		Settings:  settings,
+ 		Effective: effectiveFor(settings, source),
+ 	}}
++
++	if value, ok := parseCeilingOverride(environment); ok {
++		resolution.Effective.Enabled = value > 0
++		resolution.Effective.MaxSessions = value
++		resolution.Effective.Source = SourceEnvironment
++		resolution.Effective.Locked = true
++	} else if strings.TrimSpace(environment.Value) != "" {
++		resolution.InvalidEnvironment = true
++	}
++
++	controlCeiling, controlLocked, invalidControl := resolveControlCeiling(
++		settings.ControlMaxSessions, controlEnvironment,
++	)
++	resolution.InvalidControlEnvironment = invalidControl
++	resolution.Effective.ControlMaxSessions = controlCeiling
++	resolution.Effective.ControlLocked = controlLocked
++	resolution.Effective.TotalMaxSessions = totalMaxSessions(resolution.Effective)
++	return resolution, nil
++}
++
++// resolveControlCeiling applies the control lane's own precedence. The lane's
++// configured profile set always comes from the saved setting: an environment
++// override may change how many control sessions run, never which sessions are
++// control sessions.
++func resolveControlCeiling(
++	configured int,
++	controlEnvironment Environment,
++) (ceiling int, locked bool, invalid bool) {
++	raw := strings.TrimSpace(controlEnvironment.Value)
++	if !controlEnvironment.Present || raw == "" {
++		if raw != "" {
++			invalid = true
++		}
++		return configured, false, invalid
++	}
++	value, err := strconv.ParseInt(raw, 10, 64)
++	if err != nil || value < 0 || value > maxSessionsLimit {
++		return configured, false, true
++	}
++	return int(value), true, false
++}
++
++func parseCeilingOverride(environment Environment) (int, bool) {
+ 	raw := strings.TrimSpace(environment.Value)
+ 	if !environment.Present || raw == "" {
+-		return resolution, nil
++		return 0, false
+ 	}
+-
+ 	value, err := strconv.ParseInt(raw, 10, 64)
+ 	if err != nil || value < 0 || value > maxSessionsLimit {
+-		resolution.InvalidEnvironment = true
+-		return resolution, nil
++		return 0, false
+ 	}
+-	resolution.Effective = Effective{
+-		Enabled:     value > 0,
+-		MaxSessions: int(value),
+-		Source:      SourceEnvironment,
+-		Locked:      true,
++	return int(value), true
++}
++
++// totalMaxSessions is the aggregate bound the two lanes can admit together. It
++// is clamped to the largest portable ceiling so a worker ceiling at the maximum
++// plus any control ceiling still reports a value a session table can hold, and so
++// the sum cannot overflow a narrower int on another platform.
++func totalMaxSessions(effective Effective) int {
++	if !effective.Enabled {
++		return effective.ControlMaxSessions
+ 	}
+-	return resolution, nil
++	total := effective.MaxSessions + effective.ControlMaxSessions
++	if total > maxSessionsLimit {
++		return maxSessionsLimit
++	}
++	return total
+ }
+ 
+ func effectiveFor(settings Settings, source Source) Effective {
+-	effective := Effective{Source: source}
++	effective := Effective{
++		Source:             source,
++		ControlMaxSessions: settings.ControlMaxSessions,
++		ControlProfileIDs:  normalizeControlProfileIDs(settings.ControlProfileIDs),
++	}
+ 	if settings.Enabled {
+ 		effective.Enabled = true
+ 		effective.MaxSessions = settings.MaxSessions
+ 	}
++	effective.TotalMaxSessions = totalMaxSessions(effective)
+ 	return effective
+ }
+diff --git a/apps/backend/internal/system/sessioncapacity/service.go b/apps/backend/internal/system/sessioncapacity/service.go
+index e91573640d..4ad0dfef1f 100644
+--- a/apps/backend/internal/system/sessioncapacity/service.go
++++ b/apps/backend/internal/system/sessioncapacity/service.go
+@@ -9,16 +9,22 @@ import (
+ 	"go.uber.org/zap"
+ )
+ 
++// Target is the live admission controller. The control lane's ceiling and its
++// profile set travel with the worker ceiling so one call applies both, and a
++// partially applied capacity is not a state the controller may rest in. The
++// parameters stay primitives so this package keeps no dependency on the
++// controller's own types.
+ type Target interface {
+-	SetSessionCapacity(int)
++	SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs []string)
+ }
+ 
+ type Service struct {
+-	mu          sync.Mutex
+-	store       *Store
+-	target      Target
+-	environment Environment
+-	logger      *logger.Logger
++	mu                 sync.Mutex
++	store              *Store
++	target             Target
++	environment        Environment
++	controlEnvironment Environment
++	logger             *logger.Logger
+ }
+ 
+ func NewService(
+@@ -35,6 +41,21 @@ func NewService(
+ 	}
+ }
+ 
++// NewServiceWithControl adds the control lane's environment override. Without
++// it the control lane resolves from the saved setting alone, which is the
++// pre-existing two-argument behavior.
++func NewServiceWithControl(
++	store *Store,
++	target Target,
++	environment Environment,
++	controlEnvironment Environment,
++	log *logger.Logger,
++) *Service {
++	service := NewService(store, target, environment, log)
++	service.controlEnvironment = controlEnvironment
++	return service
++}
++
+ func (s *Service) Get(ctx context.Context) (Response, error) {
+ 	s.mu.Lock()
+ 	defer s.mu.Unlock()
+@@ -43,7 +64,7 @@ func (s *Service) Get(ctx context.Context) (Response, error) {
+ 	if err != nil {
+ 		return Response{}, err
+ 	}
+-	resolution, err := Resolve(configured, s.environment)
++	resolution, err := ResolveWithControl(configured, s.environment, s.controlEnvironment)
+ 	if err != nil {
+ 		return Response{}, err
+ 	}
+@@ -58,14 +79,14 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
+ 	if s.target == nil {
+ 		return Response{}, ErrTargetUnavailable
+ 	}
+-	if environmentIsLocked(s.environment) {
++	if s.environmentIsLocked() {
+ 		return Response{}, ErrEnvironmentLocked
+ 	}
+ 	if s.store == nil {
+ 		return Response{}, errors.New("session capacity settings store unavailable")
+ 	}
+ 	settings, err := s.store.Update(ctx, func(current *Settings) (Settings, error) {
+-		resolution, resolveErr := Resolve(current, s.environment)
++		resolution, resolveErr := ResolveWithControl(current, s.environment, s.controlEnvironment)
+ 		if resolveErr != nil {
+ 			return Settings{}, resolveErr
+ 		}
+@@ -79,11 +100,15 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
+ 	if err != nil {
+ 		return Response{}, err
+ 	}
+-	resolution, err := Resolve(&settings, s.environment)
++	resolution, err := ResolveWithControl(&settings, s.environment, s.controlEnvironment)
+ 	if err != nil {
+ 		return Response{}, err
+ 	}
+-	s.target.SetSessionCapacity(resolution.Effective.MaxSessions)
++	s.target.SetSessionCapacity(
++		resolution.Effective.MaxSessions,
++		resolution.Effective.ControlMaxSessions,
++		resolution.Effective.ControlProfileIDs,
++	)
+ 	return resolution.Response, nil
+ }
+ 
+@@ -94,17 +119,31 @@ func (s *Service) loadConfigured(ctx context.Context) (*Settings, error) {
+ 	return s.store.Load(ctx)
+ }
+ 
+-func environmentIsLocked(environment Environment) bool {
+-	resolution, err := Resolve(nil, environment)
+-	return err == nil && resolution.Effective.Locked
++// environmentIsLocked reports whether either lane is owned by the environment.
++// The settings record is one document, so a lock on either lane locks the whole
++// save rather than silently dropping half a patch.
++func (s *Service) environmentIsLocked() bool {
++	resolution, err := ResolveWithControl(nil, s.environment, s.controlEnvironment)
++	if err != nil {
++		return false
++	}
++	return resolution.Effective.Locked || resolution.Effective.ControlLocked
+ }
+ 
+ func (s *Service) warnInvalidEnvironment(resolution Resolution) {
+-	if !resolution.InvalidEnvironment || s.logger == nil {
++	if s.logger == nil {
+ 		return
+ 	}
+-	s.logger.Warn(
+-		"Ignoring invalid session capacity environment value",
+-		zap.String("environment_variable", EnvironmentVariable),
+-	)
++	if resolution.InvalidEnvironment {
++		s.logger.Warn(
++			"Ignoring invalid session capacity environment value",
++			zap.String("environment_variable", EnvironmentVariable),
++		)
++	}
++	if resolution.InvalidControlEnvironment {
++		s.logger.Warn(
++			"Ignoring invalid control session capacity environment value",
++			zap.String("environment_variable", ControlEnvironmentVariable),
++		)
++	}
+ }
+diff --git a/apps/backend/internal/system/sessioncapacity/service_test.go b/apps/backend/internal/system/sessioncapacity/service_test.go
+index 85261bea46..f7b0459acd 100644
+--- a/apps/backend/internal/system/sessioncapacity/service_test.go
++++ b/apps/backend/internal/system/sessioncapacity/service_test.go
+@@ -3,6 +3,7 @@ package sessioncapacity
+ import (
+ 	"context"
+ 	"errors"
++	"reflect"
+ 	"sync"
+ 	"testing"
+ 
+@@ -20,10 +21,20 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T)
+ 	if err != nil {
+ 		t.Fatalf("enable: %v", err)
+ 	}
+-	if response.Settings != (Settings{Enabled: true, MaxSessions: DefaultMaxSessions}) {
++	if !reflect.DeepEqual(response.Settings, Settings{
++		Enabled:            true,
++		MaxSessions:        DefaultMaxSessions,
++		ControlMaxSessions: DefaultControlMaxSessions,
++	}) {
+ 		t.Fatalf("enabled settings = %+v", response.Settings)
+ 	}
+-	if response.Effective != (Effective{Enabled: true, MaxSessions: DefaultMaxSessions, Source: SourceSetting}) {
++	if !reflect.DeepEqual(response.Effective, Effective{
++		Enabled:            true,
++		MaxSessions:        DefaultMaxSessions,
++		ControlMaxSessions: DefaultControlMaxSessions,
++		TotalMaxSessions:   DefaultMaxSessions + DefaultControlMaxSessions,
++		Source:             SourceSetting,
++	}) {
+ 		t.Fatalf("enabled effective = %+v", response.Effective)
+ 	}
+ 	if target.Capacity() != DefaultMaxSessions {
+@@ -34,7 +45,11 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T)
+ 	if err != nil {
+ 		t.Fatalf("change maximum: %v", err)
+ 	}
+-	if response.Settings != (Settings{Enabled: true, MaxSessions: 9}) || target.Capacity() != 9 {
++	if !reflect.DeepEqual(response.Settings, Settings{
++		Enabled:            true,
++		MaxSessions:        9,
++		ControlMaxSessions: DefaultControlMaxSessions,
++	}) || target.Capacity() != 9 {
+ 		t.Fatalf("changed maximum response=%+v live=%d", response, target.Capacity())
+ 	}
+ 
+@@ -42,10 +57,20 @@ func TestServicePersistsBeforeApplyingAndRetainsRememberedMaximum(t *testing.T)
+ 	if err != nil {
+ 		t.Fatalf("disable: %v", err)
+ 	}
+-	if response.Settings != (Settings{Enabled: false, MaxSessions: 9}) {
++	if !reflect.DeepEqual(response.Settings, Settings{
++		Enabled:            false,
++		MaxSessions:        9,
++		ControlMaxSessions: DefaultControlMaxSessions,
++	}) {
+ 		t.Fatalf("disabled settings = %+v, want remembered maximum", response.Settings)
+ 	}
+-	if response.Effective != (Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting}) {
++	if !reflect.DeepEqual(response.Effective, Effective{
++		Enabled:            false,
++		MaxSessions:        0,
++		ControlMaxSessions: DefaultControlMaxSessions,
++		TotalMaxSessions:   DefaultControlMaxSessions,
++		Source:             SourceSetting,
++	}) {
+ 		t.Fatalf("disabled effective = %+v", response.Effective)
+ 	}
+ 	if target.Capacity() != 0 {
+@@ -138,7 +163,11 @@ func TestServiceSerializesConcurrentPartialUpdates(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("get final settings: %v", err)
+ 	}
+-	if response.Settings != (Settings{Enabled: true, MaxSessions: 8}) || target.Capacity() != 8 {
++	if !reflect.DeepEqual(response.Settings, Settings{
++		Enabled:            true,
++		MaxSessions:        8,
++		ControlMaxSessions: DefaultControlMaxSessions,
++	}) || target.Capacity() != 8 {
+ 		t.Fatalf("final response=%+v live=%d", response, target.Capacity())
+ 	}
+ }
+@@ -178,11 +207,14 @@ type fakeTarget struct {
+ 	calls    []int
+ }
+ 
+-func (t *fakeTarget) SetSessionCapacity(capacity int) {
++// SetSessionCapacity takes both lanes because the live controller applies them
++// together; the control arguments are recorded so a caller can still assert the
++// worker ceiling it already cared about.
++func (t *fakeTarget) SetSessionCapacity(workerCeiling, _ int, _ []string) {
+ 	t.mu.Lock()
+ 	defer t.mu.Unlock()
+-	t.capacity = capacity
+-	t.calls = append(t.calls, capacity)
++	t.capacity = workerCeiling
++	t.calls = append(t.calls, workerCeiling)
+ }
+ 
+ func (t *fakeTarget) Capacity() int {
+diff --git a/apps/backend/internal/system/sessioncapacity/store_test.go b/apps/backend/internal/system/sessioncapacity/store_test.go
+index ecd43ca51f..7f3713f9a0 100644
+--- a/apps/backend/internal/system/sessioncapacity/store_test.go
++++ b/apps/backend/internal/system/sessioncapacity/store_test.go
+@@ -5,6 +5,7 @@ import (
+ 	"context"
+ 	"errors"
+ 	"fmt"
++	"reflect"
+ 	"sync"
+ 	"testing"
+ )
+@@ -23,7 +24,7 @@ func TestStoreSaveLoadAndRejectsInvalidPersistedRecords(t *testing.T) {
+ 		t.Fatalf("save settings: %v", err)
+ 	}
+ 	settings, err = store.Load(ctx)
+-	if err != nil || settings == nil || *settings != (Settings{Enabled: true, MaxSessions: 8}) {
++	if err != nil || settings == nil || !reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
+ 		t.Fatalf("load saved = %+v, %v", settings, err)
+ 	}
+ 
+@@ -53,7 +54,7 @@ func TestStoreUpdateWithoutCompareAndSwapUsesFallback(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("update: %v", err)
+ 	}
+-	if updated != (Settings{Enabled: true, MaxSessions: 6}) {
++	if !reflect.DeepEqual(updated, Settings{Enabled: true, MaxSessions: 6}) {
+ 		t.Fatalf("updated = %+v", updated)
+ 	}
+ }
+@@ -100,7 +101,7 @@ func TestStoreUpdateUsesCASAndPreservesConcurrentPartialChanges(t *testing.T) {
+ 	if err != nil || settings == nil {
+ 		t.Fatalf("load concurrent result = %+v, %v", settings, err)
+ 	}
+-	if *settings != (Settings{Enabled: true, MaxSessions: 8}) {
++	if !reflect.DeepEqual(*settings, Settings{Enabled: true, MaxSessions: 8}) {
+ 		t.Fatalf("concurrent result = %+v, want both fields preserved", *settings)
+ 	}
+ }
+diff --git a/apps/backend/internal/system/sessioncapacity/types.go b/apps/backend/internal/system/sessioncapacity/types.go
+index bb502c53bf..65478e6514 100644
+--- a/apps/backend/internal/system/sessioncapacity/types.go
++++ b/apps/backend/internal/system/sessioncapacity/types.go
+@@ -5,13 +5,22 @@ import (
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"strings"
+ )
+ 
+ const (
+ 	SettingsKey         = "session_capacity"
+ 	EnvironmentVariable = "KANDEV_MAX_CONCURRENT_SESSIONS"
+-	DefaultMaxSessions  = 5
+-	maxSessionsLimit    = 2147483647
++	// ControlEnvironmentVariable owns the control-lane ceiling on its own, so an
++	// operator can lock either lane without locking the other.
++	ControlEnvironmentVariable = "KANDEV_MAX_CONTROL_SESSIONS"
++	DefaultMaxSessions         = 5
++	// DefaultControlMaxSessions is the control-lane ceiling an install gets when
++	// the operator has never chosen one. Zero means no control lane, in which
++	// case every session is admitted against the worker ceiling exactly as
++	// before this setting existed.
++	DefaultControlMaxSessions = 2
++	maxSessionsLimit          = 2147483647
+ )
+ 
+ type Source string
+@@ -29,16 +38,25 @@ var (
+ 	ErrTargetUnavailable = errors.New("session capacity live target is unavailable")
+ )
+ 
++// Settings is the saved capacity contract. MaxSessions is the worker ceiling;
++// ControlMaxSessions is an additional ceiling for the control lane that is not
++// drawn from it, so the two lanes admit independently and the aggregate
++// maximum is their sum. ControlProfileIDs names the agent profiles whose
++// sessions belong to the control lane.
+ type Settings struct {
+-	Enabled     bool `json:"enabled"`
+-	MaxSessions int  `json:"max_sessions"`
++	Enabled            bool     `json:"enabled"`
++	MaxSessions        int      `json:"max_sessions"`
++	ControlMaxSessions int      `json:"control_max_sessions"`
++	ControlProfileIDs  []string `json:"control_profile_ids"`
+ }
+ 
+ // SettingsPatch is a partial update. A nil field means that the field was
+ // omitted from the request and must retain its saved value.
+ type SettingsPatch struct {
+-	Enabled     *bool `json:"enabled"`
+-	MaxSessions *int  `json:"max_sessions"`
++	Enabled            *bool     `json:"enabled"`
++	MaxSessions        *int      `json:"max_sessions"`
++	ControlMaxSessions *int      `json:"control_max_sessions"`
++	ControlProfileIDs  *[]string `json:"control_profile_ids"`
+ }
+ 
+ // UnmarshalJSON rejects null values because null cannot represent an omitted
+@@ -73,6 +91,24 @@ func (p *SettingsPatch) UnmarshalJSON(data []byte) error {
+ 				return fmt.Errorf("max_sessions must be an integer: %w", err)
+ 			}
+ 			decoded.MaxSessions = &value
++		case "control_max_sessions":
++			if isJSONNull(raw) {
++				return errors.New("control_max_sessions must be an integer")
++			}
++			var value int
++			if err := json.Unmarshal(raw, &value); err != nil {
++				return fmt.Errorf("control_max_sessions must be an integer: %w", err)
++			}
++			decoded.ControlMaxSessions = &value
++		case "control_profile_ids":
++			if isJSONNull(raw) {
++				return errors.New("control_profile_ids must be an array of strings")
++			}
++			var value []string
++			if err := json.Unmarshal(raw, &value); err != nil {
++				return fmt.Errorf("control_profile_ids must be an array of strings: %w", err)
++			}
++			decoded.ControlProfileIDs = &value
+ 		default:
+ 			return fmt.Errorf("unknown session capacity setting %q", field)
+ 		}
+@@ -93,19 +129,62 @@ func (p SettingsPatch) Apply(base Settings) Settings {
+ 	if p.MaxSessions != nil {
+ 		base.MaxSessions = *p.MaxSessions
+ 	}
++	if p.ControlMaxSessions != nil {
++		base.ControlMaxSessions = *p.ControlMaxSessions
++	}
++	if p.ControlProfileIDs != nil {
++		base.ControlProfileIDs = normalizeControlProfileIDs(*p.ControlProfileIDs)
++	}
+ 	return base
+ }
+ 
++// normalizeControlProfileIDs trims, drops blanks and de-duplicates while
++// preserving first-seen order, so two spellings of the same profile cannot
++// consume two control slots or make the saved value order-dependent.
++func normalizeControlProfileIDs(ids []string) []string {
++	if len(ids) == 0 {
++		return nil
++	}
++	seen := make(map[string]struct{}, len(ids))
++	normalized := make([]string, 0, len(ids))
++	for _, id := range ids {
++		trimmed := strings.TrimSpace(id)
++		if trimmed == "" {
++			continue
++		}
++		if _, duplicate := seen[trimmed]; duplicate {
++			continue
++		}
++		seen[trimmed] = struct{}{}
++		normalized = append(normalized, trimmed)
++	}
++	if len(normalized) == 0 {
++		return nil
++	}
++	return normalized
++}
++
+ type Response struct {
+ 	Settings  Settings  `json:"settings"`
+ 	Effective Effective `json:"effective"`
+ }
+ 
+ type Effective struct {
+-	Enabled     bool   `json:"enabled"`
+-	MaxSessions int    `json:"max_sessions"`
+-	Source      Source `json:"source"`
+-	Locked      bool   `json:"locked"`
++	Enabled     bool `json:"enabled"`
++	MaxSessions int  `json:"max_sessions"`
++	// ControlMaxSessions is the control lane's own ceiling. It is independent
++	// of Enabled: the control lane exists only when it is positive AND at least
++	// one control profile is configured, so disabling automatic capacity never
++	// silently closes the lane the operator reserved for monitors.
++	ControlMaxSessions int      `json:"control_max_sessions"`
++	TotalMaxSessions   int      `json:"total_max_sessions"`
++	ControlProfileIDs  []string `json:"control_profile_ids"`
++	Source             Source   `json:"source"`
++	Locked             bool     `json:"locked"`
++	// ControlLocked reports that the environment alone owns the control
++	// ceiling, which is separate from Locked because either variable can be set
++	// without the other.
++	ControlLocked bool `json:"control_locked"`
+ }
+ 
+ type Environment struct {
+@@ -116,12 +195,20 @@ type Environment struct {
+ type Resolution struct {
+ 	Response
+ 	InvalidEnvironment bool
++	// InvalidControlEnvironment reports an unusable control-lane environment
++	// value separately, because it is ignored rather than fatal and names a
++	// different variable than the worker lane's own warning.
++	InvalidControlEnvironment bool
+ }
+ 
+ // DefaultSettings returns the disabled setting with its editable default
+ // maximum retained for a later opt-in.
+ func DefaultSettings() Settings {
+-	return Settings{Enabled: false, MaxSessions: DefaultMaxSessions}
++	return Settings{
++		Enabled:            false,
++		MaxSessions:        DefaultMaxSessions,
++		ControlMaxSessions: DefaultControlMaxSessions,
++	}
+ }
+ 
+ func Validate(settings Settings) error {
+@@ -132,5 +219,20 @@ func Validate(settings Settings) error {
+ 			maxSessionsLimit,
+ 		)
+ 	}
++	if settings.ControlMaxSessions < 0 || settings.ControlMaxSessions > maxSessionsLimit {
++		return fmt.Errorf(
++			"%w: control_max_sessions must be between 0 and %d",
++			ErrValidation,
++			maxSessionsLimit,
++		)
++	}
+ 	return nil
+ }
++
++// ControlLaneConfigured reports whether a control lane exists at all. A
++// positive ceiling with no profile would admit nothing extra and a profile with
++// no ceiling would leave that lane unbounded, which is the one shape this
++// feature must never take: both halves are required.
++func ControlLaneConfigured(settings Settings) bool {
++	return settings.ControlMaxSessions > 0 && len(settings.ControlProfileIDs) > 0
++}
+diff --git a/apps/backend/internal/system/sessioncapacity/types_test.go b/apps/backend/internal/system/sessioncapacity/types_test.go
+index 5814808a3a..df0ea39feb 100644
+--- a/apps/backend/internal/system/sessioncapacity/types_test.go
++++ b/apps/backend/internal/system/sessioncapacity/types_test.go
+@@ -18,42 +18,56 @@ func TestResolveSessionCapacity(t *testing.T) {
+ 		wantInvalidEnv bool
+ 	}{
+ 		{
+-			name:          "absent saved state is disabled with remembered default",
+-			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions},
+-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceDefault},
++			name: "absent saved state is disabled with remembered default",
++			wantSettings: Settings{
++				Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions,
++			},
++			wantEffective: Effective{
++				Enabled: false, MaxSessions: 0, ControlMaxSessions: DefaultControlMaxSessions,
++				TotalMaxSessions: DefaultControlMaxSessions, Source: SourceDefault,
++			},
+ 		},
+ 		{
+-			name:          "saved disabled state remembers its maximum",
+-			configured:    &Settings{Enabled: false, MaxSessions: 11},
+-			wantSettings:  Settings{Enabled: false, MaxSessions: 11},
+-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceSetting},
++			name:       "saved disabled state remembers its maximum",
++			configured: &Settings{Enabled: false, MaxSessions: 11},
++			wantSettings: Settings{
++				Enabled: false, MaxSessions: 11,
++			},
++			wantEffective: Effective{
++				Enabled: false, MaxSessions: 0, Source: SourceSetting,
++			},
+ 		},
+ 		{
+ 			name:          "saved enabled state supplies effective capacity",
+ 			configured:    saved,
+ 			wantSettings:  *saved,
+-			wantEffective: Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
++			wantEffective: Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
+ 		},
+ 		{
+-			name:          "valid environment value wins and locks",
+-			configured:    saved,
+-			environment:   Environment{Value: " 7 ", Present: true},
+-			wantSettings:  *saved,
+-			wantEffective: Effective{Enabled: true, MaxSessions: 7, Source: SourceEnvironment, Locked: true},
++			name:         "valid environment value wins and locks",
++			configured:   saved,
++			environment:  Environment{Value: " 7 ", Present: true},
++			wantSettings: *saved,
++			wantEffective: Effective{
++				Enabled: true, MaxSessions: 7, TotalMaxSessions: 7,
++				Source: SourceEnvironment, Locked: true,
++			},
+ 		},
+ 		{
+-			name:          "zero environment value disables and locks",
+-			configured:    saved,
+-			environment:   Environment{Value: "0", Present: true},
+-			wantSettings:  *saved,
+-			wantEffective: Effective{Enabled: false, MaxSessions: 0, Source: SourceEnvironment, Locked: true},
++			name:         "zero environment value disables and locks",
++			configured:   saved,
++			environment:  Environment{Value: "0", Present: true},
++			wantSettings: *saved,
++			wantEffective: Effective{
++				Enabled: false, MaxSessions: 0, Source: SourceEnvironment, Locked: true,
++			},
+ 		},
+ 		{
+ 			name:           "blank environment falls back without warning",
+ 			configured:     saved,
+ 			environment:    Environment{Value: "  ", Present: true},
+ 			wantSettings:   *saved,
+-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
++			wantEffective:  Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
+ 			wantInvalidEnv: false,
+ 		},
+ 		{
+@@ -61,7 +75,7 @@ func TestResolveSessionCapacity(t *testing.T) {
+ 			configured:     saved,
+ 			environment:    Environment{Value: "not-a-number", Present: true},
+ 			wantSettings:   *saved,
+-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
++			wantEffective:  Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
+ 			wantInvalidEnv: true,
+ 		},
+ 		{
+@@ -69,7 +83,7 @@ func TestResolveSessionCapacity(t *testing.T) {
+ 			configured:     saved,
+ 			environment:    Environment{Value: "-1", Present: true},
+ 			wantSettings:   *saved,
+-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
++			wantEffective:  Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
+ 			wantInvalidEnv: true,
+ 		},
+ 		{
+@@ -77,14 +91,20 @@ func TestResolveSessionCapacity(t *testing.T) {
+ 			configured:     saved,
+ 			environment:    Environment{Value: "2147483648", Present: true},
+ 			wantSettings:   *saved,
+-			wantEffective:  Effective{Enabled: true, MaxSessions: 9, Source: SourceSetting},
++			wantEffective:  Effective{Enabled: true, MaxSessions: 9, TotalMaxSessions: 9, Source: SourceSetting},
+ 			wantInvalidEnv: true,
+ 		},
+ 		{
+-			name:          "maximum environment value is valid",
+-			environment:   Environment{Value: "2147483647", Present: true},
+-			wantSettings:  Settings{Enabled: false, MaxSessions: DefaultMaxSessions},
+-			wantEffective: Effective{Enabled: true, MaxSessions: 2147483647, Source: SourceEnvironment, Locked: true},
++			name:        "maximum environment value is valid",
++			environment: Environment{Value: "2147483647", Present: true},
++			wantSettings: Settings{
++				Enabled: false, MaxSessions: DefaultMaxSessions, ControlMaxSessions: DefaultControlMaxSessions,
++			},
++			wantEffective: Effective{
++				Enabled: true, MaxSessions: 2147483647, ControlMaxSessions: DefaultControlMaxSessions,
++				TotalMaxSessions: maxSessionsLimit,
++				Source:           SourceEnvironment, Locked: true,
++			},
+ 		},
+ 	}
+ 
+@@ -136,7 +156,7 @@ func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
+ 	if err != nil {
+ 		t.Fatalf("marshal settings: %v", err)
+ 	}
+-	if string(settingsJSON) != `{"enabled":true,"max_sessions":8}` {
++	if string(settingsJSON) != `{"enabled":true,"max_sessions":8,"control_max_sessions":0,"control_profile_ids":null}` {
+ 		t.Fatalf("settings JSON = %s", settingsJSON)
+ 	}
+ 
+diff --git a/apps/backend/internal/task/models/admitted_session.go b/apps/backend/internal/task/models/admitted_session.go
+new file mode 100644
+index 0000000000..4a605b9596
+--- /dev/null
++++ b/apps/backend/internal/task/models/admitted_session.go
+@@ -0,0 +1,13 @@
++package models
++
++// AdmittedSessionRef is one session in the instance-wide admitted population
++// together with the agent profile it runs.
++//
++// It lives in models rather than in either consumer because the admission
++// controller and the session repository must agree on this shape, and the
++// controller must classify the lane itself: the profile travels as durable data
++// so no repository, caller or transport can decide a session's class.
++type AdmittedSessionRef struct {
++	ID        string
++	ProfileID string
++}
+diff --git a/apps/backend/internal/task/repository/sqlite/session_ceiling.go b/apps/backend/internal/task/repository/sqlite/session_ceiling.go
+index e774bf1cd1..aff7072900 100644
+--- a/apps/backend/internal/task/repository/sqlite/session_ceiling.go
++++ b/apps/backend/internal/task/repository/sqlite/session_ceiling.go
+@@ -6,24 +6,26 @@ import (
+ 	"github.com/kandev/kandev/internal/task/models"
+ )
+ 
+-// ListAdmittedSessionIDs returns the ids of every session in the admitted
+-// population — state STARTING or RUNNING — across the entire instance: every
+-// workspace, every workflow, every board, Office and non-Office alike.
++// ListAdmittedSessionRefs returns every session in the admitted population —
++// state STARTING or RUNNING — across the entire instance: every workspace, every
++// workflow, every board, Office and non-Office alike.
+ //
+ // The query deliberately has no joins and no filters. A session counts regardless
+ // of whether its task is archived, ephemeral or automation-origin, and regardless
+ // of config_mode or IsPassthrough on the session itself: each one runs an agent
+ // process and consumes a core. Adding any of the filters the neighbouring task
+ // queries carry would under-count exactly the work the ceiling exists to bound.
++// The agent profile id is read from the session row itself, which is where the
++// launch already recorded it, so no join can change which sessions are counted.
+ //
+ // The state literals here are written out rather than derived from
+ // models.IsAdmittedSessionState on purpose: deriving them would make the
+ // drift-guard test compare the predicate against itself. Keeping the two sides
+ // independent is what lets TestAdmittedSessionIDsMatchSQLFilter catch an edit to
+ // one that was not made to the other.
+-func (r *Repository) ListAdmittedSessionIDs(ctx context.Context) ([]string, error) {
++func (r *Repository) ListAdmittedSessionRefs(ctx context.Context) ([]models.AdmittedSessionRef, error) {
+ 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+-		SELECT s.id
++		SELECT s.id, COALESCE(s.agent_profile_id, '')
+ 		FROM task_sessions s
+ 		WHERE s.state IN (?, ?)
+ 		ORDER BY s.id ASC
+@@ -33,16 +35,16 @@ func (r *Repository) ListAdmittedSessionIDs(ctx context.Context) ([]string, erro
+ 	}
+ 	defer func() { _ = rows.Close() }()
+ 
+-	var ids []string
++	var refs []models.AdmittedSessionRef
+ 	for rows.Next() {
+-		var id string
+-		if err := rows.Scan(&id); err != nil {
++		var ref models.AdmittedSessionRef
++		if err := rows.Scan(&ref.ID, &ref.ProfileID); err != nil {
+ 			return nil, err
+ 		}
+-		ids = append(ids, id)
++		refs = append(refs, ref)
+ 	}
+ 	if err := rows.Err(); err != nil {
+ 		return nil, err
+ 	}
+-	return ids, nil
++	return refs, nil
+ }
+diff --git a/apps/backend/internal/task/repository/sqlite/session_ceiling_test.go b/apps/backend/internal/task/repository/sqlite/session_ceiling_test.go
+index 1adc29eb4e..39d2c26cbd 100644
+--- a/apps/backend/internal/task/repository/sqlite/session_ceiling_test.go
++++ b/apps/backend/internal/task/repository/sqlite/session_ceiling_test.go
+@@ -54,15 +54,15 @@ func TestAdmittedSessionIDsMatchSQLFilter(t *testing.T) {
+ 				t.Fatalf("CreateTaskSession: %v", err)
+ 			}
+ 
+-			got, err := repo.ListAdmittedSessionIDs(ctx)
++			got, err := repo.ListAdmittedSessionRefs(ctx)
+ 			if err != nil {
+-				t.Fatalf("ListAdmittedSessionIDs: %v", err)
++				t.Fatalf("ListAdmittedSessionRefs: %v", err)
+ 			}
+ 
+ 			want := models.IsAdmittedSessionState(state)
+ 			found := false
+-			for _, id := range got {
+-				if id == sessionID {
++			for _, ref := range got {
++				if ref.ID == sessionID {
+ 					found = true
+ 				}
+ 			}
+@@ -129,13 +129,13 @@ func TestListAdmittedSessionIDsIgnoresTaskShape(t *testing.T) {
+ 		}
+ 	}
+ 
+-	got, err := repo.ListAdmittedSessionIDs(ctx)
++	got, err := repo.ListAdmittedSessionRefs(ctx)
+ 	if err != nil {
+-		t.Fatalf("ListAdmittedSessionIDs: %v", err)
++		t.Fatalf("ListAdmittedSessionRefs: %v", err)
+ 	}
+ 	index := make(map[string]bool, len(got))
+-	for _, id := range got {
+-		index[id] = true
++	for _, ref := range got {
++		index[ref.ID] = true
+ 	}
+ 	for _, tc := range cases {
+ 		if !index[tc.session.ID] {
+diff --git a/apps/web/components/settings/system/session-capacity-settings.test.tsx b/apps/web/components/settings/system/session-capacity-settings.test.tsx
+index b61c8fa50d..c0fccfd204 100644
+--- a/apps/web/components/settings/system/session-capacity-settings.test.tsx
++++ b/apps/web/components/settings/system/session-capacity-settings.test.tsx
+@@ -61,6 +61,7 @@ function response(
+     effectiveMaximum: number;
+     source: SessionCapacitySettingsResponse["effective"]["source"];
+     locked: boolean;
++    controlLocked: boolean;
+   }> = {},
+ ): SessionCapacitySettingsResponse {
+   const enabled = overrides.enabled ?? false;
+@@ -68,12 +69,21 @@ function response(
+   const effectiveEnabled = overrides.effectiveEnabled ?? enabled;
+   const effectiveMaximum = overrides.effectiveMaximum ?? (effectiveEnabled ? maximum : 0);
+   return {
+-    settings: { enabled, max_sessions: maximum },
++    settings: {
++      enabled,
++      max_sessions: maximum,
++      control_max_sessions: 2,
++      control_profile_ids: [],
++    },
+     effective: {
+       enabled: effectiveEnabled,
+       max_sessions: effectiveMaximum,
++      control_max_sessions: 2,
++      total_max_sessions: effectiveMaximum + 2,
++      control_profile_ids: [],
+       source: overrides.source ?? (enabled ? "setting" : "default"),
+       locked: overrides.locked ?? false,
++      control_locked: overrides.controlLocked ?? false,
+     },
+   };
+ }
+@@ -121,7 +131,12 @@ describe("SessionCapacitySettings drafts", () => {
+     const contributor = requireContributor();
+     await act(async () => contributor.save(contributor.revision));
+ 
+-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: true, max_sessions: 8 });
++    expect(updateSettingsMock).toHaveBeenCalledWith({
++      enabled: true,
++      max_sessions: 8,
++      control_max_sessions: 2,
++      control_profile_ids: [],
++    });
+     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+     expect(screen.getByTestId("session-capacity-effective-value").textContent).toBe("8");
+   });
+@@ -157,7 +172,12 @@ describe("SessionCapacitySettings drafts", () => {
+     const contributor = requireContributor();
+     expect(contributor.canSave).toBe(true);
+     await act(async () => contributor.save(contributor.revision));
+-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: false, max_sessions: 5 });
++    expect(updateSettingsMock).toHaveBeenCalledWith({
++      enabled: false,
++      max_sessions: 5,
++      control_max_sessions: 2,
++      control_profile_ids: [],
++    });
+     await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+   });
+ 
+@@ -174,7 +194,12 @@ describe("SessionCapacitySettings drafts", () => {
+     const contributor = requireContributor();
+     await act(async () => contributor.save(contributor.revision));
+ 
+-    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: true, max_sessions: 5 });
++    expect(updateSettingsMock).toHaveBeenCalledWith({
++      enabled: true,
++      max_sessions: 5,
++      control_max_sessions: 2,
++      control_profile_ids: [],
++    });
+     await waitFor(() => {
+       expect(input.getAttribute("value")).toBe("5");
+       expect(saveContributor?.isDirty).toBe(false);
+@@ -266,3 +291,42 @@ describe("SessionCapacitySettings access and recovery", () => {
+     expect(saveContributor?.isDirty).toBe(true);
+   });
+ });
++
++describe("SessionCapacitySettings control-lane lock", () => {
++  it("names the control variable when only the control lane is locked", async () => {
++    fetchSettingsMock.mockResolvedValueOnce(
++      response({ enabled: true, maximum: 8, controlLocked: true }),
++    );
++    render(<SessionCapacitySettings />);
++
++    await screen.findByLabelText(MAXIMUM_LABEL);
++    expect(screen.getByText(/KANDEV_MAX_CONTROL_SESSIONS/)).toBeTruthy();
++    expect(screen.queryByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)).toBeNull();
++    // A control-only lock still freezes every control, so the saved control
++    // ceiling is what the read-only field shows.
++    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("value", "2");
++    expect(screen.getByTestId("session-capacity-control-maximum")).toHaveProperty("disabled", true);
++    expect(requireContributor().canSave).toBe(false);
++  });
++
++  it("names both variables when both lanes are locked", async () => {
++    fetchSettingsMock.mockResolvedValueOnce(
++      response({
++        enabled: true,
++        maximum: 8,
++        effectiveMaximum: 9,
++        source: "environment",
++        locked: true,
++        controlLocked: true,
++      }),
++    );
++    render(<SessionCapacitySettings />);
++
++    await screen.findByLabelText(MAXIMUM_LABEL);
++    const notice = screen
++      .getByText(/KANDEV_MAX_CONCURRENT_SESSIONS/)
++      .textContent?.replace(/\s+/g, " ");
++    expect(notice).toContain("KANDEV_MAX_CONCURRENT_SESSIONS");
++    expect(notice).toContain("KANDEV_MAX_CONTROL_SESSIONS");
++  });
++});
+diff --git a/apps/web/components/settings/system/session-capacity-settings.tsx b/apps/web/components/settings/system/session-capacity-settings.tsx
+index 0a276d41e4..3bfec0a2b6 100644
+--- a/apps/web/components/settings/system/session-capacity-settings.tsx
++++ b/apps/web/components/settings/system/session-capacity-settings.tsx
+@@ -21,8 +21,6 @@ import {
+   useSessionCapacitySettings,
+ } from "./use-session-capacity-settings";
+ 
+-const ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
+-
+ function SessionCapacityLoadError({
+   onRetry,
+   withinGroup = false,
+@@ -54,46 +52,74 @@ function SessionCapacityLoadError({
+   );
+ }
+ 
+-function SessionCapacitySwitch({
+-  checked,
++type MaximumFieldProps = {
++  label: string;
++  description: string;
++  help: string;
++  inputId: string;
++  testId: string;
++  errorTestId: string;
++  value: string;
++  disabled: boolean;
++  error?: string;
++  min?: number;
++  onChange: (value: string) => void;
++};
++
++function MaximumField({
++  label,
++  description,
++  help,
++  inputId,
++  testId,
++  errorTestId,
++  value,
+   disabled,
++  error,
++  min = 1,
+   onChange,
+-}: {
+-  checked: boolean;
+-  disabled: boolean;
+-  onChange: (value: boolean) => void;
+-}) {
+-  const { t } = useTranslation();
+-  const label = t("system:sessionCapacityEnabledLabel");
++}: MaximumFieldProps) {
++  const errorId = `${inputId}-error`;
+   return (
+-    <SettingsRow
+-      label={label}
+-      description={t("settings:sessionLimitShort")}
+-      controlId="session-capacity-enabled"
+-      touchTarget="switch"
+-      controlWrapperTestId="session-capacity-enabled-touch-target"
+-      info={
+-        <SettingsInfo label={label}>
+-          <p>{t("system:sessionCapacityEnabledDescription")}</p>
+-          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
+-        </SettingsInfo>
+-      }
+-      control={
+-        <Switch
+-          id="session-capacity-enabled"
+-          data-testid="session-capacity-enabled"
+-          checked={checked}
+-          disabled={disabled}
+-          onCheckedChange={onChange}
+-          aria-label={label}
+-          className="cursor-pointer disabled:cursor-not-allowed"
+-        />
+-      }
+-    />
++    <div className="space-y-2">
++      <SettingsRow
++        label={label}
++        description={description}
++        descriptionId={`${inputId}-help`}
++        controlId={inputId}
++        info={
++          <SettingsInfo label={label}>
++            <p>{help}</p>
++          </SettingsInfo>
++        }
++        control={
++          <Input
++            id={inputId}
++            data-testid={testId}
++            type="number"
++            inputMode="numeric"
++            min={min}
++            max={2147483647}
++            step={1}
++            value={value}
++            disabled={disabled}
++            aria-invalid={error ? true : undefined}
++            aria-describedby={error ? errorId : undefined}
++            onChange={(event) => onChange(event.target.value)}
++            className={settingsControlClassName("w-full md:w-40")}
++          />
++        }
++      />
++      {error && (
++        <p id={errorId} data-testid={errorTestId} role="alert" className="text-sm text-destructive">
++          {error}
++        </p>
++      )}
++    </div>
+   );
+ }
+ 
+-function MaximumField({
++function ControlProfileField({
+   value,
+   disabled,
+   error,
+@@ -105,40 +131,39 @@ function MaximumField({
+   onChange: (value: string) => void;
+ }) {
+   const { t } = useTranslation();
++  const inputId = "session-capacity-control-profiles";
++  const errorId = `${inputId}-error`;
++  const label = t("system:sessionCapacityControlProfilesLabel");
+   return (
+     <div className="space-y-2">
+       <SettingsRow
+-        label={t("system:sessionCapacityMaximumLabel")}
+-        description={t("settings:sessionMaximumShort")}
+-        descriptionId="session-capacity-maximum-help"
+-        controlId="session-capacity-maximum"
++        label={label}
++        description={t("settings:sessionControlProfilesShort")}
++        controlId={inputId}
+         info={
+-          <SettingsInfo label={t("system:sessionCapacityMaximumLabel")}>
+-            {t("system:sessionCapacityMaximumHelp")}
++          <SettingsInfo label={label}>
++            <p>{t("system:sessionCapacityControlProfilesHelp")}</p>
+           </SettingsInfo>
+         }
+         control={
+           <Input
+-            id="session-capacity-maximum"
+-            data-testid="session-capacity-maximum"
+-            type="number"
+-            inputMode="numeric"
+-            min={1}
+-            max={2147483647}
+-            step={1}
++            id={inputId}
++            data-testid="session-capacity-control-profiles"
++            type="text"
+             value={value}
+             disabled={disabled}
++            placeholder="profile-id"
+             aria-invalid={error ? true : undefined}
+-            aria-describedby={error ? "session-capacity-maximum-error" : undefined}
++            aria-describedby={error ? errorId : undefined}
+             onChange={(event) => onChange(event.target.value)}
+-            className={settingsControlClassName("w-full md:w-40")}
++            className={settingsControlClassName("w-full md:w-80")}
+           />
+         }
+       />
+       {error && (
+         <p
+-          id="session-capacity-maximum-error"
+-          data-testid="session-capacity-maximum-error"
++          id={errorId}
++          data-testid="session-capacity-control-profiles-error"
+           role="alert"
+           className="text-sm text-destructive"
+         >
+@@ -149,24 +174,84 @@ function MaximumField({
+   );
+ }
+ 
++function SessionCapacitySwitch({
++  checked,
++  disabled,
++  onChange,
++}: {
++  checked: boolean;
++  disabled: boolean;
++  onChange: (value: boolean) => void;
++}) {
++  const { t } = useTranslation();
++  const label = t("system:sessionCapacityEnabledLabel");
++  return (
++    <SettingsRow
++      label={label}
++      description={t("settings:sessionLimitShort")}
++      controlId="session-capacity-enabled"
++      touchTarget="switch"
++      controlWrapperTestId="session-capacity-enabled-touch-target"
++      info={
++        <SettingsInfo label={label}>
++          <p>{t("system:sessionCapacityEnabledDescription")}</p>
++          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
++        </SettingsInfo>
++      }
++      control={
++        <Switch
++          id="session-capacity-enabled"
++          data-testid="session-capacity-enabled"
++          checked={checked}
++          disabled={disabled}
++          onCheckedChange={onChange}
++          aria-label={label}
++          className="cursor-pointer disabled:cursor-not-allowed"
++        />
++      }
++    />
++  );
++}
++
+ function EffectiveCapacity({
+   enabled,
+   maximum,
++  controlMaximum,
++  controlConfigured,
+   source,
+   isDirty,
+ }: {
+   enabled: boolean;
+   maximum: number;
++  controlMaximum: number;
++  controlConfigured: boolean;
+   source: Parameters<typeof sessionCapacitySourceLabelKey>[0];
+   isDirty: boolean;
+ }) {
+   const { t } = useTranslation();
+-  const current = enabled ? String(maximum) : t("system:sessionCapacityNoLimit");
++  const worker = enabled ? String(maximum) : t("system:sessionCapacityNoLimit");
+   return (
+     <div className="text-xs text-muted-foreground">
+       <div className="flex flex-wrap items-center gap-2">
+         <span className="text-muted-foreground">{t("system:sessionCapacityCurrent")}</span>
+-        <strong data-testid="session-capacity-effective-value">{current}</strong>
++        <strong data-testid="session-capacity-effective-value">{worker}</strong>
++        {controlConfigured ? (
++          <>
++            <span className="text-muted-foreground">
++              {t("system:sessionCapacityControlCurrent", {
++                control: String(controlMaximum),
++                total: String((enabled ? maximum : 0) + controlMaximum),
++              })}
++            </span>
++            <strong data-testid="session-capacity-control-effective-value">
++              {String(controlMaximum)}
++            </strong>
++          </>
++        ) : (
++          <span className="text-muted-foreground" data-testid="session-capacity-control-none">
++            {t("system:sessionCapacityControlNotConfigured")}
++          </span>
++        )}
+         <Badge variant="secondary" data-testid="session-capacity-source">
+           {t(sessionCapacitySourceLabelKey(source))}
+         </Badge>
+@@ -178,14 +263,14 @@ function EffectiveCapacity({
+   );
+ }
+ 
+-function SessionCapacityManagedNotice() {
++function SessionCapacityManagedNotice({ variable }: { variable: string }) {
+   const { t } = useTranslation();
+   return (
+     <Alert>
+       <IconLock className="size-4" />
+       <AlertTitle>{t("system:sessionCapacityEnvironmentLockTitle")}</AlertTitle>
+       <AlertDescription>
+-        {t("system:sessionCapacityEnvironmentLocked", { variable: ENVIRONMENT_VARIABLE })}
++        {t("system:sessionCapacityEnvironmentLocked", { variable })}
+       </AlertDescription>
+     </Alert>
+   );
+@@ -229,22 +314,21 @@ type SessionCapacitySettingsContentProps = {
+   withinGroup?: boolean;
+ };
+ 
++type SessionCapacitySettingsState = NonNullable<SessionCapacitySettingsContentProps["state"]>;
++
+ export function SessionCapacitySettings() {
+   const state = useSessionCapacitySettings();
+   return <SessionCapacitySettingsContent state={state} />;
+ }
+ 
+-function SessionCapacitySettingsReady({
+-  state,
+-  withinGroup,
+-}: SessionCapacitySettingsContentProps & {
+-  state: NonNullable<SessionCapacitySettingsContentProps["state"]>;
+-}) {
++function SessionCapacityFields({ state }: { state: SessionCapacitySettingsState }) {
+   const { t } = useTranslation();
+   const { effective, settings } = state.snapshot!;
+   const controlsDisabled = !state.isAdmin || state.isLocked;
+   const effectiveEnabled = state.isLocked ? effective.enabled : state.enabledDraft;
+   const effectiveMaximum = state.isLocked ? effective.max_sessions : settings.max_sessions;
++  const controlConfigured =
++    effective.control_profile_ids.length > 0 && effective.control_max_sessions > 0;
+   const maximumError = sessionCapacityMaximumError({
+     isAdmin: state.isAdmin,
+     isLocked: state.isLocked,
+@@ -252,6 +336,77 @@ function SessionCapacitySettingsReady({
+     parsed: state.parsed,
+     invalidReason: state.invalidReason,
+   });
++  const controlMaximumError =
++    !state.isLocked && state.parsedControl === null ? state.invalidReason : undefined;
++
++  return (
++    <>
++      <SessionCapacitySwitch
++        checked={effectiveEnabled}
++        disabled={controlsDisabled}
++        onChange={state.setEnabledDraft}
++      />
++      {effectiveEnabled && (
++        <MaximumField
++          label={t("system:sessionCapacityMaximumLabel")}
++          description={t("settings:sessionMaximumShort")}
++          help={t("system:sessionCapacityMaximumHelp")}
++          inputId="session-capacity-maximum"
++          testId="session-capacity-maximum"
++          errorTestId="session-capacity-maximum-error"
++          value={state.isLocked ? String(effective.max_sessions) : state.maxDraft}
++          disabled={controlsDisabled}
++          error={maximumError}
++          onChange={state.setMaxDraft}
++        />
++      )}
++      <MaximumField
++        label={t("system:sessionCapacityControlMaximumLabel")}
++        description={t("settings:sessionControlMaximumShort")}
++        help={t("system:sessionCapacityControlMaximumHelp")}
++        inputId="session-capacity-control-maximum"
++        testId="session-capacity-control-maximum"
++        errorTestId="session-capacity-control-maximum-error"
++        min={0}
++        value={state.isLocked ? String(effective.control_max_sessions) : state.controlMaxDraft}
++        disabled={controlsDisabled}
++        error={controlMaximumError}
++        onChange={state.setControlMaxDraft}
++      />
++      <ControlProfileField
++        value={state.controlProfilesDraft}
++        disabled={controlsDisabled}
++        onChange={state.setControlProfilesDraft}
++      />
++      <EffectiveCapacity
++        enabled={effective.enabled}
++        maximum={effectiveMaximum}
++        controlMaximum={effective.control_max_sessions}
++        controlConfigured={controlConfigured}
++        source={effective.source}
++        isDirty={state.isDirty}
++      />
++      {state.isLocked && <SessionCapacityManagedNotice variable={state.lockedVariable} />}
++      {!state.isAdmin && (
++        <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
++      )}
++      {state.saveFailed && (
++        <Alert variant="destructive">
++          <IconAlertCircle className="size-4" />
++          <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
++        </Alert>
++      )}
++    </>
++  );
++}
++
++function SessionCapacitySettingsReady({
++  state,
++  withinGroup,
++}: SessionCapacitySettingsContentProps & {
++  state: SessionCapacitySettingsState;
++}) {
++  const { t } = useTranslation();
+ 
+   const content = (
+     <>
+@@ -265,35 +420,7 @@ function SessionCapacitySettingsReady({
+         </CardHeader>
+       )}
+       <CardContent className={withinGroup ? "min-w-0 space-y-5 px-0" : "min-w-0 space-y-5"}>
+-        <SessionCapacitySwitch
+-          checked={effectiveEnabled}
+-          disabled={controlsDisabled}
+-          onChange={state.setEnabledDraft}
+-        />
+-        {effectiveEnabled && (
+-          <MaximumField
+-            value={state.isLocked ? String(effective.max_sessions) : state.maxDraft}
+-            disabled={controlsDisabled}
+-            error={maximumError}
+-            onChange={state.setMaxDraft}
+-          />
+-        )}
+-        <EffectiveCapacity
+-          enabled={effective.enabled}
+-          maximum={effectiveMaximum}
+-          source={effective.source}
+-          isDirty={state.isDirty}
+-        />
+-        {state.isLocked && <SessionCapacityManagedNotice />}
+-        {!state.isAdmin && (
+-          <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
+-        )}
+-        {state.saveFailed && (
+-          <Alert variant="destructive">
+-            <IconAlertCircle className="size-4" />
+-            <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
+-          </Alert>
+-        )}
++        <SessionCapacityFields state={state} />
+       </CardContent>
+     </>
+   );
+diff --git a/apps/web/components/settings/system/use-session-capacity-settings.ts b/apps/web/components/settings/system/use-session-capacity-settings.ts
+index d356504192..8505d7f51d 100644
+--- a/apps/web/components/settings/system/use-session-capacity-settings.ts
++++ b/apps/web/components/settings/system/use-session-capacity-settings.ts
+@@ -8,6 +8,7 @@ import {
+   type Dispatch,
+   type SetStateAction,
+ } from "react";
++
+ import { useTranslation } from "react-i18next";
+ import { useAppStore } from "@/components/state-provider";
+ import {
+@@ -22,6 +23,9 @@ import { useSettingsSaveContributor } from "../settings-save-provider";
+ 
+ const MAX_SESSIONS_LIMIT = 2147483647;
+ 
++export const SESSION_CAPACITY_ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
++export const SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONTROL_SESSIONS";
++
+ export function parseSessionCapacityMaximum(value: string): number | null {
+   const trimmed = value.trim();
+   if (!/^\d+$/.test(trimmed)) return null;
+@@ -30,6 +34,34 @@ export function parseSessionCapacityMaximum(value: string): number | null {
+   return parsed;
+ }
+ 
++/**
++ * Parses the control ceiling, where zero is meaningful: it removes the control
++ * lane instead of being an invalid entry.
++ */
++export function parseSessionCapacityControlMaximum(value: string): number | null {
++  const trimmed = value.trim();
++  if (!/^\d+$/.test(trimmed)) return null;
++  const parsed = Number(trimmed);
++  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > MAX_SESSIONS_LIMIT) return null;
++  return parsed;
++}
++
++export function formatControlProfileIds(ids: string[] | undefined): string {
++  return (ids ?? []).join(", ");
++}
++
++export function parseControlProfileIds(value: string): string[] {
++  const seen = new Set<string>();
++  const parsed: string[] = [];
++  for (const part of value.split(",")) {
++    const trimmed = part.trim();
++    if (!trimmed || seen.has(trimmed)) continue;
++    seen.add(trimmed);
++    parsed.push(trimmed);
++  }
++  return parsed;
++}
++
+ export function sessionCapacitySourceLabelKey(source: SessionCapacitySettingsSource): string {
+   switch (source) {
+     case "setting":
+@@ -48,6 +80,10 @@ type LoadState = {
+   setEnabledDraft: Dispatch<SetStateAction<boolean>>;
+   maxDraft: string;
+   setMaxDraft: Dispatch<SetStateAction<string>>;
++  controlMaxDraft: string;
++  setControlMaxDraft: Dispatch<SetStateAction<string>>;
++  controlProfilesDraft: string;
++  setControlProfilesDraft: Dispatch<SetStateAction<string>>;
+   loading: boolean;
+   loadFailed: boolean;
+   reload: () => Promise<void>;
+@@ -57,6 +93,8 @@ function useSessionCapacityLoad(): LoadState {
+   const [snapshot, setSnapshot] = useState<SessionCapacitySettingsResponse | null>(null);
+   const [enabledDraft, setEnabledDraft] = useState(false);
+   const [maxDraft, setMaxDraft] = useState("");
++  const [controlMaxDraft, setControlMaxDraft] = useState("");
++  const [controlProfilesDraft, setControlProfilesDraft] = useState("");
+   const [loading, setLoading] = useState(true);
+   const [loadFailed, setLoadFailed] = useState(false);
+   const loadVersion = useRef(0);
+@@ -71,6 +109,8 @@ function useSessionCapacityLoad(): LoadState {
+       setSnapshot(response);
+       setEnabledDraft(response.settings.enabled);
+       setMaxDraft(String(response.settings.max_sessions));
++      setControlMaxDraft(String(response.settings.control_max_sessions));
++      setControlProfilesDraft(formatControlProfileIds(response.settings.control_profile_ids));
+     } catch {
+       if (version === loadVersion.current) setLoadFailed(true);
+     } finally {
+@@ -92,85 +132,135 @@ function useSessionCapacityLoad(): LoadState {
+     setEnabledDraft,
+     maxDraft,
+     setMaxDraft,
++    controlMaxDraft,
++    setControlMaxDraft,
++    controlProfilesDraft,
++    setControlProfilesDraft,
+     loading,
+     loadFailed,
+     reload,
+   };
+ }
+ 
+-type ContributorOptions = {
+-  load: LoadState;
+-  parsed: number | null;
+-  savedEnabled: boolean | undefined;
+-  savedMaximum: number | undefined;
+-  isAdmin: boolean;
+-  isLocked: boolean;
+-  invalidReason: string | undefined;
+-  onSaveFailed: (failed: boolean) => void;
++type SavedSessionCapacity = {
++  enabled: boolean | undefined;
++  workerMaximum: number | undefined;
++  controlMaximum: number | undefined;
++  controlProfiles: string;
++};
++
++type SessionCapacityDrafts = {
++  enabled: boolean;
++  workerMaximum: string;
++  controlMaximum: string;
++  controlProfiles: string;
+ };
+ 
+-function sessionCapacityInvalidReason(
+-  t: (key: string, values?: Record<string, unknown>) => string,
+-  isAdmin: boolean,
+-  isLocked: boolean,
+-  enabled: boolean,
+-  parsed: number | null,
+-): string | undefined {
++function sessionCapacityInvalidReason({
++  t,
++  isAdmin,
++  isLocked,
++  lockedVariable,
++  enabled,
++  parsed,
++  parsedControl,
++}: {
++  t: (key: string, values?: Record<string, unknown>) => string;
++  isAdmin: boolean;
++  isLocked: boolean;
++  lockedVariable: string;
++  enabled: boolean;
++  parsed: number | null;
++  parsedControl: number | null;
++}): string | undefined {
+   if (!isAdmin) return t("system:sessionCapacityAdminOnly");
+   if (isLocked) {
+-    return t("system:sessionCapacityEnvironmentLocked", {
+-      variable: "KANDEV_MAX_CONCURRENT_SESSIONS",
+-    });
++    return t("system:sessionCapacityEnvironmentLocked", { variable: lockedVariable });
+   }
+   if (enabled && parsed === null) return t("system:sessionCapacityValidation");
++  if (parsedControl === null) return t("system:sessionCapacityControlValidation");
+   return undefined;
+ }
+ 
++function draftsFrom(drafts: SessionCapacityDrafts, saved: SavedSessionCapacity): boolean {
++  if (saved.enabled === undefined || saved.workerMaximum === undefined) return false;
++  return (
++    drafts.enabled !== saved.enabled ||
++    drafts.workerMaximum !== String(saved.workerMaximum) ||
++    drafts.controlMaximum !== String(saved.controlMaximum ?? 0) ||
++    drafts.controlProfiles !== saved.controlProfiles
++  );
++}
++
+ function useSessionCapacityContributor({
+   load,
+   parsed,
+-  savedEnabled,
+-  savedMaximum,
++  parsedControl,
++  saved,
+   isAdmin,
+   isLocked,
+   invalidReason,
+   onSaveFailed,
+-}: ContributorOptions) {
+-  const { snapshot, setSnapshot, enabledDraft, setEnabledDraft, maxDraft, setMaxDraft } = load;
+-  const isDirty =
+-    savedEnabled !== undefined &&
+-    savedMaximum !== undefined &&
+-    (enabledDraft !== savedEnabled || maxDraft !== String(savedMaximum));
++}: {
++  load: LoadState;
++  parsed: number | null;
++  parsedControl: number | null;
++  saved: SavedSessionCapacity;
++  isAdmin: boolean;
++  isLocked: boolean;
++  invalidReason: string | undefined;
++  onSaveFailed: (failed: boolean) => void;
++}) {
++  const { snapshot, setSnapshot, setEnabledDraft, setMaxDraft } = load;
++  const drafts: SessionCapacityDrafts = {
++    enabled: load.enabledDraft,
++    workerMaximum: load.maxDraft,
++    controlMaximum: load.controlMaxDraft,
++    controlProfiles: load.controlProfilesDraft,
++  };
++  const isDirty = draftsFrom(drafts, saved);
+   const canSave =
+     snapshot !== null &&
+     isAdmin &&
+     !isLocked &&
+-    (!enabledDraft || parsed !== null) &&
+-    savedMaximum !== undefined;
++    (!drafts.enabled || parsed !== null) &&
++    parsedControl !== null &&
++    saved.workerMaximum !== undefined;
+ 
+   useSettingsSaveContributor({
+     id: "system-session-capacity",
+-    revision: `${enabledDraft}:${maxDraft}`,
++    revision: `${drafts.enabled}:${drafts.workerMaximum}:${drafts.controlMaximum}:${drafts.controlProfiles}`,
+     isDirty,
+     canSave,
+     invalidReason,
+     save: async () => {
+-      if (!canSave || savedMaximum === undefined) throw new Error(invalidReason);
+-      const submittedEnabled = enabledDraft;
+-      const submittedMaximumDraft = maxDraft;
+-      const submittedMaximum = parsed ?? savedMaximum;
++      if (!canSave || saved.workerMaximum === undefined) throw new Error(invalidReason);
++      const submitted = { ...drafts };
++      const submittedControlMaximum = parsedControl ?? 0;
+       onSaveFailed(false);
+       try {
+         const response = await updateSessionCapacitySettings({
+-          enabled: submittedEnabled,
+-          max_sessions: submittedMaximum,
++          enabled: submitted.enabled,
++          max_sessions: parsed ?? saved.workerMaximum,
++          control_max_sessions: submittedControlMaximum,
++          control_profile_ids: parseControlProfileIds(submitted.controlProfiles),
+         });
+         setSnapshot(response);
+         setEnabledDraft((current) =>
+-          current === submittedEnabled ? response.settings.enabled : current,
++          current === submitted.enabled ? response.settings.enabled : current,
+         );
+         setMaxDraft((current) =>
+-          current === submittedMaximumDraft ? String(response.settings.max_sessions) : current,
++          current === submitted.workerMaximum ? String(response.settings.max_sessions) : current,
++        );
++        load.setControlMaxDraft((current) =>
++          current === submitted.controlMaximum
++            ? String(response.settings.control_max_sessions)
++            : current,
++        );
++        load.setControlProfilesDraft((current) =>
++          current === submitted.controlProfiles
++            ? formatControlProfileIds(response.settings.control_profile_ids)
++            : current,
+         );
+       } catch (error) {
+         onSaveFailed(true);
+@@ -178,8 +268,10 @@ function useSessionCapacityContributor({
+       }
+     },
+     discard: () => {
+-      if (savedEnabled !== undefined) setEnabledDraft(savedEnabled);
+-      if (savedMaximum !== undefined) setMaxDraft(String(savedMaximum));
++      if (saved.enabled !== undefined) setEnabledDraft(saved.enabled);
++      if (saved.workerMaximum !== undefined) setMaxDraft(String(saved.workerMaximum));
++      load.setControlMaxDraft(String(saved.controlMaximum ?? 0));
++      load.setControlProfilesDraft(saved.controlProfiles);
+       onSaveFailed(false);
+     },
+   });
+@@ -192,23 +284,41 @@ export function useSessionCapacitySettings() {
+   const role = useAppStore((state) => state.auth.user?.role);
+   const [saveFailed, setSaveFailed] = useState(false);
+   const load = useSessionCapacityLoad();
+-  const savedEnabled = load.snapshot?.settings.enabled;
+-  const savedMaximum = load.snapshot?.settings.max_sessions;
++  const settings = load.snapshot?.settings;
++  const saved: SavedSessionCapacity = {
++    enabled: settings?.enabled,
++    workerMaximum: settings?.max_sessions,
++    controlMaximum: settings?.control_max_sessions,
++    controlProfiles: formatControlProfileIds(settings?.control_profile_ids),
++  };
+   const parsed = parseSessionCapacityMaximum(load.maxDraft);
++  const parsedControl = parseSessionCapacityControlMaximum(load.controlMaxDraft);
+   const isAdmin = role === undefined || role === "admin";
+-  const isLocked = load.snapshot?.effective.locked === true;
+-  const invalidReason = sessionCapacityInvalidReason(
++  // The backend locks the whole settings document when either lane's ceiling has an
++  // environment override, so the UI must treat control_locked as a lock too.
++  const workerLocked = load.snapshot?.effective.locked === true;
++  const controlLocked = load.snapshot?.effective.control_locked === true;
++  const isLocked = workerLocked || controlLocked;
++  // Both lanes can be owned by their own variable at once, so the notice names
++  // every variable that actually holds a ceiling rather than one representative.
++  const lockedVariable = [
++    ...(workerLocked ? [SESSION_CAPACITY_ENVIRONMENT_VARIABLE] : []),
++    ...(controlLocked ? [SESSION_CONTROL_CAPACITY_ENVIRONMENT_VARIABLE] : []),
++  ].join(", ");
++  const invalidReason = sessionCapacityInvalidReason({
+     t,
+     isAdmin,
+     isLocked,
+-    load.enabledDraft,
++    lockedVariable,
++    enabled: load.enabledDraft,
+     parsed,
+-  );
++    parsedControl,
++  });
+   const contributor = useSessionCapacityContributor({
+     load,
+     parsed,
+-    savedEnabled,
+-    savedMaximum,
++    parsedControl,
++    saved,
+     isAdmin,
+     isLocked,
+     invalidReason,
+@@ -219,10 +329,13 @@ export function useSessionCapacitySettings() {
+     ...load,
+     ...contributor,
+     parsed,
+-    savedEnabled,
+-    savedMaximum,
++    parsedControl,
++    savedEnabled: saved.enabled,
++    savedMaximum: saved.workerMaximum,
++    savedControlMaximum: saved.controlMaximum,
+     isAdmin,
+     isLocked,
++    lockedVariable,
+     invalidReason,
+     saveFailed,
+   };
+diff --git a/docs/plans/control-session-capacity/plan.md b/docs/plans/control-session-capacity/plan.md
+new file mode 100644
+index 0000000000..74657c75ab
+--- /dev/null
++++ b/docs/plans/control-session-capacity/plan.md
+@@ -0,0 +1,61 @@
++---
++created: 2026-10-04
++status: completed
++requirements:
++  - REQ-AGENTS-SESSION-CEILING-003
++system_design:
++  - ../../specs/agents/system-design/session-concurrency-ceiling.md
++legacy_specs: []
++---
++
++# Implementation Plan: Control-lane session capacity
++
++## Overview
++
++Give control and monitoring sessions their own bounded capacity so supervision
++stays possible while the worker lane is saturated, without lowering the worker
++ceiling an operator has already chosen.
++
++The design compares three policies and adopts an additional bounded control
++ceiling: the worker ceiling stays at its configured value and a separate control
++ceiling admits control sessions in addition to it. An alternative that reserves a
++lane inside the unchanged total was rejected because it permanently reduces
++simultaneous worker capacity, and full control exemption was rejected because it
++has no finite memory bound.
++
++The
++[requirements](../../specs/agents/requirements/session-concurrency-ceiling.md)
++and [design](../../specs/agents/system-design/session-concurrency-ceiling.md)
++extend the existing agent-owned admission contract. Session classification is
++derived from durable agent-profile metadata and never from a caller-supplied
++priority.
++
++## Scope
++
++### In scope
++
++- Lane classification inside the single existing admission controller.
++- A saved control ceiling and control profile set with their own environment
++  override, resolved independently of the worker ceiling.
++- Deferral, replay, restart reconstruction, and non-termination on cap decrease.
++- The settings surface showing the worker ceiling, control ceiling, and total.
++- Admission observability labelled by lane and reason only.
++
++### Out of scope
++
++- Per-workspace or per-user ceilings.
++- Changing workflow WIP limits or limiting manual launches.
++- A release toggle, YAML setting, or CPU-derived capacity selection.
++- Replacing existing launch seams or the task repository.
++
++## Work packages
++
++- [Task 01: Control-lane admission and settings](task-01-control-lane-admission.md)
++
++## Memory implication
++
++The additional bounded control ceiling adds a worst-case incremental process
++budget equal to the control ceiling times the per-process resident memory of one
++concurrently running agent. The bound is linear and modeled, not measured:
++representative per-process resident memory for worker and control agents must be
++captured before an operator raises any ceiling above its current setting.
+\ No newline at end of file
+diff --git a/docs/plans/control-session-capacity/task-01-control-lane-admission.md b/docs/plans/control-session-capacity/task-01-control-lane-admission.md
+new file mode 100644
+index 0000000000..81f467f470
+--- /dev/null
++++ b/docs/plans/control-session-capacity/task-01-control-lane-admission.md
+@@ -0,0 +1,82 @@
++---
++id: "01-control-lane-admission"
++title: "Control-lane admission and settings"
++status: completed
++wave: 1
++depends_on: []
++plan: "plan.md"
++requirements:
++  - REQ-AGENTS-SESSION-CEILING-003
++acceptance_criteria:
++  - AC-AGENTS-SESSION-CEILING-003.1
++  - AC-AGENTS-SESSION-CEILING-003.2
++  - AC-AGENTS-SESSION-CEILING-003.3
++  - AC-AGENTS-SESSION-CEILING-003.4
++  - AC-AGENTS-SESSION-CEILING-003.5
++  - AC-AGENTS-SESSION-CEILING-003.6
++  - AC-AGENTS-SESSION-CEILING-003.7
++  - AC-AGENTS-SESSION-CEILING-003.8
++system_design:
++  - ../../specs/agents/system-design/session-concurrency-ceiling.md
++---
++
++# Task 01: Control-lane admission and settings
++
++## Acceptance
++
++- A session's lane is derived from the agent profile stored on the session row
++  and the operator's control profile set. No launch caller, request body,
++  workflow step, or transport classifies a session.
++- The worker lane is admitted against the worker ceiling and the control lane
++  against the control ceiling, both decided in one admission step. A saturated
++  worker lane does not refuse a control launch, and a control session does not
++  consume worker capacity.
++- An unresolvable agent profile counts as a worker. A control ceiling with no
++  configured control profile admits nothing.
++- Lowering either ceiling terminates no running session. A refused automatic
++  launch defers with a lane-specific reason code and replays when that lane has
++  capacity.
++- After restart each lane's population is reconstructed from persisted rows, and
++  a session above a lowered control ceiling waits instead of being terminated.
++- The control ceiling and its profile set are saved settings with their own
++  environment override, resolved independently of the worker ceiling. Settings
++  show the worker ceiling, the control ceiling, the resulting total, and whether
++  a control lane exists.
++- A control-only environment lock locks the whole settings document. While
++  locked, the control input shows the effective control ceiling rather than the
++  unsaved draft, and the managed notice names the environment variable that
++  owns the lock.
++- Manual override, workflow WIP limits, deferral ownership, and queue ordering
++  behave exactly as they do for the worker lane. Admission is unchanged when no
++  control profile is configured.
++- The admission log line carries the lane, that lane's ceiling, and that lane's
++  population, with no task, session, or agent identifier as a label.
++
++## Files touched
++
++- `apps/backend/internal/system/sessioncapacity/` types, resolver, service, and
++  their tests
++- `apps/backend/internal/orchestrator/` admission controller, launch seams, and
++  their tests
++- `apps/backend/internal/task/` deferred-launch record and lane-specific reason
++- `apps/web/components/settings/system/` session capacity settings surface and
++  hook
++- `docs/specs/agents/requirements/session-concurrency-ceiling.md`
++- `docs/specs/agents/system-design/session-concurrency-ceiling.md`
++- `docs/public/tasks-and-workflows.md`
++
++## Verification
++
++```bash
++cd apps/backend
++go test ./internal/system/sessioncapacity ./internal/orchestrator -count=1
++
++cd ../../apps/web
++pnpm run typecheck
++pnpm exec vitest run components/settings/system/session-capacity-settings.test.tsx
++pnpm run i18n:check
++```
++
++Lock flows were additionally confirmed with a one-off out-of-band check covering
++a control-only environment lock, a worker-only environment lock, and no lock. The
++check was temporary verification and is not part of the permanent suite.
+\ No newline at end of file
+diff --git a/docs/specs/office/system-design/routing-01.md b/docs/specs/office/system-design/routing-01.md
+index 8a57dc0d4e..ecdc0f31fd 100644
+--- a/docs/specs/office/system-design/routing-01.md
++++ b/docs/specs/office/system-design/routing-01.md
+@@ -213,7 +213,7 @@ runs (routing additions)
+   resolved_execution_profile_id string concrete profile that supplied the launch configuration
+   current_route_attempt_seq  int    monotonically bumped by IncrementRouteAttemptSeq
+   route_cycle_baseline_seq   int    seq floor for the current retry cycle; attempts at or below the baseline are NOT in the exclude-set
+-  routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required
++  routing_blocked_status     string waiting_for_provider_capacity | blocked_provider_action_required | waiting_for_session_capacity
+   earliest_retry_at          timestamp nullable; minimum auto-retry deadline across degraded routes
+   scheduled_retry_at         timestamp next same-route retry or parked-run wake
+ ```
