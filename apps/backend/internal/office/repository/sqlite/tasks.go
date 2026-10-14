@@ -323,6 +323,22 @@ func (r *Repository) GetTaskBasicInfo(ctx context.Context, taskID string) (*Task
 	return &info, nil
 }
 
+// GetTaskState returns the task's current lifecycle state. Returns "" with no
+// error when the task does not exist, so a caller judging terminality treats a
+// missing row as "not terminal" and leaves it to its own missing-task handling.
+func (r *Repository) GetTaskState(ctx context.Context, taskID string) (string, error) {
+	var state sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT state FROM tasks WHERE id = ?`), taskID).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return state.String, nil
+}
+
 // TaskSearchResult contains fields returned by a task search query.
 type TaskSearchResult struct {
 	ID                     string `db:"id"`

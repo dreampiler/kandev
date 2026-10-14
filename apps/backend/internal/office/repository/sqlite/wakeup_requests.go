@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -192,6 +193,41 @@ func (r *Repository) MarkWakeupRequestCoalesced(
 		return err
 	}
 	return r.mergeWakeupPayloadIntoRunSnapshot(ctx, id, intoRunID)
+}
+
+// CoalescedWakeup is one wakeup request merged into a run: its effective
+// reason (reason, else source — the same fallback the dispatcher's
+// effectiveReason applies) and the task_id its payload names, if any.
+type CoalescedWakeup struct {
+	Reason string
+	TaskID string
+}
+
+// ListCoalescedWakeups returns the wakeup requests coalesced into runID, so a
+// caller can judge each merged wake on its own target rather than by label.
+func (r *Repository) ListCoalescedWakeups(ctx context.Context, runID string) ([]CoalescedWakeup, error) {
+	var rows []struct {
+		Reason  string `db:"reason"`
+		Payload string `db:"payload"`
+	}
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT COALESCE(NULLIF(reason, ''), source) AS reason, COALESCE(payload, '') AS payload
+		FROM agent_wakeup_requests
+		WHERE run_id = ? AND status = ?
+		ORDER BY requested_at, id
+	`), runID, WakeupStatusCoalesced); err != nil {
+		return nil, err
+	}
+	wakeups := make([]CoalescedWakeup, 0, len(rows))
+	for _, row := range rows {
+		var payload struct {
+			TaskID string `json:"task_id"`
+		}
+		// An unreadable payload names no target; the caller treats that as live.
+		_ = json.Unmarshal([]byte(row.Payload), &payload)
+		wakeups = append(wakeups, CoalescedWakeup{Reason: row.Reason, TaskID: payload.TaskID})
+	}
+	return wakeups, nil
 }
 
 // PromoteRunAndCoalesceWakeupIfQueued atomically promotes a queued run,
