@@ -987,6 +987,23 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
 
+	// External-ID Found preflight (docs/specs/tasks/system-design/
+	// external-id-idempotency.md, "Request ordering and error precedence"):
+	// when the request carries an external_id, return an already-held
+	// identity before running create-specific resolution that can drift —
+	// override normalization, profile/step resolution, launch metadata — so
+	// a retry still recovers the existing task after its replacement
+	// profile was disabled or its step changed. Workspace write
+	// authorization and external_id validation/normalization already ran
+	// above, so this lookup weakens nothing; a miss continues to the normal
+	// create path, where CreateTask repeats the lookup and its
+	// unique-violation backstop still protects the race.
+	if strings.TrimSpace(req.ExternalID) != "" {
+		if found, handled := h.preflightMCPFoundCreateTask(ctx, msg, &req, admission); handled {
+			return found, nil
+		}
+	}
+
 	identity, _ := authn.IdentityFromContext(ctx)
 	contributions, err := h.resolveMCPRemoteContributions(ctx, req.WorkspaceID, identity.UserID, repos)
 	if err != nil {

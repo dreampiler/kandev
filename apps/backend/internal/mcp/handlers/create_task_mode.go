@@ -8,6 +8,7 @@ import (
 	mcporigin "github.com/kandev/kandev/internal/mcp/origin"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/task/service"
@@ -375,6 +376,57 @@ func (h *Handlers) mcpCreateTaskReference(ctx context.Context, id string) (*mode
 
 func isMCPOfficeWorkspace(workspace *models.Workspace) bool {
 	return workspace != nil && workspace.OfficeWorkflowID != ""
+}
+
+// preflightMCPFoundCreateTask returns an already-held external_id before any
+// create-specific resolution (override normalization, profile/step lookup,
+// launch metadata) runs, per the external-id-idempotency request-ordering
+// contract: lookup precedes remaining-request validation, and Found wins over
+// disabled profiles, changed steps, and stale launch metadata. It reuses the
+// service lookup (GetTaskByExternalID: workspace write authorization, then
+// validation/normalization) and the MCP Found isolation check
+// (validateMCPFoundCreateTask), and returns the same Found response shape the
+// post-CreateTask branch below produces, without side effects.
+//
+// handled=false (nil response) means "no identity held": the caller continues
+// to the normal create path, where CreateTask repeats the lookup and its
+// unique-violation backstop still protects the race.
+func (h *Handlers) preflightMCPFoundCreateTask(
+	ctx context.Context,
+	msg *ws.Message,
+	req *mcpCreateTaskRequest,
+	admission mcpCreateTaskAdmission,
+) (*ws.Message, bool) {
+	if h.taskSvc == nil {
+		return nil, false
+	}
+	found, err := h.taskSvc.GetTaskByExternalID(ctx, req.WorkspaceID, req.ExternalID)
+	if err != nil {
+		// A miss (or any lookup failure) continues to the normal create
+		// path, where CreateTask normalizes again and its backstop still
+		// protects the race. Found isolation is enforced only on a hit.
+		return nil, false
+	}
+	if err := h.validateMCPFoundCreateTask(ctx, req, found); err != nil {
+		code := mcpCreateTaskAdmissionErrorCode(err)
+		message := mcpCreateTaskAdmissionErrorMessage(err)
+		h.logMCPCreateAdmissionRejection(ctx, code, message)
+		resp, respErr := ws.NewError(msg.ID, msg.Action, code, message, nil)
+		if respErr != nil {
+			return nil, false
+		}
+		return resp, true
+	}
+	resp, respErr := ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
+		TaskDTO:          dto.FromTask(found),
+		Deduplicated:     true,
+		CreationComplete: found.ExternalIDSettledAt != nil,
+		ParentResolution: admission.parentResolution.forOutcome(false),
+	})
+	if respErr != nil {
+		return nil, false
+	}
+	return resp, true
 }
 
 func mcpCreateTaskAdmissionErrorCode(err error) string {
