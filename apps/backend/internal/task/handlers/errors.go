@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
@@ -39,6 +40,10 @@ const errorDetailKeyErrorCode = "error_code"
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
+		return
+	}
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		c.JSON(http.StatusNotFound, taskErrorBody(err))
 		return
 	}
 	if status, ok := repositorySelectionHTTPStatus(err); ok {
@@ -103,6 +108,9 @@ func taskErrorBody(err error) gin.H {
 }
 
 func taskErrorDetails(err error) map[string]interface{} {
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		return map[string]interface{}{errorDetailKeyErrorCode: repoerrors.ExecutorProfileNotFoundCode}
+	}
 	var selectionErr *service.RepositorySelectionError
 	if errors.As(err, &selectionErr) {
 		return map[string]interface{}{errorDetailKeyErrorCode: string(selectionErr.Code)}

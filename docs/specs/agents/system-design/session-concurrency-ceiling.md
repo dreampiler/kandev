@@ -31,6 +31,7 @@ in force when enabled.
 | `REQ-AGENTS-SESSION-CEILING-002` | [Settings contract](#settings-contract), [Settings surface](#settings-surface), [Persistence](#persistence) |
 | `REQ-AGENTS-SESSION-CEILING-003` | [Control lane](#control-lane), [Settings contract](#settings-contract), [Observability](#observability) |
 | `REQ-AGENTS-SESSION-CEILING-004` | [Scheduling orphan recovery](#scheduling-orphan-recovery) |
+| `REQ-AGENTS-SESSION-CEILING-005` | [Coordinator precedence](#coordinator-precedence) |
 
 ## Components and responsibilities
 
@@ -277,9 +278,10 @@ or resume: the manual override passes the session-count ceiling but never the
 host-memory condition. Only a launch that adds a new agent process is subject. A
 prompt or resume into a session that is already counted is never held, a dynamic
 hand-off and a failed-attempt replacement are never refused, and a running turn
-is never cut. The control lane and Office coordinator are exempt through the same
-lane classification that governs the count ceiling, so reclamation judgement does
-not stop with the work it manages. An unreadable or unsupported host reading
+is never cut. Only the control lane is exempt, through the same lane
+classification that governs the count ceiling, so reclamation judgement does not
+stop with the work it manages; a worker-lane Office coordinator is held like any
+worker. An unreadable or unsupported host reading
 fails open (treated as not pressured) and logs the cause once.
 
 The commit ceiling default stays below the host watchdog's whole-instance restart
@@ -290,6 +292,20 @@ guard is configured through environment/profile values, not the Settings surface
 `KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB` (default 8192), and
 `KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT` (default 75). Changing them requires a
 restart.
+
+## Coordinator precedence
+
+`CeilingCoordinatorProfiles`, wired at the composition root, answers whether a
+profile is a workspace coordinator from its live `agent_profiles` row
+(`role = ceo`, non-empty `workspace_id`); errors fail closed. Before the
+controller mutex, `withCoordinatorAdmission` marks an automatic request and reads
+its own record's `QueuedAt`. The sweep and the precedence scan share one sort
+that puts Office coordinator records first; a coordinator request stops the scan
+at the first ordinary record. In a saturated worker lane, after the memory branch,
+`ceiling_coordinator_allowance` admits it once that queue time is five minutes
+old and no counted or reserved session carries its profile (reservations record
+their profile). A start replay whose Office run is terminal or bound to another
+session gets a `LaunchOwnerClosed` re-mint error and drops its record.
 
 ## Failure and recovery
 

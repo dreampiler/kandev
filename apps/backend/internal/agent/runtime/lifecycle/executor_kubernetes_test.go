@@ -287,14 +287,14 @@ func TestKubernetesCreateInstanceUsesCurrentConnectionConfigOnReconnect(t *testi
 	restarted := newFakeKubernetesExecutorWithForwarder(resources, &recordingKubernetesExec{}, forwards)
 	reconnectRequest := kubernetesReconnectRequest(created)
 	reconnectRequest.Metadata[MetadataKeyKubernetesAuthMode] = "kubeconfig"
-	reconnectRequest.Metadata[MetadataKeyKubernetesKubeconfigPath] = "/etc/kandev/current-kubeconfig"
+	reconnectRequest.Metadata[MetadataKeyKubernetesKubeconfigPath] = hostAbsPath("/etc/kandev/current-kubeconfig")
 	reconnectRequest.Metadata[MetadataKeyKubernetesKubeContext] = "current-context"
 	reconnectRequest.Metadata[MetadataKeyKubernetesRequestTimeoutSeconds] = "45"
 
 	reconnected, err := restarted.CreateInstance(context.Background(), reconnectRequest)
 
 	require.NoError(t, err)
-	require.Equal(t, "/etc/kandev/current-kubeconfig", reconnected.Metadata[MetadataKeyKubernetesKubeconfigPath])
+	require.Equal(t, hostAbsPath("/etc/kandev/current-kubeconfig"), reconnected.Metadata[MetadataKeyKubernetesKubeconfigPath])
 	require.Equal(t, "current-context", reconnected.Metadata[MetadataKeyKubernetesKubeContext])
 	require.Equal(t, "45", reconnected.Metadata[MetadataKeyKubernetesRequestTimeoutSeconds])
 	require.NotEqual(t, created.Metadata[MetadataKeyKubernetesExecutorConfigHash], reconnected.Metadata[MetadataKeyKubernetesExecutorConfigHash])

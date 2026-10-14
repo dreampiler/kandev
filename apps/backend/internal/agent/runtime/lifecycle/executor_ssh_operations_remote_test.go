@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -497,8 +498,9 @@ func TestEnsureAgentctlOnHostUploadsWhenShaDiffers(t *testing.T) {
 	// The SFTP subsystem serves the real filesystem, so the "remote home" is a
 	// temp dir and the uploaded bytes are assertable on disk.
 	remoteHome := t.TempDir()
+	remoteRoot := sftpRemotePath(remoteHome)
 	server := newFakeSSHServer(t, newSSHScriptedHandler(t,
-		sshScriptRule{match: remoteHomeCommand, result: sshOut(remoteHome)},
+		sshScriptRule{match: remoteHomeCommand, result: sshOut(remoteRoot)},
 		sshScriptRule{match: "agentctl.sha256", result: sshOut("stale-sha\n")},
 		sshScriptRule{match: "mkdir -p", result: sshOK},
 		sshScriptRule{match: "test -x", result: sshOK},
@@ -513,10 +515,11 @@ func TestEnsureAgentctlOnHostUploadsWhenShaDiffers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureAgentctlOnHost: %v", err)
 	}
-	wantBin := filepath.Join(remoteHome, ".kandev", "bin", "agentctl")
-	if remoteBin != wantBin {
-		t.Fatalf("remote binary = %q, want %q", remoteBin, wantBin)
+	wantRemoteBin := path.Join(remoteRoot, ".kandev", "bin", "agentctl")
+	if remoteBin != wantRemoteBin {
+		t.Fatalf("remote binary = %q, want %q", remoteBin, wantRemoteBin)
 	}
+	wantBin := filepath.Join(remoteHome, ".kandev", "bin", "agentctl")
 	uploaded, err := os.ReadFile(wantBin)
 	if err != nil {
 		t.Fatalf("read uploaded agentctl: %v", err)
@@ -528,8 +531,8 @@ func TestEnsureAgentctlOnHostUploadsWhenShaDiffers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat uploaded agentctl: %v", err)
 	}
-	if info.Mode().Perm() != 0o755 {
-		t.Fatalf("uploaded mode = %v, want 0755", info.Mode().Perm())
+	if want := observableFileMode(0o755); info.Mode().Perm() != want {
+		t.Fatalf("uploaded mode = %v, want %v", info.Mode().Perm(), want)
 	}
 	sidecar, err := os.ReadFile(wantBin + ".sha256")
 	if err != nil {
@@ -538,7 +541,7 @@ func TestEnsureAgentctlOnHostUploadsWhenShaDiffers(t *testing.T) {
 	if string(sidecar) != sha+"\n" {
 		t.Fatalf("sidecar = %q, want %q", sidecar, sha+"\n")
 	}
-	if _, ok := server.lastCommandContaining("mkdir -p '" + filepath.Join(remoteHome, ".kandev", "bin") + "'"); !ok {
+	if _, ok := server.lastCommandContaining("mkdir -p '" + path.Join(remoteRoot, ".kandev", "bin") + "'"); !ok {
 		t.Fatalf("expected the bin dir to be created before upload, commands: %v", server.commands())
 	}
 }
@@ -579,7 +582,7 @@ func TestSftpUploadBytesWritesAtomically(t *testing.T) {
 	if err := os.WriteFile(target, []byte("previous"), 0o600); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
-	if err := sftpUploadBytes(client, target, []byte("replacement"), 0o640); err != nil {
+	if err := sftpUploadBytes(client, sftpRemotePath(target), []byte("replacement"), 0o640); err != nil {
 		t.Fatalf("sftpUploadBytes: %v", err)
 	}
 	got, err := os.ReadFile(target)
@@ -593,8 +596,8 @@ func TestSftpUploadBytesWritesAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat target: %v", err)
 	}
-	if info.Mode().Perm() != 0o640 {
-		t.Fatalf("mode = %v, want 0640", info.Mode().Perm())
+	if want := observableFileMode(0o640); info.Mode().Perm() != want {
+		t.Fatalf("mode = %v, want %v", info.Mode().Perm(), want)
 	}
 	entries, err := os.ReadDir(root)
 	if err != nil {

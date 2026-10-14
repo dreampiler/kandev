@@ -250,6 +250,7 @@ func (s *Service) startIdleSessionReaper(ctx context.Context) {
 		s.reclaimStuckSignalSessionsOnce(tickCtx)
 		s.detectOfficeDecisionWaitingOnce(tickCtx)
 		s.reapStalePendingMovesOnce(tickCtx)
+		s.reconcileOrphanedSessionTransfersOnce(tickCtx)
 	}) {
 		return
 	}

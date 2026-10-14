@@ -130,13 +130,13 @@ func runKubernetesPreparationWithEquivalentGitHubOrigins(t *testing.T, script st
 		"{{github.auth_setup}}", ":",
 		"{{repository.branch}}", shellQuote("main"),
 		"{{repository.clone_url}}", shellQuote("git@github.com:acme/repo.git"),
-		"{{workspace.path}}", shellQuote(workspace),
+		"{{workspace.path}}", shellQuote(filepath.ToSlash(workspace)),
 		"{{repository.setup_script}}", ":",
 		"{{kandev.agents.install}}", ":",
-		"/opt/kandev/.workspace-clone", filepath.Join(root, "runtime", "workspace-clone"),
+		"/opt/kandev/.workspace-clone", filepath.ToSlash(filepath.Join(root, "runtime", "workspace-clone")),
 	).Replace(script)
 	cmd := exec.Command("sh", "-eu", "-c", rendered)
-	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), "HOME="+home, prependPATH(bin))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Kubernetes prepare rejected equivalent GitHub origins: %v\n%s", err, output)
 	}

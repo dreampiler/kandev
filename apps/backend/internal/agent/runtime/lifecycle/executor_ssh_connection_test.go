@@ -649,8 +649,8 @@ func TestSSHRemoteContributionScriptReusesLocalDescendant(t *testing.T) {
 	targetURL := "https://github.com/acme/widget.git"
 	sourceURL := "https://github.com/contributor/widget.git"
 	configPath := filepath.Join(root, "gitconfig")
-	config := "[url \"file://" + targetBare + "\"]\n\tinsteadOf = " + targetURL + "\n" +
-		"[url \"file://" + sourceBare + "\"]\n\tinsteadOf = " + sourceURL + "\n"
+	config := "[url \"" + localFileURL(targetBare) + "\"]\n\tinsteadOf = " + targetURL + "\n" +
+		"[url \"" + localFileURL(sourceBare) + "\"]\n\tinsteadOf = " + sourceURL + "\n"
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -817,7 +817,7 @@ func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
 
 	cases := map[string]string{
 		"~/.ssh/agent.sock":                   filepath.Join(home, ".ssh", "agent.sock"),
-		"${AGENT_DIR}/%n-%h-%p-%r-%j-%%.sock": filepath.Join(home, "agents", "prod-resolved.internal-2222-deploy-jump-alias-%.sock"),
+		"${AGENT_DIR}/%n-%h-%p-%r-%j-%%.sock": filepath.Join(home, "agents") + "/prod-resolved.internal-2222-deploy-jump-alias-%.sock",
 		"$LEGACY_AGENT":                       filepath.Join(home, "legacy.sock"),
 		"SSH_AUTH_SOCK":                       filepath.Join(home, "env.sock"),
 		"@abstract-agent":                     "@abstract-agent",

@@ -237,8 +237,13 @@ func TestReservationExclusion(t *testing.T) {
 			want:    true,
 		},
 		{
-			name:    "a positive reserve excludes unknown usage until evidence returns",
+			name:    "a partial reserve defers admission until usage is known",
 			options: ModelOptions{ReservedUserSharePct: 10},
+			score:   PaceScore{Known: false},
+		},
+		{
+			name:    "a full reserve excludes unknown usage",
+			options: ModelOptions{ReservedUserSharePct: 100},
 			score:   PaceScore{Known: false},
 			want:    true,
 		},

@@ -142,22 +142,6 @@ func (s *Server) getDiagnosticBundleHandler() server.ToolHandlerFunc {
 	}
 }
 
-// listScopePayload builds the backend payload for a list tool whose scope
-// argument is optional. An agent running inside a task holds neither its
-// workspace_id nor its workflow_id, so an omitted scope is resolved from the
-// calling task's own scope on the backend rather than rejected as a missing
-// required argument. Returns a ready-to-render error message when neither an
-// explicit value nor a calling task is available.
-func (s *Server) listScopePayload(req mcp.CallToolRequest, field string) (map[string]string, string) {
-	if value := req.GetString(field, ""); value != "" {
-		return map[string]string{field: value}, ""
-	}
-	if s.taskID == "" {
-		return nil, field + " is required (there is no current task to resolve it from)"
-	}
-	return map[string]string{"caller_task_id": s.taskID}, ""
-}
-
 func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload, missing := s.listScopePayload(req, "workspace_id")
@@ -738,32 +722,6 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	}
 }
 
-// getTaskMessageOperationHandler reads one operation identity's recorded
-// outcome. It delivers nothing, so it is the safe thing to call after a
-// message_task_kandev timeout. Sender attribution is injected from the
-// server's own task/session: an operation is readable only by the session that
-// claimed it, and a caller cannot widen that by naming another task.
-func (s *Server) getTaskMessageOperationHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		operationID, err := req.RequireString("operation_id")
-		if err != nil {
-			return mcp.NewToolResultError("operation_id is required"), nil
-		}
-		payload := map[string]interface{}{
-			"task_id":           s.taskID,
-			"operation_id":      operationID,
-			"sender_task_id":    s.taskID,
-			"sender_session_id": s.sessionID,
-		}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskMessageOperation, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
 func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString(mcpKeyTaskID)
@@ -778,28 +736,6 @@ func (s *Server) stopTaskHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPStopTask, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
-}
-
-func (s *Server) reorderChildTasksHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		orderedIDs, err := req.RequireStringSlice("ordered_task_ids")
-		if err != nil || len(orderedIDs) == 0 {
-			return mcp.NewToolResultError("ordered_task_ids is required"), nil
-		}
-		// Build a fresh payload so callers cannot override trusted sender
-		// attribution; the backend authorizes against sender_task_id.
-		payload := map[string]interface{}{
-			"ordered_task_ids": orderedIDs,
-			"sender_task_id":   s.taskID,
-		}
-		copyOptionalStringArg(payload, req, "placement")
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPReorderChildTasks, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

@@ -249,14 +249,23 @@ func (r *sqliteRepository) DeleteSessionTransferCompensation(
 	ctx context.Context,
 	operationID, taskID, fromSessionID, toSessionID string,
 ) error {
-	return r.deleteSessionTransferCompensationWithOwner(
+	return r.deleteSessionTransferCompensation(
 		ctx, operationID, operationID, taskID, fromSessionID, toSessionID,
+		false,
 	)
 }
 
 func (r *sqliteRepository) deleteSessionTransferCompensationWithOwner(
 	ctx context.Context,
 	operationID, ownerID, taskID, fromSessionID, toSessionID string,
+) error {
+	return r.deleteSessionTransferCompensation(ctx, operationID, ownerID, taskID, fromSessionID, toSessionID, true)
+}
+
+func (r *sqliteRepository) deleteSessionTransferCompensation(
+	ctx context.Context,
+	operationID, ownerID, taskID, fromSessionID, toSessionID string,
+	requireLease bool,
 ) error {
 	if err := r.ensureSessionTransferCompensationSchema(ctx); err != nil {
 		return err
@@ -271,13 +280,19 @@ func (r *sqliteRepository) deleteSessionTransferCompensationWithOwner(
 	); err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, tx.Rebind(`
+	query := `
 		DELETE FROM queue_session_transfer_compensations
 		WHERE operation_id = ? AND recovery_owner = ?
 		  AND task_id = ? AND from_session_id = ? AND to_session_id = ?
-		  AND recovery_lease_expires_at > ?
-	`), operationID, ownerID, taskID, fromSessionID, toSessionID, now)
+	`
+	args := []interface{}{operationID, ownerID, taskID, fromSessionID, toSessionID}
+	// A completed original operation may release its own fence after expiry.
+	// Recovery acknowledgement still requires the claimed owner's live lease.
+	if requireLease {
+		query += ` AND recovery_lease_expires_at > ?`
+		args = append(args, time.Now().UTC())
+	}
+	result, err := tx.ExecContext(ctx, tx.Rebind(query), args...)
 	if err != nil {
 		return fmt.Errorf("delete session transfer compensation: %w", err)
 	}
@@ -298,6 +313,14 @@ func (r *sqliteRepository) claimSessionTransferCompensationRecovery(
 	ctx context.Context,
 	compensation SessionTransferCompensation,
 ) (string, error) {
+	return r.claimSessionTransferCompensation(ctx, compensation, false)
+}
+
+func (r *sqliteRepository) claimSessionTransferCompensation(
+	ctx context.Context,
+	compensation SessionTransferCompensation,
+	orphanOnly bool,
+) (string, error) {
 	if err := r.ensureSessionTransferCompensationSchema(ctx); err != nil {
 		return "", err
 	}
@@ -310,6 +333,15 @@ func (r *sqliteRepository) claimSessionTransferCompensationRecovery(
 		ctx, tx, compensation.FromSessionID, compensation.ToSessionID,
 	); err != nil {
 		return "", err
+	}
+	if orphanOnly {
+		orphaned, checkErr := r.sessionTransferCompensationOrphanedTx(ctx, tx, compensation)
+		if checkErr != nil {
+			return "", checkErr
+		}
+		if !orphaned {
+			return "", ErrSessionTransferInProgress
+		}
 	}
 	ownerID := uuid.NewString()
 	now := time.Now().UTC()

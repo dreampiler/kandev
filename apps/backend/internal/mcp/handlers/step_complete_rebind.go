@@ -4,12 +4,26 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// stepCompleteRejectionStore is the optional metadata writer used to record why
+// a step_complete call was refused. The production session repository
+// implements it; a fake that omits it records nothing and keeps its behavior.
+type stepCompleteRejectionStore interface {
+	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+}
+
+// stepCompleteRejectionReasonLimit bounds the recorded refusal reason. The
+// reminder shows it to the child agent, so it must stay short and free of paths
+// or secrets (the gate's messages carry only session/step/profile ids).
+const stepCompleteRejectionReasonLimit = 400
 
 // StepCompleteSessionRebinder promotes a session to its task's primary session.
 // It is implemented by *orchestrator.Service. The handler needs only the primary
@@ -64,7 +78,53 @@ func (h *Handlers) ensureStepCompleteSessionOwnership(
 	if rebindReason != "" {
 		message += ". " + rebindReason
 	}
+	// Record the refusal so the child's missing-signal reminder names the real
+	// block instead of implying the agent never called step_complete.
+	h.recordStepCompleteRejection(ctx, session.ID, task.WorkflowStepID, message)
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, message, nil)
+}
+
+// recordStepCompleteRejection stores the refusal reason on the calling session
+// for the current step. Best effort: a write failure only means the reminder
+// falls back to its generic text.
+func (h *Handlers) recordStepCompleteRejection(ctx context.Context, sessionID, stepID, reason string) {
+	writer, ok := h.sessionRepo.(stepCompleteRejectionStore)
+	if !ok || sessionID == "" || stepID == "" || strings.TrimSpace(reason) == "" {
+		return
+	}
+	rejection := models.StepCompleteRejection{
+		StepID: stepID,
+		Reason: boundStepCompleteRejectionReason(reason),
+		At:     time.Now().UTC(),
+	}
+	if err := writer.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyStepCompleteRejection, rejection.ToMap()); err != nil {
+		h.logger.Debug("step_complete: failed to record the refusal reason",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+// clearStepCompleteRejection drops the recorded refusal reason once a signal for
+// the current step is accepted, so a resolved block is never shown again.
+func (h *Handlers) clearStepCompleteRejection(ctx context.Context, sessionID string) {
+	writer, ok := h.sessionRepo.(stepCompleteRejectionStore)
+	if !ok || sessionID == "" {
+		return
+	}
+	if err := writer.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyStepCompleteRejection, nil); err != nil {
+		h.logger.Debug("step_complete: failed to clear the refusal reason",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func boundStepCompleteRejectionReason(reason string) string {
+	trimmed := strings.TrimSpace(reason)
+	runes := []rune(trimmed)
+	if len(runes) <= stepCompleteRejectionReasonLimit {
+		return trimmed
+	}
+	// Truncate by runes, not bytes: a byte slice can split a multi-byte rune
+	// (step names may be non-ASCII) and store invalid UTF-8.
+	return strings.TrimSpace(string(runes[:stepCompleteRejectionReasonLimit]))
 }
 
 // rebindStepCompleteSession decides whether the calling session may take over a
@@ -82,7 +142,7 @@ func (h *Handlers) rebindStepCompleteSession(
 	task *models.Task,
 	launchStepID string,
 ) (bool, string, error) {
-	if h.stepCompleteRebinder == nil {
+	if h.extensions.stepCompleteRebinder == nil {
 		return false, "Automatic rebinding is not available on this backend.", nil
 	}
 	// A primary caller reaches this path only when its profile no longer
@@ -122,7 +182,7 @@ func (h *Handlers) rebindStepCompleteSession(
 	if primary != nil && !designatedStepSessionBroken(primary, profile) {
 		return false, "Another live session is still the current step's session.", nil
 	}
-	if err := h.stepCompleteRebinder.SetPrimarySession(ctx, session.ID); err != nil {
+	if err := h.extensions.stepCompleteRebinder.SetPrimarySession(ctx, session.ID); err != nil {
 		return false, "", err
 	}
 	h.logger.Info("step_complete: rebound signal to a live current-step session",

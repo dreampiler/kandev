@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -52,7 +53,7 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if caller == "" {
 		caller = req.TaskID
 	}
-	related, err := svc.ListRelatedForCaller(ctx, caller, req.TaskID)
+	related, err := h.listRelatedForCaller(ctx, svc, caller, req.TaskID)
 	if err != nil {
 		// Access denied is an expected 403; log only genuine
 		// infrastructure errors, then route everything through
@@ -79,6 +80,57 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	}
 	h.enrichRelatedTasksWithPRs(ctx, related)
 	return ws.NewResponse(msg.ID, msg.Action, related)
+}
+
+// listRelatedForCaller resolves a related-tasks request through the read gate.
+// A controller principal is exempt from the direct-relation gate for a target
+// in its own workspace; every other caller keeps today's relation/workspace
+// check.
+func (h *Handlers) listRelatedForCaller(
+	ctx context.Context,
+	svc *service.HandoffService,
+	caller, target string,
+) (*service.RelatedTasks, error) {
+	if caller != target && h.controllerMayReadRelated(ctx, target) {
+		return svc.ListRelated(ctx, target)
+	}
+	return svc.ListRelatedForCaller(ctx, caller, target)
+}
+
+// callerIsWorkspaceController reports whether the server-derived principal is a
+// workspace controller: a principal whose own task is a workspace root (empty
+// parent_id) with at least one child. The principal is server-derived, so an
+// agent cannot widen its scope by naming a different caller task. A missing
+// handoff service or any read error fails closed.
+func (h *Handlers) callerIsWorkspaceController(ctx context.Context) bool {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || principal.CallerTaskID == "" || principal.WorkspaceID == "" || h.handoffSvc == nil {
+		return false
+	}
+	isController, err := h.handoffSvc.IsWorkspaceController(ctx, principal.CallerTaskID)
+	return err == nil && isController
+}
+
+// controllerMayReadRelated reports whether the calling principal is a workspace
+// controller that may read targetTaskID's relations without a direct relation
+// edge. The target must be in the principal's own workspace. Any read error
+// fails closed.
+func (h *Handlers) controllerMayReadRelated(ctx context.Context, targetTaskID string) bool {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || h.taskSvc == nil {
+		return false
+	}
+	if targetTaskID == "" || targetTaskID == principal.CallerTaskID {
+		return false
+	}
+	if !h.callerIsWorkspaceController(ctx) {
+		return false
+	}
+	target, err := h.taskSvc.GetTask(ctx, targetTaskID)
+	if err != nil || target == nil || target.WorkspaceID != principal.WorkspaceID {
+		return false
+	}
+	return true
 }
 
 // handleListTaskDocuments dispatches mcp.list_task_documents.

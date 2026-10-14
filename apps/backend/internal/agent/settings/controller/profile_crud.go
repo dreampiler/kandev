@@ -1164,68 +1164,12 @@ func (c *Controller) prepareProfileDeletion(ctx context.Context, profileID strin
 	if !force && len(dynamicRefs) > 0 {
 		return &ErrProfileInUseDetail{DynamicProfiles: dynamicRefs}
 	}
-	routingTierRefs, err := c.listRoutingTierReferences(ctx, profileID)
+	blockers, err := c.profileReferenceBlockers(ctx, profileID, force)
 	if err != nil {
 		return err
 	}
-	if len(routingTierRefs) > 0 {
-		return &ErrProfileInUseDetail{RoutingTiers: routingTierRefs}
-	}
-	var utilityRefs []UtilityAgentReference
-	if c.utilityDeps != nil {
-		refs, err := c.utilityDeps.ListUtilityAgentsByAgentProfile(ctx, profileID)
-		if err != nil {
-			return fmt.Errorf("check utility agents using this profile: %w", err)
-		}
-		utilityRefs = refs
-	}
-	if c.sessionChecker == nil {
-		if !force && len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{UtilityAgents: utilityRefs, DynamicProfiles: dynamicRefs}
-		}
-		return nil
-	}
-	if !force {
-		activeTasks, err := c.sessionChecker.GetActiveTaskInfoByAgentProfile(ctx, profileID)
-		if err != nil {
-			return err
-		}
-		var watcherRefs []WatcherReference
-		if c.watcherDeps != nil {
-			refs, err := c.watcherDeps.ListWatchersByAgentProfile(ctx, profileID)
-			if err != nil {
-				c.logger.Warn("watcher deps lookup failed; proceeding without watcher info",
-					zap.String("profile_id", profileID), zap.Error(err))
-			} else {
-				watcherRefs = refs
-			}
-		}
-		var automationRefs []AutomationReference
-		if c.automationDeps != nil {
-			refs, err := c.automationDeps.ListEnabledAutomationsByAgentProfile(ctx, profileID)
-			if err != nil {
-				// Fails closed, unlike the watcher lookup above. A watcher this
-				// path misses is disabled anyway by the force pass afterwards;
-				// an automation is not, so a lookup that silently returned
-				// nothing would orphan exactly the references this check was
-				// added to catch. Refusing is recoverable — the user retries.
-				return fmt.Errorf("check automations using this profile: %w", err)
-			}
-			automationRefs = refs
-		}
-		// An enabled automation is a standing instruction to launch against this
-		// profile. Nothing is running, so it never appears in the active-session
-		// list, but its next firing would go looking for a profile that is gone —
-		// and a schedule fails quietly, hours later, with nobody watching.
-		if len(activeTasks) > 0 || len(watcherRefs) > 0 || len(automationRefs) > 0 || len(utilityRefs) > 0 {
-			return &ErrProfileInUseDetail{
-				ActiveSessions:  activeTasks,
-				Watchers:        watcherRefs,
-				Automations:     automationRefs,
-				UtilityAgents:   utilityRefs,
-				DynamicProfiles: dynamicRefs,
-			}
-		}
+	if blockers != nil {
+		return blockers
 	}
 	// Clean up ephemeral tasks (quick chat, config chat) using this profile.
 	// Done after the force check since these don't need user confirmation.
@@ -1255,10 +1199,20 @@ func (c *Controller) listDynamicProfileReferences(ctx context.Context, profileID
 	}
 	out := make([]DynamicProfileReference, 0, len(refs))
 	for _, ref := range refs {
+		routes := make([]DynamicProfileRouteRef, 0, len(ref.Routes))
+		for _, route := range ref.Routes {
+			routes = append(routes, DynamicProfileRouteRef{
+				Position: route.Position,
+				Tier:     route.Tier,
+				Enabled:  route.Enabled,
+			})
+		}
 		out = append(out, DynamicProfileReference{
 			ID:      ref.ProfileID,
 			Name:    ref.Name,
 			Deleted: ref.DeletedAt != nil,
+			Version: ref.Version,
+			Routes:  routes,
 		})
 	}
 	return out, nil

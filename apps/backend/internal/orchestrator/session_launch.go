@@ -422,6 +422,9 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
+	if err := s.validateLaunchExecutorProfile(ctx, req.ExecutorProfileID); err != nil {
+		return nil, err
+	}
 	if response := s.passiveLaunchResponse(ctx, req, intent); response != nil {
 		return response, nil
 	}

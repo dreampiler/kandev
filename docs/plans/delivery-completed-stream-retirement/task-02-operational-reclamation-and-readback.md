@@ -69,6 +69,34 @@ The matching completed generic `agent_delivery_effects` receipt is deleted in th
 
 The command applies the same retention batch as the background worker, so its delete conditions are exactly those above; no new framework, verifier, hash or ledger is created.
 
+### Expected duration
+
+The dominant cost is two `VACUUM INTO` copies of the full database file (the pre-execution backup and, with `--compact`, the staged compaction), plus the bounded delete batches. On the measured 6.23 GB copy the backup and the bounded delete/scan steps dominated the wall clock; the deletes themselves commit in short bounded transactions, and the orphan scan's bounded unbound-workflow count is capped at the candidate limit. Size the stop window for at least two full-file copies plus a rerun margin, because a capped/partial run is expected to be rerun to drain the backlog.
+
+### Partial runs
+
+Default offline event/prompt execution continues across bounded batches for up
+to two minutes. It follows advancing discovery frontiers even when a page is
+protected, and stops after both alternating phases make no progress. A positive
+`--candidate-limit` deliberately requests only one event/prompt batch. The
+report includes committed `retired inbox rows` and `retired generic effects rows`;
+each retired inbox prefix has exactly one validated generic effect per row.
+Terminal/workflow receipts and replay checkpoints remain protected. A time-limited
+pass preserves committed counts and reports partial before the remaining steps.
+
+The offline command gives each delivery step (payload pruning, orphan scan, retired-session purge) a longer finite per-step budget than the online background worker, in bounded batches. A step that exceeds its budget is recorded as `partial` and the remaining steps (retired-session purge and `--compact`) still run; committed deletes are preserved and are backed by the pre-execution backup. Exit status distinguishes the three outcomes: `0` complete, `1` partial, `2` failure. A partial run is simply rerun with the same command to continue the bounded work; a `--compact` that fails (for example insufficient disk space) also reports partial and leaves the live database intact.
+
+### Steps inside vs. outside the stop window
+
+Inside the stop window (Kandev stopped, exclusive access required):
+
+- the `--execute` run — backup, retention deletes, orphan scan, retired-session purge;
+- the `--compact` staged `VACUUM INTO` and atomic swap, which replaces the live database file.
+
+Outside the stop window (Kandev may be running):
+
+- the read-only dry run (`kandev maintenance database` without `--execute`) acquires no lock, deletes nothing, and is safe to run against a live backend or a copy to inspect candidate counts first.
+
 ## Read-only copy measurement
 
 Source: the approved operational database copy (operator-local path, not recorded), taken 2026-10-13 17:53 KST (08:53 UTC) with the SQLite online backup API (WAL-consistent), 6.23 GB.

@@ -6,6 +6,10 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,6 +126,105 @@ func newFakeSSHServer(t *testing.T, handler sshExecHandler) *fakeSSHServer {
 // enableSFTP turns on the "sftp" subsystem. The server serves the real
 // filesystem, so tests must use paths under t.TempDir().
 func (s *fakeSSHServer) enableSFTP() { s.sftpEnabled = true }
+
+// sftpRemotePath turns a local directory into the remote path the fake SFTP
+// server resolves back to it. Product code treats SSH paths as POSIX; on
+// Windows the pkg/sftp server maps "/C:/dir" to "C:\dir".
+func sftpRemotePath(local string) string {
+	if runtime.GOOS != "windows" {
+		return local
+	}
+	return "/" + filepath.ToSlash(local)
+}
+
+// hostAbsPath turns a POSIX fixture path for a file on the backend host into
+// an absolute host path: unchanged on POSIX, placed on the system volume on
+// Windows ("/etc/x" -> "C:\etc\x").
+func hostAbsPath(posix string) string {
+	if runtime.GOOS != "windows" {
+		return posix
+	}
+	return filepath.VolumeName(os.TempDir()) + filepath.FromSlash(posix)
+}
+
+// shellPOSIXPath converts a local path to the POSIX form that Git for
+// Windows' sh resolves ("C:\x\y" -> "/c/x/y"), so POSIX scripts that walk
+// "/"-separated components see real directories. Unchanged on POSIX.
+func shellPOSIXPath(local string) string {
+	if runtime.GOOS != "windows" {
+		return local
+	}
+	vol := filepath.VolumeName(local)
+	if len(vol) == 2 && vol[1] == ':' {
+		return "/" + strings.ToLower(vol[:1]) + filepath.ToSlash(local[len(vol):])
+	}
+	return filepath.ToSlash(local)
+}
+
+// localFileURL returns a file:// URL git accepts for a local path:
+// "file:///tmp/x" on POSIX and "file:///C:/x" on Windows.
+func localFileURL(local string) string {
+	p := filepath.ToSlash(local)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	return "file://" + p
+}
+
+// writeFakeExecutable writes a POSIX shell script named name into dir. On
+// Windows, exec.LookPath only finds PATHEXT names, so it also writes a
+// name.cmd wrapper that runs the script with Git for Windows' sh.
+func writeFakeExecutable(t *testing.T, dir, name, script string) string {
+	t.Helper()
+	scriptPath := filepath.Join(dir, name)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+	if runtime.GOOS == "windows" {
+		wrapper := "@echo off\r\n\"" + windowsTestSh(t) + "\" \"%~dp0" + name + "\" %*\r\n"
+		if err := os.WriteFile(scriptPath+".cmd", []byte(wrapper), 0o755); err != nil {
+			t.Fatalf("write fake %s.cmd: %v", name, err)
+		}
+	}
+	return scriptPath
+}
+
+// windowsTestSh locates Git for Windows' sh.exe: on PATH, or next to git
+// (<Git>\cmd\git.exe -> <Git>\usr\bin\sh.exe).
+func windowsTestSh(t *testing.T) string {
+	t.Helper()
+	if sh, err := exec.LookPath("sh"); err == nil {
+		return sh
+	}
+	if git, err := exec.LookPath("git"); err == nil {
+		sh := filepath.Join(filepath.Dir(filepath.Dir(git)), "usr", "bin", "sh.exe")
+		if _, statErr := os.Stat(sh); statErr == nil {
+			return sh
+		}
+	}
+	t.Skip("Git for Windows sh.exe is not available")
+	return ""
+}
+
+// prependPATH returns a PATH environment entry with dir in front, joined with
+// the host list separator (";" on Windows) so Git for Windows' sh still
+// converts every entry.
+func prependPATH(dir string) string {
+	return "PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
+// observableFileMode is the permission os.Stat reports for a file written
+// with mode. Windows keeps only the owner-write bit: writable files report
+// 0666 and read-only ones 0444.
+func observableFileMode(mode os.FileMode) os.FileMode {
+	if runtime.GOOS != "windows" {
+		return mode
+	}
+	if mode&0o200 != 0 {
+		return 0o666
+	}
+	return 0o444
+}
 
 // forwardTo makes every direct-tcpip channel connect to addr regardless of the
 // port the client asked for. Used to point remote "127.0.0.1:<port>" dials at

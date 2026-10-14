@@ -38,7 +38,7 @@ func TestKubernetesRefreshRemoteInstanceUsesRotatedConnectionCredentials(t *test
 	}
 	instance := kubernetesRefreshInstance(created, req.Metadata)
 	instance.Metadata[MetadataKeyKubernetesAuthMode] = string(kubeexecutor.AuthModeKubeconfig)
-	instance.Metadata[MetadataKeyKubernetesKubeconfigPath] = "/etc/kandev/rotated.yaml"
+	instance.Metadata[MetadataKeyKubernetesKubeconfigPath] = hostAbsPath("/etc/kandev/rotated.yaml")
 	instance.Metadata[MetadataKeyKubernetesKubeContext] = "rotated"
 
 	refresh, err := executor.RefreshRemoteInstance(context.Background(), instance)
@@ -46,7 +46,7 @@ func TestKubernetesRefreshRemoteInstanceUsesRotatedConnectionCredentials(t *test
 	require.NoError(t, err)
 	require.Nil(t, refresh, "healthy agentctl should not be replaced for a credential-only refresh")
 	require.Equal(t, kubeexecutor.AuthModeKubeconfig, freshConfig.AuthMode)
-	require.Equal(t, "/etc/kandev/rotated.yaml", freshConfig.KubeconfigPath)
+	require.Equal(t, hostAbsPath("/etc/kandev/rotated.yaml"), freshConfig.KubeconfigPath)
 	require.Equal(t, "rotated", freshConfig.KubeContext)
 	executor.mu.Lock()
 	current := executor.sessions[created.InstanceID]

@@ -163,7 +163,7 @@ func uploadPortableConfigFile(
 		warning.Reason = portableConfigReasonUnsafeSourcePath
 		return warning, false, 0
 	}
-	targetPath, err := containedPath(targetHome, filepath.Join(targetHome, filepath.FromSlash(file.TargetPath)))
+	targetPath, err := containedTargetPath(targetHome, targetPathJoin(targetHome, file.TargetPath))
 	if err != nil {
 		warning.Reason = "unsafe_target_path"
 		return warning, false, 0

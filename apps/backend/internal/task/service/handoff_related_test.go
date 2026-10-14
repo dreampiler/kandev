@@ -176,6 +176,29 @@ func TestListRelatedForCaller_ReturnsSiblingDescription(t *testing.T) {
 	}
 }
 
+// TestIsWorkspaceController covers the control-tool discriminator: only a
+// workspace root task with at least one child counts as a controller.
+func TestIsWorkspaceController(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("controller", "", "ws-1")
+	tasks.addTask("child", "controller", "ws-1")
+	tasks.addTask("leaf", "", "ws-1") // root with no children
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+
+	if ok, err := svc.IsWorkspaceController(context.Background(), "controller"); err != nil || !ok {
+		t.Fatalf("root with a child = %v, err %v; want true", ok, err)
+	}
+	if ok, err := svc.IsWorkspaceController(context.Background(), "leaf"); err != nil || ok {
+		t.Errorf("root with no children = %v, err %v; want false", ok, err)
+	}
+	if ok, err := svc.IsWorkspaceController(context.Background(), "child"); err != nil || ok {
+		t.Errorf("non-root task = %v, err %v; want false", ok, err)
+	}
+	if ok, err := svc.IsWorkspaceController(context.Background(), ""); err != nil || ok {
+		t.Errorf("empty id = %v, err %v; want false", ok, err)
+	}
+}
+
 // TestListRelated_OmitsEmptyDescription confirms the projection stays lean
 // when a related task has no description (omitempty keeps the MCP output
 // usable on workflows with many historical tasks).

@@ -26,6 +26,9 @@ func TestDefaultPrepareScriptKubernetesUsesContainerWorkspaceContract(t *testing
 	}
 }
 
+// The Kubernetes prepare script compares `git rev-parse` output with the
+// workspace path, so on Windows the tests pass "C:/…" paths: the form both
+// Git for Windows' sh and git.exe print.
 func TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -54,16 +57,16 @@ func TestDefaultPrepareScriptKubernetesReusesRetainedPVCWorkspace(t *testing.T) 
 		"{{git.identity_setup}}", ":",
 		"{{github.auth_setup}}", ":",
 		"{{repository.branch}}", shellQuote("main"),
-		"{{repository.clone_url}}", shellQuote(origin),
-		"{{workspace.path}}", shellQuote(workspace),
+		"{{repository.clone_url}}", shellQuote(filepath.ToSlash(origin)),
+		"{{workspace.path}}", shellQuote(filepath.ToSlash(workspace)),
 		"{{repository.setup_script}}", ":",
 		"{{kandev.agents.install}}", ":",
-		"/opt/kandev/.workspace-clone", cloneTmp,
+		"/opt/kandev/.workspace-clone", filepath.ToSlash(cloneTmp),
 	).Replace(DefaultPrepareScript("k8s"))
 	run := func() {
 		t.Helper()
 		cmd := exec.Command("sh", "-eu", "-c", script)
-		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
+		cmd.Env = append(os.Environ(), "HOME="+home, prependPATH(bin))
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("Kubernetes prepare failed: %v\n%s", err, output)
 		}
@@ -100,11 +103,11 @@ func TestDefaultPrepareScriptKubernetesRejectsRetainedWorkspaceFromDifferentRepo
 		"{{git.identity_setup}}", ":",
 		"{{github.auth_setup}}", ":",
 		"{{repository.branch}}", shellQuote("main"),
-		"{{repository.clone_url}}", shellQuote(expectedOrigin),
-		"{{workspace.path}}", shellQuote(workspace),
+		"{{repository.clone_url}}", shellQuote(filepath.ToSlash(expectedOrigin)),
+		"{{workspace.path}}", shellQuote(filepath.ToSlash(workspace)),
 		"{{repository.setup_script}}", ":",
 		"{{kandev.agents.install}}", ":",
-		"/opt/kandev/.workspace-clone", filepath.Join(root, "runtime", "workspace-clone"),
+		"/opt/kandev/.workspace-clone", filepath.ToSlash(filepath.Join(root, "runtime", "workspace-clone")),
 	).Replace(DefaultPrepareScript("k8s"))
 	cmd := exec.Command("sh", "-eu", "-c", script)
 	cmd.Env = append(os.Environ(), "HOME="+home)

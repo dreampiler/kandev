@@ -94,6 +94,34 @@ signal and recover without completing the wrong step.
 This addition specifies recovery guidance. Automatic turn restart, deferred-move
 scheduling repairs, and changes to completion authorization are outside its scope.
 
+### REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004: Entry-scoped acceptance and consumption
+
+**Intent:** An accepted completion belongs to one arrival in a workflow step,
+including when a task leaves and returns to the same step.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.1:** Duplicate calls in the
+  same entry preserve the first accepted payload and existing retry-publish
+  behavior. A signal from a previous entry does not reject a fresh current-entry
+  call as `already_signaled`.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.2:** A caller whose turn or
+  atomic claim belongs to a superseded entry records no signal or event. The
+  rejection names the entry change and gives fresh-turn recovery guidance.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.3:** Completion gates, carry,
+  and audit use the same source-entry payload. A move cannot consume it after
+  that source entry changes, even when the step ID returns to the same value.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.4:** Only the bag consumed by
+  a committed move is cleared. A concurrent replacement or failed move retains
+  its signal. A delayed event cannot clear a new entry's accepted signal.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.5:** Legacy timestamp
+  matching remains available when its evidence establishes the entry. Ambiguous
+  legacy evidence is retained and diagnosed rather than guessed.
+- **AC-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004.6:** Entry identity comes
+  from existing server-owned transition records. No caller argument, schema
+  table, watcher, or change to ownership/profile and question/cancel barriers
+  is introduced.
+
 ## Migrated source detail
 
 ## Why
@@ -202,7 +230,7 @@ The pending completion signal continues to use `TaskSession.Metadata` as specifi
 
 ## Out of Scope
 
-- Changing completion-signal persistence or ordinary halt semantics, or
+- Adding a completion-signal table or changing ordinary halt semantics, or
   implementing ADR 0015's planned signal-writing "Mark complete & advance"
   fallback. The ordinary manual task-move action remains distinct from that
   future fallback. Explicit user-cancel behavior is defined separately by the

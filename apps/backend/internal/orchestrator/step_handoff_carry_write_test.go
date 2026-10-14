@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -45,10 +46,11 @@ func TestExecuteStepTransition_WritesHandoffCarryToken(t *testing.T) {
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "did the work",
-		Handoff: "watch out for X",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "did the work",
+		Handoff:    "watch out for X",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -81,7 +83,7 @@ func TestExecuteStepTransition_BlankHandoffRemovesToken(t *testing.T) {
 	svc := createTestService(repo, sg, newMockTaskRepo())
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
-	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "done"}
+	signal := models.PendingStepCompletionSignal{SignaledAt: time.Now().UTC(), StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "done"}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestExecuteStepTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {
 	svc := createTestService(repo, sg, newMockTaskRepo())
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
-	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal := models.PendingStepCompletionSignal{SignaledAt: time.Now().UTC(), StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -155,10 +157,11 @@ func TestExecuteStepTransition_QueuedTransitionStillWritesHandoffCarryToken(t *t
 	svc.stepHistoryRecorder = recorder
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "did the work",
-		Handoff: "watch out for X",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "did the work",
+		Handoff:    "watch out for X",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -213,10 +216,11 @@ func TestApplyEngineTransition_WritesHandoffCarryToken(t *testing.T) {
 	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "engine path done",
-		Handoff: "engine handoff text",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "engine path done",
+		Handoff:    "engine handoff text",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -275,10 +279,11 @@ func TestApplyEngineTransition_QueuedTransitionWritesHandoffCarryTokenAtAdmissio
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "engine queued work",
-		Handoff: "carry before promotion",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "engine queued work",
+		Handoff:    "carry before promotion",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -322,7 +327,7 @@ func TestApplyEngineTransition_OnTurnStartDoesNotTouchToken(t *testing.T) {
 	svc.SetWorkflowStepGetter(sg)
 	svc.stepHistoryRecorder = &fakeStepHistoryRecorder{}
 
-	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal := models.PendingStepCompletionSignal{SignaledAt: time.Now().UTC(), StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

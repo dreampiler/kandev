@@ -9,7 +9,7 @@ import (
 func TestClassifyClaudeWeeklyLimit(t *testing.T) {
 	resetInjection()
 	for _, notice := range []string{
-		"Internal error: You've hit your weekly limit · resets 4am (Asia/Seoul)",
+		"Internal error: You've hit your weekly limit · resets 4am (UTC)",
 		"You’ve hit your weekly limit",
 		"You have hit your weekly limit",
 		"YOU HAVE\nHIT YOUR\tWEEKLY LIMIT",
@@ -17,7 +17,7 @@ func TestClassifyClaudeWeeklyLimit(t *testing.T) {
 		for _, phase := range []Phase{PhasePromptSend, PhaseStreaming} {
 			t.Run(string(phase)+"/"+notice, func(t *testing.T) {
 				e := Classify(Input{ProviderID: "claude-acp", Phase: phase, Stderr: notice})
-				if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard || !e.FallbackAllowed {
+				if e.Code != CodeQuotaLimited || e.Confidence != ConfHigh || e.Class != ClassHard || !e.FallbackAllowed || !e.AutoRetryable || e.UserAction {
 					t.Fatalf("classification = %+v, want high-confidence hard quota_limited with fallback", e)
 				}
 				if e.ClassifierRule != "claude.stderr.weekly_limit.v1" {
@@ -34,7 +34,7 @@ func TestClassifyClaudeWeeklyLimitDoesNotInventResetDate(t *testing.T) {
 	resetInjection()
 	in := Input{
 		ProviderID: "claude-acp", Phase: PhasePromptSend,
-		Stderr:     "Internal error: You've hit your weekly limit · resets 4am (Asia/Seoul)",
+		Stderr:     "Internal error: You've hit your weekly limit · resets 4am (UTC)",
 		OccurredAt: time.Date(2026, time.October, 8, 21, 42, 19, 0, time.UTC),
 	}
 	if e := Classify(in); e.Code != CodeQuotaLimited || e.ResetHint != nil {

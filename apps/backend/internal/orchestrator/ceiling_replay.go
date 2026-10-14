@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"go.uber.org/zap"
@@ -84,7 +83,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
 		return
 	}
-	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
+	s.sortCeilingReplayQueue(ctx, tasks)
 	paced := isPeriodicCeilingSweep(ctx)
 	allowDispatch := func(models.CeilingDeferral) bool { return true }
 	if paced {
@@ -232,6 +231,9 @@ func (s *Service) retryOneDeferredCeilingLaunch(
 		return
 	}
 	if reasonCode, detail, drop := s.evaluateCeilingDropReasons(ctx, task, deferral); drop {
+		if reasonCode == ceilingReasonSuperseded && s.evaluateCeilingSupersedeRequeue(ctx, task, deferral, detail) {
+			return
+		}
 		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
@@ -381,12 +383,20 @@ func (s *Service) settleCeilingReplay(
 		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplaySuperseded:
 		s.deferredRetrySchedule.settle(task.ID)
+		if s.settleCeilingSupersedeRequeue(ctx, task, claim, deferral,
+			"workflow destination changed before dispatch") {
+			return
+		}
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonSuperseded, "workflow destination changed before dispatch")
 	case ceilingReplayRunClosed:
 		s.deferredRetrySchedule.settle(task.ID)
+		detail := ceilingDetailAutomationRunClosed
+		if result.detail != "" {
+			detail = result.detail
+		}
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
-			ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed)
+			ceilingReasonDroppedTaskIneligible, detail)
 	case ceilingReplayFailed:
 		s.deferredRetrySchedule.recordFailure(task.ID, ceilingDeferralIdentityKey(deferral))
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
@@ -799,6 +809,12 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	// bearer keys redacted, so proceeding would dispatch without runtime
 	// credentials. Retain the record for a later sweep instead.
 	remintedEnv, remintErr := s.remintLaunchCredentials(ctx, task.ID, "", env)
+	if isLaunchOwnerClosed(remintErr) {
+		// The Office run this start serves is terminal or already launched.
+		// Replaying the stored first payload would start a second agent for
+		// work that is over, so the record is dropped like a closed run's.
+		return ceilingReplayResult{outcome: ceilingReplayRunClosed, err: remintErr, detail: ceilingDetailLaunchOwnerClosed}
+	}
 	if remintErr != nil {
 		s.logger.Zap().Warn("ceiling replay: credential re-mint failed; retaining the record for a later sweep",
 			zap.String("task_id", task.ID), zap.Error(remintErr))

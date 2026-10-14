@@ -423,6 +423,7 @@ func (s *workflowStore) applyTransition(
 	} else if !applied {
 		return 0, nil
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 
 	// Pass the pre-move workflow ID through so cross-workflow transitions
 	// carry old_workflow_id on the task.updated payload — the frontend uses
@@ -458,6 +459,10 @@ func (s *workflowStore) carryStepHandoffForTransition(
 	if trigger != engine.TriggerOnTurnComplete {
 		return
 	}
+	if source, captured := completionSignalFromContext(ctx, task.ID, fromStepID); captured {
+		setStepHandoffCarryMetadata(task, toStepID, consumedCompletionSignal(source))
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Debug("failed to load session for step handoff carry",
@@ -467,11 +472,11 @@ func (s *workflowStore) carryStepHandoffForTransition(
 	if session == nil {
 		return
 	}
-	var consumedSignal *models.PendingStepCompletionSignal
-	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
-		consumedSignal = &signal
+	source, loadErr := loadCompletionSignalSource(ctx, s.repo, task.ID, fromStepID, session)
+	if loadErr != nil {
+		s.logger.Debug("failed to load completion entry for handoff", zap.String("task_id", task.ID), zap.Error(loadErr))
 	}
-	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+	setStepHandoffCarryMetadata(task, toStepID, consumedCompletionSignal(source))
 }
 
 func transitionContext(

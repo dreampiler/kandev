@@ -109,10 +109,11 @@ func (s *dynamicUsageSnapshot) UsageSnapshot(
 	ctx context.Context,
 	profile dynamicruntime.Profile,
 ) (map[string]dynamicruntime.PaceScore, error) {
+	observations := s.profileObservations(ctx, profile)
 	observedAt := s.now()
 	scores := make(map[string]dynamicruntime.PaceScore, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
-		score := s.scoreFor(ctx, candidate, observedAt)
+		score := s.scoreFor(ctx, candidate, observations[candidate.ID], observedAt)
 		if !score.Known && s.internal != nil {
 			score.Internal = s.internal.Internal(ctx, candidate.ID, observedAt)
 		}
@@ -121,9 +122,29 @@ func (s *dynamicUsageSnapshot) UsageSnapshot(
 	return scores, nil
 }
 
+// profileObservations gathers account readings before the shared decision clock
+// is sampled, so a newly fetched observation is not mistaken for a future one.
+func (s *dynamicUsageSnapshot) profileObservations(
+	ctx context.Context,
+	profile dynamicruntime.Profile,
+) map[string]profileUsage {
+	if s.usage == nil {
+		return nil
+	}
+	observations := make(map[string]profileUsage, len(profile.Candidates))
+	for _, candidate := range profile.Candidates {
+		if candidate.RemoteExecution || candidate.Selection.Model.UsageSource == dynamicruntime.UsageManual {
+			continue
+		}
+		observations[candidate.ID] = s.usage.ProfileUsage(ctx, candidate.ID)
+	}
+	return observations
+}
+
 func (s *dynamicUsageSnapshot) scoreFor(
 	ctx context.Context,
 	candidate dynamicruntime.Candidate,
+	observed profileUsage,
 	observedAt time.Time,
 ) dynamicruntime.PaceScore {
 	source := candidate.Selection.Model.UsageSource
@@ -133,7 +154,7 @@ func (s *dynamicUsageSnapshot) scoreFor(
 	// Usage is a property of the concrete profile's account, so any row that
 	// does not override it with manual windows ranks on the profile's own
 	// reading when one exists.
-	if score, ok := s.profileScore(ctx, candidate, observedAt); ok {
+	if score, ok := s.profileScore(candidate, observed, observedAt); ok {
 		return score
 	}
 	if source == dynamicruntime.UsageAutomatic {
@@ -151,11 +172,15 @@ func (s *dynamicUsageSnapshot) scoreFor(
 
 const freeNoWindowLabel = "no_usage_window"
 
-// profileScore reads the candidate's own account binding. It never borrows
+// maxAutomaticObservationAge bounds the original observation, independently of
+// when the shared usage cache received it.
+const maxAutomaticObservationAge = 30 * time.Minute
+
+// profileScore validates the candidate's own account reading. It never borrows
 // another profile's usage: an unavailable binding reports no reading.
 func (s *dynamicUsageSnapshot) profileScore(
-	ctx context.Context,
 	candidate dynamicruntime.Candidate,
+	observed profileUsage,
 	observedAt time.Time,
 ) (dynamicruntime.PaceScore, bool) {
 	// AC-003.3: automatic usage may only answer for a candidate whose execution
@@ -168,8 +193,11 @@ func (s *dynamicUsageSnapshot) profileScore(
 	if s.usage == nil || candidate.RemoteExecution {
 		return dynamicruntime.PaceScore{}, false
 	}
-	observed := s.usage.ProfileUsage(ctx, candidate.ID)
 	if observed.State != profileUsageOK || observed.Usage == nil {
+		return dynamicruntime.PaceScore{}, false
+	}
+	if observed.Usage.FetchedAt.IsZero() || observed.Usage.FetchedAt.After(observedAt) ||
+		observedAt.Sub(observed.Usage.FetchedAt) >= maxAutomaticObservationAge {
 		return dynamicruntime.PaceScore{}, false
 	}
 	windows := applicableAutomaticWindows(observed.ModelID, observed.Usage)

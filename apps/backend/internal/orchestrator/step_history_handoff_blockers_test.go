@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -57,11 +58,12 @@ func TestExecuteStepTransition_RecordsHandoffAndBlockersMetadata(t *testing.T) {
 	svc.stepHistoryRecorder = recorder
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:   "step1",
-		Source:   models.StepCompletionSourceAgent,
-		Summary:  "did the work",
-		Handoff:  "watch out for X",
-		Blockers: "needs a design decision",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "did the work",
+		Handoff:    "watch out for X",
+		Blockers:   "needs a design decision",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -95,9 +97,10 @@ func TestExecuteStepTransition_OmitsBlankHandoffAndBlockers(t *testing.T) {
 	svc.stepHistoryRecorder = recorder
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "did the work",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "did the work",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -134,11 +137,12 @@ func TestApplyEngineTransition_RecordsHandoffAndBlockersMetadata(t *testing.T) {
 	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:   "step1",
-		Source:   models.StepCompletionSourceAgent,
-		Summary:  "engine path done",
-		Handoff:  "engine handoff text",
-		Blockers: "engine blocker text",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "engine path done",
+		Handoff:    "engine handoff text",
+		Blockers:   "engine blocker text",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)

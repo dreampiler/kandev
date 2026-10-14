@@ -129,8 +129,8 @@ func TestDeliveryRetentionMaintenance(t *testing.T) {
 
 		first, err := Run(context.Background(), homeDir, "sqlite", fixture.dbPath,
 			RunOptions{Execute: true, CandidateLimit: 1}, nil)
-		if err != nil {
-			t.Fatalf("first execute: %v", err)
+		if !errors.Is(err, ErrPartial) {
+			t.Fatalf("first execute error = %v, want ErrPartial", err)
 		}
 		if first.Execution.DeletedDeliveryEventPayloads != 1 || first.Execution.RetiredDeliveryEventReceipts != 1 {
 			t.Fatalf("first bounded execution = %+v", first.Execution)
@@ -145,8 +145,8 @@ func TestDeliveryRetentionMaintenance(t *testing.T) {
 		for remaining := 2; remaining > 0; remaining-- {
 			outcome, err := Run(context.Background(), homeDir, "sqlite", fixture.dbPath,
 				RunOptions{Execute: true, CandidateLimit: 1}, nil)
-			if err != nil {
-				t.Fatalf("continue bounded execute: %v", err)
+			if !errors.Is(err, ErrPartial) {
+				t.Fatalf("continue bounded execute error = %v, want ErrPartial", err)
 			}
 			if outcome.Execution.DeletedDeliveryEventPayloads != 1 || outcome.Execution.RetiredDeliveryEventReceipts != 1 {
 				t.Fatalf("continued bounded execution = %+v", outcome.Execution)
