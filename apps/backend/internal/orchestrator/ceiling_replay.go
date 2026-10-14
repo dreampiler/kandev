@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -325,8 +326,17 @@ func (s *Service) evaluateCeilingStartDropReasons(
 	if run != nil && !s.automationRunAwaitsLaunch(ctx, run.RunID) {
 		return ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed, true
 	}
-	if run == nil && !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
-		return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
+	if run == nil && !task.IsFromOffice {
+		if s.workflowStepGetter == nil {
+			return "", "", false
+		}
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if err != nil && !errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
+			return "", "", false
+		}
+		if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+			return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
+		}
 	}
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return ceilingReasonDroppedLaunchGateDeclined, "terminal PR auto-start gate declined the launch", true
@@ -747,7 +757,7 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 		// launch did happen, so this is not a ceiling matter any longer.
 		return ceilingReplaySucceededResult()
 	}
-	return ceilingReplayFailedResult(err, "prompt ensure dispatch failed")
+	return ceilingReplayDispatchFailure(err, "prompt ensure dispatch failed")
 }
 
 // replayCeilingLaunchWorkflowStepEnsure replays an AC-42 "workflow_step_ensure"
@@ -767,7 +777,7 @@ func (s *Service) replayCeilingLaunchWorkflowStepEnsure(ctx context.Context, tas
 	case errors.Is(err, errSeam3WorkflowStepEnsureDeferred):
 		return ceilingReplayDeferredResult()
 	default:
-		return ceilingReplayFailedResult(err, "workflow step ensure dispatch failed")
+		return ceilingReplayDispatchFailure(err, "workflow step ensure dispatch failed")
 	}
 }
 
@@ -783,7 +793,7 @@ func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task 
 	}
 	if err != nil {
 		if _, ok := isSeam3Refusal(err); !ok {
-			return ceilingReplayFailedResult(err, "queue drain ensure dispatch failed")
+			return ceilingReplayDispatchFailure(err, "queue drain ensure dispatch failed")
 		}
 	}
 
@@ -828,7 +838,8 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 		AgentExecutionID: stringField(payload, "agent_execution_id"),
 		AgentProfileID:   stringField(payload, metaKeyAgentProfileID),
 	}
-	switch s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic, ceilingEntryBindingFromContext(ctx)) {
+	outcome, err := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic, ceilingEntryBindingFromContext(ctx))
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return ceilingReplaySucceededResult()
 	case dynamicRelaunchDeferred:
@@ -836,6 +847,6 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 	case dynamicRelaunchSuperseded:
 		return ceilingReplaySupersededResult()
 	default:
-		return ceilingReplayFailedResult(nil, "dynamic relaunch failed")
+		return ceilingReplayDispatchFailure(err, "dynamic relaunch failed")
 	}
 }

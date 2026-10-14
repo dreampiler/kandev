@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -30,7 +30,7 @@ var retryDelays = []time.Duration{
 func (s *Service) HandleRunFailure(
 	ctx context.Context, run *models.Run, runErr error,
 ) error {
-	if isDeterministicLaunchValidationError(runErr) {
+	if routingerr.IsBuiltCommandValidationError(runErr) {
 		return s.escalateFailure(ctx, run, runErr)
 	}
 	if run.RetryCount < MaxRetryCount {
@@ -88,20 +88,6 @@ func (s *Service) scheduleRetryAt(
 		zap.String("source", source))
 
 	return s.repo.ScheduleRetry(ctx, run.ID, retryAt, newCount)
-}
-
-// isDeterministicLaunchValidationError reports whether a run failure comes
-// from validation of the built agent or continue command, which a later
-// attempt cannot fix. The match is a narrow prefix on that error family, not a
-// substring, so a transient failure that merely mentions validation keeps its
-// retry budget.
-func isDeterministicLaunchValidationError(runErr error) bool {
-	if runErr == nil {
-		return false
-	}
-	msg := runErr.Error()
-	return strings.HasPrefix(msg, "validate agent command:") ||
-		strings.HasPrefix(msg, "validate continue command:")
 }
 
 // retryMaxAge is the maximum age of the original run before retries are abandoned.

@@ -1,7 +1,7 @@
 ---
 id: "01-drop-invalid-launch-replays"
 title: "Drop invalid launch replays"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -30,8 +30,8 @@ failed validation, and make the sweep's failure warning name the cause.
   `replayCeilingDeferral`, `loadCeilingReplayTask`, and each per-kind replay.
 - Log the detail and error when `settleCeilingReplay` preserves a non-ceiling
   failure.
-- Classify `validate agent command:` and `validate continue command:` as a
-  permanent failure. `settleCeilingReplay` drops it with
+- Classify the lifecycle producer's typed built-command failure as permanent,
+  including agent and continue commands through wrapping. `settleCeilingReplay` drops it with
   `ceiling_dropped_launch_invalid`.
 - Escalate an Office run at once in `HandleRunFailure` for the same error
   family.
@@ -77,3 +77,11 @@ cd apps/backend && go test ./internal/office/service/ -run 'HandleRunFailure|Ret
 - `retry_validation_failure_test.go` escalates an Office run whose launch fails
   command validation. Before the change the run was re-queued with a retry.
 - Existing replay tests now read the outcome from `ceilingReplayResult`.
+
+### PR review follow-up
+
+Typed lifecycle production replaces prefix matching. Ensure and dynamic replay
+paths preserve and classify the same cause; Office recognizes wrapped agent and
+continue errors without changing transient retry policy. Permanent producer and
+real dispatch regressions are added. Local bounded exact-source proofs pass;
+complete hosted package/runtime validation remains pending.

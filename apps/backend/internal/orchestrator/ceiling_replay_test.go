@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 
@@ -59,7 +60,7 @@ func TestCeilingReplayResultFromExecution(t *testing.T) {
 	failed := ceilingReplayResultFromExecution(nil, context.Canceled)
 	require.Equal(t, ceilingReplayFailed, failed.outcome)
 	require.ErrorIs(t, failed.err, context.Canceled)
-	invalid := ceilingReplayResultFromExecution(nil, errors.New("validate continue command: flag is not allowed"))
+	invalid := ceilingReplayResultFromExecution(nil, &routingerr.BuiltCommandValidationError{Command: "continue", Cause: errors.New("flag is not allowed")})
 	require.Equal(t, ceilingReplayPermanentlyFailed, invalid.outcome)
 }
 

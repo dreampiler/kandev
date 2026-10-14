@@ -1,6 +1,6 @@
 ---
 created: 2026-10-12
-status: done
+status: in_progress
 requirements:
   - REQ-AGENTS-SESSION-CEILING-001
   - REQ-OFFICE-SCHEDULER-001
@@ -60,9 +60,9 @@ backoff attempts each rebuild the same invalid command.
 
 ## Risks
 
-- The permanent-failure match depends on the lifecycle error prefix. A wrapped
-  error with a different prefix keeps today's retry; it never drops a record
-  that a later pass could start.
+- The lifecycle producer identifies built-command validation with a typed error.
+  Replay and Office consumers preserve its cause through wrappers and use
+  `errors.As`; provider and environment message text cannot mark it permanent.
 - A new `permanently unavailable` disposition must not reach a path that treats
   `unavailable` as retryable. Every caller of entry validation is updated in
   work order 02.
@@ -80,3 +80,19 @@ cd apps/backend && go build ./... && go vet ./internal/orchestrator/ ./internal/
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 ```
+
+## PR review remediation
+
+The producer now emits a typed built-command failure, and all replay kinds carry
+it to settlement, including cold-resume ensure and dynamic relaunch paths.
+The start eligibility check preserves failed workflow reads for already bound
+records. Permanent regressions cover the real producer, session-backed replay
+paths, Office agent/continue failures, transient controls, and bound-step reads.
+The idle-focus lease regression now inspects the replay result's outcome while
+retaining its error and all lease/record assertions.
+
+Bounded exact-source RED/GREEN proofs reproduced the wrapped-validation and
+bound-step-read failures and passed after remediation. These proofs provide no
+full-package, SQL, or runtime coverage. Hosted complete validation is pending.
+Public recovery guidance is updated in the agent profile troubleshooting and
+Office provider-routing pages.

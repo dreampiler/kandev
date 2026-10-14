@@ -93,8 +93,9 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-001.11:** When a replayed launch fails validation
   of its built agent or continue command, the sweep shall drop the record with
   a launch-invalid reason instead of preserving it. A later pass would build the
-  same command and leave another failed session. A transient failure whose
-  message only mentions validation shall still be preserved.
+  same command and leave another failed session. Wrapping the command-validation
+  error shall not change this disposition. A transient failure whose message
+  only mentions validation shall still be preserved.
 - **AC-AGENTS-SESSION-CEILING-001.12:** When a record's workflow entry can never
   become valid, the sweep shall drop it as superseded. This covers a legacy
   `start` with no recipient session, a binding that cannot be derived or is

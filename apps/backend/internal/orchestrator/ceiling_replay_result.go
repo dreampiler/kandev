@@ -2,8 +2,8 @@ package orchestrator
 
 import (
 	"errors"
-	"strings"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 )
 
@@ -64,7 +64,7 @@ func ceilingReplayResultFromExecution(execution *executor.TaskExecution, err err
 	switch {
 	case errors.Is(err, ErrCeilingLaunchSuperseded):
 		return ceilingReplaySupersededResult()
-	case isDeterministicLaunchFailure(err):
+	case routingerr.IsBuiltCommandValidationError(err):
 		return ceilingReplayPermanentlyFailedResult(err, "launch validation failed")
 	case err != nil:
 		return ceilingReplayFailedResult(err, "dispatch failed")
@@ -75,17 +75,9 @@ func ceilingReplayResultFromExecution(execution *executor.TaskExecution, err err
 	}
 }
 
-// isDeterministicLaunchFailure reports whether a launch error will fail the
-// same way on every later pass. The lifecycle manager reports an invalid built
-// command as "validate agent command: ..." or "validate continue command: ..."
-// before the agent starts. The match is a prefix on that family, not a
-// substring, so a transient failure that merely mentions validation keeps its
-// retry.
-func isDeterministicLaunchFailure(err error) bool {
-	if err == nil {
-		return false
+func ceilingReplayDispatchFailure(err error, detail string) ceilingReplayResult {
+	if routingerr.IsBuiltCommandValidationError(err) {
+		return ceilingReplayPermanentlyFailedResult(err, detail)
 	}
-	msg := err.Error()
-	return strings.HasPrefix(msg, "validate agent command:") ||
-		strings.HasPrefix(msg, "validate continue command:")
+	return ceilingReplayFailedResult(err, detail)
 }

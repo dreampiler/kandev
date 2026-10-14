@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
@@ -107,7 +108,7 @@ func newLaunchFailureReplayFixture(t *testing.T, taskID string, launchErr error)
 func TestCeilingSweepDropsAStartWhoseLaunchFailsCommandValidation(t *testing.T) {
 	ctx := context.Background()
 	f := newLaunchFailureReplayFixture(t, "launch-invalid-task",
-		errors.New("validate agent command: agent command cannot be empty"))
+		&routingerr.BuiltCommandValidationError{Command: "agent", Cause: errors.New("agent command cannot be empty")})
 
 	f.svc.drainDeferredCeilingLaunches(ctx)
 	require.Equal(t, 1, f.launchCount(), "the first sweep replays the queued start once")

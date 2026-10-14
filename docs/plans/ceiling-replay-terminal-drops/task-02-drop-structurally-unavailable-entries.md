@@ -1,7 +1,7 @@
 ---
 id: "02-drop-structurally-unavailable-entries"
 title: "Drop structurally unavailable entries"
-status: done
+status: in_progress
 wave: 2
 depends_on:
   - "01-drop-invalid-launch-replays"
@@ -74,3 +74,11 @@ cd apps/backend && go test ./internal/orchestrator/ -run 'CeilingReplay|CeilingE
 - `readValidCeilingDeferredLaunch`, Send Now, and the claimed binding check
   already treat any non-valid disposition as not pending, so the new
   disposition needs no change there.
+
+### PR review follow-up
+
+An already bound start now preserves a failed auto-start eligibility read.
+The permanent sweep regression verifies the queued record remains and no agent
+launch occurs. Genuine deleted-step and readable non-auto-start dispositions
+remain terminal. Local bounded exact-source proof passes; hosted validation is
+pending.
