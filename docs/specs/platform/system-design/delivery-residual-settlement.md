@@ -9,7 +9,7 @@ requirements:
 
 # System design: delivery residual settlement
 
-Status: implemented (second PR). Companion to
+Status: implemented (second and third PR). Companion to
 `requirements/delivery-residual-settlement.md`.
 
 ## Where the pin lives
@@ -44,9 +44,12 @@ Status: implemented (second PR). Companion to
   terminal row for a submission; multiple rows remain unsettled.
 - PR #298 writes only `not_required` workflow receipts for tasks with no
   workflow step through the Task 04 writer, then promotes via the existing
-  `completeAgentDeliveryTerminalSettlementTx`. Tasks with a workflow step
-  remain pinned for the (c) follow-up PR, which must evaluate the owning
-  workflow engine and record its actual outcome. No age-invented
+  `completeAgentDeliveryTerminalSettlementTx`. The (c) follow-up resolves
+  workflow-bound terminals from the turn's step-entry stamp and the current
+  step's `on_turn_complete` declaration, without evaluating the engine: a
+  replaced turn records `not_required`, a current-step turn on a step with no
+  automatic move records `no_automatic_transition`, and a current-step turn on
+  a step with an automatic move stays pinned. No age-invented
   `fully_settled_at` (`backend-agent-delivery-retention.md:252`).
 - Both reuse existing locks, bounded batches, and the contiguous-prefix
   retirement; no schema/index/wire/journal change; no new collector.
@@ -65,5 +68,9 @@ Status: implemented (second PR). Companion to
   untouched.
 - block_resolved + recorded no-op workflow promotes to completed with
   `fully_settled_at`; missing workflow stays pinned.
+- Replaced turn records `not_required`; a current-step turn on a step with no
+  automatic move records `no_automatic_transition`; a current-step turn on a
+  step with an automatic move stays pinned and is only counted; a terminal
+  without its turn row stays pinned.
 - Checkpoint/submission/terminal/workflow rows survive; prefix stops at
   protected rows.

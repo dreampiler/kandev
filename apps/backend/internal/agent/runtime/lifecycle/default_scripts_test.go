@@ -129,9 +129,9 @@ func TestKandevBranchCheckoutPostlude_LandsOnFeatureBranch(t *testing.T) {
 			}
 
 			script := strings.NewReplacer(
-				"{{workspace.path}}", workspace,
-				"{{worktree.branch}}", tc.featureName,
-				"{{repository.branch}}", tc.baseName,
+				"{{workspace.path}}", shellQuote(shellPOSIXPath(workspace)),
+				"{{worktree.branch}}", shellQuote(tc.featureName),
+				"{{repository.branch}}", shellQuote(tc.baseName),
 			).Replace(KandevBranchCheckoutPostlude())
 
 			cmd := exec.Command("bash", "-e", "-c", script)
@@ -276,9 +276,9 @@ func TestKandevBranchCheckoutPostlude_PreservesHistoryForRemoteBranch(t *testing
 	seedOriginBranch(t, originDir, featureBranch)
 
 	script := strings.NewReplacer(
-		"{{workspace.path}}", workspace,
-		"{{worktree.branch}}", featureBranch,
-		"{{repository.branch}}", baseBranch,
+		"{{workspace.path}}", shellQuote(shellPOSIXPath(workspace)),
+		"{{worktree.branch}}", shellQuote(featureBranch),
+		"{{repository.branch}}", shellQuote(baseBranch),
 	).Replace(KandevBranchCheckoutPostlude())
 
 	if out, err := exec.Command("bash", "-e", "-c", script).CombinedOutput(); err != nil {
@@ -317,9 +317,9 @@ func TestKandevBranchCheckoutPostlude_UnshallowsSingleBranchClone(t *testing.T) 
 	seedOriginBranch(t, originDir, featureBranch)
 
 	script := strings.NewReplacer(
-		"{{workspace.path}}", workspace,
-		"{{worktree.branch}}", featureBranch,
-		"{{repository.branch}}", baseBranch,
+		"{{workspace.path}}", shellQuote(shellPOSIXPath(workspace)),
+		"{{worktree.branch}}", shellQuote(featureBranch),
+		"{{repository.branch}}", shellQuote(baseBranch),
 	).Replace(KandevBranchCheckoutPostlude())
 
 	if out, err := exec.Command("bash", "-e", "-c", script).CombinedOutput(); err != nil {
@@ -407,7 +407,7 @@ func TestDefaultPrepareScript_SpritesCleansCredentialsWhenFetchFails(t *testing.
 	gitWrapper := filepath.Join(bin, "git")
 	wrapper := "#!/bin/sh\n" +
 		"if [ \"$1\" = \"-C\" ] && [ \"$3\" = \"fetch\" ]; then exit 1; fi\n" +
-		"exec " + realGit + " \"$@\"\n"
+		"exec " + shellQuote(filepath.ToSlash(realGit)) + " \"$@\"\n"
 	if err := os.WriteFile(gitWrapper, []byte(wrapper), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestDefaultPrepareScript_SpritesCleansCredentialsWhenFetchFails(t *testing.
 	}
 
 	script := strings.NewReplacer(
-		"{{workspace.path}}", shellQuote(workspace),
+		"{{workspace.path}}", shellQuote(shellPOSIXPath(workspace)),
 		"{{repository.clone_url}}", shellQuote("https://x-access-token:secret@github.com/acme/repo.git"),
 		"{{repository.branch}}", shellQuote("main"),
 		"{{repository.setup_script}}", ":",
@@ -428,7 +428,7 @@ func TestDefaultPrepareScript_SpritesCleansCredentialsWhenFetchFails(t *testing.
 		"{{kandev.agentctl.start}}", ":",
 	).Replace(DefaultPrepareScript("sprites"))
 	cmd := exec.Command("bash", "-e", "-c", script)
-	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), "HOME="+home, prependPATH(bin))
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("prepare unexpectedly succeeded after forced fetch failure: %s", out)
 	}
@@ -479,8 +479,8 @@ func TestDefaultPrepareScript_SpritesMaterializesNonEmptyWorkspace(t *testing.T)
 	runIn(t, seed, "git", "push", "--quiet", "origin", "main")
 
 	script := strings.NewReplacer(
-		"{{workspace.path}}", shellQuote(workspace),
-		"{{repository.clone_url}}", shellQuote(origin),
+		"{{workspace.path}}", shellQuote(shellPOSIXPath(workspace)),
+		"{{repository.clone_url}}", shellQuote(shellPOSIXPath(origin)),
 		"{{repository.branch}}", shellQuote("main"),
 		"{{repository.setup_script}}", ":",
 		"{{git.identity_setup}}", ":",
@@ -490,7 +490,7 @@ func TestDefaultPrepareScript_SpritesMaterializesNonEmptyWorkspace(t *testing.T)
 		"{{kandev.agentctl.start}}", ":",
 	).Replace(DefaultPrepareScript("sprites"))
 	cmd := exec.Command("bash", "-e", "-c", script)
-	cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
+	cmd.Env = append(os.Environ(), "HOME="+home, prependPATH(bin))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Sprites prepare failed: %v\n%s", err, out)
 	}

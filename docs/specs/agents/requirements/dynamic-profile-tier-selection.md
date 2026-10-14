@@ -99,11 +99,22 @@ the no-revisit rule applies to automatic transition chains in both layouts.
 - **AC-AGENTS-TIER-SELECTION-003.5:** User-reserved share shall default to 0% and
   be editable per row. It shall not silently reserve capacity by default. A
   configured share shall be shown separately from observed usage and elapsed
-  percentages; it shall not modify the definition of pace.
+  percentages; it shall not modify the definition of pace. A share from 1% through
+  99% shall exclude new selections only when usable evidence reaches the reserved
+  threshold. Unknown usage shall defer that check and retain the candidate,
+  without promising protection of the reserved share. A 100% share shall exclude
+  new selections even when usage is unknown.
 - **AC-AGENTS-TIER-SELECTION-003.6:** Lowest-cost selection shall operate only
   within its tier and use the configured cost classification, with deterministic
   row-order ties. It shall not invent provider prices, perform currency
   conversion, or treat unavailable pricing as a confirmed zero charge.
+- **AC-AGENTS-TIER-SELECTION-003.7:** During a failed usage refresh, selection
+  shall reuse an account- and model-applicable last observation whose timestamp
+  is not in the future and is less than 30 minutes old, provided its quota window
+  remains valid. Missing timestamps, absent values, and invalid or expired
+  observations shall remain unknown. The same evidence and reservation policy
+  shall apply to live selection and preview; existing circuit, quota, disabled,
+  and transition-chain exclusions shall remain effective.
 
 ### REQ-AGENTS-TIER-SELECTION-004: Safe advancement and continuity
 

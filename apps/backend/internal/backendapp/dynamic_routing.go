@@ -10,9 +10,11 @@ import (
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"go.uber.org/zap"
 )
 
 // dynamicRouteActionHandler owns the complete route action transaction:
@@ -24,6 +26,7 @@ func dynamicRouteActionHandler(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	log *logger.Logger,
 	launchers ...func(context.Context, string) error,
 ) func(context.Context, orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
 	var launchSuccessor func(context.Context, string) error
@@ -31,7 +34,7 @@ func dynamicRouteActionHandler(
 		launchSuccessor = launchers[0]
 	}
 	return func(ctx context.Context, request orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
-		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, launchSuccessor, request)
+		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, log, launchSuccessor, request)
 	}
 }
 
@@ -40,6 +43,7 @@ func applyDynamicRouteAction(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	log *logger.Logger,
 	launchSuccessor func(context.Context, string) error,
 	request orchestrator.RouteActionRequest,
 ) (*orchestrator.RouteActionResult, error) {
@@ -65,7 +69,7 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision)
+	changed, err := persistDynamicRouteSelection(ctx, repo, profileRepo, session, expectedState, decision, log)
 	if err != nil {
 		return nil, err
 	}
@@ -150,10 +154,13 @@ func handleDynamicRouteActionError(
 func persistDynamicRouteSelection(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
+	profileRepo settingsstore.Repository,
 	session *models.TaskSession,
 	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
+	log *logger.Logger,
 ) (bool, error) {
+	previousExecutionProfileID := session.ExecutionProfileID
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Decision.Status
@@ -170,11 +177,86 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	if previousExecutionProfileID == decision.ExecutionProfileID {
+		// Same-candidate retry: provider state and explicit user selections stay.
+		changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+		if err != nil {
+			return false, routeActionPersistenceError(ctx, repo, session, err)
+		}
+		return changed, nil
+	}
+	// The candidate changed, so the previous candidate's provider-owned state
+	// must be cleared here just as the conductor launch path does. Otherwise the
+	// next fresh ACP session applies the old candidate's persisted model, since
+	// the session already names the new candidate and the conductor clears
+	// nothing on a same-profile re-entry.
+	previousAgentID := dynamicProfileAgentID(ctx, profileRepo, previousExecutionProfileID)
+	newAgentID := ""
+	if decision.Profile != nil {
+		newAgentID = decision.Profile.AgentID
+	}
+	if newAgentID == "" {
+		newAgentID = dynamicProfileAgentID(ctx, profileRepo, decision.ExecutionProfileID)
+	}
+	// Read the previous/candidate models before the write; only report a
+	// replacement once the write actually commits and reports a change.
+	previousModel, candidateModel, stale := dynamicCandidateModelReplacement(session, decision)
+	changed, err := repo.UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
+		ctx, session, expectedState, orchestrator.DynamicCandidateProviderStateKeys(previousAgentID, newAgentID),
+	)
 	if err != nil {
 		return false, routeActionPersistenceError(ctx, repo, session, err)
 	}
+	if changed && stale {
+		logDynamicCandidateModelReplacement(log, session.ID, previousModel, candidateModel)
+	}
 	return changed, nil
+}
+
+// dynamicProfileAgentID resolves the agent identity that owns a concrete
+// execution profile. A missing profile or a failed lookup returns "", which the
+// key helper treats as a cross-agent swap and clears the explicit selection.
+func dynamicProfileAgentID(ctx context.Context, profileRepo settingsstore.Repository, profileID string) string {
+	if profileID == "" || profileRepo == nil {
+		return ""
+	}
+	info, err := profileRepo.GetAgentProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return ""
+	}
+	return info.AgentID
+}
+
+// dynamicCandidateModelReplacement reports the previous candidate's recorded
+// model when a candidate change would otherwise carry it into the new
+// candidate's launch. An explicit user selection is intentional, so only a
+// provider-recorded model that differs from the new candidate's model is
+// reported.
+func dynamicCandidateModelReplacement(
+	session *models.TaskSession,
+	decision agentruntime.ProfileExecution,
+) (previousModel, candidateModel string, stale bool) {
+	if session == nil || decision.Profile == nil {
+		return "", "", false
+	}
+	if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok && overrides.Model != "" {
+		return "", "", false
+	}
+	provider, ok := models.LoadSessionRuntimeConfig(session.Metadata)
+	if !ok || provider.Model == "" || provider.Model == decision.Profile.Model {
+		return "", "", false
+	}
+	return provider.Model, decision.Profile.Model, true
+}
+
+func logDynamicCandidateModelReplacement(log *logger.Logger, sessionID, previousModel, candidateModel string) {
+	if log == nil {
+		return
+	}
+	log.Warn("dynamic candidate change replaces the previous candidate's recorded model",
+		zap.String("session_id", sessionID),
+		zap.String("previous_model", previousModel),
+		zap.String("candidate_model", candidateModel))
 }
 
 func finishDynamicRouteAction(

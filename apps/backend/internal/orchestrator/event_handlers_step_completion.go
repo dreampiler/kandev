@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"reflect"
 	"strings"
 
 	"go.uber.org/zap"
@@ -43,10 +44,25 @@ func (s *Service) clearPendingStepSignal(ctx context.Context, session *models.Ta
 	if session == nil {
 		return
 	}
-	if session.Metadata != nil {
-		delete(session.Metadata, models.SessionMetaKeyPendingStepCompletion)
+	expected := session.Metadata[models.SessionMetaKeyPendingStepCompletion]
+	delete(session.Metadata, models.SessionMetaKeyPendingStepCompletion)
+	s.clearPendingStepSignalValue(ctx, session.ID, expected)
+}
+
+func (s *Service) clearPendingStepSignalValue(ctx context.Context, sessionID string, expected interface{}) {
+	if sessionID == "" || expected == nil {
+		return
 	}
-	s.clearPendingStepSignalByID(ctx, session.ID)
+	if store, ok := s.repo.(initialSubmissionMetadataCAS); ok {
+		if _, err := store.SetSessionMetadataKeyIfJSONValue(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, expected, nil); err != nil {
+			s.logger.Debug("failed to consume matching completion signal", zap.String("session_id", sessionID), zap.Error(err))
+		}
+		return
+	}
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err == nil && current != nil && reflect.DeepEqual(current.Metadata[models.SessionMetaKeyPendingStepCompletion], expected) {
+		s.clearPendingStepSignalByID(ctx, sessionID)
+	}
 }
 
 // clearPendingStepSignalByID issues only the DB write — skip when the
@@ -216,20 +232,7 @@ func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskI
 	if task.WorkflowStepID != stepID {
 		s.logger.Debug("reconcileStepCompletionSignalLocked: signal stale (step changed)",
 			zap.String("signal_step", stepID), zap.String("current_step", task.WorkflowStepID))
-		// Only clear the bag when its current contents are themselves
-		// stale (matching THIS subscriber's stepID). Re-load the session
-		// before checking: the local `session` snapshot was taken when
-		// the subscriber fired and may be older than a concurrent
-		// write from the new step's agent. Without the reload the
-		// in-memory check could see a stale signal that's already been
-		// cleared/replaced and erase a freshly-written valid bag entry.
-		latestSession, loadErr := s.repo.GetTaskSession(ctx, sessionID)
-		if loadErr != nil {
-			return
-		}
-		if existing, ok := models.LoadPendingStepSignal(latestSession.Metadata); ok && existing.StepID == stepID {
-			s.clearPendingStepSignal(ctx, latestSession)
-		}
+		s.clearStaleStepCompletionSignal(ctx, taskID, sessionID, stepID)
 		return
 	}
 
@@ -240,6 +243,46 @@ func (s *Service) reconcileStepCompletionSignalLocked(ctx context.Context, taskI
 	// Drive the transition via the engine path. It will re-read the bag
 	// and consume it through the same code path the inline turn-end uses.
 	s.processOnTurnCompleteViaEngine(ctx, taskID, session)
+}
+
+func (s *Service) clearStaleStepCompletionSignal(ctx context.Context, taskID, sessionID, stepID string) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return
+	}
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	if !ok || signal.StepID != stepID {
+		return
+	}
+	// Read the entry after the bag: a concurrent return to the same step must
+	// not make a new entry's signal the cleanup candidate for an old event.
+	stale, readErr := s.completionSignalIsStale(ctx, taskID, signal)
+	if readErr != nil || !stale {
+		return
+	}
+	s.clearPendingStepSignal(ctx, session)
+}
+
+func (s *Service) completionSignalIsStale(ctx context.Context, taskID string, signal models.PendingStepCompletionSignal) (bool, error) {
+	if reader, ok := s.repo.(completionEntryReader); ok {
+		entry, err := reader.GetTaskStepCompletionEntry(ctx, taskID)
+		return completionSignalKnownStale(signal, entry), err
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return task.WorkflowStepID != signal.StepID, nil
+}
+
+func completionSignalKnownStale(signal models.PendingStepCompletionSignal, entry models.StepCompletionEntry) bool {
+	if entry.StepID != signal.StepID {
+		return true
+	}
+	if entry.TransitionID == 0 || models.PendingStepSignalMatchesEntry(signal, entry) {
+		return false
+	}
+	return signal.EntryTransitionID != 0 || (!signal.SignaledAt.IsZero() && !entry.OccurredAt.IsZero())
 }
 
 // parseStepCompletionEvent extracts (task_id, session_id, step_id) from a

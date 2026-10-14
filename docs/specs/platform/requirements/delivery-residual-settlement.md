@@ -32,10 +32,13 @@ Follows: `delivery-completed-stream-retirement` (PR #282, merged as `c616a21638`
 ## Requirements
 
 PR #298 records only `not_required` workflow outcomes for tasks with no
-workflow step. Tasks with a workflow step remain pinned until the explicit
-(c) follow-up PR evaluates their workflow through the owning engine and
-records its actual outcome. This split does not remove the remaining work
-or change the one-hour inbox-growth goal.
+workflow step. The (c) follow-up resolves workflow-bound terminals from
+durable turn and step facts alone, without evaluating the workflow engine:
+a turn whose step-entry stamp is not the task's current step is replaced and
+records `not_required`; a current-step turn whose step declares no automatic
+`on_turn_complete` move records `no_automatic_transition`; a current-step turn
+whose step does declare an automatic move stays pinned. This split does not
+remove the remaining work or change the one-hour inbox-growth goal.
 
 ### REQ-PLATFORM-DELIVERY-RESIDUAL-001: Settle dead-owner submissions
 
@@ -68,6 +71,13 @@ durably recorded through the owning writer.
   the guarded decision shall be recorded through the retention spec's Task 04
   no-op writer; retention itself shall not create workflow receipts, and
   `fully_settled_at` shall never be invented by age or estimate.
+- **AC-PLATFORM-DELIVERY-RESIDUAL-002.3:** For a workflow-bound terminal the
+  decision shall use only durable turn and step facts: a turn stamped in a
+  step the task has left records `not_required`; a current-step turn whose step
+  declares no automatic `on_turn_complete` move records
+  `no_automatic_transition`; a current-step turn whose step declares an
+  automatic move stays pinned. No workflow engine call, step transition, or UI
+  publish shall occur, and a terminal missing its turn evidence stays pinned.
 
 ### REQ-PLATFORM-DELIVERY-RESIDUAL-003: Preserve replay, ACK and terminal accuracy
 

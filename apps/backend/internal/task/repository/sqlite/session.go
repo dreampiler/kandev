@@ -45,6 +45,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 // never fail because telemetry could not be resolved.
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
 	stampTurnDefaults(turn)
+	delete(turn.Metadata, models.TurnMetaKeyWorkflowStepEntryAtStart)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -73,6 +74,7 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 			turn.Metadata = map[string]interface{}{}
 		}
 		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+		r.stampTurnCompletionEntry(ctx, tx, turn)
 		stamped = true
 	}
 	if found {
@@ -935,10 +937,15 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+	var sessionCount, primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
+		FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
+	// The task lock or SQLite writer serializes primary election with insertion.
+	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -3302,6 +3309,14 @@ func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
 	taskID, sessionID, key, stepID string,
 	value interface{},
 ) (bool, error) {
+	if key == models.SessionMetaKeyPendingStepCompletion {
+		if signal, ok := models.LoadPendingStepSignal(map[string]interface{}{key: value}); ok && signal.EntryTransitionID > 0 {
+			if signal.StepID != stepID {
+				return false, models.ErrStepCompletionEntryChanged
+			}
+			return r.claimStepCompletionAtEntry(ctx, taskID, sessionID, signal)
+		}
+	}
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return false, fmt.Errorf("failed to serialize metadata value: %w", err)

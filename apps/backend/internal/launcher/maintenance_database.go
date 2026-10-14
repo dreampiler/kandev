@@ -275,6 +275,8 @@ func printMaintenanceOutcome(outcome maintenance.Outcome) {
 	fmt.Printf("  deleted delivery payloads:    %d\n", outcome.Execution.DeletedDeliveryEventPayloads)
 	fmt.Printf("  deleted settled prompts:      %d\n", outcome.Execution.DeletedSettledDeliveryPrompts)
 	fmt.Printf("  retired event receipts:       %d\n", outcome.Execution.RetiredDeliveryEventReceipts)
+	fmt.Printf("  retired inbox rows:           %d\n", outcome.Execution.RetiredDeliveryEventReceipts)
+	fmt.Printf("  retired generic effects rows: %d\n", outcome.Execution.RetiredDeliveryEventReceipts)
 	fmt.Printf("  purged session evidence rows: %d\n", outcome.Execution.PurgedRetiredDeliveryRows)
 	fmt.Printf("  orphan jobs scheduled:        %d\n", outcome.Execution.DeliveryOrphanJobsScheduled)
 	fmt.Printf("  retirement jobs completed:    %d\n", outcome.Execution.DeliveryRetirementJobsCompleted)

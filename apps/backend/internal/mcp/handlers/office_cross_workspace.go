@@ -27,7 +27,7 @@ type OfficeCrossWorkspace interface {
 
 // SetOfficeCrossWorkspace wires the Office cross-workspace access setting.
 func (h *Handlers) SetOfficeCrossWorkspace(x OfficeCrossWorkspace) {
-	h.officeCrossWorkspace = x
+	h.extensions.officeCrossWorkspace = x
 }
 
 // officeCrossWorkspaceTarget names how a guarded action identifies the
@@ -76,10 +76,10 @@ func (h *Handlers) authorizeOfficeCrossWorkspaceRequest(ctx context.Context, msg
 	if target == principal.WorkspaceID {
 		return nil, msg, nil
 	}
-	if h.officeCrossWorkspace == nil {
+	if h.extensions.officeCrossWorkspace == nil {
 		return wsError(msg.ID, msg.Action, ws.ErrorCodeForbidden, crossworkspace.ErrDisabled.Error()), nil, nil
 	}
-	if err := h.officeCrossWorkspace.Reachable(ctx, principal.WorkspaceID, target); err != nil {
+	if err := h.extensions.officeCrossWorkspace.Reachable(ctx, principal.WorkspaceID, target); err != nil {
 		return officeCrossWorkspaceError(msg, err), nil, nil
 	}
 	return nil, msg, nil
@@ -91,10 +91,10 @@ func (h *Handlers) authorizeOfficeCrossWorkspaceRequest(ctx context.Context, msg
 func (h *Handlers) officeWorkspaceDirectory(
 	ctx context.Context, principal mcpscope.Principal, msg *ws.Message,
 ) (*ws.Message, *ws.Message, error) {
-	if h.officeCrossWorkspace == nil {
+	if h.extensions.officeCrossWorkspace == nil {
 		return nil, msg, nil
 	}
-	dir, err := h.officeCrossWorkspace.ListReachable(ctx, principal.WorkspaceID)
+	dir, err := h.extensions.officeCrossWorkspace.ListReachable(ctx, principal.WorkspaceID)
 	if err != nil {
 		return officeCrossWorkspaceError(msg, err), nil, nil
 	}
@@ -162,10 +162,10 @@ func officeCrossWorkspaceError(msg *ws.Message, err error) *ws.Message {
 func (h *Handlers) deliverToOfficeTask(
 	ctx context.Context, msg *ws.Message, sender, target *models.Task, prompt, replyToQuestionID string,
 ) *ws.Message {
-	if h.officeCrossWorkspace == nil || target == nil || !target.IsFromOffice || replyToQuestionID != "" {
+	if h.extensions.officeCrossWorkspace == nil || target == nil || !target.IsFromOffice || replyToQuestionID != "" {
 		return nil
 	}
-	delivery, handled, err := h.officeCrossWorkspace.DeliverToOfficeTask(ctx, sender, target, prompt)
+	delivery, handled, err := h.extensions.officeCrossWorkspace.DeliverToOfficeTask(ctx, sender, target, prompt)
 	if err != nil {
 		h.logger.Error("office cross-workspace delivery failed",
 			zap.String("task_id", target.ID), zap.String("sender_task_id", sender.ID), zap.Error(err))
@@ -200,10 +200,10 @@ func (h *Handlers) handleReportToHandoffSource(ctx context.Context, msg *ws.Mess
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
 			"report_to_handoff_source requires an in-session task caller", nil)
 	}
-	if h.officeCrossWorkspace == nil {
+	if h.extensions.officeCrossWorkspace == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, crossworkspace.ErrDisabled.Error(), nil)
 	}
-	delivery, err := h.officeCrossWorkspace.ReportToHandoffSource(ctx, principal.WorkspaceID, strings.TrimSpace(req.TaskID), req.Body)
+	delivery, err := h.extensions.officeCrossWorkspace.ReportToHandoffSource(ctx, principal.WorkspaceID, strings.TrimSpace(req.TaskID), req.Body)
 	if err != nil {
 		return officeCrossWorkspaceError(msg, err), nil
 	}

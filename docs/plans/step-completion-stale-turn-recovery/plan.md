@@ -3,6 +3,7 @@ created: 2026-09-18
 status: done
 requirements:
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003
+  - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004
 system_design:
   - ../../specs/tasks/system-design/workflow-explicit-completion-signal.md
 legacy_specs: []
@@ -96,6 +97,18 @@ Automated text tests do not prove that every model obeys recovery instructions.
 ## Work orders
 
 - [x] [Task 01: expose safe completion recovery](task-01-completion-recovery.md)
+- [x] [Task 02: scope accepted signals to workflow entries](task-02-entry-scoped-signals.md)
+
+## Entry-scoped reliability follow-up
+
+Task 01's diagnostic change is complete. Task 02 implements the approved
+entry-scoped persistence and consumption contract in requirement 004. Its scope
+includes the claim, both turn-stamp writers, and legacy/engine/subscriber
+consumption. The original diagnostic-only scope and results above describe
+Task 01; they do not limit this follow-up.
+
+The existing transition ID distinguishes a same-step return from a duplicate.
+No new table, caller identifier, watcher, or automatic recovery move is added.
 
 ## Verification results
 

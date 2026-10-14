@@ -66,7 +66,7 @@ func (h *Handlers) handleReorderChildTasks(ctx context.Context, msg *ws.Message)
 	if failure != nil {
 		return failure.response(msg)
 	}
-	if h.childTaskReorderer == nil {
+	if h.extensions.childTaskReorderer == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task reordering is not configured", nil)
 	}
 	target, failure := h.resolveChildReorderTarget(ctx, req)
@@ -74,7 +74,7 @@ func (h *Handlers) handleReorderChildTasks(ctx context.Context, msg *ws.Message)
 		return failure.response(msg)
 	}
 
-	stepTasks, err := h.childTaskReorderer.ListTasks(ctx, target.workflowID)
+	stepTasks, err := h.extensions.childTaskReorderer.ListTasks(ctx, target.workflowID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to read the step's task order", nil)
 	}
@@ -168,7 +168,7 @@ func (h *Handlers) resolveChildReorderTarget(
 }
 
 func (h *Handlers) lookupChildReorderTask(ctx context.Context, taskID, role string) (*models.Task, *childReorderFailure) {
-	task, err := h.childTaskReorderer.GetTask(ctx, taskID)
+	task, err := h.extensions.childTaskReorderer.GetTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
 			return nil, &childReorderFailure{ws.ErrorCodeNotFound, role + " not found"}
@@ -196,12 +196,12 @@ func (h *Handlers) applyChildReorder(
 		if failure != nil {
 			return nil, failure
 		}
-		result, err := h.childTaskReorderer.ReorderStepTasks(ctx, target.stepID, target.band, bandIDs)
+		result, err := h.extensions.childTaskReorderer.ReorderStepTasks(ctx, target.stepID, target.band, bandIDs)
 		if err == nil {
 			return result, nil
 		}
 		if errors.Is(err, repoerrors.ErrStepChanged) && attempt == 0 {
-			stepTasks, err = h.childTaskReorderer.ListTasks(ctx, target.workflowID)
+			stepTasks, err = h.extensions.childTaskReorderer.ListTasks(ctx, target.workflowID)
 			if err != nil {
 				return nil, &childReorderFailure{ws.ErrorCodeInternalError, "failed to refresh the step's task order"}
 			}

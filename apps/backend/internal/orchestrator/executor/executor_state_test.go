@@ -2,11 +2,13 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // TestResolveExecutorConfig_PropagatesSSHShell pins the contract that the
@@ -35,9 +37,12 @@ func TestResolveExecutorConfig_PropagatesSSHShell(t *testing.T) {
 		},
 	}
 
-	cfg := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
+	cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
 		"executor_profile_id": "prof-1",
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	got, _ := cfg.Metadata[lifecycle.MetadataKeySSHShell].(string)
 	if got != "zsh" {
@@ -113,11 +118,14 @@ func TestResolveExecutorConfig_AuthoritativeSSHKeys_ClobberTaskMetadata(t *testi
 				Config:     map[string]string{tc.key: tc.profileValue},
 			}
 
-			cfg := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
+			cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
 				"executor_profile_id": "prof-1",
 				tc.key:                tc.taskValue,
 			})
 
+			if err != nil {
+				t.Fatal(err)
+			}
 			got, _ := cfg.Metadata[tc.key].(string)
 			if got != tc.wantMetadata {
 				t.Fatalf("metadata[%q] = %q, want %q (profile=%q task=%q)",
@@ -143,11 +151,14 @@ func TestResolveExecutorConfig_PassthroughKeys_DontClobberTaskMetadata(t *testin
 		Config:     map[string]string{}, // profile has no git_user_name
 	}
 
-	cfg := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
+	cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-ssh-1", "ws-1", map[string]interface{}{
 		"executor_profile_id": "prof-1",
 		"git_user_name":       "Task Author",
 	})
 
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got, _ := cfg.Metadata["git_user_name"].(string); got != "Task Author" {
 		t.Fatalf("metadata[git_user_name] = %q, want task value to survive empty profile", got)
 	}
@@ -190,7 +201,10 @@ func TestResolveExecutorConfig_AuthoritativeKeysClearedWithoutProfile(t *testing
 					if tc.profileID != "" {
 						metadata["executor_profile_id"] = tc.profileID
 					}
-					cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1", metadata)
+					cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1", metadata)
+					if (tc.profileID == "" && err != nil) || (tc.profileID != "" && !errors.Is(err, repoerrors.ErrExecutorProfileNotFound)) {
+						t.Fatalf("unexpected profile lookup result: %v", err)
+					}
 
 					if got, _ := cfg.Metadata[key].(string); got != "" {
 						t.Fatalf("metadata[%q] = %q, want it cleared when no profile supplies it", key, got)
@@ -222,7 +236,10 @@ func TestResolveExecutorConfig_KubernetesProfileConfigClobbersTaskMetadata(t *te
 	for key := range profileConfig {
 		metadata[key] = "hostile-task-override"
 	}
-	cfg := exec.resolveExecutorConfig(context.Background(), "exec-k8s", "ws-1", metadata)
+	cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-k8s", "ws-1", metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := make(map[string]string, len(profileConfig))
 	for key := range profileConfig {
 		got[key], _ = cfg.Metadata[key].(string)
@@ -263,7 +280,10 @@ func TestResolveExecutorConfig_KubernetesProfileKeysDoNotClobberNonKubernetesMet
 	for key, value := range want {
 		metadata[key] = value
 	}
-	cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker", "ws-1", metadata)
+	cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-docker", "ws-1", metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
 	got := make(map[string]string, len(want))
 	for key := range want {
 		got[key], _ = cfg.Metadata[key].(string)

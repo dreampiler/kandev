@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 )
@@ -45,11 +46,25 @@ func runAPITestVscodeFixture() {
 		os.Exit(2)
 	}
 	defer func() { _ = listener.Close() }()
+	if runtime.GOOS == "windows" {
+		go watchAPITestVscodeFixtureShutdown(listener)
+	}
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
 		_ = conn.Close()
+	}
+}
+
+func watchAPITestVscodeFixtureShutdown(listener net.Listener) {
+	shutdownPath := os.Getenv(apiTestVscodeFixtureEnv)
+	for {
+		if _, err := os.Stat(shutdownPath); err == nil {
+			_ = listener.Close()
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

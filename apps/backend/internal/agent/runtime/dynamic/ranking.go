@@ -196,15 +196,17 @@ func CostRank(cost CostClass) int {
 // modification of pace: raw pace is unchanged by a reservation.
 //
 // A positive share with a positive usable limit excludes the candidate once
-// observed usage reaches 1 - share. A positive share against unknown usage
-// also excludes, because an unobservable reserve must not be spent silently.
-// A zero share adds no gate at all.
+// observed usage reaches 1 - share. Unknown usage defers a partial reservation
+// check; a full reservation always excludes new selections. Zero adds no gate.
 func ReservationExclusion(options ModelOptions, score PaceScore) bool {
 	if options.ReservedUserSharePct <= 0 {
 		return false
 	}
-	if !score.Known {
+	if options.ReservedUserSharePct == 100 {
 		return true
+	}
+	if !score.Known {
+		return false
 	}
 	return score.UsageFraction >= 1-float64(options.ReservedUserSharePct)/100
 }

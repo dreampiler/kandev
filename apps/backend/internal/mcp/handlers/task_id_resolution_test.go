@@ -147,3 +147,26 @@ func TestHandleArchiveTask_ResolvesShortID(t *testing.T) {
 	require.NotNil(t, archived)
 	assert.NotNil(t, archived.ArchivedAt, "the resolved task must actually be archived")
 }
+
+// TestGuardedDispatcherResolvesShortIDBeforeArchive pins the dispatcher wiring
+// itself: a short id sent through the production guarded dispatcher must be
+// expanded before the authorization guards, so reordering or dropping the
+// expansion step would reintroduce the original short-id archive failure.
+func TestGuardedDispatcherResolvesShortIDBeforeArchive(t *testing.T) {
+	h, repo, wsID := newPrefixHandlers(t)
+	dispatcher := ws.NewDispatcher()
+	(&guardedMCPDispatcher{Dispatcher: dispatcher, handlers: h}).
+		RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
+
+	ctx := kanbanPrincipalCtx(wsID, sharedPrefixTaskA)
+	resp, err := dispatcher.Dispatch(ctx,
+		makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": "082e5aad"}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	archived, err := repo.GetTask(ctx, uniquePrefixTask)
+	require.NoError(t, err)
+	require.NotNil(t, archived)
+	assert.NotNil(t, archived.ArchivedAt, "the dispatcher must resolve the short id before the archive handler")
+}

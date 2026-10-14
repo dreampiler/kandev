@@ -550,6 +550,15 @@ stays selected in the task and utility binding, while each launch uses one
 concrete candidate behind the scenes. Candidates must be enabled, launchable
 profiles. Dynamic profiles and rich Office profiles cannot be candidates.
 
+For profiles configured with tier selection, a failed usage refresh can use the
+account's last valid observation while it is less than 30 minutes old and its
+quota window still applies. Missing or expired readings remain unknown. A
+reservation from 1% through 99% does not exclude a candidate solely because usage
+is unknown, so the reserved share cannot be guaranteed during that gap. A 100%
+reservation still excludes new selections. Known usage with remaining capacity
+takes priority over unknown usage within the tier. Actual quota and circuit
+restrictions remain.
+
 Use the **Dynamic agents** card at the top of **Settings > Agents** to create
 and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
 selected for new work, when dynamic routing is disabled. A new profile starts

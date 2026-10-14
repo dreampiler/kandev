@@ -2,12 +2,15 @@ package executor
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -123,7 +126,7 @@ type executorConfig struct {
 // resolveExecutorConfig resolves executor configuration from an executor ID.
 // If executorID is empty, it falls back to the workspace default.
 // Returns the resolved config with executor ID, type, and metadata.
-func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) executorConfig {
+func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, workspaceID string, existingMetadata map[string]interface{}) (executorConfig, error) {
 	resolved := executorID
 	if resolved == "" {
 		resolved = e.defaultExecutorID(ctx, workspaceID)
@@ -150,52 +153,55 @@ func (e *Executor) resolveExecutorConfig(ctx context.Context, executorID, worksp
 	if resolved == "" {
 		profileID, _ := metadata["executor_profile_id"].(string)
 		if profileID == "" {
-			return executorConfig{Metadata: metadata}
+			return executorConfig{Metadata: metadata}, nil
 		}
 		cfg := executorConfig{Metadata: metadata}
-		e.applyProfile(ctx, profileID, &cfg, metadata)
-		return cfg
+		err := e.applyProfile(ctx, profileID, &cfg, metadata)
+		return cfg, err
 	}
 
 	metadata["executor_id"] = resolved
 
-	executor, err := e.repo.GetExecutor(ctx, resolved)
-	if err != nil || executor == nil {
-		return executorConfig{
-			ExecutorID: resolved,
-			Metadata:   metadata,
-		}
-	}
-
 	cfg := executorConfig{
-		ExecutorID:   resolved,
-		ExecutorType: string(executor.Type),
-		ExecutorCfg:  executor.Config,
-		Metadata:     metadata,
-		Resumable:    executor.Resumable,
-		RuntimeName:  string(executor.Type),
+		ExecutorID: resolved,
+		Metadata:   metadata,
+	}
+	executor, err := e.repo.GetExecutor(ctx, resolved)
+	if err == nil && executor != nil {
+		cfg.ExecutorType = string(executor.Type)
+		cfg.ExecutorCfg = executor.Config
+		cfg.Resumable = executor.Resumable
+		cfg.RuntimeName = string(executor.Type)
 	}
 
 	// Load profile by ID if specified in metadata, otherwise skip
 	profileID, _ := metadata["executor_profile_id"].(string)
 	if profileID != "" {
-		e.applyProfile(ctx, profileID, &cfg, metadata)
+		if err := e.applyProfile(ctx, profileID, &cfg, metadata); err != nil {
+			return cfg, err
+		}
 	}
 
-	return cfg
+	return cfg, nil
+}
+
+// Retained sessions keep their executor defaults when a saved profile was deleted.
+func (e *Executor) resolveRetainedExecutorConfig(ctx context.Context, executorID, workspaceID string, metadata map[string]interface{}) (executorConfig, error) {
+	cfg, err := e.resolveExecutorConfig(ctx, executorID, workspaceID, metadata)
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		return cfg, nil
+	}
+	return cfg, err
 }
 
 // applyProfile loads an executor profile and applies its settings to the config.
-func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *executorConfig, metadata map[string]interface{}) {
+func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *executorConfig, metadata map[string]interface{}) error {
 	profile, err := e.repo.GetExecutorProfile(ctx, profileID)
 	if err != nil {
-		e.logger.Warn("failed to load executor profile",
-			zap.String("profile_id", profileID),
-			zap.Error(err))
-		return
+		return fmt.Errorf("load executor profile %q: %w", profileID, err)
 	}
 	if profile == nil {
-		return
+		return fmt.Errorf("%w: %s", repoerrors.ErrExecutorProfileNotFound, profileID)
 	}
 
 	// The profile is tied to a specific executor. If it differs from the
@@ -231,6 +237,7 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 		metadata["executor_mcp_policy"] = policyJSON
 	}
 	applyProfileConfigToMetadata(cfg.ExecutorType, profile.Config, metadata)
+	return nil
 }
 
 // Profile.Config / metadata keys shared with executor_credentials.go.

@@ -348,9 +348,6 @@ func (r *Repository) ensureCurrentTaskStepTransitionTx(
 		return 0, fmt.Errorf("read workflow entry during backfill: %w", err)
 	}
 	if err == nil && latestID > 0 {
-		if err := tx.Commit(); err != nil {
-			return 0, err
-		}
 		return latestID, nil
 	}
 
@@ -359,17 +356,20 @@ func (r *Repository) ensureCurrentTaskStepTransitionTx(
 		return 0, err
 	}
 	if !found || workflowID == "" || workflowStepID == "" {
-		if err := tx.Commit(); err != nil {
-			return 0, err
-		}
 		return 0, nil
 	}
+	var createdAt time.Time
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT created_at FROM tasks WHERE id = ?`), taskID).Scan(&createdAt); err != nil {
+		return 0, fmt.Errorf("read workflow entry backfill lower bound: %w", err)
+	}
 
+	// An untracked entry uses task creation as its compatibility floor. The
+	// backfill must not make existing same-step turns and signals stale.
 	backfilledID, err := r.recordStepTransition(ctx, tx, stepTransitionInput{
 		taskID:           taskID,
 		toWorkflowID:     workflowID,
 		toWorkflowStepID: workflowStepID,
-		occurredAt:       time.Now().UTC(),
+		occurredAt:       createdAt,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("write workflow entry backfill: %w", err)

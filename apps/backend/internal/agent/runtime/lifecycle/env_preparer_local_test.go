@@ -497,11 +497,11 @@ func TestLocalPreparer_CheckoutFailureSurfaces(t *testing.T) {
 func TestLocalPreparer_PreservesFetchFailureWhenCheckoutAlsoFails(t *testing.T) {
 	const token = "github-token-that-must-not-leak"
 	fakeBin := t.TempDir()
-	fakeGit := filepath.Join(fakeBin, "git")
 	script := `#!/bin/sh
 case "$1" in
 rev-parse)
-  pwd
+  # Git for Windows sh prints a host path with -W; POSIX sh falls back to pwd.
+  pwd -W 2>/dev/null || pwd
   exit 0
   ;;
 fetch)
@@ -514,9 +514,7 @@ checkout)
   ;;
 esac
 `
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
+	writeFakeExecutable(t, fakeBin, "git", script)
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	preparer := NewLocalPreparer(newTestLocalLogger())
@@ -576,7 +574,7 @@ func TestLocalPreparer_RunsSetupScriptWithoutCheckout(t *testing.T) {
 		TaskID:         "task-1",
 		RepositoryPath: repoDir,
 		// BaseBranch left empty — "use current" path, no checkout step at all.
-		SetupScript: "touch " + markerFile,
+		SetupScript: "touch " + shellQuote(shellPOSIXPath(markerFile)),
 	}
 
 	result, err := preparer.Prepare(context.Background(), req, nil)
@@ -674,7 +672,6 @@ func TestLocalPreparer_BranchCheckedOutElsewhereFailsClosed(t *testing.T) {
 		t.Fatalf("locate real git: %v", err)
 	}
 	fakeBin := t.TempDir()
-	fakeGit := filepath.Join(fakeBin, "git")
 	script := `#!/bin/sh
 case "$1" in
 fetch)
@@ -682,11 +679,9 @@ fetch)
   exit 128
   ;;
 esac
-exec "` + realGit + `" "$@"
+exec "` + shellPOSIXPath(realGit) + `" "$@"
 `
-	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
-		t.Fatalf("write fake git: %v", err)
-	}
+	writeFakeExecutable(t, fakeBin, "git", script)
 	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	result, err := NewLocalPreparer(newTestLocalLogger()).Prepare(context.Background(), &EnvPrepareRequest{
