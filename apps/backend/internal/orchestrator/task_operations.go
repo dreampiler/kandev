@@ -5713,7 +5713,16 @@ func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID 
 	if session == nil {
 		return true, nil
 	}
-	if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
+	switch session.State {
+	case models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		// A settled or terminal session with no live execution: safe to settle.
+	default:
+		// CREATED/STARTING/RUNNING/IDLE (or any future state): a launch or run
+		// may be in flight and the execution may simply not be registered yet, so
+		// return the original error and leave the turn alone.
 		return false, nil
 	}
 	if s.turnService == nil {
