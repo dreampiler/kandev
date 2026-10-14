@@ -55,7 +55,7 @@ exit_status() {
 	# Run the hook and print its exit status (never fails the test harness).
 	local rc
 	set +e
-	(cd "$repo" && "$hook" "$1") >"$TMP_DIR/out" 2>&1
+	(cd "$repo" && bash "$hook" "$1") >"$TMP_DIR/out" 2>&1
 	rc=$?
 	set -e
 	printf '%s' "$rc"
@@ -78,7 +78,7 @@ fi
 
 : > "$record"
 set +e
-(cd "$repo" && COMMITLINT_HOOK_PNPM_EXIT=3 "$hook" "$TMP_DIR/good") >/dev/null 2>&1
+(cd "$repo" && COMMITLINT_HOOK_PNPM_EXIT=3 bash "$hook" "$TMP_DIR/good") >/dev/null 2>&1
 rc=$?
 set -e
 if [ "$rc" -eq 3 ]; then
