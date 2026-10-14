@@ -194,6 +194,31 @@ func (r *Repository) MarkWakeupRequestCoalesced(
 	return r.mergeWakeupPayloadIntoRunSnapshot(ctx, id, intoRunID)
 }
 
+// HasCoalescedWakeupOutsideReasons reports whether any wakeup request merged
+// into runID carries an effective reason (reason, else source — the same
+// fallback the dispatcher's effectiveReason applies) outside the given set.
+// A caller passes the periodic reasons so it can tell whether the run carries
+// an event-triggered wake it must not drop.
+func (r *Repository) HasCoalescedWakeupOutsideReasons(
+	ctx context.Context, runID string, reasons ...string,
+) (bool, error) {
+	query, args, err := sqlx.In(`
+		SELECT EXISTS (
+			SELECT 1 FROM agent_wakeup_requests
+			WHERE run_id = ? AND status = ?
+			  AND COALESCE(NULLIF(reason, ''), source) NOT IN (?)
+		)
+	`, runID, WakeupStatusCoalesced, reasons)
+	if err != nil {
+		return false, err
+	}
+	var exists bool
+	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
 // PromoteRunAndCoalesceWakeupIfQueued atomically promotes a queued run,
 // attaches the wakeup request, increments the coalesced count, and merges the
 // request payload. The first run update holds the writer lock until commit, so
