@@ -30,7 +30,7 @@ apps/
 
 ### Worktrees and commit hooks
 
-A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks not just the commit-msg hook (`pnpm exec commitlint` → `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`) but any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly. Run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint/commits; subsequent pnpm commands work normally.
+A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly — so run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint. The commit-msg hook (`scripts/commitlint-hook`) tolerates the missing install: it uses Bash and Node built-ins to check the header, allowed type, subject case and punctuation, and body/footer line lengths. Invalid messages still block the commit without installing dependencies; installed workspaces delegate to commitlint.
 
 ---
 
