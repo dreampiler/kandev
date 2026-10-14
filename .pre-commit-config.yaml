@@ -4,7 +4,7 @@ repos:
     hooks:
       - id: commitlint
         name: Validate commit message (Conventional Commits)
-        entry: bash -c 'cd apps && pnpm exec commitlint --edit "$1"' --
+        entry: bash scripts/commitlint-hook
         language: system
         stages: [commit-msg]
         always_run: true
