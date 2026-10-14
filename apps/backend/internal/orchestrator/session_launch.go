@@ -1529,7 +1529,6 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
-		Automatic:                        options.Automatic,
 	})
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
@@ -1541,6 +1540,15 @@ func (s *Service) RecoverSessionWithOptions(
 			}
 		}
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
+	}
+	if resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// The resume was deferred by the session ceiling, so the launch has not
+		// happened. Never settle the recovery admission or the continuation
+		// checkpoint for a launch that is still queued: the deferred record
+		// owns the resume and the still-open recovery block stays as the
+		// operator surface. Settling here would mark the recovery ready and
+		// burn the continuation checkpoint against an empty execution.
+		return resp, nil
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
 		return nil, err
