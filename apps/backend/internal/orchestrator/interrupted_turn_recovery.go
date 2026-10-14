@@ -34,6 +34,12 @@ const (
 	// on every queued nudge.
 	interruptedTurnAutoRecoveryCooldown = time.Minute
 	interruptedTurnAutoRecoveryTimeout  = 5 * time.Minute
+	// interruptedTurnAutoRecoveryMaxAttempts bounds how many model-driven
+	// recoveries a single unresolved durable record may consume before
+	// automatic continuation stops. The bounded record is then left to an
+	// operator: the open session recovery block stays as the surface, and
+	// nothing is force-settled just to end the loop.
+	interruptedTurnAutoRecoveryMaxAttempts = 3
 )
 
 // interruptedTurnRecoveryReasons are the persisted block reasons produced by a
@@ -117,12 +123,12 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 	if session == nil {
 		return false
 	}
+	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+	if err != nil {
+		return false
+	}
 	reason := recoveryReasonFromError(cause)
 	if reason == "" {
-		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-		if err != nil {
-			return false
-		}
 		if block != nil {
 			reason = block.Reason
 		} else if session.State == models.TaskSessionStateFailed && startupFailureTextNeedsContinuation(session.ErrorMessage) {
@@ -132,7 +138,17 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 	if !interruptedTurnRecoveryReasons[reason] {
 		return false
 	}
-	if !s.claimInterruptedTurnAutoRecovery(sessionID) {
+	recordKey := interruptedTurnAutoRecoveryRecordKey(block, reason)
+	claimed, exhausted := s.claimInterruptedTurnAutoRecovery(sessionID, recordKey)
+	if !claimed {
+		if exhausted {
+			s.logger.Zap().Warn("interrupted turn auto-recovery reached its attempt bound; operator action required",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("reason", reason),
+				zap.String("record", recordKey),
+				zap.Int("max_attempts", interruptedTurnAutoRecoveryMaxAttempts))
+		}
 		return false
 	}
 	s.logger.Info("starting automatic continue_from_history for an interrupted turn",
@@ -171,6 +187,12 @@ func (s *Service) automaticContinuationSession(ctx context.Context, taskID, sess
 	if session.State == models.TaskSessionStateFailed && !s.CanAutoRecoverFailedSession(ctx, taskID, sessionID) {
 		return nil
 	}
+	// A live runtime still owns the interrupted turn: continuation from history
+	// must wait for a confirmed termination instead of replacing work that is
+	// still running. Only a session with no live execution is carried over.
+	if s.sessionRuntimeLive(ctx, sessionID) {
+		return nil
+	}
 	return session
 }
 
@@ -204,21 +226,62 @@ func (s *Service) CanAutoRecoverFailedSession(ctx context.Context, taskID, sessi
 type interruptedTurnAutoRecoveryState struct {
 	running   bool
 	startedAt time.Time
+	// recordKey names the unresolved durable record this attempt budget belongs
+	// to. A different record starts a fresh budget; a settled record is
+	// replaced by a new key so the bound never carries across records.
+	recordKey string
+	// attempts counts automatic continuations already started for recordKey.
+	attempts int
 }
 
-func (s *Service) claimInterruptedTurnAutoRecovery(sessionID string) bool {
+// interruptedTurnAutoRecoveryRecordKey names the durable record an automatic
+// continuation is settling. It prefers the delivery submission identity (the
+// exact unresolved work), then the recovery block id, then the block reason, so
+// two distinct unresolved records on one session cannot share one attempt
+// budget.
+func interruptedTurnAutoRecoveryRecordKey(block *models.SessionRecoveryBlock, reason string) string {
+	if block != nil {
+		if block.DeliverySubmissionID != "" {
+			return "submission:" + block.DeliverySubmissionID
+		}
+		if block.ID != "" {
+			return "block:" + block.ID
+		}
+	}
+	return "reason:" + reason
+}
+
+// claimInterruptedTurnAutoRecovery admits one automatic continuation for the
+// session's current unresolved record. It returns claimed=false with
+// exhausted=true once that record has consumed its whole attempt budget, so the
+// caller can leave the still-open recovery block to an operator instead of
+// retrying forever.
+func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) (claimed, exhausted bool) {
 	s.interruptedTurnAutoRecoveryMu.Lock()
 	defer s.interruptedTurnAutoRecoveryMu.Unlock()
 	if s.interruptedTurnAutoRecovery == nil {
 		s.interruptedTurnAutoRecovery = make(map[string]interruptedTurnAutoRecoveryState)
 	}
 	state := s.interruptedTurnAutoRecovery[sessionID]
+	if state.recordKey != recordKey {
+		// A different unresolved record (the prior one was settled or replaced)
+		// begins with a fresh attempt budget.
+		state = interruptedTurnAutoRecoveryState{recordKey: recordKey}
+	}
 	now := time.Now()
 	if state.running || now.Sub(state.startedAt) < interruptedTurnAutoRecoveryCooldown {
-		return false
+		s.interruptedTurnAutoRecovery[sessionID] = state
+		return false, false
 	}
-	s.interruptedTurnAutoRecovery[sessionID] = interruptedTurnAutoRecoveryState{running: true, startedAt: now}
-	return true
+	if state.attempts >= interruptedTurnAutoRecoveryMaxAttempts {
+		s.interruptedTurnAutoRecovery[sessionID] = state
+		return false, true
+	}
+	state.running = true
+	state.startedAt = now
+	state.attempts++
+	s.interruptedTurnAutoRecovery[sessionID] = state
+	return true, false
 }
 
 func (s *Service) finishInterruptedTurnAutoRecovery(sessionID string) {
