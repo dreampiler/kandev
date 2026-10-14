@@ -67,8 +67,10 @@ var runtimeEnvironmentRules = []runtimeRule{
 	{
 		// Route the bounded DeepSeek missing-reasoning diagnostic through the
 		// existing manual fresh-session recovery policy across adapters.
-		id:      reasoningContentNonReplayableRuleID,
-		pattern: reasoningContentMissingRe,
+		// Require the raw signature too, so redaction cannot shorten its gap.
+		id:       reasoningContentNonReplayableRuleID,
+		pattern:  reasoningContentMissingRe,
+		rawMatch: reasoningContentMissingRe.MatchString,
 		build: func(string) *Error {
 			return &Error{
 				Code:            CodeResumeCorrupted,

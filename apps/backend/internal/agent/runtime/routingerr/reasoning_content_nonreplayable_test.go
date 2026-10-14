@@ -64,3 +64,27 @@ func TestIsResumeCorrupted_ReasoningContent(t *testing.T) {
 		}
 	}
 }
+
+func TestClassify_ReasoningContentRawBound(t *testing.T) {
+	resetInjection()
+	for _, tc := range []struct {
+		name string
+		gap  string
+		want Code
+	}{
+		{"redactable gap at the bound", " " + strings.Repeat("x", 78) + " ", CodeResumeCorrupted},
+		{"redactable gap beyond the bound", " " + strings.Repeat("x", 79) + " ", CodeAgentRuntime},
+		{"phrases on separate lines", "\n", CodeAgentRuntime},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := "reasoning_content" + tc.gap + "must be passed back"
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: msg})
+			if got.Code != tc.want {
+				t.Fatalf("Code = %q, want %q (excerpt %q)", got.Code, tc.want, got.RawExcerpt)
+			}
+			if IsResumeCorrupted(msg) != (got.Code == CodeResumeCorrupted) {
+				t.Fatal("raw recovery predicate and classifier disagree")
+			}
+		})
+	}
+}

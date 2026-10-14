@@ -33,6 +33,7 @@ message steers toward a fresh session.
 - The `deepseek.reasoning_content.nonreplayable.v1` runtime-environment rule
   mapping to `resume_corrupted` with fresh-session remediation.
 - `IsResumeCorrupted` recognition of the same single-line signature.
+- Raw diagnostic matching before redaction can shorten the signature's gap.
 - Unit coverage for code, class, policy flags, and false-positive boundaries.
 
 ### Out of scope
@@ -53,8 +54,14 @@ message steers toward a fresh session.
   package `go vet` passing on the original source. These are author evidence,
   not independent verification of the review candidate.
 - Review adds exactly-80-character acceptance and newline rejection coverage,
-  preserving the existing recovery flags and negative prose cases. This is
-  coverage-only remediation; it does not claim a production RED.
+  preserving the existing recovery flags and negative prose cases. These
+  predicate tests passed, and 79-character/newline mutations failed their
+  assertions; that coverage-only change does not claim a production RED.
+- A controlled exact-source `Sanitize` and `matchRuntimeRules` proof exposed
+  an 81-character raw gap becoming a match after redaction. The new rule now
+  also requires the raw signature. Real `Classify` regressions cover redactable
+  80- and 81-character gaps and newline rejection. Full classifier and policy
+  verification runs in hosted CI; the controlled proof is not a package pass.
 - Independent candidate verification and hosted CI results are retained in
   the review task's sibling evidence directory, outside this work order.
 - No public docs change is needed: no API, configuration, recovery action, or

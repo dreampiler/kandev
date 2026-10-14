@@ -34,6 +34,8 @@ and make `IsResumeCorrupted` recognize the same signature.
 - `IsResumeCorrupted` returns true for the signature and false for empty text,
   unrelated `reasoning_content` prose, a gap beyond 80 characters, and phrases
   on separate lines. A gap of exactly 80 characters is accepted.
+- Redaction cannot shorten an oversized raw gap into a matching signature.
+  The rule checks both the sanitized excerpt and the raw diagnostic.
 - The existing `resume_corrupted` user-action policy vetoes automatic retry
   and unclassified fallback. The diagnostic does not prove the failure's cause
   or guarantee recovery from an adapter-level omission in a fresh session.
@@ -53,13 +55,19 @@ cd apps/backend && go test ./internal/agent/runtime/routingerr -run "ReasoningCo
 
 A broad `reasoning_content` match could turn agent prose into a veto. The rule
 requires `must be passed back` within 80 characters on the same line.
+The raw match guard preserves that bound when sanitization masks a long token.
 
 ## Results
 
 - [PR #4494](https://github.com/kdlbs/kandev/pull/4494) implements the bounded
   signature and reuses the existing recovery policy.
 - Original focused test passes are author-reported. Review retains the flags
-  assertions and adds exactly-80 and newline cases; no production logic change
-  or production RED is claimed for that coverage-only batch.
+  assertions and adds exactly-80 and newline cases. These predicate tests and
+  their negative mutations passed the controlled verification; no production
+  RED is claimed for that coverage-only change.
+- A real assertion against the exact sanitizer/runtime matcher exposed an
+  oversized raw gap matching after redaction. The minimal new-rule raw guard
+  addresses it; real `Classify` tests cover redactable 80/81 and newline gaps.
+  Hosted CI verifies the full classifier and its unchanged recovery policy.
 - Independent focused and hosted verification receipts belong to the review
   task's sibling evidence directory and are not inferred from author reports.
