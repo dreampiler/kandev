@@ -231,7 +231,7 @@ func TestEditLeaseCleanupIsDurableAcrossTaskPurge(t *testing.T) {
 	require.ErrorIs(t, err, ErrEditLeaseNotFound)
 }
 
-func TestExpiredSessionTransferLeaseCannotDeleteCompensation(t *testing.T) {
+func TestExpiredSessionTransferOwnerCanDeleteCompensation(t *testing.T) {
 	ctx := context.Background()
 	repo := newTestSQLiteRepo(t).(*sqliteRepository)
 	compensation := SessionTransferCompensation{
@@ -247,13 +247,13 @@ func TestExpiredSessionTransferLeaseCannotDeleteCompensation(t *testing.T) {
 		WHERE operation_id = ?
 	`, time.Now().UTC().Add(-time.Second), compensation.OperationID)
 	require.NoError(t, err)
-	require.ErrorIs(t, repo.DeleteSessionTransferCompensation(
+	require.NoError(t, repo.DeleteSessionTransferCompensation(
 		ctx, compensation.OperationID, compensation.TaskID,
 		compensation.FromSessionID, compensation.ToSessionID,
-	), ErrSessionTransferOwnershipLost)
+	))
 	stored, err := repo.ListSessionTransferCompensations(ctx)
 	require.NoError(t, err)
-	require.Len(t, stored, 1)
+	require.Empty(t, stored)
 }
 func TestExpiredSessionTransferLeaseCannotRenew(t *testing.T) {
 	ctx := context.Background()

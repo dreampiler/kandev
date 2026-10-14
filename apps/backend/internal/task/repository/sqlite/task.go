@@ -3796,6 +3796,30 @@ func (r *Repository) ListTasks(ctx context.Context, workflowID string) ([]*model
 	return r.scanTasks(rows)
 }
 
+// ListTasksByIDPrefix returns tasks in a workspace whose id starts with the
+// given lowercase hex prefix. Archived, ephemeral, and automation-origin tasks
+// are included: this is an identity lookup, not a user-facing list, so the
+// caller resolves the exact row a short id names and the target tool applies
+// its own access rules afterward. The cap keeps an ambiguous prefix bounded.
+const taskIDPrefixLookupCap = 20
+
+func (r *Repository) ListTasksByIDPrefix(ctx context.Context, workspaceID, prefix string) ([]*models.Task, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByIDPrefix")
+	defer span.End()
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.workspace_id = ? AND t.id LIKE ?
+		ORDER BY t.id ASC
+		LIMIT ?`), workspaceID, prefix+"%", taskIDPrefixLookupCap)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanTasks(rows)
+}
+
 // CountTasksByWorkflow returns the number of non-archived, non-ephemeral tasks in a workflow
 func (r *Repository) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
 	var count int
@@ -4338,6 +4362,24 @@ func (r *Repository) ListEphemeralTasksAllWorkspaces(ctx context.Context) ([]*mo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+// ListTasksByWorkspaceIncludingAutomation is the read-oriented variant of
+// ListTasksByWorkspaceWithArchiveMode that also returns automation-origin
+// tasks. The user-facing workspace list hides them by provenance, but a
+// control surface must be able to find a board-less automation-run output and
+// act on it. It is a read only; callers still pass through the service
+// authorization and any caller-specific access rules.
+func (r *Repository) ListTasksByWorkspaceIncludingAutomation(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return r.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+// listTasksByWorkspace is the shared implementation behind the workspace-list
+// contracts. includeAutomation is the only difference between them: the
+// user-facing list hides automation-origin rows by provenance, while the
+// control read must see them.
+func (r *Repository) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, includeAutomation bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -4357,10 +4399,12 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 		filter += " AND is_ephemeral = 0"
 	}
 	// If includeEphemeral is true and onlyEphemeral is false, include both
-	// Automation runs are excluded regardless of the ephemeral toggles: they
-	// are hidden by provenance, and "include quick chats" is not a request to
-	// see them.
-	filter += andNotAutomationOrigin
+	// Automation runs are excluded from the user-facing list regardless of the
+	// ephemeral toggles: they are hidden by provenance, and "include quick
+	// chats" is not a request to see them.
+	if !includeAutomation {
+		filter += andNotAutomationOrigin
+	}
 
 	if onlyArchived {
 		filter += " AND archived_at IS NOT NULL"
