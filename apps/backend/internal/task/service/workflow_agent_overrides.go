@@ -166,9 +166,12 @@ var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is requ
 // repository, or session row is written when the resolved workflow requires an
 // explicit agent profile selection and the caller supplied none. Only a
 // caller-provided profile (ExplicitAgentProfileID) or a validated
-// workflow_agent_overrides binding counts: creator/parent/workflow/workspace
-// fallbacks and stored task metadata deliberately do not, so a workflow that
-// requires an explicit choice cannot be satisfied by an inherited default.
+// workflow_agent_overrides binding for the task's resolved destination step
+// counts: creator/parent/workflow/workspace fallbacks and stored task
+// metadata deliberately do not, and neither does a binding for a different
+// step, so a workflow that requires an explicit choice cannot be satisfied by
+// an inherited default or by a selection that never applies to the step the
+// task actually lands on.
 //
 // It runs after validateWorkflowAgentOverrides so normalized overrides are
 // available, and after CreateTask's external_id short-circuit, so a duplicate
@@ -188,7 +191,12 @@ func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *Cr
 		return nil
 	}
 	if req.normalizedWorkflowAgentOverrides != nil && len(req.normalizedWorkflowAgentOverrides.Steps) > 0 {
-		return nil
+		if destinationStepID := s.resolveWorkflowStep(ctx, req); destinationStepID != "" {
+			if _, ok := req.normalizedWorkflowAgentOverrides.ReplacementFor(req.WorkflowID, destinationStepID); ok {
+				return nil
+			}
+		}
+		return ErrExplicitAgentProfileRequired
 	}
 	return ErrExplicitAgentProfileRequired
 }
