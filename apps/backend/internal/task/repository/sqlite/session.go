@@ -803,7 +803,7 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 		return fmt.Errorf("inspect shared workspace election: %w", err)
 	}
 	if won == 0 {
-		return r.bindReadySharedGroupEnvironment(ctx, tx, session, groupID, route)
+		return r.bindReadySharedGroupEnvironment(ctx, tx, session, candidate.ExecutorType, groupID, route)
 	}
 
 	if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
@@ -829,10 +829,11 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	session *models.TaskSession,
+	requestedExecutorType string,
 	groupID string,
 	route *models.WorkflowSessionRoute,
 ) error {
-	var environmentID, status, materializationSessionID string
+	var environmentID, status, materializationSessionID, ownerID, executorType string
 	var claimUpdatedAt sql.NullTime
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT materialized_environment_id FROM task_workspace_groups WHERE id = ?
@@ -843,18 +844,22 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		return err
 	}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.materialization_session_id, ''), e.updated_at
+		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.materialization_session_id, ''), e.updated_at,
+		       COALESCE(e.task_id, ''), COALESCE(e.executor_type, '')
 		FROM task_workspace_groups g
 		JOIN task_workspace_group_members m
 		  ON m.workspace_group_id = g.id AND m.task_id = ? AND m.released_at IS NULL
 		LEFT JOIN task_environments e ON e.id = g.materialized_environment_id
 		WHERE g.id = ?
-	`), session.TaskID, groupID).Scan(&environmentID, &status, &materializationSessionID, &claimUpdatedAt)
+	`), session.TaskID, groupID).Scan(&environmentID, &status, &materializationSessionID, &claimUpdatedAt, &ownerID, &executorType)
 	if errors.Is(err, sql.ErrNoRows) || environmentID == "" {
 		return fmt.Errorf("%w: shared workspace group is unavailable", models.ErrWorkspaceReuseUnsafe)
 	}
 	if err != nil {
 		return fmt.Errorf("load shared workspace environment: %w", err)
+	}
+	if err := validateSharedWorkspaceExecutor(session.TaskID, ownerID, executorType, requestedExecutorType); err != nil {
+		return err
 	}
 	switch models.TaskEnvironmentStatus(status) {
 	case models.TaskEnvironmentStatusReady, models.TaskEnvironmentStatusStopped:
@@ -895,6 +900,21 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		return err
 	}
 	return tx.Commit()
+}
+
+// The elected environment can change after preflight. Ownership and executor
+// compatibility must hold before binding or electing a replacement materializer.
+func validateSharedWorkspaceExecutor(taskID, ownerID, executorType, requestedExecutorType string) error {
+	if executorType != "" && executorType != requestedExecutorType {
+		return fmt.Errorf("%w: shared workspace executor does not match the selected executor", models.ErrWorkspaceReuseUnsafe)
+	}
+	if requestedExecutorType == string(models.ExecutorTypeKubernetes) && ownerID != taskID {
+		if ownerID == "" {
+			return fmt.Errorf("%w: shared workspace executor ownership is inconsistent", models.ErrWorkspaceReuseUnsafe)
+		}
+		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsupported, models.WorkspaceReuseUnsupportedMessage)
+	}
+	return nil
 }
 
 func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment) error {
@@ -4654,6 +4674,10 @@ const envRepoSelectCols = `
 	ter.id, ter.task_environment_id, ter.repository_id,
 	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
 	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
+	COALESCE(ter.worktree_branch_owner, 'unknown'), COALESCE(ter.worktree_integration_ref, ''),
+	COALESCE(ter.worktree_recovery_head_sha, ''),
+	COALESCE(ter.worktree_source_clone_path, ''), COALESCE(ter.worktree_source_common_dir, ''),
+	ter.worktree_branch_compacted_at,
 	ter.position, COALESCE(ter.error_message, ''), ter.status,
 	ter.created_at, ter.updated_at, ter.merged_at, ter.deleted_at`
 
@@ -4661,14 +4685,20 @@ const envRepoSelectCols = `
 // models.TaskEnvironmentRepo.
 func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 	row := &models.TaskEnvironmentRepo{}
-	var mergedAt, deletedAt sql.NullTime
+	var compactedAt, mergedAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
 		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
-		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch, &row.Position,
+		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+		&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
+		&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt, &row.Position,
 		&row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 		&mergedAt, &deletedAt,
 	); err != nil {
 		return nil, err
+	}
+	if compactedAt.Valid {
+		t := compactedAt.Time
+		row.WorktreeBranchCompactedAt = &t
 	}
 	if mergedAt.Valid {
 		t := mergedAt.Time
@@ -4841,13 +4871,19 @@ func (r *Repository) appendWorktreesForSessionChunk(
 
 	for rows.Next() {
 		var sessionID string
-		var mergedAt, deletedAt sql.NullTime
+		var compactedAt, mergedAt, deletedAt sql.NullTime
 		row := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
 			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.WorktreeBranchOwner, &row.WorktreeIntegrationRef, &row.WorktreeRecoveryHeadSHA,
+			&row.WorktreeSourceClonePath, &row.WorktreeSourceCommonDir, &compactedAt,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 			&mergedAt, &deletedAt); err != nil {
 			return err
+		}
+		if compactedAt.Valid {
+			t := compactedAt.Time
+			row.WorktreeBranchCompactedAt = &t
 		}
 		if mergedAt.Valid {
 			t := mergedAt.Time
