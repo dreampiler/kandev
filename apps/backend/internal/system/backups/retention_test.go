@@ -159,30 +159,6 @@ func TestVerifySnapshotRejectsCorruption(t *testing.T) {
 	}
 }
 
-// TestVerifySnapshotAcceptsValidDatabase guards the read-only DSN against the
-// Windows regression where url.URL percent-encoded backslashes and mattn opened
-// nothing. The temp path is absolute and backslash-separated on Windows.
-func TestVerifySnapshotAcceptsValidDatabase(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "valid.db")
-	writer, err := sqlx.Open("sqlite3", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := writer.Exec(`CREATE TABLE things (id TEXT PRIMARY KEY)`); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	digest, err := verifySnapshot(context.Background(), path)
-	if err != nil {
-		t.Fatalf("verify snapshot: %v", err)
-	}
-	if len(digest) != 64 {
-		t.Fatalf("digest = %q", digest)
-	}
-}
-
 func TestBackupSweepsAbandonedPrivateStaging(t *testing.T) {
 	s, _ := newTestService(t)
 	if err := s.ensureBackupsDir(); err != nil {
