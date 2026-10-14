@@ -1,7 +1,7 @@
 ---
 id: "04-restart-recovery-route-activation"
 title: "Activate resumed dynamic routes and fail blocked explicit recoveries"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -45,6 +45,7 @@ Mark the route active when the resumed runtime is ready, let an explicit recover
 
 - A resumed runtime that is ready and waiting for input leaves the claimed route active. Cancelled sessions, other executions, and stale generations stay unchanged.
 - An explicit recovery resumes a stranded `starting` route. A live launch owner, a passive resume, and other non-active states keep the guard.
+- Failed activation returns to the actual resume caller while preserving the healthy runtime. After storage recovery, admission reconciles only the same generation and current prompt-ready execution; cancelled sessions and predecessor/unknown executions stay guarded.
 - A blocked explicit recovery returns an error. A passive session open keeps its waiting response.
 
 ## Tests
@@ -61,3 +62,7 @@ cd apps/backend
 go test ./internal/orchestrator -run 'Resume|Recover|DynamicRoute|ProcessStart|SessionOpen|Dynamic|LaunchSession' -count=1
 go build ./... && go vet ./internal/orchestrator
 ```
+
+## Review remediation results
+
+Exact-source contained harness RED reproduced predecessor, unknown-execution, and cancelled-session admission. GREEN with the execution/state guards passed under the race detector. These use explicit fake storage/runtime boundaries and do not prove SQLite behavior. Permanent ownership and actual resume-caller tests are added alongside the source; their verification is owned by hosted Backend CI. Final exact-head CI remains externally pending.

@@ -13,248 +13,61 @@ legacy_specs: []
 
 ## Overview
 
-This package groups small, independent defects on the dynamic routing path.
-Each work order has its own cause, tests, and commit, so a reviewer can accept or drop one without the others.
-The agent system owns all of them because it owns candidate selection and route state.
+This package retains three independent routing corrections: counting authoritative empty normal turns under an enabled candidate policy, reporting non-dynamic route actions as validation errors, and activating a resumed route honestly after runtime readiness.
+Candidate identity, attempt ownership, workflow fences, and current execution guards remain authoritative.
 
-| Work order | Defect | Issue | Status |
-| --- | --- | --- | --- |
-| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn ends are never counted by the repeated-unclassified fallback | [#4325](https://github.com/kdlbs/kandev/issues/4325) | done |
-| [Task 02](task-02-route-action-validation.md) | A route action on a non-dynamic session is reported as an internal failure | none | done |
-| [Task 04](task-04-restart-recovery-route-activation.md) | A resumed route is never activated, and a blocked explicit recovery reports success | none | done |
-| [Task 05](task-05-post-start-no-result-proposal.md) | Contract proposal: fixed-shape post-start failures before any result are never counted | none | candidate implemented, proposal not accepted |
-| [Task 06](task-06-post-start-generic-prefix-proposal.md) | Contract proposal: generic post-start failures have no identity | none | candidate implemented, proposal not accepted |
-
-Staging:
-
-1. Task 01 is implemented first.
-2. Task 02 is implemented after Task 01, in its own commit.
-3. Task 04 is implemented after Task 02, in its own commit.
-4. Task 05 is the last, separable contract proposal. It is implemented only after the proposal is accepted for implementation, and after Task 04.
-5. The package is submitted once, after every confirmed member is implemented.
-
-## Outcome coverage
-
-The original goal of the first defect is that a dynamic turn which produces no result counts toward the candidate's repeated-failure threshold.
-That covers two shapes. This package preserves one of them and leaves the other unresolved.
-
-| Shape | Coverage | Reason |
+| Work order | Scope | Status |
 | --- | --- | --- |
-| Normal `end_turn` completion with no text, reasoning, or tool activity | Task 01, implemented | Fits the design with a fixed, text-free identity. |
-| Post-start runtime error before any result, without a complete diagnostic | Task 05, proposed | Conflicts with the current identity contract. See below. |
+| [Task 01](task-01-empty-turn-unclassified-failure.md) | Empty normal turn failure counting | implemented; review remediation in progress |
+| [Task 02](task-02-route-action-validation.md) | Typed route-action validation | implemented |
+| [Task 04](task-04-restart-recovery-route-activation.md) | Resume-ready activation and explicit recovery | implemented; caller/ownership verification in progress |
 
-### Unresolved: post-start failures without a complete diagnostic
+## Retained contract
 
-Examples are a provider header timeout or a runtime execution error during `prompt_send`, `streaming`, or `tool_execution`, before any output or effect.
-Today they reach the failure route with the terminal provider origin, fail its code check, and stop for manual recovery.
+Only a normal `end_turn` with trusted no-output/no-effect evidence receives the fixed, text-free empty-turn identity.
+The policy must be explicitly enabled, its threshold valid, and the workflow step known without a veto.
+Below the threshold recovery stays manual; at the threshold the existing fenced successor path owns the turn.
+The counted turn's own completion must preserve its count. Current successful output clears a previous count, including text or plan content delivered only in the complete frame.
 
-The [design](../../specs/agents/system-design/dynamic-unclassified-fallback.md) intentionally excludes them:
+Every other admitted origin retains complete diagnostic identity, the existing bounds, and the rejection of diagnostics requiring redaction or truncation.
+Post-start unknown failures retain manual recovery. Exit-code grouping and sanitized-prefix grouping were unaccepted proposals and are removed from this package, including their code, tests, work orders, and contract amendments.
+This package does not authorize either policy change.
 
-- Only a complete diagnostic of at most 1024 bytes that needs no redaction or truncation can form an identity.
-- Kandev does not strip timestamps, paths, IDs, or variable suffixes to manufacture equality.
-- All unclassified codes other than the two eligible origins remain excluded.
+## Recovery behavior
 
-Options for a later decision:
+Process-start and resume-ready observations activate the claimed generation for the current execution.
+A failed durable activation is returned to the actual resume caller while preserving the ready runtime.
+A later admission may reconcile that same generation once storage recovers, using the current live execution and runtime readiness; it must not activate a successor from a predecessor runtime or activate a cancelled session.
+An explicit recovery may reclaim a stranded starting route without a live runtime. Passive resumes and other non-active route states retain the route guard.
+Blocked explicit recovery returns an error; passive session open retains its waiting response.
 
-| Option | Behavior | Contract impact |
-| --- | --- | --- |
-| A. Exact identity | Admit the origin only with a producer-attested complete diagnostic | Adds an origin. Needs completeness attestation at the runtime error producers. Messages with variable suffixes stay manual. |
-| B. Normalized prefix | Admit with a sanitized, whitespace-collapsed, 256-byte error-type prefix as identity | Reverses the "no manufactured equality" and "no truncation" rules. Needs a new decision. |
-| C. Keep manual | No change | None. Repeated post-start failures still need manual recovery. |
+## Scope and ordering
 
-This item stays open. It is not dropped and is not delivered by Task 01.
-It needs two inputs before any code:
+Tasks 01, 02, and 04 are independent corrections, reviewed and delivered together.
+The virtual-profile launch rejection from #4412 is already upstream and has no work order here.
+No settings UI, automatic unknown-error retries, new catalogue rules, runtime flags, or Office behavior are added.
+Existing account-hold admission from protected main remains in force.
 
-- a mapping of the actual runtime error producers to the identity contract, including whether any of them can attest a complete diagnostic (recorded in the producer map below);
-- the prepared restart-recovery change in Task 04, because a false success result after an interrupted turn may change which post-start failures reach the route.
+## Verification ownership
 
-Task 04 is now implemented. A blocked explicit recovery returns its error to the caller, not to the failure route, so it adds no post-start failures. Activating a resumed route lets later prompt failures of that route reach the failure route with an active status instead of being suppressed, so they meet the existing origin checks unchanged.
+Source-adjacent tests protect the real stream handler, resolver, WebSocket handler, SQLite-backed resume admission, and real resume caller.
+The original contributor validation reports are historical; they are not current-head hosted CI evidence.
+Review remediation uses focused contained red/green tests only. Broad Go/SQL, full frontend, E2E, and native/Windows commands run in hosted CI.
+Final exact-head CI and review evidence is recorded externally in the owning task's recovery evidence; it remains pending until the final head passes those gates.
 
-After that, a maintainer decision on the identity model selects an option.
-Option B is the direction under review. [Task 05](task-05-post-start-no-result-proposal.md) holds its contract proposal as the last, separable part of this package.
-If the proposal is rejected, only Task 05 and its contract text are removed. The original goal then remains unmet for post-start failures.
-That commit amends the decision for this one origin only, records why A and C were not chosen, and normalizes only the fixed producer shapes listed below.
-Its tests must show that other unclassified codes, the 1024-byte and redaction rules, the threshold, and the opt-in default are unchanged.
-`Closes #4325` covers Task 01 only.
-
-#### Producer map
-
-Pre-result dynamic failures reach the failure route from two orchestrator entry points:
-
-- `handleAgentErrorEvent` (`orchestrator/event_handlers_streaming.go:521`) for stream `error` events.
-- `handleAgentFailedLocked` (`orchestrator/event_handlers_agent.go:2942`) for lifecycle agent failures.
-
-Both call `classifyKanbanFailure` (`orchestrator/event_handlers_transient_messages.go:206`).
-For a dynamic attempt with known no-output and no-effect evidence the phase is `prompt_send`.
-A message that matches no rule becomes `agent_runtime_error` through `phase.poststart.unknown` (`agent/runtime/routingerr/routingerr.go:338-345`).
-That failure fails the terminal provider origin's code check and stops for manual recovery.
-
-The `error` events come from these producers:
-
-| Producer | Message shape | Diagnostic |
-| --- | --- | --- |
-| `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` | Fixed text: peer disconnected before response. Classified as `agent_transport_lost`, so it does not reach the open item | None |
-| `agentctl/server/adapter/transport/acp/adapter_prompt.go:256` | Retained ACP application error | Structured provider error |
-| `agentctl/server/adapter/transport/acp/adapter_prompt.go:310` | Cursor retriable provider error | Structured, already classified |
-| `agentctl/server/adapter/transport/acp/adapter_prompt.go:336` | Codex model capacity | Structured, already classified |
-| `agentctl/server/api/agent.go:1193` | Async prompt failure: the error text, or the provider message when one exists | Structured only when a provider error was recognized |
-| `agentctl/server/process/manager.go:3433` | `Agent process exited with code N`, followed by recent stderr lines | None. The stderr suffix varies |
-| `agentctl/server/adapter/transport/codexappserver/adapter.go:649` | Turn failure message from the app server | None |
-
-Line numbers refer to the base commit of this package. The rows without a complete diagnostic are the candidates for the open item.
-
-## Shared scope
-
-### In scope
-
-- The work orders listed above, each with source-adjacent unit tests.
-- Contract and public documentation updates named by each work order.
-
-### Out of scope
-
-- Dynamic profile tiers, model-level quota pauses, candidate selection policy, and settings UI.
-- New error codes, catalogue rules, runtime flags, and E2E scenarios.
-- Task-environment recovery, provider usage rules, and agent control clients.
-
-## Task 01: empty normal turn ends
-
-### Evidence and cause
-
-- `routeDynamicAgentFailureWithEvidence` (`apps/backend/internal/orchestrator/dynamic_launch.go`) is called only from the error event, failed-agent, and startup-failure handlers.
-- `handleCompleteStreamEventWithGuardRelease` (`orchestrator/event_handlers_streaming.go`) persists output and completes the turn without any routing call.
-- `UnclassifiedFailureEvidence.safeBeforeResult` and `trustedFailureShape` (`agent/runtime/dynamic/types.go`) require a complete diagnostic and a provider ID, which an empty end cannot supply.
-- `failureMatchesOrigin` admits only the terminal provider and agent startup origins.
-- `finishAgentCompleted` clears the streak on process exit, which would erase a count produced by the same turn.
-
-[Requirements](../../specs/agents/requirements/dynamic-agent-routing.md) (`AC-AGENTS-DYNAMIC-AGENT-ROUTING-002.6`, `.13`), the [design](../../specs/agents/system-design/dynamic-unclassified-fallback.md#empty-turn-ends), and the [ADR amendment](../../decisions/2026-09-28-repeated-unclassified-fallback.md) define the contract.
-
-### Approach
-
-The producer reuses the existing failure route, attempt identity, workflow-step fence, and successor launch.
-The completion handler skips its ordinary follow-up only when a successor was launched, matching the error path.
-
-| Origin | Required identity | Intended behavior | Unsupported shape |
-| --- | --- | --- | --- |
-| Normal `end_turn` completion, dynamic task attempt | Execution ID, prompt generation, known no-output and no-effect evidence | Count toward the enabled candidate threshold | Existing completion behavior |
-| Cancelled, errored, or terminal-replay completion | None | Not produced | Existing completion behavior |
-| Policy off, step veto, or unknown step | None | Not produced | Existing completion behavior |
-
-### Tests
-
-| AC suffix | Test file and test |
+| Contract | Primary proof |
 | --- | --- |
-| 002.6, .13 | `apps/backend/internal/agent/runtime/dynamic/unclassified_empty_turn_test.go`: `TestUnclassifiedEmptyTurnAdmission`, `TestUnclassifiedDiagnosticWaiverIsOriginScoped`, `TestUnclassifiedEmptyTurnFingerprint`, `TestCandidateUnclassifiedEnabled` |
-| 002.3-.5, .7, .13 | `apps/backend/internal/orchestrator/dynamic_unclassified_empty_turn_test.go`: `TestEmptyTurnCompletionCountsUnclassifiedFailure` (threshold, own-completion survival, successor), `TestEmptyTurnCompletionPreconditions` |
+| Empty turns, threshold and exclusions | `TestEmptyTurnCompletionCountsUnclassifiedFailure`, `TestEmptyTurnCompletionPreconditions` |
+| Complete-frame output survives and clears a prior count | `TestCompleteFrameTextIsNotAnEmptyTurn` |
+| Unknown post-start failures stay manual | `TestPostStartUnknownFailuresKeepManualRecovery` |
+| Non-dynamic route validation | `TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile`, `TestWSRouteActionReportsNonDynamicProfileAsValidation` |
+| Explicit stranded recovery is genuinely admitted | `TestExplicitRecoveryReclaimsStrandedStartingRoute` |
+| Live activation ownership | `TestResumeAdmissionActivationRequiresCurrentLiveExecution` |
+| Activation failure remains observable and recoverable | `TestActivateResumedDynamicRouteReportsFailedActivation`, `TestResumeAdmissionCompletesRecoverableStartingRoute` plus actual resume-path coverage |
 
-`TestEmptyTurnCompletionCountsUnclassifiedFailure` must fail on the base commit because no route call is made at completion.
+## Current results
 
-## Task 02: route actions on non-dynamic sessions
-
-### Evidence and cause
-
-- `loadDynamicRouteActionSession` (`apps/backend/internal/backendapp/dynamic_routing.go`) rejects a concrete-profile session with an untyped `errors.New`.
-- `wsRouteAction` (`orchestrator/handlers/handlers.go`) recognizes only `ErrRouteActionActiveTurn`, so the rejection becomes `ErrorCodeInternalError` with the generic text "route action failed" and a warning log.
-- The client cannot tell a wrong-session request from a server fault.
-
-`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.11` and the [route action failure rules](../../specs/agents/system-design/dynamic-agent-routing-02.md) define the contract.
-
-### Tests
-
-| AC suffix | Test file and test |
-| --- | --- |
-| 001.11 | `apps/backend/internal/backendapp/dynamic_routing_test.go`: `TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile` |
-| 001.11 | `apps/backend/internal/orchestrator/handlers/handlers_test.go`: `TestWSRouteActionReportsNonDynamicProfileAsValidation` |
-
-`TestWSRouteActionReportsNonDynamicProfileAsValidation` must fail on the base commit because the handler returns an internal error.
-
-Source assessment: the candidate change touches `backendapp/dynamic_routing.go`, `orchestrator/handlers/handlers.go`, `orchestrator/service.go`, and their tests. It applies to the base without conflicts. It shares only `orchestrator/service.go` with Task 01, in a different declaration block.
-
-## Task 03: already upstream
-
-Failing closed when a launch selects the virtual dynamic family is implemented upstream by [#4412](https://github.com/kdlbs/kandev/pull/4412).
-The lifecycle launch helper and candidate resolution reject the family with `ErrVirtualProfile`, as the [virtual agent launch rejection plan](../virtual-agent-launch-rejection/plan.md) and the [routing design](../../specs/agents/system-design/dynamic-agent-routing-01.md) describe.
-This package has no remaining work for it and does not change that contract or code.
-
-## Task 04: restart recovery route activation
-
-### Evidence and cause
-
-- A resume re-claims the persisted route as `starting` and settles the session to WAITING_FOR_INPUT before the process-start callback runs.
-- `handleAgentProcessStarted` (`orchestrator/dynamic_launch.go`) marks the route active only for STARTING and RUNNING sessions, so a resumed route stays `starting`.
-- `loadResumeSessionCandidate` (`orchestrator/task_operations.go`) rejects every non-active route as `dynamic_route_pending`, including a stranded `starting` route with no live runtime.
-- `launchResume` (`orchestrator/session_launch.go`) turns that rejection into a success response even for an explicit recovery action, so its caller proceeds against a missing execution.
-
-`AC-AGENTS-DYNAMIC-AGENT-ROUTING-001.12`, `.13` and the [failure rules](../../specs/agents/system-design/dynamic-agent-routing-02.md) define the contract.
-
-### Scope
-
-The change covers only route activation after a resume and the result of a blocked explicit recovery. It does not add an automatic `continue_from_history` fallback or change how stranded sessions are reconciled.
-
-### Tests
-
-| AC suffix | Test file and test |
-| --- | --- |
-| 001.12 | `apps/backend/internal/orchestrator/dynamic_restart_recovery_test.go`: `TestHandleAgentProcessStartedActivatesRouteWaitingForInput`, `TestActivateResumedDynamicRouteMarksClaimedRouteActive` |
-| 001.13 | `apps/backend/internal/orchestrator/dynamic_restart_recovery_test.go`: `TestExplicitRecoveryReclaimsStrandedStartingRoute`, `TestLaunchResumeRecoveryActionReportsBlockedRouteAsError` |
-
-All four must fail on the base commit.
-
-## E2E tests
-
-None. The changes have no rendered surface. Existing dynamic routing E2E scenarios cover recovery and switch presentation.
-
-## Work orders
-
-- [x] [Task 01: Count empty normal turn ends](task-01-empty-turn-unclassified-failure.md)
-- [x] [Task 02: Report route actions on non-dynamic sessions as validation errors](task-02-route-action-validation.md)
-- [x] [Task 04: Activate resumed dynamic routes and fail blocked explicit recoveries](task-04-restart-recovery-route-activation.md)
-- [x] [Task 05: Contract proposal: count fixed-shape post-start no-result failures](task-05-post-start-no-result-proposal.md) (candidate)
-- [x] [Task 06: Contract proposal: bounded prefix identity for generic post-start failures](task-06-post-start-generic-prefix-proposal.md) (candidate)
-
-## Verification results
-
-Task 01:
-
-- RED on the base commit: `TestEmptyTurnCompletionCountsUnclassifiedFailure` failed with "route after first empty turn = active/candidate-a/1, want action_required/candidate-a/1".
-- GREEN after the change: the same test passed.
-- Guard check: with the stop-reason, error, step-veto, and unknown-step checks removed, five `TestEmptyTurnCompletionPreconditions` cases failed. They passed with the checks restored.
-- `go test ./internal/agent/runtime/dynamic -count=1`: passed.
-- `go test ./internal/agent/runtime -run 'Resolver|Unclassified|Dynamic' -count=1`: passed.
-- `go test ./internal/orchestrator -run 'Unclassified|EmptyTurn|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1`: passed (48 tests).
-- `go build ./...` and `go vet` on the three changed packages: passed.
-
-Task 02:
-
-- RED with only the sentinel added: `TestLoadDynamicRouteActionSessionRejectsNonDynamicProfile` failed with "error = route actions require a dynamic profile, want non-dynamic profile rejection". `TestWSRouteActionReportsNonDynamicProfileAsValidation` failed with "expected VALIDATION_ERROR, actual INTERNAL_ERROR".
-- GREEN after the change: both passed.
-- `go test ./internal/backendapp -run 'RouteAction|DynamicRoute' -count=1`: passed (8 tests).
-- `go test ./internal/orchestrator/handlers -run 'RouteAction|Ws' -count=1`: passed (60 tests).
-- `go build ./...` and `go vet` on the changed packages: passed.
-
-Task 04:
-
-- RED on the base commit, with only an empty `activateResumedDynamicRoute`: the process-start and resume-ready tests left the route `starting`; the explicit recovery guard returned `dynamic_route_pending` for a stranded `starting` route; the explicit recovery returned a success response with activation reason `dynamic_route_pending`. The guard cases for a passive resume, a live owner, and `action_required` already held.
-- GREEN after the change: all four tests passed.
-- `go test ./internal/orchestrator -run 'Resume|Recover|DynamicRoute|ProcessStart|SessionOpen|Dynamic|LaunchSession' -count=1`: passed (414 tests).
-- `go build ./...` and `go vet ./internal/orchestrator`: passed.
-
-Task 05 (candidate, proposal not accepted):
-
-- RED before the change: `TestPostStartProcessExitCountsUnclassifiedFailure` failed with "route after two code-1 exits = candidate-a/1, want candidate-b/2".
-- GREEN after the change: it passed, so two process exits with code 1 and different stderr advanced the candidate.
-- `TestPostStartProcessExitDifferentCodesDoNotMatch` and `TestPostStartProcessExitAfterOutputIsNotCounted` pass. With only Task 05, generic failures stayed manual.
-- `TestPostStartProcessExitIdentity` records the collision: the same exit code with different stderr gives one fingerprint.
-- `TestOtherOriginsKeepCompleteDiagnosticRule` and the existing `TestUnclassifiedFingerprintRequiresExactCompleteDiagnostic` pass.
-- `go test ./internal/agent/runtime/dynamic -count=1`: passed.
-- `go test ./internal/orchestrator -run 'PostStart|EmptyTurn|Unclassified|Streak|CompleteStream|CompleteEvent|DynamicFailure|DynamicRoute' -count=1`: passed (54 tests).
-- `go test ./internal/agent/runtime/routingerr -count=1`: only `TestRemediateNpxCache_RemovesHashDirAndPreservesParent` failed. It fails the same way on the base commit on Windows (home path outside the npx cache root), so it is an existing failure.
-- `go build ./...` and `go vet` on the changed packages: passed.
-
-Task 06 (candidate, proposal not accepted):
-
-- RED with only Task 05: `TestPostStartGenericFailureCountsWithBoundedPrefix` failed with "route after two generic failures with one prefix = candidate-a/1, want candidate-b/2".
-- GREEN after the change: it passed.
-- `TestPostStartGenericFailuresWithDifferentPrefixesDoNotMatch` and `TestPostStartGenericIdentity` pass. The second records the shared-prefix collision, credential masking, and UTF-8 bounds.
-- A first test draft padded the message with one long token. The sanitizer masked that token, which shortened the identity. The tests now use ordinary words, and the design notes this masking effect.
-- `go test ./internal/agent/runtime/dynamic -count=1` and the orchestrator command above: passed.
-- `go build ./...` and `go vet` on the changed packages: passed.
+Original Backend and E2E workflows completed successfully at the original head.
+The original forced frontend workflow failed during typecheck with a Node heap OOM; tests and build were skipped.
+The single initial main integration inherits protected main's existing step-scoped frontend typecheck budget. No new global resource limit is introduced.
+Focused exact-source diagnostic, admission, and completion-caller harnesses reproduced the contract and ownership failures, then passed with the remediation under the race detector. Their explicit fake boundaries are not SQL or full-stream proof. Permanent real-package caller tests and final hosted suite results remain pending.

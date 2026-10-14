@@ -34,6 +34,10 @@ var (
 	// fail closed rather than silently degrade to a generation-only claim,
 	// which would let two concurrent callers both win the same transition.
 	ErrStatusClaimUnsupported = errors.New("dynamic route persistence does not support status-fenced claims")
+	// ErrExecutionProfileHeld refuses to resume a route on a profile held
+	// until its owner releases it. It is a pending recovery, so route action
+	// callers report the durable manual-recovery state.
+	ErrExecutionProfileHeld = fmt.Errorf("%w: execution profile is held until its owner releases it", ErrRecoveryPending)
 )
 
 type Candidate struct {
@@ -140,10 +144,6 @@ const (
 	// assistant text, reasoning, or tool activity. It has no provider
 	// diagnostic, so its identity is a fixed tuple instead.
 	UnclassifiedOriginEmptyTurn UnclassifiedFailureOrigin = "empty_turn_completion"
-	// UnclassifiedOriginPostStartNoResult is a post-start failure that the
-	// classifier leaves unknown and that arrives before any output or effect.
-	// Its identity comes from a known producer shape, not a provider diagnostic.
-	UnclassifiedOriginPostStartNoResult UnclassifiedFailureOrigin = "post_start_no_result"
 )
 
 // UnclassifiedFailureEvidence is the typed, default-deny context for the
@@ -200,7 +200,7 @@ func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
 // waivesProviderDiagnostic reports whether the origin derives its identity
 // without a complete provider diagnostic or provider ID.
 func (e UnclassifiedFailureEvidence) waivesProviderDiagnostic() bool {
-	return e.Origin == UnclassifiedOriginEmptyTurn || e.Origin == UnclassifiedOriginPostStartNoResult
+	return e.Origin == UnclassifiedOriginEmptyTurn
 }
 
 func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
@@ -226,9 +226,6 @@ func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Er
 			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
 	case UnclassifiedOriginEmptyTurn:
 		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend
-	case UnclassifiedOriginPostStartNoResult:
-		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend &&
-			failure.ClassifierRule == routingerr.PostStartUnknownRule
 	default:
 		return false
 	}

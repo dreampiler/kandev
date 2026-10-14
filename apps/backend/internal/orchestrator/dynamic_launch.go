@@ -810,6 +810,11 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	guardHeld bool,
 ) dynamicFailureRouteResult {
 	unclassified := classified != nil && routingerr.ClassForCode(classified.Code) == routingerr.ClassUnclassified
+	// The hold precedes every check that decides whether this failure may
+	// route: a cancelled turn or a predecessor still serving the session must
+	// hold its restricted profile even though its failure cannot advance the
+	// current route.
+	s.holdBlockedAccount(ctx, data, classified)
 	if !guardHeld && data.SessionID != "" {
 		lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 		lock.Lock()
@@ -885,6 +890,36 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	return dynamicFailureRouteResult{handled: handled}
 }
 
+// holdBlockedAccount holds the execution profile whose provider account was
+// restricted, whether or not this failure is routed. The hold only keeps that
+// profile out of later selections; it never replays or advances this turn, so
+// output and effect safety still decide what happens to the failed attempt.
+// The failed execution's own profile is held; the route's current profile is
+// used only when the failure carries the route's current execution.
+func (s *Service) holdBlockedAccount(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	classified *routingerr.Error,
+) {
+	if classified == nil || !routingerr.HoldsUntilRelease(classified.Code) || s.profileExecutionResolver == nil {
+		return
+	}
+	profileID := data.ExecutionProfileID
+	if profileID == "" && data.SessionID != "" && data.AgentExecutionID != "" {
+		session, err := s.repo.GetTaskSession(ctx, data.SessionID)
+		if err == nil && session != nil && session.AgentExecutionID == data.AgentExecutionID {
+			profileID = session.ExecutionProfileID
+		}
+	}
+	if err := s.profileExecutionResolver.HoldAccountBlock(profileID, classified.Code); err != nil {
+		// The hold already applies in memory; the registry keeps the save
+		// pending and retries it on the next circuit change.
+		s.logger.Warn("account-block hold is not yet durable",
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", profileID), zap.Error(err))
+	}
+}
+
 func (s *Service) routeDynamicFailureDecision(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -948,7 +983,7 @@ func (s *Service) prepareUnclassifiedFailureEvidence(
 	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) (dynamicruntime.UnclassifiedFailureEvidence, bool) {
-	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, classified, startupEvidence)
+	evidence := s.unclassifiedFailureRouteEvidence(ctx, data, session, startupEvidence)
 	if !evidence.TaskScope || !evidence.CurrentAttempt {
 		return dynamicruntime.UnclassifiedFailureEvidence{}, false
 	}
@@ -968,14 +1003,10 @@ func (s *Service) unclassifiedFailureRouteEvidence(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	session *models.TaskSession,
-	classified *routingerr.Error,
 	startupEvidence *dynamicruntime.UnclassifiedFailureEvidence,
 ) dynamicruntime.UnclassifiedFailureEvidence {
 	if startupEvidence != nil {
 		return *startupEvidence
-	}
-	if isPostStartUnknownFailure(classified) {
-		return s.unclassifiedPostStartEvidence(ctx, data, session, classified.Phase)
 	}
 	return s.unclassifiedPromptEvidence(ctx, data, session)
 }

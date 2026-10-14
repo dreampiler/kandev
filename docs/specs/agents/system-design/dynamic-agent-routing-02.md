@@ -150,6 +150,12 @@ require the current exclusive probe lease.
   for a route it re-claimed as `starting` or `retrying`. A route left
   `starting` would make every later explicit recovery report
   `dynamic_route_pending`.
+- A resume-ready durable activation failure returns to the actual resume caller
+  without stopping or replacing the healthy runtime. A later resume admission
+  may reconcile the same starting generation after storage recovery, provided
+  the live prompt-ready execution matches the session's claimed execution and
+  the session is not cancelled or terminal. The generation/status-fenced write
+  remains authoritative; a predecessor runtime cannot activate a successor.
 - If an explicit recovery action finds the route `starting` and no runtime is
   live for the session, it re-claims the same persisted candidate and resumes.
   A live launch owner, a passive resume, and other non-active states keep the

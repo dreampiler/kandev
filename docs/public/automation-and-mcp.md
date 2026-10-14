@@ -194,6 +194,8 @@ Use the supplied presets: every 5, 15, or 30 minutes; hourly; every 6 hours; dai
 
 The editor accepts arbitrary five-field cron text, including fixed calendar forms such as `30 8 * * *`, weekday ranges such as `15 9 * * 1-5`, and day-of-month schedules, all of which now fire at the correct time. A saved timezone (for example `America/New_York`) is honored, including that zone's daylight-saving transitions; an empty timezone means UTC, so schedules are deterministic regardless of the host clock. Scheduled runs are deduplicated per trigger per minute.
 
+A non-empty schedule must have a next occurrence within the supported five-year search horizon. Schedules such as February 31 are rejected on save. Already-saved impossible schedules do not create automatic runs; edit them to a valid schedule. Empty schedules remain unscheduled. Valid leap-day schedules within that horizon remain supported, and day-of-month/day-of-week OR expressions such as `0 0 31 2 MON` still run on Mondays in February.
+
 ### GitHub pull requests
 
 The GitHub evaluator polls every 60 seconds and requires a working GitHub integration. It searches open PRs and supports:
@@ -647,10 +649,12 @@ resolve atomically; a source failure produces no partial report. They never stor
 CSV or reread the source on replay. Later edits or workspace cleanup do not
 change the accepted chart or table.
 
-File bytes do not persist. Kandev fetches a referenced file only after the user
-selects **Preview**; **Open file** uses the native desktop or mobile viewer.
-If the workspace disappears, the report remains and the file preview reports
-that it is unavailable.
+File bytes do not persist. Image file cards expand and load automatically when
+they appear in the conversation. Select **Hide preview** to collapse an image
+and **Preview** to reopen it. Other files load only after you select
+**Preview**. **Open file** uses the native desktop or mobile viewer. If the
+workspace disappears, the report remains and the file preview reports that it
+is unavailable.
 
 Historical version 1 reports still render, including their stored CSV snapshots.
 New version 1 calls are rejected with guidance to refresh tool discovery and

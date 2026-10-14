@@ -87,6 +87,15 @@ func TestEmptyTurnCompletionCountsUnclassifiedFailure(t *testing.T) {
 // not an empty turn: the earlier stream events carried no output, so the
 // detector must read the completion frame itself before counting a failure.
 func TestCompleteFrameTextIsNotAnEmptyTurn(t *testing.T) {
+	testCompleteFrameOutputIsNotEmpty(t, false)
+}
+
+func TestCompleteFramePlanIsNotAnEmptyTurn(t *testing.T) {
+	testCompleteFrameOutputIsNotEmpty(t, true)
+}
+
+func testCompleteFrameOutputIsNotEmpty(t *testing.T, plan bool) {
+	t.Helper()
 	fixture := newUnclassifiedWorkflowFenceFixture(t, false, false)
 	defer fixture.svc.stopDynamicSuccessorWorkers()
 	messages := &mockMessageCreator{}
@@ -106,18 +115,28 @@ func TestCompleteFrameTextIsNotAnEmptyTurn(t *testing.T) {
 	beginEmptyTurnPrompt(fixture, "execution-two", 2)
 	payload := emptyTurnCompletePayload(fixture, "execution-two", 2, endTurnData())
 	payload.Data.TurnID = "turn-two"
-	payload.Data.Text = "the delayed answer"
+	if plan {
+		payload.Data.Data.(map[string]interface{})["plan_content"] = "the delayed answer"
+	} else {
+		payload.Data.Text = "the delayed answer"
+	}
 	fixture.svc.handleAgentStreamEvent(fixture.ctx, payload)
 
 	_, candidate, generation, streak := loadEmptyTurnPolicy(t, fixture)
 	if candidate != "candidate-a" || generation != 1 {
 		t.Fatalf("route after complete-frame text = %s/%d, want candidate-a/1", candidate, generation)
 	}
-	if streak == nil || streak.Count != 1 {
-		t.Fatalf("streak after complete-frame text = %+v, want unchanged count 1", streak)
+	if streak != nil {
+		t.Fatalf("streak after complete-frame text = %+v, want success to clear the streak", streak)
 	}
 	if len(fixture.agentManager.startAgentProcessCalls) != 0 {
 		t.Fatalf("successor launches after complete-frame text = %d, want none", len(fixture.agentManager.startAgentProcessCalls))
+	}
+	if plan {
+		if len(messages.sessionMessages) != 1 || messages.sessionMessages[0].content != "the delayed answer" {
+			t.Fatalf("persisted plan messages = %+v, want the complete-frame plan saved once", messages.sessionMessages)
+		}
+		return
 	}
 	if len(messages.agentMessages) != 1 || messages.agentMessages[0].content != "the delayed answer" {
 		t.Fatalf("persisted agent messages = %+v, want the complete-frame text saved once", messages.agentMessages)
@@ -148,6 +167,11 @@ func TestEmptyTurnCompletionPreconditions(t *testing.T) {
 		}},
 		"unknown step": {data: endTurnData(), prepare: func(f unclassifiedWorkflowFenceFixture) {
 			delete(f.svc.workflowStepGetter.(*mockStepGetter).steps, "step-1")
+		}},
+		"candidate policy absent": {data: endTurnData(), prepare: func(f unclassifiedWorkflowFenceFixture) {
+			f.svc.SetProfileExecutionResolver(newWorkflowDynamicProfileResolverWithCandidates(t, f.profile.ID,
+				[]workflowDynamicCandidate{{executionProfileID: "candidate-a", enabled: true}, {executionProfileID: "candidate-b", enabled: true}},
+				dynamic.WithPersistence(f.barrier), dynamic.WithStateLoader(f.barrier)))
 		}},
 		"dynamic routing unavailable": {data: endTurnData(), prepare: func(f unclassifiedWorkflowFenceFixture) {
 			f.resolver.SetEnabled(false)

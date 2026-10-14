@@ -120,3 +120,42 @@ no host shutdown, production mutation or local browser testing is authorized.
 ## Delivery
 
 [Sequential work package](../../../plans/session-recovery-convergence/plan.md).
+
+## Projected terminal reconciliation
+
+Terminal `error` and `complete` events settle a dispatching journal submission in
+the same transaction as the event append. An interrupted return path or restart
+cannot downgrade those known outcomes. Nonterminal errors and previously stored
+unknown outcomes retain their existing semantics.
+
+Legacy journals can contain interrupted-unknown submissions with retained
+terminal sequence evidence already projected as a known SQL outcome. An idle,
+authenticated native successor may retire these exact submissions without
+changing either store's historical state. Eligibility requires matching session,
+incarnation, generation, stream, immutable hash, terminal sequence and fully
+projected SQL cursor. SQL admission revalidates the pinned terminal state and
+outcome along with the complete active inventory, current native execution and
+matching recovery fences. Any independent active record or projection gap
+refuses resolution. The same proof permits normal loaded-session reconciliation
+and explicit Resume; neither path dispatches an old prompt.
+
+## Prompt readiness after native boot
+
+A native boot event establishes runtime availability, not delivery admission.
+Before publishing the ordinary idle session state and draining queued work,
+orchestrator checks the current execution's durable delivery capability. An
+unresolved inventory creates the existing persistent delivery fence before any
+first-send attempt. The same guarded loaded-native reconciliation used for an
+existing fence may retire eligible history and resolve it transactionally.
+When original-owner evidence is insufficient, retain the fence and expose the
+existing explicit Resume controls on desktop and phone. Successful native boot
+still records its attempt-owned provider recovery and dismisses only that
+captured provider error. This does not resolve the independent delivery fence:
+do not drain queued instructions or admit prompts while that fence remains open.
+
+Both pending and explicitly selected V1 delivery repeat this reconciliation at
+admission, including when no fence existed at entry. Re-read capability after
+successful resolution; a changed or unresolved inventory still refuses dispatch.
+No implicit recovery sends an old prompt. Rejected instructions retain their
+existing blocked delivery record; an unsent composer draft remains retained while the recovery controls replace
+the editor and is sent only by a subsequent explicit user submit after recovery.

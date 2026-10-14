@@ -209,16 +209,20 @@ func TestExplicitRecoveryReclaimsStrandedStartingRoute(t *testing.T) {
 			if err := repo.UpdateTaskSession(ctx, session); err != nil {
 				t.Fatalf("UpdateTaskSession: %v", err)
 			}
+			seedExecutorRunning(t, repo, "session1", "task1", "claimed-execution")
 			running := tt.running
 			agentMgr := &mockAgentManager{isAgentRunningFn: func(context.Context, string) bool { return running }}
 			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
-			_, err = svc.loadResumeSessionCandidate(ctx, "task1", "session1",
+			candidate, err := svc.loadResumeSessionCandidate(ctx, "task1", "session1",
 				executor.ResumeOptions{RecoveryAction: tt.recovery}, nil)
 
 			var blocked *sessionOpenRecoveryBlockedError
 			if guarded := errors.As(err, &blocked) && blocked.reason == autoResumeBlockedDynamicRoute; guarded != tt.wantGuard {
 				t.Fatalf("loadResumeSessionCandidate error = %v, want dynamic-route guard %v", err, tt.wantGuard)
+			}
+			if !tt.wantGuard && (err != nil || candidate == nil) {
+				t.Fatalf("explicit stranded-route admission = %#v, %v; want a candidate without an error", candidate, err)
 			}
 		})
 	}
@@ -280,7 +284,7 @@ func TestResumeAdmissionCompletesRecoverableStartingRoute(t *testing.T) {
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
 	persistence := &failingRouteActivationRepo{Repository: repo}
 	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(persistence))
-	agentMgr := &mockAgentManager{isAgentRunningFn: func(context.Context, string) bool { return true }}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunningFn: func(context.Context, string) bool { return true }}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
 	decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)

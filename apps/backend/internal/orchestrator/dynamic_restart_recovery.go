@@ -37,10 +37,10 @@ func (s *Service) completeReadyStrandedStartingRoute(ctx context.Context, sessio
 	if s.profileExecutionResolver == nil || !s.profileExecutionResolver.Enabled() {
 		return false
 	}
-	if !isStartingRouteClaim(session) {
+	if !isStartingRouteClaim(session) || !routeActivationSessionState(session.State) {
 		return false
 	}
-	if !s.hasLivePromptReadyAgent(ctx, session.ID) {
+	if !s.hasLivePromptReadyAgent(ctx, session) {
 		return false
 	}
 	if s.markDynamicRouteActive(ctx, session.ID, session.RouteGeneration) != nil {
@@ -70,10 +70,19 @@ func isStartingRouteClaim(session *models.TaskSession) bool {
 // hasLivePromptReadyAgent reports whether the session already has a running
 // agent that can accept an immediate prompt, the ownership evidence a
 // reconciling completion needs before it retries the durable activation.
-func (s *Service) hasLivePromptReadyAgent(ctx context.Context, sessionID string) bool {
-	return s.agentManager != nil &&
-		s.agentManager.IsAgentRunningForSession(ctx, sessionID) &&
-		s.agentManager.IsAgentReadyForPrompt(ctx, sessionID)
+func (s *Service) hasLivePromptReadyAgent(ctx context.Context, session *models.TaskSession) bool {
+	if s.agentManager == nil || session.AgentExecutionID == "" ||
+		!s.agentManager.IsAgentRunningForSession(ctx, session.ID) ||
+		!s.agentManager.IsAgentReadyForPrompt(ctx, session.ID) {
+		return false
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	return err == nil && executionID == session.AgentExecutionID
+}
+
+func routeActivationSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateStarting || state == models.TaskSessionStateRunning ||
+		state == models.TaskSessionStateWaitingForInput
 }
 
 // explicitRecoveryOwnsStrandedStartingRoute reports whether an explicit

@@ -3289,8 +3289,15 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 		return
 	}
 
+	completion := emptyTurnCompletionFromPayload(payload)
+	if completion.completeOutput {
+		s.observePromptAttempt(completion.data.SessionID, completion.data.AgentExecutionID,
+			completion.data.PromptGeneration, true, false)
+		s.markDynamicStreakResetPending(completion.data)
+		s.flushPendingDynamicStreakReset(ctx, completion.data.SessionID, &completion.data)
+	}
 	// A launched successor owns the turn, as on the error path.
-	if s.routeDynamicEmptyTurn(ctx, emptyTurnCompletionFromPayload(payload), session, streamGuard) {
+	if s.routeDynamicEmptyTurn(ctx, completion, session, streamGuard) {
 		return
 	}
 

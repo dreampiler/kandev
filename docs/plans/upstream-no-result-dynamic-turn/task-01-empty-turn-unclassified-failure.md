@@ -1,7 +1,7 @@
 ---
 id: "01-empty-turn-unclassified-failure"
 title: "Count empty normal turn ends as unclassified failures"
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -36,7 +36,7 @@ Produce the `empty_turn_completion` origin at stream completion and admit it in 
 
 ## Out of scope
 
-- Post-start runtime failures without a complete diagnostic. They are an open item in the [plan](plan.md#unresolved-post-start-failures-without-a-complete-diagnostic), not resolved by this work order.
+- Post-start runtime failures without a complete diagnostic. They remain manual under the accepted diagnostic identity contract.
 - Catalogue changes, new codes, UI, runtime flags, and E2E tests.
 - Task-environment recovery, lifecycle launch builders, provider usage rules, and agent control clients.
 
@@ -59,3 +59,7 @@ go build ./... && go vet ./internal/agent/runtime/... ./internal/orchestrator/..
 ```
 
 Documentation: `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `.github/scripts/pr-docs.cjs` `validateCoverage` on the changed-file list.
+
+## Review remediation results
+
+The exact-source contained completion-caller harness failed when a complete-frame answer preserved a previous streak. It passes with output observation and the existing reset boundary, under the race detector. The permanent real-stream-handler assertion now requires the previous streak to be cleared as well as the answer persisted and no successor launched. Real-package validation and final exact-head CI remain hosted/external.

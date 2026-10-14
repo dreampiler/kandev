@@ -65,7 +65,6 @@ Eligible origins are:
 - `unknown_provider_error` from an authoritative terminal provider result, before any output or effects.
 - `agent_runtime_error` from a proven agent process-start or session-initialization failure, before prompt dispatch.
 - `agent_runtime_error` at `prompt_send` from an empty normal turn end, as defined in [Empty turn ends](#empty-turn-ends).
-- `agent_runtime_error` at `prompt_send` from a post-start failure before any result, as proposed in [Post-start no-result failures](#post-start-no-result-failures-contract-proposal).
 
 A generic task launch error, a missing phase, or an arbitrary wrapped `errors.New` is not proven agent startup failure.
 The startup boundary must distinguish agent process/session initialization from executor, repository, and task preparation.
@@ -95,6 +94,8 @@ It produces evidence only when all of these hold:
 - the current concrete candidate has an enabled `unclassified` policy with a valid threshold;
 - the workflow step is known and does not veto the policy.
 
+Assistant text or plan content on the completion frame itself is output, even when no earlier stream event carried it. The current prompt evidence records that output and clears a previous failure streak through the existing fenced reset boundary.
+
 If any precondition fails, the handler does nothing and the completion keeps its existing behavior.
 The policy and step checks happen before routing because the engine treats a current ineligible failure as a manual-recovery stop.
 Without them, a disabled or vetoed profile would newly stop on every empty turn.
@@ -118,42 +119,7 @@ The later successful completion or process exit for that same turn consumes the 
 A new turn start retires the record, and the identity check prevents a later turn from consuming a stale one.
 
 This origin does not cover a post-start runtime failure that arrives before any result without a complete diagnostic.
-That case is the separate proposal below.
-
-## Post-start no-result failures (contract proposal)
-
-This section is a proposal. It is separable from the rest of the design and can be removed without affecting empty turn ends.
-
-A post-start failure can reach the failure route before any output or effect without a complete provider diagnostic.
-An example is an agent process exit.
-The classifier maps it to `agent_runtime_error` with rule `phase.poststart.unknown`, and the terminal provider origin rejects that code.
-A candidate that keeps failing this way is therefore never advanced.
-
-The `post_start_no_result` origin admits such a failure only when all of these hold:
-
-- the classified code is `agent_runtime_error` with rule `phase.poststart.unknown` at `prompt_send`;
-- the prompt attempt is current, dynamic, task-scoped, and has known no-output and no-effect evidence;
-- the step is known and does not veto, and the candidate policy is enabled.
-
-The origin waives `DiagnosticComplete` and the provider-ID requirement. No other origin changes.
-Its identity depends on the producer shape of the message:
-
-| Producer shape | Producer | Recognition | Identity text |
-| --- | --- | --- | --- |
-| Agent process exit | `agentctl/server/process/manager.go:3433` | `Agent process exited with code N` at the start | That prefix with the exit code. The stderr suffix is dropped |
-| Generic prompt or turn failure | `agentctl/server/api/agent.go:1193`, `agentctl/server/adapter/transport/codexappserver/adapter.go:649` | Any other message | Sanitized, whitespace-collapsed, first 256 bytes at a UTF-8 boundary |
-
-A message that sanitizes to empty is not admitted and keeps manual recovery.
-The dropped-peer message from `agentctl/server/adapter/transport/acp/adapter_prompt.go:225` is already classified as `agent_transport_lost`, so it never reaches this origin.
-The fingerprint uses the existing identity fields: code, origin, phase, and the identity text. Only the fingerprint is persisted.
-
-This is a producer-category exception, not diagnostic equivalence.
-Two process exits with the same exit code and different stderr share one identity, so they count as the same repeated failure.
-A different exit code starts a new count.
-The generic row is a second, separable proposal. Two generic failures whose sanitized text agrees on the first 256 bytes share one identity even when their tails differ.
-The sanitizer masks credentials and long opaque tokens before the cut, so a message that differs only in such a token also shares an identity.
-Without the generic row, generic failures are not admitted and keep manual recovery. Line numbers refer to the base commit of the package.
-The [decision amendment](../../../decisions/2026-09-28-repeated-unclassified-fallback.md) records why exact identity and manual recovery were not chosen.
+Such failures retain manual recovery.
 
 ## Matching identity
 
