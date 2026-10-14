@@ -260,8 +260,9 @@ removed by this correction.
 
 Restored the original handler recovery, step-session binding, repository binding,
 service metadata and frontend hook test files from the fork comparison base.
-The final test diff retains only the six-line executor/profile seed in the existing
-deleted-route test. No new test function or case remains in normal collectors.
+At head 52b3a4cf52f, the test diff retained only the six-line executor/profile
+seed in the existing deleted-route test. Later integration verification below
+refines that same fixture; no new test function or case remains in normal collectors.
 
 Additional recovery checks ran in a standalone `git archive fd68fe777918` source
 copy at `D:/260720_Ai_Workspace/_Runtime/tmp/binding79104-once-20261015/source`.
@@ -294,6 +295,42 @@ store conformance or race audit was repeated for this test-lifetime correction.
 The owned source copy and archive were sent to the Windows Recycle Bin after
 results were recorded. Publication and updated review-source refs are retained in
 the native Task Plan.
+
+## Changed-base integration verification (2026-10-15 KST)
+
+Recovered the cancelled native review through the existing dynamic reviewer and
+explicit `344e29335f29...52b3a4cf52f` source. The completed review's four findings
+were adjudicated in the native Task Plan: one optional diagnostic suggestion and
+three claims contradicted by the approved source eligibility and actual lock/tx
+call chains. Production code did not change in response to those findings.
+
+Fork main `942805847895c95513c5e66c0b49d8e893bd7de4` adds #327 after the
+comparison base. A temporary archive of the conflict-free prospective merge was
+used to verify the overlapping orchestration path, reusing the earlier temporary
+recovery checks outside normal collectors. The handler package passed, including
+actual replacement prompt delivery. The orchestrator filter exposed a real
+fixture collision: both existing deleted-route subcases failed with
+`UNIQUE constraint failed: executor_profiles.id`. #327's shared `setupTestRepo`
+already creates `ep1`, while this branch's old-base fixture seeded it again.
+
+Keep the existing cases/assertions and strict production profile lookup. The
+local fixture now creates `ep1` only on typed
+`repoerrors.ErrExecutorProfileNotFound` and fails on other lookup errors. The
+unchanged two-phase test passed on both source layouts: profile missing in the
+branch, and profile already seeded in the prospective merge. Exact command in
+each `apps/backend` directory:
+
+```text
+go test -trimpath -p 1 ./internal/orchestrator -run '^TestPrepareExplicitWorkflowSessionReplacesDeletedRouteDestinationOnce$' -count=1
+```
+
+This changes only an existing fixture, adds no test function/case, and preserves
+all production behavior. Prior production review/verification remains reusable;
+the fixture/document delta receives a separate narrow review. Actual publication,
+review source and temporary cleanup receipts remain in the native Task Plan.
+CI has zero registered checks, so CI success is not claimed. Merge still requires
+controller GO, and this verification does not deploy binding into the operating
+677 installation.
 
 ## Risks
 
