@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # resolve-go-lint-base.test.sh — regression coverage for the Go lint hook's
-# comparison base. A fork's origin can be stale, so the resolver must prefer
-# the conventional canonical upstream ref without weakening lint enforcement.
+# comparison base. The resolver picks the default branch nearest HEAD: a fork
+# lints against origin, a branch tracking the canonical upstream lints against
+# upstream, and a tie favors origin. Failures stay fail-closed.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,23 +50,28 @@ new_repo() {
 
 fork_repo="" single_repo="" release_repo="" configured_repo=""
 dangling_repo="" ambiguous_repo="" unsafe_repo="" history_repo="" missing_repo=""
-full_ref_repo="" collision_repo="" untrusted_repo="" namespace_repo=""
+full_ref_repo="" collision_repo="" namespace_repo=""
 diverged_repo="" merge_repo=""
 cleanup() {
 	local repo
 	for repo in "$fork_repo" "$single_repo" "$release_repo" "$configured_repo" \
 		"$dangling_repo" "$ambiguous_repo" "$unsafe_repo" "$history_repo" "$missing_repo" \
-		"$full_ref_repo" "$collision_repo" "$untrusted_repo" "$namespace_repo" \
+		"$full_ref_repo" "$collision_repo" "$namespace_repo" \
 		"$diverged_repo" "$merge_repo"; do
 		[ -z "$repo" ] || rm -rf "$repo"
 	done
 }
 trap cleanup EXIT
 
+# Fork shape: HEAD sits on origin/main, upstream/main is an older ancestor, so
+# origin is nearer and wins even though an upstream remote exists.
 fork_repo=$(new_repo)
+git -C "$fork_repo" commit --allow-empty -qm second
+git -C "$fork_repo" update-ref refs/remotes/origin/main HEAD
 git -C "$fork_repo" remote add upstream git@github.com:kdlbs/kandev.git
-git -C "$fork_repo" update-ref refs/remotes/upstream/main HEAD
-expect_eq 'fork prefers canonical upstream' 'refs/remotes/upstream/main' "$(cd "$fork_repo" && "$RESOLVER")"
+git -C "$fork_repo" update-ref refs/remotes/upstream/main HEAD~1
+git -C "$fork_repo" symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/main
+expect_eq 'fork prefers the nearer origin base' 'refs/remotes/origin/main' "$(cd "$fork_repo" && "$RESOLVER")"
 
 single_repo=$(new_repo)
 expect_eq 'single remote uses origin default' 'refs/remotes/origin/main' "$(cd "$single_repo" && "$RESOLVER")"
@@ -76,7 +82,8 @@ git -C "$release_repo" update-ref refs/remotes/origin/release HEAD
 git -C "$release_repo" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/release
 git -C "$release_repo" remote add upstream https://github.com/kdlbs/kandev.git
 git -C "$release_repo" update-ref refs/remotes/upstream/release HEAD
-expect_eq 'non-main default follows upstream' 'refs/remotes/upstream/release' "$(cd "$release_repo" && "$RESOLVER")"
+git -C "$release_repo" symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/release
+expect_eq 'non-main default follows origin' 'refs/remotes/origin/release' "$(cd "$release_repo" && "$RESOLVER")"
 
 configured_repo=$(new_repo)
 git -C "$configured_repo" remote add upstream https://github.com/kdlbs/kandev.git
@@ -114,11 +121,6 @@ expect_eq 'resolver emits fully qualified ref' 'refs/remotes/origin/main' "$(cd 
 collision_repo=$(new_repo)
 git -C "$collision_repo" tag origin/main
 expect_eq 'tag collision still selects remote ref' 'refs/remotes/origin/main' "$(cd "$collision_repo" && "$RESOLVER")"
-
-untrusted_repo=$(new_repo)
-git -C "$untrusted_repo" remote add upstream https://example.test/not-kandev.git
-git -C "$untrusted_repo" update-ref refs/remotes/upstream/main HEAD
-expect_fail 'untrusted upstream fails closed' 'canonical' "$untrusted_repo"
 
 namespace_repo=$(new_repo)
 git -C "$namespace_repo" config kandev.lintBaseRef refs/heads/main
