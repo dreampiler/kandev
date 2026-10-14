@@ -183,14 +183,16 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 	var startupFailure *routingerr.AgentStartupFailure
 	var managedFailure *routingerr.ManagedRuntimeStartupError
 	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		// A deadline stays a timeout even when a startup type wraps it, so
+		// timeout-based recovery keeps its signal.
+		code = models.AgentErrorCauseCodeTimeout
 	case errors.As(err, &startupFailure) && startupFailure != nil:
 		code = models.AgentErrorCauseCodeTransportUnavailable
 		detail = agentStartupFailureDetail(startupFailure)
 	case errors.As(err, &managedFailure) && managedFailure != nil:
 		code = models.AgentErrorCauseCodeTransportUnavailable
 		detail = managedRuntimeStartupFailureDetail(managedFailure)
-	case errors.Is(err, context.DeadlineExceeded):
-		code = models.AgentErrorCauseCodeTimeout
 	}
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),
@@ -232,6 +234,9 @@ func boundedBootstrapCause(value string) string {
 }
 
 func truncateBootstrapDetail(value string, maxBytes int) string {
+	if maxBytes <= 0 {
+		return ""
+	}
 	if len(value) <= maxBytes {
 		return value
 	}

@@ -1,9 +1,11 @@
 package lifecycle
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
@@ -84,7 +86,34 @@ func TestAgentStartupFailureDetailRedactsAndBounds(t *testing.T) {
 	longErr := routingerr.NewAgentStartupFailure(routingerr.PhaseProcessStart, "opencode-acp",
 		errors.New(strings.Repeat("diagnostic ", 400)))
 	longFailure := bootstrapFailureFor(&AgentExecution{}, longErr)
-	if len(longFailure.Detail) > 1024 {
-		t.Fatalf("detail length = %d, want <= 1024", len(longFailure.Detail))
+	if len(longFailure.Detail) > maxBootstrapCauseDetailBytes+128 {
+		t.Fatalf("detail length = %d, want the cause bounded near %d bytes",
+			len(longFailure.Detail), maxBootstrapCauseDetailBytes)
+	}
+	if !utf8.ValidString(longFailure.Detail) {
+		t.Fatalf("detail is not valid UTF-8: %q", longFailure.Detail)
+	}
+
+	multibyte := routingerr.NewAgentStartupFailure(routingerr.PhaseSessionInit, "opencode-acp",
+		errors.New(strings.Repeat("가", 400)))
+	multibyteFailure := bootstrapFailureFor(&AgentExecution{}, multibyte)
+	if !utf8.ValidString(multibyteFailure.Detail) {
+		t.Fatalf("multibyte detail was cut mid-rune: %q", multibyteFailure.Detail)
+	}
+	if len(multibyteFailure.Detail) > maxBootstrapCauseDetailBytes+128 {
+		t.Fatalf("multibyte detail length = %d, want it bounded near %d",
+			len(multibyteFailure.Detail), maxBootstrapCauseDetailBytes)
+	}
+}
+
+func TestBootstrapFailureForKeepsTimeoutForWrappedDeadline(t *testing.T) {
+	managed := &routingerr.ManagedRuntimeStartupError{
+		Code:    routingerr.CodeAgentRuntime,
+		Details: "managed runtime bootstrap timed out",
+		Cause:   context.DeadlineExceeded,
+	}
+	failure := bootstrapFailureFor(&AgentExecution{}, managed)
+	if failure.Code != models.AgentErrorCauseCodeTimeout {
+		t.Fatalf("code = %q, want %q for a wrapped deadline", failure.Code, models.AgentErrorCauseCodeTimeout)
 	}
 }
