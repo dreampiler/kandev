@@ -49,7 +49,7 @@ func TestResidualTerminalSweepNoOp(t *testing.T) {
 	// The reconcile entry point already ran the residual pass, so the guarded
 	// no-op for the turn that never reached on_turn_complete is recorded and an
 	// explicit sweep has nothing left to do.
-	swept, err := service.sweepResidualDeliveryNoOp(ctx, "")
+	swept, _, err := service.sweepResidualDeliveryNoOp(ctx, "")
 	if err != nil || swept != 0 {
 		t.Fatalf("explicit sweep after reconcile = %d, %v; want 0", swept, err)
 	}

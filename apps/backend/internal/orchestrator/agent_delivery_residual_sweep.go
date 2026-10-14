@@ -11,10 +11,20 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
+// Agent-delivery workflow outcomes the residual sweep can record through the
+// guarded no-op writer. The values mirror the closed set
+// hasExactAgentDeliveryWorkflowOutcomeTx promotes on.
+const (
+	agentDeliveryOutcomeNotRequired = "not_required"
+	agentDeliveryOutcomeNoAutomatic = "no_automatic_transition"
+)
+
 // sweepResidualDeliveryNoOp records guarded workflow no-op receipts for
 // block_resolved terminal settlements whose workflow receipt is still
 // missing, then leaves promotion to the existing reconcile path. It returns
-// the number of receipts recorded. sessionID == "" scans every session.
+// the number of receipts recorded and the number of current-step terminals it
+// deliberately left pinned for a real transition. sessionID == "" scans every
+// session.
 //
 // A block_resolved settlement without its workflow receipt pins the stream's
 // suffix forever: promotion requires hasExactAgentDeliveryWorkflowOutcomeTx
@@ -27,59 +37,68 @@ import (
 //
 // The sweep is idempotent: a recorded receipt is never rewritten, and a
 // terminal that gained its receipt by another path is skipped.
-func (s *Service) sweepResidualDeliveryNoOp(ctx context.Context, sessionID string) (int, error) {
+func (s *Service) sweepResidualDeliveryNoOp(ctx context.Context, sessionID string) (int, int, error) {
 	settlements, ok := s.repo.(repository.AgentDeliverySettlementRepository)
 	if !ok {
-		return 0, nil
+		return 0, 0, nil
 	}
 	effects, err := settlements.ListPendingAgentDeliverySettlements(ctx, sessionID)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	swept := 0
+	swept, pinned := 0, 0
 	for _, effect := range effects {
 		if effect == nil || effect.State != models.DeliveryEffectBlockResolved {
 			continue
 		}
-		recorded, err := s.recordResidualDeliveryNoOp(ctx, effect)
+		recorded, protected, err := s.recordResidualDeliveryNoOp(ctx, effect)
 		if err != nil {
-			return swept, err
+			return swept, pinned, err
 		}
 		if recorded {
 			swept++
 		}
+		if protected {
+			pinned++
+		}
 	}
-	return swept, nil
+	if pinned > 0 {
+		s.logger.Info("residual delivery sweep left current-step terminals pinned for a real transition",
+			zap.String("session_id", sessionID), zap.Int("pinned", pinned))
+	}
+	return swept, pinned, nil
 }
 
 // recordResidualDeliveryNoOp records a single guarded no-op receipt for a
 // block_resolved terminal that still lacks its workflow outcome. It returns
 // false when the terminal already has a receipt, when the turn identity is
 // missing (no workflow key exists for an empty turn), or when the owning task
-// cannot supply the Task 04 writer's guarded decision.
-func (s *Service) recordResidualDeliveryNoOp(ctx context.Context, effect *models.AgentDeliveryEffect) (bool, error) {
+// cannot supply the Task 04 writer's guarded decision. pinned is true only
+// when the terminal is a current-step turn whose step declares an automatic
+// move, so the sweep must leave it for a real transition.
+func (s *Service) recordResidualDeliveryNoOp(ctx context.Context, effect *models.AgentDeliveryEffect) (recorded bool, pinned bool, err error) {
 	if effect == nil || effect.TurnID == "" {
-		return false, nil
+		return false, false, nil
 	}
 	reader, ok := s.repo.(agentDeliveryEffectReader)
 	if !ok {
-		return false, nil
+		return false, false, nil
 	}
 	workflowKey := workflowEffectKey(effect.TurnID)
 	if workflowKey == "" {
-		return false, nil
+		return false, false, nil
 	}
-	recorded, err := residualNoOpReceiptExists(ctx, reader, workflowKey)
-	if err != nil || recorded {
-		return false, err
+	alreadyRecorded, err := residualNoOpReceiptExists(ctx, reader, workflowKey)
+	if err != nil || alreadyRecorded {
+		return false, false, err
 	}
 	task, err := s.residualNoOpTask(ctx, effect.SessionID)
 	if err != nil || task == nil {
-		return false, err
+		return false, false, err
 	}
-	outcome := residualNoOpOutcome(task)
+	outcome, protected := s.residualDeliveryOutcome(ctx, task, effect)
 	if outcome == "" {
-		return false, nil
+		return false, protected, nil
 	}
 	workflowEffect := &models.AgentDeliveryEffect{
 		EffectKey:         workflowKey,
@@ -94,7 +113,7 @@ func (s *Service) recordResidualDeliveryNoOp(ctx context.Context, effect *models
 		TurnID:            effect.TurnID,
 		TaskID:            task.ID,
 	}
-	return s.recordDeliveryWorkflowNoOp(ctx, task, workflowEffect, outcome), nil
+	return s.recordDeliveryWorkflowNoOp(ctx, task, workflowEffect, outcome), false, nil
 }
 
 // residualNoOpReceiptExists reports whether an exact workflow receipt already
@@ -141,17 +160,61 @@ func (s *Service) residualNoOpTask(ctx context.Context, sessionID string) (*mode
 	return task, nil
 }
 
-// residualNoOpOutcome returns the only guarded no-op the sweep may record
-// without an on_turn_complete evaluation: not_required for a terminal whose
-// task has no workflow step at all, so there is genuinely nothing to
-// transition. A task that does have a workflow step may still need a real
-// automatic transition, so the sweep returns "" and leaves that terminal
-// pinned rather than fabricating no_automatic_transition to unpin it.
-func residualNoOpOutcome(task *models.Task) string {
-	if task == nil || task.WorkflowStepID == "" {
-		return "not_required"
+// residualDeliveryOutcome decides the guarded workflow outcome the residual
+// sweep may record for a block_resolved terminal whose workflow receipt is
+// missing. It reasons only from durable facts, never calls the workflow
+// engine, never moves a step, and never publishes.
+//
+// A task with no workflow step has nothing to transition, so the outcome is
+// not_required. Otherwise the terminal's turn supplies the entry evidence: a
+// turn stamped in a step the task has since left was replaced by that step
+// move, so its completion can no longer drive an entry and is not_required.
+// A current-step turn whose step declares no automatic on_turn_complete move
+// deterministically yields no_automatic_transition. A current-step turn whose
+// step does declare an automatic move is left protected (outcome "" and
+// pinned true): a real transition must not be fabricated retroactively.
+func (s *Service) residualDeliveryOutcome(
+	ctx context.Context,
+	task *models.Task,
+	effect *models.AgentDeliveryEffect,
+) (outcome string, pinned bool) {
+	if task == nil {
+		return "", false
 	}
-	return ""
+	if task.WorkflowStepID == "" {
+		return agentDeliveryOutcomeNotRequired, false
+	}
+	turn, err := s.residualTurn(ctx, effect.TurnID)
+	if err != nil || turn == nil {
+		return "", false
+	}
+	if models.StringFromAny(turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]) != task.WorkflowStepID {
+		return agentDeliveryOutcomeNotRequired, false
+	}
+	if s.workflowStepGetter == nil {
+		return "", false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil || step == nil || step.WorkflowID != task.WorkflowID {
+		return "", false
+	}
+	if step.AdvancesOnTurnComplete() {
+		return "", true
+	}
+	return agentDeliveryOutcomeNoAutomatic, false
+}
+
+// residualTurn reads the turn row that carries the step-entry stamp. A missing
+// turn is not an error: the caller leaves the terminal protected because it
+// lacks the entry and turn evidence a decision requires.
+func (s *Service) residualTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	reader, ok := s.repo.(interface {
+		GetTurn(ctx context.Context, id string) (*models.Turn, error)
+	})
+	if !ok {
+		return nil, nil
+	}
+	return reader.GetTurn(ctx, turnID)
 }
 
 // settleDeadOwnerDeliverySubmissions settles active submissions whose owner
@@ -197,7 +260,7 @@ func (s *Service) reconcileResidualDeliverySettlements(ctx context.Context, sess
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	if _, err := s.sweepResidualDeliveryNoOp(ctx, sessionID); err != nil {
+	if _, _, err := s.sweepResidualDeliveryNoOp(ctx, sessionID); err != nil {
 		s.logger.Warn("failed to sweep residual delivery workflow no-ops",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
