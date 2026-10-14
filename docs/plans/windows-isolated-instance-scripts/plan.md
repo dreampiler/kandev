@@ -65,6 +65,7 @@ disposable fake profile.
 ## Work orders
 
 - [x] [Task 01: Windows isolated-instance scripts](task-01-windows-isolated-scripts.md)
+- [x] [Task 02: Detach launched children from the caller](task-02-detach-launched-children.md)
 
 ## Risks
 

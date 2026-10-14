@@ -87,9 +87,10 @@ older backend/agentctl build cannot expose the control port. The web host is a
 `-WebHost` parameter that defaults to `127.0.0.1`. When Vite runs,
 `KANDEV_WEB_INTERNAL_URL` uses the selected host, while the browser opens the
 backend URL. This keeps the frontend behind the Go backend proxy and avoids a
-direct Vite API-port path. The launcher starts the installed Vite CLI directly
-through Node, so the recorded web PID is the actual listener rather than a
-pnpm/cmd wrapper. A network-reachable binding requires the operator to pass an
+direct Vite API-port path. The launcher starts the installed Vite CLI through
+Node inside a `cmd.exe` wrapper and records the Node process that listens on the
+web port after this launch, so the recorded web PID is the actual listener
+rather than the wrapper. A network-reachable binding requires the operator to pass an
 explicit host instead of inheriting the package script's wildcard default.
 
 ## Teardown
