@@ -85,6 +85,33 @@ func TestResidualDeadOwnerSettlement(t *testing.T) {
 				t.Fatalf("terminal-less settlement = %v, %v; want untouched", settled, err)
 			}
 		})
+
+		// A missing owner session has no terminal time, so settlement must wait
+		// for the payload grace measured from the submission's own last update.
+		t.Run(engine+"/missing_owner_within_grace_untouched", func(t *testing.T) {
+			repo, event, _ := seedResidualDeadOwner(t, engine, "missing-owner-grace")
+			ctx := context.Background()
+			if _, err := repo.DB().Exec(`DELETE FROM task_sessions WHERE id = ?`, event.SessionID); err != nil {
+				t.Fatalf("remove owner session: %v", err)
+			}
+			settled, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, event.SubmissionID)
+			if err != nil || settled {
+				t.Fatalf("missing-owner settlement within grace = %v, %v; want untouched", settled, err)
+			}
+		})
+
+		t.Run(engine+"/missing_owner_after_grace_settles", func(t *testing.T) {
+			repo, event, advance := seedResidualDeadOwner(t, engine, "missing-owner-grace-ok")
+			ctx := context.Background()
+			if _, err := repo.DB().Exec(`DELETE FROM task_sessions WHERE id = ?`, event.SessionID); err != nil {
+				t.Fatalf("remove owner session: %v", err)
+			}
+			advance(agentDeliveryDeadOwnerGrace + time.Hour)
+			settled, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, event.SubmissionID)
+			if err != nil || !settled {
+				t.Fatalf("missing-owner settlement after grace = %v, %v; want settled", settled, err)
+			}
+		})
 	}
 }
 

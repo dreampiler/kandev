@@ -93,10 +93,11 @@ func (r *Repository) SettleDeadOwnerAgentDeliverySubmission(
 	var sessionID, incarnationID string
 	var generation int64
 	var state models.DeliverySubmissionState
+	var submissionUpdatedAt time.Time
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT session_id, incarnation_id, harness_generation, state
+		SELECT session_id, incarnation_id, harness_generation, state, updated_at
 		FROM agent_delivery_submissions WHERE id = ?`),
-		submissionID).Scan(&sessionID, &incarnationID, &generation, &state)
+		submissionID).Scan(&sessionID, &incarnationID, &generation, &state, &submissionUpdatedAt)
 	if err == sql.ErrNoRows {
 		return false, tx.Commit()
 	}
@@ -115,7 +116,7 @@ func (r *Repository) SettleDeadOwnerAgentDeliverySubmission(
 	if err := lockAgentDeliveryWrites(ctx, tx, r.db.DriverName(), []string{sessionID}, nil); err != nil {
 		return false, err
 	}
-	eligible, err := deadOwnerSubmissionEligibleTx(ctx, tx, r.db.Rebind, sessionID, incarnationID, generation, submissionID, now)
+	eligible, err := deadOwnerSubmissionEligibleTx(ctx, tx, r.db.Rebind, sessionID, incarnationID, generation, submissionUpdatedAt, now)
 	if err != nil {
 		return false, err
 	}
@@ -139,18 +140,21 @@ func (r *Repository) SettleDeadOwnerAgentDeliverySubmission(
 }
 
 // deadOwnerSubmissionEligibleTx verifies every Task 01 guard inside the
-// caller's writer transaction. A missing owner qualifies on grace alone only
-// when no recovery evidence references the submission; CANCELLED owners
-// qualify on grace alone; COMPLETED/FAILED owners additionally require zero
-// open agent_delivery recovery blocks and zero queued/dispatch/send-now
-// signals for the session. Anything else (live, unclear) is ineligible.
+// caller's writer transaction. A CANCELLED owner qualifies on its terminal
+// time; COMPLETED/FAILED owners additionally require zero open agent_delivery
+// recovery blocks and zero queued/dispatch/send-now signals for the session.
+// A missing owner session has no terminal time, so it is treated as terminal
+// only when the submission has itself been quiescent for the payload grace
+// (the submission updated_at stands in for the absent owner terminal time) and
+// no recovery evidence references it; with no grace basis it is ineligible.
+// Anything else (live, unclear) is ineligible.
 func deadOwnerSubmissionEligibleTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
 	rebind func(string) string,
 	sessionID, incarnationID string,
 	generation int64,
-	submissionID string,
+	submissionUpdatedAt time.Time,
 	now time.Time,
 ) (bool, error) {
 	var ownerState models.TaskSessionState
@@ -160,11 +164,14 @@ func deadOwnerSubmissionEligibleTx(
 		SELECT state, completed_at, updated_at FROM task_sessions WHERE id = ?`),
 		sessionID).Scan(&ownerState, &completedAt, &updatedAt)
 	if err == sql.ErrNoRows {
-		if err := deadOwnerRecoveryQuiescedTx(ctx, tx, rebind, sessionID, incarnationID, generation, submissionID); err != nil {
+		if err := deadOwnerRecoveryQuiescedTx(ctx, tx, rebind, sessionID, incarnationID, generation); err != nil {
 			if errors.Is(err, errDeadOwnerRecoveryPending) {
 				return false, nil
 			}
 			return false, err
+		}
+		if submissionUpdatedAt.IsZero() || now.Sub(submissionUpdatedAt) < agentDeliveryDeadOwnerGrace {
+			return false, nil
 		}
 		return true, nil
 	}
@@ -174,7 +181,7 @@ func deadOwnerSubmissionEligibleTx(
 	switch ownerState {
 	case models.TaskSessionStateCancelled:
 	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed:
-		if err := deadOwnerRecoveryQuiescedTx(ctx, tx, rebind, sessionID, incarnationID, generation, submissionID); err != nil {
+		if err := deadOwnerRecoveryQuiescedTx(ctx, tx, rebind, sessionID, incarnationID, generation); err != nil {
 			if errors.Is(err, errDeadOwnerRecoveryPending) {
 				return false, nil
 			}
@@ -205,7 +212,6 @@ func deadOwnerRecoveryQuiescedTx(
 	rebind func(string) string,
 	sessionID, incarnationID string,
 	generation int64,
-	submissionID string,
 ) error {
 	var openBlocks int
 	if err := tx.QueryRowxContext(ctx, rebind(`
@@ -213,7 +219,10 @@ func deadOwnerRecoveryQuiescedTx(
 		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ?
 		  AND consumer_reference = 'agent_delivery' AND state = 'open'`),
 		sessionID, incarnationID, generation).Scan(&openBlocks); err != nil {
-		return err
+		if !isDeadOwnerMissingTableError(err) {
+			return err
+		}
+		openBlocks = 0
 	}
 	if openBlocks > 0 {
 		return errDeadOwnerRecoveryPending
@@ -233,7 +242,6 @@ func deadOwnerRecoveryQuiescedTx(
 			return errDeadOwnerRecoveryPending
 		}
 	}
-	_ = submissionID
 	return nil
 }
 
