@@ -123,21 +123,26 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 	if session == nil {
 		return false
 	}
-	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
-	if err != nil {
-		// A recovery that already carries its own cause reason must not be
-		// blocked by a block-read failure; fall back to the cause-only key.
-		s.logger.Zap().Warn("could not read the open session recovery block; using the cause reason",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		block = nil
-	}
 	reason := recoveryReasonFromError(cause)
+	var block *models.SessionRecoveryBlock
 	if reason == "" {
+		// The block is the only source of the reason here, so a read failure
+		// fails closed, exactly as before.
+		var err error
+		block, err = s.GetOpenSessionRecoveryBlock(ctx, sessionID)
+		if err != nil {
+			return false
+		}
 		if block != nil {
 			reason = block.Reason
 		} else if session.State == models.TaskSessionStateFailed && startupFailureTextNeedsContinuation(session.ErrorMessage) {
 			reason = durableDeliveryUnresolvedReason
 		}
+	} else if current, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID); err == nil {
+		// The cause already carries the reason: a block read here is
+		// best-effort for a richer attempt record key and never gates the
+		// recovery, so a read failure does not drop a cause-known recovery.
+		block = current
 	}
 	if !interruptedTurnRecoveryReasons[reason] {
 		return false
@@ -160,7 +165,7 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		zap.String("session_id", sessionID),
 		zap.String("reason", reason))
 	go func() {
-		defer s.finishInterruptedTurnAutoRecovery(sessionID)
+		defer s.finishInterruptedTurnAutoRecovery(sessionID, recordKey)
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), interruptedTurnAutoRecoveryTimeout)
 		defer cancel()
 		resp, err := s.RecoverSessionWithOptions(
@@ -276,17 +281,19 @@ func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) 
 		s.interruptedTurnAutoRecovery = make(map[string]interruptedTurnAutoRecoveryState)
 	}
 	state := s.interruptedTurnAutoRecovery[sessionID]
+	now := time.Now()
+	// The same-session in-flight ownership outranks a record-key change: while
+	// one attempt is running (or its cooldown is unexpired) this entry is left
+	// untouched, so a new record cannot start a second attempt and the running
+	// goroutine still owns the entry.
+	if state.running || now.Sub(state.startedAt) < interruptedTurnAutoRecoveryCooldown {
+		return false, false
+	}
 	if state.recordKey != recordKey {
-		// A different unresolved record (the prior one was settled or replaced)
-		// begins with a fresh attempt budget, but keep the in-flight and
-		// cooldown guard so two attempts for one session cannot overlap.
+		// The session is idle for the previous record, so a different
+		// unresolved record begins with a fresh attempt budget.
 		state.recordKey = recordKey
 		state.attempts = 0
-	}
-	now := time.Now()
-	if state.running || now.Sub(state.startedAt) < interruptedTurnAutoRecoveryCooldown {
-		s.interruptedTurnAutoRecovery[sessionID] = state
-		return false, false
 	}
 	if state.attempts >= interruptedTurnAutoRecoveryMaxAttempts {
 		s.interruptedTurnAutoRecovery[sessionID] = state
@@ -299,10 +306,15 @@ func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) 
 	return true, false
 }
 
-func (s *Service) finishInterruptedTurnAutoRecovery(sessionID string) {
+func (s *Service) finishInterruptedTurnAutoRecovery(sessionID, recordKey string) {
 	s.interruptedTurnAutoRecoveryMu.Lock()
 	defer s.interruptedTurnAutoRecoveryMu.Unlock()
 	state := s.interruptedTurnAutoRecovery[sessionID]
+	// Only the attempt that owns this record key clears the in-flight flag; a
+	// record replaced in the meantime is left untouched.
+	if state.recordKey != recordKey {
+		return
+	}
 	state.running = false
 	s.interruptedTurnAutoRecovery[sessionID] = state
 }
