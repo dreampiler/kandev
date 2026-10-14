@@ -97,23 +97,33 @@ func (h *Handlers) listRelatedForCaller(
 	return svc.ListRelatedForCaller(ctx, caller, target)
 }
 
-// controllerMayReadRelated reports whether the calling principal is a workspace
-// controller that may read targetTaskID's relations without a direct relation
-// edge. A controller is a principal whose own task is a workspace root with at
-// least one child; the target must be in the principal's own workspace. The
-// principal is server-derived, so an agent cannot widen its scope by naming a
-// different caller task. Any read error fails closed.
-func (h *Handlers) controllerMayReadRelated(ctx context.Context, targetTaskID string) bool {
+// callerIsWorkspaceController reports whether the server-derived principal is a
+// workspace controller: a principal whose own task is a workspace root (empty
+// parent_id) with at least one child. The principal is server-derived, so an
+// agent cannot widen its scope by naming a different caller task. A missing
+// handoff service or any read error fails closed.
+func (h *Handlers) callerIsWorkspaceController(ctx context.Context) bool {
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
-	if !ok || h.handoffSvc == nil || h.taskSvc == nil {
-		return false
-	}
-	if principal.CallerTaskID == "" || principal.WorkspaceID == "" ||
-		targetTaskID == "" || targetTaskID == principal.CallerTaskID {
+	if !ok || principal.CallerTaskID == "" || principal.WorkspaceID == "" || h.handoffSvc == nil {
 		return false
 	}
 	isController, err := h.handoffSvc.IsWorkspaceController(ctx, principal.CallerTaskID)
-	if err != nil || !isController {
+	return err == nil && isController
+}
+
+// controllerMayReadRelated reports whether the calling principal is a workspace
+// controller that may read targetTaskID's relations without a direct relation
+// edge. The target must be in the principal's own workspace. Any read error
+// fails closed.
+func (h *Handlers) controllerMayReadRelated(ctx context.Context, targetTaskID string) bool {
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok || h.taskSvc == nil {
+		return false
+	}
+	if targetTaskID == "" || targetTaskID == principal.CallerTaskID {
+		return false
+	}
+	if !h.callerIsWorkspaceController(ctx) {
 		return false
 	}
 	target, err := h.taskSvc.GetTask(ctx, targetTaskID)
