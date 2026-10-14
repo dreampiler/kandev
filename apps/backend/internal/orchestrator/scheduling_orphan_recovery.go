@@ -21,6 +21,13 @@ type schedulingTaskLister interface {
 	ListSchedulingTasks(ctx context.Context) ([]*models.Task, error)
 }
 
+// schedulingOrphanTurnChecker is a narrow interface to check if a session has
+// a turn for a specific step. It is reached through a type assertion on
+// s.repo rather than growing sessionExecutorStore for one startup pass.
+type schedulingOrphanTurnChecker interface {
+	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
 // reconcileSchedulingOrphansOnStartup restarts automatic step starts that a
 // backend restart interrupted before they produced a running session
 // (REQ-TASKS-RESTART-ORPHAN-SESSIONS-003). Such a task is in SCHEDULING with no
@@ -123,10 +130,11 @@ func schedulingOrphanHasLifecycleToken(task *models.Task) bool {
 
 // recoverSchedulingOrphan restarts the current step for one orphaned
 // SCHEDULING task. A task without an active session goes through the ordinary
-// automatic start. A resumable session without prompt history receives the
-// step entry in place, so no duplicate session is created. A session that
-// already accepted a prompt only has its stale task state repaired. Any other
-// active session state means a launch is already live and is left alone.
+// automatic start. A resumable session without a turn for the current step
+// receives the entry in place, so no duplicate session is created. A session
+// that already has a turn for the current step only has its stale task state
+// repaired. Any other active session state means a launch is already live and
+// is left alone.
 func (s *Service) recoverSchedulingOrphan(ctx context.Context, task *models.Task) {
 	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
 	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -144,19 +152,40 @@ func (s *Service) recoverSchedulingOrphan(ctx context.Context, task *models.Task
 	if !schedulingOrphanResumableSession(session) {
 		return
 	}
-	hasPrompt, err := s.repo.HasUserPromptHistory(ctx, session.ID)
+	hasTurnForStep, err := s.sessionHasTurnForStep(ctx, session.ID, task.WorkflowStepID)
 	if err != nil {
-		s.logger.Warn(schedulingOrphanEvent+": failed to read session prompt history",
+		s.logger.Warn(schedulingOrphanEvent+": failed to check session turns for step",
 			zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
 		return
 	}
-	if hasPrompt {
+	if hasTurnForStep {
 		// The step entry already delivered a turn; only the stale SCHEDULING
 		// state is left. Repair it without sending another prompt.
 		s.repairSchedulingOrphanTaskState(ctx, task)
 		return
 	}
 	s.reenterSchedulingOrphanStep(ctx, task, session)
+}
+
+// sessionHasTurnForStep checks if the session has a turn for the given step.
+// This is used to determine if the step entry prompt was already delivered.
+func (s *Service) sessionHasTurnForStep(ctx context.Context, sessionID, stepID string) (bool, error) {
+	checker, ok := s.repo.(schedulingOrphanTurnChecker)
+	if !ok {
+		return false, nil
+	}
+	turns, err := checker.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, turn := range turns {
+		if turn.Metadata != nil {
+			if stepAtStart, ok := turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart].(string); ok && stepAtStart == stepID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 
 // schedulingOrphanResumableSession reports whether an existing session is a

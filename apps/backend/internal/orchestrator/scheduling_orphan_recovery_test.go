@@ -183,12 +183,22 @@ func TestSchedulingOrphanWithPromptHistoryOnlyRepairsState(t *testing.T) {
 	f := newSchedulingOrphanFixture(t)
 	f.seedTask(t, "orphan-prompted", orphanAutoStep, nil)
 	f.seedSession(t, "orphan-prompted", "orphan-prompted-session", models.TaskSessionStateWaitingForInput)
-	claimed, err := f.repo.ClaimInitialPromptFallback(context.Background(), "orphan-prompted-session", "orphan-prompted-session-incarnation")
+	// Create a turn for the current step to simulate the step entry prompt
+	// having been delivered. The turn is stamped with the current step ID.
+	turn := &models.Turn{
+		ID:            "orphan-prompted-turn",
+		TaskSessionID: "orphan-prompted-session",
+		TaskID:        "orphan-prompted",
+		StartedAt:     time.Now().UTC(),
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyWorkflowStepIDAtStart: orphanAutoStep,
+		},
+	}
+	_, err := f.repo.CreateTurnWithStepStamp(context.Background(), turn)
 	require.NoError(t, err)
-	require.True(t, claimed)
 
 	f.runStartupSweep(t)
-	require.False(t, f.launches.awaitLaunch(0), "a session with prompt history was started again")
+	require.False(t, f.launches.awaitLaunch(0), "a session with a turn for the current step was started again")
 	require.Equal(t, v1.TaskStateInProgress, f.taskState("orphan-prompted"))
 	require.Empty(t, f.agentMgr.capturedPrompts)
 	require.Equal(t, 1, sessionCount(t, f.repo, "orphan-prompted"))
@@ -215,14 +225,14 @@ func TestSchedulingOrphanLeavesLiveSessionsAlone(t *testing.T) {
 
 // AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3: a resumable session whose step entry
 // never delivered a prompt receives the entry in place, without a second session.
-func TestSchedulingOrphanReentersIdleSessionWithoutPromptHistory(t *testing.T) {
+func TestSchedulingOrphanReentersWaitingForInputSessionWithoutPromptHistory(t *testing.T) {
 	f := newSchedulingOrphanFixture(t)
-	f.seedTask(t, "orphan-idle", orphanAutoStep, nil)
-	f.seedSession(t, "orphan-idle", "orphan-idle-session", models.TaskSessionStateWaitingForInput)
+	f.seedTask(t, "orphan-waiting", orphanAutoStep, nil)
+	f.seedSession(t, "orphan-waiting", "orphan-waiting-session", models.TaskSessionStateWaitingForInput)
 	now := time.Now().UTC()
 	require.NoError(t, f.repo.UpsertExecutorRunning(context.Background(), &models.ExecutorRunning{
-		ID: "orphan-idle-running", SessionID: "orphan-idle-session", TaskID: "orphan-idle",
-		AgentExecutionID: "exec-before-restart", ResumeToken: "acp-orphan-idle", Resumable: true,
+		ID: "orphan-waiting-running", SessionID: "orphan-waiting-session", TaskID: "orphan-waiting",
+		AgentExecutionID: "exec-before-restart", ResumeToken: "acp-orphan-waiting", Resumable: true,
 		CreatedAt: now, UpdatedAt: now,
 	}))
 	f.agentMgr.isAgentReadyFn = func(context.Context, string) bool { return true }
@@ -230,17 +240,49 @@ func TestSchedulingOrphanReentersIdleSessionWithoutPromptHistory(t *testing.T) {
 	// The sweep must return before the resumed agent reports readiness, so a
 	// slow resume cannot hold the rest of the startup sweep.
 	f.runStartupSweep(t)
-	require.True(t, f.launches.awaitLaunch(0), "the idle session was not resumed for the step entry")
+	require.True(t, f.launches.awaitLaunch(0), "the waiting session was not resumed for the step entry")
 	require.Eventually(t, func() bool {
-		session, err := f.repo.GetTaskSession(context.Background(), "orphan-idle-session")
+		session, err := f.repo.GetTaskSession(context.Background(), "orphan-waiting-session")
 		return err == nil && session.State == models.TaskSessionStateStarting
 	}, 2*time.Second, 10*time.Millisecond, "the resumed session never reached STARTING")
 	// Stand in for the agent's boot-ready event.
-	require.NoError(t, f.repo.UpdateTaskSessionState(context.Background(), "orphan-idle-session", models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, f.repo.UpdateTaskSessionState(context.Background(), "orphan-waiting-session", models.TaskSessionStateWaitingForInput, ""))
 	require.Eventually(t, func() bool {
 		f.agentMgr.mu.Lock()
 		defer f.agentMgr.mu.Unlock()
 		return len(f.agentMgr.capturedPrompts) > 0
 	}, 2*time.Second, 10*time.Millisecond, "the step entry prompt was not delivered")
-	require.Equal(t, 1, sessionCount(t, f.repo, "orphan-idle"), "re-entry created a second session")
+	require.Equal(t, 1, sessionCount(t, f.repo, "orphan-waiting"), "re-entry created a second session")
+}
+
+// AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3: the detached re-entry work is owned
+// by the service, so shutdown joins it before returning instead of leaving the
+// entry to touch repository and agent state after teardown begins.
+func TestStopOrphanReentryWorkersJoinsTrackedWork(t *testing.T) {
+	f := newSchedulingOrphanFixture(t)
+
+	release := make(chan struct{})
+	f.svc.orphanReentryWorkers.Add(1)
+	go func() {
+		defer f.svc.orphanReentryWorkers.Done()
+		<-release
+	}()
+
+	stopped := make(chan struct{})
+	go func() {
+		f.svc.stopOrphanReentryWorkers()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		t.Fatal("shutdown returned while a tracked re-entry worker was still running")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("shutdown did not join the tracked re-entry worker")
+	}
 }
