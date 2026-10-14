@@ -157,6 +157,7 @@ func (s *Service) processOnTurnCompleteWithCause(
 
 	taskID := task.ID
 	sessionID := session.ID
+	ctx = s.captureCompletionSignal(ctx, taskID, task.WorkflowStepID, session)
 	currentStep, ok := s.loadLegacyTurnCompletionStep(ctx, task, session)
 	if !ok || !s.shouldRunLegacyTurnCompletion(ctx, task, session, currentStep, cause) {
 		return false
@@ -247,8 +248,7 @@ func (s *Service) shouldRunLegacyTurnCompletion(
 		return false
 	}
 	if cause != turnCompletionCauseUserCancellation && currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != currentStep.ID {
+		if s.completionSignalForEntry(ctx, task.ID, currentStep.ID, session) == nil {
 			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
 				zap.String("step_id", currentStep.ID))
 			s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
@@ -487,6 +487,9 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
 	settleFailedTransitionSession := func(transitionErr error) {
+		if errors.Is(transitionErr, models.ErrStepCompletionEntryChanged) {
+			return
+		}
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
@@ -527,16 +530,15 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// the same task snapshot. A queued destination can be promoted immediately
 	// after this write, so a post-commit metadata write would leave a race where
 	// the first prompt starts without its handoff.
-	var consumedSignal *models.PendingStepCompletionSignal
+	var consumedSource *completionSignalSource
 	signalSession, signalErr := s.repo.GetTaskSession(ctx, sessionID)
 	if signalErr != nil {
 		s.logger.Warn("failed to load session for step handoff carry",
 			zap.String("session_id", sessionID), zap.Error(signalErr))
 	} else if triggerOnEnter && signalSession != nil {
-		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID {
-			consumedSignal = &signal
-		}
-		setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+		ctx = s.captureCompletionSignal(ctx, taskID, fromStep.ID, signalSession)
+		consumedSource = s.completionSignalForEntry(ctx, taskID, fromStep.ID, signalSession)
+		setStepHandoffCarryMetadata(task, toStepID, consumedCompletionSignal(consumedSource))
 	}
 	// executeStepTransition's two callers are always a genuine session turn:
 	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
@@ -562,6 +564,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if !applied {
 		return
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 	queued := task.QueuedForStepID != ""
 
 	// Process on_exit only after the transition is durably admitted. Reload the
@@ -606,10 +609,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if triggerOnEnter {
 		trigger = wfmodels.StepTransitionTriggerAutoComplete
 	}
-	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedCompletionSignal(consumedSource), trigger)
 	if queued {
 		if triggerOnEnter {
-			s.clearPendingStepSignalByID(ctx, sessionID)
+			s.clearConsumedCompletionSignal(ctx, sessionID, consumedSource)
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		} else {
 			s.reportWorkflowTurnStartPreparationError(
@@ -623,15 +626,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 
 	if triggerOnEnter {
-		// ADR 0015 — clear any pending completion-signal bag for the
-		// step we just left. Only on_turn_complete transitions trigger
-		// gating, so the triggerOnEnter=true branch is the only one
-		// that could have consumed a signal; on_turn_start moves leave
-		// the bag alone (it's still tied to an unsignaled step we have
-		// not left). The session struct isn't used after this point,
-		// so skip the extra GetTaskSession round-trip and write
-		// straight to the DB by session_id.
-		s.clearPendingStepSignalByID(ctx, sessionID)
+		// Consume only the captured bag. Turn-start moves do not consume a
+		// completion signal, and a replacement bag belongs to its own entry.
+		s.clearConsumedCompletionSignal(ctx, sessionID, consumedSource)
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent. Match the engine path's
@@ -7896,6 +7893,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
 	}
 
+	ctx = s.captureCompletionSignal(ctx, taskID, task.WorkflowStepID, session)
 	currentStep, eligible := s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause)
 	if !eligible {
 		if cause == turnCompletionCauseUserCancellation && currentStep != nil && !currentStep.CancelTriggersTurnComplete {
@@ -8137,8 +8135,8 @@ func (s *Service) allowEngineSignalCompletion(
 	if cause == turnCompletionCauseUserCancellation || !currentStep.AutoAdvanceRequiresSignal {
 		return true
 	}
-	signal, has := models.LoadPendingStepSignal(session.Metadata)
-	if !has || signal.StepID != currentStep.ID {
+	source := s.completionSignalForEntry(ctx, taskID, currentStep.ID, session)
+	if source == nil {
 		s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8159,7 +8157,7 @@ func (s *Service) allowEngineSignalCompletion(
 		zap.String("task_id", taskID),
 		zap.String("session_id", session.ID),
 		zap.String("step_id", currentStep.ID),
-		zap.String("source", signal.Source))
+		zap.String("source", source.Signal.Source))
 	// Bag is consumed once the transition executes (in
 	// applyEngineTransition's stamp + clear), so don't clear here —
 	// otherwise a failed transition would lose the signal.
@@ -8430,6 +8428,11 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
+	var consumedSource *completionSignalSource
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		ctx = s.captureCompletionSignal(ctx, taskID, result.FromStepID, session)
+		consumedSource = s.completionSignalForEntry(ctx, taskID, result.FromStepID, session)
+	}
 	settleFailedTransitionSession := func() {
 		if !sessionLifecycle {
 			return
@@ -8498,6 +8501,10 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	applied, err := commit(applyCtx)
 	if err != nil {
+		if errors.Is(err, models.ErrStepCompletionEntryChanged) {
+			s.logger.Debug("completion source entry changed before transition", zap.String("task_id", taskID))
+			return false
+		}
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8510,16 +8517,12 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
+	consumedSignal := consumedCompletionSignal(consumedSource)
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -8536,7 +8539,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// cleared so the next step's gating starts from a clean slate. A guarded
 	// decision must leave the decider session untouched.
 	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		s.clearPendingStepSignal(ctx, session)
+		s.clearConsumedCompletionSignal(ctx, session.ID, consumedSource)
 	}
 
 	if len(result.DataPatch) > 0 && sessionLifecycle {

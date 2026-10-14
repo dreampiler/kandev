@@ -2620,14 +2620,19 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return errMsg, err
 	}
 
-	launchStepID, err := h.stepCompletionLaunchStep(ctx, req.SessionID, task.WorkflowStepID)
+	launchEntry, err := h.stepCompletionLaunchEntry(ctx, req.TaskID, req.SessionID, task.WorkflowStepID)
 	if err != nil {
+		if response, handled, encodeErr := stepCompletionEntryErrorResponse(msg, err); handled {
+			h.recordStepCompleteRejection(ctx, req.SessionID, task.WorkflowStepID, err.Error())
+			return response, encodeErr
+		}
 		h.logger.Error("failed to resolve step-completion turn",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to resolve calling turn", nil)
 	}
+	launchStepID := launchEntry.StepID
 	if launchStepID != task.WorkflowStepID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, fmt.Sprintf(
 			"workflow step changed before signal was recorded. This turn started in step %s. "+
@@ -2649,15 +2654,20 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	boundedHandoff, handoffTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Handoff))
 	boundedBlockers, blockersTruncated := boundStepCompletionSignalField(strings.TrimSpace(req.Blockers))
 	signal := models.PendingStepCompletionSignal{
-		StepID:     launchStepID,
-		Source:     models.StepCompletionSourceAgent,
-		Summary:    strings.TrimSpace(req.Summary),
-		Handoff:    boundedHandoff,
-		Blockers:   boundedBlockers,
-		SignaledAt: time.Now().UTC(),
+		EntryTransitionID: launchEntry.TransitionID,
+		StepID:            launchStepID,
+		Source:            models.StepCompletionSourceAgent,
+		Summary:           strings.TrimSpace(req.Summary),
+		Handoff:           boundedHandoff,
+		Blockers:          boundedBlockers,
+		SignaledAt:        time.Now().UTC(),
 	}
 	stored, err := h.claimStepCompletionSignal(ctx, req.TaskID, req.SessionID, launchStepID, signal)
 	if err != nil {
+		if response, handled, encodeErr := stepCompletionEntryErrorResponse(msg, err); handled {
+			h.recordStepCompleteRejection(ctx, req.SessionID, task.WorkflowStepID, err.Error())
+			return response, encodeErr
+		}
 		h.logger.Error("failed to persist step-completion signal",
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
@@ -2665,7 +2675,7 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to record signal", nil)
 	}
 	if !stored {
-		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
+		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session, launchEntry)
 	}
 	// The current step's signal is now durably recorded, so any earlier refusal
 	// reason recorded for this session is resolved.
@@ -2740,28 +2750,6 @@ func (h *Handlers) resolveStepCompletionAdvances(ctx context.Context, workflowSt
 	return true, "", true
 }
 
-func (h *Handlers) stepCompletionLaunchStep(ctx context.Context, sessionID, fallback string) (string, error) {
-	reader, ok := h.sessionRepo.(stepCompletionTurnReader)
-	if !ok {
-		return fallback, nil
-	}
-	turns, err := reader.ListTurnsBySession(ctx, sessionID)
-	if err != nil {
-		return "", err
-	}
-	if len(turns) == 0 {
-		return fallback, nil
-	}
-	latest := turns[len(turns)-1]
-	if latest == nil {
-		return "", errors.New("latest turn is missing")
-	}
-	if stepID := models.StringFromAny(latest.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]); stepID != "" {
-		return stepID, nil
-	}
-	return "", errors.New("latest turn has no workflow-step stamp")
-}
-
 func (h *Handlers) claimStepCompletionSignal(
 	ctx context.Context,
 	taskID, sessionID, stepID string,
@@ -2782,13 +2770,14 @@ func (h *Handlers) handleDuplicateStepComplete(
 	msg *ws.Message,
 	taskID, sessionID, stepID string,
 	session *models.TaskSession,
+	entry models.StepCompletionEntry,
 ) (*ws.Message, error) {
 	// If the initial snapshot already contained this step's signal, this is a
 	// retry after a possible publish failure and the event must be re-published
 	// while the session waits. If the initial snapshot was empty, another
 	// concurrent request won the claim and will publish the event itself.
 	existing, ok := models.LoadPendingStepSignal(session.Metadata)
-	if ok && existing.StepID == stepID && session.State == models.TaskSessionStateWaitingForInput {
+	if ok && models.PendingStepSignalMatchesEntry(existing, entry) && session.State == models.TaskSessionStateWaitingForInput {
 		if errMsg, err := h.publishStepCompletionEvent(ctx, msg, taskID, sessionID, stepID, existing); errMsg != nil {
 			return errMsg, err
 		}
