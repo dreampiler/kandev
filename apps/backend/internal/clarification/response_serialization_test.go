@@ -136,6 +136,69 @@ func TestSerializeResponse_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSerializeResponse_AnsweredByChannelRoundTrip proves the E5 seam
+// survives the durable record: a slack_thread channel serializes and
+// deserializes unchanged, while an unrecorded channel stays absent from
+// the wire and deserializes to the zero value.
+func TestSerializeResponse_AnsweredByChannelRoundTrip(t *testing.T) {
+	original := &Response{
+		PendingID: "pending-77",
+		Answers: []Answer{
+			{QuestionID: "q1", CustomText: "thread reply"},
+		},
+		AnsweredBy:  AnsweredBy{Channel: "slack_thread", Ref: "C012AB345CD/1729000000.000100"},
+		RespondedAt: time.Date(2026, 5, 6, 7, 8, 9, 0, time.UTC),
+	}
+
+	serialized, err := SerializeResponse(original)
+	if err != nil {
+		t.Fatalf("SerializeResponse: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(serialized), &raw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	by, ok := raw["answered_by"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected \"answered_by\" object present, got %s", serialized)
+	}
+	if by["channel"] != "slack_thread" || by["ref"] != "C012AB345CD/1729000000.000100" {
+		t.Fatalf("expected slack_thread channel and ref, got %v", by)
+	}
+
+	got, err := DeserializeResponse(serialized)
+	if err != nil {
+		t.Fatalf("DeserializeResponse: %v", err)
+	}
+	if got.AnsweredBy != original.AnsweredBy {
+		t.Fatalf("AnsweredBy: got %+v, want %+v", got.AnsweredBy, original.AnsweredBy)
+	}
+
+	unmarked := &Response{
+		PendingID:   "pending-78",
+		Answers:     []Answer{{QuestionID: "q1"}},
+		RespondedAt: time.Date(2026, 5, 6, 7, 8, 9, 0, time.UTC),
+	}
+	plain, err := SerializeResponse(unmarked)
+	if err != nil {
+		t.Fatalf("SerializeResponse: %v", err)
+	}
+	var plainRaw map[string]any
+	if err := json.Unmarshal([]byte(plain), &plainRaw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := plainRaw["answered_by"]; ok {
+		t.Fatalf("expected no \"answered_by\" key when unrecorded, got %s", plain)
+	}
+	gotPlain, err := DeserializeResponse(plain)
+	if err != nil {
+		t.Fatalf("DeserializeResponse: %v", err)
+	}
+	if gotPlain.AnsweredBy != (AnsweredBy{}) {
+		t.Fatalf("expected zero AnsweredBy, got %+v", gotPlain.AnsweredBy)
+	}
+}
+
 // TestSerializeResponse_CancelledShape proves the fixed M6 "cancelled"
 // payload — empty answers, rejected true, reject_reason exactly "cancelled"
 // — round-trips through the same explicit serializer as every other outcome.

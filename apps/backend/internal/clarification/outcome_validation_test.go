@@ -226,10 +226,10 @@ func TestValidateOutcome_L16_BundleUnanswerableByAnyOutcome(t *testing.T) {
 // not the order the caller supplied them.
 func TestNormalizeAnswered_OrdersByBundleQuestionOrder(t *testing.T) {
 	questions := twoQuestionBundle()
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q2", CustomText: "second"},
 		{QuestionID: "q1", CustomText: "first"},
-	}, fixedNow())
+	}}, fixedNow())
 	if len(resp.Answers) != 2 {
 		t.Fatalf("expected 2 answers, got %d", len(resp.Answers))
 	}
@@ -245,9 +245,9 @@ func TestNormalizeAnswered_OrdersAndDedupsSelectedOptions(t *testing.T) {
 	questions := []Question{
 		{ID: "q1", Options: []Option{{ID: "opt-a"}, {ID: "opt-b"}, {ID: "opt-c"}}},
 	}
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q1", SelectedOptions: []string{"opt-c", "opt-a", "opt-c", "opt-b", "opt-a"}},
-	}, fixedNow())
+	}}, fixedNow())
 	got := resp.Answers[0].SelectedOptions
 	want := []string{"opt-a", "opt-b", "opt-c"}
 	if len(got) != len(want) {
@@ -265,9 +265,9 @@ func TestNormalizeAnswered_OrdersAndDedupsSelectedOptions(t *testing.T) {
 // transformation.
 func TestNormalizeAnswered_TrimsWhitespace(t *testing.T) {
 	questions := []Question{{ID: "q1"}}
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q1", CustomText: "  padded  inside stays  "},
-	}, fixedNow())
+	}}, fixedNow())
 	if got, want := resp.Answers[0].CustomText, "padded  inside stays"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
@@ -320,6 +320,46 @@ func TestNormalizeAnswered_ByteIdenticalForEquivalentSubmissions(t *testing.T) {
 	fb := stripServerSetFields(t, sb)
 	if fa != fb {
 		t.Fatalf("expected byte-identical answers/rejected/reject_reason once pending_id/responded_at are excluded:\na=%s\nb=%s", fa, fb)
+	}
+}
+
+// TestBuildOutcomeResponse_CarriesAnsweredByChannel proves the E5 seam:
+// the caller-supplied answer channel rides onto the built Response
+// unchanged on both the answered and the rejected path.
+func TestBuildOutcomeResponse_CarriesAnsweredByChannel(t *testing.T) {
+	questions := twoQuestionBundle()
+	by := AnsweredBy{Channel: "slack_thread", Ref: "C012AB345CD/1729000000.000100"}
+
+	_, answered := buildOutcomeResponse("pending-1", questions, Outcome{
+		Answers: []Answer{
+			{QuestionID: "q1", CustomText: "thread reply"},
+			{QuestionID: "q2", CustomText: "second"},
+		},
+		AnsweredBy: by,
+	}, fixedNow())
+	if answered.AnsweredBy != by {
+		t.Fatalf("answered: got %+v, want %+v", answered.AnsweredBy, by)
+	}
+
+	_, rejected := buildOutcomeResponse("pending-1", questions, Outcome{
+		Rejected:     true,
+		RejectReason: "not now",
+		AnsweredBy:   by,
+	}, fixedNow())
+	if rejected.AnsweredBy != by {
+		t.Fatalf("rejected: got %+v, want %+v", rejected.AnsweredBy, by)
+	}
+
+	// The zero value stays zero: responses resolved before this seam
+	// carry no channel.
+	_, plain := buildOutcomeResponse("pending-1", questions, Outcome{
+		Answers: []Answer{
+			{QuestionID: "q1"},
+			{QuestionID: "q2"},
+		},
+	}, fixedNow())
+	if plain.AnsweredBy != (AnsweredBy{}) {
+		t.Fatalf("expected zero AnsweredBy, got %+v", plain.AnsweredBy)
 	}
 }
 
