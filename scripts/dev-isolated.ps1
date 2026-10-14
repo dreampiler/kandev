@@ -443,8 +443,8 @@ while (-not $backendInfo -and (Get-Date) -lt $discoverDeadline) {
 if (-not $backendInfo) {
   # Clean up the cmd.exe parent tree before throwing
   $cmdTree = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $CmdPid" -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessId })
-  foreach ($pid in @($CmdPid) + $cmdTree) {
-    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+  foreach ($treePid in @($CmdPid) + $cmdTree) {
+    Stop-Process -Id $treePid -Force -ErrorAction SilentlyContinue
   }
   throw "dev-isolated: cannot identify backend (kandev.exe) listening on port $EffectiveBackendPort within ${Timeout}s"
 }
@@ -534,8 +534,8 @@ if ($Web) {
     if (-not $webInfo) {
       # Clean up the cmd.exe parent tree before throwing
       $cmdTree = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $CmdPid" -ErrorAction SilentlyContinue | ForEach-Object { $_.ProcessId })
-      foreach ($pid in @($CmdPid) + $cmdTree) {
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+      foreach ($treePid in @($CmdPid) + $cmdTree) {
+        Stop-Process -Id $treePid -Force -ErrorAction SilentlyContinue
       }
       throw "dev-isolated: cannot identify web (node.exe/vite) listening on port $EffectiveWebPort within ${Timeout}s"
     }
