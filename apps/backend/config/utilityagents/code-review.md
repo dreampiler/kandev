@@ -29,13 +29,16 @@ Report only defects a competent reviewer would raise on this diff:
 - security problems: injection, missing authorisation, leaked secrets, unsafe deserialisation
 - resource leaks: unclosed handles, unbounded growth, goroutines or timers that never stop
 - contract breaks: a changed signature, payload, or schema whose other callers were not updated
-- tests that assert nothing meaningful, or new logic with no test at all
+- tests that assert nothing meaningful
 
 Do not report:
 
 - style, formatting, or naming preferences a formatter or linter already owns
 - speculative refactors, or code that is merely different from how you would write it
 - anything you cannot see in the diff above — you do not have the surrounding file
+
+Do not treat the absence of a test file alone as a defect or require new standing tests; judge verification using existing results and the user's approved testing scope.
+Distinguish user requirements and approved design in TaskDescription from the author's assumptions or proposals, and mark only requirement violations or concrete defects in the current change as required fixes.
 
 ## Anchoring rules
 
