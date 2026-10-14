@@ -161,3 +161,36 @@ was performed. Original release acceptance remains unmet.
 Both owned launches stopped through the pidfile. No designated-bin process or
 backend listener remained; the user PATH contained no isolated Hermes entry.
 D, actual providers, K1 context-reset/R1, and post-swap readback remain open.
+
+
+### Existing verifier review findings corrected, 2026-10-15
+
+This correction addresses only the three existing verifier findings. It does
+not complete the original K12 A~E requirement or the M0/post-swap readback.
+
+- Runtime revision: the JSON revision now comes from the isolated binary's
+  `GET /api/v1/system/info` commit field. `-Commit` remains a logged source
+  label and cannot identify a different `-NoBuild`/`-BinDir` binary. A missing
+  binary commit or a revision change across the restart fails verification.
+- Owned cleanup: cleanup is armed before the first launcher call, and the main
+  `finally` always calls the owned-pidfile teardown helper. A first health
+  timeout is cleaned up; a pre-existing pidfile is not adopted or stopped.
+  The canonical kill helper retains its process identity and guarded-port checks.
+- C observation: after restart, C polls waiting state and canonical turn/
+  completion identities over its own existing 90-second budget before B's
+  explicit continuation. B preparation failure cannot shorten that observation.
+  A late unfinished turn or a RUNNING state fails C; an unchanged initial turn
+  remains one turn. The JSON records C's observed duration.
+
+Verification: Windows PowerShell 5.1 parsed the production script, and a
+temporary check executed its actual functions and main try/finally with only
+HTTP, launcher and clock fixtures. It confirmed actual binary revision versus
+a different source label, unavailable revision, restart revision drift,
+first-health-timeout cleanup, preservation of an unowned pidfile, a complete
+independent C observation interval, and detection of delayed unfinished-turn
+and state changes. No real process, provider, operating instance or database
+was used, and no standing test was added. The temporary check was removed.
+
+No new isolated A~E result is claimed by these function checks. D delivery/
+ack rebinding, real-provider behavior, K1 context-reset/R1 and authorized
+post-swap readback remain open as recorded above.
