@@ -283,18 +283,24 @@ func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.
 }
 
 // schedulingOrphanEntryContext recovers the accepted entry into the current
-// step when the resumable session is not yet its recipient: the committed route
-// is absent or still names another step, as when a profile switch was
-// interrupted after SCHEDULING was written and before the new session or route.
-// The newest ledger row, when it entered the current step, supplies the entry id
-// and the step that was left, so processOnEnter's entry guard and profile-switch
-// preparation see the same context as the original transition. When the route
-// already names this step, or the ledger cannot confirm the entry, the session
-// is a same-step recipient and re-enters with no entry context.
+// step when the resumable session is not yet proven to be its recipient. Only a
+// committed route that names this step and this very session shows a completed
+// same-step entry. A missing route, a route still naming another step, or a
+// prepared route (the handoff was interrupted between persisting the target and
+// promoting it, so the target may be a different session than the one found
+// here) all mean the entry is unfinished. The newest ledger row, when it
+// entered the current step, then supplies the entry id and the step that was
+// left, so processOnEnter's entry guard and profile-switch preparation see the
+// same context as the original transition and still enforce their own route and
+// recipient checks. When the ledger cannot confirm the entry, the session
+// re-enters with no entry context.
 func (s *Service) schedulingOrphanEntryContext(
 	ctx context.Context, task *models.Task, session *models.TaskSession,
 ) (int64, *wfmodels.WorkflowStep) {
-	if route, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok && route.DestinationStepID == task.WorkflowStepID {
+	if route, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok &&
+		route.Phase == workflowSessionRouteCommitted &&
+		route.DestinationStepID == task.WorkflowStepID &&
+		route.DestinationID == session.ID {
 		return 0, nil
 	}
 	lister, ok := s.repo.(schedulingOrphanTransitionLister)
