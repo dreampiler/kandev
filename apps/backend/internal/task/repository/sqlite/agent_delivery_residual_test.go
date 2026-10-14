@@ -46,8 +46,9 @@ func TestResidualDeadOwnerSettlement(t *testing.T) {
 		})
 
 		t.Run(engine+"/open_block_untouched", func(t *testing.T) {
-			repo, event, _ := seedResidualDeadOwner(t, engine, "open-block")
+			repo, event, advance := seedResidualDeadOwner(t, engine, "open-block")
 			ctx := context.Background()
+			advance(agentDeliveryDeadOwnerGrace + time.Hour)
 			settled, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, event.SubmissionID)
 			if err != nil || settled {
 				t.Fatalf("open block settlement = %v, %v; want untouched", settled, err)
@@ -110,6 +111,45 @@ func TestResidualDeadOwnerSettlement(t *testing.T) {
 			settled, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, event.SubmissionID)
 			if err != nil || !settled {
 				t.Fatalf("missing-owner settlement after grace = %v, %v; want settled", settled, err)
+			}
+		})
+	}
+}
+
+func TestResidualAmbiguousTerminalUntouched(t *testing.T) {
+	for _, engine := range []string{"SQLite", "Postgres"} {
+		t.Run(engine, func(t *testing.T) {
+			repo, event, advance := seedResidualDeadOwner(t, engine, "ambiguous-terminal")
+			ctx := context.Background()
+			second := event
+			second.StreamID += "-second"
+			second.EventType = streams.EventTypeError
+			payload, err := json.Marshal(streams.AgentEvent{Type: streams.EventTypeError, TurnID: "residual-second-turn"})
+			if err != nil {
+				t.Fatalf("marshal second terminal: %v", err)
+			}
+			second.Payload = payload
+			if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, &second, second.Sequence); err != nil || !inserted {
+				t.Fatalf("receive second terminal = %v, %v", inserted, err)
+			}
+			if _, err := repo.ProjectAgentDeliveryEvent(ctx, &second, nil); err != nil {
+				t.Fatalf("project second terminal: %v", err)
+			}
+			advance(agentDeliveryDeadOwnerGrace + time.Hour)
+			settled, err := repo.SettleDeadOwnerAgentDeliverySubmission(ctx, event.SubmissionID)
+			if err != nil || settled {
+				t.Fatalf("ambiguous terminal settlement = %v, %v; want untouched", settled, err)
+			}
+			submission, err := repo.GetAgentDeliverySubmissionMetadata(ctx, event.SubmissionID)
+			if err != nil || submission.State != models.DeliverySubmissionDispatching {
+				t.Fatalf("ambiguous submission = %+v, %v; want dispatching", submission, err)
+			}
+			var terminalEffects int
+			if err := repo.db.GetContext(ctx, &terminalEffects, repo.db.Rebind(`
+				SELECT COUNT(*) FROM agent_delivery_effects
+				WHERE submission_id = ? AND effect_type = ? AND state = ?`),
+				event.SubmissionID, models.DeliveryTerminalEffectType, models.DeliveryEffectPending); err != nil || terminalEffects != 2 {
+				t.Fatalf("pending ambiguous terminal effects = %d, %v; want both preserved", terminalEffects, err)
 			}
 		})
 	}

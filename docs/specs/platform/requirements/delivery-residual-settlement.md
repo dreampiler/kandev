@@ -31,6 +31,12 @@ Follows: `delivery-completed-stream-retirement` (PR #282, merged as `c616a21638`
 
 ## Requirements
 
+PR #298 records only `not_required` workflow outcomes for tasks with no
+workflow step. Tasks with a workflow step remain pinned until the explicit
+(c) follow-up PR evaluates their workflow through the owning engine and
+records its actual outcome. This split does not remove the remaining work
+or change the one-hour inbox-growth goal.
+
 ### REQ-PLATFORM-DELIVERY-RESIDUAL-001: Settle dead-owner submissions
 
 **Intent:** Streams pinned only by an active-state submission whose owner is

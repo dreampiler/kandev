@@ -68,11 +68,11 @@ func (r *Repository) ListActiveAgentDeliverySubmissionIDs(
 // All guards are checked inside one bounded writer transaction:
 //
 //   - submission is active (prepared/dispatching/accepted/interrupted_unknown)
-//   - owner session is CANCELLED, missing, or COMPLETED/FAILED with no open
+//   - owner session is terminal or missing, with no open
 //     restart or recovery evidence (open agent_delivery recovery blocks, or
 //     queued/dispatch/send-now signals for the session)
 //   - the owner session turned terminal at least the payload grace ago
-//   - a projected terminal inbox row exists for the submission (the pending
+//   - exactly one projected terminal inbox row exists for the submission (the pending
 //     terminal effect is derived from that row, never invented)
 //
 // It returns (false, nil) when any guard fails. No new submission state is
@@ -140,8 +140,7 @@ func (r *Repository) SettleDeadOwnerAgentDeliverySubmission(
 }
 
 // deadOwnerSubmissionEligibleTx verifies every Task 01 guard inside the
-// caller's writer transaction. A CANCELLED owner qualifies on its terminal
-// time; COMPLETED/FAILED owners additionally require zero open agent_delivery
+// caller's writer transaction. All terminal owners require zero open agent_delivery
 // recovery blocks and zero queued/dispatch/send-now signals for the session.
 // A missing owner session has no terminal time, so it is treated as terminal
 // only when the submission has itself been quiescent for the payload grace
@@ -179,8 +178,7 @@ func deadOwnerSubmissionEligibleTx(
 		return false, err
 	}
 	switch ownerState {
-	case models.TaskSessionStateCancelled:
-	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed:
+	case models.TaskSessionStateCancelled, models.TaskSessionStateCompleted, models.TaskSessionStateFailed:
 		if err := deadOwnerRecoveryQuiescedTx(ctx, tx, rebind, sessionID, incarnationID, generation); err != nil {
 			if errors.Is(err, errDeadOwnerRecoveryPending) {
 				return false, nil
@@ -278,10 +276,9 @@ func isDeadOwnerMissingTableError(err error) bool {
 		strings.Contains(msg, "undefined_table")
 }
 
-// deadOwnerTerminalEffectTx loads the oldest projected terminal inbox row for
-// the submission and derives its pending terminal effect. A nil effect means
-// no terminal row exists and the submission stays untouched: the effect is
-// derived from a retained row, never invented.
+// deadOwnerTerminalEffectTx derives a pending effect only when the submission
+// has exactly one projected terminal inbox row. Missing or ambiguous terminal
+// evidence leaves the submission untouched.
 func deadOwnerTerminalEffectTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -290,6 +287,17 @@ func deadOwnerTerminalEffectTx(
 	generation int64,
 	submissionID string,
 ) (*models.AgentDeliveryEffect, string, int64, error) {
+	var terminalCount int
+	if err := tx.QueryRowxContext(ctx, rebind(`
+		SELECT COUNT(*) FROM agent_delivery_inbox
+		WHERE session_id = ? AND incarnation_id = ? AND harness_generation = ?
+		  AND submission_id = ? AND terminal <> 0 AND projected_at IS NOT NULL`),
+		sessionID, incarnationID, generation, submissionID).Scan(&terminalCount); err != nil {
+		return nil, "", 0, err
+	}
+	if terminalCount != 1 {
+		return nil, "", 0, nil
+	}
 	var event models.AgentDeliveryEvent
 	var terminal int
 	var projectedAt sql.NullTime

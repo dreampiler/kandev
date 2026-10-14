@@ -39,10 +39,14 @@ Status: implemented (second PR). Companion to
 - A bounded settlement pass over dead-owner submissions only (owner terminal
   or missing, verified under the existing stream/session locks), reusing
   `settleAgentDeliveryTerminalTx` and the existing outcome evidence. Live
-  owners untouched.
-- No-op workflow receipts through the Task 04 writer for the 318 turns that
-  predate/bypass it, so `block_resolved` can promote via the existing
-  `completeAgentDeliveryTerminalSettlementTx`. No age-invented
+  owners untouched. Every terminal owner, including CANCELLED, must have no
+  pending recovery or queue evidence. The pass requires exactly one projected
+  terminal row for a submission; multiple rows remain unsettled.
+- PR #298 writes only `not_required` workflow receipts for tasks with no
+  workflow step through the Task 04 writer, then promotes via the existing
+  `completeAgentDeliveryTerminalSettlementTx`. Tasks with a workflow step
+  remain pinned for the (c) follow-up PR, which must evaluate the owning
+  workflow engine and record its actual outcome. No age-invented
   `fully_settled_at` (`backend-agent-delivery-retention.md:252`).
 - Both reuse existing locks, bounded batches, and the contiguous-prefix
   retirement; no schema/index/wire/journal change; no new collector.
