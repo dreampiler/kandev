@@ -20,9 +20,10 @@ import (
 
 func (h *Handlers) handleCreateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkspaceID string `json:"workspace_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
+		WorkspaceID                 string `json:"workspace_id"`
+		Name                        string `json:"name"`
+		Description                 string `json:"description"`
+		RequireExplicitAgentProfile bool   `json:"require_explicit_agent_profile"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -35,9 +36,10 @@ func (h *Handlers) handleCreateWorkflow(ctx context.Context, msg *ws.Message) (*
 	}
 
 	workflow, err := h.taskSvc.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
-		WorkspaceID: req.WorkspaceID,
-		Name:        req.Name,
-		Description: req.Description,
+		WorkspaceID:                 req.WorkspaceID,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		h.logger.Error("failed to create workflow", zap.Error(err))
@@ -48,10 +50,11 @@ func (h *Handlers) handleCreateWorkflow(ctx context.Context, msg *ws.Message) (*
 
 func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkflowID  string  `json:"workflow_id"`
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		Hidden      *bool   `json:"hidden"`
+		WorkflowID                  string  `json:"workflow_id"`
+		Name                        *string `json:"name"`
+		Description                 *string `json:"description"`
+		Hidden                      *bool   `json:"hidden"`
+		RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -61,9 +64,10 @@ func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*
 	}
 
 	workflow, err := h.taskSvc.UpdateWorkflow(ctx, req.WorkflowID, &service.UpdateWorkflowRequest{
-		Name:        req.Name,
-		Description: req.Description,
-		Hidden:      req.Hidden,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		Hidden:                      req.Hidden,
+		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workflow", zap.Error(err))

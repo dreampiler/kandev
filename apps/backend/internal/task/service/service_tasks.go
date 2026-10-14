@@ -370,6 +370,9 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	if err := s.validateWorkflowAgentOverrides(ctx, req); err != nil {
 		return nil, err
 	}
+	if err := s.enforceExplicitAgentProfilePolicy(ctx, req); err != nil {
+		return nil, err
+	}
 	if req.RequireAssigneeAgentProfileValidation {
 		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
 			return nil, err

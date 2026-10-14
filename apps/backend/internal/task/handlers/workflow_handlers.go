@@ -164,11 +164,12 @@ func (h *WorkflowHandlers) httpGetWorkflow(c *gin.Context) {
 }
 
 type httpCreateWorkflowRequest struct {
-	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description,omitempty"`
-	Prompt             string  `json:"prompt,omitempty"`
-	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
+	WorkspaceID                 string  `json:"workspace_id"`
+	Name                        string  `json:"name"`
+	Description                 string  `json:"description,omitempty"`
+	Prompt                      string  `json:"prompt,omitempty"`
+	WorkflowTemplateID          *string `json:"workflow_template_id,omitempty"`
+	RequireExplicitAgentProfile bool    `json:"require_explicit_agent_profile,omitempty"`
 }
 
 func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
@@ -185,11 +186,12 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 		return
 	}
 	workflow, err := h.service.CreateWorkflow(c.Request.Context(), &service.CreateWorkflowRequest{
-		WorkspaceID:        body.WorkspaceID,
-		Name:               body.Name,
-		Description:        body.Description,
-		Prompt:             body.Prompt,
-		WorkflowTemplateID: body.WorkflowTemplateID,
+		WorkspaceID:                 body.WorkspaceID,
+		Name:                        body.Name,
+		Description:                 body.Description,
+		Prompt:                      body.Prompt,
+		WorkflowTemplateID:          body.WorkflowTemplateID,
+		RequireExplicitAgentProfile: body.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		h.logger.Error("failed to create workflow", zap.Error(err))
@@ -278,11 +280,12 @@ func (h *WorkflowHandlers) wsRejectReadOnlyWorkspace(ctx context.Context, msg *w
 }
 
 type httpUpdateWorkflowRequest struct {
-	Name           *string `json:"name"`
-	Description    *string `json:"description"`
-	Prompt         *string `json:"prompt"`
-	AgentProfileID *string `json:"agent_profile_id"`
-	Hidden         *bool   `json:"hidden"`
+	Name                        *string `json:"name"`
+	Description                 *string `json:"description"`
+	Prompt                      *string `json:"prompt"`
+	AgentProfileID              *string `json:"agent_profile_id"`
+	Hidden                      *bool   `json:"hidden"`
+	RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile"`
 }
 
 func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
@@ -296,11 +299,12 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		return
 	}
 	workflow, err := h.service.UpdateWorkflow(c.Request.Context(), id, &service.UpdateWorkflowRequest{
-		Name:           body.Name,
-		Description:    body.Description,
-		Prompt:         body.Prompt,
-		AgentProfileID: body.AgentProfileID,
-		Hidden:         body.Hidden,
+		Name:                        body.Name,
+		Description:                 body.Description,
+		Prompt:                      body.Prompt,
+		AgentProfileID:              body.AgentProfileID,
+		Hidden:                      body.Hidden,
+		RequireExplicitAgentProfile: body.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
@@ -457,11 +461,12 @@ func (h *WorkflowHandlers) wsListWorkflows(ctx context.Context, msg *ws.Message)
 }
 
 type wsCreateWorkflowRequest struct {
-	WorkspaceID        string  `json:"workspace_id"`
-	Name               string  `json:"name"`
-	Description        string  `json:"description,omitempty"`
-	Prompt             string  `json:"prompt,omitempty"`
-	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
+	WorkspaceID                 string  `json:"workspace_id"`
+	Name                        string  `json:"name"`
+	Description                 string  `json:"description,omitempty"`
+	Prompt                      string  `json:"prompt,omitempty"`
+	WorkflowTemplateID          *string `json:"workflow_template_id,omitempty"`
+	RequireExplicitAgentProfile bool    `json:"require_explicit_agent_profile,omitempty"`
 }
 
 func (h *WorkflowHandlers) wsCreateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -480,11 +485,12 @@ func (h *WorkflowHandlers) wsCreateWorkflow(ctx context.Context, msg *ws.Message
 	}
 
 	workflow, err := h.service.CreateWorkflow(ctx, &service.CreateWorkflowRequest{
-		WorkspaceID:        req.WorkspaceID,
-		Name:               req.Name,
-		Description:        req.Description,
-		Prompt:             req.Prompt,
-		WorkflowTemplateID: req.WorkflowTemplateID,
+		WorkspaceID:                 req.WorkspaceID,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		Prompt:                      req.Prompt,
+		WorkflowTemplateID:          req.WorkflowTemplateID,
+		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		h.logger.Error("failed to create workflow", zap.Error(err))
@@ -514,12 +520,13 @@ func (h *WorkflowHandlers) wsGetWorkflow(ctx context.Context, msg *ws.Message) (
 }
 
 type wsUpdateWorkflowRequest struct {
-	ID             string  `json:"id"`
-	Name           *string `json:"name,omitempty"`
-	Description    *string `json:"description,omitempty"`
-	Prompt         *string `json:"prompt,omitempty"`
-	AgentProfileID *string `json:"agent_profile_id,omitempty"`
-	Hidden         *bool   `json:"hidden,omitempty"`
+	ID                          string  `json:"id"`
+	Name                        *string `json:"name,omitempty"`
+	Description                 *string `json:"description,omitempty"`
+	Prompt                      *string `json:"prompt,omitempty"`
+	AgentProfileID              *string `json:"agent_profile_id,omitempty"`
+	Hidden                      *bool   `json:"hidden,omitempty"`
+	RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile,omitempty"`
 }
 
 func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -535,11 +542,12 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 	}
 
 	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
-		Name:           req.Name,
-		Description:    req.Description,
-		Prompt:         req.Prompt,
-		AgentProfileID: req.AgentProfileID,
-		Hidden:         req.Hidden,
+		Name:                        req.Name,
+		Description:                 req.Description,
+		Prompt:                      req.Prompt,
+		AgentProfileID:              req.AgentProfileID,
+		Hidden:                      req.Hidden,
+		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workflow", zap.Error(err))
