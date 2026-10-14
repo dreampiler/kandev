@@ -166,12 +166,35 @@ func generateNonce() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// agentctlBinaryName returns the platform-appropriate binary name.
+// devBackendName and devAgentctlName name an isolated development instance's
+// binaries, so they never share a process name with an installed Kandev.
+const (
+	devBackendName  = "kandev-dev"
+	devAgentctlName = "agentctl-dev"
+)
+
+// agentctlBinaryName returns the platform-appropriate agentctl name for the
+// running backend executable.
 func agentctlBinaryName() string {
-	if runtime.GOOS == "windows" {
-		return "agentctl.exe"
+	exe, err := os.Executable()
+	if err != nil {
+		return agentctlBinaryNameFor("", runtime.GOOS)
 	}
-	return "agentctl"
+	return agentctlBinaryNameFor(filepath.Base(exe), runtime.GOOS)
+}
+
+// agentctlBinaryNameFor maps a backend executable name to its agentctl name.
+// Only a development backend uses the development agentctl, so that it never
+// resolves an installed agentctl through PATH.
+func agentctlBinaryNameFor(backendExe, goos string) string {
+	name := "agentctl"
+	if strings.TrimSuffix(strings.ToLower(backendExe), ".exe") == devBackendName {
+		name = devAgentctlName
+	}
+	if goos == "windows" {
+		return name + ".exe"
+	}
+	return name
 }
 
 // FindAgentctlBinary resolves the local agentctl binary path using the same

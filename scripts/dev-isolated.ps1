@@ -22,8 +22,13 @@
   spawns `agentctl` to create executions, and the dev/mock profile launches
   `mock-agent`. This script ensures all of those exist before launching.
 
+  The isolated backend and agentctl are built and run as `kandev-dev.exe` and
+  `agentctl-dev.exe`, so no isolated process shares a name with an installed
+  `kandev.exe` or `agentctl.exe`.
+
   Build strategy: when a (re)build is needed we run `make -C apps/backend build`,
-  the canonical build path, with the correct flags/ldflags.
+  the canonical build path, with the correct flags/ldflags and the development
+  binary names.
 
 .PARAMETER Web
   Also start the Vite dev frontend (default: backend only).
@@ -131,16 +136,18 @@ if ($BinDir) {
 } else {
   $LaunchBinDir = $BuildBinDir
 }
-$BackendBin = Join-Path $LaunchBinDir 'kandev.exe'
-$AgentctlBin = Join-Path $LaunchBinDir 'agentctl.exe'
+$DevBackendName = 'kandev-dev'
+$DevAgentctlName = 'agentctl-dev'
+$BackendBin = Join-Path $LaunchBinDir "$DevBackendName.exe"
+$AgentctlBin = Join-Path $LaunchBinDir "$DevAgentctlName.exe"
 $MockAgentBin = Join-Path $LaunchBinDir 'mock-agent.exe'
 $WebDir = Join-Path $RepoRoot 'apps\web'
 $ViteCli = Join-Path $WebDir 'node_modules\vite\bin\vite.js'
 $NodeModules = Join-Path $RepoRoot 'apps\node_modules'
 $RequiredBins = @($BackendBin, $AgentctlBin, $MockAgentBin)
 $BuildBins = @(
-  (Join-Path $BuildBinDir 'kandev.exe'),
-  (Join-Path $BuildBinDir 'agentctl.exe'),
+  (Join-Path $BuildBinDir "$DevBackendName.exe"),
+  (Join-Path $BuildBinDir "$DevAgentctlName.exe"),
   (Join-Path $BuildBinDir 'mock-agent.exe')
 )
 
@@ -287,7 +294,7 @@ if ($NoBuild) {
   if (-not (Test-BinsPresent -Bins $RequiredBins)) {
     $missing = $RequiredBins | Where-Object { -not (Test-Path -LiteralPath $_) }
     $list = $missing -join [Environment]::NewLine
-    throw "dev-isolated: -NoBuild set but required binaries are missing:`n$list`nBuild them with 'make -C apps/backend build' (or drop -NoBuild)."
+    throw "dev-isolated: -NoBuild set but required binaries are missing:`n$list`nBuild them with 'make -C apps/backend build BINARY_NAME=$DevBackendName AGENTCTL_NAME=$DevAgentctlName' (or drop -NoBuild)."
   }
 } else {
   $needBuild = $false
@@ -332,7 +339,7 @@ if ($NoBuild) {
     if ($newer) { $needBuild = $true }
   }
   if ($needBuild) {
-    Write-Host "dev-isolated: building backend binaries (make -C apps/backend build)..."
+    Write-Host "dev-isolated: building backend binaries (make -C apps/backend build BINARY_NAME=$DevBackendName AGENTCTL_NAME=$DevAgentctlName)..."
     # `go build -v` writes package paths to stderr; under $ErrorActionPreference
     # 'Stop' a redirected error stream turns that into a terminating
     # NativeCommandError. Scope Continue to this call; the exit code still decides.
@@ -340,7 +347,7 @@ if ($NoBuild) {
     $buildExit = $null
     try {
       $ErrorActionPreference = 'Continue'
-      & make -C $BackendDir build
+      & make -C $BackendDir build "BINARY_NAME=$DevBackendName" "AGENTCTL_NAME=$DevAgentctlName"
       $buildExit = $LASTEXITCODE
     } finally {
       $ErrorActionPreference = $previousErrorAction
@@ -348,7 +355,7 @@ if ($NoBuild) {
     if ($buildExit -ne 0) { throw "dev-isolated: build failed (exit $buildExit)." }
     Write-Host "dev-isolated: build complete."
     if (-not (Test-BinsPresent -Bins $BuildBins)) {
-      throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe after build, but one is missing."
+      throw "dev-isolated: expected kandev-dev.exe, agentctl-dev.exe and mock-agent.exe after build, but one is missing."
     }
   }
 }
@@ -363,7 +370,7 @@ if ($LaunchBinDir -ne $BuildBinDir) {
   }
 }
 if (-not (Test-BinsPresent -Bins $RequiredBins)) {
-  throw "dev-isolated: expected kandev.exe, agentctl.exe and mock-agent.exe in $LaunchBinDir, but one is missing."
+  throw "dev-isolated: expected kandev-dev.exe, agentctl-dev.exe and mock-agent.exe in $LaunchBinDir, but one is missing."
 }
 
 # --- Preflight: web prerequisites ---
@@ -490,7 +497,7 @@ $backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -
     -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru
 }
 $CmdPid = $backendProc.Id
-# The actual backend (kandev.exe) is a child of cmd.exe. Since cmd.exe may exit
+# The actual backend (kandev-dev.exe) is a child of cmd.exe. Since cmd.exe may exit
 # or the child may be reparented, we find the backend by its listening port.
 Start-Sleep -Milliseconds 500
 $backendInfo = $null
@@ -499,7 +506,7 @@ while (-not $backendInfo -and $listenerRetry -lt 10) {
   $listenerConn = Get-NetTCPConnection -State Listen -LocalPort $EffectiveBackendPort -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($listenerConn) {
     $listenerPid = $listenerConn.OwningProcess
-    $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid AND Name = 'kandev.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
+    $backendInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $listenerPid AND Name = '$DevBackendName.exe'" -ErrorAction SilentlyContinue | Select-Object -First 1
   }
   if (-not $backendInfo) {
     Start-Sleep -Milliseconds 500
@@ -507,7 +514,7 @@ while (-not $backendInfo -and $listenerRetry -lt 10) {
   }
 }
 if (-not $backendInfo) {
-  throw "dev-isolated: cannot identify backend (kandev.exe) listening on port $EffectiveBackendPort"
+  throw "dev-isolated: cannot identify backend ($DevBackendName.exe) listening on port $EffectiveBackendPort"
 }
 $BackendPid = $backendInfo.ProcessId
 Set-Content -LiteralPath $Pidfile -Value $BackendPid -Encoding ASCII
