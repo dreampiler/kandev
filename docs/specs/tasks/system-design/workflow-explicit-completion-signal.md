@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001
   - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003
+  - REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004
 ---
 
 # Completion signal recovery system design
@@ -11,8 +12,9 @@ requirements:
 ## Purpose and boundaries
 
 The tasks system owns completion eligibility and its recovery instructions.
-This design adds diagnostics to the existing completion contract.
-It preserves the current turn stamp, signal claim, and workflow transition rules.
+This design adds diagnostics and entry-scoped signal persistence to the existing
+completion contract. Ownership, profile, clarification, and cancellation rules
+remain unchanged.
 
 ## Requirement mapping
 
@@ -20,6 +22,7 @@ It preserves the current turn stamp, signal claim, and workflow transition rules
 | --- | --- |
 | REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-001 | Applicability response (`advances`/`note`) |
 | REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-003 | Diagnostic response, Recovery instructions, Verification |
+| REQ-TASKS-WORKFLOW-EXPLICIT-COMPLETION-SIGNAL-004 | Persistence and compatibility |
 
 ## Applicability response (`advances`/`note`)
 
@@ -77,7 +80,7 @@ failure that says nothing about the step's actual configuration.
 ## Diagnostic response
 
 `internal/mcp/handlers/handlers.go:handleStepComplete` compares the launch step
-from `stepCompletionLaunchStep` with the task's current workflow step.
+from `stepCompletionLaunchEntry` with the task's current workflow step.
 The mismatch continues to return `VALIDATION_ERROR` before the signal claim.
 
 The error retains its existing prefix for compatibility. Its text includes both
@@ -118,8 +121,26 @@ An error does not grant an agent new authority to use `move_task_kandev`.
 ## Persistence and compatibility
 
 There is no schema change, new response envelope, or new MCP argument.
-`workflow_step_id_at_start` remains an immutable historical fact.
-The task-at-step conditional signal claim and duplicate handling remain intact.
+`workflow_step_id_at_start` remains an immutable historical fact. Both turn
+creation paths also stamp `workflow_step_entry_at_start` from the existing
+`task_step_transitions.id`, under the task lock, replacing caller-supplied values.
+Pending signals store that identity as `entry_transition_id`. The claim locks the
+task and session, checks task/session ownership and current step/entry, then
+preserves the first payload for that entry. Returning to the same step creates a
+different entry: a fresh turn may replace an earlier entry's bag, while an older
+turn or a move during the claim is rejected with an entry-change diagnostic.
+
+Native identities take precedence over timestamps. Legacy turns and bags use
+the existing entry timestamp cutoff; missing dates with an established current
+entry are ambiguous and cannot authorize a claim or consuming transition.
+Ambiguous bags are retained and the diagnostic identifies the missing evidence.
+
+Legacy, engine, and out-of-band completion paths capture one source-entry bag
+before admission. The SQL admission compares the captured entry under the task
+lock, including same-step leave-and-return races. Carry and audit use that
+captured payload. Only a committed transition consumes it, with the existing
+JSON-value conditional metadata update. Failed admission and replacement bags
+remain intact. The source-entry context ends before destination callbacks run.
 RUNNING and WAITING_FOR_INPUT sessions both retain the mismatch guard.
 Idleness does not prove that work belongs to the new step.
 
