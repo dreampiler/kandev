@@ -1,7 +1,7 @@
 ---
 id: "05-stranded-waiting-route-sweep"
 title: "Sweep a stranded WAITING_FOR_INPUT dynamic route at startup"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -28,6 +28,7 @@ Let the sweep mark that session `action_required`, keeping every other exclusion
 
 - `apps/backend/internal/orchestrator/dynamic_policy_recovery.go`: `dynamicStartingRouteIsStranded` and the sweep condition.
 - `apps/backend/internal/orchestrator/dynamic_route_recovery_test.go`: drop WAITING_FOR_INPUT from the non-orphan state list.
+- `apps/backend/internal/orchestrator/dynamic_stranded_starting_route_test.go`: cover the missing-row and live-executor branches through the durable startup sweep.
 
 ## Out of scope
 
@@ -52,3 +53,11 @@ Let the sweep mark that session `action_required`, keeping every other exclusion
 cd apps/backend
 go test ./internal/orchestrator -run 'TestReconcileOrphanedDynamicStartingRoutes' -count=1
 ```
+
+## Implementation result
+
+The startup predicate and durable-sweep regression tests are implemented. The
+existing generation and status fences remain authoritative, and the projection
+write leaves the session state unchanged. Current-head hosted verification and
+review outcomes are tracked externally in the owning task's recovery evidence;
+implementation completion does not declare those delivery gates complete.
