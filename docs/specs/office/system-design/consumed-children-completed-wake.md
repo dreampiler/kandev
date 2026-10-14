@@ -46,12 +46,19 @@ names the real cause.
 3. **Check for terminal.** A parent that is neither `COMPLETED` nor `CANCELLED`
    leaves the run untouched. These are the two states the backstop's
    `ListStuckParents` excludes.
-4. **Check for live coalesced wakes.** `HasCoalescedWakeupOutsideReasons`
-   (`office/repository/sqlite/wakeup_requests.go`) is one `EXISTS` query over
-   `agent_wakeup_requests`. It reports whether any request with status
-   `coalesced` and this `run_id` has an effective reason, `COALESCE(NULLIF(reason, ''), source)`,
-   outside `routine_dispatch_cron` and `heartbeat`. That is the same fallback the
-   wakeup dispatcher applies. If such a request exists, the run launches.
+4. **Check for live coalesced wakes.** `ListCoalescedWakeups`
+   (`office/repository/sqlite/wakeup_requests.go`) returns each
+   `agent_wakeup_requests` row with status `coalesced` and this `run_id`. For
+   each row it returns the effective reason, `COALESCE(NULLIF(reason, ''), source)`,
+   which is the same fallback the wakeup dispatcher applies, and the `task_id`
+   its payload names. The run launches if any of the following holds:
+   - a row has any other reason, a routine tick included. That wake is then
+     delivered as coalescing already delivers it, so routines keep their ticks;
+   - a children-completed row names no task;
+   - a children-completed row names a task that is not terminal.
+
+   A children-completed row for the same parent, or for another terminal task,
+   is consumed.
 5. **Cancel.** Otherwise `cancelStaleRun` cancels the run with reason
    `parent_task_terminal`. It releases any checkout, clears the agent's working
    mark, writes `cancelled`, records the terminal shape, publishes the processed
@@ -74,7 +81,8 @@ cover the following:
 
 - a `COMPLETED` and a `CANCELLED` parent cancel without a launch;
 - a live parent launches;
-- a run carrying only periodic coalesced wakes is cancelled;
-- a run carrying an event wake launches;
+- a run carrying a routine tick or an event wake launches;
+- a merged children-completed wake is judged by its own target: the same parent
+  or another finished task is consumed, and a live task or no task is live;
 - a ceiling-parked run whose parent finished while it waited is cancelled once
   lifted.

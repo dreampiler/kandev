@@ -24,8 +24,8 @@ belong to [parent wake wave identity](parent-wake-wave-identity.md).
 
 - **Consumed wake:** A queued `task_children_completed` run whose parent task is
   already `COMPLETED` or `CANCELLED` when the run reaches launch.
-- **Periodic wake:** A wakeup request whose effective reason (`reason`, else
-  `source`) is `routine_dispatch_cron` or the retired `heartbeat`.
+- **Effective reason:** A wakeup request's `reason`, or its `source` when the
+  reason is empty.
 
 ## Requirements
 
@@ -52,10 +52,13 @@ already answered, and never drop a wake that still carries something live.
   the existing staleness read-failure path, which retries rather than cancels. A
   run whose parent is not terminal, or whose payload names no task, shall be
   unaffected.
-- **AC-OFFICE-CONSUMED-WAKE-001.3:** A run that has any non-periodic wakeup
-  request coalesced into it shall launch as before, so the event-triggered wake
-  it carries is never dropped. Periodic wakes coalesced into a cancelled run
-  shall be released the way an idle skip releases them.
+- **AC-OFFICE-CONSUMED-WAKE-001.3:** A run that has any other wakeup request
+  coalesced into it shall launch as before, so the wake it carries is delivered
+  the way coalescing already delivers it. This covers a routine tick as well. A
+  coalesced children-completed wake shall be judged by the task its own payload
+  names. It is consumed when that task is the same finished parent or is itself
+  `COMPLETED` or `CANCELLED`. It is live when it names no task or a task that is
+  not terminal.
 - **AC-OFFICE-CONSUMED-WAKE-001.4:** The cancelled run shall keep its row, wave
   columns, and causation. It shall still count as a terminal run for
   `AC-OFFICE-WAKE-WAVE-IDENTITY-003.1`. No other reason, producer, idempotency
