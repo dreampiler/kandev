@@ -20,7 +20,11 @@ This system owns stable and nightly channel semantics, npm, Homebrew, Scoop,
 container, and desktop release publication contracts. It also owns contributor
 notifications tied to published releases. Optional Windows runtime signing is
 defined by its [requirements](requirements/windows-runtime-signing.md) and
-[system design](system-design/windows-runtime-signing.md).
+[system design](system-design/windows-runtime-signing.md). The fork source
+revision that fork releases are built from, expressed as an upstream base plus
+ordered patches, is defined by the fork overlay patch set
+[requirements](requirements/fork-overlay-patch-set.md) and
+[system design](system-design/fork-overlay-patch-set.md).
 
 ## Exclusions
 
