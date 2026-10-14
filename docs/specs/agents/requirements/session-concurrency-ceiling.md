@@ -238,6 +238,35 @@ launch was interrupted before it produced a running session.
   startup and shall not start a second session or turn for a task another
   recovery path already owns.
 
+### REQ-AGENTS-SESSION-CEILING-005: Do not starve the workspace coordinator
+
+**Intent:** The Office coordinator is the owner's inbox. Its wakes must keep
+starting while manual overrides hold the worker lane full, without a new lane,
+a setting, a caller-supplied role, or unbounded admission.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-SESSION-CEILING-005.1:** A launch shall be a coordinator launch only
+  when the profile it is admitted under resolves, by a server read of its live
+  agent profile row, to role `ceo` with a non-empty workspace. No caller, request,
+  tool, workflow step, or transport shall mark it; a failed read shall not. Its
+  lane classification shall not change.
+- **AC-AGENTS-SESSION-CEILING-005.2:** An eligible deferred coordinator launch
+  shall rank before every other deferred launch, with the .11 order applying within
+  each group. A coordinator launch shall not yield a free unit to a non-coordinator
+  record.
+- **AC-AGENTS-SESSION-CEILING-005.3:** An automatic coordinator launch in a
+  saturated worker lane shall be admitted with reason code
+  `ceiling_coordinator_allowance` once its own deferred record was first queued at
+  least five minutes ago, and only while no other session of that profile is
+  counted or reserved. It shall count in the worker population.
+- **AC-AGENTS-SESSION-CEILING-005.4:** Host-memory pressure, manual override, the
+  control lane, unknown-population handling, and non-coordinator order shall
+  behave as before.
+- **AC-AGENTS-SESSION-CEILING-005.5:** A replay of a deferred start shall be dropped
+  without launching when the Office run it carries is terminal, missing, or already
+  bound to a different session.
+
 ## Out of scope
 
 - Per-workspace or per-user ceilings.

@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"sort"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -11,14 +10,15 @@ import (
 )
 
 func (s *Service) admitCeilingLaunch(ctx context.Context, req admissionRequest) admissionDecision {
-	return s.sessionCeiling.admit(ctx, s.orderedCeilingAdmission(req))
+	return s.sessionCeiling.admit(ctx, s.orderedCeilingAdmission(ctx, req))
 }
 
 func (s *Service) handOffOrAdmitCeilingLaunch(ctx context.Context, req admissionRequest) admissionDecision {
-	return s.sessionCeiling.handOffOrAdmit(ctx, s.orderedCeilingAdmission(req))
+	return s.sessionCeiling.handOffOrAdmit(ctx, s.orderedCeilingAdmission(ctx, req))
 }
 
-func (s *Service) orderedCeilingAdmission(req admissionRequest) admissionRequest {
+func (s *Service) orderedCeilingAdmission(ctx context.Context, req admissionRequest) admissionRequest {
+	req = s.withCoordinatorAdmission(ctx, req)
 	req.yieldToDeferred = func(ctx context.Context, class ceilingClass) deferredPrecedence {
 		return s.ceilingDeferredLaunchPrecedes(ctx, req, class)
 	}
@@ -54,8 +54,13 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 			zap.String("task_id", req.taskID), zap.Error(err))
 		return deferredPrecedence{precedes: true, state: deferredPrecedesListUnavailable}
 	}
-	sort.SliceStable(tasks, func(i, j int) bool { return ceilingReplayLess(tasks[i], tasks[j]) })
+	coordinators := s.sortCeilingReplayQueue(ctx, tasks)
 	for _, task := range tasks {
+		if req.coordinator && !coordinators[task.ID] {
+			// Coordinator records sort first, so every record from here on is
+			// an ordinary one. A coordinator never yields to those.
+			return deferredPrecedence{}
+		}
 		deferral, readable := s.readCeilingDeferralCandidate(task)
 		if !readable {
 			continue
