@@ -457,7 +457,7 @@ if (-not $backendInfo) {
   throw "dev-isolated: cannot identify backend (kandev.exe) listening on port $EffectiveBackendPort within ${Timeout}s"
 }
 $BackendPid = $backendInfo.ProcessId
-# Store the actual backend process ID for health checks (cmd.exe will exit quickly)
+# Store the actual backend process ID (not the cmd.exe wrapper) for health checks.
 $ActualBackendPid = $BackendPid
 Set-Content -LiteralPath $Pidfile -Value $BackendPid -Encoding ASCII
 Set-Content -LiteralPath $BackendStartedFile -Value $backendInfo.CreationDate.ToUniversalTime().Ticks -Encoding ASCII
