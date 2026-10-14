@@ -62,6 +62,7 @@ func TestStreamableHTTPHandler_ForwardsBodyReadErrors(t *testing.T) {
 	response := httptest.NewRecorder()
 	s.streamableHTTPHandler().ServeHTTP(response, request)
 	assert.NotEqual(t, http.StatusAccepted, response.Code)
+	assert.Contains(t, response.Body.String(), "read failed", "the SDK reports the original read error")
 }
 
 func TestSupplementNotificationProtocolVersion_AddsMetadata(t *testing.T) {
