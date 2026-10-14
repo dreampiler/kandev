@@ -119,12 +119,13 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     cancellation.arm(quickSessionId);
     try {
       await cancel.click();
-      await waitForQuickChatCancellationPending(testPage, quickSessionId, true);
       await expect(cancel).toBeDisabled();
     } finally {
       cancellation.release();
     }
-    await waitForQuickChatSessionSettled(testPage, quickSessionId, 75_000);
+    // A fresh session advances its projection for acceptance and settlement.
+    // Finish before the detached workload's natural 60-second completion.
+    await waitForQuickChatSessionSettled(testPage, quickSessionId, 20_000, 2);
     await expect(cancel).not.toBeVisible({ timeout: 15_000 });
   });
 

@@ -371,9 +371,10 @@ export async function waitForQuickChatSessionSettled(
   page: Page,
   sessionId: string,
   timeoutMs = 20_000,
+  minimumCancellationRevision?: number,
 ): Promise<void> {
   await page.waitForFunction(
-    (sid) => {
+    ({ sid, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       const session = store?.getState().taskSessions.items[sid];
       if (!session) return false;
@@ -382,10 +383,13 @@ export async function waitForQuickChatSessionSettled(
           String(session.state),
         ) &&
         session.cancellation_pending === false &&
-        session.foreground_activity == null
+        session.foreground_activity == null &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
       );
     },
-    sessionId,
+    { sid: sessionId, minimumRevision: minimumCancellationRevision },
     { timeout: timeoutMs, message: `Quick Chat session ${sessionId} did not settle` },
   );
 }
