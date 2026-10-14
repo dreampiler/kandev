@@ -3532,6 +3532,14 @@ func (s *Service) reconcileSessionTransferCompensation(
 	if err != nil {
 		return fmt.Errorf("claim session transfer compensation recovery: %w", err)
 	}
+	return s.recoverClaimedSessionTransferCompensation(ctx, compensation, ownerID)
+}
+
+func (s *Service) recoverClaimedSessionTransferCompensation(
+	ctx context.Context,
+	compensation messagequeue.SessionTransferCompensation,
+	ownerID string,
+) (resultErr error) {
 	transferCtx, cancelTransfer := context.WithCancel(ctx)
 	defer cancelTransfer()
 	operationCtx, stopLeaseRenewal := s.messageQueue.MaintainSessionTransferCompensationLeaseWithCancel(
