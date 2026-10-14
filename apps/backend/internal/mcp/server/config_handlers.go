@@ -72,6 +72,7 @@ func (s *Server) registerConfigWorkflowTools() {
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("The workflow ID")),
 			mcp.WithString("name", mcp.Description("New workflow name")),
 			mcp.WithString("description", mcp.Description("New workflow description")),
+			mcp.WithBoolean("hidden", mcp.Description("Hide this workflow from management and picker UIs. Omit to leave the stored value unchanged.")),
 			mcp.WithBoolean("require_explicit_agent_profile", mcp.Description("Opt-in create policy. When true, creating a task on this workflow is rejected unless the caller supplies an explicit agent_profile_id or a valid workflow_agent_overrides selection. Omit to leave the stored value unchanged.")),
 		),
 		s.wrapHandler("update_workflow_kandev", s.updateWorkflowHandler()),
@@ -459,6 +460,9 @@ func (s *Server) updateWorkflowHandler() server.ToolHandlerFunc {
 		}
 		if desc := req.GetString("description", ""); desc != "" {
 			payload["description"] = desc
+		}
+		if value, present := req.GetArguments()["hidden"]; present && value != nil {
+			payload["hidden"] = value
 		}
 		if value, present := req.GetArguments()["require_explicit_agent_profile"]; present && value != nil {
 			payload["require_explicit_agent_profile"] = value

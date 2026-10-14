@@ -229,12 +229,14 @@ type CreateWorkflowRequest struct {
 
 // UpdateWorkflowRequest contains the data for updating a workflow
 type UpdateWorkflowRequest struct {
-	ExpectedUpdatedAt           *time.Time `json:"-"`
-	Name                        *string    `json:"name,omitempty"`
-	Description                 *string    `json:"description,omitempty"`
-	Prompt                      *string    `json:"prompt,omitempty"`
-	AgentProfileID              *string    `json:"agent_profile_id,omitempty"`
-	RequireExplicitAgentProfile *bool      `json:"require_explicit_agent_profile,omitempty"`
+	ExpectedUpdatedAt *time.Time `json:"-"`
+	Name              *string    `json:"name,omitempty"`
+	Description       *string    `json:"description,omitempty"`
+	Prompt            *string    `json:"prompt,omitempty"`
+	AgentProfileID    *string    `json:"agent_profile_id,omitempty"`
+	// Hidden marks the workflow as system-only; nil preserves the stored value.
+	Hidden                      *bool `json:"hidden,omitempty"`
+	RequireExplicitAgentProfile *bool `json:"require_explicit_agent_profile,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace

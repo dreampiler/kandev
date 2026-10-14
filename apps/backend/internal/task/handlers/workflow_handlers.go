@@ -284,6 +284,7 @@ type httpUpdateWorkflowRequest struct {
 	Description                 *string `json:"description"`
 	Prompt                      *string `json:"prompt"`
 	AgentProfileID              *string `json:"agent_profile_id"`
+	Hidden                      *bool   `json:"hidden"`
 	RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile"`
 }
 
@@ -302,6 +303,7 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		Description:                 body.Description,
 		Prompt:                      body.Prompt,
 		AgentProfileID:              body.AgentProfileID,
+		Hidden:                      body.Hidden,
 		RequireExplicitAgentProfile: body.RequireExplicitAgentProfile,
 	})
 	if err != nil {
@@ -523,6 +525,7 @@ type wsUpdateWorkflowRequest struct {
 	Description                 *string `json:"description,omitempty"`
 	Prompt                      *string `json:"prompt,omitempty"`
 	AgentProfileID              *string `json:"agent_profile_id,omitempty"`
+	Hidden                      *bool   `json:"hidden,omitempty"`
 	RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile,omitempty"`
 }
 
@@ -543,6 +546,7 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		Description:                 req.Description,
 		Prompt:                      req.Prompt,
 		AgentProfileID:              req.AgentProfileID,
+		Hidden:                      req.Hidden,
 		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {

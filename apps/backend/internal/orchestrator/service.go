@@ -1302,6 +1302,11 @@ type Service struct {
 	// ceiling_retry_schedule.go.
 	deferredRetrySchedule *deferredRetrySchedule
 
+	// ceilingCoordinators names workspace coordinator profiles for the session
+	// ceiling's coordinator precedence. Nil disables it. See
+	// ceiling_coordinator.go.
+	ceilingCoordinators CeilingCoordinatorProfiles
+
 	// ceilingReplayTaskTimeout, when positive, bounds one task's replay
 	// inside a sweep pass so a wedged replay cannot hold the pass's
 	// remaining tasks. Zero disables the guard (tests). Production sets it

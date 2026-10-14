@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/auth"
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -952,6 +953,25 @@ func (a *profileLookupAdapter) LookupProfile(ctx context.Context, profileID stri
 		return false, "", err
 	}
 	return true, profile.Name, nil
+}
+
+// ceilingCoordinatorProfiles answers the session ceiling's coordinator
+// question from the durable agent_profiles row: a live (not soft-deleted)
+// profile whose Office role is the workspace coordinator (ceo) and that is
+// scoped to a workspace. A missing row is not a coordinator.
+type ceilingCoordinatorProfiles struct {
+	store settingsstore.Repository
+}
+
+func (a ceilingCoordinatorProfiles) IsWorkspaceCoordinatorProfile(ctx context.Context, profileID string) (bool, error) {
+	profile, err := a.store.GetAgentProfile(ctx, profileID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil || profile == nil {
+		return false, err
+	}
+	return profile.Role == settingsmodels.AgentRoleCEO && profile.WorkspaceID != "" && profile.DeletedAt == nil, nil
 }
 
 // watcherDepsAdapter enumerates linear / jira / github_issue / github_review

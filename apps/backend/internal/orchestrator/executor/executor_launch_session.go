@@ -46,9 +46,3 @@ func setLaunchMetadataProfile(metadata map[string]interface{}, profileID string)
 	metadata["executor_profile_id"] = profileID
 	return metadata
 }
-
-// retryPreparedSessionAfterWorkspaceReady and refreshRetriedSessionOrder are
-// defined in executor_execute.go; #319 (79a459ec30) re-added them here with a
-// divergent signature while the originals stayed, which left the package with
-// duplicate method declarations. The duplicates are removed so the package
-// compiles; the live callers keep using the executor_execute.go definitions.

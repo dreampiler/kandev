@@ -53,6 +53,7 @@ func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*
 		WorkflowID                  string  `json:"workflow_id"`
 		Name                        *string `json:"name"`
 		Description                 *string `json:"description"`
+		Hidden                      *bool   `json:"hidden"`
 		RequireExplicitAgentProfile *bool   `json:"require_explicit_agent_profile"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
@@ -65,6 +66,7 @@ func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*
 	workflow, err := h.taskSvc.UpdateWorkflow(ctx, req.WorkflowID, &service.UpdateWorkflowRequest{
 		Name:                        req.Name,
 		Description:                 req.Description,
+		Hidden:                      req.Hidden,
 		RequireExplicitAgentProfile: req.RequireExplicitAgentProfile,
 	})
 	if err != nil {
