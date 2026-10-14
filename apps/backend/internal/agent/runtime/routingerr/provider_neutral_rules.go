@@ -11,7 +11,7 @@ var providerNeutralRules = []rule{
 	// code on any other status is a different failure.
 	mustRule(
 		"provider.account_blocked.v1",
-		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*"message"\s*:\s*")?`+
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:\{\s*(?:"code"\s*:\s*-?\d+\s*,\s*)?"message"\s*:\s*")?`+
 			`Error\s+from\s+provider\s+[^\s:]+:\s*403\s+Forbidden\b[^\n]*?`+
 			`(?:\\?"code\\?"\s*:\s*\\?"user_blocked\\?"|\byour\s+access\s+has\s+been\s+restricted\b)`,
 		CodeAccountBlocked,
@@ -83,6 +83,35 @@ var providerNeutralRules = []rule{
 		"provider.network_unavailable.v1",
 		`(?i)(?:\b(?:ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND)\b|network\s+is\s+unreachable|no\s+route\s+to\s+host|connection\s+(?:reset|refused|timed\s+out)|temporary\s+failure\s+in\s+name\s+resolution|i/o\s+timeout|failed\s+to\s+fetch)`,
 		CodeNetworkUnavailable,
+		ConfHigh,
+	),
+	// An AI-SDK error envelope carries the provider's own classification in a
+	// structured field. Its underscore-joined value ("provider_unavailable")
+	// does not match the space-separated prose in provider.unavailable.v1, and
+	// the field is emitted by the adapter rather than written by the model, so
+	// it classifies at high confidence. The error label is required, not
+	// optional: an assistant chunk is classified on its own, so a bare JSON
+	// object that merely carries the field must not count as a provider
+	// diagnostic. It sits immediately before the generic rule so a structured
+	// provider_unavailable outranks bare prose. The line may open with the
+	// "Agent encountered an error:" status prefix the agent error surface adds
+	// in front of the envelope.
+	mustRule(
+		RuleProviderStructuredErrorType,
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		CodeProviderUnavailable,
+		ConfHigh,
+	),
+	// A model rejects a request whose input exceeds its context window. The same
+	// candidate cannot succeed by retrying, but the failure stays a runtime
+	// error so the repeated-unclassified-failure route can still try a candidate
+	// with a larger context window. Naming the rule removes the failure from the
+	// anonymous phase default without changing routing: the code stays
+	// agent_runtime_error and keeps FallbackAllowed and AutoRetryable false.
+	mustRule(
+		RuleProviderContextLengthExceeded,
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
 		ConfHigh,
 	),
 	mustRule(

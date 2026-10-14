@@ -1,8 +1,27 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { i18n } from "@/lib/i18n";
-import { durationFromMinutes, queueStatusLabel, reasonText, statusLabel } from "./overview-format";
+import {
+  circuitScope,
+  circuitTitle,
+  durationFromMinutes,
+  queueStatusLabel,
+  reasonText,
+  statusLabel,
+} from "./overview-format";
 
 const t = i18n.getFixedT(null, "translation");
+
+it("names account holds as execution profiles", () => {
+  expect(circuitScope(t, "account_block")).toBe(circuitScope(t, "profile"));
+  expect(circuitScope(t, "account_block")).not.toBe("");
+  expect(
+    circuitTitle(t, {
+      resource_key: "account_block:87778343-profile",
+      profile_id: "87778343-profile",
+      profile_name: "DP-MuseSpark Contributor",
+    }),
+  ).toBe("DP-MuseSpark Contributor");
+});
 
 describe("overview reason and status copy", () => {
   afterEach(async () => {

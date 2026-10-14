@@ -112,46 +112,6 @@ export function AgentProfileDeleteConfirmation({
   );
 }
 
-export function AgentProfileDisableConflictDialog({
-  agents,
-  onCancel,
-  onConfirm,
-}: {
-  agents: UtilityAgentReference[];
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <AlertDialog
-      open={agents.length > 0}
-      onOpenChange={(open) => {
-        if (!open) onCancel();
-      }}
-    >
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t("agents:disableProfile")}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t("agents:disableProfileUtilityWarning")}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <ul className="list-disc list-inside max-h-40 overflow-y-auto">
-          {agents.map((agent) => (
-            <li key={agent.id}>{agent.name || agent.id}</li>
-          ))}
-        </ul>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t(CANCEL_LABEL_KEY)}</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm} className="cursor-pointer">
-            {t("agents:disableProfileAnyway")}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 // AgentProfileDeleteConflict carries the structured 409 payload from the
 // backend. `open` is separate from the lists so a watcher-only conflict
 // (no active sessions) still pops the dialog.
@@ -167,13 +127,37 @@ type AgentProfileDeleteConflictDialogProps = {
   conflict: AgentProfileDeleteConflict | null;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
+  /**
+   * Which change the conflict is blocking. "delete" keeps the existing
+   * destructive "delete anyway" surface; "disable" presents the same reference
+   * breakdown for a disable that a resolution attempt re-checked, so no
+   * routing/session/watcher/automation blocker is silently dropped.
+   */
+  intent?: "delete" | "disable";
 };
+
+// A delete blocked by routing tiers cannot proceed; a disable never is, and it
+// owns its own title and consequences copy.
+function conflictDialogTitle(t: TFunction, isDisable: boolean, blockProceed: boolean): string {
+  if (isDisable) return t("agents:disableProfile");
+  return blockProceed ? t("agents:cannotDeleteAgentProfile") : t(DELETE_PROFILE_TITLE_KEY);
+}
+
+function conflictDialogConsequences(
+  t: TFunction,
+  isDisable: boolean,
+  blockProceed: boolean,
+): string {
+  if (blockProceed) return t("agents:changeTierMappingsFirst");
+  return isDisable ? t("agents:disableAnywayConsequences") : t("agents:deleteAnywayConsequences");
+}
 
 // eslint-disable-next-line complexity
 export function AgentProfileDeleteConflictDialog({
   conflict,
   onOpenChange,
   onConfirm,
+  intent = "delete",
 }: AgentProfileDeleteConflictDialogProps) {
   const { t } = useTranslation();
   const tasks = conflict?.activeSessions.filter((s) => !s.is_ephemeral) ?? [];
@@ -182,7 +166,10 @@ export function AgentProfileDeleteConflictDialog({
   const routingTiers = conflict?.routingTiers ?? [];
   const automations = conflict?.automations ?? [];
   const utilityAgents = conflict?.utilityAgents ?? [];
-  const hasHardBlockers = routingTiers.length > 0;
+  // Routing tiers are a hard blocker for a delete only; a disable leaves them in
+  // place, so its conflict keeps the proceed action available.
+  const blockProceed = intent === "delete" && routingTiers.length > 0;
+  const isDisable = intent === "disable";
   const watchersByKind = groupWatchersByKind(watchers);
   const workspaces = useAppStore((s) => s.workspaces.items);
   const providers = useAppStore((s) => s.settingsAgents.items);
@@ -195,9 +182,7 @@ export function AgentProfileDeleteConflictDialog({
         className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden"
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>
-            {hasHardBlockers ? t("agents:cannotDeleteAgentProfile") : t(DELETE_PROFILE_TITLE_KEY)}
-          </AlertDialogTitle>
+          <AlertDialogTitle>{conflictDialogTitle(t, isDisable, blockProceed)}</AlertDialogTitle>
         </AlertDialogHeader>
         <AlertDialogDescription
           asChild
@@ -205,7 +190,7 @@ export function AgentProfileDeleteConflictDialog({
           className="min-h-0 min-w-0 space-y-2 overflow-x-hidden overflow-y-auto overscroll-contain text-left"
         >
           <div>
-            <p>{t("agents:profileInUseIntro")}</p>
+            <p>{t(isDisable ? "agents:disableProfileInUseIntro" : "agents:profileInUseIntro")}</p>
             <SessionConflictSection
               title={t("agents:conflictTasksTitle")}
               sessions={tasks}
@@ -227,25 +212,23 @@ export function AgentProfileDeleteConflictDialog({
               workspaceLabels={new Map(workspaces.map((w) => [w.id, w.name]))}
             />
             <UtilityAgentConflictSection utilityAgents={utilityAgents} />
-            {hasHardBlockers ? (
-              <p>{t("agents:changeTierMappingsFirst")}</p>
-            ) : (
-              <p>{t("agents:deleteAnywayConsequences")}</p>
-            )}
+            <p>{conflictDialogConsequences(t, isDisable, blockProceed)}</p>
           </div>
         </AlertDialogDescription>
         <AlertDialogFooter data-testid="agent-profile-delete-conflict-footer">
           <AlertDialogCancel className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}>
             {t(CANCEL_LABEL_KEY)}
           </AlertDialogCancel>
-          {hasHardBlockers ? null : (
+          {blockProceed ? null : (
             <AlertDialogAction
               onClick={onConfirm}
               className={settingsActionClassName(
-                "w-full cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto",
+                intent === "disable"
+                  ? "w-full cursor-pointer sm:w-auto"
+                  : "w-full cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto",
               )}
             >
-              {t("agents:deleteAnyway")}
+              {intent === "disable" ? t("agents:disableProfileAnyway") : t("agents:deleteAnyway")}
             </AlertDialogAction>
           )}
         </AlertDialogFooter>

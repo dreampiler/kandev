@@ -87,6 +87,7 @@ const CIRCUIT_SCOPE_KEYS: Record<string, string> = {
   credential: "office:overviewCircuitScopeAccount",
   model: "office:overviewCircuitScopeModel",
   profile: "office:overviewCircuitScopeProfile",
+  account_block: "office:overviewCircuitScopeProfile",
 };
 
 /**

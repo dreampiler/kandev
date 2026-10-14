@@ -100,6 +100,36 @@ var agentDeliveryRetainedSubmissionProofSQL = `((submission_id = '' OR (
 ) IS NOT NULL)
  AND ` + agentDeliveryOpenRecoveryBlockGuardSQL + `)`
 
+// agentDeliveryActiveSubmissionStatesSQL lists the submission states that can
+// still produce delivery work; their presence keeps early retirement disabled.
+var agentDeliveryActiveSubmissionStatesSQL = agentDeliverySQLStringList([]string{
+	"prepared", "dispatching", "accepted", "interrupted_unknown",
+})
+
+// agentDeliveryCompletedStreamSQL proves a stream cursor's turn is finished:
+// the stream is fully projected to its received head, a retained settled
+// terminal proves the turn ended, and no submission of the incarnation is still
+// active. It is the only added condition that lets fragment rows retire before
+// the replay window; active, uncertain, partially projected and unterminated
+// streams keep the existing age/count contract. The cursor alias must expose
+// session_id, incarnation_id, harness_generation, stream_id, received_sequence
+// and projected_sequence.
+func agentDeliveryCompletedStreamSQL(cursorAlias string) string {
+	return `(` + cursorAlias + `.received_sequence = ` + cursorAlias + `.projected_sequence
+		AND EXISTS (
+			SELECT 1 FROM agent_delivery_inbox terminal
+			WHERE terminal.stream_id = ` + cursorAlias + `.stream_id AND terminal.terminal <> 0
+			  AND ` + agentDeliveryRetainedTerminalProofSQL + `
+		)
+		AND NOT EXISTS (
+			SELECT 1 FROM agent_delivery_submissions active_sub
+			WHERE active_sub.session_id = ` + cursorAlias + `.session_id
+			  AND active_sub.incarnation_id = ` + cursorAlias + `.incarnation_id
+			  AND active_sub.harness_generation = ` + cursorAlias + `.harness_generation
+			  AND active_sub.state IN (` + agentDeliveryActiveSubmissionStatesSQL + `)
+		))`
+}
+
 func retentionCandidateProofQuery(query string) string {
 	query = strings.ReplaceAll(query, "/* unsettled terminal */", "NOT "+agentDeliveryRetainedTerminalProofSQL)
 	query = strings.ReplaceAll(query, "/* settled event */", agentDeliveryRetainedSubmissionProofSQL)

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -67,6 +68,7 @@ func (c *failingAgentctlCommandClient) StartProcess(ctx context.Context, req age
 type shellProcess struct {
 	cmd    *exec.Cmd
 	output *lockedBuffer
+	done   chan struct{}
 }
 
 type lockedBuffer struct {
@@ -94,6 +96,9 @@ func (c *shellProcessClient) StartProcess(_ context.Context, req agentctl.StartP
 	}
 	output := &lockedBuffer{}
 	cmd.Stdout, cmd.Stderr = output, output
+	// A killed sh can leave a child holding the output pipe (Windows); bound
+	// the pipe wait so the Wait goroutine below always ends.
+	cmd.WaitDelay = time.Second
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
@@ -104,8 +109,10 @@ func (c *shellProcessClient) StartProcess(_ context.Context, req agentctl.StartP
 		c.processes = map[string]*shellProcess{}
 	}
 	id := fmt.Sprintf("process-%d", len(c.commands))
-	c.processes[id] = &shellProcess{cmd: cmd, output: output}
+	done := make(chan struct{})
+	c.processes[id] = &shellProcess{cmd: cmd, output: output, done: done}
 	go func() {
+		defer close(done)
 		_ = cmd.Wait()
 		c.mu.Lock()
 		delete(c.processes, id)
@@ -151,8 +158,8 @@ func TestAgentctlFileUploaderRoundTrip(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("written file = %v, %v; want mode 0600", info, err)
+	if want := observableFileMode(0o600); err != nil || info.Mode().Perm() != want {
+		t.Fatalf("written file = %v, %v; want mode %v", info, err, want)
 	}
 	got, err := uploader.ReadFile(context.Background(), path)
 	if err != nil || string(got) != string(secret) {
@@ -203,8 +210,8 @@ func TestAgentctlFileUploaderAppliesReadOnlyModeAfterTransfer(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o400 {
-		t.Fatalf("written file = %v, %v; want mode 0400", info, err)
+	if want := observableFileMode(0o400); err != nil || info.Mode().Perm() != want {
+		t.Fatalf("written file = %v, %v; want mode %v", info, err, want)
 	}
 	got, err := uploader.ReadFile(context.Background(), path)
 	if err != nil || !bytes.Equal(got, data) {
@@ -231,8 +238,9 @@ func TestAgentctlFileUploaderPreservesExistingFileWhenChunkTransferFails(t *test
 }
 
 func TestUploadPluginExecutorAgentCredentialsCopiesSelectedFiles(t *testing.T) {
+	skipOpenCodeHostAuthOnWindows(t)
 	localHome := t.TempDir()
-	t.Setenv("HOME", localHome)
+	setTestUserHome(t, localHome)
 	source := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
 	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
 		t.Fatal(err)
@@ -282,8 +290,14 @@ func TestUploadPluginExecutorAgentCredentialsWithoutSelectionRunsNothing(t *test
 
 func stopAll(client *shellProcessClient) {
 	client.mu.Lock()
-	defer client.mu.Unlock()
+	var running []*shellProcess
 	for _, process := range client.processes {
 		_ = process.cmd.Process.Kill()
+		running = append(running, process)
+	}
+	client.mu.Unlock()
+	// Wait for each Wait goroutine so none outlives the test (goleak).
+	for _, process := range running {
+		<-process.done
 	}
 }

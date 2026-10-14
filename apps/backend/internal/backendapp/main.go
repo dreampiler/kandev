@@ -1613,7 +1613,10 @@ func startGatewayAndServe(
 	if err := recordSchemaVersionAfterPersistence(
 		repos.RequiredStores.ValidateComplete,
 		func() error { return persistenceHealth.Check(ctx) },
-		func() { recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log) },
+		func() {
+			recordSchemaVersion(dbPool.Writer(), cfg.Database.Driver, Version, log)
+			recordServerStart(dbPool.Writer(), Version, log)
+		},
 	); err != nil {
 		log.Error("Required persistence changed before readiness", zap.Error(err))
 		closeBoundListeners(server, listeners, log)
@@ -1731,10 +1734,13 @@ func constructOfficeServices(
 	// The ledger writer is the sole writer of task_sessions' usage rollup
 	// columns (AC-10) and must run in every install, so it too is
 	// constructed and started before the Office early return.
-	if err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup); err != nil {
+	usageWriter, err := startTaskUsageWriter(repos.Task, usagePricingAdapter{lookup: pricingLookup}, eventBus, log, addCleanup)
+	if err != nil {
 		log.Error("Failed to subscribe task usage ledger writer", zap.Error(err))
 		return nil, false
 	}
+	services.UsageWriter = usageWriter
+	services.Pricing = pricingLookup
 
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")

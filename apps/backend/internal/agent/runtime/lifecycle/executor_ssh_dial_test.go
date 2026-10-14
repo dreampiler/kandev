@@ -23,7 +23,7 @@ import (
 func newTestHomeDir(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	previousSystemConfig := sshSystemConfigPath
 	sshSystemConfigPath = filepath.Join(home, "missing-system-ssh-config")
 	t.Cleanup(func() { sshSystemConfigPath = previousSystemConfig })
@@ -263,7 +263,7 @@ func TestBuildAuthMethods(t *testing.T) {
 	})
 
 	t.Run("agent identity connects to the socket", func(t *testing.T) {
-		sock := filepath.Join(t.TempDir(), "agent.sock")
+		sock := filepath.Join(shortSocketDir(t), "agent.sock")
 		listener, err := net.Listen("unix", sock)
 		if err != nil {
 			t.Skipf("unix sockets unavailable: %v", err)
@@ -708,8 +708,21 @@ Host file-host
 	})
 }
 
+// shortSocketDir returns a short temporary directory for AF_UNIX sockets.
+// Socket paths are limited to about 108 bytes, and t.TempDir() embeds the
+// test name, which overflows that limit on Windows.
+func shortSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 func TestBuildAuthMethodsIdentityAgentOverridesEnvironment(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortSocketDir(t)
 	configuredPath := filepath.Join(dir, "configured.sock")
 	envPath := filepath.Join(dir, "env.sock")
 	configured, err := net.Listen("unix", configuredPath)
@@ -818,7 +831,7 @@ Host jump-fallback
 
 func TestEffectiveSSHConfigReadsUserAndSystemFresh(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
 		t.Fatal(err)
 	}

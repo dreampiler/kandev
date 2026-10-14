@@ -389,6 +389,8 @@ type Handlers struct {
 	// nil leaves the Office surface confined to its own workspace and Kanban
 	// messages to Office tasks on their session path.
 	officeCrossWorkspace OfficeCrossWorkspace
+	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
+	coordinatorTurns CoordinatorTurnReader
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -610,8 +612,10 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
 		d.RegisterFunc(coordinator.ActionProposeMessage, h.proposeKindHandler(coordinator.ProposalKindMessage))
 		d.RegisterFunc(coordinator.ActionProposeMove, h.proposeKindHandler(coordinator.ProposalKindMove))
+		d.RegisterFunc(coordinator.ActionProposeImprovement, h.handleProposeImprovement)
 		d.RegisterFunc(coordinator.ActionGetItem, h.handleGetCoordinatorItem)
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
+		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
 }
 
@@ -840,6 +844,9 @@ func (h *Handlers) handleListByField(
 	resp, err := fn(ctx, value)
 	if err != nil {
 		h.logger.Error(logErrMsg, zap.Error(err))
+		if errors.Is(err, errCoordinatorProjectsRead) {
+			clientErrMsg = clientErrMsg + ": " + err.Error()
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, clientErrMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
@@ -915,11 +922,20 @@ func (h *Handlers) handleListRepositories(ctx context.Context, msg *ws.Message) 
 		})
 }
 
-// handleListTasks lists tasks for a workflow.
+// handleListTasks lists tasks for a workflow, or for a whole workspace when
+// workspace_id is supplied instead. The workspace form includes tasks with no
+// workflow so a controller can find them without a board to look in.
 func (h *Handlers) handleListTasks(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	if workspaceID, _ := unmarshalStringField(msg.Payload, "workspace_id"); strings.TrimSpace(workspaceID) != "" {
+		return h.handleListWorkspaceTasks(ctx, msg, strings.TrimSpace(workspaceID))
+	}
 	return h.handleListByField(ctx, msg, "workflow_id", "failed to list tasks", "Failed to list tasks",
 		func(ctx context.Context, workflowID string) (any, error) {
 			tasks, err := h.taskSvc.ListTasks(ctx, workflowID)
+			if err != nil {
+				return nil, err
+			}
+			tasks, err = h.filterCoordinatorTasks(ctx, tasks)
 			if err != nil {
 				return nil, err
 			}
@@ -2729,6 +2745,9 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if !stored {
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
+	// The current step's signal is now durably recorded, so any earlier refusal
+	// reason recorded for this session is resolved.
+	h.clearStepCompleteRejection(ctx, req.SessionID)
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
 	// below: publish is a delivery concern, and a publish failure sends the agent
@@ -4170,6 +4189,9 @@ func (h *Handlers) promptPreparedTaskMessage(
 	if err != nil {
 		var accepted interface{ DetachedResumeAccepted() bool }
 		if errors.As(err, &accepted) && accepted.DetachedResumeAccepted() {
+			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
+		}
+		if h.autoRecoverTaskMessagePrompt(ctx, taskID, session.ID, err) {
 			return taskMessageDispatchResult{status: taskMessageStatusSent, sessionID: session.ID, messageID: messageIDOf(recorded)}, nil
 		}
 		h.deleteRecordedUserMessage(ctx, recorded, ownedTurnID)

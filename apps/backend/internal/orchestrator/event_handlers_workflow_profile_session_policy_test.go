@@ -512,6 +512,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
 				withWorkflowProfileSwitchGuardHeld(ctx, fixture.current.ID, ""),
 				"t1",
 				fixture.current,
+				false,
 			)
 			if err != nil {
 				t.Fatalf("park before delayed %s event: %v", tt.name, err)

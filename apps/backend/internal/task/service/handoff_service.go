@@ -690,6 +690,34 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 	return s.ListRelated(ctx, targetTaskID)
 }
 
+// IsWorkspaceController reports whether taskID is a control-tool controller:
+// a workspace root task (empty parent_id) that has at least one non-archived
+// child. The MCP list_related_tasks_kandev handler uses this to exempt a
+// controller principal from the direct-relation gate, so a controller can
+// discover a workspace's tasks without a relation edge. It grants no access by
+// itself — the handler still requires the target to share the principal's
+// workspace.
+func (s *HandoffService) IsWorkspaceController(ctx context.Context, taskID string) (bool, error) {
+	if taskID == "" {
+		return false, nil
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if task == nil || task.ParentID != "" {
+		return false, nil
+	}
+	children, err := s.tasks.ListChildren(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return len(children) > 0, nil
+}
+
 // ListRelated returns the parent, children, siblings, blockers, and
 // blocked-by tasks for taskID. Document keys are populated for the task
 // itself plus every related task so an agent can shop for documents in

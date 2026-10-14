@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Fork release confirmation for restart-resume: build a revision, start an
@@ -37,7 +37,16 @@
   Health and scenario wait budget in seconds.
 
 .PARAMETER NoBuild
-  Use the existing binaries under apps/backend/bin instead of rebuilding.
+  Use the existing binaries instead of rebuilding. With -BinDir, the isolated
+  launcher requires the binaries to already exist in that directory.
+
+.PARAMETER BinDir
+  Forward the declared isolated binary directory to dev-isolated.ps1. The
+  launcher validates it against KANDEV_ISO_ROOT and stages build outputs there.
+
+.PARAMETER HomeDir
+  Forward an explicit disposable home to dev-isolated.ps1. The same home is
+  reused for the backend restart, subject to the launcher's isolation checks.
 
 .PARAMETER OutputPath
   Where to write the result JSON. Defaults to a file under the temp directory.
@@ -50,6 +59,8 @@ param(
   [int]$BackendPort,
   [int]$TimeoutSeconds = 150,
   [switch]$NoBuild,
+  [string]$BinDir,
+  [string]$HomeDir,
   [string]$OutputPath
 )
 
@@ -60,7 +71,6 @@ $ErrorActionPreference = 'Stop'
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $ScriptDir
 $BackendDir = Join-Path $RepoRoot 'apps\backend'
-$BinDir = Join-Path $BackendDir 'bin'
 $DevIsolated = Join-Path $ScriptDir 'dev-isolated.ps1'
 $KandevKill = Join-Path $ScriptDir 'kandev-kill.ps1'
 $GuardedPorts = @(38429, 37429, 39429, 38430)
@@ -117,8 +127,13 @@ if (-not $NoBuild) {
 $Script:IsolatedHome = $null
 function Start-Isolated {
   param([int]$TimeoutSec, [string]$HomeDirOverride)
-  $devArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $DevIsolated, '-NoBuild', '-BackendPort', "$BackendPort", '-Timeout', "$TimeoutSec")
-  if ($HomeDirOverride) { $devArgs += @('-HomeDir', $HomeDirOverride) }
+  $devArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $DevIsolated, '-BackendPort', "$BackendPort", '-Timeout', "$TimeoutSec")
+  # The first declared-directory launch lets the launcher stage freshly built
+  # binaries; restarts and -NoBuild runs require the existing staged binaries.
+  if (-not $BinDir -or $NoBuild -or $Script:IsolatedHome) { $devArgs += '-NoBuild' }
+  if ($BinDir) { $devArgs += @('-BinDir', $BinDir) }
+  $requestedHome = if ($HomeDirOverride) { $HomeDirOverride } else { $HomeDir }
+  if ($requestedHome) { $devArgs += @('-HomeDir', $requestedHome) }
   & powershell.exe @devArgs
   if ($LASTEXITCODE -ne 0) { throw "verify-release: dev-isolated failed ($LASTEXITCODE)" }
   if (Test-Path -LiteralPath $HomeFile) { $Script:IsolatedHome = (Get-Content -LiteralPath $HomeFile -Raw).Trim() }

@@ -22,6 +22,20 @@ type durableSessionTransferState struct {
 	cancelTransfer    context.CancelFunc
 }
 
+// ClaimOrphanedSessionTransferCompensationRecovery admits periodic recovery
+// only when both endpoints are terminal and no delivery claim is in flight.
+func (s *Service) ClaimOrphanedSessionTransferCompensationRecovery(
+	ctx context.Context, compensation SessionTransferCompensation,
+) (string, error) {
+	repo, ok := s.repo.(interface {
+		claimOrphanedSessionTransferCompensationRecovery(context.Context, SessionTransferCompensation) (string, error)
+	})
+	if !ok {
+		return "", errors.New("orphaned session transfer recovery unavailable")
+	}
+	return repo.claimOrphanedSessionTransferCompensationRecovery(ctx, compensation)
+}
+
 // TransferSessionWithDurablePreparation preserves the original callback
 // contract for callers whose external state is not attachment-scoped.
 func (s *Service) TransferSessionWithDurablePreparation(

@@ -95,11 +95,14 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.PATCH("/agent-profiles/:id", cfg, h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
+	api.POST("/agent-profiles/:id/dynamic-reference-resolution", cfg, h.interlock, h.httpResolveDynamicReferences)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.
 	api.POST("/agent-profiles/:id/account-block/release", cfg, h.interlock, h.httpReleaseAccountBlock)
+	api.GET("/agent-circuits", cfg, h.httpListResourceCircuits)
+	api.POST("/agent-circuits/release", cfg, h.interlock, h.httpReleaseResourceCircuit)
 	// The current-choice preview is computationally read-only, so it is
 	// registered without the mutation interlock: an existing settings lock
 	// permits it while continuing to block every mutation.

@@ -12,6 +12,11 @@ type AgentDeliveryRetentionBatchOptions struct {
 	PayloadGrace    time.Duration
 	ReplayAge       time.Duration
 	ReplayEvents    int
+	// OfflineMaintenance permits a longer, still finite, per-batch budget
+	// for the offline `kandev maintenance database` command, which holds
+	// exclusive database access. The online background worker leaves it false
+	// and keeps its short per-batch budget.
+	OfflineMaintenance bool
 }
 
 // AgentDeliveryRetentionBatchResult reports the durable work committed by one
@@ -35,6 +40,11 @@ type AgentDeliveryRetentionBatchResult struct {
 type AgentDeliveryRetirementBatchOptions struct {
 	MaxCandidates int
 	WorkTimeout   time.Duration
+	// OfflineMaintenance permits a longer, still finite, per-batch budget
+	// for the offline `kandev maintenance database` command, which holds
+	// exclusive database access. The online background worker leaves it false
+	// and keeps its short per-batch budget.
+	OfflineMaintenance bool
 }
 
 // AgentDeliveryRetirementBatchResult reports one committed retirement batch.
@@ -49,6 +59,11 @@ type AgentDeliveryRetirementBatchResult struct {
 type AgentDeliveryOrphanBatchOptions struct {
 	MaxCandidates int
 	WorkTimeout   time.Duration
+	// OfflineMaintenance permits a longer, still finite, per-batch budget
+	// for the offline `kandev maintenance database` command, which holds
+	// exclusive database access. The online background worker leaves it false
+	// and keeps its short per-batch budget.
+	OfflineMaintenance bool
 }
 
 // AgentDeliveryOrphanBatchResult reports orphan jobs scheduled by one scan.
