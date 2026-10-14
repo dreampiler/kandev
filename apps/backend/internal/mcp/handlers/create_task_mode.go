@@ -23,6 +23,7 @@ type mcpCreateTaskRequest struct {
 	WorkspaceID            string               `json:"workspace_id"`
 	WorkflowID             string               `json:"workflow_id"`
 	WorkflowStepID         string               `json:"workflow_step_id"`
+	WorkflowAgentOverrides map[string]string    `json:"workflow_agent_overrides"`
 	WorkspaceMode          string               `json:"workspace_mode"`
 	Title                  string               `json:"title"`
 	Description            string               `json:"description"`

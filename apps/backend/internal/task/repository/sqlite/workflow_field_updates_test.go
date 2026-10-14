@@ -38,6 +38,31 @@ func TestWorkflowFieldUpdatesFailures(t *testing.T) {
 	require.ErrorIs(t, err, repoerrors.ErrWorkflowNotFound)
 }
 
+func TestWorkflowRequireExplicitAgentProfileRoundTrip(t *testing.T) {
+	repo := newRepoForWorkflowSourceTests(t)
+	ctx := context.Background()
+	seed := &models.Workflow{ID: "field-explicit-profile", WorkspaceID: "ws", Name: "explicit", RequireExplicitAgentProfile: true}
+	require.NoError(t, repo.CreateWorkflow(ctx, seed))
+	stored, err := repo.GetWorkflow(ctx, seed.ID)
+	require.NoError(t, err)
+	require.True(t, stored.RequireExplicitAgentProfile, "create must persist the opt-in policy")
+
+	disabled := false
+	updated, err := repo.UpdateWorkflowFields(ctx, seed.ID, models.WorkflowFieldUpdate{RequireExplicitAgentProfile: &disabled})
+	require.NoError(t, err)
+	require.False(t, updated.RequireExplicitAgentProfile)
+
+	enabled := true
+	updated, err = repo.UpdateWorkflowFields(ctx, seed.ID, models.WorkflowFieldUpdate{RequireExplicitAgentProfile: &enabled})
+	require.NoError(t, err)
+	require.True(t, updated.RequireExplicitAgentProfile)
+
+	name := "renamed"
+	updated, err = repo.UpdateWorkflowFields(ctx, seed.ID, models.WorkflowFieldUpdate{Name: &name})
+	require.NoError(t, err)
+	require.True(t, updated.RequireExplicitAgentProfile, "an omitted policy field preserves the stored value")
+}
+
 // @covers AC-TASKS-FIELD-UPDATES-002.2, AC-TASKS-FIELD-UPDATES-002.5
 func TestWorkflowFieldUpdatesPresence(t *testing.T) {
 	repo := newRepoForWorkflowSourceTests(t)

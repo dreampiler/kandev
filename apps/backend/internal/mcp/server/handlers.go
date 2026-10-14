@@ -283,6 +283,15 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			}
 		}
 
+		// Forward the per-task fixed-step profile replacements. The map is
+		// source_profile_id -> replacement_profile_id, the same shape the
+		// create-task UI/REST surface sends; the backend validates and expands
+		// it. Only string values are forwarded so a malformed object cannot
+		// smuggle a non-string into the service request.
+		if overrides := stringMapArg(req, "workflow_agent_overrides"); len(overrides) > 0 {
+			payload["workflow_agent_overrides"] = overrides
+		}
+
 		// Add repository info. For subtasks an explicit repo overrides the
 		// parent's; if omitted the backend inherits from the parent.
 		repositoryID := req.GetString("repository_id", "")

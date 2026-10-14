@@ -156,6 +156,43 @@ func (s *Service) validateWorkflowAgentOverrides(ctx context.Context, req *Creat
 	return nil
 }
 
+// ErrExplicitAgentProfileRequired rejects a task creation whose resolved
+// workflow opts into require_explicit_agent_profile when the caller supplied
+// neither an explicit agent_profile_id nor a valid workflow_agent_overrides
+// selection. It is a validation failure, not a server fault.
+var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is required by this workflow")
+
+// enforceExplicitAgentProfilePolicy rejects a create before any task,
+// repository, or session row is written when the resolved workflow requires an
+// explicit agent profile selection and the caller supplied none. Only a
+// caller-provided profile (ExplicitAgentProfileID) or a validated
+// workflow_agent_overrides binding counts: creator/parent/workflow/workspace
+// fallbacks and stored task metadata deliberately do not, so a workflow that
+// requires an explicit choice cannot be satisfied by an inherited default.
+//
+// It runs after validateWorkflowAgentOverrides so normalized overrides are
+// available, and after CreateTask's external_id short-circuit, so a duplicate
+// retry returns the existing task without re-evaluating this policy.
+func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *CreateTaskRequest) error {
+	if req.WorkflowID == "" || s.workflows == nil {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		return err
+	}
+	if workflow == nil || !workflow.RequireExplicitAgentProfile {
+		return nil
+	}
+	if strings.TrimSpace(req.ExplicitAgentProfileID) != "" {
+		return nil
+	}
+	if req.normalizedWorkflowAgentOverrides != nil && len(req.normalizedWorkflowAgentOverrides.Steps) > 0 {
+		return nil
+	}
+	return ErrExplicitAgentProfileRequired
+}
+
 func (s *Service) validateWorkflowAgentOverrideProfiles(
 	ctx context.Context,
 	overrides *models.WorkflowAgentOverrides,

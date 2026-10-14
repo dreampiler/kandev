@@ -38,6 +38,27 @@ func stringArrayArg(req mcp.CallToolRequest, key string) []string {
 	}
 }
 
+// stringMapArg reads a string-valued object argument, tolerating the
+// map[string]interface{} shape JSON decoding produces and skipping non-string
+// values rather than failing the whole call.
+func stringMapArg(req mcp.CallToolRequest, key string) map[string]string {
+	raw, ok := req.GetArguments()[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	obj, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(map[string]string, len(obj))
+	for name, value := range obj {
+		if str, ok := value.(string); ok {
+			out[name] = str
+		}
+	}
+	return out
+}
+
 // addTaskDependencyHandler backs add_task_dependency_kandev.
 func (s *Server) addTaskDependencyHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
