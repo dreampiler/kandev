@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -659,6 +660,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 
 	var envID, status, materializationSessionID string
 	var claimUpdatedAt time.Time
+	if err := r.lockTaskMaterializationForBindingTx(ctx, tx, session.TaskID); err != nil {
+		return err
+	}
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id, status, materialization_session_id, updated_at FROM task_environments WHERE task_id = ?
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
@@ -766,6 +770,9 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockSharedMaterializationTasksTx(ctx, tx, groupID, session.TaskID); err != nil {
+		return err
+	}
 	if err := r.taskCleanupBarrierLocked(ctx, tx, session.TaskID); err != nil {
 		return err
 	}
@@ -827,6 +834,14 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 ) error {
 	var environmentID, status, materializationSessionID string
 	var claimUpdatedAt sql.NullTime
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT materialized_environment_id FROM task_workspace_groups WHERE id = ?
+	`), groupID).Scan(&environmentID); err != nil {
+		return fmt.Errorf("load shared workspace identity: %w", err)
+	}
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return err
+	}
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COALESCE(e.id, ''), COALESCE(e.status, ''), COALESCE(e.materialization_session_id, ''), e.updated_at
 		FROM task_workspace_groups g
@@ -920,7 +935,15 @@ const workspaceMaterializationAbandonAllowance = 5 * time.Minute
 // update before an owner without a running execution counts as gone.
 // Preparation and each launch phase have separate bounds, so both count.
 func workspaceMaterializationAbandonAfter() time.Duration {
-	return constants.SetupScriptTimeout + constants.AgentLaunchTimeout + workspaceMaterializationAbandonAllowance
+	const maximum = time.Duration(math.MaxInt64)
+	budget := constants.SetupScriptTimeout
+	for _, phase := range []time.Duration{constants.AgentLaunchTimeout, workspaceMaterializationAbandonAllowance} {
+		if phase > maximum-budget {
+			return maximum
+		}
+		budget += phase
+	}
+	return budget
 }
 
 // settleWorkspaceMaterializationClaim decides a creating claim found by a

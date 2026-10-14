@@ -108,6 +108,9 @@ None.
 
 ## Results
 
+These are historical contributor results. Current-head review remediation and
+hosted acceptance requirements are recorded in [the plan](plan.md#review-remediation-validation).
+
 - RED on the unmodified code:
   - The three binding tests that pinned the old outcome, now
     `TestCreateTaskSessionWithWorkspaceBindingTakesOver{AbandonedCreatingClaim,OwnerlessCreatingClaim,TerminalCreatingOwner}`,

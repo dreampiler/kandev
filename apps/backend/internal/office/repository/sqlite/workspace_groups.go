@@ -132,7 +132,7 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.OwnershipGeneration, g.MaterializedPath,
-		g.MaterializedEnvironmentID, g.MaterializedKind, g.OwnedByKandev,
+		g.MaterializedEnvironmentID, g.MaterializedKind, boolToInt(g.OwnedByKandev),
 		g.CleanupPolicy, g.CleanupStatus, g.CleanedAt, g.CleanupError,
 		g.RestoreStatus, g.RestoreError, g.RestoreConfigJSON,
 		g.CreatedAt, g.UpdatedAt)
@@ -216,7 +216,7 @@ func (r *Repository) MarkWorkspaceMaterialized(ctx context.Context, id string, m
 			updated_at = ?
 		WHERE id = ?
 		  AND (materialized_environment_id = '' OR materialized_environment_id = ?)
-	`), m.Path, m.EnvironmentID, m.Kind, m.OwnedByKandev, policy,
+	`), m.Path, m.EnvironmentID, m.Kind, boolToInt(m.OwnedByKandev), policy,
 		m.RestoreConfig, time.Now().UTC(), id, m.EnvironmentID)
 	if err != nil {
 		return err

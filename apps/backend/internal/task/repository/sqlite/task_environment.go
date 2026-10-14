@@ -329,6 +329,9 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, env.ID); err != nil {
+		return err
+	}
 
 	var taskID string
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), env.ID).Scan(&taskID); err != nil {
@@ -492,6 +495,9 @@ func (r *Repository) ReelectFailedTaskEnvironmentMaterialization(
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return false, err
+	}
 
 	var taskID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_environments WHERE id = ?`), environmentID).Scan(&taskID)
@@ -535,13 +541,16 @@ func (r *Repository) FailTaskEnvironmentMaterialization(ctx context.Context, ses
 
 	var environmentID string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT id FROM task_environments WHERE status = ? AND materialization_session_id = ?
-	`), string(models.TaskEnvironmentStatusCreating), sessionID).Scan(&environmentID)
-	if errors.Is(err, sql.ErrNoRows) {
+		SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&environmentID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && environmentID == "") {
 		return false, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("load owned task environment materialization: %w", err)
+	}
+	if err := r.lockTaskEnvironmentMaterializationTx(ctx, tx, environmentID); err != nil {
+		return false, err
 	}
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
 		return false, err

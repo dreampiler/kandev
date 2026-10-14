@@ -7,7 +7,7 @@ requirements:
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-003
   - REQ-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004
 created: 2026-08-24
-updated: 2026-10-12
+updated: 2026-10-14
 owners:
   - cfl12
 ---
@@ -404,9 +404,13 @@ overwrite a claim that another session re-elected meanwhile.
 
 Release points:
 
-- `LaunchPreparedSession` releases the session's claim on every error return,
-  except `ErrExecutionAlreadyRunning`, which reports another live launch of the
-  same session.
+- `LaunchPreparedSession` releases the session's claim on error only after the
+  session snapshot read under its launch lock proves membership in the supplied
+  task. A failed initial lookup or foreign-task request has no release authority.
+  Release remains inside that lock. `ErrExecutionAlreadyRunning` and a
+  superseded cancellable resume preserve the current claim. A committed
+  re-election followed by a failed environment reload still releases the claim
+  after session ownership has been established.
 - The `startTask` early-return helper releases the claim of a session that this
   start created, for ordinary and ephemeral tasks alike, unless the error is
   `ErrCeilingLaunchDeferred`. A session reused by the start keeps its claim.
@@ -422,7 +426,9 @@ last updated before the launch budget and the owner is not live. Lifecycle
 preparation and each launch phase have separate bounds, so the budget is
 `constants.SetupScriptTimeout` plus `constants.AgentLaunchTimeout` plus the
 five-minute allowance that the orphaned-session reconciliation already uses
-(30 minutes with default settings). A live owner is a session in `STARTING` or
+(30 minutes with default settings). The sum saturates at the maximum duration
+for accepted extreme preparation settings; arithmetic overflow must never
+shorten the owner's budget. A live owner is a session in `STARTING` or
 `RUNNING` with an `executors_running` row. A launch that is still preparing after
 the budget is treated as abandoned; the race rules below keep it from
 publishing over the new owner.
@@ -441,8 +447,10 @@ the caller's transaction. Its conditional update accepts exactly two rows:
 - a `creating` row whose claim is still the abandoned owner read by the same
   transaction.
 
-Physical evidence is a workspace path, container ID, sandbox ID, or a
-non-deleted `task_environment_repos` row. The update sets `creating`, stores the
+Physical evidence is a workspace path, container ID, sandbox ID, a
+non-deleted `task_environment_repos` row, or retained Kubernetes metadata even
+when control credentials were never recorded. Only a bare Kubernetes row with
+empty metadata is eligible. The update sets `creating`, stores the
 new owner, clears container and sandbox handles and their secret references, and
 updates `updated_at`. It keeps the environment ID, so the shared group pointer,
 sessions that reference the row, and recovery claims keep their identity.
@@ -467,6 +475,17 @@ Every caller runs after `taskCleanupBarrierLocked` and
 still fails the binding.
 
 ### Races
+
+PostgreSQL release, binding, launch re-election, and finalization share the
+transaction advisory namespace `task-environment-materialization:<environmentID>`.
+Identity-only queries discover the lock target; they do not authorize a mutable
+state transition. Acquire the owning task row before the environment lock, then
+read current status and materializer in a separate READ COMMITTED statement.
+Shared bindings acquire requester, group-owner, and environment-owner task rows
+in sorted order before any environment lock. Recheck identity after waiting and
+fail closed if it changed rather than extending the task lock set out of order.
+SQLite retains its existing single-writer serialization. Cleanup and recovery
+admission remain mandatory before a binding, re-election, or publication write.
 
 Exactly one conditional update wins. A binding that loses returns the current
 state error: `workspace_preparing` while the winner prepares. A launch that loses
@@ -526,3 +545,9 @@ second retry inside the same request is not part of this amendment.
   preservation on `ErrCeilingLaunchDeferred` and for reused sessions.
 - MCP handler tests cover the reset guidance for a `failed` environment with
   physical evidence.
+- PostgreSQL 16 and 18 run actual multi-connection lock-wait tests for release,
+  local/shared binding, launch re-election, and finalization. State and owner
+  replacements while blocked must be observed after admission. A refused former
+  owner's finalization must roll back its inventory deletion and replacement.
+  Shared-group ownership round trips through the real INTEGER schema on both
+  versions. CI guards against skipped or unmatched PostgreSQL 18 tests.

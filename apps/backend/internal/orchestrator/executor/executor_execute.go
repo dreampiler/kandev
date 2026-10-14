@@ -1986,6 +1986,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 	sessionLock.Lock()
 	defer sessionLock.Unlock()
 
+	sessionOwned := false
 	execution, err := func() (*TaskExecution, error) {
 		// Re-fetch the session under the lock so the fast-path check below sees
 		// any AgentExecutionID the previous holder just persisted. Without the
@@ -2001,6 +2002,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if session.TaskID != task.ID {
 			return nil, fmt.Errorf("session does not belong to task")
 		}
+		sessionOwned = true
 		if strings.TrimSpace(agentProfileID) == "" {
 			agentProfileID = strings.TrimSpace(session.ExecutionProfileID)
 			if agentProfileID == "" {
@@ -2323,7 +2325,7 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		}
 		return execution, finalizeErr
 	}()
-	if err != nil && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
+	if err != nil && sessionOwned && task != nil && !errors.Is(err, ErrExecutionAlreadyRunning) &&
 		(!isCancellableResumeContext(ctx) || ctx.Err() == nil) {
 		// Release while the session lock is still held so a losing launch
 		// cannot fail a claim a later same-session launch already elected.

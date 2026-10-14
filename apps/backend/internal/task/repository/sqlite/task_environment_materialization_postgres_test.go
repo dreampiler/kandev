@@ -18,7 +18,7 @@ import (
 // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6
 // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.7
 func TestPostgresMaterializationSerializesAndRechecksOwner(t *testing.T) {
-	for _, operation := range []string{"release", "launch_reelection", "binding_abandoned", "binding_failed", "shared_abandoned", "shared_failed", "finalize"} {
+	for _, operation := range []string{"release", "launch_reelection", "binding_abandoned", "binding_failed", "binding_observes_failed", "shared_abandoned", "shared_failed", "shared_observes_failed", "finalize"} {
 		t.Run(operation, func(t *testing.T) {
 			db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 			db.SetMaxOpenConns(4)
@@ -33,6 +33,12 @@ func TestPostgresMaterializationSerializesAndRechecksOwner(t *testing.T) {
 			const replacement = "pg-materialization-replacement"
 			if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: replacement, TaskID: owner.TaskID}); err != nil {
 				t.Fatal(err)
+			}
+			if operation == "finalize" {
+				if err := repo.CreateTaskEnvironmentRepo(ctx, &models.TaskEnvironmentRepo{ID: "pg-retained-inventory",
+					TaskEnvironmentID: owner.TaskEnvironmentID, RepositoryID: "pg-repository", WorktreePath: "/retained"}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			holder, err := db.BeginTxx(ctx, nil)
 			if err != nil {
@@ -61,8 +67,12 @@ func TestPostgresMaterializationSerializesAndRechecksOwner(t *testing.T) {
 			waitForMaterializationAdvisoryLock(t, ctx, db, owner.TaskEnvironmentID, finished)
 			// The independent connection changes the owner while the operation
 			// waits. Its earlier snapshot must never authorize a later write.
+			status, materializer := models.TaskEnvironmentStatusCreating, replacement
+			if operation == "binding_observes_failed" || operation == "shared_observes_failed" {
+				status, materializer = models.TaskEnvironmentStatusFailed, ""
+			}
 			if _, err := holder.ExecContext(ctx, db.Rebind(`UPDATE task_environments SET status = ?, materialization_session_id = ?, updated_at = ? WHERE id = ?`),
-				string(models.TaskEnvironmentStatusCreating), replacement, time.Now().UTC(), owner.TaskEnvironmentID); err != nil {
+				string(status), materializer, time.Now().UTC(), owner.TaskEnvironmentID); err != nil {
 				t.Fatal(err)
 			}
 			if err := holder.Commit(); err != nil {
@@ -80,8 +90,20 @@ func TestPostgresMaterializationSerializesAndRechecksOwner(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if current.Status != models.TaskEnvironmentStatusCreating || current.MaterializationSessionID != replacement {
+			if status == models.TaskEnvironmentStatusFailed {
+				materializer = "pg-retry"
+			}
+			if current.Status != models.TaskEnvironmentStatusCreating || current.MaterializationSessionID != materializer {
 				t.Fatalf("replacement claim changed: status=%q owner=%q", current.Status, current.MaterializationSessionID)
+			}
+			if operation == "finalize" {
+				inventory, err := repo.ListTaskEnvironmentRepos(ctx, owner.TaskEnvironmentID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(inventory) != 1 || inventory[0].ID != "pg-retained-inventory" || inventory[0].WorktreePath != "/retained" {
+					t.Fatalf("former owner's inventory write escaped rollback: %+v", inventory)
+				}
 			}
 		})
 	}
@@ -98,26 +120,8 @@ func seedPostgresMaterializationOperation(t *testing.T, repo *tasksqlite.Reposit
 		t.Fatal(err)
 	}
 	owner := &models.TaskSession{ID: "session-pg-materialization", TaskID: taskID}
-	if operation == "shared_abandoned" || operation == "shared_failed" {
-		if err := repo.CreateTask(ctx, &models.Task{ID: "task-pg-member", WorkspaceID: "ws-pg-materialization", Title: "Member"}); err != nil {
-			t.Fatal(err)
-		}
-		office, err := officesqlite.NewWithDB(sqlx.NewDb(repo.DB(), "pgx"), sqlx.NewDb(repo.DB(), "pgx"), nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := office.CreateWorkspaceGroup(ctx, &officemodels.WorkspaceGroup{ID: "pg-materialization-group", WorkspaceID: "ws-pg-materialization", OwnerTaskID: taskID, MaterializedKind: "local"}); err != nil {
-			t.Fatal(err)
-		}
-		for _, member := range []string{taskID, "task-pg-member"} {
-			if err := office.AddWorkspaceGroupMember(ctx, "pg-materialization-group", member, ""); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, owner,
-			&models.TaskEnvironment{TaskID: taskID, ExecutorType: string(models.ExecutorTypeLocal)}, "pg-materialization-group"); err != nil {
-			t.Fatal(err)
-		}
+	if operation == "shared_abandoned" || operation == "shared_failed" || operation == "shared_observes_failed" {
+		seedPostgresSharedMaterializer(t, repo, owner)
 	} else {
 		if err := repo.CreateTaskSessionWithWorkspaceBinding(ctx, owner, &models.TaskEnvironment{TaskID: taskID, ExecutorType: string(models.ExecutorTypeLocal)}); err != nil {
 			t.Fatal(err)
@@ -128,7 +132,7 @@ func seedPostgresMaterializationOperation(t *testing.T, repo *tasksqlite.Reposit
 			t.Fatalf("seed failed claim: changed=%v err=%v", changed, err)
 		}
 	}
-	if operation == "binding_abandoned" || operation == "shared_abandoned" {
+	if operation == "binding_abandoned" || operation == "shared_abandoned" || operation == "binding_observes_failed" || operation == "shared_observes_failed" {
 		if err := repo.UpdateTaskSessionState(ctx, owner.ID, models.TaskSessionStateFailed, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -150,23 +154,30 @@ func runPostgresMaterializationOperation(ctx context.Context, repo *tasksqlite.R
 			return errors.New("stale failed snapshot re-elected replacement claim")
 		}
 		return err
-	case "binding_abandoned", "binding_failed":
+	case "binding_abandoned", "binding_failed", "binding_observes_failed":
 		err := repo.CreateTaskSessionWithWorkspaceBinding(ctx, &models.TaskSession{ID: "pg-retry", TaskID: owner.TaskID},
 			&models.TaskEnvironment{TaskID: owner.TaskID, ExecutorType: string(models.ExecutorTypeLocal)})
+		if operation == "binding_observes_failed" {
+			return err
+		}
 		if !errors.Is(err, models.ErrWorkspacePreparing) {
 			return fmt.Errorf("binding error = %v, want preparing", err)
 		}
 		return nil
-	case "shared_abandoned", "shared_failed":
+	case "shared_abandoned", "shared_failed", "shared_observes_failed":
 		err := repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, &models.TaskSession{ID: "pg-retry", TaskID: "task-pg-member"},
 			&models.TaskEnvironment{TaskID: "task-pg-member", ExecutorType: string(models.ExecutorTypeLocal)}, "pg-materialization-group")
+		if operation == "shared_observes_failed" {
+			return err
+		}
 		if !errors.Is(err, models.ErrWorkspacePreparing) {
 			return fmt.Errorf("shared binding error = %v, want preparing", err)
 		}
 		return nil
 	case "finalize":
 		err := repo.FinalizeTaskEnvironmentMaterialization(ctx, &models.TaskEnvironment{ID: owner.TaskEnvironmentID, TaskID: owner.TaskID,
-			ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady}, nil, owner.ID)
+			ExecutorType: string(models.ExecutorTypeLocal), Status: models.TaskEnvironmentStatusReady},
+			[]*models.TaskEnvironmentRepo{{ID: "pg-stale-inventory", RepositoryID: "pg-repository", WorktreePath: "/stale-owner"}}, owner.ID)
 		if err == nil {
 			return errors.New("former owner finalized replacement claim")
 		}
@@ -198,5 +209,30 @@ func waitForMaterializationAdvisoryLock(t *testing.T, ctx context.Context, db *s
 			t.Fatal("environment advisory lock wait was not observed")
 		case <-ticker.C:
 		}
+	}
+}
+
+func seedPostgresSharedMaterializer(t *testing.T, repo *tasksqlite.Repository, owner *models.TaskSession) {
+	t.Helper()
+	ctx := context.Background()
+	taskID := owner.TaskID
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-pg-member", WorkspaceID: "ws-pg-materialization", Title: "Member"}); err != nil {
+		t.Fatal(err)
+	}
+	office, err := officesqlite.NewWithDB(sqlx.NewDb(repo.DB(), "pgx"), sqlx.NewDb(repo.DB(), "pgx"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := office.CreateWorkspaceGroup(ctx, &officemodels.WorkspaceGroup{ID: "pg-materialization-group", WorkspaceID: "ws-pg-materialization", OwnerTaskID: taskID, MaterializedKind: "local"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, member := range []string{taskID, "task-pg-member"} {
+		if err := office.AddWorkspaceGroupMember(ctx, "pg-materialization-group", member, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.CreateTaskSessionWithSharedGroupWorkspaceBinding(ctx, owner,
+		&models.TaskEnvironment{TaskID: taskID, ExecutorType: string(models.ExecutorTypeLocal)}, "pg-materialization-group"); err != nil {
+		t.Fatal(err)
 	}
 }

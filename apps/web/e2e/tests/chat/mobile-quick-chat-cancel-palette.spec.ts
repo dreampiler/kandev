@@ -86,7 +86,9 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await palette.getByRole("combobox").fill("cancel");
     const cancelOption = palette.getByRole("option").filter({ hasText: /Cancel Turn/i });
     await expect(cancelOption).toHaveCount(1);
-    expect((await cancelOption.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expect
+      .poll(async () => (await cancelOption.boundingBox())?.height ?? 0)
+      .toBeGreaterThanOrEqual(44);
     await cancelOption.tap();
 
     await expect(quickChat.getByTestId("cancel-agent-button")).toBeDisabled({ timeout: 5_000 });

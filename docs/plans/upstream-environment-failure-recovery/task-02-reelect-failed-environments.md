@@ -110,6 +110,9 @@ git diff --check
 
 ## Results
 
+These are historical contributor results. Current-head review remediation and
+hosted acceptance requirements are recorded in [the plan](plan.md#review-remediation-validation).
+
 - RED on the code after work order 01:
   - `TestWorkspaceBindingReelectsFailedEnvironmentWithoutEvidence` and
     `TestWorkspaceBindingConcurrentFailedReelectionHasOneOwner` failed with

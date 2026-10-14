@@ -128,7 +128,8 @@ points with existing test doubles. No browser scenario is added.
 
 ## Verification results
 
-Both work orders record their RED and GREEN tests.
+Both work orders record the contributor's historical RED and GREEN tests. Those
+results and Windows exclusions below are not current-head merge acceptance.
 
 - Some tests fail on Windows with and without this package and are excluded
   below:
@@ -140,6 +141,27 @@ Both work orders record their RED and GREEN tests.
 - `go vet`, `golangci-lint --new-from-rev`, `go build ./...`, the
   documentation catalog and specification checks, and the local
   `pr-docs.cjs` coverage check of the changed files pass.
+
+## Review remediation validation
+
+Permanent launch regressions cover foreign-task refusal and a committed election
+followed by a read failure. A hosted tests-first run demonstrated the foreign-task
+claim-release defect and five PostgreSQL paths returning without the required
+environment advisory lock. Shared cases exposed Go boolean parameters bound to
+the real PostgreSQL INTEGER ownership column before reaching the lock assertion.
+
+The remediation restricts release to validated task membership, serializes all
+materialization paths with task-before-environment locking, and uses the existing
+integer ownership encoder. Independent PostgreSQL holder, worker, and observer
+connections cover changed owners and changed states after waiting, including
+finalization inventory rollback. Both PostgreSQL 16 and 18 must execute these
+tests; PostgreSQL 18 has explicit RUN/PASS guards. A permanent duration test also
+covers saturation for extreme accepted preparation settings.
+
+Current-head acceptance requires hosted Go, real PostgreSQL 16/18, native Windows,
+actual frontend tests and build, all web E2E shards, native desktop, and Kubernetes
+commands. Skipped wrappers and historical results provide no coverage. The
+public executor guide describes empty-environment recovery and reset boundaries.
 
 ## Risks
 
