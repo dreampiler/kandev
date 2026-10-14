@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
@@ -178,15 +179,67 @@ func bootstrapFailureFor(execution *AgentExecution, err error) *BootstrapFailure
 		return existing
 	}
 	code := models.AgentErrorCauseCodeUnknown
-	if errors.Is(err, context.DeadlineExceeded) {
+	detail := bootstrapFailureDetail(code)
+	var startupFailure *routingerr.AgentStartupFailure
+	var managedFailure *routingerr.ManagedRuntimeStartupError
+	switch {
+	case errors.As(err, &startupFailure) && startupFailure != nil:
+		code = models.AgentErrorCauseCodeTransportUnavailable
+		detail = agentStartupFailureDetail(startupFailure)
+	case errors.As(err, &managedFailure) && managedFailure != nil:
+		code = models.AgentErrorCauseCodeTransportUnavailable
+		detail = managedRuntimeStartupFailureDetail(managedFailure)
+	case errors.Is(err, context.DeadlineExceeded):
 		code = models.AgentErrorCauseCodeTimeout
 	}
 	return &BootstrapFailure{
 		Operation: bootstrapOperation(execution),
 		Code:      code,
-		Detail:    bootstrapFailureDetail(code),
+		Detail:    detail,
 		Cause:     err,
 	}
+}
+
+// maxBootstrapCauseDetailBytes keeps the projected cause well under the durable
+// cause-detail budget (maxAgentErrorCauseDetailBytes = 1024) so the phase,
+// agent id, and cause excerpt all survive normalization.
+const maxBootstrapCauseDetailBytes = 512
+
+// agentStartupFailureDetail turns trusted process/ACP-init evidence into a
+// bounded detail. The raw diagnostic stays only in Cause for logs; the durable
+// projection carries the phase, a safe agent identifier, and a sanitized cause.
+func agentStartupFailureDetail(failure *routingerr.AgentStartupFailure) string {
+	parts := []string{"agent startup failed", "phase=" + string(failure.Phase)}
+	if agent := safeBootstrapSelector(failure.ProviderID); agent != "" {
+		parts = append(parts, "agent="+agent)
+	}
+	if cause := boundedBootstrapCause(failure.Diagnostic); cause != "" {
+		parts = append(parts, cause)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func managedRuntimeStartupFailureDetail(failure *routingerr.ManagedRuntimeStartupError) string {
+	parts := []string{"managed runtime startup failed", "code=" + string(failure.Code)}
+	if details := boundedBootstrapCause(failure.Details); details != "" {
+		parts = append(parts, details)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func boundedBootstrapCause(value string) string {
+	return truncateBootstrapDetail(routingerr.Sanitize(value), maxBootstrapCauseDetailBytes)
+}
+
+func truncateBootstrapDetail(value string, maxBytes int) string {
+	if len(value) <= maxBytes {
+		return value
+	}
+	value = value[:maxBytes]
+	for len(value) > 0 && !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
 }
 
 func bootstrapFailureDetail(code string) string {
