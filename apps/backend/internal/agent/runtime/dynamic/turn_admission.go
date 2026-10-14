@@ -13,6 +13,9 @@ func (e *Engine) WithTurnAdmission(ctx context.Context, profile Profile, current
 	if !found {
 		return ErrNoEligibleCandidate
 	}
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
+	score, checkErr := checker.CheckAdmission(ctx, candidate, current.SessionID, e.now())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, exists, err := e.loadStateLocked(ctx, current.SessionID)
@@ -22,8 +25,7 @@ func (e *Engine) WithTurnAdmission(ctx context.Context, profile Profile, current
 	if !exists || state.Generation != current.Generation {
 		return ErrStaleGeneration
 	}
-	score, err := checker.CheckAdmission(ctx, candidate, current.SessionID, e.now())
-	if err != nil || score.AdmissionReason == "" {
+	if checkErr != nil || score.AdmissionReason == "" {
 		return claim()
 	}
 	return e.deferTurnAdmission(ctx, profile, state, score)

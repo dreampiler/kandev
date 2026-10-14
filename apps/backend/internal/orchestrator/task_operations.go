@@ -9787,28 +9787,30 @@ func (s *Service) claimPromptableSessionForIdentity(
 	taskID, sessionID string,
 	reservation *queuedDispatchReservation,
 ) (models.PromptableTaskSessionClaim, error) {
-
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return models.PromptableTaskSessionClaim{}, err
-	}
 	var claim models.PromptableTaskSessionClaim
-	var claimErr error
-	err = s.withProviderTurnAdmission(ctx, session, func() error {
-		if reservation == nil || reservation.identity.SessionIncarnationID == "" {
-			claim, claimErr = s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
-			return claimErr
-		}
-		claim, claimErr = s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+	var err error
+	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
+		claim, err = s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+	} else {
+		claim, err = s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
 			ctx,
 			reservation.identity.TaskID,
 			reservation.identity.SessionID,
 			reservation.identity.SessionIncarnationID,
 		)
-		return claimErr
-	})
-	return claim, err
-
+	}
+	if err != nil || claim.Status != models.PromptableTaskSessionClaimed || s.profileExecutionResolver == nil {
+		return claim, err
+	}
+	session, err := s.loadClaimedLifecycleSession(ctx, sessionID, reservation)
+	if err == nil {
+		err = s.withProviderTurnAdmission(ctx, session, func() error { return nil })
+	}
+	if err != nil {
+		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
+		return models.PromptableTaskSessionClaim{}, err
+	}
+	return claim, nil
 }
 
 func (s *Service) restoreLifecycleClaimForReservation(

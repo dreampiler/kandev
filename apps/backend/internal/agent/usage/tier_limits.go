@@ -335,10 +335,15 @@ func MergeTierLimits(base, next TierLimits) TierLimits {
 	}
 	base.Windows = append([]LimitBudget(nil), base.Windows...)
 	for _, b := range next.Windows {
-		b.Learned = next.Learned
+		b.Learned = b.Learned || next.Learned
 		found := false
 		for i, old := range base.Windows {
 			if old.Key() == b.Key() {
+				if b.Value == nil {
+					b.Value = old.Value
+					b.Learned = old.Learned
+					b.WindowEstimated = old.WindowEstimated
+				}
 				base.Windows[i] = b
 				found = true
 				break

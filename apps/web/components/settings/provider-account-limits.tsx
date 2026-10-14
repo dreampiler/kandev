@@ -9,7 +9,11 @@ import type { useProviderLimits } from "@/hooks/domains/settings/use-provider-li
 import type { BillingTier, ProviderAccountLimit } from "@/lib/api/domains/provider-limits-api";
 import { settingsActionClassName } from "./settings-control";
 import { ProviderTierEditor } from "./provider-tier-editor";
-import { BILLING_TIERS, TIER_LABELS } from "@/lib/settings/provider-tier-limits";
+import {
+  BILLING_TIERS,
+  TIER_LABELS,
+  getProviderTierState,
+} from "@/lib/settings/provider-tier-limits";
 import { ProviderAccountOptions, ProviderProfileTiers } from "./provider-account-options";
 
 export function ProviderAccountLimits({
@@ -69,7 +73,7 @@ export function ProviderAccountLimits({
             key={tier}
             accountId={account.account_id}
             tier={tier}
-            state={account.tiers[tier]}
+            state={getProviderTierState(account, tier)}
             override={draft.tiers[tier] ?? {}}
             onChange={(patch) => updateTier(tier, patch)}
             disabled={status === "saving"}

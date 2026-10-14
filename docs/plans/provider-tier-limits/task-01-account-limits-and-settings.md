@@ -71,4 +71,43 @@ node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit
   Exit 0 after the standard typecheck exited 134 at its heap limit.
 ```
 
-No independent review, merge, installation, or natural-error learning readback has occurred. PR2 will change learning to owner > learned > defaults, add scope-specific daily counts, and learn groups only from unambiguous classified-limit evidence; congestion and unclassified failures will not learn. The existing response-count estimate provenance remains visible. The overall owner outcome remains outstanding.
+At the initial PR handoff, independent review, merge, installation, and natural-error learning readback were outstanding. PR2 will change learning to owner > learned > defaults, add scope-specific daily counts, and learn groups only from unambiguous classified-limit evidence; congestion and unclassified failures will not learn. The existing response-count estimate provenance remains visible. The overall owner outcome remains outstanding.
+
+## PR1 review remediation (2026-10-14)
+
+The reviewed PR1 head was `dbf97a73cc`. Fork main `c6b90cd1c7` was incorporated by an ordinary merge, with normal hooks, before remediation. The six reproduced defects were fixed without changing provider values, route ordering, settings permissions, or the PR2 learning scope.
+
+| Finding | Disposition |
+| --- | --- |
+| fd358b0e | Not reproduced, nonblocking. `base_schema.go:48` calls `initUsageLimitObservationsSchema` before `runMigrations` at line 63. Fresh initialization, observation-field round-trip/replay, and an existing-row legacy-schema upgrade all passed. No production migration change was necessary. |
+| 33f6d1c5 | Preserve each window's learned provenance and its 5% reserve. An explicit owner allowance replaces learned provenance. |
+| d8e25beb | Atomically claim the lifecycle session before reading its route for admission. Busy/inactive claims do not read admission inputs; failed admission restores the claim. |
+| 1f7dfa4e | Serialize final capacity reads and claims with a separate admission mutex, perform the read outside the engine state mutex, and recheck generation under the state mutex. |
+| df4cf385 | Unit/reset edits retain a blank inherited allowance. Backend window merging preserves the inherited allowance and provenance when the owner changes rules only. |
+| 9b3810ed | Publish the authoritative server provider snapshot after account saves. Missing saved-account evidence rejects the save. Legacy responses that omit accounts still preserve account editors. |
+| afa4b2ee | Supply an editable empty tier state when a response omits a tier. |
+
+Red evidence covered lost window provenance, lost rule-only inheritance, engine-lock blocking during final admission, pre-claim session reads, and both save-response defects. The first blocked-admission fixture also blocked initial selection; it timed out in fixture setup, was corrected to block final admission only, and then reproduced the intended lock defect.
+
+Targeted green checks:
+
+```text
+go test -trimpath -race -p 2 -timeout 2m ./internal/agent/usage ./internal/agent/runtime/dynamic ./internal/orchestrator ./internal/task/repository/sqlite -run 'TestProviderTier|TestUsageLimitObservationsRoundTrip' -count=1
+  Exit 0; all four selected packages passed.
+go test -p 2 -timeout 2m ./internal/task/repository/sqlite -run '^TestUsageLimitObservationsLegacyUpgrade$' -count=1
+  Exit 0; old-schema rows survived the actual initialization/upgrade path. Process-local GOMAXPROCS=2 and GOFLAGS=-p=2 were used. The preceding race variant stalled before an observed test-binary launch and was stopped; it is not a PASS claim.
+go build -p 2 ./internal/agent/usage ./internal/agent/runtime/dynamic ./internal/orchestrator ./internal/task/repository/sqlite
+  Exit 0.
+go vet -p 2 ./internal/agent/usage ./internal/agent/runtime/dynamic ./internal/orchestrator ./internal/task/repository/sqlite
+  Exit 0.
+golangci-lint run --allow-serial-runners --new-from-rev=dbf97a73cc3bc43ccb401861632687b154eab575 --timeout=8m --concurrency=2 ./internal/agent/usage ./internal/agent/runtime/dynamic ./internal/orchestrator ./internal/task/repository/sqlite
+  Exit 0; zero issues. The first 5-minute run reported zero issues but exited 1 on timeout and was not treated as PASS.
+golangci-lint run --allow-serial-runners --new-from-rev=dbf97a73cc3bc43ccb401861632687b154eab575 --timeout=8m --concurrency=2 ./internal/task/repository/sqlite
+  Exit 0; zero issues after adding the legacy-upgrade companion case.
+pnpm exec vitest run hooks/domains/settings/use-provider-limits.test.ts lib/settings/provider-tier-limits.test.ts components/settings/provider-limits-card.test.tsx
+  Exit 0; three files, nine cases.
+node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit
+  Exit 0.
+```
+
+Changed-file ESLint, `pnpm run i18n:check`, the specification catalog, and specification lint passed with exit 0. UI changes only normalize state and draft data in the existing shared desktop/phone components; layout, touch targets, scrolling, and navigation are unchanged, so targeted helper/hook and existing component coverage satisfy this remediation's mobile scope. Public documentation already describes blank inheritance and the learned reserve; no public contract or copy changed. Normal commit/push receipts belong in the controller handoff and task plan. Controller review of the new delta and merge authorization remain outstanding; this session does not merge or signal workflow completion.

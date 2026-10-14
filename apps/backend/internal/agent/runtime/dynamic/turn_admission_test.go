@@ -13,6 +13,64 @@ type mutableAdmissionUsage struct {
 	full bool
 }
 
+type blockedAdmissionUsage struct {
+	fixedUsage
+	entered chan struct{}
+	release chan struct{}
+	block   bool
+}
+
+func (u *blockedAdmissionUsage) CheckAdmission(ctx context.Context, _ Candidate, _ string, _ time.Time) (PaceScore, error) {
+	if !u.block {
+		return PaceScore{}, nil
+	}
+	close(u.entered)
+	select {
+	case <-u.release:
+		return PaceScore{}, nil
+	case <-ctx.Done():
+		return PaceScore{}, ctx.Err()
+	}
+}
+
+func TestProviderTierTurnAdmissionRechecksGenerationWithoutHoldingStateLock(t *testing.T) {
+	u := &blockedAdmissionUsage{entered: make(chan struct{}), release: make(chan struct{})}
+	e := NewEngine(WithUsageSnapshotProvider(u))
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{{ID: "first", Enabled: true}}}
+	decision, err := e.Select("session", profile, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.block = true
+	done := make(chan error, 1)
+	claimed := false
+	go func() {
+		done <- e.WithTurnAdmission(context.Background(), profile, decision, func() error { claimed = true; return nil })
+	}()
+	<-u.entered
+	replaced := make(chan struct{})
+	go func() {
+		e.mu.Lock()
+		state := e.states[decision.SessionID]
+		state.Generation++
+		e.states[decision.SessionID] = state
+		e.mu.Unlock()
+		close(replaced)
+	}()
+	select {
+	case <-replaced:
+	case <-time.After(time.Second):
+		close(u.release)
+		<-done
+		<-replaced
+		t.Fatal("admission I/O held the engine state lock")
+	}
+	close(u.release)
+	if err := <-done; !errors.Is(err, ErrStaleGeneration) || claimed {
+		t.Fatalf("stale admission = %v, claimed = %v", err, claimed)
+	}
+}
+
 func TestProviderTierExhaustionSkipsWithoutReordering(t *testing.T) {
 	engine := NewEngine(WithUsageSnapshotProvider(fixedUsage{
 		"first": {AdmissionReason: "limit_daily", AdmissionRetryAt: time.Now().Add(time.Hour)},

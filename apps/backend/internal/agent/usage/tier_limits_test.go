@@ -25,6 +25,33 @@ func TestProviderTierOwnerOverrideKeepsItsFullAllowance(t *testing.T) {
 	}
 }
 
+func TestProviderTierMergePreservesWindowLearning(t *testing.T) {
+	now := time.Now()
+	learned := TierLimits{Windows: []LimitBudget{{Window: "5h", Unit: "tokens", Value: limitNumber(100), Reset: "rolling", Learned: true}}}
+	effective := MergeTierLimits(TierLimits{}, learned)
+	if !effective.Windows[0].Learned {
+		t.Fatal("merging a window discarded its learned provenance")
+	}
+	if got := EvaluateTierLimits(effective, LimitUsage{Windows: map[string]float64{"5h": 95}}, now); got.Reason != "limit_window" {
+		t.Fatalf("learned window lost its reserve: %+v", got)
+	}
+	owner := TierLimits{Windows: []LimitBudget{{Window: "5h", Unit: "tokens", Value: limitNumber(100), Reset: "rolling"}}}
+	effective = MergeTierLimits(effective, owner)
+	if got := EvaluateTierLimits(effective, LimitUsage{Windows: map[string]float64{"5h": 95}}, now); got.Reason != "" || effective.Windows[0].Learned {
+		t.Fatalf("owner window must replace learned provenance and reserve: %+v", got)
+	}
+}
+
+func TestProviderTierWindowRulesInheritAllowance(t *testing.T) {
+	base := TierLimits{Windows: []LimitBudget{{Window: "5h", Unit: "tokens", Value: limitNumber(100), Reset: "rolling", Learned: true}}}
+	owner := TierLimits{Windows: []LimitBudget{{Window: "5h", Unit: "tokens", Reset: "utc"}}}
+	effective := MergeTierLimits(base, owner)
+	budget := effective.Windows[0]
+	if budget.Value == nil || *budget.Value != 100 || !budget.Learned || budget.Reset != "utc" {
+		t.Fatalf("rule-only owner edit discarded inherited allowance: %+v", budget)
+	}
+}
+
 func TestProviderTierUnknownLearningRetainsWindowUncertainty(t *testing.T) {
 	used := LimitUsage{RequestsDay: 80, Windows: map[string]float64{"5h": 500}}
 	learned := LearnTierLimits(TierLimits{}, "daily", used)

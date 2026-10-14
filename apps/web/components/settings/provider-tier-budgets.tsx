@@ -11,6 +11,7 @@ import type {
   TierLimits,
 } from "@/lib/api/domains/provider-limits-api";
 import { settingsControlClassName } from "./settings-control";
+import { budgetKey, updateBudgetOverride } from "@/lib/settings/provider-tier-limits";
 
 const WINDOW_LABELS = {
   "5h": "agents:providerTierFiveHours",
@@ -39,10 +40,6 @@ type Props = {
   onChange: (patch: Partial<TierLimits>) => void;
 };
 
-function budgetKey(budget: LimitBudget) {
-  return `${budget.window}:${budget.scope ?? ""}`;
-}
-
 export function ProviderTierBudgets({ prefix, tier, state, override, onChange }: Props) {
   const periods: LimitBudget["window"][] =
     tier === "paid" ? ["day", "month"] : ["5h", "week", "month"];
@@ -55,16 +52,7 @@ export function ProviderTierBudgets({ prefix, tier, state, override, onChange }:
         reset: tier === "paid" ? "utc" : "provider",
       });
   const update = (budget: LimitBudget, patch: Partial<LimitBudget>, clear = false) => {
-    const windows = (override.windows ?? []).filter(
-      (entry) => budgetKey(entry) !== budgetKey(budget),
-    );
-    if (!clear)
-      windows.push({
-        ...budget,
-        ...override.windows?.find((entry) => budgetKey(entry) === budgetKey(budget)),
-        ...patch,
-      });
-    onChange({ windows });
+    onChange({ windows: updateBudgetOverride(override.windows ?? [], budget, patch, clear) });
   };
   return (
     <>

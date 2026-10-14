@@ -47,16 +47,19 @@ func WithPersistence(persistence Persistence) EngineOption {
 }
 
 type Engine struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	circuits    *CircuitRegistry
-	states      map[string]RouteState
-	persistence Persistence
-	loader      StateLoader
-	probes      map[string][]ProbeLease
-	usage       UsageSnapshotProvider
-	history     SelectionHistory
-	pick        func(n int) int
+	// turnAdmissionMu serializes capacity reads and final turn claims without
+	// preventing route state changes during the read.
+	turnAdmissionMu sync.Mutex
+	mu              sync.Mutex
+	now             func() time.Time
+	circuits        *CircuitRegistry
+	states          map[string]RouteState
+	persistence     Persistence
+	loader          StateLoader
+	probes          map[string][]ProbeLease
+	usage           UsageSnapshotProvider
+	history         SelectionHistory
+	pick            func(n int) int
 	// recentPicks holds selections this process made, keyed by logical
 	// profile, until the durable history reflects them.
 	recentPicks map[string]map[string]time.Time

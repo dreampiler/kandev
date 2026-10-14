@@ -50,11 +50,17 @@ describe("provider limit saves", () => {
     });
   });
 
-  it("updates an account without replacing monthly reset or paid block controls", async () => {
+  it("publishes server state after an account save", async () => {
     const updated = { ...account, overrides: { tiers: { free: { requests_per_day: 42 } } } };
     const original = { ...current, block_until: legacyRequest.block_until };
     api.listProviderLimits.mockResolvedValue({ providers: [original] });
-    api.updateProviderLimit.mockResolvedValue({ ...current, accounts: [updated] });
+    const saved = {
+      ...current,
+      profile_count: 2,
+      next_monthly_reset_source: "usage" as const,
+      accounts: [updated],
+    };
+    api.updateProviderLimit.mockResolvedValue(saved);
     const { result } = renderHook(() => useProviderLimits());
     await waitFor(() => expect(result.current.state.status).toBe("ready"));
     await act(() =>
@@ -68,7 +74,24 @@ describe("provider limit saves", () => {
     );
     expect(result.current.state).toEqual({
       status: "ready",
-      providers: [{ ...original, accounts: [updated] }],
+      providers: [saved],
     });
+  });
+
+  it("rejects an account save response that omits the saved account", async () => {
+    api.listProviderLimits.mockResolvedValue({ providers: [current] });
+    api.updateProviderLimit.mockResolvedValue({ ...current, accounts: [] });
+    const { result } = renderHook(() => useProviderLimits());
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+    await act(async () => {
+      await expect(
+        result.current.save(current.provider, {
+          ...legacyRequest,
+          account_id: account.account_id,
+          account_limits: account.overrides,
+        }),
+      ).rejects.toThrow();
+    });
+    expect(result.current.state).toEqual({ status: "ready", providers: [current] });
   });
 });
