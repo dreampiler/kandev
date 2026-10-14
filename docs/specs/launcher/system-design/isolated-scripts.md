@@ -110,7 +110,9 @@ fail closed. Teardown refuses guarded production ports unless `-Force` is given.
 The launcher reports an actionable error before any write when the home fails
 the safety guard or a requested port is guarded. Web prerequisites are checked
 before backend startup. `-Install` runs the Unix-oriented root recipes through
-Git Bash on Windows. A fatal web-launch error tears down the backend; teardown
-leaves no listener owned by the verified instance. The launcher returns once
+Git Bash on Windows. If no new listener appears within `-Timeout`, the launcher
+stops the `cmd.exe` wrapper and its direct children and fails. A fatal
+web-launch error tears down the backend; teardown leaves no listener owned by
+the verified instance. The launcher returns once
 the backend is healthy and leaves it detached, so a non-interactive caller
 tears it down in the same run.

@@ -31,8 +31,9 @@ Mirror the Unix helper flow in `scripts/dev-isolated.ps1`,
 `scripts/kandev-kill.ps1`, and `scripts/kandev-instances.ps1`. Reuse the native
 launcher binaries and the `dev` profile via `make -C apps/backend build`. Keep
 the numeric backend pidfile and record process start times and the isolated home
-in sidecars. Launch Vite directly through Node so its pidfile names the actual
-listener; verify process identity before terminating either process tree.
+in sidecars. Launch the backend and Vite inside a `cmd.exe` wrapper and record
+the listener created by this launch on each port, so the pidfiles name the
+actual listeners; verify process identity before terminating either process tree.
 Default the Vite host to `127.0.0.1` and refuse a resolved home that is a
 live-state boundary before any write.
 
@@ -44,7 +45,7 @@ live-state boundary before any write.
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.2` | Unique default home, isolated `KANDEV_HOME_DIR`, `HOME`, `USERPROFILE`, and fresh `data` database |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.3` | `Resolve-SafeIsolatedHome` refuses live-home descendants, reparse aliases, drive/workspace boundaries before any write |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.4` | `-WebHost` defaults to `127.0.0.1`; the Go backend proxies to the selected Vite host |
-| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Direct Vite PID, start-time verification, and full-tree teardown after backend exit |
+| `AC-LAUNCHER-ISOLATED-SCRIPTS-001.5` | Port-discovered Vite listener PID, start-time verification, and full-tree teardown after backend exit |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.6` | `kandev-kill.ps1` guarded-port refusal unless `-Force` |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.7` | Recorded home and pipeline-friendly `-Raw` listing |
 | `AC-LAUNCHER-ISOLATED-SCRIPTS-001.8` | Backend and Vite child environments are allowlisted; backend config discovery is disabled |
