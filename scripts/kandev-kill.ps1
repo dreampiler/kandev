@@ -15,9 +15,9 @@
     - Refuses to act unless you explicitly pass a port or a -Pidfile.
     - Stops only a development backend named kandev-dev.exe. A process named
       kandev.exe or agentctl.exe, or running from an operational path, is
-      never stopped.
+      never stopped, even with -Force.
     - GUARDED PORTS (the well-known production ports: 38429 backend, 37429 web,
-      39429 agentctl) are protected: killing one
+      39429 agentctl) are protected: killing a development process on one
       requires an explicit -Force. The guard is applied to the RESOLVED backend
       ports, so it holds no matter HOW you reached it - by <port> OR via a
       -Pidfile whose process happens to listen on a guarded port.
@@ -39,7 +39,8 @@
   Skip the confirmation prompt (for scripted teardown).
 
 .PARAMETER Force
-  Allow terminating a guarded production port. Use with care.
+  Allow terminating a development process on a guarded production port. It
+  never allows stopping kandev.exe, agentctl.exe, or an operational path.
 
 .EXAMPLE
   scripts\kandev-kill.ps1 48429 -Yes
