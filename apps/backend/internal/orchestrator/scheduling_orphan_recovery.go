@@ -28,6 +28,14 @@ type schedulingOrphanTurnChecker interface {
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 }
 
+// schedulingOrphanSessionLister is the narrow repository capability this pass
+// needs to see an IDLE session, which the shared active-session lookup
+// excludes. It is reached through a type assertion on s.repo rather than
+// widening GetActiveTaskSessionByTaskID.
+type schedulingOrphanSessionLister interface {
+	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+}
+
 // reconcileSchedulingOrphansOnStartup restarts automatic step starts that a
 // backend restart interrupted before they produced a running session
 // (REQ-TASKS-RESTART-ORPHAN-SESSIONS-003). Such a task is in SCHEDULING with no
@@ -136,9 +144,9 @@ func schedulingOrphanHasLifecycleToken(task *models.Task) bool {
 // repaired. Any other active session state means a launch is already live and
 // is left alone.
 func (s *Service) recoverSchedulingOrphan(ctx context.Context, task *models.Task) {
-	session, err := s.repo.GetActiveTaskSessionByTaskID(ctx, task.ID)
-	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
-		s.logger.Warn(schedulingOrphanEvent+": failed to read the active session",
+	session, err := s.schedulingOrphanRecoverableSession(ctx, task.ID)
+	if err != nil {
+		s.logger.Warn(schedulingOrphanEvent+": failed to read the recoverable session",
 			zap.String("task_id", task.ID), zap.Error(err))
 		return
 	}
@@ -165,6 +173,36 @@ func (s *Service) recoverSchedulingOrphan(ctx context.Context, task *models.Task
 		return
 	}
 	s.reenterSchedulingOrphanStep(ctx, task, session)
+}
+
+// schedulingOrphanRecoverableSession returns the session this pass should act
+// on: the task's active session when one exists, otherwise the most recent
+// resumable session. GetActiveTaskSessionByTaskID deliberately excludes IDLE
+// (an office session between turns is not a task's active session), but this
+// pass treats IDLE as resumable, so it resolves that state separately rather
+// than widening the shared active-session lookup.
+func (s *Service) schedulingOrphanRecoverableSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	active, err := s.repo.GetActiveTaskSessionByTaskID(ctx, taskID)
+	if err == nil && active != nil {
+		return active, nil
+	}
+	if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+		return nil, err
+	}
+	lister, ok := s.repo.(schedulingOrphanSessionLister)
+	if !ok {
+		return nil, nil
+	}
+	sessions, err := lister.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, candidate := range sessions {
+		if candidate != nil && candidate.State == models.TaskSessionStateIdle {
+			return candidate, nil
+		}
+	}
+	return nil, nil
 }
 
 // sessionHasTurnForStep checks if the session has a turn for the given step.
