@@ -5672,10 +5672,45 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
 	if err := s.executor.Stop(ctx, sessionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			// The session has no live execution to stop (already stopped, or its
+			// runtime was torn down earlier). Treat the stop as an idempotent
+			// settle rather than a not-found failure, and close the session's
+			// open turn through the turn service so a task-wide idle check (for
+			// example workspace-source attach) is not blocked by an
+			// execution-less open turn. A live execution or another owner's
+			// cleanup is never force-completed here, and the existing session
+			// row/state is preserved.
+			s.settleExecutionLessSessionStop(ctx, sessionID)
+			return nil
+		}
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
 	return nil
+}
+
+// settleExecutionLessSessionStop closes the open turns of a session that has no
+// live execution. Stopping such a session is a no-op settle; it must not leave
+// an execution-less turn active for the task-wide idle check.
+func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if !errors.Is(err, models.ErrTaskSessionNotFound) {
+			s.logger.Warn("failed to load session for execution-less stop settle",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	if session == nil {
+		return
+	}
+	if err := s.completeTurnForTaskSessionChecked(ctx, session.TaskID, sessionID); err != nil {
+		s.logger.Warn("failed to settle turn for execution-less session stop",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 // StopSessionSynchronously is the internal cleanup variant of StopSession. It
