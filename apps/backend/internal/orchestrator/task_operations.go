@@ -750,6 +750,11 @@ type startCreatedSessionOptions struct {
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// automatic marks a server-classified automatic launch (an agent/MCP-
+	// initiated start that is not an autoStart). It selects the automatic class
+	// for the ceiling and memory guard without changing the launch's
+	// explicit/manual creation authority.
+	automatic bool
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -824,9 +829,11 @@ func (s *Service) startCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
-	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
+	ceilingOrigin := ceilingLaunchOrigin(originFromAutoStart(autoStart), options.automatic)
+	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, ceilingOrigin, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, session.AgentProfileID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, session.AgentProfileID,
+		ceilingOrigin, startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -4649,26 +4656,32 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
 	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
-		return fmt.Errorf(
-			"execution %s teardown is already owned for session %s",
-			executionID,
-			sessionID,
-		)
+		// A concurrent lifecycle path (for example a provider-failure cleanup)
+		// may already own this exact execution's teardown. A completed claim
+		// means the prompt-unready execution is already stopped, so skip the
+		// duplicate stop and continue; only an unfinished owner is a hard error.
+		if claim, ok := s.executionTeardownClaimFor(sessionID, executionID); !ok || !claim.cleanupCompleted {
+			return fmt.Errorf(
+				"execution %s teardown is already owned for session %s",
+				executionID,
+				sessionID,
+			)
+		}
+	} else {
+		s.logger.Warn("stopping prompt-unready agent execution before resume",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(cause))
+		cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
+		defer cancelCleanup()
+		if s.lspLeases != nil {
+			s.lspLeases.StopLSPLeasesForExecution(executionID)
+		}
+		if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
+			return err
+		}
+		s.markExecutionFailed(sessionID, executionID)
 	}
-
-	s.logger.Warn("stopping prompt-unready agent execution before resume",
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", executionID),
-		zap.Error(cause))
-	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), cancellationOperationTTL)
-	defer cancelCleanup()
-	if s.lspLeases != nil {
-		s.lspLeases.StopLSPLeasesForExecution(executionID)
-	}
-	if err := s.executor.StopExecution(cleanupCtx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
-		return err
-	}
-	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	taskID := ""
 	if refreshed != nil {
@@ -5666,10 +5679,82 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
 	if err := s.executor.Stop(ctx, sessionID, reason, force); err != nil {
+		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			settled, cause := s.settleExecutionLessSessionStop(ctx, sessionID)
+			if settled {
+				// The session has no live execution and its open turn is closed:
+				// the stop is an idempotent settle, not a not-found failure.
+				return nil
+			}
+			if cause != nil {
+				// A lookup or turn-settlement failure: surface it instead of a
+				// false success.
+				return cause
+			}
+		}
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
 	return nil
+}
+
+// settleExecutionLessSessionStop closes the single open turn of a session that
+// has no live execution and reports whether the stop was settled. It reuses the
+// turn service's expected-turn-identity settlement so a concurrent launch or a
+// different successor turn is never swept. A session whose state still shows a
+// launch or run in flight (STARTING/RUNNING) is not settled — its execution may
+// simply not be registered yet — so the caller returns the original error and
+// the turn is left alone (settled=false, cause=nil). A turn-settlement or lookup
+// failure is returned as cause, never swallowed as success. A live execution or
+// another owner's cleanup is never force-completed here, and the existing
+// session row/state is preserved.
+func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) (settled bool, cause error) {
+	// Capture the open turn first so a successor opened between this read and the
+	// state read below cannot later be treated as the expected turn. The state
+	// read then gates every path - including when there is no open turn - so a
+	// launching/running session is never settled as a success, and the
+	// expected-turn settlement fails closed if the active turn changed.
+	var turn *models.Turn
+	if s.turnService != nil {
+		active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			if !isNoActiveTurnError(err) {
+				return false, err
+			}
+		} else {
+			turn = active
+		}
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			// No session row: nothing is left to block a task-wide idle check.
+			return true, nil
+		}
+		return false, err
+	}
+	if session == nil {
+		return true, nil
+	}
+	switch session.State {
+	case models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateCancelled:
+		// A settled or terminal session with no live execution: safe to settle.
+	default:
+		// CREATED/STARTING/RUNNING/IDLE (or any future state): a launch or run
+		// may be in flight and the execution may simply not be registered yet, so
+		// return the original error and leave any turn alone.
+		return false, nil
+	}
+	if turn == nil {
+		return true, nil
+	}
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, session.TaskID, sessionID, turn.ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StopSessionSynchronously is the internal cleanup variant of StopSession. It

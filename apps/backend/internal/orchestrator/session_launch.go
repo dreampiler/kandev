@@ -971,7 +971,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{}
+	options := startCreatedSessionOptions{automatic: req.Automatic}
 	if !req.NoInitialPrompt {
 		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
 			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
@@ -1124,10 +1124,17 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
+	if req == nil {
+		return launchOriginManual
+	}
+	// A server-classified automatic launch (an agent/MCP-initiated resume or
+	// start) is admitted as automatic even though it is not an autoStart, so it
+	// is subject to the session ceiling and the host-memory guard instead of
+	// riding the manual override. Only the server-side handlers set Automatic.
+	if req.Automatic || req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return launchOriginAutomatic
 	}
-	return originFromAutoStart(req != nil && req.AutoStart)
+	return originFromAutoStart(req.AutoStart)
 }
 
 func (s *Service) deferredLaunchResponse(
@@ -1351,6 +1358,11 @@ type RecoverSessionOptions struct {
 	IdempotencyKey string
 	SettingsPolicy executor.ResumeSettingsPolicy
 	ErrorStamp     string
+	// Automatic marks a server-driven recovery (automatic continue_from_history
+	// after a restart-interrupted turn, or a route-action continuation) so its
+	// resume and continuation prompt are admitted as automatic instead of
+	// riding the manual override. A human-initiated recovery leaves it false.
+	Automatic bool
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1495,10 +1507,12 @@ func (s *Service) RecoverSessionWithOptions(
 	// action_required: the recovery block this action settles can only be
 	// settled here, so refusing the route as dynamic_route_pending would leave
 	// the session with no admissible recovery path.
+	reclaimedRouteGeneration, reclaimedRoute := int64(0), false
 	if generation, reclaimed := s.reclaimActionRequiredRouteForRecovery(launchCtx, sessionID, action); reclaimed {
+		reclaimedRouteGeneration, reclaimedRoute = generation, true
 		defer func() {
 			if err != nil {
-				s.restoreRouteAfterFailedRecovery(ctx, sessionID, generation)
+				s.restoreRouteAfterFailedRecovery(ctx, sessionID, reclaimedRouteGeneration)
 			}
 		}()
 	}
@@ -1517,7 +1531,25 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		Automatic:                        options.Automatic,
 	})
+	if err == nil && resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// The resume was deferred by the session ceiling, so the launch has not
+		// happened. Settle the continuation checkpoint uncertain exactly like
+		// the other failed continuation paths, never settle the recovery
+		// admission as ready, and leave the still-open recovery block as the
+		// operator surface.
+		if settleErr := s.settleCeilingDeferredRecovery(ctx, launchCtx, checkpoint, recoveryAdmission); settleErr != nil {
+			return nil, normalizeRecoverSessionError(settleErr)
+		}
+		if reclaimedRoute {
+			// The launch did not happen, so do not keep the reclaimed route
+			// claim with no runtime behind it. Restoring it lets a later
+			// recovery reclaim the same route instead of stranding it.
+			s.restoreRouteAfterFailedRecovery(ctx, sessionID, reclaimedRouteGeneration)
+		}
+		return resp, nil
+	}
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
@@ -1553,7 +1585,8 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, normalizeRecoverSessionError(err)
 	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true,
+		ceilingLaunchOrigin(launchOriginManual, options.Automatic),
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,
@@ -1610,6 +1643,30 @@ func (s *Service) liveWorkspaceRecoveryResponse(
 		return nil, nil
 	}
 	return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+}
+
+// settleCeilingDeferredRecovery records that a recovery resume was deferred by
+// the session ceiling: the continuation checkpoint is settled uncertain like
+// the other failed continuation paths and the recovery admission is completed
+// not-ready, while the still-open recovery block stays as the operator surface.
+// A ceiling replay is a plain native resume, so it cannot restore the
+// continuation while the ceiling holds the launch.
+func (s *Service) settleCeilingDeferredRecovery(
+	ctx, launchCtx context.Context,
+	checkpoint *continuationCheckpoint,
+	admission *worktree.RecoveryAdmission,
+) error {
+	if checkpoint != nil {
+		if err := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain); err != nil {
+			return err
+		}
+	}
+	if admission != nil {
+		if err := admission.CompleteRecoveryResume(launchCtx, false, "ceiling_deferred"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func completeRecoveryResumeAfterLaunch(
