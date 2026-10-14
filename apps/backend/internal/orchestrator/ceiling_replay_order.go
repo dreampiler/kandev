@@ -25,6 +25,16 @@ func ceilingReplayLess(left, right *models.Task) bool {
 	return left.ID < right.ID
 }
 
+// ceilingReplayOrderLess ranks a workspace coordinator's record ahead of every
+// other record (REQ-AGENTS-SESSION-CEILING-005) and otherwise keeps
+// ceilingReplayLess unchanged, so non-coordinator order is byte-identical.
+func ceilingReplayOrderLess(coordinators map[string]bool, left, right *models.Task) bool {
+	if lc, rc := coordinators[left.ID], coordinators[right.ID]; lc != rc {
+		return lc
+	}
+	return ceilingReplayLess(left, right)
+}
+
 func ceilingReplayQueuedAt(task *models.Task) time.Time {
 	record, _ := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	deferral, err := models.ReadCeilingDeferral(record)
