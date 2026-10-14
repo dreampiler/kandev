@@ -125,6 +125,10 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 	}
 	reason := recoveryReasonFromError(cause)
 	var block *models.SessionRecoveryBlock
+	// blockRead reports that the canonical block lookup succeeded. A failed
+	// lookup is not evidence of a different record, so it must not reopen the
+	// known record's attempt budget.
+	blockRead := false
 	if reason == "" {
 		// The block is the only source of the reason here, so a read failure
 		// fails closed, exactly as before.
@@ -133,6 +137,7 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		if err != nil {
 			return false
 		}
+		blockRead = true
 		if block != nil {
 			reason = block.Reason
 		} else if session.State == models.TaskSessionStateFailed && startupFailureTextNeedsContinuation(session.ErrorMessage) {
@@ -143,19 +148,20 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		// best-effort for a richer attempt record key and never gates the
 		// recovery, so a read failure does not drop a cause-known recovery.
 		block = current
+		blockRead = true
 	}
 	if !interruptedTurnRecoveryReasons[reason] {
 		return false
 	}
-	recordKey := interruptedTurnAutoRecoveryRecordKey(block, reason)
-	claimed, exhausted := s.claimInterruptedTurnAutoRecovery(sessionID, recordKey)
+	recordKey, blockID := interruptedTurnAutoRecoveryRecordKey(block, reason)
+	claimed, exhausted, effectiveKey := s.claimInterruptedTurnAutoRecovery(ctx, sessionID, recordKey, blockID, blockRead)
 	if !claimed {
 		if exhausted {
 			s.logger.Zap().Warn("interrupted turn auto-recovery reached its attempt bound; operator action required",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("reason", reason),
-				zap.String("record", recordKey),
+				zap.String("record", effectiveKey),
 				zap.Int("max_attempts", interruptedTurnAutoRecoveryMaxAttempts))
 		}
 		return false
@@ -165,7 +171,7 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		zap.String("session_id", sessionID),
 		zap.String("reason", reason))
 	go func() {
-		defer s.finishInterruptedTurnAutoRecovery(sessionID, recordKey)
+		defer s.finishInterruptedTurnAutoRecovery(sessionID, effectiveKey)
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), interruptedTurnAutoRecoveryTimeout)
 		defer cancel()
 		resp, err := s.RecoverSessionWithOptions(
@@ -242,39 +248,52 @@ func (s *Service) CanAutoRecoverFailedSession(ctx context.Context, taskID, sessi
 type interruptedTurnAutoRecoveryState struct {
 	running   bool
 	startedAt time.Time
-	// recordKey names the unresolved durable record this attempt budget belongs
-	// to. A different record starts a fresh budget; a settled record is
-	// replaced by a new key so the bound never carries across records.
+	// recordKey names the unresolved durable record the attempt budget belongs
+	// to. It prefers the delivery submission identity (the exact unresolved
+	// work), then the recovery block id; a reason-only key is the fallback when
+	// no block is known.
 	recordKey string
-	// attempts counts automatic continuations already started for recordKey.
-	// The budget is in-memory and resets on backend restart; the bound-reached
-	// warn log is then the operator surface, and no durable store is added.
+	// blockID is the canonical recovery block the durable attempt count is
+	// recorded on. When set, the bound survives a backend restart; when empty
+	// the count in attempts is this process only.
+	blockID string
+	// attempts is the attempt count for recordKey. It mirrors the durable block
+	// count while a block is known and is the whole budget when none is.
 	attempts int
+	// tracked reports that recordKey/blockID already describe a seen record, so
+	// a later reason-only key from a failed read is not mistaken for a new one.
+	tracked bool
 }
 
 // interruptedTurnAutoRecoveryRecordKey names the durable record an automatic
 // continuation is settling. It prefers the delivery submission identity (the
 // exact unresolved work), then the recovery block id, then the block reason, so
 // two distinct unresolved records on one session cannot share one attempt
-// budget.
-func interruptedTurnAutoRecoveryRecordKey(block *models.SessionRecoveryBlock, reason string) string {
+// budget. blockID is the row the durable count is recorded on (empty for a
+// reason-only fallback).
+func interruptedTurnAutoRecoveryRecordKey(block *models.SessionRecoveryBlock, reason string) (recordKey, blockID string) {
 	if block != nil {
 		if block.DeliverySubmissionID != "" {
-			return "submission:" + block.DeliverySubmissionID
+			return "submission:" + block.DeliverySubmissionID, block.ID
 		}
 		if block.ID != "" {
-			return "block:" + block.ID
+			return "block:" + block.ID, block.ID
 		}
 	}
-	return "reason:" + reason
+	return "reason:" + reason, ""
 }
 
 // claimInterruptedTurnAutoRecovery admits one automatic continuation for the
 // session's current unresolved record. It returns claimed=false with
 // exhausted=true once that record has consumed its whole attempt budget, so the
 // caller can leave the still-open recovery block to an operator instead of
-// retrying forever.
-func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) (claimed, exhausted bool) {
+// retrying forever. The count is durable on the recovery block when one is
+// known, so a backend restart does not reopen the bound; a reason-only key from
+// a failed enrichment read keeps the last confirmed record instead of resetting
+// it.
+func (s *Service) claimInterruptedTurnAutoRecovery(
+	ctx context.Context, sessionID, recordKey, blockID string, blockRead bool,
+) (claimed, exhausted bool, effectiveKey string) {
 	s.interruptedTurnAutoRecoveryMu.Lock()
 	defer s.interruptedTurnAutoRecoveryMu.Unlock()
 	if s.interruptedTurnAutoRecovery == nil {
@@ -287,23 +306,64 @@ func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) 
 	// untouched, so a new record cannot start a second attempt and the running
 	// goroutine still owns the entry.
 	if state.running || now.Sub(state.startedAt) < interruptedTurnAutoRecoveryCooldown {
-		return false, false
+		return false, false, state.recordKey
 	}
-	if state.recordKey != recordKey {
-		// The session is idle for the previous record, so a different
-		// unresolved record begins with a fresh attempt budget.
+	switch {
+	case !state.tracked:
+		state.tracked = true
 		state.recordKey = recordKey
+		state.blockID = blockID
 		state.attempts = 0
+	case state.recordKey == recordKey:
+		if blockID != "" {
+			state.blockID = blockID
+		}
+	case blockID != "" || blockRead:
+		// A confirmed different record, or the confirmed settlement/absence of
+		// the previous one, begins with a fresh attempt budget.
+		state.recordKey = recordKey
+		state.blockID = blockID
+		state.attempts = 0
+	default:
+		// The block enrichment read failed: a reason-only key is not evidence
+		// of a different record, so keep the confirmed record and its budget.
+		recordKey = state.recordKey
+		blockID = state.blockID
 	}
-	if state.attempts >= interruptedTurnAutoRecoveryMaxAttempts {
+	attempts, allowed := s.reserveInterruptedTurnAutoRecoveryAttempt(ctx, blockID, state.attempts)
+	if !allowed {
 		s.interruptedTurnAutoRecovery[sessionID] = state
-		return false, true
+		return false, true, state.recordKey
 	}
+	state.attempts = attempts
 	state.running = true
 	state.startedAt = now
-	state.attempts++
+	state.recordKey = recordKey
 	s.interruptedTurnAutoRecovery[sessionID] = state
-	return true, false
+	return true, false, state.recordKey
+}
+
+// reserveInterruptedTurnAutoRecoveryAttempt consumes one attempt for the
+// session's current unresolved record. The count is durable on the recovery
+// block when one is known (a backend restart cannot reopen it) and falls back
+// to the in-memory count otherwise.
+func (s *Service) reserveInterruptedTurnAutoRecoveryAttempt(ctx context.Context, blockID string, inMemoryAttempts int) (int, bool) {
+	if blockID != "" {
+		if store, ok := s.repo.(sessionRecoveryBlockAutoAttemptStore); ok {
+			attempts, allowed, err := store.IncrementOpenSessionRecoveryBlockAutoAttempts(
+				ctx, blockID, interruptedTurnAutoRecoveryMaxAttempts)
+			if err == nil {
+				return attempts, allowed
+			}
+			s.logger.Warn("failed to persist the interrupted-turn recovery attempt bound; using the in-memory bound",
+				zap.String("session_recovery_block_id", blockID),
+				zap.Error(err))
+		}
+	}
+	if inMemoryAttempts >= interruptedTurnAutoRecoveryMaxAttempts {
+		return inMemoryAttempts, false
+	}
+	return inMemoryAttempts + 1, true
 }
 
 func (s *Service) finishInterruptedTurnAutoRecovery(sessionID, recordKey string) {
@@ -312,7 +372,7 @@ func (s *Service) finishInterruptedTurnAutoRecovery(sessionID, recordKey string)
 	state := s.interruptedTurnAutoRecovery[sessionID]
 	// Only the attempt that owns this record key clears the in-flight flag; a
 	// record replaced in the meantime is left untouched.
-	if state.recordKey != recordKey {
+	if !state.tracked || state.recordKey != recordKey {
 		return
 	}
 	state.running = false

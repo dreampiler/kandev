@@ -87,6 +87,7 @@ const sessionContinuitySchema = `
 			delivery_turn_id TEXT NOT NULL DEFAULT '',
 			delivery_outcome TEXT NOT NULL DEFAULT '',
 			authorized_action TEXT NOT NULL DEFAULT '',
+			auto_recovery_attempts INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			resolved_at TIMESTAMP,
@@ -375,8 +376,9 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 		INSERT INTO session_recovery_blocks
 		(id, session_id, incarnation_id, expected_generation, reason, state,
 		 consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
-		 delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 delivery_turn_id, delivery_outcome, authorized_action, auto_recovery_attempts,
+		 created_at, updated_at, resolved_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (session_id, incarnation_id, expected_generation, reason) DO UPDATE SET
 		 state = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
@@ -423,6 +425,10 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 		   AND excluded.consumer_reference = 'agent_delivery'
 		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
 		   THEN session_recovery_blocks.authorized_action ELSE excluded.authorized_action END,
+		 auto_recovery_attempts = CASE WHEN session_recovery_blocks.state = ?
+		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
+		   AND excluded.consumer_reference = 'agent_delivery'
+		   THEN session_recovery_blocks.auto_recovery_attempts ELSE excluded.auto_recovery_attempts END,
 		 updated_at = excluded.updated_at,
 		 resolved_at = CASE WHEN session_recovery_blocks.state = ?
 		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
@@ -434,11 +440,12 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(query), block.ID, block.SessionID,
 		block.IncarnationID, block.ExpectedGeneration, block.Reason, block.State,
 		block.ConsumerReference, block.DeliverySubmissionID, block.DeliveryStreamID, block.DeliverySequence,
-		block.DeliveryTurnID, block.DeliveryOutcome, block.AuthorizedAction, block.CreatedAt, block.UpdatedAt,
+		block.DeliveryTurnID, block.DeliveryOutcome, block.AuthorizedAction,
+		block.AutoRecoveryAttempts, block.CreatedAt, block.UpdatedAt,
 		block.ResolvedAt, models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen,
 		models.RecoveryBlockOpen,
 		models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen, models.RecoveryBlockOpen,
-		models.RecoveryBlockOpen).Scan(&canonicalID)
+		models.RecoveryBlockOpen, models.RecoveryBlockOpen).Scan(&canonicalID)
 	if err == nil {
 		block.ID = canonicalID
 	}
@@ -466,7 +473,8 @@ func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID,
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
 		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
-		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
+		       delivery_turn_id, delivery_outcome, authorized_action, auto_recovery_attempts,
+		       created_at, updated_at, resolved_at
 		FROM session_recovery_blocks
 		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = ?
 		ORDER BY created_at LIMIT 1`), sessionID, incarnationID, expectedGeneration, models.RecoveryBlockOpen)
@@ -474,7 +482,7 @@ func (r *Repository) GetOpenSessionRecoveryBlock(ctx context.Context, sessionID,
 	if err := row.Scan(&block.ID, &block.SessionID, &block.IncarnationID, &block.ExpectedGeneration,
 		&block.Reason, &block.State, &block.ConsumerReference, &block.DeliverySubmissionID,
 		&block.DeliveryStreamID, &block.DeliverySequence, &block.DeliveryTurnID, &block.DeliveryOutcome,
-		&block.AuthorizedAction,
+		&block.AuthorizedAction, &block.AutoRecoveryAttempts,
 		&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
 		return nil, err
 	}
@@ -491,7 +499,8 @@ func (r *Repository) ListOpenSessionRecoveryBlocks(
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
 		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
-		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
+		       delivery_turn_id, delivery_outcome, authorized_action, auto_recovery_attempts,
+		       created_at, updated_at, resolved_at
 		FROM session_recovery_blocks
 		WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = ?
 		ORDER BY created_at, id`), sessionID, incarnationID, expectedGeneration, models.RecoveryBlockOpen)
@@ -506,6 +515,7 @@ func (r *Repository) ListOpenSessionRecoveryBlocks(
 			&block.ExpectedGeneration, &block.Reason, &block.State, &block.ConsumerReference,
 			&block.DeliverySubmissionID, &block.DeliveryStreamID, &block.DeliverySequence,
 			&block.DeliveryTurnID, &block.DeliveryOutcome, &block.AuthorizedAction,
+			&block.AutoRecoveryAttempts,
 			&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
 			return nil, err
 		}
@@ -520,13 +530,14 @@ func (r *Repository) GetSessionRecoveryBlock(ctx context.Context, id string) (*m
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, incarnation_id, expected_generation, reason, state,
 		       consumer_reference, delivery_submission_id, delivery_stream_id, delivery_sequence,
-		       delivery_turn_id, delivery_outcome, authorized_action, created_at, updated_at, resolved_at
+		       delivery_turn_id, delivery_outcome, authorized_action, auto_recovery_attempts,
+		       created_at, updated_at, resolved_at
 		FROM session_recovery_blocks WHERE id = ?`), id)
 	var block models.SessionRecoveryBlock
 	if err := row.Scan(&block.ID, &block.SessionID, &block.IncarnationID, &block.ExpectedGeneration,
 		&block.Reason, &block.State, &block.ConsumerReference, &block.DeliverySubmissionID,
 		&block.DeliveryStreamID, &block.DeliverySequence, &block.DeliveryTurnID, &block.DeliveryOutcome,
-		&block.AuthorizedAction,
+		&block.AuthorizedAction, &block.AutoRecoveryAttempts,
 		&block.CreatedAt, &block.UpdatedAt, &block.ResolvedAt); err != nil {
 		return nil, err
 	}
@@ -583,4 +594,31 @@ func boolToInt(value bool) int {
 		return 1
 	}
 	return 0
+}
+
+// IncrementOpenSessionRecoveryBlockAutoAttempts records one automatic
+// continue_from_history recovery against an open recovery block and reports
+// the resulting count. The increment is conditional on the block still being
+// open and below maxAttempts, so the bound is durable: a backend restart cannot
+// reopen it, and a resolved (settled) block is never charged. allowed is false
+// when the block is missing, already resolved, or already at the bound.
+func (r *Repository) IncrementOpenSessionRecoveryBlockAutoAttempts(
+	ctx context.Context, id string, maxAttempts int,
+) (attempts int, allowed bool, err error) {
+	if id == "" || maxAttempts <= 0 {
+		return 0, false, nil
+	}
+	err = r.db.QueryRowxContext(ctx, r.db.Rebind(`
+		UPDATE session_recovery_blocks
+		SET auto_recovery_attempts = auto_recovery_attempts + 1
+		WHERE id = ? AND state = ? AND auto_recovery_attempts < ?
+		RETURNING auto_recovery_attempts`),
+		id, models.RecoveryBlockOpen, maxAttempts).Scan(&attempts)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return attempts, true, nil
 }

@@ -109,6 +109,14 @@ type sessionRecoveryBlockStore interface {
 	ResolveSessionRecoveryBlock(context.Context, string, string, time.Time) (bool, error)
 }
 
+// sessionRecoveryBlockAutoAttemptStore records the automatic
+// continue_from_history attempt bound durably on the canonical recovery block.
+// It is asserted separately so a store without the durable boundary still works
+// with the in-memory bound only.
+type sessionRecoveryBlockAutoAttemptStore interface {
+	IncrementOpenSessionRecoveryBlockAutoAttempts(context.Context, string, int) (int, bool, error)
+}
+
 type sessionRecoveryBlockLookup interface {
 	GetSessionRecoveryBlock(context.Context, string) (*models.SessionRecoveryBlock, error)
 }
