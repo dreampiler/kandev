@@ -9,6 +9,52 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStepSignalPreLedgerReadersBackfillOneEntry(t *testing.T) {
+	repo, task, _ := signalEntryFixture(t)
+	assertPreLedgerReadersBackfillOneEntry(t, repo, repo, task)
+}
+
+func assertPreLedgerReadersBackfillOneEntry(t *testing.T, repo, secondReader *Repository, task *models.Task) {
+	t.Helper()
+	ctx := t.Context()
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`DELETE FROM task_step_transitions WHERE task_id = ?`), task.ID)
+	require.NoError(t, err)
+	type result struct {
+		entry models.StepCompletionEntry
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	for _, reader := range []*Repository{repo, secondReader} {
+		go func() {
+			<-start
+			entry, readErr := reader.GetTaskStepCompletionEntry(ctx, task.ID)
+			results <- result{entry: entry, err: readErr}
+		}()
+	}
+	close(start)
+	first := <-results
+	second := <-results
+	require.NoError(t, first.err)
+	require.NoError(t, second.err)
+	require.Positive(t, first.entry.TransitionID)
+	require.Equal(t, first.entry.TransitionID, second.entry.TransitionID)
+	require.True(t, first.entry.OccurredAt.Equal(task.CreatedAt), "an untracked entry must not exclude work that predates its backfill")
+	id, err := repo.EnsureCurrentTaskStepTransition(ctx, task.ID)
+	require.NoError(t, err, "rechecking an existing backfill must not commit twice")
+	require.Equal(t, first.entry.TransitionID, id)
+	rows, err := repo.ListTaskStepTransitions(ctx, task.ID, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}
+
+func TestStepSignalPreLedgerEnsureExistingEntryIsIdempotent(t *testing.T) {
+	repo, task, entryID := signalEntryFixture(t)
+	id, err := repo.EnsureCurrentTaskStepTransition(context.Background(), task.ID)
+	require.NoError(t, err)
+	require.Equal(t, entryID, id)
+}
+
 func signalEntryFixture(t *testing.T) (*Repository, *models.Task, int64) {
 	t.Helper()
 	repo := newRepoForSessionTests(t)

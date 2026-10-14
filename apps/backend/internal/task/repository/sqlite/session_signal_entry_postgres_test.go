@@ -8,6 +8,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPostgresStepSignalPreLedgerReadersBackfillOneEntry(t *testing.T) {
+	dsn := testutil.PostgresDSNFromEnv(t)
+	db := testutil.OpenIsolatedPostgres(t, dsn)
+	repo, err := NewWithDB(db, db, nil)
+	require.NoError(t, err)
+	secondDB := openSecondPostgresConnection(t, dsn, db)
+	second := NewWithInitializedDB(secondDB, secondDB, nil)
+	task, _ := seedSignalEntryFixture(t, repo)
+	assertPreLedgerReadersBackfillOneEntry(t, repo, second, task)
+}
+
 func TestPostgresStepSignalEntryConcurrentClaimsAndConsumption(t *testing.T) {
 	dsn := testutil.PostgresDSNFromEnv(t)
 	db := testutil.OpenIsolatedPostgres(t, dsn)

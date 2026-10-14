@@ -15,6 +15,13 @@ type stepCompletionEntryQueryer interface {
 }
 
 func (r *Repository) GetTaskStepCompletionEntry(ctx context.Context, taskID string) (models.StepCompletionEntry, error) {
+	entry, err := r.readStepCompletionEntry(ctx, r.ro, taskID)
+	if err != nil || entry.TransitionID > 0 || entry.StepID == "" {
+		return entry, err
+	}
+	if _, err := r.EnsureCurrentTaskStepTransition(ctx, taskID); err != nil {
+		return models.StepCompletionEntry{}, err
+	}
 	return r.readStepCompletionEntry(ctx, r.ro, taskID)
 }
 

@@ -12,6 +12,50 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStepSignalPreLedgerCompletesAndOldSignalCannotReenter(t *testing.T) {
+	for _, path := range []string{"legacy", "engine", "subscriber"} {
+		t.Run(path, func(t *testing.T) {
+			ctx := context.Background()
+			svc, repo := newGatedStepFailureService(t)
+			task, err := repo.GetTask(ctx, "t1")
+			require.NoError(t, err)
+			_, err = repo.DB().ExecContext(ctx, `DELETE FROM task_step_transitions WHERE task_id = ?`, task.ID)
+			require.NoError(t, err)
+			old := models.PendingStepCompletionSignal{StepID: "step1", Summary: "legacy complete", SignaledAt: task.CreatedAt}
+			require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, old))
+			if path != "legacy" {
+				svc.initWorkflowEngine()
+			}
+			complete := func() {
+				session, readErr := repo.GetTaskSession(ctx, "s1")
+				require.NoError(t, readErr)
+				switch path {
+				case "legacy":
+					current, taskErr := repo.GetTask(ctx, task.ID)
+					require.NoError(t, taskErr)
+					svc.processOnTurnComplete(ctx, current, session)
+				case "engine":
+					svc.processOnTurnCompleteViaEngine(ctx, task.ID, session)
+				case "subscriber":
+					require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""))
+					svc.onStepCompletionSignaled(ctx, stepCompletionSignalEvent(task.ID, "s1", "step1"))
+				}
+			}
+			complete()
+			moved, err := repo.GetTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, "step2", moved.WorkflowStepID)
+			moved.WorkflowStepID = "step1"
+			require.NoError(t, repo.UpdateTask(ctx, moved))
+			require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, old))
+			complete()
+			current, err := repo.GetTask(ctx, task.ID)
+			require.NoError(t, err)
+			require.Equal(t, "step1", current.WorkflowStepID, "backfill must not let an earlier signal authorize a later entry")
+		})
+	}
+}
+
 type stepSignalReentryRepo struct {
 	*sqliterepo.Repository
 	afterTaskRead func()

@@ -55,6 +55,14 @@ expectation.
 
 ## Related contracts
 
+The pre-ledger compatibility correction backfills a missing current entry through
+the existing task-row-guarded ensurer before rereading it. Source-adjacent tests
+cover concurrent/idempotent backfill, acceptance from a turn predating the
+backfill, all three consuming paths, and old-signal rejection after re-entry.
+The creation timestamp is a compatibility floor for the first untracked entry,
+not reconstructed transition history. Existing rows and later moves remain
+authoritative. Entry-scoped admission is retained instead of a step-only bypass.
+
 - [Plan](plan.md)
 - [Requirement 004](../../specs/tasks/requirements/workflow-explicit-completion-signal.md)
 - [System design](../../specs/tasks/system-design/workflow-explicit-completion-signal.md)

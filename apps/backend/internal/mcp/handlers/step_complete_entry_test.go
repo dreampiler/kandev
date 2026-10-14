@@ -13,6 +13,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestHandleStepCompletePreLedgerTurnIsAccepted(t *testing.T) {
+	ctx := context.Background()
+	h, repo, task, bus := stepCompleteEntryFixture(t)
+	_, err := repo.DB().ExecContext(ctx, `DELETE FROM task_step_transitions WHERE task_id = ?`, task.ID)
+	require.NoError(t, err)
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-entry-handler", models.SessionMetaKeyPendingStepCompletion, nil))
+	turn := &models.Turn{ID: "turn-pre-ledger", TaskID: task.ID, TaskSessionID: "session-entry-handler"}
+	_, err = repo.CreateTurnWithStepStamp(ctx, turn)
+	require.NoError(t, err)
+	require.Zero(t, models.StepCompletionEntryIDFromAny(turn.Metadata[models.TurnMetaKeyWorkflowStepEntryAtStart]))
+	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+		"task_id": task.ID, "session_id": "session-entry-handler", "summary": "legacy work complete",
+	})
+	resp, err := h.handleStepComplete(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	require.Equal(t, true, payload["accepted"])
+	require.Len(t, bus.events, 1)
+	entry, err := repo.GetTaskStepCompletionEntry(ctx, task.ID)
+	require.NoError(t, err)
+	require.Positive(t, entry.TransitionID)
+	session, err := repo.GetTaskSession(ctx, "session-entry-handler")
+	require.NoError(t, err)
+	signal, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok)
+	require.Equal(t, entry.TransitionID, signal.EntryTransitionID)
+}
+
 type stepCompleteClaimReentryRepo struct {
 	*sqliterepo.Repository
 	beforeClaim func()

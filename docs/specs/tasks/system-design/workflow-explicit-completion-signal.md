@@ -130,6 +130,20 @@ preserves the first payload for that entry. Returning to the same step creates a
 different entry: a fresh turn may replace an earlier entry's bag, while an older
 turn or a move during the claim is rejected with an entry-change diagnostic.
 
+A task predating the ledger may have no entry row. The shared completion-entry
+reader then calls the existing `EnsureCurrentTaskStepTransition` and rereads the
+current snapshot. Its task-row write guard serializes backfill with moves and
+other backfill callers. The transaction owner commits once, including when a
+concurrent caller already created the row. This preserves entry-scoped claim and
+admission instead of permanently rejecting the task or reverting to step-only
+admission.
+
+The first untracked entry uses task creation as its compatibility timestamp
+floor, so pre-existing same-step turns and signals do not become stale merely
+because the row was created later. This does not reconstruct missing historical
+step times. Subsequent real moves retain their own time and new identity; an old
+signal still cannot authorize a return to the same step.
+
 Native identities take precedence over timestamps. Legacy turns and bags use
 the existing entry timestamp cutoff; missing dates with an established current
 entry are ambiguous and cannot authorize a claim or consuming transition.
