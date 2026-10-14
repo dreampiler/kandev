@@ -10,13 +10,16 @@ import (
 // seam2StartCreatedPayload builds the AC-42d "start_created" replay row from
 // startCreatedSession's own frame, at the point the gate is consulted — before
 // the profile override, prompt composition, and workflow/plan transforms below
-// it, so the recorded payload is the caller's original request.
+// it, so the recorded payload is the caller's original request. origin is the
+// effective admission class (not the raw autoStart), so a replay restores the
+// same class the launch was refused under.
 func seam2StartCreatedPayload(
 	sessionID, agentProfileID, prompt string,
 	skipMessageRecord, planMode, autoStart bool,
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	origin launchOrigin,
 	options startCreatedSessionOptions,
 ) map[string]interface{} {
 	payload := map[string]interface{}{
@@ -29,6 +32,7 @@ func seam2StartCreatedPayload(
 		"prompt_reference_context":       promptReferenceContext,
 		"skip_message_record":            skipMessageRecord,
 		"auto_start":                     autoStart,
+		"origin":                         string(origin),
 		"skip_task_description_fallback": options.skipTaskDescriptionFallback,
 		"prompt_already_composed":        options.promptAlreadyComposed,
 		"retry_prompt":                   options.retryPrompt,

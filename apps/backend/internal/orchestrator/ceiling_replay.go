@@ -896,6 +896,10 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
 		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
 		ceilingEntryBinding:         entryBinding,
+		// The refusal recorded the launch's effective admission class in the
+		// payload origin, so a replay restores it instead of re-deriving it
+		// from auto_start (which is false for an agent/MCP-initiated start).
+		automatic: stringField(payload, "origin") == string(launchOriginAutomatic),
 	}
 
 	execution, err := s.startCreatedSession(
