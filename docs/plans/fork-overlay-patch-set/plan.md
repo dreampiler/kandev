@@ -34,7 +34,7 @@ Tasks 01 to 03 need no further authorization and land in one fork PR. Tasks 04
 and 05 need separate authorization and are recorded here so the stage is not
 reported as complete early.
 
-## Measured baseline (2026-10-15)
+## Measured baseline (2026-10-14 UTC)
 
 Measured after `git fetch origin --prune` and `git fetch upstream main`. The
 earlier inventory counts (23 upstream-identical commits, 171 test-residue

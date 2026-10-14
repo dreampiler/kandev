@@ -1,7 +1,7 @@
 ---
 id: task-02
 title: Cut the patch bundles and index
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - task-01
@@ -70,4 +70,24 @@ The per-patch `diff --git` counts must sum to the fork-delta file count.
 
 ## Results
 
-Pending.
+Cut on 2026-10-14 UTC from source `3368a2084825` (task 01 and the design
+package on fork `main` `9f005901b35a`) at upstream base `51af93dcd86b`, and
+committed in `3349e6c586`.
+
+| Patch | Files | Lines |
+| --- | ---: | ---: |
+| `20-dynamic-tier.patch` | 82 | 11,827 |
+| `21-provider-limits.patch` | 76 | 7,531 |
+| `22-control-capacity.patch` | 29 | 1,717 |
+| `23-peer-batch.patch` | 20 | 1,826 |
+| `30-office-overview.patch` | 69 | 7,803 |
+| `90-fork-remainder.patch` | 1,358 | 116,821 |
+| **Total** | **1,634** | **147,525** |
+
+The `diff --git` counts sum to 1,634, equal to the fork-delta file count from
+`git diff --no-renames --numstat`, and the line totals match its +141,416 and
+-6,109. Before formatting, the last bundle commit's tree equaled the source
+tree. 180 files touched by a named bundle and another commit stay in the
+remainder (for example, 42 D01 files and 29 D02 files shared with
+unattributed commits). `patches/.gitattributes` marks the patches as generated
+and hides their text diff.

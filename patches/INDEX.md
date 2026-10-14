@@ -3,7 +3,7 @@
 | Reference | Commit |
 | --- | --- |
 | Upstream base | `51af93dcd86beb66f15d0495a92bb6c846ff2177` |
-| Upstream `main` at fetch (2026-10-15) | `73c5ddb8c9550744655432d03edbe5872b6bbb80` (31 commits after the base, not yet synced) |
+| Upstream `main` at fetch (2026-10-14 UTC) | `73c5ddb8c9550744655432d03edbe5872b6bbb80` (31 commits after the base, not yet synced) |
 | Source revision | `3368a2084825338545d56d2a82129ee9a0696977` |
 
 `kd/overlay` is the upstream base plus the patches below, applied with
@@ -41,4 +41,25 @@ other files stay in the remainder.
 
 ## Reproduction record
 
-Pending the task 03 run.
+One run on 2026-10-14T16:30:04Z UTC with git 2.55.0.windows.3, using the
+patch files committed in `3349e6c586` (the commit that added this directory):
+
+```text
+Switched to a new branch 'kd/overlay'
+Applying: fork(20-dynamic-tier): D02 dynamic profile tier selection
+Applying: fork(21-provider-limits): D03 per-model provider limit suspension
+Applying: fork(22-control-capacity): D06 control-session capacity
+Applying: fork(23-peer-batch): D09 peer report batch delivery
+Applying: fork(30-office-overview): D01 Office overview
+Applying: fork(90-fork-remainder): fork changes not yet attributed to one bundle
+git am exit=0
+cfd4f55500da1fb1b0c8052a0f329ca682988676
+diff vs source exit=0
+```
+
+The resulting local `kd/overlay` head is
+`cfd4f55500da1fb1b0c8052a0f329ca682988676`. Its tree equals the source
+revision outside `patches/`. The branch is not pushed.
+
+Later commits on the source branch change only `patches/` and
+`docs/plans/fork-overlay-patch-set/`; they are carried by the next cut.

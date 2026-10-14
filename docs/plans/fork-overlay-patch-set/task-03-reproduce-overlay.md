@@ -1,7 +1,7 @@
 ---
 id: task-03
 title: Reproduce the overlay with git am
-status: in_progress
+status: done
 wave: 3
 depends_on:
   - task-02
@@ -58,4 +58,8 @@ upstream base does not contain `patches/`.
 
 ## Results
 
-Pending.
+One run on 2026-10-14T16:30:04Z UTC: all six patches applied with
+`git am` exit 0 on a fresh local `kd/overlay`, head `cfd4f55500da`.
+`git diff --quiet 3368a2084825 kd/overlay -- . ':(exclude)patches'` exited 0.
+The full log is in
+[the index reproduction record](../../../patches/INDEX.md#reproduction-record).
