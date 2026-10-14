@@ -23,6 +23,38 @@ func (s *Service) persistResolvedExecution(ctx context.Context, session *models.
 	return s.updateDynamicLaunchSession(ctx, session, previousProfile, previousState, previousAgentID, newAgentID)
 }
 
+// dynamicCandidateProviderStateKeys are the provider-owned session metadata keys
+// that belong to one concrete route candidate and must be cleared whenever the
+// owning candidate changes. runtime_config_overrides is handled separately: an
+// explicit user selection survives a same-agent candidate swap.
+var dynamicCandidateProviderStateKeys = []string{
+	"acp_session_id",
+	models.SessionMetaKeySessionMode,
+	models.SessionMetaKeyRuntimeConfig,
+	models.SessionMetaKeyACPConfigBaseline,
+	models.SessionMetaKeyACPModelState,
+	models.SessionMetaKeyContextWindow,
+}
+
+// DynamicCandidateProviderStateKeys returns the provider-owned metadata keys to
+// clear when a session moves to a different concrete candidate. It is the single
+// source of the profile-isolation invariant, shared by the conductor launch
+// path (updateDynamicLaunchSession) and the manual route-action path
+// (persistDynamicRouteSelection), so both clear the previous candidate's model,
+// mode, ACP identity, and config snapshot the same way.
+//
+// runtime_config_overrides is cleared only when the agent identity changes: a
+// same-agent candidate swap keeps an explicit user selection, but a different
+// agent may not advertise the persisted values.
+func DynamicCandidateProviderStateKeys(previousAgentID, newAgentID string) []string {
+	keys := make([]string, len(dynamicCandidateProviderStateKeys), len(dynamicCandidateProviderStateKeys)+1)
+	copy(keys, dynamicCandidateProviderStateKeys)
+	if !sameAgentIdentity(previousAgentID, newAgentID) {
+		keys = append(keys, models.SessionMetaKeyRuntimeConfigOverrides)
+	}
+	return keys
+}
+
 func (s *Service) updateDynamicLaunchSession(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -35,23 +67,7 @@ func (s *Service) updateDynamicLaunchSession(
 		// selections.
 		return s.repo.UpdateTaskSession(ctx, session)
 	}
-	// Provider-owned settings belong to one concrete candidate and are always
-	// cleared when the owning candidate changes.
-	keys := []string{
-		"acp_session_id",
-		models.SessionMetaKeySessionMode,
-		models.SessionMetaKeyRuntimeConfig,
-		models.SessionMetaKeyACPConfigBaseline,
-		models.SessionMetaKeyACPModelState,
-		models.SessionMetaKeyContextWindow,
-	}
-	// An explicit user selection (model/mode/config overrides) stays valid only
-	// while the candidate change keeps the same agent; a different agent may not
-	// advertise the persisted values, so the selection is cleared with the
-	// provider state instead of being carried across agents.
-	if !sameAgentIdentity(previousAgentID, newAgentID) {
-		keys = append(keys, models.SessionMetaKeyRuntimeConfigOverrides)
-	}
+	keys := DynamicCandidateProviderStateKeys(previousAgentID, newAgentID)
 	if err := s.persistDynamicCandidateSettings(ctx, session, previousState, keys); err != nil {
 		return err
 	}
