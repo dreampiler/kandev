@@ -171,9 +171,10 @@ workspace was not watching when the pause was written, so the read on mount is
 what makes AC-OFFICE-KILL-SWITCH-006.4 hold for exactly the operator arriving at
 a stopped workspace.
 
-The slice holds three things: the pause record or `null`; a **status** of
-`unknown` or `known`; and one monotonic counter plus the sequence of the last
-update applied. Issuing any request increments the counter and tags that request
+The slice holds four things: the pause record or `null`; a **status** of
+`unknown`, `loading`, `known`, or `error`; the workspace the record and
+status were read for; and one monotonic counter plus the sequence of the
+last update applied. Issuing any request increments the counter and tags that request
 with the new value. The tag exists to discard a **superseded** response:
 responses arrive in whatever order the network delivers them, and without it a
 slow early request would overwrite a fast later one.
@@ -184,11 +185,11 @@ not in this table is a defect in the table, not a decision for the call site.
 
 | Input | Effect |
 | --- | --- |
-| Mount, and every change of selected workspace | status `unknown`; **clear the record**; issue a read |
+| Mount, and every change of selected workspace | status `loading`; **clear the record only when the workspace changed** (a same-workspace remount re-reads while the last state stays on screen); issue a read |
 | WS reconnect | issue a read; status unchanged, the last known state still being the best available |
 | Refresh control (-006.13) | issue a read; status unchanged until it answers |
 | `GET` success | apply only if `workspace_id` matches the selected workspace **and** the tag exceeds last-applied; then status `known` |
-| `GET` failure | status `unknown`; the record is **not** cleared, so a pause already read stays on screen |
+| `GET` failure | status `error`; the record is **not** cleared, so a pause already read stays on screen |
 | `POST` pause or resume success | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; then status `known` |
 | `POST` pause or resume failure | status and record unchanged; surface the failure (-006.6) |
 
@@ -202,18 +203,19 @@ the paused state.
 Four consequences, each a rule a builder would otherwise have to invent:
 
 - **The record is cleared when the selected workspace changes**, so it can never
-  describe a workspace the operator is no longer looking at. Mount and a workspace
-  change share a row because they are the same situation: nothing known about the
-  newly selected workspace yet. Retaining the record across a switch would render
+  describe a workspace the operator is no longer looking at. A remount with the
+  same workspace selected is not the same situation: the last state read is
+  still the best available until the re-read answers, so it stays on screen.
+  Retaining the record across a switch would render
   workspace A's banner over workspace B until B's read landed, and indefinitely if
   that read failed, since a failed `GET` deliberately keeps whatever record is
   held. That is -006.4 inverted: a *running* workspace showing a *stopped* banner.
   The rule is stated because the store slice has in-repo precedent for both a
-  workspace-keyed and a flat shape, so neither is inferable. Clearing also means
-  the "pause state unavailable" affordance appears briefly on a workspace switch
-  exactly as it does on mount, which is deliberate rather than a regression:
-  during that window the client genuinely does not know, and saying so is truthful
-  where showing nothing is not.
+  workspace-keyed and a flat shape, so neither is inferable. While a workspace
+  switch or a first mount is being read with no record yet, a reading indicator
+  is shown instead of the failure warning: during that window the client
+  genuinely does not know, and saying so is truthful where showing nothing is
+  not, while the warning stays reserved for an actual failed read.
 
 - **A mutation response is checked for workspace, not only for order.** Both
   halves of the `GET` rule apply to it. The workspace half is the one that is easy
@@ -223,12 +225,14 @@ Four consequences, each a rule a builder would otherwise have to invent:
   at all. Nothing is applied optimistically before the response, so -006.6's "keep
   the displayed state matching the server's" holds by construction rather than by
   rollback.
-- **`unknown` is a rendered state, not a hidden one.** While `unknown` with no
-  record, the banner is absent and a "pause state unavailable" affordance with a
-  retry is shown in its place, so the absence of a banner is never read as a
+- **`unknown`, `loading`, and `error` are rendered states, not hidden ones.**
+  While `loading` (or `unknown` before the first read) with no
+  record, the banner is absent and a reading indicator is shown in its place;
+  while `error` with no record, a "pause state unavailable" affordance with a
+  retry is shown instead, so the absence of a banner is never read as a
   running workspace, the -006.4 failure that matters most, since it is exactly an
   operator arriving at a stopped workspace during a database problem. While
-  `unknown` with a record already read, the banner stays and is marked stale. The
+  `error` with a record already read, the banner stays and is marked stale. The
   pause control stays reachable in every state: an operator must be able to stop a
   workspace whose state could not be read.
 - **The displayed state can be stale, and the refresh is the correction.** A pause

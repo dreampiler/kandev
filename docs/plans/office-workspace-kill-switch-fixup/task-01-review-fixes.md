@@ -15,6 +15,7 @@ acceptance_criteria:
   - AC-OFFICE-KILL-SWITCH-003.6
   - AC-OFFICE-KILL-SWITCH-003.7
   - AC-OFFICE-KILL-SWITCH-005.6
+  - AC-OFFICE-KILL-SWITCH-006.4
   - AC-OFFICE-KILL-SWITCH-006.6
   - AC-OFFICE-KILL-SWITCH-006.8
   - AC-OFFICE-KILL-SWITCH-006.9
@@ -34,9 +35,15 @@ system_design:
   desktop and mobile Office surfaces.
 - Reject malformed JSON request bodies and keep the empty resume-body contract.
 - Update the internal design record, copy, and focused regression tests.
+- Preserve the cached pause record while re-reading the same workspace after
+  a remount. Clear it when the workspace changes, and distinguish a pending
+  read from a failed read so only failures show the unavailable warning.
 
 ## Verification
 
 - Focused backend Go tests for the pause handlers, sweep, scope middleware, and
   SQLite/PostgreSQL repository paths.
 - Focused frontend API and hook tests, i18n checks, typecheck, and spec lint.
+- The remount follow-up reuses the existing store, hook, and banner tests;
+  new remount scenarios are checked temporarily rather than adding standing
+  test cases.
