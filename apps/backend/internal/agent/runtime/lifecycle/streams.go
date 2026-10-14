@@ -618,13 +618,13 @@ func (sm *StreamManager) prepareAgentEvent(
 	return sm.prepareAgentEventWithRetry(ctx, execution, client, delivery, event, streamAdmissionRetry{})
 }
 
-// prepareAgentEventWithRetry is prepareAgentEvent with a bounded, drain-aware
-// retry around only the durable admission step. The negotiation wait, the event
-// identity classification, and the duplicate acknowledgement stay outside the
-// retry: they are not the transient writer-contention cause, and repeating the
-// whole prepare would re-run the negotiation deadline and the duplicate ACK HTTP
-// on a projected duplicate. A zero-value retry keeps the single-attempt behavior
-// every non-processor caller relies on.
+// prepareAgentEventWithRetry is prepareAgentEvent that threads a bounded,
+// drain-aware retry down to the one durable admission insert. The negotiation
+// wait, the harness-generation wait, the expired-replay recovery, the duplicate
+// acknowledgement, and the effect lookup stay outside the retry: they are not
+// the transient writer-contention cause, and repeating them would stretch their
+// existing time and failure semantics. A zero-value retry keeps the
+// single-attempt behavior every non-processor caller relies on.
 func (sm *StreamManager) prepareAgentEventWithRetry(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -657,9 +657,9 @@ func (sm *StreamManager) prepareAgentEventWithRetry(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
-	process, skipCallback, effect, err := retry.admit(func() (bool, bool, *models.AgentDeliveryEffect, error) {
-		return sm.prepareDurableAgentDeliveryEvent(ctx, execution, durableEvent, delivery, client)
-	})
+	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
+		ctx, execution, durableEvent, delivery, client, retry,
+	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
 	}
@@ -680,8 +680,8 @@ func (sm *StreamManager) prepareAgentEventWithRetry(
 	}, nil
 }
 
-// streamAdmissionRetry drives a bounded, in-place retry of the durable
-// admission step. A nil sleep performs a single attempt, which preserves the
+// streamAdmissionRetry drives a bounded, in-place retry of one durable admission
+// insert. A nil sleep performs a single attempt, which preserves the
 // non-processor callers' behavior.
 type streamAdmissionRetry struct {
 	ctx      context.Context
@@ -689,24 +689,14 @@ type streamAdmissionRetry struct {
 	logRetry func(attempt int)
 }
 
-// admit runs the admission closure, retrying it in place while it returns a
-// retryable deadline and the driver is live. Only the admission is repeated, so
-// negotiation, identity classification, and the duplicate acknowledgement run
-// exactly once.
-func (r streamAdmissionRetry) admit(
-	admission func() (bool, bool, *models.AgentDeliveryEffect, error),
-) (bool, bool, *models.AgentDeliveryEffect, error) {
+// admit runs fn, retrying it in place while it returns a retryable deadline and
+// the driver is live, up to a bounded number of attempts. Only fn is repeated,
+// so nothing else in the admission path is re-run.
+func (r streamAdmissionRetry) admit(fn func() error) error {
 	if r.sleep == nil {
-		return admission()
+		return fn()
 	}
-	var process, skipCallback bool
-	var effect *models.AgentDeliveryEffect
-	err := retryStreamAdmission(r.ctx, r.sleep, r.logRetry, func() error {
-		var admissionErr error
-		process, skipCallback, effect, admissionErr = admission()
-		return admissionErr
-	})
-	return process, skipCallback, effect, err
+	return retryStreamAdmission(r.ctx, r.sleep, r.logRetry, fn)
 }
 
 func (sm *StreamManager) notifyAgentEvent(
@@ -729,6 +719,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	durableEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
 	client *agentctl.Client,
+	retry streamAdmissionRetry,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, err error) {
 	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
 		return true, false, nil, nil
@@ -737,7 +728,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	if err != nil {
 		return false, false, nil, err
 	}
-	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository)
+	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository, retry)
 	if errors.Is(err, repoerrors.ErrAgentDeliveryReplayExpired) {
 		projected, recoveryErr := reconcileExpiredAgentDeliveryReplay(
 			ctx, execution, durableEvent, repository, client, client,
