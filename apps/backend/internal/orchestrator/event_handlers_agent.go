@@ -2250,6 +2250,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	uncertainDelivery := errors.Is(err, lifecycle.ErrUncertainPromptDelivery)
+	ensureSessionRunningTimeout := isEnsureSessionRunningTimeout(err)
 	if passthroughAttachmentRecovery ||
 		(!uncertainDelivery && (lifecyclePrompt || queuedMsg.IsDurablePlanComment())) ||
 		errors.Is(err, errLifecyclePromptClaim) ||
@@ -2257,10 +2258,7 @@ func (s *Service) handleQueuedMessageExecutionError(
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
 		errors.Is(err, ErrSessionRuntimeUnavailable) ||
-		// A bounded wait for the session runtime that ran out ("failed to
-		// ensure session is running: context deadline exceeded") says nothing
-		// about the message itself; keep it for the next delivery trigger.
-		errors.Is(err, context.DeadlineExceeded) {
+		ensureSessionRunningTimeout {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}

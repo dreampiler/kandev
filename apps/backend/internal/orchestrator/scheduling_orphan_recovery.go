@@ -179,7 +179,8 @@ func schedulingOrphanResumableSession(session *models.TaskSession) bool {
 // The entry runs detached, like the launch of a task without a session: it
 // resumes the agent and waits for readiness, and doing that inline would hold
 // the rest of the startup sweep, including the bounded lifecycle-token pass,
-// for up to one launch timeout per task.
+// for up to one launch timeout per task. The goroutine is tracked in
+// orphanReentryWorkers so that Service.Stop joins it before returning.
 func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.Task, session *models.TaskSession) {
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || step == nil {
@@ -189,8 +190,12 @@ func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
 		zap.String("step_id", step.ID))
-	entryCtx := context.WithoutCancel(ctx)
-	go s.processOnEnter(entryCtx, task.ID, session, step, task.Description, 0, nil)
+	s.orphanReentryWorkers.Add(1)
+	go func() {
+		defer s.orphanReentryWorkers.Done()
+		entryCtx := context.WithoutCancel(ctx)
+		s.processOnEnter(entryCtx, task.ID, session, step, task.Description, 0, nil)
+	}()
 }
 
 // repairSchedulingOrphanTaskState clears a stale SCHEDULING state for a task
