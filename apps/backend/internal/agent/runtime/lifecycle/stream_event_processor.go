@@ -160,18 +160,18 @@ func (p *streamEventProcessor) run() {
 
 func (p *streamEventProcessor) handleEvent(batch *streamEventBatch, event agentctl.AgentEvent) error {
 	admissionCtx := withDeliveryDetachSignal(p.ctx, p.detached)
-	var prepared preparedAgentEvent
-	err := retryStreamAdmission(p.ctx, p.manager.sleepOrStop, func(attempt int) {
-		p.manager.logger.Warn("retrying durable agent event admission after deadline",
-			zap.String("instance_id", p.execution.ID),
-			zap.Int("attempt", attempt))
-	}, func() error {
-		var prepareErr error
-		prepared, prepareErr = p.manager.prepareAgentEvent(
-			admissionCtx, p.execution, p.client, p.delivery, event,
-		)
-		return prepareErr
-	})
+	prepared, err := p.manager.prepareAgentEventWithRetry(
+		admissionCtx, p.execution, p.client, p.delivery, event,
+		streamAdmissionRetry{
+			ctx:   p.ctx,
+			sleep: func(d time.Duration) bool { return p.manager.sleepOrStopContext(p.ctx, d) },
+			logRetry: func(attempt int) {
+				p.manager.logger.Warn("retrying durable agent event admission after deadline",
+					zap.String("instance_id", p.execution.ID),
+					zap.Int("attempt", attempt))
+			},
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -215,10 +215,11 @@ func streamAdmissionRetryable(ctx context.Context, err error) bool {
 
 // retryStreamAdmission runs prepare, retrying in place while it returns a
 // retryable deadline and the processor is live, up to a bounded number of
-// attempts. The same event is re-prepared, so later events are never overtaken
+// attempts. The same admission is re-run, so later events are never overtaken
 // and delivery order is preserved; sleep is drain-aware and aborts the retry on
-// a stop signal. The final prepare error is returned unchanged, so the stop
-// path and its log wording are the same as before.
+// a stop signal. The context is re-checked after the pause so a cancellation
+// that lands mid-backoff never reaches another attempt, and the final error is
+// returned unchanged so the stop path and its log wording stay the same.
 func retryStreamAdmission(
 	ctx context.Context,
 	sleep func(time.Duration) bool,
@@ -231,6 +232,9 @@ func retryStreamAdmission(
 			return err
 		}
 		if !sleep(streamAdmissionRetryBackoff) {
+			return err
+		}
+		if ctx.Err() != nil {
 			return err
 		}
 		logRetry(attempt)

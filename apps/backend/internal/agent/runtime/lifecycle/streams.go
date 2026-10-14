@@ -383,6 +383,26 @@ func (sm *StreamManager) sleepOrStop(d time.Duration) bool {
 	}
 }
 
+// sleepOrStopContext is sleepOrStop plus a caller cancellation: it returns
+// false as soon as ctx is cancelled, so a processor or parent cancellation
+// during a retry backoff is reflected immediately instead of after the full
+// interval. Manager drain (stopCh/waitCh) still aborts it, and a nil stopCh is
+// a disabled select case rather than a missed signal.
+func (sm *StreamManager) sleepOrStopContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-sm.waitCh:
+		return false
+	case <-sm.stopCh:
+		return false
+	}
+}
+
 // streamContext preserves the execution's session trace values while making
 // in-flight WebSocket dials cancellable by either the external Manager
 // shutdown signal or StreamManager.Wait's internal drain signal.
@@ -595,6 +615,24 @@ func (sm *StreamManager) prepareAgentEvent(
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 ) (preparedAgentEvent, error) {
+	return sm.prepareAgentEventWithRetry(ctx, execution, client, delivery, event, streamAdmissionRetry{})
+}
+
+// prepareAgentEventWithRetry is prepareAgentEvent with a bounded, drain-aware
+// retry around only the durable admission step. The negotiation wait, the event
+// identity classification, and the duplicate acknowledgement stay outside the
+// retry: they are not the transient writer-contention cause, and repeating the
+// whole prepare would re-run the negotiation deadline and the duplicate ACK HTTP
+// on a projected duplicate. A zero-value retry keeps the single-attempt behavior
+// every non-processor caller relies on.
+func (sm *StreamManager) prepareAgentEventWithRetry(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+	retry streamAdmissionRetry,
+) (preparedAgentEvent, error) {
 	if err := waitForDeliveryNegotiation(ctx, execution); err != nil {
 		return preparedAgentEvent{}, err
 	}
@@ -619,9 +657,9 @@ func (sm *StreamManager) prepareAgentEvent(
 	// callbacks can advance or clear prompt state, but the inbox payload must
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
-	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		ctx, execution, durableEvent, delivery, client,
-	)
+	process, skipCallback, effect, err := retry.admit(func() (bool, bool, *models.AgentDeliveryEffect, error) {
+		return sm.prepareDurableAgentDeliveryEvent(ctx, execution, durableEvent, delivery, client)
+	})
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
 	}
@@ -640,6 +678,35 @@ func (sm *StreamManager) prepareAgentEvent(
 		deliveryEffect: effect,
 		skipCallback:   skipCallback,
 	}, nil
+}
+
+// streamAdmissionRetry drives a bounded, in-place retry of the durable
+// admission step. A nil sleep performs a single attempt, which preserves the
+// non-processor callers' behavior.
+type streamAdmissionRetry struct {
+	ctx      context.Context
+	sleep    func(time.Duration) bool
+	logRetry func(attempt int)
+}
+
+// admit runs the admission closure, retrying it in place while it returns a
+// retryable deadline and the driver is live. Only the admission is repeated, so
+// negotiation, identity classification, and the duplicate acknowledgement run
+// exactly once.
+func (r streamAdmissionRetry) admit(
+	admission func() (bool, bool, *models.AgentDeliveryEffect, error),
+) (bool, bool, *models.AgentDeliveryEffect, error) {
+	if r.sleep == nil {
+		return admission()
+	}
+	var process, skipCallback bool
+	var effect *models.AgentDeliveryEffect
+	err := retryStreamAdmission(r.ctx, r.sleep, r.logRetry, func() error {
+		var admissionErr error
+		process, skipCallback, effect, admissionErr = admission()
+		return admissionErr
+	})
+	return process, skipCallback, effect, err
 }
 
 func (sm *StreamManager) notifyAgentEvent(
