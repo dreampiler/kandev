@@ -83,3 +83,17 @@ Go formatting passed after correcting owned-volume parent directory ownership.
 Hosted validation of the updated tests and full suites is pending. No local
 SQL or broad backend suite has run. Public documentation needs no change:
 CLI syntax, handoff authorization, and signing-key storage remain unchanged.
+
+### Hosted fixture repair
+
+The Office helper identity/error cases and direct orchestrator dispatch/failure
+cases passed in hosted backend shard 2. The replay cases failed before reaching
+the reminter because their fixture used an absent-record CAS token after
+clearing to a still-present empty object. The fixture now uses the repository's
+observed predecessor and asserts the successful write and absence of a lost
+comparison. A dispatch control shares the same fixture with early/late refusal
+cases; direct refusal also observes the actual executor launch count.
+
+This is a fixture setup repair, not evidence of a defect in production refresh
+logic. The failed artifact and raw Go JSON are retained externally. Fresh hosted
+validation of the repaired replay fixture remains pending.
