@@ -125,7 +125,11 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 	}
 	block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
 	if err != nil {
-		return false
+		// A recovery that already carries its own cause reason must not be
+		// blocked by a block-read failure; fall back to the cause-only key.
+		s.logger.Zap().Warn("could not read the open session recovery block; using the cause reason",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		block = nil
 	}
 	reason := recoveryReasonFromError(cause)
 	if reason == "" {
@@ -238,6 +242,8 @@ type interruptedTurnAutoRecoveryState struct {
 	// replaced by a new key so the bound never carries across records.
 	recordKey string
 	// attempts counts automatic continuations already started for recordKey.
+	// The budget is in-memory and resets on backend restart; the bound-reached
+	// warn log is then the operator surface, and no durable store is added.
 	attempts int
 }
 
@@ -272,8 +278,10 @@ func (s *Service) claimInterruptedTurnAutoRecovery(sessionID, recordKey string) 
 	state := s.interruptedTurnAutoRecovery[sessionID]
 	if state.recordKey != recordKey {
 		// A different unresolved record (the prior one was settled or replaced)
-		// begins with a fresh attempt budget.
-		state = interruptedTurnAutoRecoveryState{recordKey: recordKey}
+		// begins with a fresh attempt budget, but keep the in-flight and
+		// cooldown guard so two attempts for one session cannot overlap.
+		state.recordKey = recordKey
+		state.attempts = 0
 	}
 	now := time.Now()
 	if state.running || now.Sub(state.startedAt) < interruptedTurnAutoRecoveryCooldown {
