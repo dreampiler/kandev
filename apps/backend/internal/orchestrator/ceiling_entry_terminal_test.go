@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -207,4 +208,116 @@ func TestCeilingSweepDropsALegacySessionlessStart(t *testing.T) {
 	agent.mu.Lock()
 	defer agent.mu.Unlock()
 	require.Empty(t, agent.setExecutionDescriptionCalls, "a dropped start must not launch")
+}
+
+// @covers AC-AGENTS-SESSION-CEILING-001.12
+func TestEvaluateCeilingDropReasons_DeletedStepDuringBindingDerivationIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "drop-derive-deleted", "derive-deleted-session", models.TaskSessionStateCreated)
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "drop-derive-deleted", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       "route-derive-deleted",
+		DestinationStepID: "step-derive-deleted",
+		EntryIdentity:     "entry:00000000000000000001",
+		TargetKind:        "new_session",
+		DestinationID:     "derive-deleted-session",
+		Phase:             "committed",
+	}))
+	task, err := repo.GetTask(ctx, "drop-derive-deleted")
+	require.NoError(t, err)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		return nil, fmt.Errorf("%w: %s", wfmodels.ErrWorkflowStepNotFound, stepID)
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	deferral := models.CeilingDeferral{Kind: models.CeilingLaunchStartCreated, Payload: map[string]interface{}{
+		metaKeySessionID:      "derive-deleted-session",
+		metaKeyWorkflowStepID: "step-derive-deleted",
+	}}
+	reasonCode, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, deferral)
+	require.True(t, drop, "a deleted destination step can never become valid, so it must terminate")
+	require.Equal(t, ceilingReasonSuperseded, reasonCode)
+	require.Contains(t, detail, "ambiguous")
+}
+
+// @covers AC-AGENTS-SESSION-CEILING-001.12
+func TestEvaluateCeilingDropReasons_DeletedUnroutedDestinationStepIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "drop-unrouted-deleted", "unrouted-deleted-session", "step-unrouted-deleted")
+	task, err := repo.GetTask(ctx, "drop-unrouted-deleted")
+	require.NoError(t, err)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		return nil, fmt.Errorf("%w: %s", wfmodels.ErrWorkflowStepNotFound, stepID)
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
+	step := &wfmodels.WorkflowStep{ID: "step-unrouted-deleted", WorkflowID: "wf1"}
+	binding := models.CeilingWorkflowEntryBinding{
+		WorkflowID:        "wf1",
+		DestinationStepID: "step-unrouted-deleted",
+		RouteOperationID:  workflowSessionRouteID(task.ID, "step-unrouted-deleted", entryIdentity, nil, svc.resolveStepProfileSessionStartPolicy(step)),
+		EntryIdentity:     entryIdentity,
+	}
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:                    "unrouted-deleted-session",
+			metaKeyWorkflowStepID:               "step-unrouted-deleted",
+			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
+		},
+	}
+	_, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, deferral)
+	require.True(t, drop, "a deleted unrouted destination step can never become valid, so it must terminate")
+	require.Contains(t, detail, "no longer exists")
+}
+
+// @covers AC-AGENTS-SESSION-CEILING-001.12
+func TestEvaluateCeilingDropReasons_DeletedRoutedDestinationStepIsTerminal(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSessionWithStep(t, repo, "drop-routed-deleted", "routed-deleted-session", "step-routed-deleted")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.getStepFunc = func(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+		return nil, fmt.Errorf("%w: %s", wfmodels.ErrWorkflowStepNotFound, stepID)
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	task, err := repo.GetTask(ctx, "drop-routed-deleted")
+	require.NoError(t, err)
+	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
+	require.NotEqual(t, legacyWorkflowEntryIdentity, entryIdentity, "the task row must supply a usable identity")
+	operationID := "route-routed-deleted"
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, "drop-routed-deleted", models.MetaKeyWorkflowSessionRoute, models.WorkflowSessionRoute{
+		OperationID:       operationID,
+		DestinationStepID: "step-routed-deleted",
+		EntryIdentity:     entryIdentity,
+		TargetKind:        "new_session",
+		DestinationID:     "routed-deleted-session",
+		Phase:             "committed",
+	}))
+	task, err = repo.GetTask(ctx, "drop-routed-deleted")
+	require.NoError(t, err)
+	binding := models.CeilingWorkflowEntryBinding{
+		WorkflowID:           "wf1",
+		DestinationStepID:    "step-routed-deleted",
+		RouteOperationID:     operationID,
+		EntryIdentity:        entryIdentity,
+		DestinationSessionID: "routed-deleted-session",
+	}
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchStartCreated,
+		Payload: map[string]interface{}{
+			metaKeySessionID:                    "routed-deleted-session",
+			metaKeyWorkflowStepID:               "step-routed-deleted",
+			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
+		},
+	}
+	_, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, deferral)
+	require.True(t, drop, "a deleted routed destination step can never become valid, so it must terminate")
+	require.Contains(t, detail, "workflow changed")
 }

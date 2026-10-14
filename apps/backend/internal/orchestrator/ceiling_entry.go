@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -154,7 +155,10 @@ func (s *Service) deriveCeilingEntryBinding(
 	if s.workflowStepGetter != nil {
 		var stepErr error
 		step, stepErr = s.workflowStepGetter.GetStep(ctx, requestedStepID)
-		if stepErr != nil {
+		// A deleted step is a structural dead end, not a failed read: resolve it
+		// as not-derived so validation drops the record instead of retrying it
+		// forever. Every other read error is retryable.
+		if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
 			return models.CeilingWorkflowEntryBinding{}, false, stepErr
 		}
 		if step == nil {
@@ -762,7 +766,9 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 	}
 	if s.workflowStepGetter != nil {
 		step, stepErr := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
-		if stepErr != nil {
+		// A deleted step (not-found) resolves to a nil step and supersedes the
+		// record; only a genuine read failure stays retryable.
+		if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
 			return ceilingEntryUnavailable, "workflow destination step could not be read", stepErr
 		}
 		// Some legacy workflow-step providers return the step without its
@@ -786,7 +792,9 @@ func (s *Service) validateUnroutedWorkflowEntry(
 		return ceilingEntryUnavailable, "workflow destination step cannot be read", nil
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
-	if err != nil {
+	// A deleted step is a structural dead end, so it supersedes the record;
+	// only a genuine read failure stays retryable.
+	if err != nil && !errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
 		return ceilingEntryUnavailable, "workflow destination step could not be read", err
 	}
 	if step == nil {
