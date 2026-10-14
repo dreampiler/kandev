@@ -48,12 +48,15 @@ func newResidualWorkflowFixture(t *testing.T, suffix, currentStep, turnStamp str
 	}
 	streamID := "residual-wf-stream-" + suffix
 	event := persistedTerminalEvent(sessionID, incarnationID, 1, submissionID, streamID, "complete")
-	if err := repo.CreateTurn(ctx, &models.Turn{
+	turn := &models.Turn{
 		ID: eventTurnID(event), TaskSessionID: sessionID, TaskID: taskID,
 		StartedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
-		Metadata: map[string]interface{}{models.TurnMetaKeyWorkflowStepIDAtStart: turnStamp},
-	}); err != nil {
-		t.Fatalf("create stamped turn: %v", err)
+	}
+	if turnStamp != "" {
+		turn.Metadata = map[string]interface{}{models.TurnMetaKeyWorkflowStepIDAtStart: turnStamp}
+	}
+	if err := repo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("create residual turn: %v", err)
 	}
 	projectOrchestratorDeliveryEvent(t, repo, ctx, event)
 	stepGetter := newMockStepGetter()
@@ -186,5 +189,38 @@ func TestResidualWorkflowMissingTurnStaysPinned(t *testing.T) {
 	submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.submissionID("noturn"))
 	if err != nil || submission.FullySettledAt != nil {
 		t.Fatalf("missing-turn submission = %+v, %v; want not fully settled", submission, err)
+	}
+}
+
+func TestResidualWorkflowUnstampedTurnStaysPinned(t *testing.T) {
+	// A turn with no step-entry stamp carries no entry evidence (it may have
+	// started before the task held a step), so even when the current step has
+	// an automatic move the terminal must stay pinned rather than record
+	// not_required.
+	fixture := newResidualWorkflowFixture(t, "nostamp", "step-move-nostamp", "")
+	stepTime := time.Date(2026, 10, 14, 0, 0, 0, 0, time.UTC)
+	fixture.installStep(t, &wfmodels.WorkflowStep{
+		ID: "step-move-nostamp", WorkflowID: "wf1", UpdatedAt: stepTime,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}}},
+	})
+
+	if err := fixture.service.reconcileAgentDeliverySettlements(fixture.ctx, fixture.session.ID); err != nil {
+		t.Fatalf("reconcile unstamped turn: %v", err)
+	}
+	swept, _, err := fixture.service.sweepResidualDeliveryNoOp(fixture.ctx, fixture.session.ID)
+	if err != nil || swept != 0 {
+		t.Fatalf("unstamped sweep = %d, %v; want 0", swept, err)
+	}
+	if _, err := fixture.repo.GetAgentDeliveryEffect(fixture.ctx,
+		"workflow.on_turn_complete:turn-"+fixture.submissionID("nostamp")); err == nil {
+		t.Fatal("unstamped turn gained a workflow receipt; want none")
+	}
+	terminal, err := fixture.repo.GetAgentDeliveryEffect(fixture.ctx, "agent_delivery.terminal:residual-wf-stream-nostamp:1")
+	if err != nil || terminal.State != models.DeliveryEffectBlockResolved {
+		t.Fatalf("unstamped terminal = %+v, %v; want block_resolved", terminal, err)
+	}
+	submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.submissionID("nostamp"))
+	if err != nil || submission.FullySettledAt != nil {
+		t.Fatalf("unstamped submission = %+v, %v; want not fully settled", submission, err)
 	}
 }

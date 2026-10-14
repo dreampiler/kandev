@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"go.uber.org/zap"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // Agent-delivery workflow outcomes the residual sweep can record through the
@@ -185,17 +187,39 @@ func (s *Service) residualDeliveryOutcome(
 		return agentDeliveryOutcomeNotRequired, false
 	}
 	turn, err := s.residualTurn(ctx, effect.TurnID)
-	if err != nil || turn == nil {
+	if errors.Is(err, sql.ErrNoRows) {
 		return "", false
 	}
-	if models.StringFromAny(turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart]) != task.WorkflowStepID {
+	if err != nil {
+		s.logger.Warn("residual delivery sweep could not read the terminal turn",
+			zap.String("turn_id", effect.TurnID), zap.Error(err))
+		return "", false
+	}
+	if turn == nil {
+		return "", false
+	}
+	// A turn without a step-entry stamp carries no entry evidence: it may have
+	// started before the task held a step, so it stays protected.
+	stamp := models.StringFromAny(turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart])
+	if stamp == "" {
+		return "", false
+	}
+	if stamp != task.WorkflowStepID {
 		return agentDeliveryOutcomeNotRequired, false
 	}
 	if s.workflowStepGetter == nil {
 		return "", false
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if err != nil || step == nil || step.WorkflowID != task.WorkflowID {
+	if errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
+		return "", false
+	}
+	if err != nil {
+		s.logger.Warn("residual delivery sweep could not read the current workflow step",
+			zap.String("task_id", task.ID), zap.String("step_id", task.WorkflowStepID), zap.Error(err))
+		return "", false
+	}
+	if step == nil || step.WorkflowID != task.WorkflowID {
 		return "", false
 	}
 	if step.AdvancesOnTurnComplete() {
