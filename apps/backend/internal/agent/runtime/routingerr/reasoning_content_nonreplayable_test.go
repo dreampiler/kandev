@@ -51,9 +51,11 @@ func TestIsResumeCorrupted_ReasoningContent(t *testing.T) {
 	}{
 		{"deepseek reasoning_content 400", reasoningContentMessage, true},
 		{"bare phrasing", "The reasoning_content in the thinking mode must be passed back to the API.", true},
-		{"gap at the bound", "reasoning_content" + strings.Repeat("x", 80) + "must be passed back", true},
-		{"gap beyond the bound", "reasoning_content" + strings.Repeat("x", 81) + "must be passed back", false},
-		{"phrases on separate lines", "reasoning_content\nmust be passed back", false},
+		{"gap at the bound", "Internal error: reasoning_content" + strings.Repeat("x", 80) + "must be passed back", true},
+		{"gap beyond the bound", "Internal error: reasoning_content" + strings.Repeat("x", 81) + "must be passed back", false},
+		{"phrases on separate lines", "Internal error: reasoning_content\nmust be passed back", false},
+		{"agent explanation", "DeepSeek requires reasoning_content in thinking mode and it must be passed back to the API", false},
+		{"quoted diagnostic", "The child reported: The reasoning_content in the thinking mode must be passed back to the API.", false},
 		{"reasoning_content without the phrase", "the model emitted reasoning_content blocks inline", false},
 		{"ordinary prose", "please pass the reasoning back to me", false},
 		{"empty", "", false},
@@ -77,7 +79,7 @@ func TestClassify_ReasoningContentRawBound(t *testing.T) {
 		{"phrases on separate lines", "\n", CodeAgentRuntime},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			msg := "reasoning_content" + tc.gap + "must be passed back"
+			msg := "Internal error: reasoning_content" + tc.gap + "must be passed back"
 			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: msg})
 			if got.Code != tc.want {
 				t.Fatalf("Code = %q, want %q (excerpt %q)", got.Code, tc.want, got.RawExcerpt)
@@ -86,5 +88,18 @@ func TestClassify_ReasoningContentRawBound(t *testing.T) {
 				t.Fatal("raw recovery predicate and classifier disagree")
 			}
 		})
+	}
+}
+
+func TestClassify_ReasoningContentAgentProse(t *testing.T) {
+	resetInjection()
+	for _, msg := range []string{
+		"DeepSeek requires reasoning_content in thinking mode and it must be passed back to the API",
+		"The child reported: The reasoning_content in the thinking mode must be passed back to the API.",
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: msg})
+		if got.Code != CodeAgentRuntime || IsResumeCorrupted(msg) {
+			t.Errorf("agent prose classified as resume corruption: %q (code %q)", msg, got.Code)
+		}
 	}
 }

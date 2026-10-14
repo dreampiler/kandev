@@ -33,6 +33,8 @@ message steers toward a fresh session.
 - The `deepseek.reasoning_content.nonreplayable.v1` runtime-environment rule
   mapping to `resume_corrupted` with fresh-session remediation.
 - `IsResumeCorrupted` recognition of the same single-line signature.
+- Canonical bare diagnostic or error-line framing, excluding agent prose that
+  quotes or explains the two phrases.
 - Raw diagnostic matching before redaction can shorten the signature's gap.
 - Unit coverage for code, class, policy flags, and false-positive boundaries.
 
@@ -62,6 +64,10 @@ message steers toward a fresh session.
   also requires the raw signature. Real `Classify` regressions cover redactable
   80- and 81-character gaps and newline rejection. Full classifier and policy
   verification runs in hosted CI; the controlled proof is not a package pass.
+- Codex review found a prose collision. An exact-predicate assertion reproduced
+  it, and the matcher now requires a standalone canonical diagnostic or an
+  anchored error line. Predicate and real `Classify` tests reject explanations
+  and quoted diagnostics while preserving the captured error and raw bounds.
 - Independent candidate verification and hosted CI results are retained in
   the review task's sibling evidence directory, outside this work order.
 - No public docs change is needed: no API, configuration, recovery action, or

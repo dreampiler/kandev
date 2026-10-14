@@ -349,10 +349,14 @@ func isTransientProviderError(e *Error) bool {
 // an unrelated "cannot be modified".
 var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
 
-// reasoningContentMissingRe requires both DeepSeek diagnostic phrases within
-// 80 characters on one line. The signature alone does not identify whether
+// reasoningContentMissingRe accepts the canonical bare DeepSeek diagnostic or
+// an error line carrying both phrases within 80 characters. Anchoring rejects
+// agent prose quoting the diagnostic. The signature does not identify whether
 // saved history or the adapter omitted the required reasoning field.
-var reasoningContentMissingRe = regexp.MustCompile(`(?i)reasoning_content[^\n]{0,80}must be passed back`)
+var reasoningContentMissingRe = regexp.MustCompile(
+	`(?i)(?:\A\s*The \x60?reasoning_content\x60? in the thinking mode must be passed back to the API\.\s*\z|` +
+		`(?:\A|\n)[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[^\n]*reasoning_content[^\n]{0,80}must be passed back)`,
+)
 
 // IsResumeCorrupted reports whether the message matches an Anthropic
 // thinking-blocks-immutable or DeepSeek missing-reasoning signature assigned
