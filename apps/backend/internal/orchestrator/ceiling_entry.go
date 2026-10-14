@@ -557,7 +557,7 @@ func (s *Service) enrichCeilingDeferralBinding(
 	defer release()
 	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
 	if err != nil {
-		s.logger.Zap().Warn("could not decode deferred workflow entry binding; using legacy validation",
+		s.logger.Zap().Warn("could not decode deferred workflow entry binding",
 			zap.String("task_id", taskID), zap.Error(err))
 		return deferral, nil
 	}
@@ -693,7 +693,7 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 	}
 	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
 	if err != nil {
-		return ceilingEntryUnavailable, err.Error(), nil
+		return ceilingEntryPermanentlyUnavailable, err.Error(), nil
 	}
 	route, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
 	payloadStepID := stringField(deferral.Payload, metaKeyWorkflowStepID)

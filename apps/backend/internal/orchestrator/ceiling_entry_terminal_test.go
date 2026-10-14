@@ -68,6 +68,35 @@ func TestEvaluateCeilingDropReasons_AmbiguousBindingIsTerminal(t *testing.T) {
 	require.Contains(t, detail, "ambiguous")
 }
 
+// @covers AC-AGENTS-SESSION-CEILING-001.12
+func TestCeilingSweepDropsIncompleteStoredEntryBindings(t *testing.T) {
+	for _, missing := range []string{"workflow_id", "destination_step_id", "route_operation_id", "entry_identity"} {
+		t.Run(missing, func(t *testing.T) {
+			ctx := context.Background()
+			f := newLaunchFailureReplayFixture(t, "incomplete-binding-"+missing, errors.New("launch must not run"))
+			raw, prior, err := f.repo.GetTaskDeferredLaunch(ctx, f.taskID)
+			require.NoError(t, err)
+			deferral, err := models.ReadCeilingDeferral(raw)
+			require.NoError(t, err)
+			binding := map[string]interface{}{
+				"workflow_id": "wf1", "destination_step_id": "step-auto",
+				"route_operation_id": "stored-route", "entry_identity": "stored-entry",
+			}
+			delete(binding, missing)
+			deferral.Payload[models.CeilingLaunchEntryBindingKey] = binding
+			stored, _, err := f.repo.SetTaskDeferredLaunchIfUnchanged(ctx, f.taskID, prior, models.CeilingRecordKeys(deferral))
+			require.NoError(t, err)
+			require.True(t, stored)
+			f.svc.drainDeferredCeilingLaunches(ctx)
+			require.False(t, f.ceilingDeferred(t), "incomplete durable identity must terminate instead of retrying")
+			require.Zero(t, f.launchCount(), "a malformed stored binding must never reach dispatch")
+			drops := f.logs.FilterMessage("dropping a ceiling-deferred launch").All()
+			require.NotEmpty(t, drops)
+			require.Contains(t, drops[0].ContextMap()["detail"], "binding is incomplete")
+		})
+	}
+}
+
 func TestEvaluateCeilingDropReasons_StepReadErrorIsRetried(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

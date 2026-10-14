@@ -96,3 +96,8 @@ bound-step-read failures and passed after remediation. These proofs provide no
 full-package, SQL, or runtime coverage. Hosted complete validation is pending.
 Public recovery guidance is updated in the agent profile troubleshooting and
 Office provider-routing pages.
+
+Stored workflow-binding decode and incompleteness failures are now terminal.
+A four-field durable sweep regression prevents these records from retrying;
+genuine repository read failures remain retained. Bounded exact decoder/prefix
+RED/GREEN proof passes with no package or SQL coverage credit.

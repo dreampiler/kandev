@@ -82,3 +82,8 @@ The permanent sweep regression verifies the queued record remains and no agent
 launch occurs. Genuine deleted-step and readable non-auto-start dispositions
 remain terminal. Local bounded exact-source proof passes; hosted validation is
 pending.
+
+Stored workflow-binding decode and incompleteness failures are now terminal.
+A four-field durable sweep regression prevents these records from retrying;
+genuine repository read failures remain retained. Bounded exact decoder/prefix
+RED/GREEN proof passes with no package or SQL coverage credit.
