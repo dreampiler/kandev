@@ -13,6 +13,8 @@ legacy_specs: []
 # Plan: delivery residual settlement (design checkpoint)
 
 Status: implemented in the second PR under explicit parent implementation order.
+Task 02's workflow-bound classification is implemented in the third PR from
+durable turn and step facts (no engine evaluation).
 
 ## Work orders
 
