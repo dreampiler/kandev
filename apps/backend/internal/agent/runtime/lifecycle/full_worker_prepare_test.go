@@ -34,7 +34,7 @@ func TestFullWorkerPreparationContract(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "sh", "-c", script)
-	cmd.Env = append(os.Environ(), prependPATH(dir), "DOCKER_READY_TIMEOUT_SECONDS=1")
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "DOCKER_READY_TIMEOUT_SECONDS=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(output), "Docker daemon did not become ready") {
 		t.Fatalf("readiness failure: %v %s", err, output)
