@@ -330,9 +330,15 @@ func (s *Service) claimInterruptedTurnAutoRecovery(
 		recordKey = state.recordKey
 		blockID = state.blockID
 	}
-	attempts, allowed := s.reserveInterruptedTurnAutoRecoveryAttempt(ctx, blockID, state.attempts)
+	attempts, allowed, uncertain := s.reserveInterruptedTurnAutoRecoveryAttempt(ctx, blockID, state.attempts)
 	if !allowed {
 		s.interruptedTurnAutoRecovery[sessionID] = state
+		if uncertain {
+			// The known record could not be charged durably. This is not the
+			// attempt bound, so it must not be reported as one; reserve logged
+			// the distinct operator surface. No new model recovery is admitted.
+			return false, false, state.recordKey
+		}
 		return false, true, state.recordKey
 	}
 	state.attempts = attempts
@@ -344,26 +350,39 @@ func (s *Service) claimInterruptedTurnAutoRecovery(
 }
 
 // reserveInterruptedTurnAutoRecoveryAttempt consumes one attempt for the
-// session's current unresolved record. The count is durable on the recovery
-// block when one is known (a backend restart cannot reopen it) and falls back
-// to the in-memory count otherwise.
-func (s *Service) reserveInterruptedTurnAutoRecoveryAttempt(ctx context.Context, blockID string, inMemoryAttempts int) (int, bool) {
+// session's current unresolved record. A record with a canonical block MUST be
+// charged durably: if the durable increment cannot be confirmed (store error or
+// a store without the durable boundary), the attempt is refused instead of
+// being authorized on the in-memory count, so a restart plus a write error
+// cannot open a fourth recovery for an already-exhausted record. Only a record
+// with no canonical block falls back to the process-local in-memory count; that
+// case has no durable identity to charge and is a known process-local limit,
+// not a durable guarantee. uncertain reports the durable-charge failure so the
+// caller does not confuse it with the attempt bound.
+func (s *Service) reserveInterruptedTurnAutoRecoveryAttempt(
+	ctx context.Context, blockID string, inMemoryAttempts int,
+) (attempts int, allowed, uncertain bool) {
 	if blockID != "" {
-		if store, ok := s.repo.(sessionRecoveryBlockAutoAttemptStore); ok {
-			attempts, allowed, err := store.IncrementOpenSessionRecoveryBlockAutoAttempts(
-				ctx, blockID, interruptedTurnAutoRecoveryMaxAttempts)
-			if err == nil {
-				return attempts, allowed
-			}
-			s.logger.Warn("failed to persist the interrupted-turn recovery attempt bound; using the in-memory bound",
+		store, ok := s.repo.(sessionRecoveryBlockAutoAttemptStore)
+		if !ok {
+			s.logger.Warn("no durable attempt store for a known recovery block; refusing automatic recovery",
+				zap.String("session_recovery_block_id", blockID))
+			return inMemoryAttempts, false, true
+		}
+		attempts, allowed, err := store.IncrementOpenSessionRecoveryBlockAutoAttempts(
+			ctx, blockID, interruptedTurnAutoRecoveryMaxAttempts)
+		if err != nil {
+			s.logger.Warn("failed to persist the interrupted-turn recovery attempt bound; refusing automatic recovery",
 				zap.String("session_recovery_block_id", blockID),
 				zap.Error(err))
+			return inMemoryAttempts, false, true
 		}
+		return attempts, allowed, false
 	}
 	if inMemoryAttempts >= interruptedTurnAutoRecoveryMaxAttempts {
-		return inMemoryAttempts, false
+		return inMemoryAttempts, false, false
 	}
-	return inMemoryAttempts + 1, true
+	return inMemoryAttempts + 1, true, false
 }
 
 func (s *Service) finishInterruptedTurnAutoRecovery(sessionID, recordKey string) {

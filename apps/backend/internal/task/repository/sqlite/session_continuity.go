@@ -426,8 +426,6 @@ func (r *Repository) upsertSessionRecoveryBlockTx(
 		   AND session_recovery_blocks.delivery_submission_id != excluded.delivery_submission_id
 		   THEN session_recovery_blocks.authorized_action ELSE excluded.authorized_action END,
 		 auto_recovery_attempts = CASE WHEN session_recovery_blocks.state = ?
-		   AND session_recovery_blocks.consumer_reference = 'agent_delivery'
-		   AND excluded.consumer_reference = 'agent_delivery'
 		   THEN session_recovery_blocks.auto_recovery_attempts ELSE excluded.auto_recovery_attempts END,
 		 updated_at = excluded.updated_at,
 		 resolved_at = CASE WHEN session_recovery_blocks.state = ?
