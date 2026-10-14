@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -150,6 +151,10 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(),
+				map[string]interface{}{"error_code": repoerrors.ExecutorProfileNotFoundCode})
+		}
 		if recoveryResponse, responseErr := managedCloneRelocationConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
 		}

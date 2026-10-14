@@ -49,7 +49,7 @@ func TestExecutorProfileScriptsApplyProfile(t *testing.T) {
 	require.NoError(t, err)
 	cfg := executorConfig{ExecutorID: "projection-executor"}
 	metadata := map[string]interface{}{}
-	e.applyProfile(t.Context(), "projection-profile", &cfg, metadata)
+	require.NoError(t, e.applyProfile(t.Context(), "projection-profile", &cfg, metadata))
 	require.Equal(t, prepare, cfg.SetupScript)
 	require.Equal(t, cleanup, cfg.CleanupScript)
 	require.Equal(t, cleanup, metadata[lifecycle.MetadataKeyCleanupScript])

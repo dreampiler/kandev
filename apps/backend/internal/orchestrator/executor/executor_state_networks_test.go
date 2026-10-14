@@ -33,12 +33,15 @@ func TestResolveExecutorConfig_ProfileNetworkOverridesTaskMetadata(t *testing.T)
 				Config: map[string]string{key: "profile-value"},
 			}
 
-			cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
+			cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
 				map[string]interface{}{
 					"executor_profile_id": "prof-1",
 					key:                   "task-supplied",
 				})
 
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got, _ := cfg.Metadata[key].(string); got != "profile-value" {
 				t.Fatalf("metadata[%q] = %q, want the profile value to win", key, got)
 			}
@@ -62,12 +65,15 @@ func TestResolveExecutorConfig_EmptyProfileNetworkClearsTaskMetadata(t *testing.
 			}
 			repo.executorProfiles["prof-1"] = &models.ExecutorProfile{ID: "prof-1", Config: map[string]string{}}
 
-			cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
+			cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
 				map[string]interface{}{
 					"executor_profile_id": "prof-1",
 					key:                   "task-supplied",
 				})
 
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got, _ := cfg.Metadata[key].(string); got != "" {
 				t.Fatalf("metadata[%q] = %q, want it cleared by the empty profile value", key, got)
 			}
@@ -89,8 +95,11 @@ func TestResolveExecutorConfig_NetworkClearedWithoutProfile(t *testing.T) {
 				Type: models.ExecutorTypeLocalDocker,
 			}
 
-			cfg := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
+			cfg, err := exec.resolveExecutorConfig(context.Background(), "exec-docker-1", "ws-1",
 				map[string]interface{}{key: "task-supplied"})
+			if err != nil {
+				t.Fatal(err)
+			}
 
 			if got, _ := cfg.Metadata[key].(string); got != "" {
 				t.Fatalf("metadata[%q] = %q, want it cleared when no profile supplies it", key, got)

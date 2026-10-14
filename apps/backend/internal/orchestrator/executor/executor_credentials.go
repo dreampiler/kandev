@@ -350,7 +350,10 @@ func (e *Executor) PreflightManagedGitCredentials(
 	if executorProfileID != "" {
 		metadata["executor_profile_id"] = executorProfileID
 	}
-	execConfig := e.resolveExecutorConfig(ctx, executorID, workspaceID, metadata)
+	execConfig, err := e.resolveRetainedExecutorConfig(ctx, executorID, workspaceID, metadata)
+	if err != nil {
+		return err
+	}
 	return e.preflightManagedGitCredentials(ctx, workspaceID, taskID, execConfig)
 }
 
