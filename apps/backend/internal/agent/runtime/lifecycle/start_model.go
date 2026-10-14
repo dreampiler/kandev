@@ -158,6 +158,15 @@ func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, r
 	return decision
 }
 
+// isStartModelTransportError reports whether a SetModel failure is a transport
+// or teardown race rather than a model-application fault: the ACP stream is
+// already gone (the agent is stopping, or the connection dropped before the
+// request). Such a failure must surface as the transport error so the caller
+// keeps its teardown classification instead of recording application_failed.
+func isStartModelTransportError(err error) bool {
+	return isAgentStreamNotConnectedErr(err) || isTransportDeadErr(err)
+}
+
 // applyStartModelPolicy applies the profile model only when the executor's
 // ACP catalog advertises it. An exact profile fails closed when the requested
 // model cannot be attested before inference. Compatible profiles preserve the
@@ -235,7 +244,8 @@ func applyStartModelPolicy(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(
@@ -291,7 +301,8 @@ func applyUniqueAdvertisedVariation(
 			decision.SetModelCalled = true
 			return decision, nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(
@@ -327,7 +338,8 @@ func applyAdvertisedFallback(
 			}
 			return providerDefaultDecision(state, policy, ModelSelectionReasonSelectionUnsupported), nil
 		}
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+			isStartModelTransportError(err) {
 			return decision, err
 		}
 		return decision, modelSelectionBootstrapFailure(
