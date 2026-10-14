@@ -55,12 +55,16 @@ historical judgments, not a fresh classification of that interval.
 | `evidence` | Public commit, PR, issue, and pinned source links. A PR link alone does not prove equivalence. |
 | `uncertainty` | Scope limits, confidence of imported disposition, and remaining replacement questions. |
 
-All 314 commits have a fork PR association. The first publication records two
-confirmed equivalents, 14 pending upstream relationships, and 298 unknown
+All 314 commits have a fork PR association. The map records two
+confirmed equivalents, 17 pending upstream relationships, and 295 unknown
 relationships. These counts describe correspondence, not the confidence of a
 planned destination. Proposal links may cover only part of a commit; unknown
 rows are retained deliberately. No R5 rejection reason is inferred from the
 absence of an upstream PR.
+
+An imported `sync` disposition describes the containing PR's classification.
+It does not establish that every contributed commit contains only sync changes
+or that its fork behavior can be removed without further inspection.
 
 The two confirmed rows compare the affected production file at both pinned
 trees. They do not certify a later fork replacement PR. Other merged upstream
