@@ -811,6 +811,7 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		log,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
