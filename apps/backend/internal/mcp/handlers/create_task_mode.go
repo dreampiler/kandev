@@ -384,13 +384,15 @@ func isMCPOfficeWorkspace(workspace *models.Workspace) bool {
 // create-specific resolution (override normalization, profile/step lookup,
 // launch metadata) runs, per the external-id-idempotency request-ordering
 // contract: lookup precedes remaining-request validation, and Found wins over
-// disabled profiles, changed steps, and stale launch metadata. It follows the
-// same order as Service.CreateTask (TaskWrite authorization, external_id
-// normalization, reserved-prefix refusal, then the Find) so a
-// coordinator-proposal identity cannot return Found through this preflight
-// while CreateTask would refuse it, and reuses the MCP Found isolation check
-// (validateMCPFoundCreateTask). The response matches the post-CreateTask Found
-// branch below, without side effects.
+// disabled profiles, changed steps, and stale launch metadata. It mirrors
+// Service.CreateTask's order (TaskWrite authorization, external_id
+// normalization, reserved-prefix refusal, then the Find) explicitly here
+// because the shared lookup (GetTaskByExternalID) only applies read-scope
+// authorization and ID normalization: without the explicit steps a
+// coordinator-proposal identity would return Found through this preflight
+// while CreateTask refuses it. The MCP Found isolation check
+// (validateMCPFoundCreateTask) still applies, and the response matches the
+// post-CreateTask Found branch below, without side effects.
 //
 // handled=false (nil response) means "no identity held": the caller continues
 // to the normal create path, where CreateTask repeats the lookup and its
