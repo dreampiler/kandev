@@ -281,7 +281,12 @@ func TestResumeAdmissionCompletesRecoverableStartingRoute(t *testing.T) {
 	)
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
-	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
+		ExecutionProfileID: "candidate-1", Status: "ready",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	persistence := &failingRouteActivationRepo{Repository: repo}
 	engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(persistence))
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunningFn: func(context.Context, string) bool { return true }}

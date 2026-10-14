@@ -13,12 +13,14 @@ import (
 
 func TestResumeAdmissionActivationRequiresCurrentLiveExecution(t *testing.T) {
 	for _, testCase := range []struct {
-		name          string
-		state         models.TaskSessionState
-		liveExecution string
-		wantActive    bool
+		name           string
+		state          models.TaskSessionState
+		liveExecution  string
+		runtimeProfile string
+		wantActive     bool
 	}{
 		{name: "current ready execution", state: models.TaskSessionStateWaitingForInput, liveExecution: "claimed-execution", wantActive: true},
+		{name: "projected predecessor candidate", state: models.TaskSessionStateWaitingForInput, liveExecution: "claimed-execution", runtimeProfile: "predecessor-profile"},
 		{name: "predecessor execution", state: models.TaskSessionStateWaitingForInput, liveExecution: "predecessor-execution"},
 		{name: "unknown execution", state: models.TaskSessionStateWaitingForInput},
 		{name: "cancelled session", state: models.TaskSessionStateCancelled, liveExecution: "claimed-execution"},
@@ -27,7 +29,16 @@ func TestResumeAdmissionActivationRequiresCurrentLiveExecution(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedTaskAndSession(t, repo, "task1", "session1", testCase.state)
-			seedExecutorRunning(t, repo, "session1", "task1", "claimed-execution")
+			runtimeProfile := testCase.runtimeProfile
+			if runtimeProfile == "" {
+				runtimeProfile = "candidate-1"
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "session1", SessionID: "session1", TaskID: "task1",
+				AgentExecutionID: "claimed-execution", ExecutionProfileID: runtimeProfile, Status: "ready",
+			}); err != nil {
+				t.Fatal(err)
+			}
 			engine := dynamicruntime.NewEngine(dynamicruntime.WithPersistence(repo))
 			decision := seedClaimedDynamicRoute(t, ctx, repo, engine, "session1", "claimed-execution")
 			manager := &mockAgentManager{

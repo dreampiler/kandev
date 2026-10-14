@@ -39,6 +39,12 @@ func TestResumeCallerReportsActivationFailureAndRecoversSameExecution(t *testing
 			if err := repo.UpdateTaskSession(launchCtx, current); err != nil {
 				return nil, err
 			}
+			if err := repo.UpsertExecutorRunning(launchCtx, &models.ExecutorRunning{
+				ID: request.SessionID, SessionID: request.SessionID, TaskID: "task1",
+				AgentExecutionID: "ready-execution", ExecutionProfileID: "candidate-1", Status: "ready",
+			}); err != nil {
+				return nil, err
+			}
 			live = true
 			persistence.failActivation = true
 			return &executor.LaunchAgentResponse{AgentExecutionID: "ready-execution"}, nil

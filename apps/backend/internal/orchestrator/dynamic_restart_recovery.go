@@ -40,6 +40,18 @@ func (s *Service) completeReadyStrandedStartingRoute(ctx context.Context, sessio
 	if !isStartingRouteClaim(session) || !routeActivationSessionState(session.State) {
 		return false
 	}
+	lock, release := s.acquireCancelInFlightGuard(session.ID)
+	lock.Lock()
+	defer func() { lock.Unlock(); release() }()
+	if s.isCancelInFlight(session.ID) {
+		return false
+	}
+	current, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil || current == nil || !routeActivationSessionState(current.State) ||
+		current.RouteGeneration != session.RouteGeneration || current.ExecutionProfileID != session.ExecutionProfileID ||
+		current.AgentExecutionID != session.AgentExecutionID || !isStartingRouteClaim(current) {
+		return false
+	}
 	if !s.hasLivePromptReadyAgent(ctx, session) {
 		return false
 	}
@@ -77,7 +89,12 @@ func (s *Service) hasLivePromptReadyAgent(ctx context.Context, session *models.T
 		return false
 	}
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, session.ID)
-	return err == nil && executionID == session.AgentExecutionID
+	if err != nil || executionID != session.AgentExecutionID {
+		return false
+	}
+	running, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	return err == nil && running != nil && running.AgentExecutionID == executionID &&
+		running.ExecutionProfileID == session.ExecutionProfileID
 }
 
 func routeActivationSessionState(state models.TaskSessionState) bool {

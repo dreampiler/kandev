@@ -278,3 +278,5 @@ require the current exclusive probe lease.
   actions, or health policy outside a dynamic profile.
 - Automatically converting legacy Office routing rows into dynamic profiles or
   deleting those rows during this feature's rollout.
+
+Activation reconciliation also verifies the execution record's concrete profile against the current route candidate. Matching the session's execution ID alone is insufficient while a detached successor has been recorded but its predecessor still runs. The shared cancellation/settlement guard serializes observation and activation with successor launch, and a guarded session read revalidates the observed generation, candidate, execution, and nonterminal state.

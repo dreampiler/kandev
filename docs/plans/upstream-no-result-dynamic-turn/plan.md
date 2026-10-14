@@ -71,3 +71,5 @@ Original Backend and E2E workflows completed successfully at the original head.
 The original forced frontend workflow failed during typecheck with a Node heap OOM; tests and build were skipped.
 The single initial main integration inherits protected main's existing step-scoped frontend typecheck budget. No new global resource limit is introduced.
 Focused exact-source diagnostic, admission, and completion-caller harnesses reproduced the contract and ownership failures, then passed with the remediation under the race detector. Their explicit fake boundaries are not SQL or full-stream proof. Permanent real-package caller tests and final hosted suite results remain pending.
+
+Activation reconciliation also verifies the execution record's concrete profile against the current route candidate. Matching the session's execution ID alone is insufficient while a detached successor has been recorded but its predecessor still runs. The shared cancellation/settlement guard serializes observation and activation with successor launch, and a guarded session read revalidates the observed generation, candidate, execution, and nonterminal state.
