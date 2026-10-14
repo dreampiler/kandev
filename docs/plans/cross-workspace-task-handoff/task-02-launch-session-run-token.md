@@ -75,6 +75,11 @@ cause, matching the current main replay-result contract. Original hosted
 backend, E2E build, and desktop logs demonstrated the incompatible bare-enum
 return. Those build failures are compiler evidence, not behavioral test RED.
 
+The controlled, exact production-helper proof passed eight synthetic boundary
+scenarios using only the standard library inside the approved sandbox. It
+does not qualify SQL, JWT signing, runtime, or lifecycle behavior. Selected
+Go formatting passed after correcting owned-volume parent directory ownership.
+
 Hosted validation of the updated tests and full suites is pending. No local
 SQL or broad backend suite has run. Public documentation needs no change:
 CLI syntax, handoff authorization, and signing-key storage remain unchanged.

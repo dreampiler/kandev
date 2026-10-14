@@ -1,133 +1,143 @@
 package orchestrator
 
 import (
- "context"
- "errors"
- "encoding/json"
- "testing"
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
 
- "github.com/stretchr/testify/require"
- "github.com/kandev/kandev/internal/orchestrator/executor"
- "github.com/kandev/kandev/internal/task/models"
- tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
- v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 type launchCredentialReminterFunc func(context.Context, string, string, map[string]string) (map[string]string, error)
+
 func (f launchCredentialReminterFunc) RemintLaunchCredentials(ctx context.Context, taskID, sessionID string, env map[string]string) (map[string]string, error) {
- return f(ctx, taskID, sessionID, env)
+	return f(ctx, taskID, sessionID, env)
 }
 
 func TestStartTaskWithEnv_RemintsConcreteOfficeSessionBeforeDispatch(t *testing.T) {
- ctx := context.Background()
- repo := setupTestRepo(t)
- seedTaskAndSession(t, repo, "task1", "completed-session", models.TaskSessionStateCompleted)
- task, err := repo.GetTask(ctx, "task1")
- require.NoError(t, err)
- task.ProjectID = "office-project"
- require.NoError(t, repo.UpdateTask(ctx, task))
- tasks := newMockTaskRepo()
- tasks.tasks["task1"] = &v1.Task{ID:"task1", Title:"Office task", Description:"Do the work", State:v1.TaskStateInProgress}
- var dispatched *executor.LaunchAgentRequest
- manager := &mockAgentManager{launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-  dispatched = req
-  return &executor.LaunchAgentResponse{AgentExecutionID:"exec-" + req.SessionID}, nil
- }}
- svc := createTestServiceWithScheduler(repo, newMockStepGetter(), tasks, manager)
- var mintedSession string
- env := validOfficeRuntimeEnv()
- svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, sessionID string, input map[string]string) (map[string]string, error) {
-  require.Equal(t, "task1", taskID)
-  session, readErr := repo.GetTaskSession(ctx, sessionID)
-  require.NoError(t, readErr)
-  require.Equal(t, taskID, session.TaskID)
-  require.NotEqual(t, "completed-session", sessionID)
-  mintedSession = sessionID
-  refreshed := make(map[string]string, len(input))
-  for key, value := range input { refreshed[key] = value }
-  refreshed["KANDEV_API_KEY"], refreshed["KANDEV_RUN_TOKEN"] = "fresh-session-token", "fresh-session-token"
-  return refreshed, nil
- }))
- execution, err := svc.StartTaskWithEnv(ctx, "task1", "office-runner", "", "", "", "Do the work", "", false, false, nil, env)
- require.NoError(t, err)
- require.NotNil(t, dispatched)
- require.Equal(t, execution.SessionID, mintedSession)
- require.Equal(t, mintedSession, dispatched.SessionID)
- require.Equal(t, "fresh-session-token", dispatched.Env["KANDEV_API_KEY"])
- require.Equal(t, "fresh-session-token", dispatched.Env["KANDEV_RUN_TOKEN"])
- require.Equal(t, "signed-run-token", env["KANDEV_API_KEY"])
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "completed-session", models.TaskSessionStateCompleted)
+	task, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	task.ProjectID = "office-project"
+	require.NoError(t, repo.UpdateTask(ctx, task))
+	tasks := newMockTaskRepo()
+	tasks.tasks["task1"] = &v1.Task{ID: "task1", Title: "Office task", Description: "Do the work", State: v1.TaskStateInProgress}
+	var dispatched *executor.LaunchAgentRequest
+	manager := &mockAgentManager{launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+		dispatched = req
+		return &executor.LaunchAgentResponse{AgentExecutionID: "exec-" + req.SessionID}, nil
+	}}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), tasks, manager)
+	var mintedSession string
+	env := validOfficeRuntimeEnv()
+	svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, sessionID string, input map[string]string) (map[string]string, error) {
+		require.Equal(t, "task1", taskID)
+		session, readErr := repo.GetTaskSession(ctx, sessionID)
+		require.NoError(t, readErr)
+		require.Equal(t, taskID, session.TaskID)
+		require.NotEqual(t, "completed-session", sessionID)
+		mintedSession = sessionID
+		refreshed := make(map[string]string, len(input))
+		for key, value := range input {
+			refreshed[key] = value
+		}
+		refreshed["KANDEV_API_KEY"], refreshed["KANDEV_RUN_TOKEN"] = "fresh-session-token", "fresh-session-token"
+		return refreshed, nil
+	}))
+	execution, err := svc.StartTaskWithEnv(ctx, "task1", "office-runner", "", "", "", "Do the work", "", false, false, nil, env)
+	require.NoError(t, err)
+	require.NotNil(t, dispatched)
+	require.Equal(t, execution.SessionID, mintedSession)
+	require.Equal(t, mintedSession, dispatched.SessionID)
+	require.Equal(t, "fresh-session-token", dispatched.Env["KANDEV_API_KEY"])
+	require.Equal(t, "fresh-session-token", dispatched.Env["KANDEV_RUN_TOKEN"])
+	require.Equal(t, "signed-run-token", env["KANDEV_API_KEY"])
 }
 
 func TestCeilingReplay_RefreshFailureRetainsRedactedLaunch(t *testing.T) {
- for _, failAt := range []int{1, 2} {
-  t.Run(map[int]string{1:"before session", 2:"after session"}[failAt], func(t *testing.T) {
-   ctx := context.Background()
-   fixture := newLaunchFailureReplayFixture(t, "refresh-failure-task", errors.New("unexpected executor dispatch"))
-   original := deferredLaunchOf(t, fixture.svc, fixture.taskID)
-   deferral, err := models.ReadCeilingDeferral(original)
-   require.NoError(t, err)
-   deferral.Payload["env"] = redactedCeilingLaunchEnv(map[string]string{"KANDEV_RUN_ID":"run-1", "KANDEV_API_KEY":"captured-token", "KANDEV_RUN_TOKEN":"captured-token"})
-   fixture.svc.clearCeilingDeferredRecord(ctx, fixture.taskID)
-   _, _, err = fixture.repo.SetTaskDeferredLaunchIfUnchanged(ctx, fixture.taskID, tasksqlite.AbsentDeferredLaunch(), models.CeilingRecordKeys(deferral))
-   require.NoError(t, err)
-   fixture.svc.SetTurnService(&repoBackedTurnService{repo: fixture.repo})
-   calls := 0
-   cause := errors.New("credential issuer unavailable")
-   fixture.svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, sessionID string, input map[string]string) (map[string]string, error) {
-    calls++
-    require.Equal(t, fixture.taskID, taskID)
-    if calls == 1 { require.Empty(t, sessionID); require.NotContains(t, input, "KANDEV_API_KEY") } else { require.NotEmpty(t, sessionID) }
-    if calls == failAt { return nil, cause }
-    return map[string]string{"KANDEV_RUN_ID":"run-1", "KANDEV_API_KEY":"early-token", "KANDEV_RUN_TOKEN":"early-token"}, nil
-   }))
-   fixture.svc.drainDeferredCeilingLaunches(ctx)
-   require.Equal(t, failAt, calls)
-   require.Zero(t, fixture.launchCount())
-   require.True(t, fixture.ceilingDeferred(t))
-   stored := deferredLaunchOf(t, fixture.svc, fixture.taskID)
-   serialized, err := json.Marshal(stored)
-   require.NoError(t, err)
-   require.NotContains(t, string(serialized), "captured-token")
-   require.NotContains(t, string(serialized), "early-token")
-   sessions, err := fixture.repo.ListTaskSessions(ctx, fixture.taskID)
-   require.NoError(t, err)
-   require.Len(t, sessions, failAt-1)
-   if failAt == 2 {
-    require.Equal(t, models.TaskSessionStateFailed, sessions[0].State)
-    turn, turnErr := fixture.repo.GetTurn(ctx, "turn-"+sessions[0].ID)
-    require.NoError(t, turnErr)
-    require.NotNil(t, turn.CompletedAt)
-   }
-   entries := fixture.logs.FilterMessage(ceilingReplayRetainedFailureLog).All()
-   require.Len(t, entries, 1)
-   require.Contains(t, entries[0].ContextMap()["error"], cause.Error())
-  })
- }
+	for _, failAt := range []int{1, 2} {
+		t.Run(map[int]string{1: "before session", 2: "after session"}[failAt], func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newLaunchFailureReplayFixture(t, "refresh-failure-task", errors.New("unexpected executor dispatch"))
+			original := deferredLaunchOf(t, fixture.svc, fixture.taskID)
+			deferral, err := models.ReadCeilingDeferral(original)
+			require.NoError(t, err)
+			deferral.Payload["env"] = redactedCeilingLaunchEnv(map[string]string{"KANDEV_RUN_ID": "run-1", "KANDEV_API_KEY": "captured-token", "KANDEV_RUN_TOKEN": "captured-token"})
+			fixture.svc.clearCeilingDeferredRecord(ctx, fixture.taskID)
+			_, _, err = fixture.repo.SetTaskDeferredLaunchIfUnchanged(ctx, fixture.taskID, tasksqlite.AbsentDeferredLaunch(), models.CeilingRecordKeys(deferral))
+			require.NoError(t, err)
+			fixture.svc.SetTurnService(&repoBackedTurnService{repo: fixture.repo})
+			calls := 0
+			cause := errors.New("credential issuer unavailable")
+			fixture.svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, sessionID string, input map[string]string) (map[string]string, error) {
+				calls++
+				require.Equal(t, fixture.taskID, taskID)
+				if calls == 1 {
+					require.Empty(t, sessionID)
+					require.NotContains(t, input, "KANDEV_API_KEY")
+				} else {
+					require.NotEmpty(t, sessionID)
+				}
+				if calls == failAt {
+					return nil, cause
+				}
+				return map[string]string{"KANDEV_RUN_ID": "run-1", "KANDEV_API_KEY": "early-token", "KANDEV_RUN_TOKEN": "early-token"}, nil
+			}))
+			fixture.svc.drainDeferredCeilingLaunches(ctx)
+			require.Equal(t, failAt, calls)
+			require.Zero(t, fixture.launchCount())
+			require.True(t, fixture.ceilingDeferred(t))
+			stored := deferredLaunchOf(t, fixture.svc, fixture.taskID)
+			serialized, err := json.Marshal(stored)
+			require.NoError(t, err)
+			require.NotContains(t, string(serialized), "captured-token")
+			require.NotContains(t, string(serialized), "early-token")
+			sessions, err := fixture.repo.ListTaskSessions(ctx, fixture.taskID)
+			require.NoError(t, err)
+			require.Len(t, sessions, failAt-1)
+			if failAt == 2 {
+				require.Equal(t, models.TaskSessionStateFailed, sessions[0].State)
+				turn, turnErr := fixture.repo.GetTurn(ctx, "turn-"+sessions[0].ID)
+				require.NoError(t, turnErr)
+				require.NotNil(t, turn.CompletedAt)
+			}
+			entries := fixture.logs.FilterMessage(ceilingReplayRetainedFailureLog).All()
+			require.Len(t, entries, 1)
+			require.Contains(t, entries[0].ContextMap()["error"], cause.Error())
+		})
+	}
 }
 
 func TestStartTaskWithEnv_RefreshFailureSettlesOwnedSession(t *testing.T) {
- ctx := context.Background()
- repo, svc := seedStartClaimTask(t)
- svc.SetTurnService(&repoBackedTurnService{repo: repo})
- cause := errors.New("runtime credential mint refused")
- var sessionID string
- svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, session string, env map[string]string) (map[string]string, error) {
-  require.Equal(t, "task1", taskID)
-  require.NotEmpty(t, session)
-  sessionID = session
-  return nil, cause
- }))
- execution, err := svc.StartTaskWithEnv(ctx, "task1", "profile1", "", "", "", "Do the work", "", false, false, nil, map[string]string{"KANDEV_RUN_ID":"run-1", "KANDEV_API_KEY":"captured-token"})
- require.Nil(t, execution)
- require.ErrorContains(t, err, cause.Error())
- session, readErr := repo.GetTaskSession(ctx, sessionID)
- require.NoError(t, readErr)
- require.Equal(t, models.TaskSessionStateFailed, session.State)
- turn, turnErr := repo.GetTurn(ctx, "turn-"+sessionID)
- require.NoError(t, turnErr)
- require.NotNil(t, turn.CompletedAt)
- environment, readErr := repo.GetTaskEnvironmentByTaskID(ctx, "task1")
- require.NoError(t, readErr)
- require.Equal(t, models.TaskEnvironmentStatusFailed, environment.Status)
- require.Empty(t, environment.MaterializationSessionID)
+	ctx := context.Background()
+	repo, svc := seedStartClaimTask(t)
+	svc.SetTurnService(&repoBackedTurnService{repo: repo})
+	cause := errors.New("runtime credential mint refused")
+	var sessionID string
+	svc.SetLaunchCredentialReminter(launchCredentialReminterFunc(func(_ context.Context, taskID, session string, env map[string]string) (map[string]string, error) {
+		require.Equal(t, "task1", taskID)
+		require.NotEmpty(t, session)
+		sessionID = session
+		return nil, cause
+	}))
+	execution, err := svc.StartTaskWithEnv(ctx, "task1", "profile1", "", "", "", "Do the work", "", false, false, nil, map[string]string{"KANDEV_RUN_ID": "run-1", "KANDEV_API_KEY": "captured-token"})
+	require.Nil(t, execution)
+	require.ErrorContains(t, err, cause.Error())
+	session, readErr := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, readErr)
+	require.Equal(t, models.TaskSessionStateFailed, session.State)
+	turn, turnErr := repo.GetTurn(ctx, "turn-"+sessionID)
+	require.NoError(t, turnErr)
+	require.NotNil(t, turn.CompletedAt)
+	environment, readErr := repo.GetTaskEnvironmentByTaskID(ctx, "task1")
+	require.NoError(t, readErr)
+	require.Equal(t, models.TaskEnvironmentStatusFailed, environment.Status)
+	require.Empty(t, environment.MaterializationSessionID)
 }

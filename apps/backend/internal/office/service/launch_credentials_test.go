@@ -14,10 +14,10 @@ import (
 // credential re-minter passes, so a test can assert the token is scoped to
 // the launch session (with the run's persisted session as the fallback).
 type recordingTokenMinter struct {
-	token     string
-	calls     int
+	token                                                        string
+	calls                                                        int
 	agentID, taskID, workspaceID, runID, sessionID, capabilities string
-	err error
+	err                                                          error
 }
 
 func (m *recordingTokenMinter) MintRuntimeJWT(agentID, taskID, workspaceID, runID, sessionID, capabilities string) (string, error) {
@@ -90,22 +90,34 @@ func TestRemintLaunchCredentials_ScopesTokenToLaunchSession(t *testing.T) {
 }
 
 func TestRemintLaunchCredentials_FailsClosed(t *testing.T) {
- for _, tc := range []struct { name string; runID string; mintErr error; wantErr error; wantCalls int }{
-  {name: "missing run", runID: "missing", wantErr: sql.ErrNoRows},
-  {name: "mint rejected", runID: "run-remint-fail", mintErr: context.Canceled, wantErr: context.Canceled, wantCalls: 1},
- } {
-  t.Run(tc.name, func(t *testing.T) {
-   svc := newTestService(t)
-   svc.ExecSQL(t, `INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
+	for _, tc := range []struct {
+		name      string
+		runID     string
+		mintErr   error
+		wantErr   error
+		wantCalls int
+	}{
+		{name: "missing run", runID: "missing", wantErr: sql.ErrNoRows},
+		{name: "mint rejected", runID: "run-remint-fail", mintErr: context.Canceled, wantErr: context.Canceled, wantCalls: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newTestService(t)
+			svc.ExecSQL(t, `INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
     VALUES ('run-remint-fail', 'agent-1', 'task_assigned', '{}', 'queued', datetime('now'))`)
-   minter := &recordingTokenMinter{token: "must-not-dispatch", err: tc.mintErr}
-   svc.SetAgentTokenMinter(minter)
-   si := service.NewSchedulerIntegration(svc, time.Minute)
-   env := map[string]string{"KANDEV_RUN_ID": tc.runID, "KANDEV_AGENT_ID": "agent-1", "KANDEV_WORKSPACE_ID": "ws-1", "KANDEV_API_KEY": "captured-token"}
-   got, err := si.RemintLaunchCredentials(context.Background(), "task-1", "session-launch", env)
-   if !errors.Is(err, tc.wantErr) || got != nil { t.Fatalf("refresh = %v, %v; want nil env and preserved cause %v", got, err, tc.wantErr) }
-   if minter.calls != tc.wantCalls { t.Fatalf("mint calls = %d, want %d", minter.calls, tc.wantCalls) }
-   if env["KANDEV_API_KEY"] != "captured-token" { t.Fatal("failed refresh mutated input") }
-  })
- }
+			minter := &recordingTokenMinter{token: "must-not-dispatch", err: tc.mintErr}
+			svc.SetAgentTokenMinter(minter)
+			si := service.NewSchedulerIntegration(svc, time.Minute)
+			env := map[string]string{"KANDEV_RUN_ID": tc.runID, "KANDEV_AGENT_ID": "agent-1", "KANDEV_WORKSPACE_ID": "ws-1", "KANDEV_API_KEY": "captured-token"}
+			got, err := si.RemintLaunchCredentials(context.Background(), "task-1", "session-launch", env)
+			if !errors.Is(err, tc.wantErr) || got != nil {
+				t.Fatalf("refresh = %v, %v; want nil env and preserved cause %v", got, err, tc.wantErr)
+			}
+			if minter.calls != tc.wantCalls {
+				t.Fatalf("mint calls = %d, want %d", minter.calls, tc.wantCalls)
+			}
+			if env["KANDEV_API_KEY"] != "captured-token" {
+				t.Fatal("failed refresh mutated input")
+			}
+		})
+	}
 }
