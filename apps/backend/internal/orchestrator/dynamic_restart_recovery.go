@@ -56,24 +56,42 @@ func (s *Service) completeReadyStrandedStartingRoute(ctx context.Context, sessio
 	if s.markDynamicRouteActive(ctx, session.ID, session.RouteGeneration) != nil {
 		return false
 	}
-	loader, ok := s.repo.(dynamicRouteStateLoader)
-	if !ok {
+	projection := s.activeRouteProjection(ctx, session)
+	if projection == nil {
 		return false
 	}
-	state, err := loader.LoadRouteState(ctx, session.ID)
-	if err != nil || state == nil || state.Generation != session.RouteGeneration ||
-		state.Status != dynamicRouteStatusActive {
-		return false
-	}
-	session.RouteState = dynamicRouteStatusActive
+	session.RouteState = projection.RouteState
+	session.RouteReason = projection.RouteReason
+	session.UpdatedAt = projection.UpdatedAt
 	return true
 }
 
 func sameStartingRouteOwner(current, expected *models.TaskSession) bool {
-	return isStartingRouteClaim(current) && routeActivationSessionState(current.State) &&
+	return isStartingRouteClaim(current) && sameRouteActivationOwner(current, expected)
+}
+
+func sameRouteActivationOwner(current, expected *models.TaskSession) bool {
+	return current != nil && routeActivationSessionState(current.State) &&
 		current.RouteGeneration == expected.RouteGeneration &&
 		current.ExecutionProfileID == expected.ExecutionProfileID &&
 		current.AgentExecutionID == expected.AgentExecutionID
+}
+
+func (s *Service) activeRouteProjection(ctx context.Context, expected *models.TaskSession) *models.TaskSession {
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return nil
+	}
+	state, err := loader.LoadRouteState(ctx, expected.ID)
+	if err != nil || state == nil || state.Generation != expected.RouteGeneration ||
+		state.Status != dynamicRouteStatusActive {
+		return nil
+	}
+	current, err := s.repo.GetTaskSession(ctx, expected.ID)
+	if err != nil || !sameRouteActivationOwner(current, expected) || current.RouteState != dynamicRouteStatusActive {
+		return nil
+	}
+	return current
 }
 
 // isStartingRouteClaim reports whether a session carries a claimed dynamic

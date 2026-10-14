@@ -66,3 +66,5 @@ go build ./... && go vet ./internal/orchestrator
 ## Review remediation results
 
 Exact-source contained harness RED reproduced predecessor, unknown-execution, and cancelled-session admission. GREEN with the execution/state guards passed under the race detector. These use explicit fake storage/runtime boundaries and do not prove SQLite behavior. Permanent ownership and actual resume-caller tests are added alongside the source; their verification is owned by hosted Backend CI. Final exact-head CI remains externally pending.
+
+The projection failure case now has `TestResumeAdmissionWaitsForPersistedActiveRouteProjection`: durable activation alone cannot admit a still-starting persisted session. A later admission repairs the projection and returns its authoritative reason and timestamp for the same live execution. Focused contained RED/GREEN is retained externally; this new real-package SQLite test and final-head suites await hosted CI.
