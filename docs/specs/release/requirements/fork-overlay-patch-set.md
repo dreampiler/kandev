@@ -78,6 +78,10 @@ adopted by re-applying patches instead of re-merging history.
 - **AC-RELEASE-FORK-OVERLAY-PATCH-SET-001.3:** Each fork-delta file shall be
   changed by exactly one patch, so that patches do not depend on hunks from
   another patch.
+- **AC-RELEASE-FORK-OVERLAY-PATCH-SET-001.4:** For stage completion, the
+  patches shall apply on the `upstream/main` commit observed at fetch. A
+  reproduction at an older merge base shall be reported as an intermediate
+  check, not as completion.
 
 ### REQ-RELEASE-FORK-OVERLAY-PATCH-SET-002: Patch index
 

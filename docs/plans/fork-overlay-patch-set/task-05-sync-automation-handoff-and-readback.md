@@ -2,7 +2,7 @@
 id: task-05
 title: Sync automation handoff and readback
 status: pending
-wave: 5
+wave: 6
 depends_on:
   - task-04
 plan: plan.md

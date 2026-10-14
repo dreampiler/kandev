@@ -41,16 +41,10 @@ A fresh `kd/overlay` at the upstream base, with every patch applied by
 
 ## Verification
 
-```sh
-git switch -c kd/overlay 51af93dcd86beb66f15d0495a92bb6c846ff2177
-git am --keep-cr --3way patches/20-dynamic-tier.patch patches/21-provider-limits.patch \
-  patches/22-control-capacity.patch patches/23-peer-batch.patch \
-  patches/30-office-overview.patch patches/90-fork-remainder.patch
-git diff --quiet <source> kd/overlay -- . ':(exclude)patches'
-```
-
-Read the patch files from the source branch before switching, because the
-upstream base does not contain `patches/`.
+Run the streamed command in
+[the index](../../../patches/INDEX.md), which reads each patch with
+`git cat-file blob <patch-commit>:patches/<name>` because the upstream base
+does not contain `patches/`.
 
 ## Likely files
 
@@ -63,3 +57,9 @@ One run on 2026-10-14T16:30:04Z UTC: all six patches applied with
 `git diff --quiet 3368a2084825 kd/overlay -- . ':(exclude)patches'` exited 0.
 The full log is in
 [the index reproduction record](../../../patches/INDEX.md#reproduction-record).
+
+This proves the cut at its merge base, an intermediate check under
+AC-RELEASE-FORK-OVERLAY-PATCH-SET-001.4. A second run on the observed
+`upstream/main` `73c5ddb8c955` applied bundle 20 and stopped at bundle 21 with
+five conflicts from upstream #4448; it was aborted. Applying on the observed
+`upstream/main` moves to task 06.

@@ -52,10 +52,16 @@ This design uses but does not own:
 
 ### Upstream base
 
-The upstream base is `git merge-base <source> upstream/main`: the newest
-upstream commit already merged into the source revision. Cutting at that base
-makes the overlay tree equal the source tree, so adoption does not change
-behavior. Moving to a newer upstream is a sync run, not part of cutting.
+A cut uses `git merge-base <source> upstream/main`: the newest upstream commit
+already merged into the source revision. Cutting at that base makes the
+overlay tree equal the source tree, which proves the cut lost nothing.
+
+The overlay contract is relative to the `upstream/main` observed at fetch.
+When the source has not merged that commit, a reproduction at the older
+merge base is only an intermediate check. The overlay is complete when the
+patches apply on the observed `upstream/main`, either because the fork synced
+to it before the cut (the base and `upstream/main` are then the same commit)
+or because conflicting bundles were ported by hand.
 
 ### Bundle attribution
 
@@ -114,16 +120,23 @@ reported separately.
 
 ```sh
 git switch -c kd/overlay <base>
-git am --keep-cr --3way patches/20-dynamic-tier.patch patches/21-provider-limits.patch \
-  patches/22-control-capacity.patch patches/23-peer-batch.patch \
-  patches/30-office-overview.patch patches/90-fork-remainder.patch
+{ git cat-file blob <patch-commit>:patches/20-dynamic-tier.patch
+  git cat-file blob <patch-commit>:patches/21-provider-limits.patch
+  git cat-file blob <patch-commit>:patches/22-control-capacity.patch
+  git cat-file blob <patch-commit>:patches/23-peer-batch.patch
+  git cat-file blob <patch-commit>:patches/30-office-overview.patch
+  git cat-file blob <patch-commit>:patches/90-fork-remainder.patch
+} | git am --keep-cr --3way
 git diff --quiet <source> kd/overlay -- . ':(exclude)patches'
 ```
 
-`--keep-cr` preserves carriage returns in files stored with CRLF line endings.
-`--3way` lets a later sync apply a patch whose context moved upstream. The
-patch list is the `INDEX.md` order, written out explicitly; never rely on a
-shell glob.
+The base does not contain `patches/`, so the patches are read from the commit
+that holds them and streamed to `git am` as one mailbox; no copy outside the
+repository is needed. `--keep-cr` preserves carriage returns in files stored
+with CRLF line endings. `--3way` lets a patch apply when its context moved
+upstream. The patch list is the `INDEX.md` order, written out explicitly;
+never rely on a shell glob. The tree comparison applies when `<base>` is the
+cut's merge base.
 
 ### Removing verified duplicates
 
@@ -155,15 +168,22 @@ replacement is not used. After landing,
 
 The CM-owned automation follows this order (RB-3):
 
-1. Fetch upstream and record the new upstream `main` as the candidate base.
-2. Recreate `kd/overlay` at that base and apply the patches in `INDEX.md`
-   order with the command above.
-3. Run `scripts/verify-release.ps1` against the overlay revision.
-4. On success, adopt the overlay in `main` through the merge path above, then
-   build the overlay revision verified in step 3. The adopted `main` has the
-   same tree outside `patches/` but a different commit, so building the
-   overlay revision keeps `system/info` equal to the verified revision.
-5. Update `INDEX.md`: mark bundles confirmed merged upstream or moved to a
+1. Fetch upstream and origin. Record the new upstream `main` as the candidate
+   base and the current fork `main`.
+2. If fork `main` differs from the index source revision outside `patches/`,
+   cut the patch set again from the current `main` first. Applying an older
+   cut would drop every fork change made after it.
+3. Recreate `kd/overlay` at the candidate base and apply the patches in
+   `INDEX.md` order with the command above.
+4. Run `scripts/verify-release.ps1` against the overlay revision.
+5. On success, confirm that fork `main` has not moved since step 1; if it has,
+   hold the adoption and start again from step 1. Otherwise adopt the overlay
+   in `main` through the merge path above, with the overlay tree plus
+   `patches/` as the merge tree. Then build the overlay revision verified in
+   step 4. The adopted `main` has the same tree outside `patches/` but a
+   different commit, so building the overlay revision keeps `system/info`
+   equal to the verified revision.
+6. Update `INDEX.md`: mark bundles confirmed merged upstream or moved to a
    plugin, delete their patches, and report the total line count.
 
 ## Failure and recovery
@@ -176,8 +196,9 @@ The CM-owned automation follows this order (RB-3):
   set from the recorded source; do not edit the overlay branch.
 - **Verification fails:** keep `main` unchanged. The rollback is keeping
   `main`, which no step rewrites.
-- **Source moves during review:** the index names its source revision. Later
-  fork commits are carried by regenerating the patch set at the next sync.
+- **Source moves after the cut:** the index names its source revision. The
+  next sync cuts again from the current `main` before applying (sync step 2),
+  and holds adoption if `main` moves during the run (sync step 5).
 
 ## Persistence
 

@@ -25,14 +25,18 @@ through [the system design](../../specs/release/system-design/fork-overlay-patch
 
 The migration stage completes only when all three results hold:
 
-1. A fresh `kd/overlay` reproduces the source with `git am` in index order.
+1. A fresh `kd/overlay` at the observed `upstream/main` reproduces the source
+   with `git am` in index order.
 2. `main` adopts the overlay through a history-preserving merge commit.
 3. One quoted success log of the sync automation, and one installed
    `GET /api/v1/system/info` readback matching the verified overlay revision.
 
-Tasks 01 to 03 need no further authorization and land in one fork PR. Tasks 04
-and 05 need separate authorization and are recorded here so the stage is not
-reported as complete early.
+Tasks 01 to 03 need no further authorization and land in one fork PR. Task 03
+reproduced the cut at its merge base, an intermediate check; the patch set
+does not yet apply on the observed `upstream/main` because of upstream #4448,
+so task 06 follows the next fork upstream sync. Tasks 04 and 05 need separate
+authorization. All of them are recorded here so the stage is not reported as
+complete early.
 
 ## Measured baseline (2026-10-14 UTC)
 
@@ -56,8 +60,9 @@ lines, 10 duplicate commits) are design inputs, not these measurements.
 | 1 | [Task 01: Remove verified upstream duplicates](task-01-remove-verified-upstream-duplicates.md) | none | this PR |
 | 2 | [Task 02: Cut the patch bundles and index](task-02-cut-patch-bundles-and-index.md) | 01 | this PR |
 | 3 | [Task 03: Reproduce the overlay with git am](task-03-reproduce-overlay.md) | 02 | this PR |
-| 4 | [Task 04: Adopt the overlay in main](task-04-adopt-overlay-in-main.md) | 03, PR merged | owner approval for the `main` merge |
-| 5 | [Task 05: Sync automation handoff and readback](task-05-sync-automation-handoff-and-readback.md) | 04 | CM owner change and an approved installation |
+| 4 | [Task 06: Apply on the observed upstream main](task-06-apply-on-observed-upstream.md) | 03, fork upstream sync | the existing fork sync path |
+| 5 | [Task 04: Adopt the overlay in main](task-04-adopt-overlay-in-main.md) | 06, PR merged | owner approval for the `main` merge |
+| 6 | [Task 05: Sync automation handoff and readback](task-05-sync-automation-handoff-and-readback.md) | 04 | CM owner change and an approved installation |
 
 ## Verification strategy
 
@@ -67,6 +72,8 @@ suite, a full build, repeated runs, or a base-branch comparison rerun.
 - Task 01: run the changed package's tests once.
 - Task 02: check the index against the generated patch files.
 - Task 03: apply the patches to a fresh `kd/overlay` once and compare trees.
+- Task 06: after the fork upstream sync, cut again and apply once on the
+  observed `upstream/main`.
 - Tasks 04 and 05: one ancestry check and one installed readback after the
   authorized actions.
 

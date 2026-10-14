@@ -2,9 +2,9 @@
 id: task-04
 title: Adopt the overlay in main
 status: pending
-wave: 4
+wave: 5
 depends_on:
-  - task-03
+  - task-06
 plan: plan.md
 requirements:
   - REQ-RELEASE-FORK-OVERLAY-PATCH-SET-004

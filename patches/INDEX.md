@@ -11,16 +11,27 @@
 `git am`. The contract is defined in
 [the system design](../docs/specs/release/system-design/fork-overlay-patch-set.md).
 
+The base does not contain `patches/`, so the patches are read from the commit
+that added them (`3349e6c586fce46b3348ca226f2f86e5c5f96c54`) and streamed to
+`git am` as one mailbox:
+
 ```sh
 git switch -c kd/overlay 51af93dcd86beb66f15d0495a92bb6c846ff2177
-git am --keep-cr --3way patches/20-dynamic-tier.patch patches/21-provider-limits.patch \
-  patches/22-control-capacity.patch patches/23-peer-batch.patch \
-  patches/30-office-overview.patch patches/90-fork-remainder.patch
+P=3349e6c586fce46b3348ca226f2f86e5c5f96c54
+{ git cat-file blob $P:patches/20-dynamic-tier.patch
+  git cat-file blob $P:patches/21-provider-limits.patch
+  git cat-file blob $P:patches/22-control-capacity.patch
+  git cat-file blob $P:patches/23-peer-batch.patch
+  git cat-file blob $P:patches/30-office-overview.patch
+  git cat-file blob $P:patches/90-fork-remainder.patch
+} | git am --keep-cr --3way
 git diff --quiet 3368a2084825338545d56d2a82129ee9a0696977 kd/overlay -- . ':(exclude)patches'
 ```
 
-Copy the patch files out of the source branch first, because the upstream base
-does not contain `patches/`.
+**Completion status:** this cut reproduces at its merge base, which is an
+intermediate check. It does not yet apply on the observed `upstream/main`
+`73c5ddb8c955`: bundle 21 conflicts with upstream #4448 (see the reproduction
+record).
 
 ## Bundles
 
@@ -57,9 +68,33 @@ cfd4f55500da1fb1b0c8052a0f329ca682988676
 diff vs source exit=0
 ```
 
-The resulting local `kd/overlay` head is
+That run passed byte copies of the committed patch files (`git cat-file blob`)
+as file arguments. The resulting local `kd/overlay` head is
 `cfd4f55500da1fb1b0c8052a0f329ca682988676`. Its tree equals the source
 revision outside `patches/`. The branch is not pushed.
 
-Later commits on the source branch change only `patches/` and
-`docs/plans/fork-overlay-patch-set/`; they are carried by the next cut.
+### Application on the observed upstream/main
+
+One run on 2026-10-14T16:47:18Z UTC on a detached checkout of
+`73c5ddb8c9550744655432d03edbe5872b6bbb80`, with the streamed command above:
+
+```text
+Applying: fork(20-dynamic-tier): D02 dynamic profile tier selection
+Applying: fork(21-provider-limits): D03 per-model provider limit suspension
+CONFLICT (add/add): apps/backend/internal/agent/runtime/dynamic/account_block_test.go
+CONFLICT (content): apps/backend/internal/agent/runtime/dynamic/circuit.go
+CONFLICT (add/add): apps/backend/internal/agent/runtime/routingerr/account_block_test.go
+CONFLICT (content): apps/backend/internal/agent/settings/handlers/agent_settings_org_scope_test.go
+CONFLICT (add/add): apps/backend/internal/orchestrator/dynamic_account_block_test.go
+Patch failed at 0002 fork(21-provider-limits): D03 per-model provider limit suspension
+```
+
+The run was aborted with `git am --abort`. Bundle 21 is held. The conflicts
+come from upstream #4448 (`750a7a2613`, provider account-block hold), merged
+after the base; it overlaps the fork account-block change and is the trigger
+for re-comparing fork #239 and #288. `git mailsplit` on the same stream
+produced six mails, so the streamed form passes every patch.
+
+Later commits on the source branch change only `patches/`,
+`docs/plans/fork-overlay-patch-set/`, and the release specification files;
+they are carried by the next cut.
