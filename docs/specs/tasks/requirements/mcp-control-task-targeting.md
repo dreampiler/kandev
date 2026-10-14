@@ -59,10 +59,13 @@ that belong to no board, without a `workflow_id` it cannot get.
 
 - **AC-TASKS-MCP-TARGET-002.1:** `list_tasks_kandev` shall accept an optional
   `workspace_id`. With it, the tool returns the workspace's non-archived,
-  non-ephemeral tasks, including tasks whose `workflow_id` is empty and tasks
-  whose `origin` is an automation run. The automation-run rows stay hidden from
-  the user-facing workspace list; exposing them here is a read for the control
-  surface, not a change to that list.
+  non-ephemeral tasks, including tasks whose `workflow_id` is empty. A
+  controller principal (a workspace root task with at least one child, see
+  `REQ-TASKS-MCP-CTRL-001`) shall also receive tasks whose `origin` is an
+  automation run; an ordinary task principal shall not, so automation-run rows
+  stay hidden from the user-facing workspace list and from a normal worker's
+  view. Exposing them to a controller is a read for the control surface, not a
+  change to that list.
 - **AC-TASKS-MCP-TARGET-002.2:** A non-Office caller shall only name its own
   workspace; another workspace shall be refused with `forbidden`. Cross-workspace
   listing stays on the Office reach path (`REQ-OFFICE-XWS-003`).

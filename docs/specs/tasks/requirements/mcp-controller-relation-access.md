@@ -53,4 +53,5 @@ without routing every unrelated task through the operational session.
   they stay forbidden for another workspace (`REQ-OFFICE-XWS-004`).
 - Plan reads/writes and step moves: those handlers carry no relation gate in the
   same workspace, so no widening is required here.
-- Exposing automation-origin tasks through `list_tasks_kandev`.
+- Exposing automation-origin tasks through `list_tasks_kandev`; that read is
+  owned by `REQ-TASKS-MCP-TARGET-002`.
