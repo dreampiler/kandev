@@ -383,6 +383,26 @@ func (sm *StreamManager) sleepOrStop(d time.Duration) bool {
 	}
 }
 
+// sleepOrStopContext is sleepOrStop plus a caller cancellation: it returns
+// false as soon as ctx is cancelled, so a processor or parent cancellation
+// during a retry backoff is reflected immediately instead of after the full
+// interval. Manager drain (stopCh/waitCh) still aborts it, and a nil stopCh is
+// a disabled select case rather than a missed signal.
+func (sm *StreamManager) sleepOrStopContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	case <-sm.waitCh:
+		return false
+	case <-sm.stopCh:
+		return false
+	}
+}
+
 // streamContext preserves the execution's session trace values while making
 // in-flight WebSocket dials cancellable by either the external Manager
 // shutdown signal or StreamManager.Wait's internal drain signal.
@@ -595,6 +615,24 @@ func (sm *StreamManager) prepareAgentEvent(
 	delivery AgentDeliveryRepository,
 	event agentctl.AgentEvent,
 ) (preparedAgentEvent, error) {
+	return sm.prepareAgentEventWithRetry(ctx, execution, client, delivery, event, streamAdmissionRetry{})
+}
+
+// prepareAgentEventWithRetry is prepareAgentEvent that threads a bounded,
+// drain-aware retry down to the one durable admission insert. The negotiation
+// wait, the harness-generation wait, the expired-replay recovery, the duplicate
+// acknowledgement, and the effect lookup stay outside the retry: they are not
+// the transient writer-contention cause, and repeating them would stretch their
+// existing time and failure semantics. A zero-value retry keeps the
+// single-attempt behavior every non-processor caller relies on.
+func (sm *StreamManager) prepareAgentEventWithRetry(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+	retry streamAdmissionRetry,
+) (preparedAgentEvent, error) {
 	if err := waitForDeliveryNegotiation(ctx, execution); err != nil {
 		return preparedAgentEvent{}, err
 	}
@@ -620,7 +658,7 @@ func (sm *StreamManager) prepareAgentEvent(
 	// remain byte-identical from admission through projection.
 	durableEvent := durableAgentEvent(execution, event)
 	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		ctx, execution, durableEvent, delivery, client,
+		ctx, execution, durableEvent, delivery, client, retry,
 	)
 	if err != nil {
 		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
@@ -640,6 +678,25 @@ func (sm *StreamManager) prepareAgentEvent(
 		deliveryEffect: effect,
 		skipCallback:   skipCallback,
 	}, nil
+}
+
+// streamAdmissionRetry drives a bounded, in-place retry of one durable admission
+// insert. A nil sleep performs a single attempt, which preserves the
+// non-processor callers' behavior.
+type streamAdmissionRetry struct {
+	ctx      context.Context
+	sleep    func(time.Duration) bool
+	logRetry func(attempt int)
+}
+
+// admit runs fn, retrying it in place while it returns a retryable deadline and
+// the driver is live, up to a bounded number of attempts. Only fn is repeated,
+// so nothing else in the admission path is re-run.
+func (r streamAdmissionRetry) admit(fn func() error) error {
+	if r.sleep == nil {
+		return fn()
+	}
+	return retryStreamAdmission(r.ctx, r.sleep, r.logRetry, fn)
 }
 
 func (sm *StreamManager) notifyAgentEvent(
@@ -662,6 +719,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	durableEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
 	client *agentctl.Client,
+	retry streamAdmissionRetry,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, err error) {
 	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
 		return true, false, nil, nil
@@ -670,7 +728,7 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	if err != nil {
 		return false, false, nil, err
 	}
-	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository)
+	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository, retry)
 	if errors.Is(err, repoerrors.ErrAgentDeliveryReplayExpired) {
 		projected, recoveryErr := reconcileExpiredAgentDeliveryReplay(
 			ctx, execution, durableEvent, repository, client, client,
