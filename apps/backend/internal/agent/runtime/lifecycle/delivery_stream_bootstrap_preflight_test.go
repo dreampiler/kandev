@@ -41,9 +41,11 @@ func TestDeliveryPreflightRetainedStartupEventBeforeNativeInitialization(t *test
 	require.Error(t, err, "a restored native conversation is not a fresh bootstrap")
 	execution.ACPSessionID = ""
 	execution.isResumedSession = true
-	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
-	require.Error(t, err, "replacement recovery is not a fresh bootstrap")
-	execution.isResumedSession = false
+	after, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
+	require.NoError(t, err, "a resumed execution with no committed native conversation is a fresh bootstrap")
+	require.Zero(t, after, "replay the retained startup event; do not fabricate a receipt")
+	_, err = repo.GetAgentDeliveryCursor(ctx, execution.DeliveryStreamID)
+	require.Error(t, err, "preflight must leave the absent SQL receipt absent")
 	descriptor.SubmissionCount = 1
 	_, err = sm.initialDeliveryReplayCursor(ctx, execution, repo, client, execution.DeliveryStreamID)
 	require.Error(t, err, "retained prompt work must be reconciled")
