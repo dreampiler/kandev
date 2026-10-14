@@ -5672,12 +5672,18 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
 	if err := s.executor.Stop(ctx, sessionID, reason, force); err != nil {
-		if errors.Is(err, lifecycle.ErrNoExecutionForSession) && s.settleExecutionLessSessionStop(ctx, sessionID) {
-			// The session has no live execution and is not launching: treat the
-			// stop as an idempotent settle and close the session's open turn so a
-			// task-wide idle check (for example workspace-source attach) is not
-			// blocked by an execution-less open turn.
-			return nil
+		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			settled, cause := s.settleExecutionLessSessionStop(ctx, sessionID)
+			if settled {
+				// The session has no live execution and its open turn is closed:
+				// the stop is an idempotent settle, not a not-found failure.
+				return nil
+			}
+			if cause != nil {
+				// A lookup or turn-settlement failure: surface it instead of a
+				// false success.
+				return cause
+			}
 		}
 		return err
 	}
@@ -5685,35 +5691,48 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 	return nil
 }
 
-// settleExecutionLessSessionStop closes the open turns of a session that has no
-// live execution and reports whether the stop was settled. A session whose state
-// still shows a launch or run in flight (STARTING/RUNNING) is not settled — its
-// execution may simply not be registered yet — so the caller returns the
-// original error and never closes a launching session's turn. A live execution
-// or another owner's cleanup is never force-completed here, and the existing
+// settleExecutionLessSessionStop closes the single open turn of a session that
+// has no live execution and reports whether the stop was settled. It reuses the
+// turn service's expected-turn-identity settlement so a concurrent launch or a
+// different successor turn is never swept. A session whose state still shows a
+// launch or run in flight (STARTING/RUNNING) is not settled — its execution may
+// simply not be registered yet — so the caller returns the original error and
+// the turn is left alone (settled=false, cause=nil). A turn-settlement or lookup
+// failure is returned as cause, never swallowed as success. A live execution or
+// another owner's cleanup is never force-completed here, and the existing
 // session row/state is preserved.
-func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) bool {
+func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) (settled bool, cause error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		if !errors.Is(err, models.ErrTaskSessionNotFound) {
-			s.logger.Warn("failed to load session for execution-less stop settle",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			// No session row: nothing is left to block a task-wide idle check.
+			return true, nil
 		}
-		return false
+		return false, err
 	}
 	if session == nil {
-		return false
+		return true, nil
 	}
 	if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
-		return false
+		return false, nil
 	}
-	if err := s.completeTurnForTaskSessionChecked(ctx, session.TaskID, sessionID); err != nil {
-		s.logger.Warn("failed to settle turn for execution-less session stop",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+	if s.turnService == nil {
+		return true, nil
 	}
-	return true
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if turn == nil {
+		return true, nil
+	}
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, session.TaskID, sessionID, turn.ID); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // StopSessionSynchronously is the internal cleanup variant of StopSession. It
