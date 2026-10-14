@@ -99,7 +99,7 @@ func (s *Service) RecoverSessionWithContinuationFallback(
 		zap.String("session_id", sessionID),
 		zap.Error(err))
 	fallback, fallbackErr := s.RecoverSessionWithOptions(
-		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: true},
+		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: options.Automatic},
 	)
 	if fallbackErr != nil {
 		return nil, errors.Join(err, fallbackErr)
@@ -143,13 +143,20 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		defer s.finishInterruptedTurnAutoRecovery(sessionID)
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), interruptedTurnAutoRecoveryTimeout)
 		defer cancel()
-		if _, err := s.RecoverSessionWithOptions(
+		resp, err := s.RecoverSessionWithOptions(
 			recoveryCtx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: true},
-		); err != nil {
+		)
+		if err != nil {
 			s.logger.Warn("automatic continue_from_history failed",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
+			return
+		}
+		if resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+			s.logger.Info("automatic continue_from_history deferred by the session ceiling",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
 			return
 		}
 		s.logger.Info("automatic continue_from_history started the interrupted session",
