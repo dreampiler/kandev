@@ -34,9 +34,12 @@ without a recursive `/...` suffix. Quoted arrays preserve argument boundaries.
 An empty package array exits successfully before resolving the comparison base.
 
 Each non-empty batch invokes one `golangci-lint run` with those packages,
-`--new-from-rev` set to the existing resolver result, and `--timeout=5m`.
-Pre-commit may split exceptionally large filename lists into serial batches.
-Dependencies can still be loaded for type information.
+`--new-from-rev` set to the existing resolver result, `--timeout=5m`, and
+`--allow-parallel-runners`. The last flag drops the host-wide lock so a second
+concurrent worktree lints instead of aborting with "parallel golangci-lint is
+running"; the shared analysis cache is content-addressed and safe for parallel
+readers. Pre-commit may split exceptionally large filename lists into serial
+batches. Dependencies can still be loaded for type information.
 
 ## Repository context and failures
 
@@ -46,11 +49,14 @@ Before Git discovery, the wrapper clears `GIT_DIR`, `GIT_WORK_TREE`,
 own path, then runs `scripts/resolve-go-lint-base --comparison-base` there.
 Authentication and transport environment settings remain available.
 
-The resolver retains configured-base, canonical-upstream, merge-base, and
-incoming-base-merge behavior. A resolution failure exits before lint. The
-wrapper uses `exec` for the linter so its diagnostics and failure status reach
-pre-commit directly. There is no fallback to a different comparison base or to
-backend-wide analysis.
+The resolver retains configured-base, merge-base, and incoming-base-merge
+behavior, and picks the default branch nearest HEAD: it compares `origin`'s head
+branch with `upstream`'s head branch (when an `upstream` remote exists) and uses
+whichever shares the closest merge base with HEAD, so a fork lints against
+`origin` while a branch tracking the canonical upstream lints against upstream.
+A tie favors `origin`. A resolution failure exits before lint. The wrapper uses
+`exec` for the linter so its diagnostics and failure status reach pre-commit
+directly. There is no fallback to backend-wide analysis.
 
 ## Verification boundaries
 
