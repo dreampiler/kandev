@@ -242,29 +242,6 @@ func (e *Executor) resolveTaskSessionMCPProfile(ctx context.Context, taskID stri
 	return e.withCanvasCapability(mcpprofile.New(surface, capabilities, nil)), nil
 }
 
-// officeCrossWorkspaceCapabilities returns the Office cross-workspace MCP
-// capabilities for a task session: the read and message tools for an Office
-// task whose workspace turned the setting on, and the handoff report tool for
-// a Kanban task whose workspace such an Office workspace reaches.
-func (e *Executor) officeCrossWorkspaceCapabilities(
-	ctx context.Context, surface mcpprofile.Surface, workspaceID string,
-) []mcpprofile.Capability {
-	if e == nil || e.officeCrossWorkspace == nil || workspaceID == "" {
-		return nil
-	}
-	switch surface {
-	case mcpprofile.SurfaceOfficeTask:
-		if e.officeCrossWorkspace.Enabled(ctx, workspaceID) {
-			return []mcpprofile.Capability{mcpprofile.CapabilityOfficeCrossWorkspace}
-		}
-	case mcpprofile.SurfaceKanbanTask:
-		if e.officeCrossWorkspace.ReceivesHandoffReports(ctx, workspaceID) {
-			return []mcpprofile.Capability{mcpprofile.CapabilityOfficeHandoffReport}
-		}
-	}
-	return nil
-}
-
 // ResolveTaskSessionMCPProfile returns the backend-owned MCP profile that will
 // be sent to a session launch. Prompt producers use this read-only view so
 // optional guidance follows the same surface and capability resolver as the
@@ -803,103 +780,6 @@ func (e *Executor) markTaskEnvironmentMaterializationFailed(
 		zap.String("task_environment_id", env.ID),
 		zap.String("session_id", sessionID),
 		zap.String("reason", reason))
-}
-
-// FailOwnedCreatingTaskEnvironment marks the task's creating environment failed
-// when sessionID is its materialization owner. An abandoned launch must not
-// leave its own creating environment behind: nothing else finalizes it, and the
-// next launch then waits forever on a workspace that never becomes ready.
-// Environments owned by a different materializer are left untouched.
-func (e *Executor) FailOwnedCreatingTaskEnvironment(ctx context.Context, taskID, sessionID, reason string) {
-	if taskID == "" || sessionID == "" {
-		return
-	}
-	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-	if err != nil {
-		e.logger.Warn("failed to load task environment after early launch error",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return
-	}
-	e.markTaskEnvironmentMaterializationFailed(ctx, env, sessionID, reason)
-}
-
-// taskEnvironmentNeverMaterialized reports whether the environment carries no
-// physical workspace evidence. A creating environment is born without a
-// workspace path and per-repository rows are published only when the launch
-// finalizes, so a failed row with no path, no container or sandbox handle, and
-// no live repository inventory never reached a physical workspace.
-func taskEnvironmentNeverMaterialized(env *models.TaskEnvironment) bool {
-	if env == nil {
-		return false
-	}
-	if env.WorkspacePath != "" || env.ContainerID != "" || env.SandboxID != "" {
-		return false
-	}
-	for _, repo := range env.Repos {
-		if repo != nil && repo.DeletedAt == nil {
-			return false
-		}
-	}
-	return true
-}
-
-// reelectFailedTaskEnvironmentForLaunch hands a failed environment that never
-// materialized back to full preparation instead of rejecting every later
-// launch forever. The repository CAS is the authority; the in-memory check
-// only decides whether to attempt it. A failed environment that carried a
-// physical workspace, an inherited environment owned by another task, and a
-// failed row another launch already re-claimed all keep failing closed.
-func (e *Executor) reelectFailedTaskEnvironmentForLaunch(
-	ctx context.Context,
-	task *v1.Task,
-	session *models.TaskSession,
-	env *models.TaskEnvironment,
-) error {
-	if !taskEnvironmentNeverMaterialized(env) || env.MaterializationSessionID != "" || env.TaskID != task.ID {
-		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
-	}
-	reclaimed, err := e.repo.ReclaimFailedTaskEnvironmentMaterialization(ctx, env.ID, session.ID)
-	if err != nil {
-		return fmt.Errorf("reclaim failed task environment: %w", err)
-	}
-	if !reclaimed {
-		return e.failedReclaimOutcome(ctx, env, session.ID)
-	}
-	env.Status = models.TaskEnvironmentStatusCreating
-	env.MaterializationSessionID = session.ID
-	env.ContainerID = ""
-	env.ContainerBootstrapNonceSecretID = ""
-	env.ContainerControlAuthTokenSecretID = ""
-	env.SandboxID = ""
-	e.logger.Info("re-elected failed task environment for fresh materialization",
-		zap.String("task_id", task.ID),
-		zap.String("task_environment_id", env.ID),
-		zap.String("session_id", session.ID))
-	return nil
-}
-
-// failedReclaimOutcome resolves a lost reclaim race: another launch owns the
-// environment now. A creating owner is awaited like any sibling, a published
-// workspace is adopted, and anything else keeps failing closed.
-func (e *Executor) failedReclaimOutcome(ctx context.Context, env *models.TaskEnvironment, sessionID string) error {
-	fresh, loadErr := e.repo.GetTaskEnvironment(ctx, env.ID)
-	if loadErr != nil || fresh == nil {
-		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
-	}
-	if fresh.Status == models.TaskEnvironmentStatusCreating && fresh.MaterializationSessionID != sessionID {
-		readyEnv, waitErr := e.waitForTaskEnvironmentReady(ctx, fresh.ID)
-		if waitErr != nil {
-			return waitErr
-		}
-		*env = *readyEnv
-		return nil
-	}
-	if fresh.Status == models.TaskEnvironmentStatusReady || fresh.Status == models.TaskEnvironmentStatusStopped {
-		*env = *fresh
-		return nil
-	}
-	return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 }
 
 func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
@@ -1846,74 +1726,6 @@ func (e *Executor) createPreparedSession(
 	return e.repo.CreateTaskSession(ctx, session)
 }
 
-// retryPreparedSessionAfterWorkspaceReady waits for the elected environment,
-// then retries binding once. Shared groups use the refusal's environment ID;
-// legacy same-task refusals use the task's own row. A self-owned, failed, or
-// unready environment keeps the original refusal.
-func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
-	ctx context.Context,
-	taskID, sessionID string,
-	preparingErr error,
-	create func() error,
-) error {
-	var env *models.TaskEnvironment
-	var err error
-	var preparing *models.WorkspacePreparingError
-	if errors.As(preparingErr, &preparing) && preparing.EnvironmentID != "" {
-		env, err = e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
-	} else {
-		env, err = e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-	}
-	if err != nil || env == nil || env.ID == "" {
-		return preparingErr
-	}
-	// Waiting on the environment this session already owns would wait on
-	// itself; anything not creating/ready/stopped (a failed row another launch
-	// is reclaiming) keeps the original refusal.
-	if env.MaterializationSessionID == sessionID {
-		return preparingErr
-	}
-	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
-		e.logger.Warn("workspace was not ready after the binding election; keeping the preparing refusal",
-			zap.String("session_id", sessionID),
-			zap.String("task_environment_id", env.ID),
-			zap.Error(err))
-		return preparingErr
-	}
-	return create()
-}
-
-// refreshRetriedSessionOrder re-derives creation order and primary ownership
-// before a binding retry. The election winner may have created the task's first
-// session while this start waited, so the retry must neither claim the
-// first-session origin nor take the primary flag from the winner.
-func (e *Executor) refreshRetriedSessionOrder(
-	ctx context.Context,
-	session *models.TaskSession,
-	wasPrimary bool,
-	appliedInitialRuntimeConfig bool,
-) (bool, error) {
-	sessions, err := e.repo.ListTaskSessions(ctx, session.TaskID)
-	if err != nil {
-		return wasPrimary, fmt.Errorf("list task sessions before workspace retry: %w", err)
-	}
-	if len(sessions) > 0 {
-		delete(session.Metadata, models.SessionMetaKeyOrigin)
-		if appliedInitialRuntimeConfig {
-			delete(session.Metadata, models.SessionMetaKeyRuntimeConfigOverrides)
-		}
-	}
-	primary := wasPrimary
-	for _, existing := range sessions {
-		if existing.IsPrimary {
-			primary = false
-			break
-		}
-	}
-	session.IsPrimary = primary
-	return primary, nil
-}
-
 // taskUsesDeferredEnvironmentInheritance keeps the handoff resolver
 // authoritative for inherited tasks. Shared groups use the transactional
 // shared-group binder above, which elects the first materializer before any
@@ -2000,47 +1812,6 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	return nil
 }
 
-// existingEnvironmentRunner returns the task's canonical environment when its
-// runner must take precedence over task metadata, or nil. A task that has
-// already materialized a canonical environment has a frozen runner
-// (EvaluateRunnerMutability rejects a runner switch once any session or
-// environment exists). A surviving task-metadata executor_profile_id is then
-// stale evidence, not a selection.
-func (e *Executor) existingEnvironmentRunner(ctx context.Context, task *v1.Task) *models.TaskEnvironment {
-	if e.repo == nil || task == nil {
-		return nil
-	}
-	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
-	if err != nil || env == nil || env.ExecutorType == "" {
-		return nil
-	}
-	return env
-}
-
-// canonicalEnvironmentRunner overrides a requested runner with the canonical
-// environment's runner unless the caller deliberately selected a different
-// profile (a real executor transition). Once an environment exists the runner is
-// frozen (EvaluateRunnerMutability rejects a switch after session or environment
-// creation), so a requested profile that merely echoes the task's stored
-// metadata is stale evidence and must not force a second workspace under a
-// different backend. The environment is the durable runner authority.
-func canonicalEnvironmentRunner(
-	task *v1.Task,
-	env *models.TaskEnvironment,
-	executorID, executorProfileID string,
-) (string, string) {
-	if env == nil || env.ExecutorType == "" {
-		return executorID, executorProfileID
-	}
-	if runnerRequestedDiffersFromTaskMetadata(task, executorProfileID) {
-		return executorID, executorProfileID
-	}
-	if env.ExecutorID != "" {
-		executorID = env.ExecutorID
-	}
-	return executorID, env.ExecutorProfileID
-}
-
 func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 	workspace, ok := metadata["workspace"].(map[string]interface{})
 	if !ok {
@@ -2062,92 +1833,6 @@ func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) err
 		return nil
 	}
 	return e.worktreeRecoveryAdmission(ctx, taskID)
-}
-
-// admitEnvironmentRecovery retires a task's canonical environment when it is a
-// failed, consumer-free row, so the affected session can be created/bound to a
-// fresh canonical environment instead of refusing. It is a no-op when the task
-// has no active environment or the active environment is not failed. A failed
-// environment with a live consumer is left in place, and the caller's normal
-// attach-only refusal then applies (fail-closed).
-//
-// It is best-effort: a lookup or storage failure is logged and swallowed so it
-// cannot preempt the normal launch path's sanitized error handling, and the
-// unusable row still blocks reuse until it is retired.
-func (e *Executor) admitEnvironmentRecovery(ctx context.Context, taskID string) {
-	if e.repo == nil || taskID == "" {
-		return
-	}
-	env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-	if err != nil || env == nil || env.Status != models.TaskEnvironmentStatusFailed {
-		return
-	}
-	if _, err := e.repo.RetireUnusableTaskEnvironment(ctx, env.ID); err != nil {
-		e.logger.Warn("failed to retire unusable task environment",
-			zap.String("task_id", taskID), zap.String("environment_id", env.ID), zap.Error(err))
-	}
-}
-
-// resolveFreshTaskDirName returns the per-task directory name to use when a
-// session is about to (re)materialize a worktree environment. It reuses a name
-// already recorded on the environment; otherwise it prefers the deterministic
-// semantic name. When that root is already occupied by a preserved (retained)
-// environment of the same task, it selects a distinct fresh root tied to the
-// requesting session so the preserved checkout is never overwritten. Every
-// candidate, including the session-suffixed one, is checked against the
-// recorded names, so a second replacement of the same session cannot reselect
-// an already-used root. A lookup error fails closed to a fully fresh root
-// rather than risk clobbering a preserved checkout.
-func (e *Executor) resolveFreshTaskDirName(ctx context.Context, task *v1.Task, session *models.TaskSession, existingEnv *models.TaskEnvironment) string {
-	if existingEnv != nil && existingEnv.TaskDirName != "" {
-		return existingEnv.TaskDirName
-	}
-	if task == nil {
-		return ""
-	}
-	base := worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
-	if base == "" {
-		return ""
-	}
-	names, err := e.listTaskDirNames(ctx, task.ID)
-	if err != nil {
-		// Cannot prove the base or a previously used session suffix is free;
-		// fall back to a fully fresh root instead of risking a clobber.
-		return base + "_" + uuid.New().String()[:8]
-	}
-	if !taskDirNameInList(names, base) {
-		return base
-	}
-	suffix := ""
-	if session != nil {
-		suffix = worktree.TaskDirSuffix(session.ID)
-	}
-	if suffix == "" {
-		suffix = uuid.New().String()[:8]
-	}
-	candidate := base + "_" + suffix
-	for attempt := 2; taskDirNameInList(names, candidate); attempt++ {
-		candidate = fmt.Sprintf("%s_%s_%d", base, suffix, attempt)
-	}
-	return candidate
-}
-
-// listTaskDirNames returns the per-task directory names recorded for a task
-// across active and retained environments. A nil repository yields no names.
-func (e *Executor) listTaskDirNames(ctx context.Context, taskID string) ([]string, error) {
-	if e.repo == nil || taskID == "" {
-		return nil, nil
-	}
-	return e.repo.ListTaskEnvironmentTaskDirNames(ctx, taskID)
-}
-
-func taskDirNameInList(names []string, name string) bool {
-	for _, existing := range names {
-		if existing == name {
-			return true
-		}
-	}
-	return false
 }
 
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
@@ -2903,48 +2588,6 @@ func assignLaunchTaskEnvironmentID(session *models.TaskSession, existingEnv *mod
 	if session.TaskEnvironmentID == "" {
 		session.TaskEnvironmentID = uuid.New().String()
 	}
-}
-
-// bindSessionLaunchRunner resolves the runner for a prepared-session launch.
-// The session's canonical environment is the durable runner authority for any
-// launch whose requested profile merely echoes the task's stored runner
-// metadata: a stale task-metadata executor_profile_id must not override it at
-// launch time, or resolveExecutorConfig would apply the wrong executor via
-// applyProfile and a second workspace would be materialized under a different
-// backend. A caller that deliberately selected a different profile (a real
-// executor transition) is preserved. The effective profile is projected onto
-// the launch metadata (an empty value is meaningful: local default, no profile)
-// so the metadata fallback cannot resurrect a stale value. When no environment
-// is bound, the session's own stored profile keeps the prior behavior.
-func bindSessionLaunchRunner(
-	task *v1.Task,
-	env *models.TaskEnvironment,
-	session *models.TaskSession,
-	executorID string,
-	metadata map[string]interface{},
-) (string, map[string]interface{}) {
-	sessionProfileID := ""
-	if session != nil {
-		sessionProfileID = session.ExecutorProfileID
-	}
-	if env != nil && env.ExecutorType != "" && !runnerRequestedDiffersFromTaskMetadata(task, sessionProfileID) {
-		if env.ExecutorID != "" {
-			executorID = env.ExecutorID
-		}
-		return executorID, setLaunchMetadataProfile(metadata, env.ExecutorProfileID)
-	}
-	if session != nil {
-		return executorID, setLaunchMetadataProfile(metadata, sessionProfileID)
-	}
-	return executorID, metadata
-}
-
-func setLaunchMetadataProfile(metadata map[string]interface{}, profileID string) map[string]interface{} {
-	if metadata == nil {
-		metadata = make(map[string]interface{})
-	}
-	metadata["executor_profile_id"] = profileID
-	return metadata
 }
 
 // buildLaunchAgentRequest constructs a LaunchAgentRequest for a new session launch,
