@@ -1,11 +1,14 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -63,6 +66,23 @@ func TestStreamableHTTPHandler_ForwardsBodyReadErrors(t *testing.T) {
 	s.streamableHTTPHandler().ServeHTTP(response, request)
 	assert.NotEqual(t, http.StatusAccepted, response.Code)
 	assert.Contains(t, response.Body.String(), "read failed", "the SDK reports the original read error")
+}
+
+func TestStreamableHTTPHandler_DoesNotReadBodyBeforeTransportChecks(t *testing.T) {
+	s := newProtocolCompatibilityServer(t)
+	body := &countingReader{Reader: strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/roots/list_changed"}`)}
+	request := httptest.NewRequest(http.MethodPost, "http://untrusted.example/mcp", body)
+	loopback := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 10005}
+	request = request.WithContext(context.WithValue(request.Context(), http.LocalAddrContextKey, loopback))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json, text/event-stream")
+	request.Header.Set(protocolVersionHeader, modernProtocolVersion)
+	request.Header.Set(methodHeader, rootsListChanged)
+
+	response := httptest.NewRecorder()
+	s.streamableHTTPHandler().ServeHTTP(response, request)
+	assert.Equal(t, http.StatusForbidden, response.Code, "SDK DNS-rebinding protection rejects the request")
+	assert.Zero(t, body.reads, "a rejected request body must not be read")
 }
 
 func TestSupplementNotificationProtocolVersion_AddsMetadata(t *testing.T) {
@@ -124,6 +144,16 @@ func TestStreamableHTTPHandler_BypassesNonModernRequests(t *testing.T) {
 			assert.Equal(t, direct.Body.String(), viaAdapter.Body.String())
 		})
 	}
+}
+
+type countingReader struct {
+	io.Reader
+	reads int
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	r.reads++
+	return r.Reader.Read(p)
 }
 
 type failingReader struct{}

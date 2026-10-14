@@ -15,25 +15,39 @@ import (
 func (s *Server) streamableHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		version := r.Header.Get(mcp.HeaderProtocolVersion)
-		if r.Method != http.MethodPost || r.Body == nil ||
-			!mcp.IsModernProtocol(version) || !s.httpServer.SupportsProtocolVersion(version) {
-			s.httpServer.ServeHTTP(w, r)
-			return
-		}
-
-		originalBody := r.Body
-		defer func() { _ = originalBody.Close() }()
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			// Preserve the SDK's read-error response, including its transport checks.
-			r.Body = io.NopCloser(notificationBodyReadError{err})
-		} else {
-			body = supplementNotificationProtocolVersion(body, version)
-			r.Body = io.NopCloser(bytes.NewReader(body))
-			r.ContentLength = int64(len(body))
+		if r.Method == http.MethodPost && r.Body != nil &&
+			mcp.IsModernProtocol(version) && s.httpServer.SupportsProtocolVersion(version) {
+			// Read lazily so the SDK's transport checks run before the body is consumed.
+			r.Body = &notificationBody{original: r.Body, version: version}
+			r.ContentLength = -1
 		}
 		s.httpServer.ServeHTTP(w, r)
 	})
+}
+
+// notificationBody defers reading and supplementing the request body until the
+// SDK first reads it.
+type notificationBody struct {
+	original io.ReadCloser
+	version  string
+	reader   io.Reader
+}
+
+func (b *notificationBody) Read(p []byte) (int, error) {
+	if b.reader == nil {
+		body, err := io.ReadAll(b.original)
+		if err != nil {
+			// Preserve the SDK's read-error response.
+			b.reader = notificationBodyReadError{err}
+		} else {
+			b.reader = bytes.NewReader(supplementNotificationProtocolVersion(body, b.version))
+		}
+	}
+	return b.reader.Read(p)
+}
+
+func (b *notificationBody) Close() error {
+	return b.original.Close()
 }
 
 func supplementNotificationProtocolVersion(body []byte, version string) []byte {

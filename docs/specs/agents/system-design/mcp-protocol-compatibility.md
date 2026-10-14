@@ -156,6 +156,8 @@ The adapter preserves all messages containing an `id` member, including
 conflicting values. Invalid JSON, batches, invalid parameter shapes, and
 unsupported or legacy versions keep the SDK path. Raw JSON fields preserve
 numeric precision, and unchanged messages retain their original body bytes.
+The adapter reads the body only when the SDK first reads it, so SDK transport
+checks such as DNS-rebinding protection run before the body is consumed.
 Body read errors are forwarded to the SDK as read errors.
 Differently cased core fields or metadata keys are left untouched because the
 SDK's struct decoder can recognize those spellings; supplementation must not
