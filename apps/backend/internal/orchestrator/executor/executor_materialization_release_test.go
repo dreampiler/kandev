@@ -3,6 +3,8 @@ package executor
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,5 +165,119 @@ func TestPersistTaskEnvironmentRefusesPublicationAfterClaimTakenOver(t *testing.
 	}
 	if current.Status != models.TaskEnvironmentStatusCreating || current.MaterializationSessionID != "session-2" {
 		t.Fatalf("environment = status %q owner %q, want the new owner's claim kept", current.Status, current.MaterializationSessionID)
+	}
+}
+
+// releaseObservingRepository wraps the mock repository to observe when a
+// launch performs its claim release.
+type releaseObservingRepository struct {
+	*mockRepository
+	onRelease func()
+}
+
+func (r *releaseObservingRepository) FailTaskEnvironmentMaterialization(ctx context.Context, sessionID string) (bool, error) {
+	if r.onRelease != nil {
+		r.onRelease()
+	}
+	return r.mockRepository.FailTaskEnvironmentMaterialization(ctx, sessionID)
+}
+
+type launchMarkerContextKey struct{}
+
+func withLaunchMarker(ctx context.Context, marker string) context.Context {
+	return context.WithValue(ctx, launchMarkerContextKey{}, marker)
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.1
+func TestLaunchPreparedSessionReleasesClaimBeforeLaterStartEntersSessionLock(t *testing.T) {
+	repo := newMockRepository()
+	env := seedOwnedCreatingClaim(repo, models.TaskSessionStateCreated)
+	failRepositoryInfo(repo)
+
+	var (
+		mu          sync.Mutex
+		events      []string
+		releasing   = make(chan struct{})
+		resume      = make(chan struct{})
+		entered     = make(chan struct{})
+		onceRelease sync.Once
+	)
+	mark := func(event string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, event)
+	}
+	observed := &releaseObservingRepository{mockRepository: repo}
+	observed.onRelease = func() {
+		onceRelease.Do(func() {
+			close(releasing)
+			<-resume
+			mark("release-performed")
+		})
+	}
+	repo.getTaskSessionFunc = func(ctx context.Context, id string) (*models.TaskSession, error) {
+		if marker, _ := ctx.Value(launchMarkerContextKey{}).(string); marker == "later-start" {
+			mark("later-start-entered-lock")
+			select {
+			case <-entered:
+			default:
+				close(entered)
+			}
+		}
+		repo.mu.Lock()
+		session, ok := repo.sessions[id]
+		repo.mu.Unlock()
+		if !ok {
+			return nil, fmt.Errorf("task session not found: %s", id)
+		}
+		return cloneMockTaskSession(session), nil
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, observed)
+
+	firstErr := make(chan error, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		_, err := exec.LaunchPreparedSession(withLaunchMarker(context.Background(), "first"), releaseTask(), releaseSessionID,
+			LaunchOptions{AgentProfileID: "profile-123", StartAgent: true})
+		firstErr <- err
+	}()
+	<-releasing
+	go func() {
+		_, err := exec.LaunchPreparedSession(withLaunchMarker(context.Background(), "later-start"), releaseTask(), releaseSessionID,
+			LaunchOptions{AgentProfileID: "profile-123", StartAgent: true})
+		secondErr <- err
+	}()
+	select {
+	case <-entered:
+		t.Fatal("a later same-session start entered the session lock while the failed launch was still releasing its claim")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(resume)
+	firstLaunchErr := <-firstErr
+	secondLaunchErr := <-secondErr
+
+	if firstLaunchErr == nil || secondLaunchErr == nil {
+		t.Fatalf("launch errors = %v, %v, want both launches to fail on the repository info error", firstLaunchErr, secondLaunchErr)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	releaseAt, enteredAt := -1, -1
+	for i, event := range events {
+		switch event {
+		case "release-performed":
+			releaseAt = i
+		case "later-start-entered-lock":
+			enteredAt = i
+		}
+	}
+	if enteredAt == -1 {
+		t.Fatal("the later start never entered the session lock")
+	}
+	if releaseAt == -1 || releaseAt > enteredAt {
+		t.Fatalf("release events %v, want the claim release performed before the later start entered the session lock", events)
+	}
+	if env.Status != models.TaskEnvironmentStatusFailed || env.MaterializationSessionID != "" {
+		t.Fatalf("environment = status %q owner %q, want the first launch's own claim failed without an owner",
+			env.Status, env.MaterializationSessionID)
 	}
 }

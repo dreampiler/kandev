@@ -395,7 +395,7 @@ manual environment reset. Neither state has a physical workspace to protect.
 ### Claim release by the owner
 
 The owner releases its own claim when it gives up. Release uses one conditional
-repository write, `FailTaskEnvironmentMaterialization(environmentID, sessionID)`,
+repository write, `FailTaskEnvironmentMaterialization(sessionID)`,
 that changes the row to `failed` and clears the claim only while the row is
 still `creating` and still owned by that session. The existing
 `markTaskEnvironmentMaterializationFailed` path and the inline `LaunchAgent`

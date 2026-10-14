@@ -392,8 +392,11 @@ func (r *Repository) FinalizeTaskEnvironmentMaterialization(
 // materialization owner. The WHERE clause is the guard: the row must still be
 // in the state and claim the caller read, and must hold no workspace path,
 // container, sandbox, or live repository inventory, so no physical workspace
-// changes hands. Stale container handles and secret references are cleared so
-// the new owner provisions fresh ones.
+// changes hands. A Kubernetes inventory row that recorded runtime metadata
+// (PVC, Pod, executor identity) is retained physical evidence too, including
+// when its control credentials were never saved; only a bare claim row with
+// empty metadata stays re-electable. Stale container handles and secret
+// references are cleared so the new owner provisions fresh ones.
 const reelectTaskEnvironmentMaterializationSQL = `
 	UPDATE task_environments
 	SET status = ?, materialization_session_id = ?,
@@ -407,6 +410,11 @@ const reelectTaskEnvironmentMaterializationSQL = `
 	  AND NOT EXISTS (
 		SELECT 1 FROM task_environment_repos
 		WHERE task_environment_id = task_environments.id AND deleted_at IS NULL
+	  )
+	  AND NOT EXISTS (
+		SELECT 1 FROM task_environment_kubernetes k
+		WHERE k.environment_id = task_environments.id
+		  AND COALESCE(k.metadata, '') NOT IN ('', '{}')
 	  )
 `
 

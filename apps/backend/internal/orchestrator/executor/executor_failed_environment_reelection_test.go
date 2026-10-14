@@ -118,3 +118,21 @@ func TestReelectFailedEnvironmentForLaunchRequiresResetWhenEvidenceAppears(t *te
 		t.Fatalf("failed environment with inventory error = %v, want reset required", err)
 	}
 }
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6
+func TestReelectFailedEnvironmentForLaunchRequiresResetWhenKubernetesEvidenceBlocksReelection(t *testing.T) {
+	repo := newMockRepository()
+	env := failedLaunchEnvironment(releaseTaskID)
+	repo.taskEnvironments[env.ID] = env
+	// The store refuses the re-election because the Kubernetes inventory row
+	// recorded retained runtime metadata the environment snapshot cannot
+	// carry; the row itself still looks empty to this check.
+	repo.reelectFailedFunc = func(context.Context, string, string) (bool, error) { return false, nil }
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+	_, err := exec.reelectFailedTaskEnvironmentForLaunch(context.Background(), releaseTask(), releaseSession(), env)
+
+	if !errors.Is(err, models.ErrTaskEnvironmentResetRequired) {
+		t.Fatalf("refused failed re-election error = %v, want reset required", err)
+	}
+}

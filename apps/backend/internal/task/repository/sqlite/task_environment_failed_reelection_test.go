@@ -31,6 +31,80 @@ func addWorktreeEvidence(t *testing.T, repo *Repository, environmentID string) {
 	}
 }
 
+// addKubernetesInventoryRow inserts the task_environment_kubernetes row a
+// launch claims before it records runtime metadata, then optionally stores the
+// metadata a created Pod or PVC leaves behind.
+func addKubernetesInventoryRow(t *testing.T, repo *Repository, environmentID, metadata string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO task_environment_kubernetes (environment_id, task_id, ownership_generation)
+		SELECT id, task_id, ownership_generation FROM task_environments WHERE id = ?
+	`), environmentID); err != nil {
+		t.Fatal(err)
+	}
+	if metadata == "" {
+		return
+	}
+	if _, err := repo.db.ExecContext(ctx, repo.db.Rebind(
+		`UPDATE task_environment_kubernetes SET metadata = ? WHERE environment_id = ?`,
+	), metadata, environmentID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6
+func TestFailedReelectionKeepsRetainedKubernetesRuntime(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedMaterializationClaimTask(t, repo, "task-k8s-evidence")
+	environmentID := seedFailedEnvironment(t, repo, "task-k8s-evidence", "session-k8s-evidence-owner")
+	// A partial initial Kubernetes launch: PVC and Pod metadata were recorded
+	// before the agentctl connect failed, so the control credentials were
+	// never saved.
+	addKubernetesInventoryRow(t, repo, environmentID,
+		`{"kubernetes_pod_uid":"pod-uid-1","kubernetes_pvc_name":"pvc-1"}`)
+
+	reelected, err := repo.ReelectFailedTaskEnvironmentMaterialization(ctx, environmentID, "session-k8s-retry")
+	if err != nil {
+		t.Fatalf("re-elect with retained Kubernetes inventory: %v", err)
+	}
+	if reelected {
+		t.Fatal("retained Kubernetes runtime metadata was treated as an empty unmaterialized environment")
+	}
+	_, err = bindRetry(repo, "task-k8s-evidence", "session-k8s-retry")
+	if !errors.Is(err, models.ErrTaskEnvironmentResetRequired) {
+		t.Fatalf("binding against a retained Kubernetes runtime error = %v, want reset required", err)
+	}
+	environment, err := repo.GetTaskEnvironment(ctx, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if environment.Status != models.TaskEnvironmentStatusFailed || environment.MaterializationSessionID != "" {
+		t.Fatalf("environment = status %q owner %q, want unchanged failed row", environment.Status, environment.MaterializationSessionID)
+	}
+}
+
+// @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.6
+func TestFailedReelectionAllowsBareKubernetesClaimRow(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedMaterializationClaimTask(t, repo, "task-k8s-bare-claim")
+	environmentID := seedFailedEnvironment(t, repo, "task-k8s-bare-claim", "session-k8s-bare-owner")
+	// The claim row alone records no runtime metadata, so no physical
+	// resource exists and the environment stays re-electable.
+	addKubernetesInventoryRow(t, repo, environmentID, "")
+
+	retry, err := bindRetry(repo, "task-k8s-bare-claim", "session-k8s-retry")
+	if err != nil {
+		t.Fatalf("bind after a bare Kubernetes claim row: %v", err)
+	}
+	assertTakenOverMaterialization(t, repo, environmentID, retry)
+	if _, err := repo.GetKubernetesEnvironment(ctx, environmentID); err != nil {
+		t.Fatalf("bare Kubernetes claim row was removed by the re-election: %v", err)
+	}
+}
+
 // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-004.4
 func TestWorkspaceBindingReelectsFailedEnvironmentWithoutEvidence(t *testing.T) {
 	repo := newRepoForEntityTests(t)

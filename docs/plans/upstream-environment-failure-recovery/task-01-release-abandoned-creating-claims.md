@@ -29,7 +29,7 @@ young owners.
 ## In scope
 
 - Write failing repository, executor, and orchestrator tests first.
-- Add `FailTaskEnvironmentMaterialization(environmentID, sessionID)`, a
+- Add `FailTaskEnvironmentMaterialization(sessionID)`, a
   `creating` to `failed` write that succeeds only for the current owner, and
   route `markTaskEnvironmentMaterializationFailed` and the inline `LaunchAgent`
   error branch through it.
