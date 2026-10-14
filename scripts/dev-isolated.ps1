@@ -433,8 +433,8 @@ $backendProc = Invoke-WithIsolatedEnvironment -Environment $BackendEnvironment -
 $CmdPid = $backendProc.Id
 # The actual backend (kandev.exe) is launched by cmd.exe and cannot be read from
 # Start-Process, so we find it by its listening port. Every listener row on the
-# port is checked, and only a listener created after this launch is accepted, so
-# a leftover kandev.exe or another address's listener is never adopted.
+# port is checked, so a non-matching row listed first does not hide this launch's
+# listener, and only a kandev.exe created after this launch is accepted.
 # Discovery and the health loop each wait up to $Timeout seconds, so the total
 # wait can reach 2 x $Timeout.
 $discoverDeadline = (Get-Date).AddSeconds($Timeout)
