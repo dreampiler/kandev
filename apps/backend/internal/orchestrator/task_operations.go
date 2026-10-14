@@ -2115,6 +2115,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchClaim.consume(ctx)
 	seam1Res.consume()
 
+	// A spawn whose task still points at a terminal primary succeeds it as
+	// primary and receives its queue. A live primary is preserved by the
+	// repository's conditional, atomic promotion.
+	if opts.SpawnOrigin != nil {
+		s.promoteSpawnedSuccessorOnTerminalPrimary(ctx, taskID, sessionID)
+	}
+
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
