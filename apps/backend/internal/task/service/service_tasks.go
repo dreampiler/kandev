@@ -373,12 +373,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// Resolve the destination step once and share it with the explicit-profile
 	// policy below: resolving twice would consult the step resolver twice and
 	// could route the policy check and the task row to different steps when
-	// the resolver answers differently between calls.
-	workflowStepID, err := s.resolveWorkflowStepE(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.enforceExplicitAgentProfilePolicy(ctx, req, workflowStepID); err != nil {
+	// the resolver answers differently between calls. The resolver error is
+	// propagated only on the policy path that needs the destination (opt-in
+	// workflow with validated overrides); every other create keeps the
+	// historical tolerant behavior (warn and continue with an empty step).
+	workflowStepID, resolveErr := s.resolveWorkflowStepE(ctx, req)
+	if err := s.enforceExplicitAgentProfilePolicy(ctx, req, workflowStepID, resolveErr); err != nil {
 		return nil, err
 	}
 	if req.RequireAssigneeAgentProfileValidation {
