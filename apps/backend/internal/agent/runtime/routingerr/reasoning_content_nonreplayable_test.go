@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// reasoningContentMessage is the exact DeepSeek thinking-mode 400 an agent
-// surfaces after a session/load resume reconstructed the assistant history
-// without its `reasoning_content`. The persisted reasoning state is poisoned,
-// so resuming replays the same 400 and only a fresh session recovers.
+// reasoningContentMessage is a sanitized DeepSeek missing-reasoning diagnostic
+// surfaced through an ACP adapter.
 const reasoningContentMessage = "Internal error: {\"message\":\"The `reasoning_content` in the thinking mode " +
 	"must be passed back to the API. (request_id: ***)\",\"type\":\"invalid_request_error\",\"param\":null," +
 	"\"code\":\"invalid_request_error\"}"
@@ -38,10 +36,10 @@ func TestClassify_ReasoningContentNonReplayable(t *testing.T) {
 		t.Errorf("UserAction = false, want true")
 	}
 	if e.AutoRetryable {
-		t.Errorf("AutoRetryable = true, want false (resuming is futile)")
+		t.Errorf("AutoRetryable = true, want false")
 	}
 	if e.FallbackAllowed {
-		t.Errorf("FallbackAllowed = true, want false (session-state corruption, not a provider problem)")
+		t.Errorf("FallbackAllowed = true, want false")
 	}
 }
 
@@ -53,7 +51,9 @@ func TestIsResumeCorrupted_ReasoningContent(t *testing.T) {
 	}{
 		{"deepseek reasoning_content 400", reasoningContentMessage, true},
 		{"bare phrasing", "The reasoning_content in the thinking mode must be passed back to the API.", true},
+		{"gap at the bound", "reasoning_content" + strings.Repeat("x", 80) + "must be passed back", true},
 		{"gap beyond the bound", "reasoning_content" + strings.Repeat("x", 81) + "must be passed back", false},
+		{"phrases on separate lines", "reasoning_content\nmust be passed back", false},
 		{"reasoning_content without the phrase", "the model emitted reasoning_content blocks inline", false},
 		{"ordinary prose", "please pass the reasoning back to me", false},
 		{"empty", "", false},

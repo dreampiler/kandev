@@ -32,9 +32,11 @@ and make `IsResumeCorrupted` recognize the same signature.
   `resume_corrupted` under rule `deepseek.reasoning_content.nonreplayable.v1`,
   with no automatic retry or fallback.
 - `IsResumeCorrupted` returns true for the signature and false for empty text,
-  unrelated `reasoning_content` prose, and a gap beyond the line bound.
-- The failure is corrupt resume state, so it never qualifies for unclassified
-  fallback.
+  unrelated `reasoning_content` prose, a gap beyond 80 characters, and phrases
+  on separate lines. A gap of exactly 80 characters is accepted.
+- The existing `resume_corrupted` user-action policy vetoes automatic retry
+  and unclassified fallback. The diagnostic does not prove the failure's cause
+  or guarantee recovery from an adapter-level omission in a fresh session.
 
 ## Verification
 
@@ -54,6 +56,10 @@ requires `must be passed back` within 80 characters on the same line.
 
 ## Results
 
-- `TestClassify_ReasoningContentNonReplayable` and
-  `TestIsResumeCorrupted_ReasoningContent` pass with the existing
-  resume-corruption tests.
+- [PR #4494](https://github.com/kdlbs/kandev/pull/4494) implements the bounded
+  signature and reuses the existing recovery policy.
+- Original focused test passes are author-reported. Review retains the flags
+  assertions and adds exactly-80 and newline cases; no production logic change
+  or production RED is claimed for that coverage-only batch.
+- Independent focused and hosted verification receipts belong to the review
+  task's sibling evidence directory and are not inferred from author reports.
