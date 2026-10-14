@@ -69,19 +69,19 @@ were cancelled by the first sweep.
 **A cancellation that found nothing to cancel is not a failed cancellation.**
 `CancelTaskExecution` delegates to `StopByTaskID`, which returns
 `ErrExecutionNotFound` both for a task with no live session and for a task whose
-own session lookup failed. Idle tasks are *expected* members of the sweep's union:
+own session lookup failed. Idle tasks are _expected_ members of the sweep's union:
 `ListLiveRoutineTaskIDsForWorkspace` selects on non-terminal `tasks.state`, and a
 heavy routine's task is non-terminal for as long as it sits on the board, live
 agent or not. Counting that sentinel in `failures` would report a healthy pause of
 a quiet workspace as a sweep that failed once per idle task, the opposite of what
--003.7 asks the count to mean: a *failed* cancellation is work that should have
+-003.7 asks the count to mean: a _failed_ cancellation is work that should have
 stopped and did not, and an idle task has already stopped.
 
 So the sentinel increments `executions_not_running`, and `failures` counts every
 other error. Three consequences, stated because two of them are costs:
 
 - **The count reports, it does not diagnose.** The same sentinel covers a failed
-  session lookup, so a task that *is* live whose lookup failed lands in
+  session lookup, so a task that _is_ live whose lookup failed lands in
   `executions_not_running` rather than `failures`, and the sweep does not stop it.
   That is a real hole in the halt guarantee and it is not closed here.
 - **It is recorded rather than discarded, which is why the third count exists.** A
@@ -138,8 +138,8 @@ keep that intent without creating a run while paused
 
 Three remain, stated rather than claimed closed.
 
-**First**, a dispatcher that read the gate *before* the insert and writes its run
-*after* the sweep passed that agent lands a queued run under a paused workspace.
+**First**, a dispatcher that read the gate _before_ the insert and writes its run
+_after_ the sweep passed that agent lands a queued run under a paused workspace.
 Three things bound it: run processing gates twice on the same predicate, so the run
 is never claimed into a launch; a repeat pause re-runs the sweep (-003.6); and the
 sweep is idempotent, since the cancel writer only transitions runs still queued or
@@ -147,13 +147,13 @@ claimed and the checkout release is scoped to the runs it cancelled.
 
 **Second**, between the final gate read and `si.launchAgent` there is an
 instruction-level window; a pause committing inside it launches one agent whose run
-was claimed *before* the pause existed, which -002.7 does not govern and -003.3's
+was claimed _before_ the pause existed, which -002.7 does not govern and -003.3's
 execution cancellation covers.
 
 **Third**, the sweep cancels by task id, and `StopByTaskID` enumerates that task's
-live sessions when it is *called*, not when the snapshot was taken. A sweep still
+live sessions when it is _called_, not when the snapshot was taken. A sweep still
 running when a resume commits therefore cancels whatever is live at that moment,
-which can be an execution launched *after* that resume — the launch -005.2
+which can be an execution launched _after_ that resume — the launch -005.2
 requires. This is the price of the rule that a sweep in flight runs to completion
 rather than aborting, and it is bounded: one sweep's duration, only a task already
 named in that sweep's union, and no repeat, since nothing re-cancels afterwards.
@@ -173,8 +173,8 @@ a stopped workspace.
 
 The slice holds four things: the pause record or `null`; a **status** of
 `unknown`, `loading`, `known`, or `error`; the workspace the record and
-status were read for; and one monotonic counter plus the sequence of the
-last update applied. Issuing any request increments the counter and tags that request
+status were read for; and one monotonic counter plus the latest read tag and
+the last accepted state-update tag. Issuing any request increments the counter and tags that request
 with the new value. The tag exists to discard a **superseded** response:
 responses arrive in whatever order the network delivers them, and without it a
 slow early request would overwrite a fast later one.
@@ -183,15 +183,15 @@ The input set is enumerated and closed. Adding one rule per newly noticed input
 is what left earlier revisions of this section incomplete, so an input that is
 not in this table is a defect in the table, not a decision for the call site.
 
-| Input | Effect |
-| --- | --- |
-| Mount, and every change of selected workspace | status `loading`; **clear the record only when the workspace changed** (a same-workspace remount re-reads while the last state stays on screen); issue a read |
-| WS reconnect | issue a read; status unchanged, the last known state still being the best available |
-| Refresh control (-006.13) | issue a read; status unchanged until it answers |
-| `GET` success | apply only if `workspace_id` matches the selected workspace **and** the tag exceeds last-applied; store the accepted workspace as the cached owner, then status `known` |
-| `GET` failure | apply under the workspace and last-applied guards only when no newer request is pending; status `error`, and the record is **not** cleared, so a pause already read stays on screen |
-| `POST` pause or resume success | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; store the accepted workspace as the cached owner, then status `known` |
-| `POST` pause or resume failure | status and record unchanged; surface the failure (-006.6) |
+| Input                                         | Effect                                                                                                                                                                           |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mount, and every change of selected workspace | status `loading`; **clear the record only when the workspace changed** (a same-workspace remount re-reads while the last state stays on screen); issue a read                    |
+| WS reconnect                                  | issue a read; status unchanged, the last known state still being the best available                                                                                              |
+| Refresh control (-006.13)                     | issue a read; status unchanged until it answers                                                                                                                                  |
+| `GET` success                                 | apply only if `workspace_id` matches the selected workspace **and** the tag exceeds last-applied; store the accepted workspace as the cached owner, then status `known`          |
+| `GET` failure                                 | apply under the workspace and last-applied guards only when no newer read was issued; status `error`, and the record is **not** cleared, so a pause already read stays on screen |
+| `POST` pause or resume success                | apply under **both** conditions of the `GET` rule, the `workspace_id` match and the tag; store the accepted workspace as the cached owner, then status `known`                   |
+| `POST` pause or resume failure                | status, record and last-applied tag unchanged; surface the failure (-006.6), leaving an outstanding read able to settle                                                          |
 
 The pause response also carries its sweep outcome. When `sweep.failures` is
 non-zero, the paused banner shows a localized warning and a retry action. The
@@ -209,7 +209,7 @@ Four consequences, each a rule a builder would otherwise have to invent:
   Retaining the record across a switch would render
   workspace A's banner over workspace B until B's read landed, and indefinitely if
   that read failed, since a failed `GET` deliberately keeps whatever record is
-  held. That is -006.4 inverted: a *running* workspace showing a *stopped* banner.
+  held. That is -006.4 inverted: a _running_ workspace showing a _stopped_ banner.
   The rule is stated because the store slice has in-repo precedent for both a
   workspace-keyed and a flat shape, so neither is inferable. While a workspace
   switch or a first mount is being read with no record yet, a reading indicator
@@ -220,7 +220,7 @@ Four consequences, each a rule a builder would otherwise have to invent:
 - **A mutation response is checked for workspace, not only for order.** Both
   halves of the `GET` rule apply to it. The workspace half is the one that is easy
   to drop, because a client "knows" which workspace it just posted to, but it
-  posted to the workspace selected *then* and the response can land after the
+  posted to the workspace selected _then_ and the response can land after the
   operator has moved on, which is why every response body carries `workspace_id`
   at all. Nothing is applied optimistically before the response, so -006.6's "keep
   the displayed state matching the server's" holds by construction rather than by
@@ -344,9 +344,9 @@ Backend, in `*_test.go` beside each source:
 - a **cron** fire blocked by a pause writes a `skipped` run carrying
   `skip_reason = 'workspace_paused'` and the blocking `pause_id`, identically to
   a webhook fire, and `TickScheduledTriggers` logs no error for it — while a gate
-  *read* error on the same tick does;
+  _read_ error on the same tick does;
 - a second blocked fire of the same routine under the same pause writes no row of
-  any kind, while one under a *different* pause record does (-002.13, and proof
+  any kind, while one under a _different_ pause record does (-002.13, and proof
   the insert is keyed on the pair);
 - a pause-skipped routine run is distinguishable from a skip-if-active row;
 - two pauses resolve to one record; two resumes release once; a pause whose
@@ -358,7 +358,7 @@ Backend, in `*_test.go` beside each source:
   orphan entry), same for release; a resume on an unpaused workspace releases
   nothing and still writes its activity log entry;
 - a plain **repeat pause**, an already-paused workspace with no concurrent
-  writer, returns the existing record unchanged *and* commits a
+  writer, returns the existing record unchanged _and_ commits a
   `workspace_pause_noop` entry naming the requested operation, so -005.8's "every
   request auditable" covers the pressed-twice case and not only the raced one;
 - halt sweep: taskless runs cancelled, checkouts released, terminal runs
@@ -380,7 +380,7 @@ Backend, in `*_test.go` beside each source:
 - malformed pause and resume JSON returns `400`; an empty resume body remains
   accepted;
 - resume effectiveness: a run queued after resume launches, while the same wake
-  for a *budget-paused* agent launches nothing (-005.2 and -005.5);
+  for a _budget-paused_ agent launches nothing (-005.2 and -005.5);
 - a wake reason named nowhere in this spec is gated too, asserting the chokepoint
   is reason-agnostic rather than an enumeration;
 - a 500-CJK-character reason accepted, a 501-code-point one rejected;

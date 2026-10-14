@@ -53,7 +53,14 @@ export const defaultOfficeState: OfficeSliceState = {
     runAttempts: { byRunId: {} },
     agentRouting: { byAgentId: {} },
     taskQuorum: { byTaskId: {} },
-    pause: { record: null, status: "unknown", workspaceId: null, requestSeq: 0, appliedSeq: 0 },
+    pause: {
+      record: null,
+      status: "unknown",
+      workspaceId: null,
+      requestSeq: 0,
+      readSeq: 0,
+      appliedSeq: 0,
+    },
   },
 };
 
@@ -391,11 +398,12 @@ function createPauseActions(set: SetFn) {
     // Every issued GET or POST bumps the one shared counter and takes the
     // new value as its tag, so requests are ordered by when they were
     // issued rather than by when their response lands.
-    beginPauseRequest: (): number => {
+    beginPauseRequest: (kind: "read" | "mutate" = "read"): number => {
       let tag = 0;
       set((draft) => {
         draft.office.pause.requestSeq += 1;
         tag = draft.office.pause.requestSeq;
+        if (kind === "read") draft.office.pause.readSeq = tag;
       });
       return tag;
     },
@@ -422,10 +430,13 @@ function createPauseActions(set: SetFn) {
       set((draft) => {
         const pause = draft.office.pause;
         if (responseWorkspaceId !== activeWorkspaceId || tag <= pause.appliedSeq) return;
-        // A newer pending request owns the read outcome; an earlier failure
+        // A newer read owns the read outcome; an earlier failure
         // must not turn its loading state into an unavailable warning.
-        if (outcome.kind === "read-failure" && tag < pause.requestSeq) return;
+        if (outcome.kind === "read-failure" && tag < pause.readSeq) return;
         applied = true;
+        // A failed mutation learned no newer server state. Do not let it
+        // invalidate an outstanding read's success or failure.
+        if (outcome.kind === "mutate-failure") return;
         pause.appliedSeq = tag;
         switch (outcome.kind) {
           case "read-success":
@@ -438,9 +449,6 @@ function createPauseActions(set: SetFn) {
             // Status `error`; the record is not cleared, so a pause
             // already read stays on screen (marked stale by the caller).
             pause.status = "error";
-            return;
-          case "mutate-failure":
-            // Status and record unchanged; the caller surfaces the failure.
             return;
         }
       });

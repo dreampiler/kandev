@@ -52,7 +52,7 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
 
   const read = useCallback(async () => {
     if (!workspaceId) return;
-    const tag = beginPauseRequest();
+    const tag = beginPauseRequest("read");
     try {
       const res = await getWorkspacePause(workspaceId);
       const activeWorkspaceId = storeApi.getState().workspaces.activeId;
@@ -98,7 +98,7 @@ export function useWorkspacePause(workspaceId: string | null): UseWorkspacePause
       updateSweep: boolean,
     ): Promise<WorkspacePauseActionResult> => {
       if (!workspaceId) return { ok: false, error: t("office:pauseUnavailable") };
-      const tag = beginPauseRequest();
+      const tag = beginPauseRequest("mutate");
       setIsMutating(true);
       try {
         const res = await action(workspaceId, reason);

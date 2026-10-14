@@ -39,7 +39,9 @@ system_design:
   a remount. Clear it when the workspace changes, and distinguish a pending
   read from a failed read so only failures show the unavailable warning.
 - Update the cached workspace owner on an accepted response, and ignore an
-  older failed read while a newer request is pending.
+  older failed read only when a newer read can settle its state. A failed POST
+  leaves the last-applied tag unchanged so an outstanding GET can settle in
+  either completion order; accepted successes still supersede older failures.
 
 ## Verification
 

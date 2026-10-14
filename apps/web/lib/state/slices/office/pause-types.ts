@@ -28,8 +28,9 @@ export type WorkspacePauseStatus = "unknown" | "loading" | "known" | "error";
  * section: the record or `null`, a status, the workspace the record and
  * status were read for, and one monotonic counter plus the sequence of
  * the last update applied. `requestSeq` is bumped by
- * `beginPauseRequest` on every issued GET or POST; `appliedSeq` is the tag of
- * whichever response last passed both supersession guards. `workspaceId`
+ * `beginPauseRequest` on every issued GET or POST; `readSeq` tracks the latest
+ * GET, and `appliedSeq` is the tag of the last accepted success or read failure.
+ * A failed mutation does not supersede an outstanding read. `workspaceId`
  * lets a remount tell a same-workspace re-read (keep the record) from a
  * workspace change (clear it) without relying on hook-instance memory.
  */
@@ -38,6 +39,7 @@ export type WorkspacePauseSliceState = {
   status: WorkspacePauseStatus;
   workspaceId: string | null;
   requestSeq: number;
+  readSeq: number;
   appliedSeq: number;
 };
 

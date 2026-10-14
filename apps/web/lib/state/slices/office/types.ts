@@ -701,7 +701,7 @@ export type OfficeSliceActions = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
   setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
-  beginPauseRequest: () => number;
+  beginPauseRequest: (kind?: "read" | "mutate") => number;
   beginPauseRead: (workspaceId: string) => void;
 
   applyPauseResponse: (
