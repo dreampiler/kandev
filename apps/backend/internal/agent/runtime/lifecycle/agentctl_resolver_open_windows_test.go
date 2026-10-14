@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -55,6 +56,25 @@ func TestOpenCachedHelperForReadWaitsOutTransientSharingViolation(t *testing.T) 
 	if err := <-opened; err != nil {
 		t.Fatalf("open after the transient hold: %v", err)
 	}
+}
+
+func TestOpenCachedHelperForReadOpensLongPath(t *testing.T) {
+	dir := t.TempDir()
+	for len(dir) <= 300 {
+		dir = filepath.Join(dir, strings.Repeat("d", 50))
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cached := filepath.Join(dir, "agentctl")
+	if err := os.WriteFile(cached, []byte("helper"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := openCachedHelperForRead(cached)
+	if err != nil {
+		t.Fatalf("open long cache path: %v", err)
+	}
+	_ = reader.Close()
 }
 
 func TestOpenCachedHelperForReadReportsMissingFile(t *testing.T) {
