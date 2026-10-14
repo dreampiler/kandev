@@ -147,6 +147,11 @@ for the upstream write owner, not code to add here.
   succeeded. The JSON reported B and E passed, A and C failed, D unverified,
   and `result=failed`; task 04 records the observations and remaining limits.
   The original release acceptance remains unmet.
+- The approved A/C verifier correction validates preparation, reads canonical
+  completed-turn identities, captures C's baseline immediately before restart,
+  and records the actual persisted activity timestamp. Preparation is bounded
+  by `TimeoutSeconds`; event/completion observation remains 90 seconds after
+  preparation. A changed-input confirming run follows the temporary checks.
 - Existing Windows listener and snapshot test failures are recorded as existing
   failures and are not rerun.
 

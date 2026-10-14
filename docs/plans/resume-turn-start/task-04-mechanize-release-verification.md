@@ -109,3 +109,55 @@ not release acceptance or a completed K1 context-reset investigation.
 Both launches were stopped through their own pidfile. The isolated binary
 processes and backend listener were confirmed absent. Temporary fixture cleanup
 uses only the controller-designated disposable location.
+
+### A/C verifier correction
+
+Retained session, message, turn, and delivery records established that both
+failures came from the verifier. A's asynchronous preparation exceeded the
+90-second observation window before execution attachment; its initial output
+and completed turn arrived later. C's premature baseline was zero, while its
+single initial turn produced a thinking row and a message row before restart.
+No C turn, submission, or event was added after restart. These observations
+do not demonstrate a core resume defect or an idle redispatch regression.
+
+The approved correction separates bounded preparation from run observation.
+Preparation uses the existing `TimeoutSeconds` budget (default 150 seconds).
+The subsequent event/completion budget remains 90 seconds. An unsuccessful
+preparation result is retained as failure, rather than discarded.
+
+The verifier reads canonical turn IDs and `completed_at` through the existing
+session-turn API. New work requires a new completed turn with an associated
+agent activity message. `first_event_at` is the activity's persisted
+`created_at`, not the verification clock. Thinking and message rows from one
+turn therefore count as one completed turn. C captures completed initial-turn
+identity immediately before restart, then requires the idle state and the
+same turn/completion identities afterward, including absence of a new
+unfinished turn.
+
+Temporary checks first failed on all three original defects, then passed
+after the correction. Controls also cover a new unfinished turn, an old
+completed turn masquerading as continuation, and A's preparation failure stage.
+No recurring tests or new API, runtime policy, or core implementation was added.
+
+One changed-input canonical run followed the correction, using the unchanged
+Go binaries at `cdd512153b68c6d890288cc70af9b7ce884cca97` and a fresh disposable
+isolated home. It returned exit 1 and emitted:
+
+```text
+A passed   B passed   C failed   E failed   D unverified
+result=failed   web_assets_ok=false
+```
+
+A recorded a real first activity timestamp `2026-10-14T03:38:42.4112347Z`,
+execution ID, canonical turn ID, and completion timestamp. B's initial completed
+turn count was 1 and its continuation recorded a different completed turn.
+C reached the 150-second preparation boundary in RUNNING; E remained CREATED
+without an execution. Those preparation failures are now preserved rather than
+ignored. C's baseline/preservation comparison was not performed because its
+precondition was unmet. This run does not prove that the remaining preparation
+delay is a product defect, and no second confirming run or timeout extension
+was performed. Original release acceptance remains unmet.
+
+Both owned launches stopped through the pidfile. No designated-bin process or
+backend listener remained; the user PATH contained no isolated Hermes entry.
+D, actual providers, K1 context-reset/R1, and post-swap readback remain open.
