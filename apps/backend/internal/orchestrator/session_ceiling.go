@@ -101,6 +101,12 @@ const (
 	// resource limit from a session-count limit. The control lane and Office
 	// coordinator are never refused by this reason.
 	ceilingReasonMemoryPressure = "memory_pressure"
+	// ceilingReasonCoordinatorAllowance admits a workspace coordinator's
+	// automatic launch into a saturated worker lane once its own queued launch
+	// has waited coordinatorAllowanceAge, so the owner-facing coordinator is
+	// not starved behind manual overrides. It is bounded to one session per
+	// coordinator profile and counts in the worker population.
+	ceilingReasonCoordinatorAllowance = "ceiling_coordinator_allowance"
 )
 
 // deferredPrecedenceState is the closed set describing why a queued launch
@@ -155,6 +161,9 @@ type ceilingReservation struct {
 	sessionID string
 	class     ceilingClass
 	takenAt   time.Time
+	// profileID is the agent profile the reservation was admitted for, when
+	// the admission knew it. Only the coordinator allowance reads it.
+	profileID string
 }
 
 // admissionRequest is one launch asking for capacity.
@@ -170,6 +179,12 @@ type admissionRequest struct {
 	// replacesFailedAttempt marks the automatic successor launched for the
 	// same session's own failed dynamic attempt. It is set only by that seam.
 	replacesFailedAttempt bool
+	// coordinator marks an automatic launch whose profile the durable profile
+	// row names as a workspace coordinator. coordinatorQueuedSince is the
+	// original queue time of the request's own deferred record, zero when it
+	// has none. Both are resolved by the orchestrator, never by the caller.
+	coordinator            bool
+	coordinatorQueuedSince time.Time
 }
 
 // admissionDecision is the controller's answer.
@@ -550,6 +565,14 @@ func (c *sessionCeilingController) reserveLocked(sessionID string, class ceiling
 	return key
 }
 
+// reserveRequestLocked is reserveLocked for an admission request, recording the
+// profile the request was admitted for.
+func (c *sessionCeilingController) reserveRequestLocked(req admissionRequest, class ceilingClass) string {
+	key := c.reserveLocked(req.sessionID, class)
+	c.reservations[key].profileID = req.agentProfileID
+	return key
+}
+
 // admit decides one launch and, where it admits, records the reservation before
 // returning. The population read and the reservation write share one critical
 // section, so two launches arriving together cannot both see the same free slot.
@@ -601,7 +624,7 @@ func (c *sessionCeilingController) admitUnlimitedLocked(
 			return decision
 		}
 	}
-	decision.reservationKey = c.reserveLocked(req.sessionID, class)
+	decision.reservationKey = c.reserveRequestLocked(req, class)
 	c.logDecision(req, origin, decision)
 	return decision
 }
@@ -665,17 +688,60 @@ func (c *sessionCeilingController) decideLocked(
 		decision.precedesState = precedence.state
 	case classCeiling == unlimitedSessionCeiling || classPopulation < classCeiling:
 		decision.admitted = true
-		decision.reservationKey = c.reserveLocked(req.sessionID, class)
+		decision.reservationKey = c.reserveRequestLocked(req, class)
 	case origin == launchOriginManual:
 		decision.admitted = true
 		decision.manualOverride = true
 		decision.reasonCode = ceilingReasonManualOverride
-		decision.reservationKey = c.reserveLocked(req.sessionID, class)
+		decision.reservationKey = c.reserveRequestLocked(req, class)
+	case c.coordinatorAllowanceLocked(ctx, req, class):
+		decision.admitted = true
+		decision.reasonCode = ceilingReasonCoordinatorAllowance
+		decision.reservationKey = c.reserveRequestLocked(req, class)
 	default:
 		decision.reasonCode = refusedReasonFor(class)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
+}
+
+// coordinatorAllowanceLocked reports whether a saturated worker lane admits this
+// request as a workspace coordinator: an automatic coordinator launch whose own
+// queued launch has waited coordinatorAllowanceAge, while no other session of
+// the same profile is counted or reserved. The bound is one session per
+// coordinator profile, so the overshoot is at most the number of coordinators.
+// Host memory pressure was already decided before any slot is offered.
+func (c *sessionCeilingController) coordinatorAllowanceLocked(
+	ctx context.Context, req admissionRequest, class ceilingClass,
+) bool {
+	if !req.coordinator || class != ceilingClassWorker || req.coordinatorQueuedSince.IsZero() ||
+		c.now().Sub(req.coordinatorQueuedSince) < coordinatorAllowanceAge {
+		return false
+	}
+	return !c.profileHeldLocked(ctx, req.agentProfileID)
+}
+
+// profileHeldLocked reports whether a session of the profile is already in the
+// population, counted or reserved. An unreadable population counts as held.
+func (c *sessionCeilingController) profileHeldLocked(ctx context.Context, profileID string) bool {
+	for _, reservation := range c.reservations {
+		if reservation.profileID == profileID {
+			return true
+		}
+	}
+	if c.lister == nil {
+		return false
+	}
+	refs, err := c.lister.ListAdmittedSessionRefs(ctx)
+	if err != nil {
+		return true
+	}
+	for _, ref := range refs {
+		if ref.ProfileID == profileID {
+			return true
+		}
+	}
+	return false
 }
 
 // refusedReasonFor keeps the worker lane's historical reason code byte-identical
@@ -740,7 +806,7 @@ func (c *sessionCeilingController) decideUnknownPopulationLocked(
 	if origin == launchOriginManual {
 		decision.admitted = true
 		decision.manualOverride = true
-		decision.reservationKey = c.reserveLocked(req.sessionID, class)
+		decision.reservationKey = c.reserveRequestLocked(req, class)
 	}
 	c.logDecision(req, origin, decision)
 	return decision

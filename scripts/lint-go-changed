@@ -25,6 +25,10 @@ done
 
 [ "${#packages[@]}" -gt 0 ] || exit 0
 
+# golangci-lint guards one run per host through os.TempDir()/golangci-lint.lock,
+# so a second concurrent worktree aborts with "parallel golangci-lint is running"
+# instead of linting. --allow-parallel-runners drops the host-wide lock and lets
+# the runs proceed against the shared, content-addressed cache.
 base=$(scripts/resolve-go-lint-base --comparison-base)
 cd apps/backend
-exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m
+exec golangci-lint run "${packages[@]}" --new-from-rev="$base" --timeout=5m --allow-parallel-runners
