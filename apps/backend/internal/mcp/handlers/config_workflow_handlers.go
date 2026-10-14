@@ -51,6 +51,7 @@ func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*
 		WorkflowID  string  `json:"workflow_id"`
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
+		Hidden      *bool   `json:"hidden"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -62,6 +63,7 @@ func (h *Handlers) handleUpdateWorkflow(ctx context.Context, msg *ws.Message) (*
 	workflow, err := h.taskSvc.UpdateWorkflow(ctx, req.WorkflowID, &service.UpdateWorkflowRequest{
 		Name:        req.Name,
 		Description: req.Description,
+		Hidden:      req.Hidden,
 	})
 	if err != nil {
 		h.logger.Error("failed to update workflow", zap.Error(err))

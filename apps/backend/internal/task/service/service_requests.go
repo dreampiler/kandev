@@ -223,6 +223,8 @@ type UpdateWorkflowRequest struct {
 	Description       *string    `json:"description,omitempty"`
 	Prompt            *string    `json:"prompt,omitempty"`
 	AgentProfileID    *string    `json:"agent_profile_id,omitempty"`
+	// Hidden marks the workflow as system-only; nil preserves the stored value.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
