@@ -1047,7 +1047,10 @@ func TestPreparedWorkspaceInventoryRequestRequiresReuseForPersistedRuntime(t *te
 	session := &models.TaskSession{ID: "session", TaskEnvironmentID: "environment"}
 	env := &models.TaskEnvironment{ID: "environment", Status: models.TaskEnvironmentStatusReady, MaterializationSessionID: session.ID}
 
-	req := executor.preparedWorkspaceInventoryRequest(context.Background(), &v1.Task{ID: "task", WorkspaceID: "workspace"}, session, "executor-1", nil, env)
+	req, err := executor.preparedWorkspaceInventoryRequest(context.Background(), &v1.Task{ID: "task", WorkspaceID: "workspace"}, session, "executor-1", nil, env)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !req.WorkspaceReuseRequired {
 		t.Fatal("prepared runtime disabled workspace inventory admission")
 	}

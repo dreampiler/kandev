@@ -350,7 +350,10 @@ func (e *Executor) createOfficeSession(
 		metadata["executor_profile_id"] = executorProfileID
 	}
 
-	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	execConfig, err := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if err != nil {
+		return nil, err
+	}
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}

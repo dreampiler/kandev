@@ -37,6 +37,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/planws"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
@@ -1147,6 +1148,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BlockedBy:              req.BlockedBy,
 		StartWhenUnblocked:     req.StartWhenUnblocked,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
+		ExecutorID:             launchConfig.ExecutorID,
+		ExecutorProfileID:      launchConfig.ExecutorProfileID,
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
 		StartAgent:             startAgent,
@@ -1161,7 +1164,11 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		if code != ws.ErrorCodeInternalError {
 			message = err.Error()
 		}
-		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		var details map[string]interface{}
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			details = map[string]interface{}{"error_code": repoerrors.ExecutorProfileNotFoundCode}
+		}
+		return ws.NewError(msg.ID, msg.Action, code, message, details)
 	}
 
 	// The MCP skip is a data-loss guard, not just an optimization: the steps
@@ -1280,6 +1287,8 @@ type mcpCreateTaskResult struct {
 
 func classifyCreateTaskError(err error) string {
 	switch {
+	case errors.Is(err, repoerrors.ErrExecutorProfileNotFound):
+		return ws.ErrorCodeNotFound
 	case errors.Is(err, service.ErrWIPLimitExceeded):
 		return ws.ErrorCodeConflict
 	case errors.Is(err, service.ErrTaskTitleTooLong):

@@ -271,6 +271,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (Creat
 	if err := refuseReservedMetadata(req.Metadata, req.AllowReservedMetadata); err != nil {
 		return CreateTaskResult{}, err
 	}
+	if err := s.validateExecutorProfileReferences(ctx, req); err != nil {
+		return CreateTaskResult{}, err
+	}
 	if err := s.validateRequestedExecutorAdmission(ctx, req); err != nil {
 		return CreateTaskResult{}, err
 	}

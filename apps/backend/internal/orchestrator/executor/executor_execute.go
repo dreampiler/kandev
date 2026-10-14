@@ -1703,7 +1703,10 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	}
 
 	// Resolve executor configuration
-	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	execConfig, err := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if err != nil {
+		return "", err
+	}
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
@@ -2853,10 +2856,13 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 	executorID string,
 	repositories []*repoInfo,
 	env *models.TaskEnvironment,
-) *LaunchAgentRequest {
+) (*LaunchAgentRequest, error) {
 	metadata := cloneMetadata(task.Metadata)
 	executorID, metadata = bindSessionLaunchRunner(task, env, session, executorID, metadata)
-	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	execConfig, err := e.resolveRetainedExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if err != nil {
+		return nil, err
+	}
 	// This request is constructed only after finding an existing runtime row.
 	// That row may outlive a failed materialization by this same session, so it
 	// must never bypass preserved-workspace inventory admission.
@@ -2867,7 +2873,7 @@ func (e *Executor) preparedWorkspaceInventoryRequest(
 		TaskEnvironmentID: session.TaskEnvironmentID, ExecutorType: execConfig.ExecutorType,
 		UseWorktree: shouldUseWorktree(execConfig.ExecutorType), WorkspaceReuseRequired: reuseRequired,
 		Repositories: buildRepoSpecs(repositories),
-	}
+	}, nil
 }
 
 func bindSessionToTaskEnvironment(session *models.TaskSession, env *models.TaskEnvironment) {
@@ -2974,7 +2980,10 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		return nil, executorConfig{}, err
 	}
 
-	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	execConfig, err := e.resolveRetainedExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
+	if err != nil {
+		return nil, executorConfig{}, err
+	}
 	if execConfig.ExecutorID != "" {
 		metadata = execConfig.Metadata
 		req.ExecutorType = execConfig.ExecutorType
@@ -3004,7 +3013,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	e.injectGitLabWorkspaceCredentials(ctx, req)
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
-	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
+	metadata, err = e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
 		return nil, execConfig, err
 	}
