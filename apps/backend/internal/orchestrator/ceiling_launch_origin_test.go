@@ -49,3 +49,29 @@ func TestSeam1StartPayloadCarriesEffectiveOrigin(t *testing.T) {
 		t.Fatalf("explicit automatic payload origin = %q, want %q", got, launchOriginAutomatic)
 	}
 }
+
+// TestLaunchOriginForActivationHonorsAutomaticMarker pins that a resume or
+// start-created activation carrying the server-only Automatic marker is
+// admitted as automatic even when it is not an autoStart, so an agent/MCP-
+// initiated launch cannot ride the manual override past the ceiling. A human
+// resume without the marker keeps the manual class.
+func TestLaunchOriginForActivationHonorsAutomaticMarker(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *LaunchSessionRequest
+		want launchOrigin
+	}{
+		{"automatic marker overrides a manual base", &LaunchSessionRequest{Automatic: true}, launchOriginAutomatic},
+		{"plain resume stays manual", &LaunchSessionRequest{}, launchOriginManual},
+		{"autoStart stays automatic", &LaunchSessionRequest{AutoStart: true}, launchOriginAutomatic},
+		{"session open stays automatic", &LaunchSessionRequest{ActivationSource: LaunchActivationSourceSessionOpen}, launchOriginAutomatic},
+		{"nil request is manual", nil, launchOriginManual},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := launchOriginForActivation(tc.req); got != tc.want {
+				t.Fatalf("launchOriginForActivation(%+v) = %q, want %q", tc.req, got, tc.want)
+			}
+		})
+	}
+}

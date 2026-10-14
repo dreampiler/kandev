@@ -99,7 +99,7 @@ func (s *Service) RecoverSessionWithContinuationFallback(
 		zap.String("session_id", sessionID),
 		zap.Error(err))
 	fallback, fallbackErr := s.RecoverSessionWithOptions(
-		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{},
+		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: true},
 	)
 	if fallbackErr != nil {
 		return nil, errors.Join(err, fallbackErr)
@@ -144,7 +144,7 @@ func (s *Service) AutoRecoverBlockedPrompt(ctx context.Context, taskID, sessionI
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), interruptedTurnAutoRecoveryTimeout)
 		defer cancel()
 		if _, err := s.RecoverSessionWithOptions(
-			recoveryCtx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{},
+			recoveryCtx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: true},
 		); err != nil {
 			s.logger.Warn("automatic continue_from_history failed",
 				zap.String("task_id", taskID),

@@ -1932,6 +1932,10 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
+			// An MCP-created task's auto-start is agent-initiated: admit it as
+			// automatic so it is subject to the session ceiling instead of
+			// riding the manual override.
+			Automatic: true,
 		}
 		if config.InitialCreatePrompt {
 			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
@@ -1964,6 +1968,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:      task.WorkflowStepID,
 				Prompt:              task.Description,
 				InitialCreatePrompt: true,
+				Automatic:           true,
 			}
 		}
 
@@ -3949,6 +3954,10 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 		SessionID:                   sessionID,
 		Intent:                      orchestrator.IntentResume,
 		AllowCompletedSessionResume: true,
+		// An MCP-issued follow-up is agent-initiated: admit it as automatic so
+		// it is subject to the session ceiling instead of riding the manual
+		// override.
+		Automatic: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to resume completed session: %w", err)

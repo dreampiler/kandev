@@ -750,6 +750,11 @@ type startCreatedSessionOptions struct {
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// automatic marks a server-classified automatic launch (an agent/MCP-
+	// initiated start that is not an autoStart). It selects the automatic class
+	// for the ceiling and memory guard without changing the launch's
+	// explicit/manual creation authority.
+	automatic bool
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -824,9 +829,11 @@ func (s *Service) startCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
-	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
+	ceilingOrigin := ceilingLaunchOrigin(originFromAutoStart(autoStart), options.automatic)
+	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, ceilingOrigin, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, session.AgentProfileID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, session.AgentProfileID,
+		ceilingOrigin, startPayload)
 	if err != nil {
 		return nil, err
 	}

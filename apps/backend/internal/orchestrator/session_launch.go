@@ -971,7 +971,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{}
+	options := startCreatedSessionOptions{automatic: req.Automatic}
 	if !req.NoInitialPrompt {
 		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
 			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
@@ -1124,10 +1124,17 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
+	if req == nil {
+		return launchOriginManual
+	}
+	// A server-classified automatic launch (an agent/MCP-initiated resume or
+	// start) is admitted as automatic even though it is not an autoStart, so it
+	// is subject to the session ceiling and the host-memory guard instead of
+	// riding the manual override. Only the server-side handlers set Automatic.
+	if req.Automatic || req.ActivationSource == LaunchActivationSourceSessionOpen {
 		return launchOriginAutomatic
 	}
-	return originFromAutoStart(req != nil && req.AutoStart)
+	return originFromAutoStart(req.AutoStart)
 }
 
 func (s *Service) deferredLaunchResponse(
@@ -1351,6 +1358,11 @@ type RecoverSessionOptions struct {
 	IdempotencyKey string
 	SettingsPolicy executor.ResumeSettingsPolicy
 	ErrorStamp     string
+	// Automatic marks a server-driven recovery (automatic continue_from_history
+	// after a restart-interrupted turn, or a route-action continuation) so its
+	// resume and continuation prompt are admitted as automatic instead of
+	// riding the manual override. A human-initiated recovery leaves it false.
+	Automatic bool
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
@@ -1517,6 +1529,7 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		Automatic:                        options.Automatic,
 	})
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
@@ -1553,7 +1566,8 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, normalizeRecoverSessionError(err)
 	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true,
+		ceilingLaunchOrigin(launchOriginManual, options.Automatic),
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,
