@@ -1529,7 +1529,19 @@ func (s *Service) RecoverSessionWithOptions(
 		RecoveryAction:                   action,
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
+		Automatic:                        options.Automatic,
 	})
+	if err == nil && resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// The resume was deferred by the session ceiling, so the launch has not
+		// happened. Settle the continuation checkpoint uncertain exactly like
+		// the other failed continuation paths, never settle the recovery
+		// admission as ready, and leave the still-open recovery block as the
+		// operator surface.
+		if settleErr := s.settleCeilingDeferredRecovery(ctx, launchCtx, checkpoint, recoveryAdmission); settleErr != nil {
+			return nil, normalizeRecoverSessionError(settleErr)
+		}
+		return resp, nil
+	}
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
@@ -1540,15 +1552,6 @@ func (s *Service) RecoverSessionWithOptions(
 			}
 		}
 		return s.handleContinuationLaunchError(ctx, checkpoint, err)
-	}
-	if resp != nil && resp.ActivationDisposition == activationDispositionQueued {
-		// The resume was deferred by the session ceiling, so the launch has not
-		// happened. Never settle the recovery admission or the continuation
-		// checkpoint for a launch that is still queued: the deferred record
-		// owns the resume and the still-open recovery block stays as the
-		// operator surface. Settling here would mark the recovery ready and
-		// burn the continuation checkpoint against an empty execution.
-		return resp, nil
 	}
 	if err := completeRecoveryResumeAfterLaunch(launchCtx, recoveryAdmission, resp); err != nil {
 		return nil, err
@@ -1632,6 +1635,30 @@ func (s *Service) liveWorkspaceRecoveryResponse(
 		return nil, nil
 	}
 	return workspaceRecoveryInProgressResponse(taskID, sessionID, operation), nil
+}
+
+// settleCeilingDeferredRecovery records that a recovery resume was deferred by
+// the session ceiling: the continuation checkpoint is settled uncertain like
+// the other failed continuation paths and the recovery admission is completed
+// not-ready, while the still-open recovery block stays as the operator surface.
+// A ceiling replay is a plain native resume, so it cannot restore the
+// continuation while the ceiling holds the launch.
+func (s *Service) settleCeilingDeferredRecovery(
+	ctx, launchCtx context.Context,
+	checkpoint *continuationCheckpoint,
+	admission *worktree.RecoveryAdmission,
+) error {
+	if checkpoint != nil {
+		if err := s.settleContinuationCheckpoint(ctx, checkpoint, models.ContinuitySnapshotUncertain); err != nil {
+			return err
+		}
+	}
+	if admission != nil {
+		if err := admission.CompleteRecoveryResume(launchCtx, false, "ceiling_deferred"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func completeRecoveryResumeAfterLaunch(
