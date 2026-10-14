@@ -310,6 +310,17 @@ func (s *Service) claimInterruptedTurnAutoRecovery(
 	}
 	switch {
 	case !state.tracked:
+		if !blockRead && blockID == "" {
+			// A cold session's first canonical lookup failed, so the record
+			// identity is unknown. A failed read is not a confirmed absence: a
+			// process-local budget must not be opened without charging the real
+			// still-open row. Refuse (not the attempt bound) and leave the open
+			// block as the operator surface.
+			s.logger.Warn("interrupted turn auto-recovery skipped: canonical record identity is unknown",
+				zap.String("session_id", sessionID),
+				zap.String("reason_key", recordKey))
+			return false, false, ""
+		}
 		state.tracked = true
 		state.recordKey = recordKey
 		state.blockID = blockID
