@@ -1,3 +1,11 @@
+---
+status: done
+requirements:
+  - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
+system_design:
+  - ../../specs/tasks/system-design/bounded-session-queue-admission.md
+---
+
 # Bounded Session Queue Admission Delivery
 
 ## Outcome and authority

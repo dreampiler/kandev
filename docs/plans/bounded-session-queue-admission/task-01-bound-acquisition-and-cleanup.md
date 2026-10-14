@@ -1,5 +1,19 @@
 ---
+id: P37-01
+title: Bound Queue Acquisition and Cleanup
 status: done
+wave: 1
+depends_on: []
+plan: plan.md
+requirements:
+  - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
+acceptance_criteria:
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.1
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.2
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3
+  - AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.4
+system_design:
+  - ../../specs/tasks/system-design/bounded-session-queue-admission.md
 ---
 
 # Work Order: Bound Queue Acquisition and Cleanup
@@ -113,3 +127,9 @@ describes the acquisition-only 30-second wait and retryable busy outcome for
 Remove and Auto-run. No public action, setting, or screenshot changes.
 `node scripts/validate-public-docs.mjs` returned exit 0 and validated 48
 published pages. This documentation-only delta does not repeat code tests.
+
+Publication preflight found missing work-order linkage metadata. Added the
+existing required frontmatter to this work order and its plan, retaining the
+same requirements and criteria. The existing `pr-docs.cjs` coverage evaluator
+returned exit 0, `status: covered`, and no errors for all eleven changed paths.
+Production and test sources did not change.
