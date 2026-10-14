@@ -397,6 +397,10 @@ func (s *Service) resolvePreviewInitialWorkflowSession(
 	if profileID == "" && len(sessions) == 0 {
 		profileID = models.StringFromAny(task.Metadata[models.MetaKeyAgentProfileID])
 	}
+	initial, profileID, err = s.applyInitialRecipientBinding(ctx, task, initial, profileID)
+	if err != nil {
+		return nil, "", err
+	}
 	if profileID == "" {
 		return nil, "", fmt.Errorf("initial session provenance is unavailable for task %s", taskID)
 	}

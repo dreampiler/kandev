@@ -423,6 +423,12 @@ func TestPrepareExplicitWorkflowSessionReplacesDeletedRouteDestinationOnce(t *te
 			ctx := context.Background()
 			startPolicy := models.WorkflowProfileSessionStartPolicyNew
 			fixture := newProfileSwitchFixture(t, startPolicy, models.WorkflowProfileSessionEndPolicyPark)
+			if _, err := fixture.repo.GetExecutor(ctx, "exec-local"); errors.Is(err, models.ErrExecutorNotFound) {
+				require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{ID: "exec-local", Name: "Local", Type: models.ExecutorTypeLocal}))
+			} else {
+				require.NoError(t, err)
+			}
+			require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{ID: "ep1", ExecutorID: "exec-local", Name: "Local test"}))
 			target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
 			step := &wfmodels.WorkflowStep{
 				ID: "step-review", WorkflowID: "wf1", Position: 1,

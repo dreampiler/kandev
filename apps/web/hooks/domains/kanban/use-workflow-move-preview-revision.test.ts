@@ -380,6 +380,36 @@ it("tracks a bound replacement profile before the destination session exists", (
   ).not.toBe(first);
 });
 
+it("invalidates a preview when only the registered recovery recipient changes", () => {
+  resetState();
+  const before = getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2");
+  state.kanban.tasks[0]!.metadata = {
+    workflow_initial_recipient_binding: {
+      initial_session_id: SESSION_ID,
+      source_session_id: SESSION_ID,
+      session_id: "recovery-session",
+      agent_profile_id: INITIAL_PROFILE_ID,
+    },
+  };
+  state.agentProfiles.items.push({
+    id: INITIAL_PROFILE_ID,
+    label: "Recovered",
+    agent_id: "agent-1",
+    agent_name: "luna",
+    model: "mock-fast",
+    updatedAt: BASE_TIMESTAMP,
+  } as never);
+  const after = getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2");
+  expect(after).not.toBe(before);
+  expect(
+    JSON.parse(after).profiles.some(({ id }: { id: string }) => id === INITIAL_PROFILE_ID),
+  ).toBe(true);
+  state.agentProfiles.items.find(({ id }) => id === INITIAL_PROFILE_ID)!.model = "changed";
+  expect(
+    getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
+  ).not.toBe(after);
+});
+
 it("tracks the initial-target profile after the original session is missing", () => {
   resetState();
   state.kanban.tasks[0]!.metadata = {

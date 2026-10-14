@@ -6139,13 +6139,22 @@ func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, de
 // SetPrimarySession marks a session as the primary session for its task
 // and broadcasts a task.updated event so the frontend reflects the change.
 func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
+	return s.setPrimarySession(ctx, sessionID, "")
+}
+
+func (s *Service) setPrimarySession(ctx context.Context, sessionID, recoverySourceID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
 
 	s.primarySessionReclaimMu.Lock()
 	taskID, previousPrimaryID := s.previousPrimaryForReplacement(ctx, sessionID)
-	primaryErr := s.repo.SetSessionPrimary(ctx, sessionID)
+	var primaryErr error
+	if recoverySourceID == "" {
+		primaryErr = s.repo.SetSessionPrimary(ctx, sessionID)
+	} else {
+		primaryErr = s.registerInitialRecipientPrimary(ctx, sessionID, recoverySourceID)
+	}
 	s.primarySessionReclaimMu.Unlock()
 	if err := primaryErr; err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)

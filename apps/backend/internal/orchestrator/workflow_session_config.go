@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -496,49 +495,11 @@ func (s *Service) originalTaskSession(ctx context.Context, taskID string) (*mode
 }
 
 func markedOriginalTaskSession(sessions []*models.TaskSession) (*models.TaskSession, bool) {
-	marked := make([]*models.TaskSession, 0, 1)
-	for _, candidate := range sessions {
-		if candidate != nil && models.IsOriginalTaskSession(candidate.Metadata) {
-			marked = append(marked, candidate)
-		}
-	}
-	if len(marked) == 1 {
-		return marked[0], true
-	}
-	if len(marked) > 1 {
-		return nil, true
-	}
-	return nil, false
+	return models.MarkedOriginalTaskSession(sessions)
 }
 
 func legacyOriginalTaskSession(sessions []*models.TaskSession) *models.TaskSession {
-	legacy := make([]*models.TaskSession, 0, len(sessions))
-	for _, candidate := range sessions {
-		if candidate == nil || candidate.Metadata[models.SessionMetaKeyCreatedBy] == models.SessionCreatedByWorkflowSwitch {
-			continue
-		}
-		legacy = append(legacy, candidate)
-	}
-	if len(legacy) == 0 {
-		return nil
-	}
-	sort.SliceStable(legacy, func(i, j int) bool {
-		left, right := legacy[i].StartedAt, legacy[j].StartedAt
-		if left.Equal(right) {
-			return legacy[i].ID < legacy[j].ID
-		}
-		if left.IsZero() {
-			return false
-		}
-		if right.IsZero() {
-			return true
-		}
-		return left.Before(right)
-	})
-	if len(legacy) > 1 && legacy[0].StartedAt.Equal(legacy[1].StartedAt) {
-		return nil
-	}
-	return legacy[0]
+	return models.LegacyOriginalTaskSession(sessions)
 }
 
 func (s *Service) warnWorkflowSessionConfig(ctx context.Context, taskID, sessionID, stepID, content string) {

@@ -1204,6 +1204,9 @@ func (r *Repository) persistWorkflowSessionRouteTx(
 		return nil
 	}
 	prepared := *route
+	if err := r.validateInitialRecipientRouteWithExecutor(ctx, exec, taskID, &prepared); err != nil {
+		return err
+	}
 	if prepared.DestinationID == "" {
 		prepared.DestinationID = destinationID
 	}
@@ -4999,6 +5002,7 @@ func (r *Repository) setSessionPrimary(
 	requireNonterminal bool,
 	requireCurrentPrimaryTerminal bool,
 	route *models.WorkflowSessionRoute,
+	recoveryBindings ...models.WorkflowInitialRecipientBinding,
 ) (bool, error) {
 	now := time.Now().UTC()
 
@@ -5061,6 +5065,11 @@ func (r *Repository) setSessionPrimary(
 		}
 	}
 
+	if len(recoveryBindings) > 0 {
+		if err := r.commitInitialRecipientBindingTx(ctx, tx, taskID, sessionID, recoveryBindings[0], now); err != nil {
+			return false, err
+		}
+	}
 	if route != nil {
 		if err := r.commitWorkflowSessionRouteTx(ctx, tx, taskID, sessionID, route, now); err != nil {
 			return false, err

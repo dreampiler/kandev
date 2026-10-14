@@ -12,6 +12,7 @@ type PreviewRevisionSession = AppState["taskSessions"]["items"][string];
 const TASK_METADATA_KEYS = [
   "agent_profile_id",
   "workflow_initial_session",
+  "workflow_initial_recipient_binding",
   "workflow_session_route",
   "initial_session_runtime_config",
   "initial_session_runtime_config_profile_id",
@@ -276,6 +277,10 @@ function addProfileId(profileIds: Set<string>, profileId: unknown) {
 function addTaskProfileIds(profileIds: Set<string>, task: PreviewRevisionTask) {
   addProfileId(profileIds, task.metadata?.agent_profile_id);
   addProfileId(profileIds, profileIdFromMetadata(task.metadata?.workflow_initial_session));
+  addProfileId(
+    profileIds,
+    profileIdFromMetadata(task.metadata?.workflow_initial_recipient_binding),
+  );
   const overrides = task.workflowAgentOverrides;
   if (
     !overrides ||

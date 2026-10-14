@@ -457,13 +457,14 @@ type WorkflowSessionRoute struct {
 	DestinationStepID string `json:"destination_step_id"`
 	// EntryIdentity binds the route to the workflow entry that created it. It
 	// prevents a late replay from consuming a newer route for the same step.
-	EntryIdentity   string `json:"entry_identity,omitempty"`
-	TargetKind      string `json:"target_kind"`
-	TargetStepID    string `json:"target_step_id,omitempty"`
-	AgentProfileID  string `json:"agent_profile_id,omitempty"`
-	SourceSessionID string `json:"source_session_id,omitempty"`
-	DestinationID   string `json:"destination_session_id,omitempty"`
-	Phase           string `json:"phase"`
+	EntryIdentity           string                           `json:"entry_identity,omitempty"`
+	TargetKind              string                           `json:"target_kind"`
+	TargetStepID            string                           `json:"target_step_id,omitempty"`
+	AgentProfileID          string                           `json:"agent_profile_id,omitempty"`
+	SourceSessionID         string                           `json:"source_session_id,omitempty"`
+	DestinationID           string                           `json:"destination_session_id,omitempty"`
+	Phase                   string                           `json:"phase"`
+	InitialRecipientBinding *WorkflowInitialRecipientBinding `json:"initial_recipient_binding,omitempty"`
 }
 
 // LoadWorkflowSessionRoute decodes the bounded route record stored in task
