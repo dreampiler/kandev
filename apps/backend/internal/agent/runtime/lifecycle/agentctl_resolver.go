@@ -573,7 +573,7 @@ func publishVerifiedRemoteHelper(tempPath, cachePath string, record RemoteHelper
 }
 
 func validateCachedRemoteHelper(path string, record RemoteHelperRecord) (bool, error) {
-	file, err := os.Open(path)
+	file, err := openCachedHelperForRead(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
 	}

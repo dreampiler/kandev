@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -69,8 +70,12 @@ func TestPreferNativeBinary_StandaloneLooksUpPath(t *testing.T) {
 	ag := agents.NewCopilotACP()
 
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "copilot")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	// Lookup only: the file is never run, so Windows needs just a PATHEXT name.
+	name, body := "copilot", "#!/bin/sh\n"
+	if runtime.GOOS == "windows" {
+		name, body = "copilot.cmd", "@echo off\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
 		t.Fatalf("write fake copilot: %v", err)
 	}
 
