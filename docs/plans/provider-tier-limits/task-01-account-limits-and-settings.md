@@ -111,3 +111,22 @@ node --max-old-space-size=8192 node_modules/typescript/bin/tsc --noEmit
 ```
 
 Changed-file ESLint, `pnpm run i18n:check`, the specification catalog, and specification lint passed with exit 0. UI changes only normalize state and draft data in the existing shared desktop/phone components; layout, touch targets, scrolling, and navigation are unchanged, so targeted helper/hook and existing component coverage satisfy this remediation's mobile scope. Public documentation already describes blank inheritance and the learned reserve; no public contract or copy changed. Normal commit/push receipts belong in the controller handoff and task plan. Controller review of the new delta and merge authorization remain outstanding; this session does not merge or signal workflow completion.
+
+## Selection/final-admission review remediation (2026-10-14)
+
+Independent review `8c5105bd` completed the `dbf97a73cc...4a311e7e78` delta (43 files). The previous dispositions were accepted; new findings 128a3f32 and 604c6b5a exposed two interleavings introduced by the split admission/state locks. The owner contracts, values, and PR2 scope remain unchanged.
+
+- Select, unclassified successor, interrupted successor, and final prompt admission now share the admission mutex before the state mutex. Selection capacity is sampled outside the state mutex; candidate ranking and resource-wait deadlines consume the same snapshot. Probe claims do no capacity I/O.
+- Lifecycle atomic claim, route/incarnation revalidation, and failed-claim restoration run inside the admission callback. An unconfigured routing path keeps its direct atomic claim. This retains the earlier stale-route protection without exposing transient lifecycle claims to competing admissions.
+- Companion red evidence: Select and final admission both succeeded and claimed capacity 2 against limit 1; concurrent lifecycle requests both returned resource-wait and admitted zero. The lifecycle fixture initially duplicated a workspace through a shared seeding helper and was corrected to create two sessions in the same disposable database.
+
+Targeted race verification passed with exit 0 in both changed packages:
+
+```text
+go test -trimpath -race -p 2 -timeout 2m ./internal/agent/runtime/dynamic ./internal/orchestrator -run 'TestProviderTier|Test.*Unclassified|Test.*Interrupted|TestAccountBlock' -count=1
+go build -p 2 ./internal/agent/runtime/dynamic ./internal/orchestrator
+go vet -p 2 ./internal/agent/runtime/dynamic ./internal/orchestrator
+golangci-lint run --allow-serial-runners --new-from-rev=4a311e7e784cf2114269d0417db38d676526552b --timeout=8m --concurrency=2 ./internal/agent/runtime/dynamic ./internal/orchestrator
+```
+
+Build, vet, and scoped lint also passed with exit 0, with zero lint issues. A single-case race check of `TestProviderTierLifecycleClaimRejectsChangedRoute` passed: changing the route immediately after atomic claim rejects dispatch, restores the session state, and preserves the replacement generation. Normal commit/push and the controller's `4a311e7e78...new head` review receipt belong in the task plan. No frontend, provider, operating-data, integration/E2E/CI, or permission change is part of this delta. The task remains unmerged, without a workflow completion signal.

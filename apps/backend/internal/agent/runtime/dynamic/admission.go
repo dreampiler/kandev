@@ -30,11 +30,30 @@ func (e *Engine) observeClassifiedLimit(ctx context.Context, c Candidate, failur
 	e.observeLimit(ctx, c.ID, failure)
 }
 
-func (e *Engine) admissionDeadline(c Candidate, now time.Time) (time.Time, bool) {
+// claimInputs reads capacity while the admission lock is held and the state
+// lock is free. The same immutable scores gate selection and resource waiting.
+func (e *Engine) claimInputs(ctx context.Context, profile Profile, now time.Time) RankOptions {
+	inputs := e.rankInputs(ctx, profile)
 	checker, ok := e.usage.(AdmissionChecker)
 	if !ok {
-		return time.Time{}, false
+		return inputs
 	}
-	score, err := checker.CheckAdmission(context.Background(), c, "", now)
-	return score.AdmissionRetryAt, err == nil && score.AdmissionReason != "" && score.AdmissionRetryAt.After(now)
+	scores := make(map[string]PaceScore, len(profile.Candidates))
+	for id, score := range inputs.Scores {
+		scores[id] = score
+	}
+	for _, candidate := range profile.Candidates {
+		if !candidate.Enabled {
+			continue
+		}
+		admission, err := checker.CheckAdmission(ctx, candidate, profile.AdmissionSessionID, now)
+		if err != nil {
+			continue
+		}
+		score := scores[candidate.ID]
+		score.AdmissionReason, score.AdmissionRetryAt = admission.AdmissionReason, admission.AdmissionRetryAt
+		scores[candidate.ID] = score
+	}
+	inputs.Scores = scores
+	return inputs
 }

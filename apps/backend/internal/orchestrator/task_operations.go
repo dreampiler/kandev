@@ -9787,30 +9787,47 @@ func (s *Service) claimPromptableSessionForIdentity(
 	taskID, sessionID string,
 	reservation *queuedDispatchReservation,
 ) (models.PromptableTaskSessionClaim, error) {
-	var claim models.PromptableTaskSessionClaim
-	var err error
-	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
-		claim, err = s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
-	} else {
-		claim, err = s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
-			ctx,
-			reservation.identity.TaskID,
-			reservation.identity.SessionID,
-			reservation.identity.SessionIncarnationID,
-		)
+	if s.profileExecutionResolver == nil {
+		return s.claimPromptableSessionAtomically(ctx, sessionID, reservation)
 	}
-	if err != nil || claim.Status != models.PromptableTaskSessionClaimed || s.profileExecutionResolver == nil {
-		return claim, err
-	}
-	session, err := s.loadClaimedLifecycleSession(ctx, sessionID, reservation)
-	if err == nil {
-		err = s.withProviderTurnAdmission(ctx, session, func() error { return nil })
-	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
+		return models.PromptableTaskSessionClaim{}, err
+	}
+	var claim models.PromptableTaskSessionClaim
+	err = s.withProviderTurnAdmission(ctx, session, func() error {
+		var claimErr error
+		claim, claimErr = s.claimPromptableSessionAtomically(ctx, sessionID, reservation)
+		if claimErr != nil || claim.Status != models.PromptableTaskSessionClaimed {
+			return claimErr
+		}
+		fresh, claimErr := s.loadClaimedLifecycleSession(ctx, sessionID, reservation)
+		if claimErr == nil && session != nil && (fresh.TaskID != session.TaskID ||
+			fresh.QueueIncarnationID != session.QueueIncarnationID || fresh.AgentProfileID != session.AgentProfileID ||
+			fresh.ExecutionProfileID != session.ExecutionProfileID || fresh.RouteGeneration != session.RouteGeneration) {
+			claimErr = dynamicruntime.ErrStaleGeneration
+		}
+		if claimErr != nil {
+			s.restoreLifecycleClaimForReservation(ctx, taskID, sessionID, reservation, claim.PreviousState)
+		}
+		return claimErr
+	})
+	if err != nil {
 		return models.PromptableTaskSessionClaim{}, err
 	}
 	return claim, nil
+}
+
+func (s *Service) claimPromptableSessionAtomically(ctx context.Context, sessionID string, reservation *queuedDispatchReservation) (models.PromptableTaskSessionClaim, error) {
+	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
+		return s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+	}
+	return s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx,
+		reservation.identity.TaskID,
+		reservation.identity.SessionID,
+		reservation.identity.SessionIncarnationID,
+	)
 }
 
 func (s *Service) restoreLifecycleClaimForReservation(

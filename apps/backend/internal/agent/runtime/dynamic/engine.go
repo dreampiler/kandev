@@ -47,8 +47,8 @@ func WithPersistence(persistence Persistence) EngineOption {
 }
 
 type Engine struct {
-	// turnAdmissionMu serializes capacity reads and final turn claims without
-	// preventing route state changes during the read.
+	// turnAdmissionMu serializes selection and final turn claims.
+	// It is acquired before mu; capacity reads leave mu available.
 	turnAdmissionMu sync.Mutex
 	mu              sync.Mutex
 	now             func() time.Time
@@ -204,9 +204,11 @@ func (e *Engine) selectWithPlan(
 	plan func(RouteState, bool) selectionPlan,
 	reason string,
 ) (RouteDecision, error) {
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
 	observedAt := e.now()
 	profile.AdmissionSessionID = sessionID
-	inputs := e.rankInputs(ctx, profile)
+	inputs := e.claimInputs(ctx, profile, observedAt)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -231,7 +233,7 @@ func (e *Engine) selectWithPlan(
 	}
 	winner := resolved.firstSelectable(inputs.at(observedAt), claim)
 	if !winner.ok {
-		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain)
+		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain, inputs.Scores)
 	}
 	candidate, tier := winner.candidate, winner.tier
 	e.notePickLocked(profile.ID, candidate.ID, observedAt)
@@ -290,6 +292,7 @@ func (e *Engine) persistExhaustedSelection(
 	generation int64,
 	observedAt time.Time,
 	chain SelectionChain,
+	admission map[string]PaceScore,
 ) (RouteDecision, error) {
 	nextState := RouteState{
 		SessionID:        sessionID,
@@ -302,7 +305,7 @@ func (e *Engine) persistExhaustedSelection(
 	if exhausted, err := carrySelectionChain("", chain.forProfile(profile.ID, generation)); err == nil {
 		nextState.PolicyStateJSON = exhausted
 	}
-	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt)
+	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt, admission)
 	if chain.Interrupted {
 		nextState.Status = routeStatusActionRequired
 		resourceWait = false
@@ -371,11 +374,6 @@ func (e *Engine) eligibilityFor(profile Profile, preferredProfileID string) map[
 // only. It takes the probe lease when a circuit is open so the successor gets a
 // real launch attempt rather than being skipped on a stale verdict.
 func (e *Engine) claimProbe(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
-	if checker, ok := e.usage.(AdmissionChecker); ok {
-		if score, err := checker.CheckAdmission(context.Background(), candidate, sessionID, now); err == nil && score.AdmissionReason != "" {
-			return false
-		}
-	}
 	return e.admitCandidate(candidate, sessionID, generation, now)
 }
 
@@ -685,10 +683,12 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 
-	// The usage observation is taken before the engine lock so a slow provider
-	// read cannot block other sessions, and so every candidate the successor
-	// search ranks is compared against one clock and one set of evidence.
-	scores := e.rankInputs(ctx, profile)
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
+	profile.AdmissionSessionID = sessionID
+	// The observation leaves the state lock available and compares every
+	// successor against one clock and one set of evidence.
+	scores := e.claimInputs(ctx, profile, e.now())
 
 	e.mu.Lock()
 	defer e.mu.Unlock()

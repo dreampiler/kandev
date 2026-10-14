@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,6 +12,80 @@ import (
 type mutableAdmissionUsage struct {
 	fixedUsage
 	full bool
+}
+
+type selectionAdmissionUsage struct {
+	fixedUsage
+	capacity     atomic.Int32
+	block        bool
+	entered      chan struct{}
+	release      chan struct{}
+	selected     chan struct{}
+	selectedOnce sync.Once
+}
+
+func (u *selectionAdmissionUsage) CheckAdmission(_ context.Context, _ Candidate, sessionID string, now time.Time) (PaceScore, error) {
+	used := u.capacity.Load()
+	if u.block && sessionID == "retained" {
+		close(u.entered)
+		<-u.release
+	}
+	if u.block && sessionID == "new-session" {
+		u.selectedOnce.Do(func() { close(u.selected) })
+	}
+	if used >= 1 {
+		return PaceScore{AdmissionReason: "limit_concurrency", AdmissionRetryAt: now.Add(time.Minute)}, nil
+	}
+	return PaceScore{}, nil
+}
+
+type selectionAdmissionPersistence struct{ usage *selectionAdmissionUsage }
+
+func (p *selectionAdmissionPersistence) RecordRouteDecision(_ context.Context, decision RouteDecision, _ RouteState) error {
+	if decision.SessionID == "new-session" {
+		p.usage.capacity.Add(1)
+	}
+	return nil
+}
+func (*selectionAdmissionPersistence) SaveRouteState(context.Context, RouteState) error { return nil }
+func (*selectionAdmissionPersistence) AppendRouteAttempt(context.Context, RouteAttempt) error {
+	return nil
+}
+
+func TestProviderTierSelectionAndFinalAdmissionShareLastSlot(t *testing.T) {
+	u := &selectionAdmissionUsage{entered: make(chan struct{}), release: make(chan struct{}), selected: make(chan struct{})}
+	e := NewEngine(WithUsageSnapshotProvider(u), WithPersistence(&selectionAdmissionPersistence{usage: u}))
+	profile := Profile{ID: "dynamic", Candidates: []Candidate{{ID: "shared", Enabled: true}}}
+	current, err := e.Select("retained", profile, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A retained route has no active turn until its final prompt claim commits.
+	retained := e.states[current.SessionID]
+	retained.Status = routeStatusActive
+	e.states[current.SessionID] = retained
+	u.block = true
+	finalDone, selectDone := make(chan error, 1), make(chan error, 1)
+	go func() {
+		finalDone <- e.WithTurnAdmission(context.Background(), profile, current, func() error { u.capacity.Add(1); return nil })
+	}()
+	<-u.entered
+	selectStarted := make(chan struct{})
+	go func() {
+		close(selectStarted)
+		_, err := e.Select("new-session", profile, 0, "")
+		selectDone <- err
+	}()
+	<-selectStarted
+	select {
+	case <-u.selected:
+	case <-time.After(time.Second):
+	}
+	close(u.release)
+	finalErr, selectErr := <-finalDone, <-selectDone
+	if finalErr != nil || selectErr == nil || u.capacity.Load() != 1 {
+		t.Fatalf("one-slot capacity = %d, final = %v, selection = %v", u.capacity.Load(), finalErr, selectErr)
+	}
 }
 
 type blockedAdmissionUsage struct {
