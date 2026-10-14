@@ -1032,15 +1032,25 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
 	// The task-aware runtime resolver substitutes a fixed step's source profile
-	// with the caller's replacement. Mirror that here so the profile reported
-	// to the caller (task metadata and the deferred-launch record) matches the
-	// one that will actually run.
-	if adjusted := h.applyMCPWorkflowAgentOverride(ctx, resolvedStepID, launchConfig.AgentProfileID, req.WorkflowAgentOverrides); adjusted != launchConfig.AgentProfileID {
-		launchConfig.AgentProfileID = adjusted
-		metadata[models.MetaKeyAgentProfileID] = adjusted
-		if _, ok := metadata[models.MetaKeyInitialSessionRuntimeConfig]; ok {
-			metadata[models.MetaKeyInitialSessionRuntimeConfigProfileID] = adjusted
+	// with the caller's replacement. Resolve it through the shared service
+	// normalization so the profile reported to the caller (task metadata and the
+	// deferred-launch record) matches the one that will actually run.
+	if replacement, replaced, overrideErr := h.resolveMCPWorkflowAgentOverride(ctx, &req, resolvedStepID); overrideErr != nil {
+		code := ws.ErrorCodeInternalError
+		if errors.Is(overrideErr, models.ErrInvalidWorkflowAgentOverrides) {
+			code = ws.ErrorCodeValidation
 		}
+		return ws.NewError(msg.ID, msg.Action, code, overrideErr.Error(), nil)
+	} else if replaced && replacement != launchConfig.AgentProfileID {
+		// The replacement is a different profile: drop the creator-copied
+		// initial runtime config (its model/mode/options belong to the source
+		// profile) rather than re-tagging it, and let the selected profile's own
+		// canonical values apply at launch.
+		launchConfig.AgentProfileID = replacement
+		launchConfig.InitialRuntimeConfig = nil
+		metadata[models.MetaKeyAgentProfileID] = replacement
+		delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
+		delete(metadata, models.MetaKeyInitialSessionRuntimeConfigProfileID)
 	}
 	launchConfig.InitialCreatePrompt = startAgent && explicitWorkflowStep && req.WorkflowStepID != "" && strings.TrimSpace(req.Description) != ""
 	metadata = workspacePolicy.MergeMetadataBlock(metadata)
@@ -1755,38 +1765,23 @@ func (h *Handlers) resolveMCPFinalAgentProfile(
 	return agentProfileID, false, nil
 }
 
-// applyMCPWorkflowAgentOverride substitutes a fixed destination step's source
-// profile with the caller's workflow_agent_overrides replacement so the launch
-// profile this handler reports and records matches the task-aware runtime
-// resolver. Only a step's own pinned profile is a substitution source: the
-// workflow-level default and the initial selection keep their existing
-// behavior, matching the overrides design. The service re-validates and expands
-// the map before any row is written, so an invalid key never reaches a launch.
-func (h *Handlers) applyMCPWorkflowAgentOverride(
-	ctx context.Context,
-	workflowStepID, agentProfileID string,
-	overrides map[string]string,
-) string {
-	if len(overrides) == 0 || workflowStepID == "" || h.workflowCtrl == nil {
-		return agentProfileID
+// resolveMCPWorkflowAgentOverride resolves the replacement profile the
+// caller's workflow_agent_overrides map applies to the destination step,
+// through the same service normalization the create path uses (source-key
+// trimming, SessionTarget exclusion, replacement eligibility). It returns
+// replaced=false when no override applies to that step. A resolution failure is
+// surfaced to the caller rather than silently falling back to the source
+// profile, so the reported and recorded launch profile cannot disagree with the
+// runtime resolver.
+func (h *Handlers) resolveMCPWorkflowAgentOverride(
+	ctx context.Context, req *mcpCreateTaskRequest, workflowStepID string,
+) (string, bool, error) {
+	if len(req.WorkflowAgentOverrides) == 0 || strings.TrimSpace(workflowStepID) == "" || h.taskSvc == nil {
+		return "", false, nil
 	}
-	resp, err := h.workflowCtrl.GetStep(ctx, workflowStepID)
-	if err != nil || resp == nil || resp.Step == nil {
-		return agentProfileID
-	}
-	sourceProfileID := strings.TrimSpace(resp.Step.AgentProfileID)
-	if sourceProfileID == "" {
-		return agentProfileID
-	}
-	replacement, ok := overrides[sourceProfileID]
-	if !ok {
-		return agentProfileID
-	}
-	replacement = strings.TrimSpace(replacement)
-	if replacement == "" || replacement == sourceProfileID {
-		return agentProfileID
-	}
-	return replacement
+	return h.taskSvc.ResolveWorkflowAgentOverrideReplacement(
+		ctx, req.WorkspaceID, req.WorkflowID, workflowStepID, req.WorkflowAgentOverrides,
+	)
 }
 
 func (h *Handlers) resolveMCPCreatorSession(ctx context.Context, sourceTaskID, sourceSessionID string) (*models.TaskSession, error) {

@@ -286,9 +286,13 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 		// Forward the per-task fixed-step profile replacements. The map is
 		// source_profile_id -> replacement_profile_id, the same shape the
 		// create-task UI/REST surface sends; the backend validates and expands
-		// it. Only string values are forwarded so a malformed object cannot
-		// smuggle a non-string into the service request.
-		if overrides := stringMapArg(req, "workflow_agent_overrides"); len(overrides) > 0 {
+		// it. A malformed shape or value is rejected here so the backend never
+		// receives a partial selection built from a malformed input.
+		overrides, overrideErr := workflowAgentOverridesArg(req)
+		if overrideErr != nil {
+			return mcp.NewToolResultError(overrideErr.Error()), nil
+		}
+		if len(overrides) > 0 {
 			payload["workflow_agent_overrides"] = overrides
 		}
 

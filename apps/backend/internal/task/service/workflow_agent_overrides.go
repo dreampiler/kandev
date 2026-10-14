@@ -193,6 +193,39 @@ func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *Cr
 	return ErrExplicitAgentProfileRequired
 }
 
+// ResolveWorkflowAgentOverrideReplacement resolves the replacement profile a
+// requested workflow_agent_overrides map applies to stepID, reusing the same
+// normalization and validation the create path uses (source-key trimming,
+// SessionTarget exclusion, replacement eligibility). A pre-create adapter (the
+// MCP create handler) uses it so the profile it reports and records matches the
+// task-aware runtime resolver instead of re-deriving the map's rules.
+func (s *Service) ResolveWorkflowAgentOverrideReplacement(
+	ctx context.Context, workspaceID, workflowID, stepID string, requested map[string]string,
+) (string, bool, error) {
+	workflowID = strings.TrimSpace(workflowID)
+	stepID = strings.TrimSpace(stepID)
+	if len(requested) == 0 || workflowID == "" || stepID == "" {
+		return "", false, nil
+	}
+	lister, ok := s.workflowStepGetter.(workflowStepLister)
+	if !ok || lister == nil {
+		return "", false, fmt.Errorf("%w: workflow step listing unavailable", models.ErrInvalidWorkflowAgentOverrides)
+	}
+	steps, err := lister.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		return "", false, fmt.Errorf("%w: list workflow steps: %v", models.ErrInvalidWorkflowAgentOverrides, err)
+	}
+	normalized, err := normalizeWorkflowAgentOverrides(ctx, workspaceID, workflowID, requested, steps, s.agentProfiles)
+	if err != nil {
+		return "", false, err
+	}
+	if normalized == nil {
+		return "", false, nil
+	}
+	replacement, ok := normalized.ReplacementFor(workflowID, stepID)
+	return replacement, ok, nil
+}
+
 func (s *Service) validateWorkflowAgentOverrideProfiles(
 	ctx context.Context,
 	overrides *models.WorkflowAgentOverrides,
