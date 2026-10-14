@@ -43,8 +43,10 @@ The settings release route and any change to candidate order.
 ## Verification
 
 ```bash
-cd apps/backend && go test -trimpath ./internal/agent/runtime/dynamic -count=1
-cd apps/backend && go test -trimpath ./internal/orchestrator -run AccountBlocked -count=1
+cd apps/backend
+go test -trimpath ./internal/agent/runtime/dynamic -count=1
+go test -trimpath ./internal/agent/runtime -run AccountBlocked -count=1
+go test -trimpath ./internal/orchestrator -run AccountBlocked -count=1
 ```
 
 ## Results
@@ -61,3 +63,8 @@ cd apps/backend && go test -trimpath ./internal/orchestrator -run AccountBlocked
     its failure cannot advance the route.
 - The orchestrator test for a restriction before any output holds the profile
   and moves the route to the next candidate.
+- Review remediation adds refusal at existing-route resolution and the
+  downstream launch/resume boundary, including a hold established after
+  selection. Release preserves the retained route attribution. Exact-source
+  contained proofs reproduced each bypass before the fix; genuine package
+  and integration results are recorded in the PR's hosted CI evidence.

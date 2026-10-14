@@ -39,8 +39,9 @@ Holding profiles, release, and other 403 or authentication failures.
 ## Verification
 
 ```bash
-cd apps/backend && go test -trimpath ./internal/agent/runtime/routingpolicy -count=1
-cd apps/backend && go test -trimpath ./internal/agent/runtime/routingerr -run AccountBlocked -count=1
+cd apps/backend
+go test -trimpath ./internal/agent/runtime/routingpolicy -count=1
+go test -trimpath ./internal/agent/runtime/routingerr -run AccountBlocked -count=1
 ```
 
 ## Results

@@ -333,6 +333,9 @@ func (r *ProfileExecutionResolver) ResolveExisting(
 	if executionProfileID == "" || generation <= 0 {
 		return ProfileExecution{}, errors.New("dynamic session has no persisted execution profile")
 	}
+	if r.engine != nil && r.engine.Circuits().IsHeld(dynamic.ResourceKey(dynamic.ScopeAccountBlock, executionProfileID)) {
+		return ProfileExecution{}, dynamic.ErrExecutionProfileHeld
+	}
 	concrete, err := r.profiles.GetAgentProfile(ctx, executionProfileID)
 	if err != nil {
 		return ProfileExecution{}, fmt.Errorf("resolve existing execution profile %s: %w", executionProfileID, err)
@@ -753,6 +756,9 @@ func (r *ProfileExecutionResolver) agentNameForProfile(
 	agent, err := r.profiles.GetAgent(ctx, profile.AgentID)
 	if err != nil {
 		return "", fmt.Errorf("resolve agent for execution profile %s: %w", profile.ID, err)
+	}
+	if agent.Name == agents.DynamicAgentID {
+		return "", fmt.Errorf("execution profile %s: %w", profile.ID, ErrVirtualProfile)
 	}
 	return agent.Name, nil
 }

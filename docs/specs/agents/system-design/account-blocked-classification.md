@@ -60,6 +60,12 @@ held code moves to the next candidate. A route that was waiting to retry a
 profile held in the meantime does not resume on it, by schedule or by a manual
 retry; it returns to manual recovery.
 
+Existing-route resolution also refuses a held concrete profile without
+changing its retained generation. The conductor checks the hold immediately
+before each downstream launch and resume, including a hold established while
+building a continuation after selection. These checks prevent a retained or
+already selected route from bypassing the selection and retry gates.
+
 The orchestrator holds the failed execution's own profile when the failure is
 reported, before the cancellation, attribution, and safety checks decide
 whether to route, so a predecessor that still serves the session holds its
