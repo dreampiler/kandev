@@ -7,8 +7,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+TMP_DIR="$ROOT_DIR/.kandev/commit-friction-tmp/hook-tests"
+mkdir -p "$TMP_DIR"
+# The caller removes this disposable fixture directory after recording results.
 
 status=0
 fail() { printf 'FAIL  %s\n' "$*"; status=1; }
@@ -35,10 +36,20 @@ export COMMITLINT_HOOK_RECORD="$record"
 export PATH="$stub_bin:$PATH"
 
 printf 'feat: add a thing\n' > "$TMP_DIR/good"
+printf 'feat: header with a body\n\nbody line one\nbody line two\n' > "$TMP_DIR/good-body"
 printf 'not a conventional header\n' > "$TMP_DIR/bad-shape"
 printf 'build: use an unlisted type\n' > "$TMP_DIR/bad-type"
 printf 'feat: ends with a period.\n' > "$TMP_DIR/bad-period"
 printf 'feat: %s\n' "$(printf 'x%.0s' {1..120})" > "$TMP_DIR/bad-long"
+printf 'feat: Add A Thing\n' > "$TMP_DIR/bad-start-case"
+printf 'feat: AddAThing\n' > "$TMP_DIR/bad-pascal-case"
+printf 'feat: ADD A THING\n' > "$TMP_DIR/bad-upper-case"
+printf 'feat: add a thing \n' > "$TMP_DIR/bad-trim"
+printf 'feat: add a thing\n\n%s\n' "$(printf 'x%.0s' {1..101})" > "$TMP_DIR/bad-body"
+printf 'feat: add a thing\n\nBREAKING CHANGE: %s\n' "$(printf 'x%.0s' {1..101})" > "$TMP_DIR/bad-footer"
+printf 'feat: Add a thing\n' > "$TMP_DIR/good-sentence-case"
+printf 'feat: add a thing\n\nSee https://example.com/%s\n' "$(printf 'x%.0s' {1..120})" > "$TMP_DIR/good-url"
+printf 'feat: add a thing...\n' > "$TMP_DIR/good-ellipsis"
 
 exit_status() {
 	# Run the hook and print its exit status (never fails the test harness).
@@ -77,7 +88,7 @@ else
 fi
 
 # --- missing: built-in fallback still enforces ------------------------------
-rm -rf "$repo/apps/node_modules"
+mv "$repo/apps/node_modules" "$TMP_DIR/installed-node_modules"
 : > "$record"
 
 if [ "$(exit_status "$TMP_DIR/good")" = 0 ]; then
@@ -89,6 +100,11 @@ if grep -q 'built-in check' "$TMP_DIR/out"; then
 	pass "fallback: reports the built-in check"
 else
 	fail "fallback: did not report the built-in check: $(cat "$TMP_DIR/out")"
+fi
+if [ "$(exit_status "$TMP_DIR/good-body")" = 0 ]; then
+	pass "fallback: multi-line message passes"
+else
+	fail "fallback: multi-line message should pass: $(cat "$TMP_DIR/out")"
 fi
 
 if [ "$(exit_status "$TMP_DIR/bad-shape")" != 0 ]; then
@@ -117,6 +133,21 @@ if [ -s "$record" ]; then
 else
 	pass "fallback: hook does not invoke pnpm"
 fi
+
+for fixture in bad-start-case bad-pascal-case bad-upper-case bad-trim bad-body bad-footer; do
+	if [ "$(exit_status "$TMP_DIR/$fixture")" != 0 ]; then
+		pass "fallback: $fixture fails"
+	else
+		fail "fallback: $fixture must fail"
+	fi
+done
+for fixture in good-sentence-case good-url good-ellipsis; do
+	if [ "$(exit_status "$TMP_DIR/$fixture")" = 0 ]; then
+		pass "fallback: $fixture passes"
+	else
+		fail "fallback: $fixture should pass: $(cat "$TMP_DIR/out")"
+	fi
+done
 
 if [ "$status" -eq 0 ]; then
 	echo 'All commitlint hook checks passed.'

@@ -19,11 +19,7 @@ if [ -f "$shim_dir/commitlint" ] || [ -f "$shim_dir/commitlint.cmd" ]; then
 	exec pnpm exec commitlint --edit "$msg_file"
 fi
 
-# Built-in fallback for the rules the effective commitlint config enforces
-# without a node_modules install: header-max-length (config-conventional 100),
-# type case and type-enum (the local override), the "type(scope): subject"
-# shape, a non-empty subject, and subject-full-stop. It intentionally omits the
-# parser-dependent rules (subject-case, body/footer line length).
+# The fallback covers the active config-conventional errors and local overrides.
 allowed_types='feat fix perf refactor docs chore ci test release'
 max_header=100
 
@@ -32,13 +28,13 @@ fail() {
 	exit 1
 }
 
-header="$(sed -e '/^#/d' -e '/^[[:space:]]*$/d' "$msg_file" | head -n 1)"
+header="$(awk 'NF == 0 || /^#/ { next } { print; exit }' "$msg_file")"
 [ -n "$header" ] || fail "empty commit message"
 
 len=${#header}
 [ "$len" -le "$max_header" ] || fail "header is $len characters; the limit is $max_header"
 
-[[ "$header" =~ ^([a-z]+)(\([^()]+\))?!?:[[:space:]](.+)$ ]] \
+[[ "$header" =~ ^([a-z]+)(\(.*\))?!?:\ (.+)$ ]] \
 	|| fail "header must be 'type(scope): subject' with a lowercase type (got: $header)"
 type=${BASH_REMATCH[1]}
 subject=${BASH_REMATCH[3]}
@@ -48,8 +44,54 @@ case " $allowed_types " in
 	*) fail "type '$type' is not allowed (allowed: $allowed_types)" ;;
 esac
 
-case "$subject" in
-	*.) fail "subject must not end with a period" ;;
-esac
+node --input-type=module - "$msg_file" "$header" "$subject" <<'EOF'
+import { readFileSync } from 'node:fs';
+
+const [messageFile, header, subject] = process.argv.slice(2);
+const fail = (message) => {
+  console.error(`commitlint-hook: ${message}`);
+  process.exit(1);
+};
+
+if (header.length > 100) fail('header must not exceed 100 characters');
+if (header !== header.trim()) fail('header must not start or end with whitespace');
+if (!subject.trim()) fail('subject must not be empty');
+if (header.endsWith('.') && !header.endsWith('...')) {
+  fail('subject must not end with a period');
+}
+
+// Quoted proper names are excluded from commitlint's case comparison.
+if (/^[\p{Ll}\p{Lu}\p{Lt}]/u.test(subject)) {
+  const input = subject.replace(/`.*?`|".*?"|'.*?'/g, '').trim();
+  const words = input
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/([a-zA-Z])([0-9])/g, '$1 $2')
+    .replace(/([0-9])([a-zA-Z])/g, '$1 $2')
+    .match(/[^\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]+/g) ?? [];
+  const upperFirst = (word) => [...word][0]?.toUpperCase() + word.slice([...word][0]?.length ?? 0);
+  const startCase = words.map(upperFirst).join(' ');
+  const camelWords = input.match(/[A-Z]?[a-z]+|[A-Z]+(?=[A-Z][a-z]|[^a-z]|$)|\d+|[^\x00-\x7f]+/g) ?? [];
+  const pascalCase = camelWords.map((word) => upperFirst(word.toLowerCase())).join('');
+  // Latin accents are deburred by the case transforms and cannot be fixed points.
+  const deburred = !/[\xc0-\xd6\xd8-\xf6\xf8-\xff\u0100-\u017f\u0300-\u036f]/u.test(input);
+  if (!input || /^\d/.test(input) || input === input.toUpperCase()
+      || (deburred && (input === startCase || input === pascalCase))) {
+    fail('subject must not be start-case, pascal-case, or upper-case');
+  }
+}
+
+// Both body and footer have the same limit and URL exception.
+const lines = readFileSync(messageFile, 'utf8').split(/\r?\n/).filter((line) => !line.startsWith('#'));
+const headerIndex = lines.findIndex((line) => line.trim());
+for (const line of lines.slice(headerIndex + 1)) {
+  if (line.length > 100 && !/\bhttps?:\/\/\S+/.test(line)) {
+    fail('body and footer lines must not exceed 100 characters');
+  }
+}
+if (lines[headerIndex + 1]?.trim()) {
+  console.warn('commitlint-hook: body or footer should have a leading blank line');
+}
+EOF
 
 printf 'commitlint-hook: apps/node_modules not installed; validated with the built-in check\n'
