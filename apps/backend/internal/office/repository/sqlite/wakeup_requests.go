@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -194,29 +195,39 @@ func (r *Repository) MarkWakeupRequestCoalesced(
 	return r.mergeWakeupPayloadIntoRunSnapshot(ctx, id, intoRunID)
 }
 
-// HasCoalescedWakeupOutsideReasons reports whether any wakeup request merged
-// into runID carries an effective reason (reason, else source — the same
-// fallback the dispatcher's effectiveReason applies) outside the given set.
-// A caller passes the periodic reasons so it can tell whether the run carries
-// an event-triggered wake it must not drop.
-func (r *Repository) HasCoalescedWakeupOutsideReasons(
-	ctx context.Context, runID string, reasons ...string,
-) (bool, error) {
-	query, args, err := sqlx.In(`
-		SELECT EXISTS (
-			SELECT 1 FROM agent_wakeup_requests
-			WHERE run_id = ? AND status = ?
-			  AND COALESCE(NULLIF(reason, ''), source) NOT IN (?)
-		)
-	`, runID, WakeupStatusCoalesced, reasons)
-	if err != nil {
-		return false, err
+// CoalescedWakeup is one wakeup request merged into a run: its effective
+// reason (reason, else source — the same fallback the dispatcher's
+// effectiveReason applies) and the task_id its payload names, if any.
+type CoalescedWakeup struct {
+	Reason string
+	TaskID string
+}
+
+// ListCoalescedWakeups returns the wakeup requests coalesced into runID, so a
+// caller can judge each merged wake on its own target rather than by label.
+func (r *Repository) ListCoalescedWakeups(ctx context.Context, runID string) ([]CoalescedWakeup, error) {
+	var rows []struct {
+		Reason  string `db:"reason"`
+		Payload string `db:"payload"`
 	}
-	var exists bool
-	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(&exists); err != nil {
-		return false, err
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT COALESCE(NULLIF(reason, ''), source) AS reason, COALESCE(payload, '') AS payload
+		FROM agent_wakeup_requests
+		WHERE run_id = ? AND status = ?
+		ORDER BY requested_at, id
+	`), runID, WakeupStatusCoalesced); err != nil {
+		return nil, err
 	}
-	return exists, nil
+	wakeups := make([]CoalescedWakeup, 0, len(rows))
+	for _, row := range rows {
+		var payload struct {
+			TaskID string `json:"task_id"`
+		}
+		// An unreadable payload names no target; the caller treats that as live.
+		_ = json.Unmarshal([]byte(row.Payload), &payload)
+		wakeups = append(wakeups, CoalescedWakeup{Reason: row.Reason, TaskID: payload.TaskID})
+	}
+	return wakeups, nil
 }
 
 // PromoteRunAndCoalesceWakeupIfQueued atomically promotes a queued run,

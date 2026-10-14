@@ -45,10 +45,15 @@ func newConsumedWakeFixture(t *testing.T, parentState string) *consumedWakeFixtu
 
 func (f *consumedWakeFixture) coalesceWakeup(t *testing.T, id, reason string) {
 	t.Helper()
+	f.coalesceWakeupWithPayload(t, id, reason, `{}`)
+}
+
+func (f *consumedWakeFixture) coalesceWakeupWithPayload(t *testing.T, id, reason, payload string) {
+	t.Helper()
 	ctx := context.Background()
 	repo := f.svc.RepoForTest()
 	if err := repo.CreateWakeupRequest(ctx, &sqlite.WakeupRequest{
-		ID: id, AgentProfileID: f.agent.ID, Source: "routine", Reason: reason, Payload: `{}`,
+		ID: id, AgentProfileID: f.agent.ID, Source: "routine", Reason: reason, Payload: payload,
 	}); err != nil {
 		t.Fatalf("create wakeup request: %v", err)
 	}
@@ -106,21 +111,52 @@ func TestSchedulerTick_ChildrenCompletedForLiveParentStillLaunches(t *testing.T)
 	f.requireLaunched(t)
 }
 
-// Periodic routine wakes merged into a consumed run are released exactly as an
-// idle skip would release them; the next cron tick queues a fresh run.
-func TestSchedulerTick_ConsumedWakeCarryingOnlyPeriodicWakesIsCancelled(t *testing.T) {
+// A routine tick merged into the run is delivered by that run, exactly as it was
+// before this check existed, so the run launches instead of dropping it.
+func TestSchedulerTick_ConsumedWakeCarryingARoutineTickStillLaunches(t *testing.T) {
 	f := newConsumedWakeFixture(t, "COMPLETED")
-	f.coalesceWakeup(t, "wake-cron-1", "routine_dispatch_cron")
-	f.coalesceWakeup(t, "wake-cron-2", "routine_dispatch_cron")
+	f.coalesceWakeup(t, "wake-cron", "routine_dispatch_cron")
 	service.RunSchedulerTick(f.svc, context.Background())
-	f.requireCancelledAsConsumed(t)
+	f.requireLaunched(t)
+}
+
+// A merged children-completed wake is judged by the task it names: one for the
+// same finished parent, or for another task that has since finished, is
+// consumed; one for a task still in progress is live.
+func TestSchedulerTick_MergedChildrenCompletedWakeIsJudgedByItsOwnTarget(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		otherState   string
+		payload      string
+		wantLaunched bool
+	}{
+		{"same finished parent", "", `{"task_id":"parent-consumed"}`, false},
+		{"another finished task", "COMPLETED", `{"task_id":"other-parent"}`, false},
+		{"another live task", "IN_PROGRESS", `{"task_id":"other-parent"}`, true},
+		{"no named task", "", `{}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newConsumedWakeFixture(t, "COMPLETED")
+			if tc.otherState != "" {
+				f.svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, state, created_at, updated_at)
+					VALUES ('other-parent', 'ws-1', 'Other', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, tc.otherState)
+			}
+			f.coalesceWakeupWithPayload(t, "wake-children", "task_children_completed", tc.payload)
+			service.RunSchedulerTick(f.svc, context.Background())
+			if tc.wantLaunched {
+				f.requireLaunched(t)
+			} else {
+				f.requireCancelledAsConsumed(t)
+			}
+		})
+	}
 }
 
 // An event-triggered wake (a manual or webhook routine fire) coalesced into the
 // run must still be delivered, so the run launches even though its parent is done.
 func TestSchedulerTick_ConsumedWakeCarryingAnEventWakeStillLaunches(t *testing.T) {
 	f := newConsumedWakeFixture(t, "COMPLETED")
-	f.coalesceWakeup(t, "wake-cron", "routine_dispatch_cron")
+	f.coalesceWakeupWithPayload(t, "wake-children", "task_children_completed", `{"task_id":"parent-consumed"}`)
 	f.coalesceWakeup(t, "wake-event", "routine_dispatch_event")
 	service.RunSchedulerTick(f.svc, context.Background())
 	f.requireLaunched(t)
