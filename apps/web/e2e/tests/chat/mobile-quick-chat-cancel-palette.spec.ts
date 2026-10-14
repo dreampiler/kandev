@@ -13,6 +13,7 @@ import {
   sendQuickChatMessage,
   startQuickChatFromSetup,
   waitForQuickChatDirectInput,
+  waitForSessionSettledBaseline,
 } from "./quick-chat-helpers";
 
 function commandDialog(page: Page) {
@@ -35,6 +36,7 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
 
   test("cancels an active Quick Chat turn through the visible touch composer control", async ({
     testPage,
+    apiClient,
   }) => {
     test.setTimeout(120_000);
     await testPage.goto("/");
@@ -42,10 +44,16 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    await startQuickChatFromSetup(quickChat, testPage);
+    const { task_id: quickTaskId, session_id: startedSessionId } = await startQuickChatFromSetup(
+      quickChat,
+      testPage,
+    );
+    await waitForSessionSettledBaseline(apiClient, quickTaskId, startedSessionId);
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
+    await waitForAgentMessage(apiClient, startedSessionId, "Running slow response (30s total)", 30_000);
 
     const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
+    expect(quickSessionId).toBe(startedSessionId);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
