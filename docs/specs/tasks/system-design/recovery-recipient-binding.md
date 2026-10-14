@@ -117,6 +117,16 @@ creation, task copies, and metadata updates cannot supply or rewrite this
 server-owned record. Do not add a second metadata policy or copy path.
 No backfill from primary assignment is permitted.
 
+For a legacy task without an initial snapshot, an existing validated binding's
+`initial_session_id` remains the recorded historical identity after that session
+is deleted. Normal original-session lookup, read-only preview and subsequent
+registration share that recorded-ID lookup before considering legacy election.
+A missing original row stays missing: do not re-elect the successor or backfill
+its profile/model as the original snapshot. The binding supplies only the
+historical ID and the successor's separate logical profile. Existing snapshot
+identity and mismatch checks retain their meaning. The frontend revision's
+historical-original reference follows the same ID-only rule.
+
 ## Routing
 
 Use the binding only for `session_target.kind=initial`. Keep original identity

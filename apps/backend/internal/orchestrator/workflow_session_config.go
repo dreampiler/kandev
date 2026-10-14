@@ -459,18 +459,26 @@ func (s *Service) persistWorkflowSessionConfigOverride(ctx context.Context, sess
 	return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfigOverrides, overrides)
 }
 
-// originalTaskSession returns the immutable task-initial session. The marker
-// is authoritative; the timestamp fallback is deliberately conservative for
-// sessions created before the marker existed.
+// originalTaskSession reads the recorded historical initial session. Marker and
+// conservative timestamp election apply only when neither a snapshot nor a
+// recovery binding has recorded its identity.
 func (s *Service) originalTaskSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	if task, taskErr := s.repo.GetTask(ctx, taskID); taskErr == nil && task != nil {
-		if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata); ok {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task != nil {
+		initialID, err := models.RecordedWorkflowInitialSessionID(task.Metadata)
+		if err != nil {
+			return nil, err
+		}
+		if initialID != "" {
 			for _, candidate := range sessions {
-				if candidate != nil && candidate.ID == snapshot.SessionID {
+				if candidate != nil && candidate.ID == initialID {
 					return candidate, nil
 				}
 			}

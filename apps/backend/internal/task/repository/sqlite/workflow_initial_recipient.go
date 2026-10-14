@@ -102,11 +102,7 @@ func validateInitialRecipientSuccession(
 	if binding.SessionID != sessionID || binding.SourceSessionID == sessionID || binding.AgentProfileID == "" {
 		return fmt.Errorf("invalid initial recipient recovery identity")
 	}
-	initialID := initialRecipientProvenance(metadata, sessions)
-	if initialID == "" || initialID != binding.InitialSessionID {
-		return fmt.Errorf("initial recipient recovery provenance is unavailable or changed")
-	}
-	if err := validateInitialRecipientExpectedSource(metadata, initialID, binding); err != nil {
+	if err := validateInitialRecipientExpectedSource(metadata, sessions, binding); err != nil {
 		return err
 	}
 	var source, destination *models.TaskSession
@@ -127,7 +123,14 @@ func validateInitialRecipientSuccession(
 	return nil
 }
 
-func validateInitialRecipientExpectedSource(metadata map[string]interface{}, initialID string, binding models.WorkflowInitialRecipientBinding) error {
+func validateInitialRecipientExpectedSource(metadata map[string]interface{}, sessions []*models.TaskSession, binding models.WorkflowInitialRecipientBinding) error {
+	initialID, err := initialRecipientProvenance(metadata, sessions)
+	if err != nil {
+		return err
+	}
+	if initialID == "" || initialID != binding.InitialSessionID {
+		return fmt.Errorf("initial recipient recovery provenance is unavailable or changed")
+	}
 	current, err := models.LoadWorkflowInitialRecipientBinding(metadata)
 	if err != nil {
 		return err
@@ -148,18 +151,19 @@ func validateInitialRecipientExpectedSource(metadata map[string]interface{}, ini
 	return nil
 }
 
-func initialRecipientProvenance(metadata map[string]interface{}, sessions []*models.TaskSession) string {
-	if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(metadata); ok {
-		return snapshot.SessionID
+func initialRecipientProvenance(metadata map[string]interface{}, sessions []*models.TaskSession) (string, error) {
+	initialID, err := models.RecordedWorkflowInitialSessionID(metadata)
+	if err != nil || initialID != "" {
+		return initialID, err
 	}
 	original, marked := models.MarkedOriginalTaskSession(sessions)
 	if !marked {
 		original = models.LegacyOriginalTaskSession(sessions)
 	}
 	if original != nil {
-		return original.ID
+		return original.ID, nil
 	}
-	return ""
+	return "", nil
 }
 
 func (r *Repository) initialRecipientSourceBusyTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (bool, error) {

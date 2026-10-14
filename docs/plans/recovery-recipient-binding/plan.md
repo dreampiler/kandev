@@ -332,6 +332,53 @@ CI has zero registered checks, so CI success is not claimed. Merge still require
 controller GO, and this verification does not deploy binding into the operating
 677 installation.
 
+## Required legacy-original deletion correction (2026-10-15 KST)
+
+The owner's independent source review at `52b3a4cf52f` applies unchanged to the
+product code in `5a09495af96`. With no initial snapshot, supported A-to-B
+registration records historical A in the typed binding. Deleting A then allowed
+legacy election to select B, backfill B as initial, and fail the binding's A
+provenance check. Preview, successor-profile fallback and B-to-C registration had
+the same re-election problem. This is a required correction separate from the
+four earlier native findings; the controller was told not to merge the old head.
+
+Share recorded historical-ID lookup from the existing snapshot, or otherwise the
+protected typed binding, before marker/timestamp election. A missing original row
+stays missing in original-configuration consumers. The effective target still uses
+the binding's separately recorded successor/profile. Never construct a historical
+TaskSession, profile/model snapshot or replacement initial history. Original
+snapshot mismatch checks and all source eligibility/admission checks remain.
+The frontend preview revision uses the same historical ID rather than re-electing
+the remaining successor. This adds no type, table, authority/identity gate, UI,
+flag, standing case or collector.
+
+Verification ran only in an explicit standalone backend archive and an explicitly
+selected frontend test/config outside normal collectors:
+
+- RED: five orchestration paths (preview, new entry, B-to-C, terminal successor,
+  missing successor) failed with binding provenance mismatch. Independent
+  repository B-to-C failed with unavailable/changed provenance. Setup proved the
+  snapshot absent after supported registration and deleted A normally.
+- GREEN: the same checks plus prior recovery checks passed in orchestrator and
+  repository. A reused real-repository WS fixture, changed only in the temporary
+  copy to omit the initial snapshot and delete A before transition, delivered the
+  actual next-step prompt exactly once to the replacement, with snapshot still
+  absent. The external agent alone was fake.
+- The temporary frontend historical-reference assertion failed against the old
+  hook while its ten original cases passed; all eleven passed after correction.
+  Earlier external-path/dependency preparation errors collected no tests and are
+  not counted as RED. The worktree's unchanged ten original tests and hook ESLint
+  also passed. The shared-state mobile-parity exception still applies.
+- Relevant existing Go targeting/configuration, original-model, primary and
+  repository-binding filters passed in the worktree (orchestrator, models and
+  repository). No original assertion/case or production validation was relaxed.
+
+Exact commands, receipts, temporary cleanup and new published head/delta review
+are retained in the native Task Plan. Do not count source inspection alone,
+registration or old-head review as completion of this correction. Operating677
+remains separate; normal exact-source review and controller-GO integration still
+apply. No upstream posting or full unrelated audit is part of this repair.
+
 ## Risks
 
 - The fork's best-effort step-binding refresh must not substitute for atomic

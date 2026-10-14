@@ -17,6 +17,19 @@ type WorkflowInitialRecipientBinding struct {
 	AgentProfileID   string `json:"agent_profile_id"`
 }
 
+// RecordedWorkflowInitialSessionID reads historical identity without electing a
+// legacy session or constructing configuration that was never recorded.
+func RecordedWorkflowInitialSessionID(metadata map[string]interface{}) (string, error) {
+	if snapshot, ok := LoadWorkflowInitialSessionSnapshot(metadata); ok {
+		return snapshot.SessionID, nil
+	}
+	binding, err := LoadWorkflowInitialRecipientBinding(metadata)
+	if err != nil || binding == nil {
+		return "", err
+	}
+	return binding.InitialSessionID, nil
+}
+
 // MarkedOriginalTaskSession distinguishes an absent marker from ambiguity.
 func MarkedOriginalTaskSession(sessions []*TaskSession) (*TaskSession, bool) {
 	var original *TaskSession

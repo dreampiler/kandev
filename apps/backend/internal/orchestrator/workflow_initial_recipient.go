@@ -20,7 +20,7 @@ func (s *Service) applyInitialRecipientBinding(
 	if err != nil || binding == nil {
 		return initial, profileID, err
 	}
-	initialID := ""
+	initialID := binding.InitialSessionID
 	if initial != nil {
 		initialID = initial.ID
 	}
@@ -122,10 +122,11 @@ func (s *Service) registerInitialRecipientPrimary(ctx context.Context, sessionID
 	if err != nil {
 		return err
 	}
-	initialID := ""
-	if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata); ok {
-		initialID = snapshot.SessionID
-	} else if original := previewOriginalTaskSessionFromTask(task, sessions); original != nil {
+	initialID, err := models.RecordedWorkflowInitialSessionID(task.Metadata)
+	if err != nil {
+		return err
+	}
+	if original := previewOriginalTaskSessionFromTask(task, sessions); original != nil {
 		initialID = original.ID
 	}
 	return promoter.SetSessionPrimaryWithInitialRecipientBinding(ctx, sessionID, models.WorkflowInitialRecipientBinding{

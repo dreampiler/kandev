@@ -181,20 +181,25 @@ function currentSessionReference(entries: SessionEntry[]): SessionReference | nu
   return latest ? sessionReference(latest) : null;
 }
 
+function metadataSessionId(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const id = (value as Record<string, unknown>)[key];
+  return typeof id === "string" && id !== "" ? id : undefined;
+}
+
 function originalSessionReference(
   task: PreviewRevisionTask | undefined,
   entries: SessionEntry[],
 ): { status: "selected" | "missing" | "ambiguous"; session: SessionReference | null } {
-  const initial = task?.metadata?.workflow_initial_session;
-  if (initial && typeof initial === "object" && "session_id" in initial) {
-    const sessionId = (initial as { session_id?: unknown }).session_id;
-    if (typeof sessionId === "string" && sessionId !== "") {
-      const match = entries.find(({ session }) => session.id === sessionId);
-      return {
-        status: match ? "selected" : "missing",
-        session: match ? sessionReference(match) : null,
-      };
-    }
+  const sessionId =
+    metadataSessionId(task?.metadata?.workflow_initial_session, "session_id") ??
+    metadataSessionId(task?.metadata?.workflow_initial_recipient_binding, "initial_session_id");
+  if (sessionId) {
+    const match = entries.find(({ session }) => session.id === sessionId);
+    return {
+      status: match ? "selected" : "missing",
+      session: match ? sessionReference(match) : null,
+    };
   }
 
   const marked = entries.filter(({ session }) => session.metadata?.origin === "task_initial");

@@ -110,6 +110,9 @@ successor. The operation can register a replacement that is already primary.
 Office tasks retain scheduler-owned recovery.
 
 Registration preserves initial history and an existing entry's committed recipient.
+For a registered legacy task without an initial snapshot, deleting the original
+conversation keeps its historical ID in the binding. Kandev does not replace that
+history with the successor's profile or model snapshot.
 The next new initial-target entry uses the replacement's logical profile: reuse
 selects that conversation, while new-session policy creates a fresh one. Ordinary
 primary selection, spawning, and conditional profile changes do not register

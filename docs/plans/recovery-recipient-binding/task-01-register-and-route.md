@@ -197,5 +197,15 @@ this correction. Exact commands and the initial no-match portions are recorded i
 [the plan](plan.md#test-lifetime-correction-2026-10-15-kst).
 No operating deployment is claimed.
 
+The owner's later source review found a required legacy edge case: after A-to-B
+registration without an initial snapshot, deleting A allowed original-session
+lookup and B-to-C registration to re-elect B. The repair reads the recorded
+historical ID from the existing snapshot or protected typed binding before legacy
+election, preserving a missing original/configuration and the absent snapshot.
+Preview, entry, re-registration, repository validation and shared preview revision
+use the same history rule. Temporary deletion/fallback/chain checks and a real
+legacy WS-to-next-prompt check cover it outside normal collectors; exact RED/GREEN
+and publication/review evidence is retained in the plan and native Task Plan.
+
 Publication and independent review follow this work order through the native Task
 Plan's actual PR/head/base/worktree records. Fork-main merge requires controller GO.
