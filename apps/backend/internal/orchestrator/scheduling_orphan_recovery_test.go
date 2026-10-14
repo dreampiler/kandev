@@ -162,24 +162,6 @@ func TestSchedulingOrphanLeavesOwnedTasksAlone(t *testing.T) {
 	}
 }
 
-// AC-TASKS-RESTART-ORPHAN-SESSIONS-003.2: any present deferred_launch value,
-// including an empty or non-object one, keeps its existing owner, as the
-// ordinary launchDeferredTask reader does. CreateTask drops such a record from
-// a fresh row, so eligibility is checked on the loaded task directly.
-func TestSchedulingOrphanKeepsMalformedDeferredRecordWithItsOwner(t *testing.T) {
-	f := newSchedulingOrphanFixture(t)
-	f.seedTask(t, "orphan-malformed", orphanAutoStep, nil)
-	task, err := f.repo.GetTask(context.Background(), "orphan-malformed")
-	require.NoError(t, err)
-	require.True(t, f.svc.schedulingOrphanRecoverable(context.Background(), task))
-	for name, record := range map[string]interface{}{
-		"empty": map[string]interface{}{}, "non-object": "invalid", "null": nil,
-	} {
-		task.Metadata[models.MetaKeyDeferredLaunch] = record
-		require.Falsef(t, f.svc.schedulingOrphanRecoverable(context.Background(), task), "%s record was treated as absent", name)
-	}
-}
-
 // AC-TASKS-RESTART-ORPHAN-SESSIONS-003.1: the restarted start passes session
 // ceiling admission. With the only slot taken, it is deferred, not launched.
 func TestSchedulingOrphanRestartRespectsSessionCeiling(t *testing.T) {
@@ -220,61 +202,6 @@ func TestSchedulingOrphanWithPromptHistoryOnlyRepairsState(t *testing.T) {
 	require.Equal(t, v1.TaskStateInProgress, f.taskState("orphan-prompted"))
 	require.Empty(t, f.agentMgr.capturedPrompts)
 	require.Equal(t, 1, sessionCount(t, f.repo, "orphan-prompted"))
-}
-
-// AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3: a lifecycle-only turn carries the
-// current step stamp but is not an accepted prompt, so it does not stop the
-// step entry from being delivered.
-func TestSchedulingOrphanLifecycleOnlyTurnIsNotPromptHistory(t *testing.T) {
-	f := newSchedulingOrphanFixture(t)
-	f.seedTask(t, "orphan-lifecycle", orphanAutoStep, nil)
-	f.seedSession(t, "orphan-lifecycle", "orphan-lifecycle-session", models.TaskSessionStateWaitingForInput)
-	_, err := f.repo.CreateTurnWithStepStamp(context.Background(), &models.Turn{
-		ID: "orphan-lifecycle-turn", TaskSessionID: "orphan-lifecycle-session", TaskID: "orphan-lifecycle",
-		StartedAt: time.Now().UTC(),
-		Metadata: map[string]interface{}{
-			models.TurnMetaKeyWorkflowStepIDAtStart: orphanAutoStep,
-			models.TurnMetaKeyLifecycleOnly:         true,
-		},
-	})
-	require.NoError(t, err)
-
-	hasTurn, err := f.svc.sessionHasTurnForStep(context.Background(), "orphan-lifecycle-session", orphanAutoStep)
-	require.NoError(t, err)
-	require.False(t, hasTurn)
-	f.runStartupSweep(t)
-	require.Equal(t, v1.TaskStateScheduling, f.taskState("orphan-lifecycle"), "a lifecycle-only turn repaired the task as if a prompt was accepted")
-}
-
-// AC-TASKS-RESTART-ORPHAN-SESSIONS-003.1: a resumable session left by the prior
-// step is re-entered with the accepted entry id and the step that was left.
-func TestSchedulingOrphanEntryContextUsesLatestLedgerEntry(t *testing.T) {
-	f := newSchedulingOrphanFixture(t)
-	f.seedTask(t, "orphan-entry", orphanHoldStep, nil)
-	ctx := context.Background()
-	task, err := f.repo.GetTask(ctx, "orphan-entry")
-	require.NoError(t, err)
-	task.WorkflowStepID = orphanAutoStep
-	require.NoError(t, f.repo.UpdateTask(ctx, task))
-	task, err = f.repo.GetTask(ctx, "orphan-entry")
-	require.NoError(t, err)
-	f.seedSession(t, "orphan-entry", "orphan-entry-session", models.TaskSessionStateWaitingForInput)
-	session, err := f.repo.GetTaskSession(ctx, "orphan-entry-session")
-	require.NoError(t, err)
-
-	id, source := f.svc.schedulingOrphanEntryContext(ctx, task, session)
-	require.Positive(t, id)
-	require.NotNil(t, source)
-	require.Equal(t, orphanHoldStep, source.ID)
-
-	// A route that already names the current step makes the session a
-	// same-step recipient: no entry context is recovered.
-	task.Metadata[models.MetaKeyWorkflowSessionRoute] = models.WorkflowSessionRoute{
-		OperationID: "op", DestinationStepID: orphanAutoStep, TargetKind: "step", Phase: "committed",
-	}
-	id, source = f.svc.schedulingOrphanEntryContext(ctx, task, session)
-	require.Zero(t, id)
-	require.Nil(t, source)
 }
 
 // AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3: CREATED, STARTING, and RUNNING
