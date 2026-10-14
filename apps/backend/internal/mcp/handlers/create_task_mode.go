@@ -416,6 +416,12 @@ func (h *Handlers) preflightMCPFoundCreateTask(
 			}
 			return resp, true
 		}
+		// WorkspaceNotFound stays not-found; any other (storage) failure
+		// surfaces through the create error classification instead of being
+		// reshaped into not-found.
+		if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			return h.preflightMCPFoundError(msg, err)
+		}
 		resp, respErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
 		if respErr != nil {
 			return nil, false
@@ -456,7 +462,9 @@ func (h *Handlers) preflightMCPFoundCreateTask(
 			}
 			return resp, true
 		}
-		return nil, false
+		// Any other (storage) failure interrupts with its own meaning
+		// instead of being treated as a miss.
+		return h.preflightMCPFoundError(msg, lookupErr)
 	}
 	if err := h.validateMCPFoundCreateTask(ctx, req, found); err != nil {
 		code := mcpCreateTaskAdmissionErrorCode(err)
@@ -519,6 +527,34 @@ func (h *Handlers) recoverMCPFoundAfterPreCreateFailure(
 		CreationComplete: found.ExternalIDSettledAt != nil,
 		ParentResolution: admission.parentResolution.forOutcome(false),
 	})
+	if respErr != nil {
+		return nil, false
+	}
+	return resp, true
+}
+
+// preflightMCPFoundError surfaces a preflight storage/authorization failure
+// with the same meaning the CreateTask failure branch gives it: it reuses
+// classifyCreateTaskError, carries the error text on non-internal codes, and
+// attaches the typed executor-profile detail. It never reshapes the failure
+// into not-found and never treats it as a miss.
+func (h *Handlers) preflightMCPFoundError(
+	msg *ws.Message,
+	err error,
+) (*ws.Message, bool) {
+	if h.logger != nil {
+		h.logger.Error("MCP task creation preflight lookup failed", zap.Error(err))
+	}
+	code := classifyCreateTaskError(err)
+	message := "Failed to create task"
+	if code != ws.ErrorCodeInternalError {
+		message = err.Error()
+	}
+	var details map[string]interface{}
+	if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+		details = map[string]interface{}{"error_code": repoerrors.ExecutorProfileNotFoundCode}
+	}
+	resp, respErr := ws.NewError(msg.ID, msg.Action, code, message, details)
 	if respErr != nil {
 		return nil, false
 	}
