@@ -47,16 +47,19 @@ func WithPersistence(persistence Persistence) EngineOption {
 }
 
 type Engine struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	circuits    *CircuitRegistry
-	states      map[string]RouteState
-	persistence Persistence
-	loader      StateLoader
-	probes      map[string][]ProbeLease
-	usage       UsageSnapshotProvider
-	history     SelectionHistory
-	pick        func(n int) int
+	// turnAdmissionMu serializes selection and final turn claims.
+	// It is acquired before mu; capacity reads leave mu available.
+	turnAdmissionMu sync.Mutex
+	mu              sync.Mutex
+	now             func() time.Time
+	circuits        *CircuitRegistry
+	states          map[string]RouteState
+	persistence     Persistence
+	loader          StateLoader
+	probes          map[string][]ProbeLease
+	usage           UsageSnapshotProvider
+	history         SelectionHistory
+	pick            func(n int) int
 	// recentPicks holds selections this process made, keyed by logical
 	// profile, until the durable history reflects them.
 	recentPicks map[string]map[string]time.Time
@@ -201,8 +204,11 @@ func (e *Engine) selectWithPlan(
 	plan func(RouteState, bool) selectionPlan,
 	reason string,
 ) (RouteDecision, error) {
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
 	observedAt := e.now()
-	inputs := e.rankInputs(ctx, profile)
+	profile.AdmissionSessionID = sessionID
+	inputs := e.claimInputs(ctx, profile, observedAt)
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -227,7 +233,7 @@ func (e *Engine) selectWithPlan(
 	}
 	winner := resolved.firstSelectable(inputs.at(observedAt), claim)
 	if !winner.ok {
-		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain)
+		return e.persistExhaustedSelection(ctx, sessionID, profile, expectedGeneration, generation, observedAt, resolved.chain, inputs.Scores)
 	}
 	candidate, tier := winner.candidate, winner.tier
 	e.notePickLocked(profile.ID, candidate.ID, observedAt)
@@ -286,6 +292,7 @@ func (e *Engine) persistExhaustedSelection(
 	generation int64,
 	observedAt time.Time,
 	chain SelectionChain,
+	admission map[string]PaceScore,
 ) (RouteDecision, error) {
 	nextState := RouteState{
 		SessionID:        sessionID,
@@ -298,7 +305,7 @@ func (e *Engine) persistExhaustedSelection(
 	if exhausted, err := carrySelectionChain("", chain.forProfile(profile.ID, generation)); err == nil {
 		nextState.PolicyStateJSON = exhausted
 	}
-	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt)
+	deadline, resourceWait := e.resourceWaitDeadline(profile, observedAt, admission)
 	if chain.Interrupted {
 		nextState.Status = routeStatusActionRequired
 		resourceWait = false
@@ -638,7 +645,6 @@ func (e *Engine) ApplyFailureContext(
 		return RouteDecision{}, err
 	}
 	e.openCircuitForFailure(ctx, profile, currentCandidateID, failure)
-	e.observeLimit(ctx, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -677,10 +683,12 @@ func (e *Engine) ApplyUnclassifiedFailureContext(
 		return RouteDecision{}, ErrStaleGeneration
 	}
 
-	// The usage observation is taken before the engine lock so a slow provider
-	// read cannot block other sessions, and so every candidate the successor
-	// search ranks is compared against one clock and one set of evidence.
-	scores := e.rankInputs(ctx, profile)
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
+	profile.AdmissionSessionID = sessionID
+	// The observation leaves the state lock available and compares every
+	// successor against one clock and one set of evidence.
+	scores := e.claimInputs(ctx, profile, e.now())
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -1683,6 +1691,12 @@ func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, can
 	if !ok {
 		return
 	}
+	if resolver, ok := e.usage.(LimitFailureResolver); ok {
+		if resolved := resolver.ResolveLimitFailure(ctx, candidate, failure); resolved != nil {
+			failure = resolved
+		}
+	}
+	e.observeClassifiedLimit(ctx, candidate, failure)
 	policy := policyForFailure(candidate, failure)
 	now := e.now()
 	for _, key := range failureTargets(candidate, failure, policy) {

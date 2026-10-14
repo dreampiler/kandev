@@ -195,6 +195,12 @@ func seam1StartPayload(
 	if origin == "" {
 		origin = originFromAutoStart(autoStart)
 	}
+	// The admission class (origin) can differ from the creation authority
+	// (creation_origin): an agent/MCP-initiated launch is admitted as automatic
+	// while its explicit/autoStart origin still decides manual-creation
+	// authority. Round-trip both so a replay keeps the ceiling class without
+	// promoting the creation authority.
+	baseOrigin := origin
 	origin = ceilingLaunchOrigin(origin, opts.Automatic)
 	payload := map[string]interface{}{
 		metaKeyAgentProfileID:    agentProfileID,
@@ -213,6 +219,7 @@ func seam1StartPayload(
 		"entry_options":          opts.EntryOptions,
 		"workflow_entry_id":      opts.WorkflowEntryID,
 		"origin":                 string(origin),
+		"creation_origin":        string(baseOrigin),
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{

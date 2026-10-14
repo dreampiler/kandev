@@ -16,11 +16,14 @@ import (
 // query, so the value is a lower bound rather than a provider-wide remaining
 // quota.
 type ManualWindowUsage struct {
-	TokensTotal     int64
-	CostSubcents    int64
-	EventCount      int64
-	UnpricedCount   int64
-	IncompleteCount int64
+	RequestCount     int64
+	TurnCount        int64
+	RequestEstimated bool
+	TokensTotal      int64
+	CostSubcents     int64
+	EventCount       int64
+	UnpricedCount    int64
+	IncompleteCount  int64
 	// TurnsAttributed counts rows resolved through the stored concrete turn
 	// profile, which is the preferred evidence. ProfileAttributed counts the
 	// narrower fallback where a concrete event profile was proven directly.
@@ -56,6 +59,8 @@ const manualWindowUsageQuery = `
 		COALESCE(SUM(CASE WHEN e.cost_source = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN e.usage_completeness <> ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0)
+		,COUNT(DISTINCT COALESCE(NULLIF(e.turn_id,''), e.usage_event_id))
+		,COALESCE(SUM(CASE WHEN e.provider_response_id='' THEN 1 ELSE 0 END),0)
 	  FROM task_usage_events e
 	 LEFT JOIN task_session_turns t ON t.id = e.turn_id
 	 WHERE e.occurred_at >= ?
@@ -112,6 +117,7 @@ func (r *Repository) GetManualWindowUsageForProfiles(
 	}
 	usage := ManualWindowUsage{}
 	var attributedByTurn int64
+	var summaryRows int64
 	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(
 		&usage.EventCount,
 		&usage.TokensTotal,
@@ -119,11 +125,15 @@ func (r *Repository) GetManualWindowUsageForProfiles(
 		&usage.UnpricedCount,
 		&usage.IncompleteCount,
 		&attributedByTurn,
+		&usage.TurnCount,
+		&summaryRows,
 	)
 	if err != nil {
 		return ManualWindowUsage{}, err
 	}
 	usage.TurnsAttributed = attributedByTurn
+	usage.RequestCount = usage.EventCount
+	usage.RequestEstimated = summaryRows > 0
 	usage.ProfileAttributed = usage.EventCount - attributedByTurn
 	if usage.ProfileAttributed < 0 {
 		usage.ProfileAttributed = 0

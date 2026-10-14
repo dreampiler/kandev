@@ -762,29 +762,7 @@ func (s *Service) dynamicLaunchDecision(
 		return decision, true, nil
 	}
 	if !s.profileExecutionResolver.KeepModelWhileRunning(ctx, session.AgentProfileID) {
-		// Keep-model off compares capacity again before a new user turn. This runs
-		// at the idle boundary before any launch, so it never interrupts an
-		// admitted turn or background work, and a failure to compare falls back
-		// to the incumbent rather than moving work on a guess.
-		reevaluated, err := s.reevaluateDynamicModelForNewTurn(ctx, session, *state)
-		if err != nil {
-			return decision, true, nil
-		}
-		resolved, err := s.profileExecutionResolver.ResolveExisting(
-			ctx, session.ID, session.AgentProfileID, reevaluated.ExecutionProfileID,
-			reevaluated.Generation, reevaluated.ProfileVersion, "keep_model_reevaluated",
-		)
-		if err != nil {
-			return decision, true, nil
-		}
-		if session.ExecutionProfileID == resolved.ExecutionProfileID &&
-			session.RouteGeneration == resolved.Generation {
-			return resolved.Decision, true, nil
-		}
-		if err := s.persistResolvedExecution(ctx, session, resolved); err != nil {
-			return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
-		}
-		return resolved.Decision, true, nil
+		return s.reevaluatedDynamicLaunchDecision(ctx, session, *state, decision)
 	}
 	resolved, err := s.profileExecutionResolver.ResolveExisting(
 		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
@@ -792,6 +770,34 @@ func (s *Service) dynamicLaunchDecision(
 	)
 	if err != nil {
 		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if session.ExecutionProfileID == resolved.ExecutionProfileID &&
+		session.RouteGeneration == resolved.Generation {
+		return resolved.Decision, true, nil
+	}
+	if err := s.persistResolvedExecution(ctx, session, resolved); err != nil {
+		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	return resolved.Decision, true, nil
+}
+
+func (s *Service) reevaluatedDynamicLaunchDecision(
+	ctx context.Context, session *models.TaskSession, state dynamicruntime.RouteState,
+	decision dynamicruntime.RouteDecision,
+) (dynamicruntime.RouteDecision, bool, error) {
+	reevaluated, err := s.reevaluateDynamicModelForNewTurn(ctx, session, state)
+	if errors.Is(err, dynamicruntime.ErrNoEligibleCandidate) {
+		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if err != nil {
+		return decision, true, nil
+	}
+	resolved, err := s.profileExecutionResolver.ResolveExisting(
+		ctx, session.ID, session.AgentProfileID, reevaluated.ExecutionProfileID,
+		reevaluated.Generation, reevaluated.ProfileVersion, "keep_model_reevaluated",
+	)
+	if err != nil {
+		return decision, true, nil
 	}
 	if session.ExecutionProfileID == resolved.ExecutionProfileID &&
 		session.RouteGeneration == resolved.Generation {

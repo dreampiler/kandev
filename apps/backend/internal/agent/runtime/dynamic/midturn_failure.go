@@ -28,7 +28,10 @@ func (e *Engine) ApplyInterruptedFailureContext(ctx context.Context, sessionID s
 	if !InterruptedFailureAllowed(failure) {
 		return RouteDecision{}, ErrNoEligibleCandidate
 	}
-	inputs := e.rankInputs(ctx, profile)
+	e.turnAdmissionMu.Lock()
+	defer e.turnAdmissionMu.Unlock()
+	profile.AdmissionSessionID = sessionID
+	inputs := e.claimInputs(ctx, profile, e.now())
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	state, err := e.currentUnclassifiedRouteState(ctx, sessionID, profile, generation, candidateID)
@@ -55,7 +58,6 @@ func (e *Engine) ApplyInterruptedFailureContext(ctx context.Context, sessionID s
 	}
 	e.states[sessionID] = state
 	e.RecordResourceFailure(ctx, profile, candidateID, failure)
-	e.observeLimit(ctx, candidateID, failure)
 	key := probeKey(sessionID, generation, candidateID)
 	leases := e.probes[key]
 	delete(e.probes, key)

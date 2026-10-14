@@ -24,8 +24,8 @@
   handoff) and any real-provider resume behavior.
 
 .PARAMETER Commit
-  Revision label recorded in the result. Informational; the script verifies the
-  current worktree, not an arbitrary checkout.
+  Informational source label written to the log. The result revision is read
+  from the running isolated binary through /api/v1/system/info.
 
 .PARAMETER ReleaseRoot
   Declared release directory recorded in the result.
@@ -107,7 +107,7 @@ function Get-LastScenarioFailure {
 
 # --- Revision identity -----------------------------------------------------
 if (-not $Commit) { $Commit = (& git -C $RepoRoot rev-parse HEAD).Trim() }
-$HeadSha = ($Commit -split '\s+')[0]
+Write-Log ("source revision label: " + $Commit)
 if (-not $ReleaseRoot) { $ReleaseRoot = Join-Path $env:TEMP 'kandev-verify-release' }
 
 # --- Port selection (never a guarded production port) ----------------------
@@ -127,13 +127,26 @@ $HomeFile = $Pidfile -replace '\.pid$', '.home'
 
 # --- Build -----------------------------------------------------------------
 if (-not $NoBuild) {
-  Write-Log 'building kandev, agentctl, mock-agent'
-  & make -C $BackendDir build-kandev build-agentctl build-mock-agent
+  # dev-isolated.ps1 launches only the development binary names.
+  Write-Log 'building kandev-dev, agentctl-dev, mock-agent'
+  & make -C $BackendDir build-kandev build-agentctl build-mock-agent 'BINARY_NAME=kandev-dev' 'AGENTCTL_NAME=agentctl-dev'
   if ($LASTEXITCODE -ne 0) { throw "verify-release: build failed ($LASTEXITCODE)" }
 }
 
 # --- Isolated instance helpers --------------------------------------------
 $Script:IsolatedHome = $null
+$Script:IsolatedRevision = $null
+$Script:OwnsIsolatedPidfile = $false
+
+function Get-IsolatedRevision {
+  $info = Invoke-RestMethod -Method Get -Uri "$Base/api/v1/system/info" -TimeoutSec 3
+  $revision = ([string]$info.commit).Trim()
+  if ([string]::IsNullOrWhiteSpace($revision) -or $revision -eq 'unknown') {
+    throw 'verify-release: running binary did not report its build commit'
+  }
+  return $revision
+}
+
 function Start-Isolated {
   param([int]$TimeoutSec, [string]$HomeDirOverride)
   $devArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $DevIsolated, '-BackendPort', "$BackendPort", '-Timeout', "$TimeoutSec")
@@ -143,22 +156,37 @@ function Start-Isolated {
   if ($BinDir) { $devArgs += @('-BinDir', $BinDir) }
   $requestedHome = if ($HomeDirOverride) { $HomeDirOverride } else { $HomeDir }
   if ($requestedHome) { $devArgs += @('-HomeDir', $requestedHome) }
+  # Never adopt another launch's pidfile. Arm cleanup before launching, so a
+  # first health failure still tears down this invocation's recorded process.
+  if (-not $Script:OwnsIsolatedPidfile -and (Test-Path -LiteralPath $Pidfile)) {
+    throw "verify-release: isolated pidfile already exists; it is not owned by this run: $Pidfile"
+  }
+  $Script:OwnsIsolatedPidfile = $true
   & powershell.exe @devArgs
   if ($LASTEXITCODE -ne 0) { throw "verify-release: dev-isolated failed ($LASTEXITCODE)" }
   if (Test-Path -LiteralPath $HomeFile) { $Script:IsolatedHome = (Get-Content -LiteralPath $HomeFile -Raw).Trim() }
   $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  $healthy = $false
   while ((Get-Date) -lt $deadline) {
     try {
       $r = Invoke-WebRequest -UseBasicParsing -Uri "$Base/api/v1/system/health" -TimeoutSec 3
-      if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { return }
+      if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) {
+        $healthy = $true
+        break
+      }
     } catch { }
     Start-Sleep -Seconds 1
   }
-  throw 'verify-release: backend did not become healthy'
+  if (-not $healthy) { throw 'verify-release: backend did not become healthy' }
+  $revision = Get-IsolatedRevision
+  if ($Script:IsolatedRevision -and $Script:IsolatedRevision -ne $revision) {
+    throw 'verify-release: running binary revision changed across the isolated restart'
+  }
+  $Script:IsolatedRevision = $revision
 }
 
 function Stop-Isolated {
-  if (Test-Path -LiteralPath $Pidfile) {
+  if ($Script:OwnsIsolatedPidfile -and (Test-Path -LiteralPath $Pidfile)) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $KandevKill -Pidfile $Pidfile -Yes | Out-Null
     Start-Sleep -Seconds 2
   }
@@ -348,13 +376,32 @@ function Test-PreservedWait {
   return $true
 }
 
+function Wait-PreservedWait {
+  param([string]$TaskId, [string]$SessionId, $Before, [int]$Timeout = 90)
+  $startedAt = Get-Date
+  $deadline = $startedAt.AddSeconds($Timeout)
+  while ($true) {
+    $session = Get-Session -TaskId $TaskId -SessionId $SessionId
+    $after = Get-RunEvidence -SessionId $SessionId
+    $now = Get-Date
+    $preserved = Test-PreservedWait -Session $session -Before $Before -After $after
+    if (-not $preserved -or $now -ge $deadline) {
+      return @{
+        preserved = $preserved
+        session = $session
+        evidence = $after
+        observed_seconds = ($now - $startedAt).TotalSeconds
+      }
+    }
+    Start-Sleep -Seconds 2
+  }
+}
+
 # --- Run -------------------------------------------------------------------
 $scenarios = @()
-$started = $false
 try {
   Write-Log "starting isolated instance on :$BackendPort"
   Start-Isolated -TimeoutSec $TimeoutSeconds
-  $started = $true
   $fixture = New-Fixture
 
   # A: new run -> execution + first event + one turn complete
@@ -426,6 +473,24 @@ try {
   Stop-Isolated
   Start-Isolated -TimeoutSec $TimeoutSeconds -HomeDirOverride $Script:IsolatedHome
 
+  # C has its own existing 90-second observation budget after restart; it
+  # does not borrow B's wait, which may be skipped after a preparation failure.
+  $c = $scenarios | Where-Object { $_.id -eq 'C' }
+  if ($c.status -eq 'pending') {
+    $observation = Wait-PreservedWait -TaskId $cTask -SessionId $cSid -Before $cBaseline
+    $sess = $observation.session
+    $after = $observation.evidence
+    $c.observed_seconds = $observation.observed_seconds
+    if ($observation.preserved) {
+      $c.status = 'passed'
+      $c.after = $after.completed_turn_ids.Count
+      $c.auto_redispatch_count = 0
+    } else {
+      $c.status = 'failed'
+      $c.reason = "state=$($sess.state) completed_turns=$($after.completed_turn_ids.Count) before=$($c.before)"
+    }
+  }
+
   # B: explicit continuation must begin a real turn
   $b = $scenarios | Where-Object { $_.id -eq 'B' }
   if ($b.status -eq 'pending') {
@@ -435,16 +500,6 @@ try {
     if ($run -and $sess.agent_execution_id -and -not $sess.error_message) {
       $b.status = 'passed'; $b.execution_id = $sess.agent_execution_id; $b.turn_id = $run.turn_id; $b.first_event_at = $run.first_event_at
     } else { $b.status = 'failed'; $b.reason = "ws=$($r.type) error=$($sess.error_message) completed_new_turn=$([bool]$run)" }
-  }
-
-  # C: preserved with zero auto re-dispatch
-  $c = $scenarios | Where-Object { $_.id -eq 'C' }
-  if ($c.status -eq 'pending') {
-    $sess = Get-Session -TaskId $cTask -SessionId $cSid
-    $after = Get-RunEvidence -SessionId $cSid
-    if (Test-PreservedWait -Session $sess -Before $cBaseline -After $after) {
-      $c.status = 'passed'; $c.after = $after.completed_turn_ids.Count; $c.auto_redispatch_count = 0
-    } else { $c.status = 'failed'; $c.reason = "state=$($sess.state) completed_turns=$($after.completed_turn_ids.Count) before=$($c.before)" }
   }
 
   # E: message starts a turn or explicit failure; no permanent pending route
@@ -474,7 +529,7 @@ try {
 } catch {
   Write-Log ("error: " + $_.Exception.Message)
 } finally {
-  if ($started) { Stop-Isolated }
+  Stop-Isolated
 }
 
 # D is not exercised deterministically here.
@@ -488,7 +543,7 @@ $coveredPassed = @($scenarios | Where-Object { $coveredIds -contains $_.id -and 
 # run to completion) must not be reported as covered.
 $passed = (($failedCount -eq 0) -and ($coveredPassed -eq $coveredIds.Count))
 $result = @{
-  revision = $HeadSha
+  revision = $Script:IsolatedRevision
   release_dir = $ReleaseRoot
   web_assets_ok = [bool]$webOk
   scenarios = $scenarios

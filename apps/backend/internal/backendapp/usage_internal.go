@@ -158,6 +158,35 @@ func (r *usageLimitRecorder) record(ctx context.Context, profileID string, code 
 	return r.store.InsertUsageLimitObservation(ctx, observation)
 }
 
+// ObserveClassifiedLimit records the classified window on the existing observation path.
+func (r *usageLimitRecorder) ObserveClassifiedLimit(_ context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, at time.Time) {
+	if r == nil || r.store == nil || r.accounts == nil || r.accounts.ledger == nil {
+		return
+	}
+	r.wg.Add(1)
+	go func() {
+		defer r.wg.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := r.recordClassified(ctx, candidate, failure, at); err != nil && r.log != nil {
+			r.log.Warn("usage.limit_observation_failed", zap.String("profile_id", candidate.ID), zap.Error(err))
+		}
+	}()
+}
+
+func (r *usageLimitRecorder) recordClassified(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, at time.Time) error {
+	if r.accounts.usage == nil || r.accounts.usage.tierLimits == nil {
+		return r.record(ctx, candidate.ID, failure.Code, at)
+	}
+
+	observation := sqliterepo.UsageLimitObservation{ID: uuid.NewString(), ExecutionProfileID: candidate.ID, AccountKey: r.accounts.accountKey(ctx, candidate.ID), Code: string(failure.Code), ObservedAt: at}
+
+	if err := r.accounts.usage.tierLimits.enrichObservation(ctx, candidate, failure, &observation); err != nil {
+		return err
+	}
+	return r.store.InsertUsageLimitObservation(ctx, observation)
+}
+
 // accountKey identifies the profile's account for grouping observations. A
 // profile without a binding is its own account.
 func (r *accountUsageReader) accountKey(ctx context.Context, profileID string) string {
