@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -21,6 +23,35 @@ import (
 // per-container session dir (local) or sprite (remote).
 type FileUploader interface {
 	WriteFile(ctx context.Context, path string, data []byte, mode os.FileMode) error
+}
+
+// targetPathJoin joins elements under an upload target root. Remote roots
+// are POSIX paths ("/root") even when the backend runs on Windows, so they
+// join with "/"; a local root keeps the host separator. On POSIX hosts both
+// forms are identical.
+func targetPathJoin(root string, elem ...string) string {
+	if !strings.HasPrefix(root, "/") {
+		return filepath.Join(append([]string{root}, elem...)...)
+	}
+	parts := []string{root}
+	for _, e := range elem {
+		parts = append(parts, filepath.ToSlash(e))
+	}
+	return path.Join(parts...)
+}
+
+// containedTargetPath is containedPath for upload targets: it applies POSIX
+// rules to a remote root and host rules to a local one.
+func containedTargetPath(root, target string) (string, error) {
+	if !strings.HasPrefix(root, "/") {
+		return containedPath(root, target)
+	}
+	cleanRoot := path.Clean(root)
+	cleanPath := path.Clean(target)
+	if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, strings.TrimSuffix(cleanRoot, "/")+"/") {
+		return "", fmt.Errorf("path %q escapes session root %q", target, root)
+	}
+	return cleanPath, nil
 }
 
 type fileReader interface {
@@ -67,7 +98,7 @@ func UploadCredentialFiles(
 				return fmt.Errorf("failed to read credential source %s: %w", srcPath, readErr)
 			}
 
-			targetPath := filepath.Join(targetHomeDir, method.TargetRelDir, filepath.Base(relPath))
+			targetPath := targetPathJoin(targetHomeDir, method.TargetRelDir, filepath.Base(relPath))
 			uploadData, mergeErr := credentialFileUploadData(ctx, uploader, method, targetPath, data)
 			if mergeErr != nil {
 				return fmt.Errorf("failed to prepare %s: %w", targetPath, mergeErr)

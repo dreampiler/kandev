@@ -13,7 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -375,7 +375,7 @@ func ensureAgentctlOnHostWithProgress(ctx, helperCtx context.Context, client *ss
 		zap.String("sha256", localSha),
 		zap.Int("bytes", len(localData)))
 
-	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(filepath.Dir(remoteBin))); err != nil {
+	if _, _, err := runSSHCommand(ctx, client, "mkdir -p "+shellQuote(path.Dir(remoteBin))); err != nil {
 		return "", fmt.Errorf("ssh: mkdir for agentctl: %w", err)
 	}
 	if err := sftpUploadBytes(client, remoteBin, localData, 0o755); err != nil {
@@ -750,7 +750,7 @@ func buildSSHCreateInstanceRequest(
 		// The SSH task directory is the stable remote environment. Keep the
 		// journal below it so agentctl replacement does not move delivery state
 		// with the process or session directory.
-		createRequest.DurableJournalPath = filepath.Join(
+		createRequest.DurableJournalPath = path.Join(
 			workspacePath, ".kandev", "agentctl-journals", req.DurableJournalOwnerID, "delivery.bbolt",
 		)
 	}

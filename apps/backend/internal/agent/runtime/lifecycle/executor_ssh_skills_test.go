@@ -25,7 +25,7 @@ func TestUploadSSHSkillManifest_WritesDecisionSkillToRemoteWorkspace(t *testing.
 		t.Fatalf("marshal manifest: %v", err)
 	}
 
-	if err := uploadSSHSkillManifest(context.Background(), server.dial(t), remoteWorkspace,
+	if err := uploadSSHSkillManifest(context.Background(), server.dial(t), sftpRemotePath(remoteWorkspace),
 		map[string]interface{}{MetadataKeySkillManifestJSON: string(manifest)}); err != nil {
 		t.Fatalf("uploadSSHSkillManifest: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestUploadSSHSkillManifest_NoSeatRemovesStaleDecisionSkill(t *testing.T) {
 		t.Fatalf("marshal seat manifest: %v", err)
 	}
 	metadata := map[string]interface{}{MetadataKeySkillManifestJSON: string(seatManifest)}
-	if err := uploadSSHSkillManifest(context.Background(), client, remoteWorkspace, metadata); err != nil {
+	if err := uploadSSHSkillManifest(context.Background(), client, sftpRemotePath(remoteWorkspace), metadata); err != nil {
 		t.Fatalf("seat uploadSSHSkillManifest: %v", err)
 	}
 	decisionPath := filepath.Join(remoteWorkspace, ".claude", "skills", "kandev-step-decision", "SKILL.md")
@@ -67,7 +67,7 @@ func TestUploadSSHSkillManifest_NoSeatRemovesStaleDecisionSkill(t *testing.T) {
 		t.Fatalf("marshal no-seat manifest: %v", err)
 	}
 	metadata[MetadataKeySkillManifestJSON] = string(noSeatManifest)
-	if err := uploadSSHSkillManifest(context.Background(), client, remoteWorkspace, metadata); err != nil {
+	if err := uploadSSHSkillManifest(context.Background(), client, sftpRemotePath(remoteWorkspace), metadata); err != nil {
 		t.Fatalf("no-seat uploadSSHSkillManifest: %v", err)
 	}
 	if _, err := os.Stat(decisionPath); !os.IsNotExist(err) {
@@ -96,7 +96,7 @@ func TestUploadSSHSkillManifest_NoSeatDoesNotFollowDecisionSkillSymlink(t *testi
 	if err != nil {
 		t.Fatalf("marshal no-seat manifest: %v", err)
 	}
-	if err := uploadSSHSkillManifest(context.Background(), server.dial(t), remoteWorkspace,
+	if err := uploadSSHSkillManifest(context.Background(), server.dial(t), sftpRemotePath(remoteWorkspace),
 		map[string]interface{}{MetadataKeySkillManifestJSON: string(manifest)}); err != nil {
 		t.Fatalf("uploadSSHSkillManifest: %v", err)
 	}

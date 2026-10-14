@@ -253,7 +253,7 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 		remoteHome := t.TempDir()
 		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 			if strings.Contains(command, remoteHomeCommand) {
-				return sshOut(remoteHome)
+				return sshOut(sftpRemotePath(remoteHome))
 			}
 			return sshOK
 		})
@@ -281,6 +281,7 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 
 	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.11
 	t.Run("OpenCode provider maps preserve target-only logins", func(t *testing.T) {
+		skipOpenCodeHostAuthOnWindows(t)
 		localHome := t.TempDir()
 		setTestUserHome(t, localHome)
 		localAuth := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
@@ -308,7 +309,7 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 
 		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 			if strings.Contains(command, remoteHomeCommand) {
-				return sshOut(remoteHome)
+				return sshOut(sftpRemotePath(remoteHome))
 			}
 			return sshOK
 		})
@@ -347,6 +348,7 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 
 	// @covers AC-EXECUTORS-SSH-EXECUTOR-001.12
 	t.Run("malformed remote OpenCode auth remains unchanged", func(t *testing.T) {
+		skipOpenCodeHostAuthOnWindows(t)
 		localHome := t.TempDir()
 		setTestUserHome(t, localHome)
 		localAuth := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
@@ -369,7 +371,7 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 
 		server := newFakeSSHServer(t, func(command, _ string) sshExecResult {
 			if strings.Contains(command, remoteHomeCommand) {
-				return sshOut(remoteHome)
+				return sshOut(sftpRemotePath(remoteHome))
 			}
 			return sshOK
 		})
@@ -418,13 +420,24 @@ func TestSSHExecutorUploadCredentials(t *testing.T) {
 	})
 }
 
+// skipOpenCodeHostAuthOnWindows skips tests that forward OpenCode host auth
+// files. The agent declares its auth source files only for darwin and linux
+// (agents/opencode_acp.go, RemoteAuth SourceFiles), so a Windows host has no
+// OpenCode credential file to forward.
+func skipOpenCodeHostAuthOnWindows(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("OpenCode declares host auth source files only for darwin and linux")
+	}
+}
+
 func TestSSHFileUploaderWriteFileCreatesParents(t *testing.T) {
 	server := newFakeSSHServer(t, nil)
 	server.enableSFTP()
 	uploader := &sshFileUploader{client: server.dial(t)}
 	target := filepath.Join(t.TempDir(), "a", "b", "c", "creds.json")
 
-	if err := uploader.WriteFile(context.Background(), target, []byte("secret"), 0o600); err != nil {
+	if err := uploader.WriteFile(context.Background(), sftpRemotePath(target), []byte("secret"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	data, err := os.ReadFile(target)
@@ -438,12 +451,12 @@ func TestSSHFileUploaderWriteFileCreatesParents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
+	if want := observableFileMode(0o600); info.Mode().Perm() != want {
+		t.Fatalf("mode = %v, want %v", info.Mode().Perm(), want)
 	}
 
 	// Writing again over the existing tree must still succeed.
-	if err := uploader.WriteFile(context.Background(), target, []byte("rotated"), 0o644); err != nil {
+	if err := uploader.WriteFile(context.Background(), sftpRemotePath(target), []byte("rotated"), 0o644); err != nil {
 		t.Fatalf("second WriteFile: %v", err)
 	}
 	data, _ = os.ReadFile(target)

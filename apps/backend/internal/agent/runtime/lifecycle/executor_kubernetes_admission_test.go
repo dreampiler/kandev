@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -185,7 +186,13 @@ func TestKubernetesCreateInstanceMaterializesSkillsCredentialsAndPortableConfig(
 	requireKubernetesUploadedFile(t, execs, "/workspace/.agents/skills/kandev-review/SKILL.md", "# Review")
 	requireKubernetesUploadedFile(t, execs, "/workspace/.agents/skills/kandev-review/refs/checklist.md", "check")
 	requireKubernetesUploadedFile(t, execs, "/opt/kandev/runtime/office/instructions/profile-1/AGENTS.md", "office rules")
-	requireKubernetesUploadedFile(t, execs, "/run/kandev/home/.codex/auth.json", "auth-data")
+	if runtime.GOOS == "windows" {
+		// Codex declares host auth source files only for darwin and linux
+		// (agents/codex_acp.go RemoteAuth SourceFiles); a Windows host has none.
+		requireKubernetesPathNotUsed(t, execs, "/run/kandev/home/.codex/auth.json")
+	} else {
+		requireKubernetesUploadedFile(t, execs, "/run/kandev/home/.codex/auth.json", "auth-data")
+	}
 	requireKubernetesUploadedFile(t, execs, "/run/kandev/home/.mock-agent/settings.json", "settings-data")
 	requireKubernetesPathNotUsed(t, execs, "/home/untrusted-task-value")
 }
