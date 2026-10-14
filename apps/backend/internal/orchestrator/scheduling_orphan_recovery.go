@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -26,6 +27,14 @@ type schedulingTaskLister interface {
 // s.repo rather than growing sessionExecutorStore for one startup pass.
 type schedulingOrphanTurnChecker interface {
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
+}
+
+// schedulingOrphanTransitionLister reads the newest step-transition ledger row,
+// which names the accepted entry into the current step and the step it left.
+// It is reached through a type assertion on s.repo like the other narrow
+// capabilities of this pass.
+type schedulingOrphanTransitionLister interface {
+	ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error)
 }
 
 // schedulingOrphanSessionLister is the narrow repository capability this pass
@@ -113,14 +122,15 @@ func (s *Service) schedulingOrphanRecoverable(ctx context.Context, task *models.
 }
 
 // schedulingOrphanHasDeferredIntent reports whether the task still carries a
-// deferred-launch intent. A non-object or empty record is no intent, matching
-// every existing reader of the shared record.
+// deferred_launch record. Key presence is the ownership signal, matching
+// launchDeferredTask: a malformed, empty, or profile-less record is kept by that
+// reader and stops the ordinary automatic start, so it is not absence here.
 func schedulingOrphanHasDeferredIntent(task *models.Task) bool {
 	if task == nil || task.Metadata == nil {
 		return false
 	}
-	record, ok := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
-	return ok && len(record) > 0
+	_, present := task.Metadata[models.MetaKeyDeferredLaunch]
+	return present
 }
 
 // schedulingOrphanHasLifecycleToken reports whether another startup pass
@@ -205,8 +215,10 @@ func (s *Service) schedulingOrphanRecoverableSession(ctx context.Context, taskID
 	return nil, nil
 }
 
-// sessionHasTurnForStep checks if the session has a turn for the given step.
-// This is used to determine if the step entry prompt was already delivered.
+// sessionHasTurnForStep checks if the session has a conversational turn for the
+// given step. This is used to determine if the step entry prompt was already
+// delivered. A lifecycle-only turn (a boot or todo status record) carries the
+// same step stamp but never reflects an accepted prompt, so it does not count.
 func (s *Service) sessionHasTurnForStep(ctx context.Context, sessionID, stepID string) (bool, error) {
 	checker, ok := s.repo.(schedulingOrphanTurnChecker)
 	if !ok {
@@ -217,7 +229,10 @@ func (s *Service) sessionHasTurnForStep(ctx context.Context, sessionID, stepID s
 		return false, err
 	}
 	for _, turn := range turns {
-		if turn.Metadata != nil {
+		if turn != nil && turn.Metadata != nil {
+			if lifecycleOnly, _ := turn.Metadata[models.TurnMetaKeyLifecycleOnly].(bool); lifecycleOnly {
+				continue
+			}
 			if stepAtStart, ok := turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart].(string); ok && stepAtStart == stepID {
 				return true, nil
 			}
@@ -253,16 +268,58 @@ func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.
 	if err != nil || step == nil {
 		return
 	}
+	transitionID, sourceStep := s.schedulingOrphanEntryContext(ctx, task, session)
 	s.logger.Info(schedulingOrphanEvent+": re-entering the current step on a resumable session",
 		zap.String("task_id", task.ID),
 		zap.String("session_id", session.ID),
-		zap.String("step_id", step.ID))
+		zap.String("step_id", step.ID),
+		zap.Int64("transition_id", transitionID))
 	s.orphanReentryWorkers.Add(1)
 	go func() {
 		defer s.orphanReentryWorkers.Done()
 		entryCtx := context.WithoutCancel(ctx)
-		s.processOnEnter(entryCtx, task.ID, session, step, task.Description, 0, nil)
+		s.processOnEnter(entryCtx, task.ID, session, step, task.Description, transitionID, sourceStep)
 	}()
+}
+
+// schedulingOrphanEntryContext recovers the accepted entry into the current
+// step when the resumable session is not yet its recipient: the committed route
+// is absent or still names another step, as when a profile switch was
+// interrupted after SCHEDULING was written and before the new session or route.
+// The newest ledger row, when it entered the current step, supplies the entry id
+// and the step that was left, so processOnEnter's entry guard and profile-switch
+// preparation see the same context as the original transition. When the route
+// already names this step, or the ledger cannot confirm the entry, the session
+// is a same-step recipient and re-enters with no entry context.
+func (s *Service) schedulingOrphanEntryContext(
+	ctx context.Context, task *models.Task, session *models.TaskSession,
+) (int64, *wfmodels.WorkflowStep) {
+	if route, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok && route.DestinationStepID == task.WorkflowStepID {
+		return 0, nil
+	}
+	lister, ok := s.repo.(schedulingOrphanTransitionLister)
+	if !ok {
+		return 0, nil
+	}
+	rows, err := lister.ListTaskStepTransitions(ctx, task.ID, 0, 1)
+	if err != nil || len(rows) == 0 {
+		if err != nil {
+			s.logger.Warn(schedulingOrphanEvent+": failed to read the current step entry",
+				zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
+		}
+		return 0, nil
+	}
+	entry := rows[0]
+	if entry.ToWorkflowStepID == nil || *entry.ToWorkflowStepID != task.WorkflowStepID {
+		return 0, nil
+	}
+	var sourceStep *wfmodels.WorkflowStep
+	if entry.FromWorkflowStepID != nil && *entry.FromWorkflowStepID != "" {
+		if from, err := s.workflowStepGetter.GetStep(ctx, *entry.FromWorkflowStepID); err == nil {
+			sourceStep = from
+		}
+	}
+	return entry.ID, sourceStep
 }
 
 // repairSchedulingOrphanTaskState clears a stale SCHEDULING state for a task
