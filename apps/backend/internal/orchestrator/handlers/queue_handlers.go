@@ -1843,10 +1843,12 @@ func (h *QueueHandlers) settlePendingAttachmentCleanup(
 	}
 }
 
+var pendingAttachmentCleanupMaxAttempts = 60
+
 func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) {
 	defer h.attachmentCleanupWG.Done()
 	delay := 10 * time.Millisecond
-	for {
+	for attempt := 0; attempt < pendingAttachmentCleanupMaxAttempts; attempt++ {
 		if !h.editLeaseActive(pending) {
 			if err := h.runPendingAttachmentCleanup(pending); err == nil {
 				if err := h.deletePendingAttachmentCleanup(pending); err != nil {
@@ -1866,6 +1868,12 @@ func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttac
 			delay *= 2
 		}
 	}
+	h.logger.Warn("queue attachment cleanup attempts exhausted; leaving durable cleanup for recovery",
+		zap.String(fieldSessionID, pending.key.sessionID),
+		zap.String(fieldEntryID, pending.key.entryID))
+	h.attachmentCleanupMu.Lock()
+	delete(h.pendingAttachmentCleanup, pending.key)
+	h.attachmentCleanupMu.Unlock()
 }
 
 func (h *QueueHandlers) deletePendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) error {

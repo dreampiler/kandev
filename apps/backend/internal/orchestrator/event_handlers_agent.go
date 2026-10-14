@@ -2276,7 +2276,8 @@ func (s *Service) handleQueuedMessageExecutionError(
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
-		errors.Is(err, ErrSessionRuntimeUnavailable) {
+		errors.Is(err, ErrSessionRuntimeUnavailable) ||
+		errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}
