@@ -14,10 +14,15 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// shortTaskIDPattern matches a hex prefix of a UUID (8 to 35 characters). A
-// full 36-character UUID and any non-hex value are left untouched, so existing
-// callers that pass full ids keep their exact behavior.
-var shortTaskIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8,35}$`)
+// shortTaskIDPattern matches a prefix of a dashed UUID: at least 8 characters
+// of hex, optionally broken by the UUID's own dashes, at most 35 characters in
+// total. Stored ids are dashed, so a dash-free pattern would reject every
+// prefix longer than the first group and leave the "pass a longer prefix"
+// remedy unusable. The 35-character ceiling is what keeps a full 36-character
+// UUID out, so existing callers that pass full ids keep their exact behavior.
+// Only hex and dashes are accepted, so the value is safe to pass to the
+// repository's LIKE as a literal prefix.
+var shortTaskIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,27}$`)
 
 // taskRefScalarFields are the payload keys that name a task by id and that a
 // short-id expansion may rewrite. They are shared across the MCP control
@@ -126,6 +131,8 @@ func (h *Handlers) expandShortTaskRefValue(
 
 // shortTaskIDAmbiguous builds the rejection for a prefix that matches several
 // tasks in the caller's workspace, listing the candidates it may have meant.
+// The lookup is capped, so a count at the cap is reported as a lower bound
+// rather than as the exact number of matches.
 func shortTaskIDAmbiguous(msg *ws.Message, prefix string, tasks []*models.Task) (*ws.Message, error) {
 	candidates := make([]map[string]interface{}, 0, maxTaskIDCandidates)
 	for i, task := range tasks {
@@ -138,9 +145,13 @@ func shortTaskIDAmbiguous(msg *ws.Message, prefix string, tasks []*models.Task) 
 			"state":   string(task.State),
 		})
 	}
+	count := strconv.Itoa(len(tasks)) + " tasks"
+	if len(tasks) >= maxTaskIDCandidates {
+		count = "at least " + count
+	}
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-		"task id prefix "+prefix+" matches "+strconv.Itoa(len(tasks))+
-			" tasks in this workspace; pass a longer prefix or the full id", map[string]interface{}{
+		"task id prefix "+prefix+" matches "+count+
+			" in this workspace; pass a longer prefix or the full id", map[string]interface{}{
 			"reason":     "ambiguous_task_id_prefix",
 			"prefix":     prefix,
 			"candidates": candidates,

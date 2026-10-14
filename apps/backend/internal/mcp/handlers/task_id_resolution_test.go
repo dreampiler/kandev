@@ -109,6 +109,25 @@ func TestExpandShortTaskRefs_LeavesFullUnknownAndUnownedValuesAlone(t *testing.T
 	assert.Same(t, foreign, expanded, "a prefix that lives in another workspace is not resolved")
 }
 
+// TestExpandShortTaskRefs_ResolvesDashedLongerPrefix pins the disambiguation
+// remedy the ambiguity message offers: stored ids are dashed, so a prefix past
+// the first group must resolve too.
+func TestExpandShortTaskRefs_ResolvesDashedLongerPrefix(t *testing.T) {
+	h, _, wsID := newPrefixHandlers(t)
+	ctx := kanbanPrincipalCtx(wsID, sharedPrefixTaskA)
+
+	ambiguous := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": "15c6b3f2"})
+	expanded, errMsg := h.expandShortTaskRefs(ctx, ambiguous)
+	require.Nil(t, expanded)
+	require.NotNil(t, errMsg)
+
+	longer := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": "15c6b3f2-0000-4000-8000-000000000002"})
+	expanded, errMsg = h.expandShortTaskRefs(ctx, longer)
+	require.Nil(t, errMsg)
+	require.NotNil(t, expanded)
+	assert.Equal(t, sharedPrefixTaskB, msgTaskID(t, expanded))
+}
+
 // TestHandleArchiveTask_ResolvesShortID is the completion-path check: a
 // controller that knows only the first eight characters archives the task.
 func TestHandleArchiveTask_ResolvesShortID(t *testing.T) {

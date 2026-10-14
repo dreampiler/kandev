@@ -22,7 +22,8 @@ id is still subject to every existing guard.
 
 ## Terminology
 
-- **Short task id:** A hex prefix of a UUID, 8 to 35 characters.
+- **Short task id:** A prefix of a UUID's stored dashed form, 8 to 35
+  characters of hex and dashes.
 
 ## Requirements
 
@@ -58,7 +59,10 @@ that belong to no board, without a `workflow_id` it cannot get.
 
 - **AC-TASKS-MCP-TARGET-002.1:** `list_tasks_kandev` shall accept an optional
   `workspace_id`. With it, the tool returns the workspace's non-archived,
-  non-ephemeral tasks, including tasks whose `workflow_id` is empty.
+  non-ephemeral tasks, including tasks whose `workflow_id` is empty and tasks
+  whose `origin` is an automation run. The automation-run rows stay hidden from
+  the user-facing workspace list; exposing them here is a read for the control
+  surface, not a change to that list.
 - **AC-TASKS-MCP-TARGET-002.2:** A non-Office caller shall only name its own
   workspace; another workspace shall be refused with `forbidden`. Cross-workspace
   listing stays on the Office reach path (`REQ-OFFICE-XWS-003`).
@@ -67,7 +71,4 @@ that belong to no board, without a `workflow_id` it cannot get.
 
 ## Out of scope
 
-- Exposing automation-origin tasks through `list_tasks_kandev`. They stay hidden
-  by provenance for a non-Office caller; widening that is a separate decision
-  about which principal counts as a controller.
 - Session-id prefix resolution. Only task-id arguments are resolved here.

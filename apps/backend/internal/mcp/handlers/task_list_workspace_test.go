@@ -42,6 +42,34 @@ func TestHandleListTasks_WorkspaceScopeIncludesWorkflowlessTasks(t *testing.T) {
 	assert.True(t, titles["NoBoard"], "workflow-less task must be listed")
 }
 
+func TestHandleListTasks_WorkspaceScopeIncludesAutomationOriginTasks(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-auto", Name: "Auto"}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-automation-run", WorkspaceID: "ws-auto", WorkflowID: "", Title: "Daily sync",
+		State: v1.TaskStateTODO, Origin: models.TaskOriginAutomationRun,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-plain", WorkspaceID: "ws-auto", WorkflowID: "", Title: "Plain", State: v1.TaskStateTODO,
+	}))
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	resp, err := h.handleListTasks(kanbanPrincipalCtx("ws-auto", "task-plain"),
+		makeWSMessage(t, ws.ActionMCPListTasks, map[string]string{"workspace_id": "ws-auto"}))
+	require.NoError(t, err)
+
+	var out dto.ListTasksResponse
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	byTitle := map[string]dto.TaskDTO{}
+	for _, task := range out.Tasks {
+		byTitle[task.Title] = task
+	}
+	require.Contains(t, byTitle, "Daily sync", "an automation-run output must be findable by a controller")
+	assert.Equal(t, "task-automation-run", byTitle["Daily sync"].ID)
+	assert.Equal(t, models.TaskOriginAutomationRun, byTitle["Daily sync"].Origin)
+}
+
 func TestHandleListTasks_WorkspaceScopeRejectsForeignWorkspaceForKanban(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

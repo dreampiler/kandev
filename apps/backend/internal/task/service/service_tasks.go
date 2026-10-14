@@ -4644,6 +4644,14 @@ type workspaceArchiveModeLister interface {
 	ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error)
 }
 
+// workspaceAutomationLister is the optional repository contract behind the
+// inclusive workspace read. It is asserted like taskIDPrefixLister so a
+// repository without it degrades to the provenance-hiding list rather than
+// failing the call.
+type workspaceAutomationLister interface {
+	ListTasksByWorkspaceIncludingAutomation(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error)
+}
+
 func listTasksByWorkspaceWithArchiveMode(repo taskrepo.TaskRepository, ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
 	if lister, ok := repo.(workspaceArchiveModeLister); ok {
 		return lister.ListTasksByWorkspaceWithArchiveMode(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
@@ -4652,6 +4660,18 @@ func listTasksByWorkspaceWithArchiveMode(repo taskrepo.TaskRepository, ctx conte
 		return nil, 0, fmt.Errorf("archived-only workspace task listing is unavailable")
 	}
 	return repo.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+}
+
+// listTasksByWorkspaceRows dispatches to the inclusive repository contract when
+// includeAutomation is set and the repository has it, otherwise to the
+// provenance-hiding archive-mode contract.
+func (s *Service) listTasksByWorkspaceRows(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, includeAutomation bool) ([]*models.Task, int, error) {
+	if includeAutomation {
+		if lister, ok := s.tasks.(workspaceAutomationLister); ok {
+			return lister.ListTasksByWorkspaceIncludingAutomation(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+		}
+	}
+	return listTasksByWorkspaceWithArchiveMode(s.tasks, ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
 }
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
@@ -4665,10 +4685,24 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 // used by the sidebar archive view. onlyArchived takes precedence over
 // includeArchived when both are true.
 func (s *Service) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return s.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, false)
+}
+
+// ListTasksByWorkspaceIncludingAutomation is the read-oriented workspace list
+// that also returns automation-origin tasks. The MCP control surface uses it so
+// a controller can find an automation-run output that belongs to no board;
+// ListTasksByWorkspace keeps hiding those rows by provenance.
+func (s *Service) ListTasksByWorkspaceIncludingAutomation(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived bool) ([]*models.Task, int, error) {
+	return s.listTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, true)
+}
+
+// listTasksByWorkspace is the shared implementation behind the workspace-list
+// contracts. includeAutomation is the only difference between them.
+func (s *Service) listTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, includeAutomation bool) ([]*models.Task, int, error) {
 	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
 		return nil, 0, err
 	}
-	tasks, total, err := listTasksByWorkspaceWithArchiveMode(s.tasks, ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived)
+	tasks, total, err := s.listTasksByWorkspaceRows(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig, onlyArchived, includeAutomation)
 	if err != nil {
 		return nil, 0, err
 	}
