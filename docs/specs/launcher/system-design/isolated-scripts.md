@@ -117,9 +117,10 @@ names never match an installed Kandev.
 - `kandev-instances.ps1` lists listening backends named `kandev-dev` or
   `kandev`.
 
-`scripts/verify-release.ps1 -InstanceKind isolated` launches and tears down
-through these helpers, so release verification uses the development names
-without its own name handling.
+`scripts/verify-release.ps1 -InstanceKind isolated` builds with the same
+`BINARY_NAME=kandev-dev AGENTCTL_NAME=agentctl-dev` overrides and launches and
+tears down through these helpers, so release verification runs only the
+development names.
 
 ## Loopback binding
 The backend, its agentctl child, and the Vite dev server bind `127.0.0.1` by

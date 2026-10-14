@@ -31,6 +31,8 @@ Teardown and listing recognize those names, and teardown never stops a
   the agentctl name from the backend executable name.
 - `scripts/dev-isolated.ps1`, `scripts/kandev-kill.ps1`,
   `scripts/kandev-instances.ps1`: use and recognize the development names.
+- `scripts/verify-release.ps1`: build the development names before it starts
+  `dev-isolated.ps1` with `-NoBuild`.
 
 ## Exclusions
 
@@ -67,7 +69,7 @@ collection:
 - `apps/backend/Makefile`
 - `apps/backend/internal/agent/runtime/agentctl/launcher/launcher.go` and
   `launcher_test.go`
-- `scripts/dev-isolated.ps1`, `scripts/kandev-kill.ps1`,
+- `scripts/dev-isolated.ps1`, `scripts/kandev-kill.ps1`, `scripts/verify-release.ps1`,
   `scripts/kandev-instances.ps1`
 
 ## Results
@@ -91,3 +93,12 @@ collection:
     `agentctl-dev.exe` and `kandev-dev.exe`. No development process remained,
     and port 48429 was free.
 - The check's binaries, home, and logs were sent to the Recycle Bin.
+- Self-review found that `scripts/verify-release.ps1` built the default names
+  and then started `dev-isolated.ps1` with `-NoBuild`, which would no longer
+  find `kandev-dev.exe`. It now passes the same overrides.
+  - `make -n` with those overrides prints `-o bin/kandev-dev.exe`,
+    `-o bin/agentctl-dev.exe`, and `-o bin/mock-agent.exe`; without them,
+    `build-agentctl` still prints `-o bin/agentctl.exe`.
+  - The four changed scripts parse without errors.
+  - A full verify-release scenario run was not repeated for this one-line
+    build change.

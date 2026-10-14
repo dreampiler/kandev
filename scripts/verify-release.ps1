@@ -127,8 +127,9 @@ $HomeFile = $Pidfile -replace '\.pid$', '.home'
 
 # --- Build -----------------------------------------------------------------
 if (-not $NoBuild) {
-  Write-Log 'building kandev, agentctl, mock-agent'
-  & make -C $BackendDir build-kandev build-agentctl build-mock-agent
+  # dev-isolated.ps1 launches only the development binary names.
+  Write-Log 'building kandev-dev, agentctl-dev, mock-agent'
+  & make -C $BackendDir build-kandev build-agentctl build-mock-agent 'BINARY_NAME=kandev-dev' 'AGENTCTL_NAME=agentctl-dev'
   if ($LASTEXITCODE -ne 0) { throw "verify-release: build failed ($LASTEXITCODE)" }
 }
 
