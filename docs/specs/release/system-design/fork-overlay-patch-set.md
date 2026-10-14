@@ -160,7 +160,9 @@ The CM-owned automation follows this order (RB-3):
    order with the command above.
 3. Run `scripts/verify-release.ps1` against the overlay revision.
 4. On success, adopt the overlay in `main` through the merge path above, then
-   build that revision.
+   build the overlay revision verified in step 3. The adopted `main` has the
+   same tree outside `patches/` but a different commit, so building the
+   overlay revision keeps `system/info` equal to the verified revision.
 5. Update `INDEX.md`: mark bundles confirmed merged upstream or moved to a
    plugin, delete their patches, and report the total line count.
 
