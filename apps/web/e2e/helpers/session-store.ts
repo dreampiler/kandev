@@ -261,16 +261,27 @@ export async function waitForActiveSessionCancellationPending(
   page: Page,
   pending: boolean,
   targetSessionId?: string,
+  minimumCancellationRevision?: number,
 ): Promise<void> {
   await page.waitForFunction(
-    ({ expected, sessionId: targetSessionId }) => {
+    ({ expected, sessionId: targetSessionId, minimumRevision }) => {
       const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
       if (!store) return false;
       const sessionId = targetSessionId ?? store.getState().tasks.activeSessionId;
       if (!sessionId) return false;
-      return store.getState().taskSessions.items[sessionId]?.cancellation_pending === expected;
+      const session = store.getState().taskSessions.items[sessionId];
+      return (
+        session?.cancellation_pending === expected &&
+        (minimumRevision === undefined ||
+          (typeof session.cancellation_revision === "number" &&
+            session.cancellation_revision >= minimumRevision))
+      );
     },
-    { expected: pending, sessionId: targetSessionId },
+    {
+      expected: pending,
+      sessionId: targetSessionId,
+      minimumRevision: minimumCancellationRevision,
+    },
     {
       timeout: 45_000,
       message: `Session ${targetSessionId ?? "active"} did not reach cancellation_pending=${pending}`,
