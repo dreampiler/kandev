@@ -1867,12 +1867,12 @@ func (s *Service) startDynamicRelaunchCreatedSession(
 	} else {
 		registry.releaseInitialPromptHold(attempt)
 	}
-	if err != nil {
-		registry.abortInitialPromptHold(attempt)
-	}
 	if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
 		s.cleanupCancelledResumeAttempt(attempt)
 		return nil, attemptErr
+	}
+	if err != nil {
+		registry.abortInitialPromptHold(attempt)
 	}
 	return execution, err
 }
