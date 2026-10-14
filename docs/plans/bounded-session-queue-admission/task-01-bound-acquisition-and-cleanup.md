@@ -107,3 +107,9 @@ exit 0 with `0 issues`. The isolated orchestrator package also returned exit 0
 with `0 issues`. Both used `scripts/lint-go-changed` and the fixed comparison
 base above; splitting the initial invocation completed validation without
 changing the repository's resource defaults or production code.
+
+Integration documentation: the existing public coordination explanation now
+describes the acquisition-only 30-second wait and retryable busy outcome for
+Remove and Auto-run. No public action, setting, or screenshot changes.
+`node scripts/validate-public-docs.mjs` returned exit 0 and validated 48
+published pages. This documentation-only delta does not repeat code tests.
