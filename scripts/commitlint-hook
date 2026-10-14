@@ -28,7 +28,7 @@ fail() {
 	exit 1
 }
 
-header="$(awk 'NF == 0 || /^#/ { next } { sub(/\r$/, ""); print; exit }' "$msg_file")"
+header="$(awk '{ sub(/\r$/, "") } NF == 0 || /^#/ { next } { print; exit }' "$msg_file")"
 [ -n "$header" ] || fail "empty commit message"
 
 [[ "$header" =~ ^([a-z]+)(\(.*\))?!?:\ (.+)$ ]] \
