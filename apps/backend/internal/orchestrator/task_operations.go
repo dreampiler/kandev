@@ -5702,23 +5702,21 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 // another owner's cleanup is never force-completed here, and the existing
 // session row/state is preserved.
 func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) (settled bool, cause error) {
-	if s.turnService == nil {
-		return true, nil
-	}
-	// Capture the open turn before reading the session state and settle only that
-	// exact turn. A concurrent launch/resume that opens a successor turn also
-	// moves the session to a non-settleable state, so the state read below fails
-	// closed; and completeTurnForTaskSessionCheckedOwned fails closed if the
-	// active turn changed in the meantime. A successor turn is never swept.
-	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
-	if err != nil {
-		if isNoActiveTurnError(err) {
-			return true, nil
+	// Capture the open turn first so a successor opened between this read and the
+	// state read below cannot later be treated as the expected turn. The state
+	// read then gates every path - including when there is no open turn - so a
+	// launching/running session is never settled as a success, and the
+	// expected-turn settlement fails closed if the active turn changed.
+	var turn *models.Turn
+	if s.turnService != nil {
+		active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+		if err != nil {
+			if !isNoActiveTurnError(err) {
+				return false, err
+			}
+		} else {
+			turn = active
 		}
-		return false, err
-	}
-	if turn == nil {
-		return true, nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -5740,8 +5738,11 @@ func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID 
 	default:
 		// CREATED/STARTING/RUNNING/IDLE (or any future state): a launch or run
 		// may be in flight and the execution may simply not be registered yet, so
-		// return the original error and leave the turn alone.
+		// return the original error and leave any turn alone.
 		return false, nil
+	}
+	if turn == nil {
+		return true, nil
 	}
 	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, session.TaskID, sessionID, turn.ID); err != nil {
 		return false, err
