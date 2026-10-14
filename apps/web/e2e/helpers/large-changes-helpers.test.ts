@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Page } from "@playwright/test";
-import { scrollChangesToEnd } from "./large-changes-helpers";
+import { scrollChangesToEnd } from "../tests/git/large-changes-helpers";
 
 const playwright = vi.hoisted(() => {
   const expect = (value: unknown, message?: string) => ({
