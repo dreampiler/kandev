@@ -5,15 +5,9 @@ import (
 	"fmt"
 )
 
-// RemintLaunchCredentials implements orchestrator.LaunchCredentialReminter,
-// re-minting KANDEV_API_KEY / KANDEV_RUN_TOKEN for a launch that carries
-// Office run identity (agent/workspace/run id) in env. sessionID is the task
-// session the launch will use; when empty (a ceiling-deferred "start" replay
-// that has no session yet) the run's persisted session id is used instead.
-// The original env is returned unchanged when it carries no Office run
-// identity (a non-Office launch, or an Office env this build's buildEnvVars
-// shape has since dropped a field from) — there is nothing to re-mint, and
-// the launch should proceed rather than fail outright.
+// RemintLaunchCredentials binds Office credentials to the concrete launch session,
+// falling back to the run session for early replay. Missing identity or a nil
+// minter preserves the environment; required refresh failures return no environment.
 func (si *SchedulerIntegration) RemintLaunchCredentials(
 	ctx context.Context, taskID, sessionID string, env map[string]string,
 ) (map[string]string, error) {

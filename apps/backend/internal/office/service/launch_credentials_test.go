@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,13 +16,15 @@ import (
 type recordingTokenMinter struct {
 	token     string
 	calls     int
-	sessionID string
+	agentID, taskID, workspaceID, runID, sessionID, capabilities string
+	err error
 }
 
-func (m *recordingTokenMinter) MintRuntimeJWT(_, _, _, _, sessionID, _ string) (string, error) {
+func (m *recordingTokenMinter) MintRuntimeJWT(agentID, taskID, workspaceID, runID, sessionID, capabilities string) (string, error) {
 	m.calls++
-	m.sessionID = sessionID
-	return m.token, nil
+	m.agentID, m.taskID, m.workspaceID, m.runID = agentID, taskID, workspaceID, runID
+	m.sessionID, m.capabilities = sessionID, capabilities
+	return m.token, m.err
 }
 
 // TestRemintLaunchCredentials_ScopesTokenToLaunchSession pins the P45a
@@ -35,8 +39,8 @@ func TestRemintLaunchCredentials_ScopesTokenToLaunchSession(t *testing.T) {
 	si := service.NewSchedulerIntegration(svc, time.Minute)
 	ctx := context.Background()
 
-	svc.ExecSQL(t, `INSERT INTO runs (id, agent_profile_id, reason, payload, status, session_id, requested_at)
-		VALUES ('run-remint-1', 'agent-1', 'task_assigned', '{}', 'queued', 'session-persisted', datetime('now'))`)
+	svc.ExecSQL(t, `INSERT INTO runs (id, agent_profile_id, reason, payload, status, session_id, capabilities, requested_at)
+		VALUES ('run-remint-1', 'agent-1', 'task_assigned', '{}', 'queued', 'session-persisted', '{"can_handoff_tasks":true}', datetime('now'))`)
 
 	officeEnv := map[string]string{
 		"KANDEV_RUN_ID":       "run-remint-1",
@@ -47,6 +51,12 @@ func TestRemintLaunchCredentials_ScopesTokenToLaunchSession(t *testing.T) {
 	got, err := si.RemintLaunchCredentials(ctx, "task-1", "session-launch", officeEnv)
 	if err != nil {
 		t.Fatalf("remint with launch session: %v", err)
+	}
+	if minter.agentID != "agent-1" || minter.taskID != "task-1" || minter.workspaceID != "ws-1" || minter.runID != "run-remint-1" {
+		t.Fatalf("minted identity = %q/%q/%q/%q", minter.agentID, minter.taskID, minter.workspaceID, minter.runID)
+	}
+	if minter.capabilities != `{"can_handoff_tasks":true}` {
+		t.Fatalf("capabilities = %q, want persisted run capabilities", minter.capabilities)
 	}
 	if minter.sessionID != "session-launch" {
 		t.Fatalf("token session id = %q, want %q", minter.sessionID, "session-launch")
@@ -77,4 +87,25 @@ func TestRemintLaunchCredentials_ScopesTokenToLaunchSession(t *testing.T) {
 	if unchanged["KANDEV_SOMETHING_ELSE"] != "x" {
 		t.Fatalf("non-Office env changed: %v", unchanged)
 	}
+}
+
+func TestRemintLaunchCredentials_FailsClosed(t *testing.T) {
+ for _, tc := range []struct { name string; runID string; mintErr error; wantErr error; wantCalls int }{
+  {name: "missing run", runID: "missing", wantErr: sql.ErrNoRows},
+  {name: "mint rejected", runID: "run-remint-fail", mintErr: context.Canceled, wantErr: context.Canceled, wantCalls: 1},
+ } {
+  t.Run(tc.name, func(t *testing.T) {
+   svc := newTestService(t)
+   svc.ExecSQL(t, `INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at)
+    VALUES ('run-remint-fail', 'agent-1', 'task_assigned', '{}', 'queued', datetime('now'))`)
+   minter := &recordingTokenMinter{token: "must-not-dispatch", err: tc.mintErr}
+   svc.SetAgentTokenMinter(minter)
+   si := service.NewSchedulerIntegration(svc, time.Minute)
+   env := map[string]string{"KANDEV_RUN_ID": tc.runID, "KANDEV_AGENT_ID": "agent-1", "KANDEV_WORKSPACE_ID": "ws-1", "KANDEV_API_KEY": "captured-token"}
+   got, err := si.RemintLaunchCredentials(context.Background(), "task-1", "session-launch", env)
+   if !errors.Is(err, tc.wantErr) || got != nil { t.Fatalf("refresh = %v, %v; want nil env and preserved cause %v", got, err, tc.wantErr) }
+   if minter.calls != tc.wantCalls { t.Fatalf("mint calls = %d, want %d", minter.calls, tc.wantCalls) }
+   if env["KANDEV_API_KEY"] != "captured-token" { t.Fatal("failed refresh mutated input") }
+  })
+ }
 }

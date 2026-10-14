@@ -59,6 +59,22 @@ Re-mint the run token once the launch session is known, so a normally launched r
 
 ```bash
 cd apps/backend
-go test ./internal/office/service -run 'TestRemintLaunchCredentials_ScopesTokenToLaunchSession' -count=1
-go test ./internal/orchestrator -run 'Ceiling' -count=1
+go test -trimpath ./internal/office/service -run 'TestRemintLaunchCredentials' -count=1
+go test -trimpath -race ./internal/orchestrator -run 'TestStartTaskWithEnv_(Remints|RefreshFailure)|TestCeilingReplay_RefreshFailure' -count=1
 ```
+
+## Review remediation and results
+
+The review adds full mint identity assertions, missing-run and rejected-mint
+coverage, concrete created-session dispatch coverage, and refresh-failure
+coverage that checks owned session/turn settlement and durable credential
+redaction. Deferred replay retains both early and late refresh failures.
+
+The early failure now returns `ceilingReplayFailedResult` with the refresh
+cause, matching the current main replay-result contract. Original hosted
+backend, E2E build, and desktop logs demonstrated the incompatible bare-enum
+return. Those build failures are compiler evidence, not behavioral test RED.
+
+Hosted validation of the updated tests and full suites is pending. No local
+SQL or broad backend suite has run. Public documentation needs no change:
+CLI syntax, handoff authorization, and signing-key storage remain unchanged.

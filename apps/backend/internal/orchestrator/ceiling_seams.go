@@ -123,19 +123,8 @@ func redactedCeilingLaunchEnv(env map[string]string) map[string]string {
 	return redacted
 }
 
-// LaunchCredentialReminter refreshes the short-lived Office runtime
-// credentials a launch needs immediately before it dispatches, using the
-// durable identity fields (agent/workspace/run id) carried in env plus the
-// session id the launch will actually use. The session id is passed
-// explicitly because a first launch's task session does not exist when the
-// run's credentials are first minted: the Office runtime token would
-// otherwise carry an empty session id, and every session-scoped runtime
-// action (for example handoff_task) refuses such a token. A ceiling-deferred
-// "start" replay has no session yet at its own re-mint point, so it passes an
-// empty session id and the re-minter falls back to the run's persisted one.
-// Registered via SetLaunchCredentialReminter; nil is a valid, common case
-// (non-Office launches never carry these keys, so there is nothing to
-// re-mint).
+// LaunchCredentialReminter refreshes Office credentials from trusted run identity
+// and the concrete launch session. Sessionless replay uses the persisted session.
 type LaunchCredentialReminter interface {
 	RemintLaunchCredentials(ctx context.Context, taskID, sessionID string, env map[string]string) (map[string]string, error)
 }
