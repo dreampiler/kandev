@@ -1,6 +1,9 @@
 package routingerr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // reasoningContentMessage is the exact DeepSeek thinking-mode 400 an agent
 // surfaces after a session/load resume reconstructed the assistant history
@@ -50,6 +53,7 @@ func TestIsResumeCorrupted_ReasoningContent(t *testing.T) {
 	}{
 		{"deepseek reasoning_content 400", reasoningContentMessage, true},
 		{"bare phrasing", "The reasoning_content in the thinking mode must be passed back to the API.", true},
+		{"gap beyond the bound", "reasoning_content" + strings.Repeat("x", 81) + "must be passed back", false},
 		{"reasoning_content without the phrase", "the model emitted reasoning_content blocks inline", false},
 		{"ordinary prose", "please pass the reasoning back to me", false},
 		{"empty", "", false},
