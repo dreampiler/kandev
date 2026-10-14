@@ -142,7 +142,7 @@ func (h *Handlers) rebindStepCompleteSession(
 	task *models.Task,
 	launchStepID string,
 ) (bool, string, error) {
-	if h.stepCompleteRebinder == nil {
+	if h.extensions.stepCompleteRebinder == nil {
 		return false, "Automatic rebinding is not available on this backend.", nil
 	}
 	// A primary caller reaches this path only when its profile no longer
@@ -182,7 +182,7 @@ func (h *Handlers) rebindStepCompleteSession(
 	if primary != nil && !designatedStepSessionBroken(primary, profile) {
 		return false, "Another live session is still the current step's session.", nil
 	}
-	if err := h.stepCompleteRebinder.SetPrimarySession(ctx, session.ID); err != nil {
+	if err := h.extensions.stepCompleteRebinder.SetPrimarySession(ctx, session.ID); err != nil {
 		return false, "", err
 	}
 	h.logger.Info("step_complete: rebound signal to a live current-step session",

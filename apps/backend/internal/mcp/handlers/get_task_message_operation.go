@@ -58,12 +58,12 @@ func (h *Handlers) handleGetTaskMessageOperation(ctx context.Context, msg *ws.Me
 	if err := validateSendOperationIDParam(req.OperationID); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 	}
-	if h.sendOperationStore == nil {
+	if h.extensions.sendOperationStore == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"send-operation records are not available in this deployment", nil)
 	}
 
-	operation, err := h.sendOperationStore.GetSendOperation(
+	operation, err := h.extensions.sendOperationStore.GetSendOperation(
 		ctx, req.SenderTaskID, req.SenderSessionID, req.OperationID)
 	if err != nil {
 		if errors.Is(err, models.ErrSendOperationNotFound) {

@@ -66,14 +66,14 @@ type SendOperationStore interface {
 // operation-identity parameters are inert: a send carrying an identity behaves
 // exactly as an identity-free send rather than half-claiming one.
 func (h *Handlers) SetSendOperationStore(store SendOperationStore) {
-	h.sendOperationStore = store
+	h.extensions.sendOperationStore = store
 }
 
 // SetSendOperationRetention wires the bounded retention pass. The wiring site
 // wraps the store's prune call in maintenance admission, so retention can never
 // block or fail a live send: a busy lease simply defers the batch.
 func (h *Handlers) SetSendOperationRetention(prune func(ctx context.Context)) {
-	h.sendOperationRetention = prune
+	h.extensions.sendOperationRetention = prune
 }
 
 // sendOperationClaimRequest is the delivery-determining part of a send, exactly
@@ -120,7 +120,7 @@ func (h *Handlers) claimSendOperation(
 		return claimOutcome{}, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation,
 			"operation_id must be 1-128 characters of letters, digits, '.', '_', ':' or '-' and start with a letter or digit")
 	}
-	store := h.sendOperationStore
+	store := h.extensions.sendOperationStore
 	if store == nil {
 		// No store wired: preserving today's send semantics is strictly better
 		// than rejecting a send the caller believes is identified.
@@ -209,7 +209,7 @@ func (h *Handlers) replaySendOperation(
 func (h *Handlers) settleSendOperation(
 	ctx context.Context, operation *models.TaskMessageSendOperation, result taskMessageDispatchResult, dispatchErr error,
 ) {
-	store := h.sendOperationStore
+	store := h.extensions.sendOperationStore
 	if store == nil || operation == nil {
 		return
 	}
@@ -328,7 +328,7 @@ func sendOperationMetricKey(outcome, deliveryStatus string) string {
 // It is detached, best-effort, and never reports failure to the caller: a full
 // retention queue delays a cleanup that no live send depends on.
 func (h *Handlers) pruneSendOperationsAsync(ctx context.Context) {
-	prune := h.sendOperationRetention
+	prune := h.extensions.sendOperationRetention
 	if prune == nil {
 		return
 	}
