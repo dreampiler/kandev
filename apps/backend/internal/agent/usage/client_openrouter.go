@@ -49,8 +49,9 @@ type openRouterKeyResponse struct {
 	Data struct {
 		IsFreeTier             bool `json:"is_free_tier"`
 		FreeModelDailyRequests *struct {
-			Used  float64 `json:"used"`
-			Limit float64 `json:"limit"`
+			Used      float64  `json:"used"`
+			Limit     float64  `json:"limit"`
+			Remaining *float64 `json:"remaining"`
 		} `json:"free_model_daily_requests"`
 	} `json:"data"`
 }
@@ -82,6 +83,7 @@ func parseOpenRouterUsage(raw openRouterKeyResponse, now time.Time, configuredLi
 	if counter == nil {
 		return usage
 	}
+	usage.FreeModelDailyRequests = freeCounter(raw)
 	limit := counter.Limit
 	if configuredLimit > 0 {
 		limit = float64(configuredLimit)
@@ -98,7 +100,22 @@ func parseOpenRouterUsage(raw openRouterKeyResponse, now time.Time, configuredLi
 		StartAt:         start,
 		DurationSeconds: int64(24 * time.Hour / time.Second),
 		Scope:           WindowScopeFreeModels,
-		LimitReached:    counter.Used >= limit,
+		LimitReached:    counter.Used >= limit || (counter.Remaining != nil && *counter.Remaining == 0),
 	})
 	return usage
+}
+
+func freeCounter(raw openRouterKeyResponse) *FreeModelCounter {
+	c := raw.Data.FreeModelDailyRequests
+	if c == nil || c.Limit <= 0 || c.Used < 0 {
+		return nil
+	}
+	remaining := c.Limit - c.Used
+	if c.Remaining != nil {
+		remaining = *c.Remaining
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	return &FreeModelCounter{Used: c.Used, Limit: c.Limit, Remaining: remaining}
 }

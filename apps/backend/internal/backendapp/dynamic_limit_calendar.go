@@ -44,6 +44,11 @@ func (c *dynamicLimitCalendar) ExhaustedUntil(
 	candidate dynamicruntime.Candidate,
 	now time.Time,
 ) (time.Time, bool) {
+	if adapter, ok := c.usage.(*usageProviderAdapter); ok && adapter.tierLimits != nil && !candidate.RemoteExecution {
+		if reset, found := adapter.tierLimits.windowReset(ctx, candidate.ID, "", now, true); found {
+			return reset, true
+		}
+	}
 	windows := c.observedWindows(ctx, candidate)
 	if isDailyQuotaModel(candidate.ModelID) && hasExhaustedDailyWindow(windows) {
 		// OpenRouter's free tier counts requests per UTC day, so its free daily
@@ -72,6 +77,11 @@ func (c *dynamicLimitCalendar) MonthlyReset(
 ) (time.Time, bool) {
 	if reset, ok := observedMonthlyReset(c.observedWindows(ctx, candidate), now); ok {
 		return reset, true
+	}
+	if adapter, ok := c.usage.(*usageProviderAdapter); ok && adapter.tierLimits != nil && !candidate.RemoteExecution {
+		if reset, found := adapter.tierLimits.windowReset(ctx, candidate.ID, "month", now, false); found {
+			return reset, true
+		}
 	}
 	limit, ok := c.providerLimit(ctx, dynamicruntime.ProviderOf(candidate.ModelID))
 	if !ok {

@@ -126,6 +126,21 @@ func (c *UsageCache) GetOrFetchWithin(
 	return usage, nil
 }
 
+func (c *UsageCache) Refresh(ctx context.Context, key string, fetch func(context.Context) (*ProviderUsage, error)) (*ProviderUsage, error) {
+	lock := c.keyLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	usage, err := fetch(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			c.storeFailure(key, err)
+		}
+		return nil, err
+	}
+	c.storeSuccess(key, usage)
+	return usage, nil
+}
+
 func (c *UsageCache) keyLock(key string) *sync.Mutex {
 	c.fetchMu.Lock()
 	defer c.fetchMu.Unlock()

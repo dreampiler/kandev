@@ -36,8 +36,12 @@ func wireAgentSettingsPreview(services *Services, repos *Repositories, controlle
 		controller.SetAccountBlockReleaser(services.DynamicProfileResolver)
 	}
 	controller.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
-	controller.SetProviderLimitService(newProviderLimitService(
+	providerLimits := newProviderLimitService(
 		repos.Task, repos.AgentSettings,
 		newDynamicLimitCalendar(services.UsageAdapter, repos.Task),
-	))
+	)
+	if services.UsageAdapter != nil {
+		providerLimits.tiers = services.UsageAdapter.tierLimits
+	}
+	controller.SetProviderLimitService(providerLimits)
 }
