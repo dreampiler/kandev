@@ -38,7 +38,9 @@ export function useProviderLimits() {
         ? {
             status: "ready",
             providers: current.providers.map((entry) =>
-              entry.provider === saved.provider ? saved : entry,
+              entry.provider === saved.provider
+                ? mergeProviderLimit(entry, saved, request.account_id)
+                : entry,
             ),
           }
         : current,
@@ -47,4 +49,18 @@ export function useProviderLimits() {
   }, []);
 
   return { state, reload, save };
+}
+
+function mergeProviderLimit(
+  current: ProviderLimit,
+  saved: ProviderLimit,
+  accountId?: string,
+): ProviderLimit {
+  if (!accountId) return { ...saved, accounts: saved.accounts ?? current.accounts };
+  const account = saved.accounts?.find((entry) => entry.account_id === accountId);
+  if (!account) return current;
+  return {
+    ...current,
+    accounts: current.accounts?.map((entry) => (entry.account_id === accountId ? account : entry)),
+  };
 }

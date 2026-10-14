@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	"time"
 )
 
@@ -15,8 +16,9 @@ var ErrInvalidProviderLimit = errors.New("invalid provider limit")
 // ProviderLimitDTO is one provider's limit settings and the reset instants the
 // router currently uses for it.
 type ProviderLimitDTO struct {
-	Provider     string `json:"provider"`
-	ProfileCount int    `json:"profile_count"`
+	Accounts     []ProviderAccountLimitDTO `json:"accounts,omitempty"`
+	Provider     string                    `json:"provider"`
+	ProfileCount int                       `json:"profile_count"`
 	// ModelScoped is true when usage limits of this provider pause one model
 	// at a time.
 	ModelScoped bool `json:"model_scoped"`
@@ -45,9 +47,33 @@ type ProviderLimitsResponse struct {
 // UpdateProviderLimitRequest replaces one provider's operator settings. A nil
 // instant clears that setting.
 type UpdateProviderLimitRequest struct {
-	MonthlyResetAt       *time.Time `json:"monthly_reset_at"`
-	MonthlyResetTimezone string     `json:"monthly_reset_timezone"`
-	BlockUntil           *time.Time `json:"block_until"`
+	AccountID            string                        `json:"account_id,omitempty"`
+	AccountLimits        *agentusage.AccountTierConfig `json:"account_limits,omitempty"`
+	MonthlyResetAt       *time.Time                    `json:"monthly_reset_at"`
+	MonthlyResetTimezone string                        `json:"monthly_reset_timezone"`
+	BlockUntil           *time.Time                    `json:"block_until"`
+}
+
+type ProviderAccountLimitDTO struct {
+	AccountID   string                                          `json:"account_id"`
+	AccountKind string                                          `json:"account_kind"`
+	Profiles    []ProviderTierProfileDTO                        `json:"profiles"`
+	Tiers       map[agentusage.BillingTier]ProviderTierLimitDTO `json:"tiers"`
+	Overrides   agentusage.AccountTierConfig                    `json:"overrides"`
+}
+
+type ProviderTierProfileDTO struct {
+	ID   string                 `json:"id"`
+	Name string                 `json:"name"`
+	Tier agentusage.BillingTier `json:"tier"`
+}
+
+type ProviderTierLimitDTO struct {
+	Defaults  agentusage.TierLimits `json:"defaults"`
+	Learned   agentusage.TierLimits `json:"learned"`
+	Override  agentusage.TierLimits `json:"override"`
+	Effective agentusage.TierLimits `json:"effective"`
+	Usage     agentusage.LimitUsage `json:"usage"`
 }
 
 // ProviderLimitService owns provider limit settings. The runtime composition

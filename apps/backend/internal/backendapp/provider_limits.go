@@ -23,6 +23,7 @@ type providerLimitStore interface {
 // are the prefixes of the models agent profiles launch, plus any provider that
 // already has saved settings.
 type providerLimitService struct {
+	tiers    *providerTierLimitService
 	store    providerLimitStore
 	profiles settingsstore.Repository
 	calendar *dynamicLimitCalendar
@@ -59,7 +60,17 @@ func (s *providerLimitService) ListProviderLimits(ctx context.Context) ([]contro
 	if err != nil {
 		return nil, err
 	}
+	accounts := map[string][]controller.ProviderAccountLimitDTO{}
+	if s.tiers != nil {
+		accounts, err = s.tiers.ListAccounts(ctx)
+		if err != nil {
+			return nil, err
+		}
+	}
 	providers := make(map[string]struct{}, len(profiles)+len(byProvider))
+	for provider := range accounts {
+		providers[provider] = struct{}{}
+	}
 	for provider := range profiles {
 		providers[provider] = struct{}{}
 	}
@@ -78,7 +89,9 @@ func (s *providerLimitService) ListProviderLimits(ctx context.Context) ([]contro
 		if !hasLimit {
 			limit = dynamicruntime.ProviderLimit{Provider: provider}
 		}
-		result = append(result, s.describe(ctx, limit, hasLimit, profiles[provider], now))
+		entry := s.describe(ctx, limit, hasLimit, profiles[provider], now)
+		entry.Accounts = accounts[provider]
+		result = append(result, entry)
 	}
 	return result, nil
 }
@@ -90,23 +103,12 @@ func (s *providerLimitService) UpdateProviderLimit(
 	request controller.UpdateProviderLimitRequest,
 ) (*controller.ProviderLimitDTO, error) {
 	provider = dynamicruntime.NormalizeProvider(provider)
-	if !providerKeyPattern.MatchString(provider) {
-		return nil, fmt.Errorf("%w: provider %q", controller.ErrInvalidProviderLimit, provider)
+	if request.AccountID != "" || request.AccountLimits != nil {
+		return s.updateAccountLimits(ctx, provider, request)
 	}
-	timezone := strings.TrimSpace(request.MonthlyResetTimezone)
-	if timezone != "" {
-		if _, err := time.LoadLocation(timezone); err != nil {
-			return nil, fmt.Errorf("%w: unknown timezone %q", controller.ErrInvalidProviderLimit, timezone)
-		}
-	}
-	limit := dynamicruntime.ProviderLimit{
-		Provider:             provider,
-		MonthlyResetAt:       nonZeroTime(request.MonthlyResetAt),
-		MonthlyResetTimezone: timezone,
-		BlockUntil:           nonZeroTime(request.BlockUntil),
-	}
-	if limit.MonthlyResetAt == nil {
-		limit.MonthlyResetTimezone = ""
+	limit, err := providerLimitFromRequest(provider, request)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.store.SaveProviderLimit(ctx, limit); err != nil {
 		return nil, err
@@ -119,6 +121,26 @@ func (s *providerLimitService) UpdateProviderLimit(
 	limit.UpdatedAt = now
 	described := s.describe(ctx, limit, true, profiles[provider], now)
 	return &described, nil
+}
+
+func providerLimitFromRequest(provider string, request controller.UpdateProviderLimitRequest) (dynamicruntime.ProviderLimit, error) {
+	if !providerKeyPattern.MatchString(provider) {
+		return dynamicruntime.ProviderLimit{}, fmt.Errorf("%w: provider %q", controller.ErrInvalidProviderLimit, provider)
+	}
+	timezone := strings.TrimSpace(request.MonthlyResetTimezone)
+	if timezone != "" {
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return dynamicruntime.ProviderLimit{}, fmt.Errorf("%w: unknown timezone %q", controller.ErrInvalidProviderLimit, timezone)
+		}
+	}
+	limit := dynamicruntime.ProviderLimit{
+		Provider: provider, MonthlyResetAt: nonZeroTime(request.MonthlyResetAt),
+		MonthlyResetTimezone: timezone, BlockUntil: nonZeroTime(request.BlockUntil),
+	}
+	if limit.MonthlyResetAt == nil {
+		limit.MonthlyResetTimezone = ""
+	}
+	return limit, nil
 }
 
 func (s *providerLimitService) describe(
@@ -222,4 +244,24 @@ func utcTime(value *time.Time) *time.Time {
 	}
 	utc := value.UTC()
 	return &utc
+}
+
+func (s *providerLimitService) updateAccountLimits(ctx context.Context, provider string, request controller.UpdateProviderLimitRequest) (*controller.ProviderLimitDTO, error) {
+	if request.AccountID == "" || request.AccountLimits == nil || s.tiers == nil {
+		return nil, controller.ErrInvalidProviderLimit
+	}
+	if err := s.tiers.UpdateAccount(ctx, provider, request.AccountID, *request.AccountLimits); err != nil {
+		return nil, err
+	}
+	all, err := s.ListProviderLimits(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range all {
+		if entry.Provider == provider {
+			return &entry, nil
+		}
+	}
+	return nil, controller.ErrInvalidProviderLimit
+
 }

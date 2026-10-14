@@ -72,6 +72,7 @@ func (t *claudeProbeTracker) release(cacheKey string) {
 }
 
 type usageProviderAdapter struct {
+	tierLimits           *providerTierLimitService
 	svc                  *agentusage.UsageService
 	settingsStore        settingsstore.Repository
 	proxyResolver        usageProxyResolver

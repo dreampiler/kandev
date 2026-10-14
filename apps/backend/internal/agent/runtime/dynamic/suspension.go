@@ -126,6 +126,12 @@ func (e *Engine) resourceWaitDeadline(profile Profile, now time.Time) (time.Time
 		}
 		enabled++
 		suspension := e.SuspensionFor(candidate, now)
+		if until, blocked := e.admissionDeadline(candidate, now); blocked {
+			if !suspension.Blocked() || until.After(suspension.Until) {
+				suspension.State = ResourceWaiting
+				suspension.Until = until
+			}
+		}
 		if !suspension.Blocked() || suspension.Until.IsZero() {
 			return time.Time{}, false
 		}

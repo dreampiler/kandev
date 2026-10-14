@@ -18,6 +18,7 @@ import {
   toLocalInputValue,
 } from "@/lib/settings/provider-limits";
 import { settingsActionClassName } from "./settings-control";
+import { ProviderAccountLimits } from "./provider-account-limits";
 
 type ProviderLimitsCardProps = {
   /** Show only this provider, for a profile whose model belongs to it. */
@@ -103,6 +104,14 @@ function ProviderLimitRow({ limit, onSave }: { limit: ProviderLimit; onSave: Sav
       data-testid={`provider-limit-${limit.provider}`}
     >
       <ProviderLimitSummary limit={limit} />
+      {limit.accounts?.map((account) => (
+        <ProviderAccountLimits
+          key={account.account_id}
+          account={account}
+          provider={limit.provider}
+          save={onSave}
+        />
+      ))}
       <div className="grid gap-2 sm:grid-cols-2">
         <div className="grid gap-1">
           <Label htmlFor={monthlyId}>{t("agents:providerLimitsMonthlyReset")}</Label>

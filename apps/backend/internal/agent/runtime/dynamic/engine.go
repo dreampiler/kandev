@@ -202,6 +202,7 @@ func (e *Engine) selectWithPlan(
 	reason string,
 ) (RouteDecision, error) {
 	observedAt := e.now()
+	profile.AdmissionSessionID = sessionID
 	inputs := e.rankInputs(ctx, profile)
 
 	e.mu.Lock()
@@ -367,6 +368,11 @@ func (e *Engine) eligibilityFor(profile Profile, preferredProfileID string) map[
 // only. It takes the probe lease when a circuit is open so the successor gets a
 // real launch attempt rather than being skipped on a stale verdict.
 func (e *Engine) claimProbe(candidate Candidate, sessionID string, generation int64, now time.Time) bool {
+	if checker, ok := e.usage.(AdmissionChecker); ok {
+		if score, err := checker.CheckAdmission(context.Background(), candidate, sessionID, now); err == nil && score.AdmissionReason != "" {
+			return false
+		}
+	}
 	return e.admitCandidate(candidate, sessionID, generation, now)
 }
 
@@ -638,7 +644,6 @@ func (e *Engine) ApplyFailureContext(
 		return RouteDecision{}, err
 	}
 	e.openCircuitForFailure(ctx, profile, currentCandidateID, failure)
-	e.observeLimit(ctx, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -1683,6 +1688,12 @@ func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, can
 	if !ok {
 		return
 	}
+	if resolver, ok := e.usage.(LimitFailureResolver); ok {
+		if resolved := resolver.ResolveLimitFailure(ctx, candidate, failure); resolved != nil {
+			failure = resolved
+		}
+	}
+	e.observeClassifiedLimit(ctx, candidate, failure)
 	policy := policyForFailure(candidate, failure)
 	now := e.now()
 	for _, key := range failureTargets(candidate, failure, policy) {

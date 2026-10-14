@@ -1507,10 +1507,14 @@ func startGatewayAndServe(
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
 	}
 	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
-	agentSettingsController.SetProviderLimitService(newProviderLimitService(
+	providerLimits := newProviderLimitService(
 		repos.Task, repos.AgentSettings,
 		newDynamicLimitCalendar(services.UsageAdapter, repos.Task),
-	))
+	)
+	if services.UsageAdapter != nil {
+		providerLimits.tiers = services.UsageAdapter.tierLimits
+	}
+	agentSettingsController.SetProviderLimitService(providerLimits)
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)

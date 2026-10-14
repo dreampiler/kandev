@@ -9413,18 +9413,31 @@ func (s *Service) claimSessionRunningForPrompt(
 		}
 	}
 	previousState := freshSession.State
-	switch {
-	case reservation != nil && reservation.identity.SessionIncarnationID != "":
-		if err := s.setQueuedSessionRunningForIdentity(ctx, reservation.identity, freshSession); err != nil {
-			return nil, "", "", false, nil, nil, err
+	claimRunning := func() error {
+		switch {
+		case reservation != nil && reservation.identity.SessionIncarnationID != "":
+			if err := s.setQueuedSessionRunningForIdentity(ctx, reservation.identity, freshSession); err != nil {
+				return err
+			}
+		case expectedIdentity != nil:
+			if err := s.setQueuedSessionRunningForIdentity(ctx, *expectedIdentity, freshSession); err != nil {
+				return err
+			}
+		default:
+			s.setSessionRunning(ctx, taskID, sessionID, freshSession)
 		}
-	case expectedIdentity != nil:
-		if err := s.setQueuedSessionRunningForIdentity(ctx, *expectedIdentity, freshSession); err != nil {
-			return nil, "", "", false, nil, nil, err
-		}
-	default:
-		s.setSessionRunning(ctx, taskID, sessionID, freshSession)
+		return nil
 	}
+	var providerErr error
+	if expectedCurrentTurnID != "" {
+		providerErr = claimRunning()
+	} else {
+		providerErr = s.withProviderTurnAdmission(ctx, freshSession, claimRunning)
+	}
+	if providerErr != nil {
+		return nil, "", "", false, nil, nil, providerErr
+	}
+
 	// The guarded state transition refreshes freshSession in place, so a
 	// competing terminal transition remains visible before turn creation.
 	if requireNonterminalSession && isTerminalSessionState(freshSession.State) {
@@ -9774,15 +9787,28 @@ func (s *Service) claimPromptableSessionForIdentity(
 	taskID, sessionID string,
 	reservation *queuedDispatchReservation,
 ) (models.PromptableTaskSessionClaim, error) {
-	if reservation == nil || reservation.identity.SessionIncarnationID == "" {
-		return s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return models.PromptableTaskSessionClaim{}, err
 	}
-	return s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
-		ctx,
-		reservation.identity.TaskID,
-		reservation.identity.SessionID,
-		reservation.identity.SessionIncarnationID,
-	)
+	var claim models.PromptableTaskSessionClaim
+	var claimErr error
+	err = s.withProviderTurnAdmission(ctx, session, func() error {
+		if reservation == nil || reservation.identity.SessionIncarnationID == "" {
+			claim, claimErr = s.repo.ClaimPromptableTaskSessionIfActive(ctx, sessionID)
+			return claimErr
+		}
+		claim, claimErr = s.repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+			ctx,
+			reservation.identity.TaskID,
+			reservation.identity.SessionID,
+			reservation.identity.SessionIncarnationID,
+		)
+		return claimErr
+	})
+	return claim, err
+
 }
 
 func (s *Service) restoreLifecycleClaimForReservation(

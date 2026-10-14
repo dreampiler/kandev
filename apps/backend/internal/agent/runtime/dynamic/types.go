@@ -86,9 +86,10 @@ type Candidate struct {
 }
 
 type Profile struct {
-	ID         string
-	Version    int64
-	Candidates []Candidate
+	AdmissionSessionID string
+	ID                 string
+	Version            int64
+	Candidates         []Candidate
 	// KeepModelWhileRunning is the profile-wide continuity preference. It binds
 	// a healthy selection across turns and is not a selection mode.
 	KeepModelWhileRunning bool
