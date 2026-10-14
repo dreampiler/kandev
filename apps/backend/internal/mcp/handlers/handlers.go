@@ -290,36 +290,33 @@ type AgentProfileVerifier interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	automationCreator           AutomationCreator
-	taskSvc                     *service.Service
-	workflowCtrl                *workflowctrl.Controller
-	clarificationSvc            ClarificationService
-	sessionCanceller            SessionCanceller
-	inputPauser                 ClarificationInputPauser
-	sessionCeilingReleaser      SessionCeilingReleaser
-	stepCompleteRebinder        StepCompleteSessionRebinder
-	stepCompleteBindingResolver StepCompleteSessionBindingResolver
-	messageCreator              MessageCreator
-	sessionRepo                 SessionRepository
-	taskRepo                    TaskRepository
-	eventBus                    EventBus
-	planService                 *service.PlanService
-	walkthroughService          *service.WalkthroughService
-	sessionLauncher             SessionLauncher
-	taskStopper                 TaskStopper
-	titleBranchRenamer          TaskTitleBranchRenamer
-	stopTaskGetter              func(context.Context, string) (*models.Task, error)
-	childTaskReorderer          ChildTaskReorderService
-	messageQueue                MessageQueuer
-	promptResolver              PromptReferenceResolver
-	promptReader                PromptReader
-	promptWriter                PromptWriter
-	promptAuthEnabled           func() bool
-	userSettingsProvider        UserSettingsProvider
-	agentProfileVerifier        AgentProfileVerifier
-	settingsRegistry            *settingscatalog.Registry
-	settingsOperations          SettingsOperations
-	logger                      *logger.Logger
+	automationCreator      AutomationCreator
+	taskSvc                *service.Service
+	workflowCtrl           *workflowctrl.Controller
+	clarificationSvc       ClarificationService
+	sessionCanceller       SessionCanceller
+	inputPauser            ClarificationInputPauser
+	sessionCeilingReleaser SessionCeilingReleaser
+	messageCreator         MessageCreator
+	sessionRepo            SessionRepository
+	taskRepo               TaskRepository
+	eventBus               EventBus
+	planService            *service.PlanService
+	walkthroughService     *service.WalkthroughService
+	sessionLauncher        SessionLauncher
+	taskStopper            TaskStopper
+	titleBranchRenamer     TaskTitleBranchRenamer
+	stopTaskGetter         func(context.Context, string) (*models.Task, error)
+	messageQueue           MessageQueuer
+	promptResolver         PromptReferenceResolver
+	promptReader           PromptReader
+	promptWriter           PromptWriter
+	promptAuthEnabled      func() bool
+	userSettingsProvider   UserSettingsProvider
+	agentProfileVerifier   AgentProfileVerifier
+	settingsRegistry       *settingscatalog.Registry
+	settingsOperations     SettingsOperations
+	logger                 *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc         *workflowsvc.Service
@@ -364,15 +361,6 @@ type Handlers struct {
 	clarificationResolver *clarification.Resolver
 	clarificationBundles  ClarificationBundleLister
 
-	// Optional task-message operation identity store (set via
-	// SetSendOperationStore). Without it the operation_id parameter on
-	// message_task_kandev and get_task_message_operation_kandev are inert.
-	sendOperationStore SendOperationStore
-	// Optional bounded retention pass for that store (set via
-	// SetSendOperationRetention), already wrapped in maintenance admission by
-	// the wiring site.
-	sendOperationRetention func(ctx context.Context)
-
 	// Optional list_pending_agent_permissions_kandev / resolve_agent_permission_kandev
 	// dependency (external MCP surface only, set via SetAgentPermissionService).
 	agentPermissionSvc AgentPermissionService
@@ -384,13 +372,12 @@ type Handlers struct {
 	// registered and a coordinator principal's propose call 404s via the
 	// guard's nil-service check.
 	coordinatorSvc *coordinator.Service
-
-	// Optional Office cross-workspace access setting (SetOfficeCrossWorkspace).
-	// nil leaves the Office surface confined to its own workspace and Kanban
-	// messages to Office tasks on their session path.
-	officeCrossWorkspace OfficeCrossWorkspace
 	// coordinatorTurns reads the turn ledger; nil while phase 3.1 is off.
 	coordinatorTurns CoordinatorTurnReader
+
+	// extensions holds the product-specific optional dependencies so the base
+	// dependency list stays stable as features are added.
+	extensions HandlerExtensions
 }
 
 func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context, taskID string) {
@@ -441,7 +428,7 @@ func NewHandlers(
 	}
 	if taskSvc != nil {
 		h.stopTaskGetter = taskSvc.GetTask
-		h.childTaskReorderer = taskSvc
+		h.extensions.childTaskReorderer = taskSvc
 		h.taskTransferSvc = taskSvc
 	}
 	if stopper, ok := sessionLauncher.(TaskStopper); ok {
@@ -467,20 +454,6 @@ func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) 
 // out of the counted population.
 func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
 	h.sessionCeilingReleaser = releaser
-}
-
-// SetStepCompleteSessionRebinder wires the orchestrator-owned primary-session
-// promotion used to rebind a step-completion signal when the session the task
-// currently designates for the step is gone or running the wrong profile.
-func (h *Handlers) SetStepCompleteSessionRebinder(rebinder StepCompleteSessionRebinder) {
-	h.stepCompleteRebinder = rebinder
-}
-
-// SetStepCompleteSessionBindingResolver wires the orchestrator-owned durable
-// step binding the step-completion judgment reads to recognize the session a
-// restart or substitution moved onto the current step.
-func (h *Handlers) SetStepCompleteSessionBindingResolver(resolver StepCompleteSessionBindingResolver) {
-	h.stepCompleteBindingResolver = resolver
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
@@ -602,11 +575,9 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
-	d.RegisterFunc(ws.ActionMCPGetTaskMessageOperation, h.handleGetTaskMessageOperation)
 	d.RegisterFunc(ws.ActionMCPListTaskSessions, h.handleListTaskSessions)
 	d.RegisterFunc(ws.ActionMCPListPendingAgentPermissions, h.handleListPendingAgentPermissions)
 	d.RegisterFunc(ws.ActionMCPResolveAgentPermission, h.handleResolveAgentPermission)
-	d.RegisterFunc(ws.ActionMCPReportToHandoffSource, h.handleReportToHandoffSource)
 	if h.coordinatorSvc != nil {
 		d.RegisterFunc(coordinator.ActionProposeTask, h.handleProposeTask)
 		d.RegisterFunc(coordinator.ActionProposeResume, h.proposeKindHandler(coordinator.ProposalKindResume))
@@ -617,6 +588,7 @@ func (h *Handlers) registerTaskReadHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(coordinator.ActionListActivity, h.handleListCoordinatorActivity)
 		d.RegisterFunc(coordinator.ActionListTurns, h.handleListCoordinatorTurns)
 	}
+	h.registerAdditionalReadActions(d)
 }
 
 func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
@@ -640,8 +612,8 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
-	d.RegisterFunc(ws.ActionMCPReorderChildTasks, h.handleReorderChildTasks)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
+	h.registerAdditionalMutationActions(d)
 }
 
 func (h *Handlers) registerTaskPlanHandlers(d *guardedMCPDispatcher) {
@@ -779,56 +751,6 @@ func unmarshalStringField(payload json.RawMessage, fieldName string) (string, er
 		return "", err
 	}
 	return m[fieldName], nil
-}
-
-// resolveListScope returns the identifier a list action should use when the
-// caller omitted it, falling back to the calling task's own scope.
-//
-// An agent that already runs inside a task holds neither its workspace_id nor
-// its workflow_id, so omitting one was a frequent first-call failure that cost
-// a round trip to recover. The fallback is the caller's own task scope, so it
-// never widens a read — it names the board the caller is already on. It applies
-// only when the request carries caller_task_id, which the MCP server sends for
-// exactly the tools whose scope argument is optional; every other caller keeps
-// the required-argument rejection.
-func (h *Handlers) resolveListScope(ctx context.Context, msg *ws.Message, fieldName string) (string, *ws.Message) {
-	value, err := unmarshalStringField(msg.Payload, fieldName)
-	if err != nil {
-		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error())
-	}
-	if value != "" {
-		return value, nil
-	}
-	callerTaskID, callerErr := unmarshalStringField(msg.Payload, "caller_task_id")
-	if callerErr != nil || callerTaskID == "" {
-		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, fieldName+" is required")
-	}
-	task, taskErr := h.taskSvc.GetTask(ctx, callerTaskID)
-	if taskErr != nil || task == nil {
-		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-			fieldName+" is required and could not be resolved from the calling task "+
-				callerTaskID+"; call list_workspaces_kandev (or list_workflows_kandev) and pass the ID explicitly.")
-	}
-	value = taskWorkspaceOrWorkflowID(task, fieldName)
-	if value == "" {
-		return "", wsError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			fieldName+" is required: the calling task "+callerTaskID+" has no "+fieldName+
-				". Pass it explicitly — call list_workspaces_kandev or list_workflows_kandev to discover it.")
-	}
-	return value, nil
-}
-
-// taskWorkspaceOrWorkflowID projects the one scope field a list action keys on
-// from the calling task.
-func taskWorkspaceOrWorkflowID(task *models.Task, fieldName string) string {
-	switch fieldName {
-	case "workspace_id":
-		return task.WorkspaceID
-	case "workflow_id":
-		return task.WorkflowID
-	default:
-		return ""
-	}
 }
 
 // handleListByField is a generic handler for listing resources identified by a single string field.
@@ -4909,38 +4831,6 @@ func (h *Handlers) recordUserMessage(ctx context.Context, taskID, sessionID, pro
 		return nil
 	}
 	return message
-}
-
-// recordUserMessageForPrompt retains creation ownership separately from the
-// message's turn ID: attaching to an existing turn never grants cleanup rights.
-func (h *Handlers) recordUserMessageForPrompt(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*models.Message, string) {
-	if h.taskSvc == nil {
-		return nil, ""
-	}
-	turn, err := h.taskSvc.GetActiveTurn(ctx, sessionID)
-	if err != nil {
-		return h.recordUserMessage(ctx, taskID, sessionID, prompt, metadata), ""
-	}
-	ownedTurnID := ""
-	if turn == nil {
-		turn, err = h.taskSvc.StartTurn(ctx, sessionID)
-		if err != nil {
-			return h.recordUserMessage(ctx, taskID, sessionID, prompt, metadata), ""
-		}
-		ownedTurnID = turn.ID
-	}
-	message, err := h.taskSvc.CreateMessage(ctx, &service.CreateMessageRequest{
-		TaskSessionID: sessionID, TaskID: taskID, TurnID: turn.ID,
-		Content: prompt, AuthorType: "user", Metadata: metadata,
-	})
-	if err != nil {
-		h.logger.Warn("failed to record user message for message_task", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		if ownedTurnID != "" {
-			_, _ = h.taskSvc.RollbackUnsentMessageTurn(ctx, sessionID, ownedTurnID)
-		}
-		return nil, ""
-	}
-	return message, ownedTurnID
 }
 
 func (h *Handlers) deleteRecordedUserMessage(ctx context.Context, message *models.Message, ownedTurnID string) {
