@@ -88,6 +88,9 @@ carried forward unchanged from that iteration.
 
 - [Task 01: Cross-workspace task handoff](task-01-cross-workspace-task-handoff.md)
   — delivers the CLI/route mechanism described above.
+- [Task 02: Launch-session run token](task-02-launch-session-run-token.md)
+  — re-mints the Office run token for the launch session so a first-launch
+  run carries a source session id.
 
 ## Delivery notes
 
