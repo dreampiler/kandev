@@ -51,7 +51,7 @@ func (s *Service) PromptUnattendedWake(ctx context.Context, in UnattendedWakePro
 		}
 		return nil
 	}
-	_, err := s.promptTask(ctx, in.TaskID, in.SessionID, in.Content, "", false, nil, true, launchOriginManual,
+	_, err := s.promptTask(ctx, in.TaskID, in.SessionID, in.Content, "", false, nil, true, launchOriginAutomatic,
 		promptTaskOptions{
 			reserveTurnUntilDispatch: true,
 			disableDispatchRetry:     true,

@@ -97,7 +97,10 @@ describe("AgentProfileDeleteConfirmation", () => {
 
 const FIXTURE_TIMESTAMP = "2026-01-01T00:00:00.000Z";
 
-function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
+function renderConflictDialog(
+  conflict: AgentProfileDeleteConflict | null,
+  options: { intent?: "delete" | "disable"; onConfirm?: () => void } = {},
+) {
   return render(
     <StateProvider
       initialState={{
@@ -129,8 +132,9 @@ function renderConflictDialog(conflict: AgentProfileDeleteConflict | null) {
     >
       <AgentProfileDeleteConflictDialog
         conflict={conflict}
+        intent={options.intent}
         onOpenChange={() => {}}
-        onConfirm={() => {}}
+        onConfirm={options.onConfirm ?? (() => {})}
       />
     </StateProvider>,
   );
@@ -257,6 +261,38 @@ describe("AgentProfileDeleteConflictDialog", () => {
     renderConflictDialog(null);
 
     expect(screen.queryByText(/Delete agent profile/i)).toBeNull();
+  });
+});
+
+// The save path forwards the full blocked list here, so a disable conflict must
+// surface every category (session, watcher, tier, automation, utility) rather
+// than dropping all but utility, and must keep a proceed action.
+describe("AgentProfileDeleteConflictDialog disable intent", () => {
+  it("shows every blocker with a disable action", () => {
+    const onConfirm = vi.fn();
+    renderConflictDialog(
+      {
+        activeSessions: [{ task_id: "t1", task_title: "Live task", is_ephemeral: false }],
+        watchers: [{ id: "linear-w1", kind: "linear", label: "team ENG" }],
+        routingTiers: [{ workspace_id: "ws-1", provider_id: "codex-acp", tier: "balanced" }],
+        automations: [{ id: "auto-1", name: "Weekly dependency sweep", workspace_id: "ws-1" }],
+        utilityAgents: [{ id: "util-1", name: "Summarizer" }],
+      },
+      { intent: "disable", onConfirm },
+    );
+
+    expect(
+      screen.getByText("This profile is currently in use. Disabling it will affect the following:"),
+    ).toBeTruthy();
+    expect(screen.getByText("Live task")).toBeTruthy();
+    expect(screen.getByText(/Linear:/)).toBeTruthy();
+    expect(screen.getByText(/Workspace tier mappings:/)).toBeTruthy();
+    expect(screen.getByText("Weekly dependency sweep")).toBeTruthy();
+    expect(screen.getByText("Summarizer")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable profile" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Delete Anyway/)).toBeNull();
   });
 });
 

@@ -651,6 +651,7 @@ func (s *Service) createAutomation(ctx context.Context, req *CreateAutomationReq
 		Description:                      req.Description,
 		WorkflowID:                       req.WorkflowID,
 		WorkflowStepID:                   req.WorkflowStepID,
+		ParentTaskID:                     req.ParentTaskID,
 		AgentProfileID:                   req.AgentProfileID,
 		ExecutorProfileID:                req.ExecutorProfileID,
 		TaskMode:                         taskMode,

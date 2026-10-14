@@ -165,8 +165,8 @@ func TestExpandHome(t *testing.T) {
 	if got := expandHome("~"); got != home {
 		t.Errorf("expandHome(~) = %q, want %q", got, home)
 	}
-	if got := expandHome("~/.ssh/id_ed25519"); !strings.HasPrefix(got, home+"/.ssh") {
-		t.Errorf("expandHome(~/.ssh/...) = %q, want prefix %q/.ssh", got, home)
+	if got, want := expandHome("~/.ssh/id_ed25519"), filepath.Join(home, ".ssh", "id_ed25519"); got != want {
+		t.Errorf("expandHome(~/.ssh/...) = %q, want %q", got, want)
 	}
 	if got := expandHome("/abs/path"); got != "/abs/path" {
 		t.Errorf("expandHome(/abs/path) = %q, want unchanged", got)
@@ -806,7 +806,7 @@ func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 
 func TestExpandIdentityAgentOpenSSHSyntax(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	t.Setenv("AGENT_DIR", filepath.Join(home, "agents"))
 	t.Setenv("LEGACY_AGENT", filepath.Join(home, "legacy.sock"))
 	t.Setenv("SSH_AUTH_SOCK", filepath.Join(home, "env.sock"))

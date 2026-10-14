@@ -5,6 +5,7 @@ requirements:
   - REQ-OFFICE-AUTOMATION-TARGETS-001
   - REQ-OFFICE-AUTOMATION-TARGETS-002
   - REQ-OFFICE-AUTOMATION-TARGETS-003
+  - REQ-OFFICE-AUTOMATION-TARGETS-004
 ---
 
 # Automation Target Modes System Design
@@ -29,6 +30,7 @@ MCP surface.
 | `REQ-OFFICE-AUTOMATION-TARGETS-001` | Data and contracts, control flow, persistence |
 | `REQ-OFFICE-AUTOMATION-TARGETS-002` | Components and responsibilities, control flow, failure and recovery |
 | `REQ-OFFICE-AUTOMATION-TARGETS-003` | Frontend boundary and observability |
+| `REQ-OFFICE-AUTOMATION-TARGETS-004` | Data and contracts, control flow, persistence |
 
 ## Components and responsibilities
 
@@ -38,7 +40,9 @@ MCP surface.
 - `internal/orchestrator` resolves the target before task creation. It creates
   hidden tasks with `TaskOriginAutomationRun` and visible tasks with a distinct
   visible automation origin. It records the run ID in task metadata and binds
-  the exact session and turn after launch.
+  the exact session and turn after launch. It carries the automation's optional
+  `parent_task_id` through `ReviewTaskRequest.ParentID` into the task service,
+  and preserves it in the retry launch snapshot.
 - `internal/task/service` receives an empty repository list for a valid scratch
   task. It requires a workflow for a visible automation task and retains the
   normal workflow-step resolver when the step is omitted.
@@ -67,7 +71,9 @@ The workflow, repository, branch, agent-profile, and executor-profile controls
 are shared with task creation. The workflow menu shows ordered steps and the
 configured start marker. Repository rows use the same paired chips and branch
 search. Profile menus use the same search, logos, labels, and availability
-rules. Automation code owns no parallel option catalog.
+rules. The optional parent control reuses the shared searchable task picker and
+is scoped to the automation's workspace. Automation code owns no parallel option
+catalog.
 
 On phones the existing automation editor remains the primary scroll surface.
 Target and continuity choices use the existing stacked control pattern with
@@ -83,6 +89,7 @@ bindings:
 ```text
 task_mode: automation_run | normal_task
 repositories: [{repository_id, base_branch}, ...]
+parent_task_id: <task id, optional>
 ```
 
 `automation_run` is the compatibility default when older clients omit the
@@ -90,6 +97,13 @@ field. An empty `repositories` list means no repository. The compatibility
 `repository_ids` field is accepted from older clients and resolves each ID to
 its configured default branch, but no empty request falls back to the first
 workspace repository.
+
+An optional `parent_task_id` names an existing task in the same workspace. It is
+carried through dispatch to `CreateTaskRequest.ParentID`; the task service's
+existing hierarchy admission resolves and validates it, so the feature adds no
+second parent rule. An empty value keeps the firing's task top-level. Because it
+names a task row in this install, `parent_task_id` is excluded from portable
+export like `continuation_task_id`.
 
 The task model adds a visible automation provenance value, for example
 `automation_task`. Board, sidebar, and normal task queries continue to exclude
@@ -169,12 +183,14 @@ Keep `task_mode` on `automations` and store ordered repository bindings in
 repositories. Existing non-empty repository bindings use the repository's
 configured default branch when their legacy branch is empty. Existing empty
 and `workspace_default` rows migrate to no repositories; the first-repository
-fallback is removed.
+fallback is removed. `parent_task_id` is a nullable-by-default `TEXT NOT NULL
+DEFAULT ''` column added by an idempotent `ADD COLUMN` migration; empty means
+top-level.
 
 Portable YAML includes both user choices and repository IDs, but excludes
-`continuation_task_id`, run bindings, rendered titles, session pointers, and
-cleanup jobs. Import normalizes omitted target fields to the compatibility
-defaults and revalidates executor/workflow combinations.
+`continuation_task_id`, `parent_task_id`, run bindings, rendered titles, session
+pointers, and cleanup jobs. Import normalizes omitted target fields to the
+compatibility defaults and revalidates executor/workflow combinations.
 
 Changing target mode, repository/base-branch pairs, workflow, agent profile, or
 executor profile rotates the continuation on the next firing.

@@ -908,7 +908,16 @@ func localPathFromCloneURL(raw string) string {
 		return ""
 	}
 	path, err := url.PathUnescape(parsed.Path)
-	if err != nil || !filepath.IsAbs(path) {
+	if err != nil {
+		return ""
+	}
+	// A Windows file URL keeps the drive inside its path ("/C:/repo.git").
+	// VolumeName is always empty off Windows, so POSIX paths are unchanged.
+	if trimmed := strings.TrimPrefix(path, "/"); filepath.VolumeName(trimmed) != "" {
+		path = trimmed
+	}
+	path = filepath.FromSlash(path)
+	if !filepath.IsAbs(path) {
 		return ""
 	}
 	return path

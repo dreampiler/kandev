@@ -53,3 +53,9 @@ var ErrIntegrityCheckFailed = errors.New("staged database failed PRAGMA integrit
 // ErrBackupUnverified is returned when the pre-execution backup could not
 // be created or verified. Execution never proceeds past this point.
 var ErrBackupUnverified = errors.New("could not create or verify a pre-execution backup")
+
+// ErrPartial reports that the run made partial progress: some step ran out
+// of its offline budget or compaction was not applied. Committed deletes are
+// backed up and rerunning the command continues the bounded work. It is not
+// a fatal failure.
+var ErrPartial = errors.New("maintenance completed with partial results; rerun to continue")

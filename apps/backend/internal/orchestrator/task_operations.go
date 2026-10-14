@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"runtime"
 	"sort"
@@ -871,35 +870,11 @@ func (s *Service) startCreatedSession(
 
 	// If the workflow step overrode the profile, update the session record in DB
 	// so the frontend tab displays the correct agent (it reads session.agent_profile_id).
-	if effectiveProfileID != session.AgentProfileID {
-		observedState := session.State
-		s.logger.Info("updating session agent profile for workflow step override",
-			zap.String("session_id", sessionID),
-			zap.String("old_profile", session.AgentProfileID),
-			zap.String("new_profile", effectiveProfileID))
-		session.AgentProfileID = effectiveProfileID
-		// Re-resolve the agent profile snapshot so the tab shows the correct agent logo/name.
-		// Set a minimal snapshot first so stale data is never persisted if resolution fails.
-		session.AgentProfileSnapshot = map[string]interface{}{"id": effectiveProfileID}
-		if profileInfo, err := s.agentManager.ResolveAgentProfile(ctx, effectiveProfileID); err != nil {
-			s.logger.Warn("failed to resolve agent profile snapshot for workflow step override",
-				zap.String("session_id", sessionID),
-				zap.String("profile_id", effectiveProfileID),
-				zap.Error(err))
-		} else if profileInfo != nil {
-			session.AgentProfileSnapshot = map[string]interface{}{
-				"id":             profileInfo.ProfileID,
-				"name":           profileInfo.ProfileName,
-				"agent_id":       profileInfo.AgentID,
-				"agent_name":     profileInfo.AgentName,
-				"model":          profileInfo.Model,
-				"mode":           profileInfo.Mode,
-				"config_options": maps.Clone(profileInfo.ConfigOptions),
-			}
-		}
-		if err := s.persistFullTaskSessionIfCurrent(ctx, session, observedState); err != nil {
-			return nil, fmt.Errorf("persist workflow session profile: %w", err)
-		}
+	switched, err := s.applyWorkflowStepProfileOverride(ctx, session, effectiveProfileID)
+	if err != nil {
+		return nil, err
+	}
+	if switched {
 		// Tag as workflow-spawned provenance only after the guarded profile
 		// write succeeds; a concurrent stop owns a rejected session.
 		s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
@@ -1474,6 +1449,11 @@ type startTaskOptions struct {
 	// SpawnOrigin is set when another agent session spawned this launch; it
 	// produces the spawner-attribution system block on the first turn.
 	SpawnOrigin *SpawnOrigin
+	// Automatic marks a server-classified automatic launch that is not an
+	// autoStart (an agent/MCP-initiated launch). It selects the automatic class
+	// for the ceiling and memory guard without changing the launch's
+	// explicit/manual creation authority.
+	Automatic bool
 	// EntryOptions carries one-shot workflow-move overrides for a fresh
 	// auto-started session. The profile override is applied via the profile
 	// argument (with ProfileExplicit); the instructions are appended once to the
@@ -1662,12 +1642,17 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		zap.Bool("auto_start", autoStart),
 		zap.Int("attachments", len(attachments)))
 
-	origin := opts.Origin
-	if origin == "" {
-		origin = originFromAutoStart(autoStart)
+	baseOrigin := opts.Origin
+	if baseOrigin == "" {
+		baseOrigin = originFromAutoStart(autoStart)
 	}
+	// The admission class can differ from the creation authority. An
+	// agent/MCP-initiated launch (opts.Automatic) is admitted as automatic so it
+	// is subject to the session ceiling and memory guard, while its explicit /
+	// autoStart origin is what still decides manual-creation authority.
+	ceilingOrigin := ceilingLaunchOrigin(baseOrigin, opts.Automatic)
 	manualTaskID := ""
-	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
+	if baseOrigin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
 	}
 	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
@@ -1695,7 +1680,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, agentProfileID, origin,
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, agentProfileID, ceilingOrigin,
 		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
 	if err != nil {
 		return nil, err
@@ -3474,7 +3459,7 @@ func (s *Service) resumeTaskSessionAndPrompt(
 		ctx,
 		taskID,
 		sessionID,
-		executor.ResumeOptions{Origin: string(launchOriginManual)},
+		executor.ResumeOptions{Origin: string(launchOriginAutomatic)},
 		func(resumeCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 			var promptErr error
 			options := promptOptions
@@ -3488,7 +3473,7 @@ func (s *Service) resumeTaskSessionAndPrompt(
 				planMode,
 				attachments,
 				false,
-				launchOriginManual,
+				launchOriginAutomatic,
 				options,
 			)
 			return promptErr

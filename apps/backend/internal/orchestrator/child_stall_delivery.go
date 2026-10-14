@@ -24,6 +24,10 @@ var errChildStallQueueUnavailable = errors.New("message queue is not configured"
 // not be read, so a nudge cannot be routed.
 var errChildStallSessionUnavailable = errors.New("child stall session is unavailable")
 
+// errChildStallTaskUnavailable means the stalled child's task row could not be
+// read, so the (task, step) nudge streak cannot be advanced.
+var errChildStallTaskUnavailable = errors.New("child stall task is unavailable")
+
 // reasonNudgeEscalated records a candidate suppressed because its streak
 // already alerted the parent.
 const reasonNudgeEscalated = "nudge_escalated"
@@ -82,7 +86,15 @@ func (p *ChildStallProducer) deliverMissingSignal(
 		p.retryLater(ctx, turn, state, decision, err, now)
 		return
 	}
-	streak, action := p.nextNudgeStreak(ctx, childSession, decision, start.TransitionID)
+	childTask, err := p.store.GetTask(ctx, turn.TaskID)
+	if err != nil || childTask == nil {
+		if err == nil {
+			err = errChildStallTaskUnavailable
+		}
+		p.retryLater(ctx, turn, state, decision, err, now)
+		return
+	}
+	streak, action := p.nextNudgeStreak(childTask, decision, start.TransitionID)
 	switch action {
 	case childstall.NudgeActionSuppress:
 		state.State, state.Reason = string(childstall.OutcomeSuppressed), reasonNudgeEscalated
@@ -224,7 +236,7 @@ func (p *ChildStallProducer) deliverChildNudge(
 	childSession *models.TaskSession,
 	now time.Time,
 ) bool {
-	alert := p.buildNudge(turn, start)
+	alert := p.buildNudge(turn, start, decision.BlockedReason)
 	queued, identity, err := p.admitAlert(ctx, turn, start, childSession, alert, childstall.CauseMissingCompletionSignal)
 	var stale *childStallStaleError
 	switch {
@@ -241,17 +253,19 @@ func (p *ChildStallProducer) deliverChildNudge(
 	return true
 }
 
-// nextNudgeStreak folds the candidate into the child session's stored streak
-// and returns the routing action. The stored streak is never mutated here; it
-// is persisted only after a successful delivery.
+// nextNudgeStreak folds the candidate into the child task's stored streak and
+// returns the routing action. It is keyed to the task, not the settled turn's
+// session, so a session substitution does not reset the escalation count; the
+// streak still restarts when the workflow entry (transition) changes. The
+// stored streak is never mutated here; it is persisted only after a successful
+// delivery.
 func (p *ChildStallProducer) nextNudgeStreak(
-	ctx context.Context,
-	childSession *models.TaskSession,
+	childTask *models.Task,
 	decision childstall.Decision,
 	transitionID int64,
 ) (childstall.NudgeStreak, childstall.NudgeAction) {
 	prev := childstall.NudgeStreak{}
-	if persisted, ok := models.LoadChildStallNudgeStreak(childSession.Metadata); ok {
+	if persisted, ok := models.LoadChildStallNudgeStreak(childTask.Metadata); ok {
 		prev = childstall.NudgeStreak{
 			Cause:        childstall.Cause(persisted.Cause),
 			TransitionID: persisted.TransitionID,
@@ -262,7 +276,7 @@ func (p *ChildStallProducer) nextNudgeStreak(
 	return childstall.AdvanceNudge(prev, decision.Cause, transitionID, p.nudgePolicy)
 }
 
-// persistNudgeStreak stores the advanced streak on the child session. A write
+// persistNudgeStreak stores the advanced streak on the child task. A write
 // failure is logged and does not undo the delivered reminder.
 func (p *ChildStallProducer) persistNudgeStreak(
 	ctx context.Context,
@@ -277,11 +291,20 @@ func (p *ChildStallProducer) persistNudgeStreak(
 		Escalated:    streak.Escalated,
 		UpdatedAt:    now,
 	}
-	if err := p.store.SetSessionMetadataKey(
-		ctx, turn.TaskSessionID, models.SessionMetaKeyChildStallNudge, persisted.ToMap(),
-	); err != nil {
+	stored, err := p.store.SetTaskMetadataKeyIfNotArchived(
+		ctx, turn.TaskID, models.TaskMetaKeyChildStallNudge, persisted.ToMap(),
+	)
+	if err != nil {
 		p.log.Warn("failed to persist child stall nudge streak",
 			zap.String("turn_id", turn.ID), zap.Error(err))
+		return
+	}
+	if !stored {
+		// The task stopped accepting metadata (archiving/archived) before the
+		// streak write; the delivery already happened, so only make the missed
+		// escalation bookkeeping visible.
+		p.log.Debug("child stall nudge streak not persisted: task no longer accepts metadata",
+			zap.String("turn_id", turn.ID))
 	}
 }
 
@@ -441,22 +464,33 @@ func childStallAdmissionKey(prefix string, turn *models.Turn, start models.Child
 }
 
 // buildNudge builds the short reminder queued for the child's own session.
-func (p *ChildStallProducer) buildNudge(turn *models.Turn, start models.ChildStallStart) childStallAlert {
+func (p *ChildStallProducer) buildNudge(turn *models.Turn, start models.ChildStallStart, blockedReason string) childStallAlert {
 	metadata := map[string]interface{}{
 		messagequeue.MetadataChildStallNudge: true,
 		"turn_id":                            turn.ID,
 	}
 	return childStallAlert{
 		key:      childStallNudgeKey(turn, start),
-		content:  formatChildStallNudge(),
+		content:  formatChildStallNudge(blockedReason),
 		metadata: metadata,
 	}
 }
 
-func formatChildStallNudge() string {
-	return "STEP COMPLETION SIGNAL MISSING\n\n" +
-		"Your previous turn ended without calling step_complete_kandev, so this workflow step did not advance.\n\n" +
-		"If you have finished this step, call step_complete_kandev with a summary. Otherwise, continue the work."
+// formatChildStallNudge builds the reminder text. When a completion signal for
+// the current step was refused by the ownership/profile gate, the reminder names
+// that refusal instead of implying the agent never signalled.
+func formatChildStallNudge(blockedReason string) string {
+	var b strings.Builder
+	b.WriteString("STEP COMPLETION SIGNAL MISSING\n\n")
+	if reason := strings.TrimSpace(blockedReason); reason != "" {
+		b.WriteString("Your step_complete_kandev call was refused, so this workflow step did not advance: ")
+		b.WriteString(reason)
+		b.WriteString("\n\nResolve the refusal and call step_complete_kandev again with a summary. Otherwise, continue the work.")
+		return b.String()
+	}
+	b.WriteString("Your previous turn ended without calling step_complete_kandev, so this workflow step did not advance.\n\n")
+	b.WriteString("If you have finished this step, call step_complete_kandev with a summary. Otherwise, continue the work.")
+	return b.String()
 }
 
 func (p *ChildStallProducer) buildAlert(

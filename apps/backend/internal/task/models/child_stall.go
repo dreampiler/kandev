@@ -20,9 +20,15 @@ const (
 	TurnMetaKeyChildStall = "child_stall"
 	// TurnMetaKeyChildStallResolved marks a turn the producer no longer scans.
 	TurnMetaKeyChildStallResolved = "child_stall_resolved"
-	// SessionMetaKeyChildStallNudge holds the producer's consecutive
-	// missing-completion-signal nudge streak for a child session.
-	SessionMetaKeyChildStallNudge = "child_stall_nudge"
+	// TaskMetaKeyChildStallNudge holds the producer's consecutive
+	// missing-completion-signal nudge streak for a child task, keyed by the
+	// workflow entry the stalls share. It is task-scoped, not session-scoped, so
+	// a session substitution does not reset the streak.
+	TaskMetaKeyChildStallNudge = "child_stall_nudge"
+	// SessionMetaKeyStepCompleteRejection holds the short reason a step_complete
+	// call was rejected by the ownership/profile gate. The child reminder reads
+	// it to name the real block instead of reporting a missing signal.
+	SessionMetaKeyStepCompleteRejection = "step_complete_rejection"
 )
 
 // Child-turn settlement kinds stored under TurnMetaKeyChildStallSettlement.
@@ -122,13 +128,44 @@ func (s ChildStallNudgeStreak) ToMap() map[string]interface{} {
 	return value
 }
 
-// LoadChildStallNudgeStreak decodes the nudge streak from session metadata.
+// LoadChildStallNudgeStreak decodes the nudge streak from task metadata.
 func LoadChildStallNudgeStreak(metadata map[string]interface{}) (ChildStallNudgeStreak, bool) {
 	var streak ChildStallNudgeStreak
-	if !decodeTurnMetadataValue(metadata, SessionMetaKeyChildStallNudge, &streak) {
+	if !decodeTurnMetadataValue(metadata, TaskMetaKeyChildStallNudge, &streak) {
 		return ChildStallNudgeStreak{}, false
 	}
 	return streak, true
+}
+
+// StepCompleteRejection is the short reason a step_complete call was refused by
+// the ownership/profile gate, recorded on the calling session. StepID scopes it
+// to the step that was refused so a later step never reads a stale reason.
+type StepCompleteRejection struct {
+	StepID string    `json:"step_id"`
+	Reason string    `json:"reason"`
+	At     time.Time `json:"at"`
+}
+
+// ToMap returns the JSON-compatible metadata value.
+func (s StepCompleteRejection) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"step_id": s.StepID,
+		"reason":  s.Reason,
+		"at":      s.At.UTC().Format(time.RFC3339Nano),
+	}
+}
+
+// LoadStepCompleteRejection decodes a recorded step_complete rejection from
+// session metadata.
+func LoadStepCompleteRejection(metadata map[string]interface{}) (StepCompleteRejection, bool) {
+	var rejection StepCompleteRejection
+	if !decodeTurnMetadataValue(metadata, SessionMetaKeyStepCompleteRejection, &rejection) {
+		return StepCompleteRejection{}, false
+	}
+	if rejection.Reason == "" {
+		return StepCompleteRejection{}, false
+	}
+	return rejection, true
 }
 
 // ChildStallSettlement returns the recorded non-live settlement kind, or "".

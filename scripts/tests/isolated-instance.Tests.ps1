@@ -91,6 +91,33 @@ try {
     Assert-SafeIsolatedHomePaths -HomeDir $safeHome -Paths @((Join-Path $dataJunction 'kandev.db'))
   } 'A database path inside a reused home must not pass through a junction.'
 
+  # Launch-path guard: the operational roots are refused, and a declared
+  # isolated root is the only sanctioned home for build outputs handed off by a
+  # task copy that itself sits under an operational root.
+  $isolatedRoot = Join-Path $testRoot 'iso'
+  New-Item -ItemType Directory -Path (Join-Path $isolatedRoot 'bin') -Force | Out-Null
+
+  Assert-Throws {
+    Assert-OperationalBinaryPath -Path (Join-Path $productionHome 'apps\backend\bin\kandev.exe') `
+      -OperationalRoots @($productionHome)
+  } 'A binary under an operational root must be refused.'
+  Assert-True (($null -eq (Assert-OperationalBinaryPath -Path (Join-Path $isolatedRoot 'bin\kandev.exe') `
+        -OperationalRoots @($productionHome)))) 'A binary outside the operational roots must be accepted.'
+  Assert-True (($null -eq (Assert-OperationalBinaryPath -Path (Join-Path (Join-Path $profileRoot '.kandev-other') 'bin\kandev.exe') `
+        -OperationalRoots @($productionHome)))) 'A shared-prefix sibling directory must not count as inside.'
+
+  Assert-Throws {
+    Assert-IsolatedLaunchRoot -Path (Join-Path $isolatedRoot 'bin') -IsolatedRoot ''
+  } 'A -BinDir request without a declared isolated root must be refused.'
+  Assert-Throws {
+    Assert-IsolatedLaunchRoot -Path (Join-Path $testRoot 'outside') -IsolatedRoot $isolatedRoot
+  } 'A -BinDir outside the declared isolated root must be refused.'
+  Assert-Throws {
+    Assert-IsolatedLaunchRoot -Path (Join-Path $isolatedRoot 'sibling-name') -IsolatedRoot (Join-Path $isolatedRoot 'bin')
+  } 'A -BinDir that only shares a prefix with the isolated root must be refused.'
+  Assert-True (($null -eq (Assert-IsolatedLaunchRoot -Path (Join-Path $isolatedRoot 'bin') -IsolatedRoot $isolatedRoot))) `
+    'A -BinDir inside the declared isolated root must be accepted.'
+
   $originalVariables = @{
     KANDEV_DATABASE_DRIVER = $env:KANDEV_DATABASE_DRIVER
     KANDEV_INTERNAL_CONFIG_FILE = $env:KANDEV_INTERNAL_CONFIG_FILE

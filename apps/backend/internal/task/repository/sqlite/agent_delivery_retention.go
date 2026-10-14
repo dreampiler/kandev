@@ -37,6 +37,7 @@ type agentDeliveryRetentionCandidate struct {
 	canRetire             bool
 	cursorExists          bool
 	cursorIdentityValid   bool
+	streamCompleted       bool
 	projectedSequence     int64
 	retiredSequence       int64
 	firstTerminalSequence sql.NullInt64
@@ -312,8 +313,12 @@ func normalizeAgentDeliveryRetentionOptions(options models.AgentDeliveryRetentio
 	if options.MaxPayloadBytes <= 0 || options.MaxPayloadBytes > agentDeliveryRetentionPayloadByteLimit {
 		options.MaxPayloadBytes = agentDeliveryRetentionPayloadByteLimit
 	}
-	if options.WorkTimeout <= 0 || options.WorkTimeout > agentDeliveryRetentionWorkTimeout {
-		options.WorkTimeout = agentDeliveryRetentionWorkTimeout
+	workTimeoutCap := agentDeliveryRetentionWorkTimeout
+	if options.OfflineMaintenance {
+		workTimeoutCap = agentDeliveryMaintenanceWorkTimeout
+	}
+	if options.WorkTimeout <= 0 || options.WorkTimeout > workTimeoutCap {
+		options.WorkTimeout = workTimeoutCap
 	}
 	if options.PayloadGrace <= 0 || options.PayloadGrace > 30*24*time.Hour {
 		options.PayloadGrace = agentDeliveryRetentionPayloadGrace

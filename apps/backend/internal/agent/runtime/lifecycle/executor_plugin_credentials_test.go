@@ -232,7 +232,7 @@ func TestAgentctlFileUploaderPreservesExistingFileWhenChunkTransferFails(t *test
 
 func TestUploadPluginExecutorAgentCredentialsCopiesSelectedFiles(t *testing.T) {
 	localHome := t.TempDir()
-	t.Setenv("HOME", localHome)
+	setTestUserHome(t, localHome)
 	source := filepath.Join(localHome, ".local", "share", "opencode", "auth.json")
 	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
 		t.Fatal(err)

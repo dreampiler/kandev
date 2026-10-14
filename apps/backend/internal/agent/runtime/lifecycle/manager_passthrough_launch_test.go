@@ -210,7 +210,7 @@ func TestCursorPassthroughStartAndResumePublishAfterMCPPreparation(t *testing.T)
 	for _, path := range []string{"start", "resume"} {
 		t.Run(path, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setTestUserHome(t, home)
 			mgr, runner, execution := newPassthroughRunnerManager(t)
 			t.Cleanup(func() {
 				if execution.PassthroughProcessID != "" {

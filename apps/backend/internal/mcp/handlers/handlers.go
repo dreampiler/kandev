@@ -2740,6 +2740,9 @@ func (h *Handlers) handleStepComplete(ctx context.Context, msg *ws.Message) (*ws
 	if !stored {
 		return h.handleDuplicateStepComplete(ctx, msg, req.TaskID, req.SessionID, launchStepID, session)
 	}
+	// The current step's signal is now durably recorded, so any earlier refusal
+	// reason recorded for this session is resolved.
+	h.clearStepCompleteRejection(ctx, req.SessionID)
 
 	// Counted here, at the durable bag write, not after publishStepCompletionEvent
 	// below: publish is a delivery concern, and a publish failure sends the agent
