@@ -1664,6 +1664,9 @@ func (r *Repository) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
 	// expectedStepID doubles as the source step to lock: it is, by
 	// construction, the step this task is expected to currently occupy.
 	_, applied, err = r.updateTaskWithWorkflowStepAdmission(ctx, task, expectedStepID, targetStepID, limit, nil, false, expectedStepID, "", nil, nil, nil)
+	if errors.Is(err, models.ErrStepCompletionEntryChanged) {
+		return false, nil
+	}
 	return applied, err
 }
 
@@ -2163,6 +2166,11 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 			return false, false, err
 		}
 	}
+	if current, entryErr := r.completionEntryStillCurrentInTx(ctx, tx, task.ID); entryErr != nil {
+		return false, false, entryErr
+	} else if !current {
+		return false, false, models.ErrStepCompletionEntryChanged
+	}
 	if workflowChangeSource != nil {
 		if err := r.validateWorkflowChangeSourceInTx(ctx, tx, task.ID, actualWorkflowID, actualSourceStepID, workflowChangeSource); err != nil {
 			return false, false, err
@@ -2318,6 +2326,7 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	if err := tx.Commit(); err != nil {
 		return false, false, err
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 	r.dispatchStepEntry(ctx, task.ID, task.WorkflowID, task.WorkflowStepID, entryID, markerEntryID)
 	return admitted, true, nil
 }

@@ -811,6 +811,7 @@ func startAgentInfrastructure(
 		repos.Task,
 		repos.AgentSettings,
 		services.DynamicProfileResolver,
+		log,
 		orchestratorSvc.LaunchDynamicRouteAction,
 	))
 	orchestratorSvc.SetProfileExecutionResolver(services.DynamicProfileResolver)
@@ -820,6 +821,9 @@ func startAgentInfrastructure(
 	// reconciler when its agent type left the registry) self-heal on the
 	// next poll instead of looping on "profile not found" forever.
 	orchestratorSvc.SetProfileLookup(&profileLookupAdapter{store: repos.AgentSettings})
+	// The session ceiling ranks and, once aged, admits a workspace
+	// coordinator's launch from the durable profile role alone.
+	orchestratorSvc.SetCeilingCoordinatorProfiles(ceilingCoordinatorProfiles{store: repos.AgentSettings})
 	// Watcher dispatch self-heals a binding whose repository was soft-deleted
 	// after the watch was configured, instead of creating an orphan task row.
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})
@@ -1249,25 +1253,19 @@ func startGatewayAndServe(
 		return nil
 	}
 	persistenceHealth := requiredstores.NewHealth(repos.RequiredStores, dbPool, log)
-	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
-		Version:   Version,
-		Commit:    Commit,
-		BuildTime: BuildTime,
-		BootID:    agentRuntimeAvailability.BootID(),
-	}, systemsvc.Wiring{
-		OrchestratorShutdown:              func() { _ = orchestratorSvc.Stop() },
-		DatabaseQuiesce:                   databaseQuiesce,
-		RestoreQuiesce:                    restoreQuiesce,
-		SystemSettings:                    repos.SystemSettings,
-		RequiredStores:                    repos.RequiredStores,
-		PersistenceHealth:                 persistenceHealth,
-		MessageQueue:                      orchestratorSvc.GetMessageQueue(),
-		MessageQueueConfig:                queueConfiguration(cfg),
-		SessionCapacity:                   orchestratorSvc,
-		SessionCapacityEnvironment:        sessionCapacityEnvironment,
-		ControlSessionCapacityEnvironment: controlSessionCapacityEnvironment,
-		TaskSessions:                      repos.Task,
-		AgentRuntimeRecovery:              agentRuntimeRecovery,
+	systemWiring := systemsvc.Wiring{
+		OrchestratorShutdown:       func() { _ = orchestratorSvc.Stop() },
+		DatabaseQuiesce:            databaseQuiesce,
+		RestoreQuiesce:             restoreQuiesce,
+		SystemSettings:             repos.SystemSettings,
+		RequiredStores:             repos.RequiredStores,
+		PersistenceHealth:          persistenceHealth,
+		MessageQueue:               orchestratorSvc.GetMessageQueue(),
+		MessageQueueConfig:         queueConfiguration(cfg),
+		SessionCapacity:            orchestratorSvc,
+		SessionCapacityEnvironment: sessionCapacityEnvironment,
+		TaskSessions:               repos.Task,
+		AgentRuntimeRecovery:       agentRuntimeRecovery,
 		ToolPayloadChanged: func(eventCtx context.Context, ids []string) {
 			for _, id := range ids {
 				message, err := services.Task.GetMessage(eventCtx, id)
@@ -1280,7 +1278,14 @@ func startGatewayAndServe(
 				}
 			}
 		},
-	})
+	}
+	systemWiring.ControlSessionCapacityEnvironment = controlSessionCapacityEnvironment
+	systemSvc := systemsvc.Provide(cfg, log, dbPool, eventBus, systemsvc.BuildInfo{
+		Version:   Version,
+		Commit:    Commit,
+		BuildTime: BuildTime,
+		BootID:    agentRuntimeAvailability.BootID(),
+	}, systemWiring)
 	storageComposition, err := provideStorageCompositionWithDependencies(
 		cfg, dbPool, systemSvc.Jobs, eventBus, lifecycleMgr, services.WorktreeMgr, services.Task,
 		log,
@@ -1496,25 +1501,7 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(services.UsageAdapter)
 	}
 
-	// The settings current-choice preview shares the tier runtime's usage
-	// snapshot, its pure preview and the live route-health registry, so the
-	// editor and a real selection answer from the same evidence including a
-	// paused binding. The resolver is the same instance routing uses, so a
-	// candidate's binding key resolves identically on both paths.
-	previewSnapshot := newDynamicSelectionPreview(services, repos.Task)
-	agentSettingsController.SetDynamicPreviewProvider(previewSnapshot)
-	if services.DynamicProfileResolver != nil {
-		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
-	}
-	agentSettingsController.SetProfileUsageProvider(newProfileUsageLister(services.UsageAdapter, repos.Task))
-	providerLimits := newProviderLimitService(
-		repos.Task, repos.AgentSettings,
-		newDynamicLimitCalendar(services.UsageAdapter, repos.Task),
-	)
-	if services.UsageAdapter != nil {
-		providerLimits.tiers = services.UsageAdapter.tierLimits
-	}
-	agentSettingsController.SetProviderLimitService(providerLimits)
+	wireAgentSettingsPreview(services, repos, agentSettingsController)
 
 	services.Task.StartAutoArchiveLoop(ctx)
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
@@ -1751,19 +1738,9 @@ func constructOfficeServices(
 		return runProcessorSvc, true
 	}
 
-	// Office agent runtime JWTs are signed with an HMAC key. When the operator
-	// has not supplied one, load or create a persisted key under the Kandev
-	// home so tokens survive a restart instead of being invalidated by a fresh
-	// ephemeral key. A persistence failure aborts Office startup rather than
-	// silently downgrading to an ephemeral key.
-	officeJWTKey := cfg.Office.JWTSigningKey
-	if officeJWTKey == "" {
-		resolved, err := resolveOfficeJWTSigningKey(cfg.ResolvedHomeDir(), log)
-		if err != nil {
-			log.Error("office jwt signing key unavailable; refusing to start Office with an ephemeral key", zap.Error(err))
-			return nil, false
-		}
-		officeJWTKey = resolved
+	officeJWTKey, ok := resolveOfficeJWTKey(cfg, log)
+	if !ok {
+		return nil, false
 	}
 
 	services.Office = runProcessorSvc

@@ -358,10 +358,14 @@ func TestUpdateWorkflowHandler_Success(t *testing.T) {
 		"workflow_id": "wf-1",
 		"name":        "Updated",
 		"description": "New description",
+		"hidden":      true,
 	})
 
 	assert.False(t, result.IsError)
 	assert.Equal(t, ws.ActionMCPUpdateWorkflow, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["hidden"])
 }
 
 func TestUpdateWorkflowHandler_MissingWorkflowID(t *testing.T) {

@@ -418,7 +418,7 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 	}
 	durableEvent := durableAgentEvent(execution, event)
 	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
-		context.Background(), execution, durableEvent, repository, nil,
+		context.Background(), execution, durableEvent, repository, nil, streamAdmissionRetry{},
 	)
 	if err != nil {
 		t.Fatalf("prepare durable event: %v", err)

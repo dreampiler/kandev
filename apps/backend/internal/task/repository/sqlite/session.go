@@ -45,6 +45,7 @@ func (r *Repository) CreateTurn(ctx context.Context, turn *models.Turn) error {
 // never fail because telemetry could not be resolved.
 func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.Turn) (bool, error) {
 	stampTurnDefaults(turn)
+	delete(turn.Metadata, models.TurnMetaKeyWorkflowStepEntryAtStart)
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -73,6 +74,7 @@ func (r *Repository) CreateTurnWithStepStamp(ctx context.Context, turn *models.T
 			turn.Metadata = map[string]interface{}{}
 		}
 		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+		r.stampTurnCompletionEntry(ctx, tx, turn)
 		stamped = true
 	}
 	if found {
@@ -935,10 +937,15 @@ func (r *Repository) applyInitialRuntimeSeedTx(ctx context.Context, tx *sqlx.Tx,
 	if err != nil {
 		return err
 	}
-	var sessionCount int
-	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`), session.TaskID).Scan(&sessionCount); err != nil {
+	var sessionCount, primaryCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*), COALESCE(SUM(CASE WHEN is_primary = 1 THEN 1 ELSE 0 END), 0)
+		FROM task_sessions WHERE task_id = ?
+	`), session.TaskID).Scan(&sessionCount, &primaryCount); err != nil {
 		return fmt.Errorf("check task sessions before workspace binding: %w", err)
 	}
+	// The task lock or SQLite writer serializes primary election with insertion.
+	session.IsPrimary = session.IsPrimary && primaryCount == 0
 	if sessionCount == 0 {
 		if session.Metadata == nil {
 			session.Metadata = make(map[string]interface{})
@@ -3302,6 +3309,14 @@ func (r *Repository) SetSessionMetadataKeyIfAbsentOrDifferentStepIfTaskAtStep(
 	taskID, sessionID, key, stepID string,
 	value interface{},
 ) (bool, error) {
+	if key == models.SessionMetaKeyPendingStepCompletion {
+		if signal, ok := models.LoadPendingStepSignal(map[string]interface{}{key: value}); ok && signal.EntryTransitionID > 0 {
+			if signal.StepID != stepID {
+				return false, models.ErrStepCompletionEntryChanged
+			}
+			return r.claimStepCompletionAtEntry(ctx, taskID, sessionID, signal)
+		}
+	}
 	valueJSON, err := json.Marshal(value)
 	if err != nil {
 		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
@@ -4954,7 +4969,7 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 // (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
 // concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
-	_, err := r.setSessionPrimary(ctx, sessionID, false, nil)
+	_, err := r.setSessionPrimary(ctx, sessionID, false, false, nil)
 	return err
 }
 
@@ -4962,7 +4977,7 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 // nonterminal. It is used by workflow profile switching so a completed agent
 // cannot be promoted from a stale lookup and have its ACP conversation resumed.
 func (r *Repository) SetSessionPrimaryIfNonterminal(ctx context.Context, sessionID string) (bool, error) {
-	return r.setSessionPrimary(ctx, sessionID, true, nil)
+	return r.setSessionPrimary(ctx, sessionID, true, false, nil)
 }
 
 // SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal promotes a route
@@ -4974,7 +4989,7 @@ func (r *Repository) SetSessionPrimaryWithWorkflowSessionRouteIfNonterminal(
 	sessionID string,
 	route models.WorkflowSessionRoute,
 ) (bool, error) {
-	return r.setSessionPrimary(ctx, sessionID, true, &route)
+	return r.setSessionPrimary(ctx, sessionID, true, false, &route)
 }
 
 //nolint:cyclop // Primary promotion preserves one transaction boundary for both legacy and route-aware callers.
@@ -4982,6 +4997,7 @@ func (r *Repository) setSessionPrimary(
 	ctx context.Context,
 	sessionID string,
 	requireNonterminal bool,
+	requireCurrentPrimaryTerminal bool,
 	route *models.WorkflowSessionRoute,
 ) (bool, error) {
 	now := time.Now().UTC()
@@ -5016,6 +5032,19 @@ func (r *Repository) setSessionPrimary(
 		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
 		if err != nil && err != sql.ErrNoRows {
 			return false, err
+		}
+	}
+
+	// Conditional succession holds the task lock before reading the current
+	// primary, so a predecessor that a concurrent promotion made nonterminal
+	// is observed as live and this promotion declines.
+	if requireCurrentPrimaryTerminal {
+		live, err := r.hasLivePrimarySession(ctx, tx, taskID, sessionID)
+		if err != nil {
+			return false, err
+		}
+		if live {
+			return false, nil
 		}
 	}
 

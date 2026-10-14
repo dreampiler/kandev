@@ -78,6 +78,12 @@ class ChangedGoLintTest(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.calls.read_text().splitlines()]
 
+    def expected_args(self, *packages):
+        return [
+            "run", *packages,
+            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
+        ]
+
     def test_lints_each_staged_package_once(self):
         for filename in ("one.go", "two_test.go"):
             self.write(f"apps/backend/internal/first/{filename}", "package first\n// staged\n")
@@ -88,10 +94,10 @@ class ChangedGoLintTest(unittest.TestCase):
         result = self.run_hook()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.lint_calls(), [{
-            "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m"],
-        }])
+        calls = self.lint_calls()
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
+        self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
         self.assertEqual(other.read_text(), unstaged)
 
     def test_lints_multiple_packages_in_one_process_without_recursing(self):
@@ -111,7 +117,7 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertCountEqual(calls[0]["args"], [
             "run", ".", "./internal/first", "./internal/first/child", "./internal/second",
-            f"--new-from-rev={self.base}", "--timeout=5m",
+            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
         ])
 
     def test_non_go_commit_skips_lint(self):
@@ -168,10 +174,10 @@ class ChangedGoLintTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.lint_calls(), [{
-            "cwd": str(self.repo / "apps/backend"),
-            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m"],
-        }])
+        calls = self.lint_calls()
+        self.assertEqual(len(calls), 1, calls)
+        self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
+        self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
 
 
 if __name__ == "__main__":

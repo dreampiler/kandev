@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # resolve-go-lint-base prints the local remote-tracking ref used by the
-# pre-commit Go lint hook. Fork worktrees conventionally retain the canonical
-# repository as `upstream`; do not silently fall back when the base is unclear.
+# pre-commit Go lint hook. The hook scopes changed packages with
+# `--new-from-rev`, so the base should be the default branch this checkout is
+# nearest to: a fork lints against its own origin, while a branch tracking the
+# canonical upstream lints against upstream. Do not silently fall back when the
+# base is unclear.
 set -euo pipefail
 
-canonical_repository='kdlbs/kandev'
 comparison_base=false
 
 die() {
@@ -37,22 +39,6 @@ normalize_remote_ref() {
 	printf '%s\n' "$normalized"
 }
 
-is_canonical_remote() {
-	local url=$1 path
-	case "$url" in
-		https://github.com/*) path=${url#https://github.com/} ;;
-		http://github.com/*) path=${url#http://github.com/} ;;
-		ssh://git@github.com/*) path=${url#ssh://git@github.com/} ;;
-		git+ssh://git@github.com/*) path=${url#git+ssh://git@github.com/} ;;
-		git://github.com/*) path=${url#git://github.com/} ;;
-		git@github.com:*) path=${url#git@github.com:} ;;
-		*) return 1 ;;
-	esac
-	path=${path%.git}
-	path=${path%/}
-	[ "$(printf '%s' "$path" | tr '[:upper:]' '[:lower:]')" = "$canonical_repository" ]
-}
-
 configured_refs=()
 while IFS= read -r ref; do
 	[ -n "$ref" ] && configured_refs+=("$ref")
@@ -68,18 +54,36 @@ else
 	origin_head=$(git symbolic-ref --quiet refs/remotes/origin/HEAD || true)
 	[ -n "$origin_head" ] || die "origin's default branch is unavailable; set kandev.lintBaseRef to a local remote-tracking ref"
 	case "$origin_head" in
-		refs/remotes/origin/*) base_branch=${origin_head#refs/remotes/origin/} ;;
+		refs/remotes/origin/*) ;;
 		*) die "origin's default ref is invalid: $origin_head" ;;
 	esac
-	[ -n "$base_branch" ] || die "origin's default ref is invalid: $origin_head"
 
-	if upstream_url=$(git remote get-url upstream 2>/dev/null); then
-		is_canonical_remote "$upstream_url" || die "upstream remote is not the canonical $canonical_repository repository"
-		base_ref=$(normalize_remote_ref "refs/remotes/upstream/$base_branch")
-		git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "canonical upstream ref does not resolve locally: $base_ref"
-	else
-		base_ref=$(normalize_remote_ref "$origin_head")
+	# Lint against the default branch this checkout is nearest to: a fork opens
+	# PRs against its own origin, while a branch tracking the canonical upstream
+	# is measured against upstream. Each remote contributes the default branch
+	# its own HEAD publishes, so an upstream whose default differs from origin's
+	# is not skipped. Pick the candidate whose merge base with HEAD is closest
+	# (fewest commits HEAD is ahead of it); a tie favors origin.
+	candidate_refs=("$(normalize_remote_ref "$origin_head")")
+	if git remote get-url upstream >/dev/null 2>&1; then
+		upstream_head=$(git symbolic-ref --quiet refs/remotes/upstream/HEAD || true)
+		if [ -n "$upstream_head" ]; then
+			candidate_refs+=("$(normalize_remote_ref "$upstream_head")")
+		fi
 	fi
+
+	base_ref=""
+	best_ahead=""
+	for candidate in "${candidate_refs[@]}"; do
+		git rev-parse --verify --quiet "$candidate^{commit}" >/dev/null 2>&1 || continue
+		merge_base=$(git merge-base HEAD "$candidate" 2>/dev/null) || continue
+		ahead=$(git rev-list --count "$merge_base..HEAD")
+		if [ -z "$best_ahead" ] || [ "$ahead" -lt "$best_ahead" ]; then
+			base_ref=$candidate
+			best_ahead=$ahead
+		fi
+	done
+	[ -n "$base_ref" ] || base_ref=$(normalize_remote_ref "$origin_head")
 fi
 
 git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null || die "base ref does not resolve locally: $base_ref"

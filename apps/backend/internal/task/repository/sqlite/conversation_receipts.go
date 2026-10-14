@@ -421,6 +421,7 @@ func (r *Repository) CreateTurnWithConversationReceipt(ctx context.Context, turn
 
 func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Context, turn *models.Turn) (bool, *models.ConversationMutationReceipt, error) {
 	stampTurnDefaults(turn)
+	delete(turn.Metadata, models.TurnMetaKeyWorkflowStepEntryAtStart)
 	tx, base, err := r.beginConversationMutation(ctx, turn.TaskSessionID)
 	if err != nil {
 		return false, nil, err
@@ -433,6 +434,7 @@ func (r *Repository) CreateTurnWithStepStampConversationReceipt(ctx context.Cont
 			turn.Metadata = map[string]interface{}{}
 		}
 		turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] = stepID
+		r.stampTurnCompletionEntry(ctx, tx, turn)
 		stamped = true
 	}
 	if stepErr == nil && found {

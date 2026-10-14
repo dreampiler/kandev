@@ -77,7 +77,7 @@ func TestHandleReorderChildTasksPlacement(t *testing.T) {
 	} {
 		t.Run(tc.placement, func(t *testing.T) {
 			f := newChildReorderFixture()
-			h := &Handlers{childTaskReorderer: f}
+			h := &Handlers{extensions: HandlerExtensions{childTaskReorderer: f}}
 			response, err := h.handleReorderChildTasks(context.Background(), makeWSMessage(t, ws.ActionMCPReorderChildTasks, map[string]interface{}{
 				"sender_task_id": "parent", "ordered_task_ids": []string{"b", "a"}, "placement": tc.placement,
 			}))
@@ -108,7 +108,7 @@ func TestHandleReorderChildTasksRejectsInvalidTargets(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(f)
 			}
-			h := &Handlers{childTaskReorderer: f}
+			h := &Handlers{extensions: HandlerExtensions{childTaskReorderer: f}}
 			response, err := h.handleReorderChildTasks(context.Background(), makeWSMessage(t, ws.ActionMCPReorderChildTasks, map[string]interface{}{
 				"sender_task_id": "parent", "ordered_task_ids": tc.ids,
 			}))
@@ -123,7 +123,7 @@ func TestHandleReorderChildTasksConflictRetry(t *testing.T) {
 	for _, count := range []int{1, 2} {
 		f := newChildReorderFixture()
 		f.conflicts = count
-		h := &Handlers{childTaskReorderer: f}
+		h := &Handlers{extensions: HandlerExtensions{childTaskReorderer: f}}
 		response, err := h.handleReorderChildTasks(context.Background(), makeWSMessage(t, ws.ActionMCPReorderChildTasks, map[string]interface{}{
 			"sender_task_id": "parent", "ordered_task_ids": []string{"b", "a"},
 		}))
@@ -140,7 +140,7 @@ func TestHandleReorderChildTasksConflictRetry(t *testing.T) {
 func TestHandleReorderChildTasksRevalidatesParentInBandSnapshot(t *testing.T) {
 	f := newChildReorderFixture()
 	f.onList = func() { f.tasks["a"].ParentID = "different" }
-	h := &Handlers{childTaskReorderer: f}
+	h := &Handlers{extensions: HandlerExtensions{childTaskReorderer: f}}
 	response, err := h.handleReorderChildTasks(context.Background(), makeWSMessage(t, ws.ActionMCPReorderChildTasks, map[string]interface{}{
 		"sender_task_id": "parent", "ordered_task_ids": []string{"a"},
 	}))

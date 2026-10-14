@@ -171,6 +171,19 @@ destination entry, whereas a ceiling can delay a session already selected by ent
   explanation. Normal conversation controls shall remain available. Genuine queued
   destinations shall retain queue status without a duplicate Start or Resume action.
 
+### REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004: Spawned successor succeeds a terminal primary
+
+**Intent:** A task whose primary session has ended stops pointing at it, and its queued work is not stranded.
+
+#### Acceptance criteria
+
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.1:** When `spawn_session_kandev` successfully creates a same-task session and the task's current primary session is terminal (FAILED, CANCELLED, or COMPLETED), the new session shall become the task's primary.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.2:** When the current primary is nonterminal (CREATED, STARTING, RUNNING, IDLE, or WAITING_FOR_INPUT), the new session shall remain secondary and the current primary shall be unchanged.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.3:** On succession, work queued against the previous primary shall be handed to the successor and delivered through the existing queue-handoff path. User messages shall not be deleted or reposted.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.4:** Succession shall be conditional at the assignment boundary: two concurrent spawns shall produce exactly one primary, and a successor that already became nonterminal shall not be overwritten.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.5:** A failed session creation shall not promote any session, and a promotion or queue-transfer failure shall not fail a spawn whose session was created.
+- **AC-TASKS-QUEUED-SESSION-OWNERSHIP-004.6:** Ordinary launches, resumes, and spawns against a live primary shall keep their existing primary-assignment behavior.
+
 ## Compatibility and exclusions
 
 Actual manual starts and resumes retain the existing ceiling override. This
@@ -182,6 +195,11 @@ No new session-state enum, global queue dashboard, queue reordering, ETA,
 capacity setting, workflow lifecycle setting, or provider-routing policy is added.
 Office scheduling, WIP admission order, terminal conversation recovery, and
 unrelated prompt queues retain their owning contracts.
+
+Terminal-primary succession (REQ-004) applies only to the `spawn_session_kandev`
+launch path. It adds no new MCP tool, watchdog, other launch path, or general
+queue lifecycle feature; ordinary and workflow launches retain their existing
+primary-assignment behavior.
 
 ## Design
 

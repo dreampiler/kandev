@@ -9,6 +9,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsmodels "github.com/kandev/kandev/internal/runs/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // staleRunThreshold is how old a run can be before it is considered stale.
@@ -30,8 +33,15 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 	// the queued step with the task's current step before launch. Legacy runs
 	// do not include workflow_step_id and retain the existing behaviour.
 	payload := ParseRunPayload(run.Payload)
-	expectedStepID := payload["workflow_step_id"]
 	taskID := payload["task_id"]
+	consumed, err := si.childrenCompletedWakeConsumed(ctx, run, taskID)
+	if err != nil {
+		return false, "", err
+	}
+	if consumed {
+		return true, staleReasonParentTaskTerminal, nil
+	}
+	expectedStepID := payload["workflow_step_id"]
 	if expectedStepID == "" || taskID == "" {
 		return false, "", nil
 	}
@@ -57,6 +67,70 @@ func (si *SchedulerIntegration) evaluateRunStaleness(
 		return true, "workflow_step_changed", nil
 	}
 	return false, "", nil
+}
+
+// staleReasonParentTaskTerminal cancels a children-completed wake whose parent
+// already reached a terminal state: the coordination it asks for is over, so
+// launching it would only start an empty turn.
+const staleReasonParentTaskTerminal = "parent_task_terminal"
+
+// childrenCompletedWakeConsumed reports whether a children-completed run has
+// nothing left to deliver: its parent task is COMPLETED or CANCELLED — the
+// terminal predicate the backstop producer already applies to parents
+// (ListStuckParents) — and every wakeup request coalesced into it is itself a
+// consumed children-completed wake. Any other merged wake, a routine tick
+// included, keeps the run live so it is delivered exactly as before this
+// check existed. A read failure is returned so the caller keeps its existing
+// retry path.
+func (si *SchedulerIntegration) childrenCompletedWakeConsumed(
+	ctx context.Context, run *runsmodels.Run, parentTaskID string,
+) (bool, error) {
+	if parentTaskID == "" || !isChildrenCompletedReason(run.Reason) {
+		return false, nil
+	}
+	terminal, err := si.taskIsTerminal(ctx, parentTaskID)
+	if err != nil || !terminal {
+		return false, err
+	}
+	wakeups, err := si.svc.repo.ListCoalescedWakeups(ctx, run.ID)
+	if err != nil {
+		return false, fmt.Errorf("inspect wakeups coalesced into run %s: %w", run.ID, err)
+	}
+	for _, wakeup := range wakeups {
+		consumed, err := si.coalescedWakeConsumed(ctx, wakeup, parentTaskID)
+		if err != nil || !consumed {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// coalescedWakeConsumed judges one merged wake by its own target: a
+// children-completed wake for the same terminal parent, or for another task
+// that is now terminal, carries nothing live. Any other reason, or a
+// children-completed wake that names no task, is live.
+func (si *SchedulerIntegration) coalescedWakeConsumed(
+	ctx context.Context, wakeup sqlite.CoalescedWakeup, parentTaskID string,
+) (bool, error) {
+	if !isChildrenCompletedReason(wakeup.Reason) || wakeup.TaskID == "" {
+		return false, nil
+	}
+	if wakeup.TaskID == parentTaskID {
+		return true, nil
+	}
+	return si.taskIsTerminal(ctx, wakeup.TaskID)
+}
+
+func isChildrenCompletedReason(reason string) bool {
+	return reason == RunReasonTaskChildrenCompleted || reason == legacyRunReasonChildrenCompleted
+}
+
+func (si *SchedulerIntegration) taskIsTerminal(ctx context.Context, taskID string) (bool, error) {
+	state, err := si.svc.repo.GetTaskState(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("resolve task state for %s: %w", taskID, err)
+	}
+	return state == string(v1.TaskStateCompleted) || state == string(v1.TaskStateCancelled), nil
 }
 
 // cancelStaleRun marks the run cancelled, logs the event, and releases

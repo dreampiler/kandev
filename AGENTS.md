@@ -30,7 +30,7 @@ apps/
 
 ### Worktrees and commit hooks
 
-A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks not just the commit-msg hook (`pnpm exec commitlint` → `Command "commitlint" not found` / `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL`) but any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly. Run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint/commits; subsequent pnpm commands work normally.
+A fresh git worktree shares `.git/` but **not** `apps/node_modules/`. The missing install breaks any pnpm command — `vitest` fails with `Failed to resolve import "vitest"`, eslint similarly — so run `pnpm install --frozen-lockfile` from `apps/` once after creating the worktree, before running tests/lint. The commit-msg hook (`scripts/commitlint-hook`) tolerates the missing install: it uses Bash and Node built-ins to check the header, allowed type, subject case and punctuation, and body/footer line lengths. Invalid messages still block the commit without installing dependencies; installed workspaces delegate to commitlint.
 
 ---
 
@@ -66,9 +66,9 @@ Only required product localization and product data can use another language.
 
 ### Commit Conventions (enforced by CI)
 
-Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples.
+Commits to `main` **must** follow [Conventional Commits](https://www.conventionalcommits.org/) (`type: description`). PRs are squash-merged - the PR title becomes the commit, validated by CI. Changelog is auto-generated from these via git-cliff (`cliff.toml`). See `.agents/skills/commit/SKILL.md` for allowed types and examples. The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook reformats staged TS/TSX files, and the `gofmt (backend)` hook can reformat staged Go files; if either hook changes files, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`). Before committing, use `git diff --cached --name-only | grep '\.go$' | xargs gofmt -l`; run `gofmt -w` and re-add any files it reports.
 
-The commitlint hook caps the header at **100 characters** (`type(scope): description`). The pre-commit prettier hook reformats staged TS/TSX files, and the `gofmt (backend)` hook can reformat staged Go files; if either hook changes files, the commit fails. Re-stage the reformatted files and create a new commit (don't `--amend`). Before committing, use `git diff --cached --name-only | grep '\.go$' | xargs gofmt -l`; run `gofmt -w` and re-add any files it reports.
+For fork changes, record the upstream relationship with a commit trailer: `Upstream: #N` means the fork change is equivalent to the accepted upstream implementation; `Upstream-pending: #N` means an upstream PR is open and the fork carries the change first; `Fork-only: <reason + patch bundle>` records the R5 reason (upstream rejection or a missing extension point) and patch-bundle identity. Put the trailer in the squash merge commit body; a trailer only on an intermediate worktree commit is lost. Keep the Conventional Commit header within 100 characters. See [the fork correspondence map](docs/fork/README.md) for the historical snapshot and unresolved relationships. No hook or CI enforcement is added for these trailers.
 
 ### Release & Versioning
 

@@ -120,10 +120,10 @@ func (h *Handlers) boundStepSessionMatches(
 	session *models.TaskSession,
 	task *models.Task,
 ) (bool, error) {
-	if h.stepCompleteBindingResolver == nil || session == nil {
+	if h.extensions.stepCompleteBindingResolver == nil || session == nil {
 		return false, nil
 	}
-	boundSessionID, err := h.stepCompleteBindingResolver.BoundWorkflowStepSession(ctx, task.ID, task.WorkflowStepID)
+	boundSessionID, err := h.extensions.stepCompleteBindingResolver.BoundWorkflowStepSession(ctx, task.ID, task.WorkflowStepID)
 	if err != nil {
 		return false, err
 	}

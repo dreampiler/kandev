@@ -5,6 +5,7 @@ requirements:
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002
   - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003
+  - REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004
   - REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001
 ---
 
@@ -24,6 +25,7 @@ and task-owned deferred record. It does not replace either queue or change WIP a
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-001 | Inspection intent; Conversation recovery and workflow stop history; Recovery metadata and prompt turns |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-002 | Deferred entry ownership; Task reconciliation |
 | REQ-TASKS-QUEUED-SESSION-OWNERSHIP-003 | Queue projection; Desktop and mobile surfaces; Failure and observability |
+| REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004 | Spawned successor of a terminal primary |
 | REQ-TASKS-WORKFLOW-CANCELLED-TURN-COMPLETION-001 | Replay and reconciliation locking |
 
 ## Existing components
@@ -461,6 +463,38 @@ does not rewrite old audit messages. An ordinary deferral does not mean an empty
 prompt completed. Verify empty-turn handling at the real event boundary; the
 reported warning's exact origin was not proven, so do not remove valid warnings
 or claim its cause without a failing regression.
+
+## Spawned successor of a terminal primary
+
+This section implements REQ-TASKS-QUEUED-SESSION-OWNERSHIP-004. It extends the
+existing primary/queue handoff rather than adding a launch path.
+
+`spawn_session_kandev` launches through `orchestrator.Service.LaunchSession` with
+`IntentStart` and a verified `SpawnOrigin`. In `startTask`, after the agent launch
+succeeds and only when `opts.SpawnOrigin != nil`, the launch calls
+`promoteSpawnedSuccessorOnTerminalPrimary`. Ordinary starts, resumes, and workflow
+launches leave primary assignment unchanged.
+
+Promotion is a conditional repository write,
+`SetSessionPrimaryIfCurrentPrimaryTerminal`, that runs inside the existing
+`setSessionPrimary` transaction (one task lock, or SQLite's single writer). Before
+demoting, it reads the task's current primary rows: any nonterminal primary
+(CREATED, STARTING, RUNNING, IDLE, WAITING_FOR_INPUT) means a live primary exists
+and the promotion declines, so a concurrent spawn whose successor is already
+nonterminal cannot be overwritten and exactly one successor wins. The target
+session must itself still be nonterminal, so a session that turned terminal
+between creation and the promotion is never installed as primary.
+
+On a successful promotion the service refreshes the current step's session
+binding and hands the previous primary's queue to the successor through the same
+`transferQueuedSessionState` / `drainQueuedAfterWaitingTransition` path as
+`SetPrimarySessionTransferringQueue`. Messages are moved, never deleted or
+reposted. The operation is best-effort and fail-open: a promotion or transfer
+failure only logs, because the spawn has already created its session and must not
+fail.
+
+`hasLivePrimarySession` uses the same nonterminal set as
+`lockNonterminalPrimarySession`, so the two agree on which states count as live.
 
 ## Related records
 

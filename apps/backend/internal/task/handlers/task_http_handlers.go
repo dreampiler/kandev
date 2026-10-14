@@ -1219,6 +1219,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkflowID:             body.WorkflowID,
 		WorkflowStepID:         body.WorkflowStepID,
 		WorkflowAgentOverrides: body.WorkflowAgentOverrides,
+		ExplicitAgentProfileID: strings.TrimSpace(body.AgentProfileID),
 		AssigneeAgentProfileID: assigneeAgentProfileID,
 		// This is untrusted browser input, unlike the internal callers
 		// (agent-created subtasks, onboarding, routines) that also populate

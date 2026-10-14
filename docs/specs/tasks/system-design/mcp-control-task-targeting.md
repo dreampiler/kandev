@@ -32,15 +32,21 @@ lower bound rather than an exact total.
 ## Workspace listing
 
 `handlers.handleListTasks` branches on `workspace_id` and calls
-`Service.ListTasksByWorkspaceIncludingAutomation(workspaceID, "", ...)`, whose
-existing contract already includes workflow-less tasks. That service method and
-its `sqlite.Repository` counterpart share one private implementation with the
-provenance-hiding `ListTasksByWorkspaceWithArchiveMode`, differing only in the
-automation-origin filter, so the user-facing list keeps hiding automation runs
-while the control read returns them. `handleListWorkspaceTasks` refuses a
-non-Office caller that names another workspace; the service's own workspace
-authorization still applies underneath. Cross-workspace listing stays on the
-Office reach path, which this change does not touch.
+`handleListWorkspaceTasks`, which picks the repository contract from the caller.
+A controller principal (`Handlers.callerIsWorkspaceController`, the
+`REQ-TASKS-MCP-CTRL-001` discriminator) reads through
+`Service.ListTasksByWorkspaceIncludingAutomation(workspaceID, "", ...)`; every
+other principal reads `Service.ListTasksByWorkspace`, the provenance-hiding
+contract, so automation-run rows stay out of an ordinary worker's view. Both
+contracts already include workflow-less tasks, and the services and their
+`sqlite.Repository` counterparts share one private implementation differing only
+in the automation-origin filter, so the user-facing list keeps hiding automation
+runs. `handleListWorkspaceTasks` refuses a non-Office caller that names another
+workspace; the service's own workspace authorization still applies underneath.
+Cross-workspace listing stays on the Office reach path, which this change does
+not touch. The workspace form is a single page of up to `workspaceTaskListPageSize`
+(200) tasks in the server's default order; `total` carries the full count and the
+tool description states the bound.
 
 ## Failure behavior
 

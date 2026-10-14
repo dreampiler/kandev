@@ -2115,6 +2115,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchClaim.consume(ctx)
 	seam1Res.consume()
 
+	// A spawn whose task still points at a terminal primary succeeds it as
+	// primary and receives its queue. A live primary is preserved by the
+	// repository's conditional, atomic promotion.
+	if opts.SpawnOrigin != nil {
+		s.promoteSpawnedSuccessorOnTerminalPrimary(ctx, taskID, sessionID)
+	}
+
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
@@ -3245,46 +3252,6 @@ func stepPromptBodyWithOptions(step *wfmodels.WorkflowStep, taskID, basePrompt s
 func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.WorkflowStep, taskID string) (string, string) {
 	block, title, _ := s.workflowInstructionsBlockWithRevision(ctx, step, taskID)
 	return block, title
-}
-
-// workflowInstructionsBlockWithRevision is workflowInstructionsBlock plus the
-// workflow's last-modified time, which a per-session delivery record carries so
-// an unchanged workflow can be recognised without comparing the block.
-func (s *Service) workflowInstructionsBlockWithRevision(
-	ctx context.Context, step *wfmodels.WorkflowStep, taskID string,
-) (string, string, time.Time) {
-	if s.workflowStepGetter == nil || step == nil || step.WorkflowID == "" {
-		return "", "", time.Time{}
-	}
-	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
-	if err != nil {
-		if s.logger != nil {
-			s.logger.Warn("failed to get workflow prompt for prompt building",
-				zap.String("workflow_id", step.WorkflowID),
-				zap.Error(err))
-		}
-		return "", "", time.Time{}
-	}
-	prompt := strings.TrimSpace(meta.Prompt)
-	if prompt == "" {
-		return "", "", meta.PromptUpdatedAt
-	}
-	interpolated := sysprompt.InterpolatePlaceholders(prompt, taskID)
-	interpolated = s.interpolateStepEntryNumberIfPresent(ctx, interpolated, taskID, step.ID)
-	// The title is substituted last so its text is never scanned for tokens.
-	interpolated, title := s.interpolateTaskTitleIfPresent(ctx, interpolated, taskID)
-	interpolated = strings.TrimSpace(interpolated)
-	if interpolated == "" {
-		return "", "", meta.PromptUpdatedAt
-	}
-	// Drop any accidental end-marker text from user content so chat split
-	// cannot cut the block early (frontend also prefers the final marker).
-	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
-	interpolated = strings.TrimSpace(interpolated)
-	if interpolated == "" {
-		return "", "", meta.PromptUpdatedAt
-	}
-	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd, title, meta.PromptUpdatedAt
 }
 
 // stepEntryNumberToken is the exact literal REQ-TWS-001 substitutes in
@@ -6114,67 +6081,6 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	return nil
 }
 
-// SetPrimarySessionTransferringQueue promotes a session to primary and moves
-// any queue still bound to the previous primary onto it. Without this, a queue
-// left behind on a demoted primary is stranded when that session later ends.
-func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessionID string) error {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
-		return err
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		return fmt.Errorf("failed to load session for primary promotion: %w", err)
-	}
-	if session == nil {
-		return fmt.Errorf("session not found: %s", sessionID)
-	}
-	previousPrimaryID, err := s.primarySessionID(ctx, session.TaskID)
-	if err != nil {
-		s.logger.Warn("failed to resolve previous primary before promotion; queue will not transfer",
-			zap.String("task_id", session.TaskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		previousPrimaryID = ""
-	}
-	if err := s.SetPrimarySession(ctx, sessionID); err != nil {
-		return err
-	}
-	if previousPrimaryID == "" || previousPrimaryID == sessionID {
-		s.drainQueuedAfterWaitingTransition(ctx, session.TaskID, sessionID)
-		return nil
-	}
-	if err := s.transferQueuedSessionState(ctx, session.TaskID, previousPrimaryID, sessionID); err != nil {
-		// Fail-open: the promotion stands. A queue left behind is recovered
-		// when its dispatch observes the stranded session
-		// (see recoverStrandedQueueToPrimary).
-		s.logger.Warn("failed to transfer queue to new primary session",
-			zap.String("task_id", session.TaskID),
-			zap.String("old_primary", previousPrimaryID),
-			zap.String("new_primary", sessionID),
-			zap.Error(err))
-		return nil
-	}
-	// The transferred queue belongs to the new primary now, and nothing else
-	// will deliver it: the demoted primary is no longer a trigger for this task.
-	s.drainQueuedAfterWaitingTransition(ctx, session.TaskID, sessionID)
-	return nil
-}
-
-// primarySessionID returns the current primary session for a task, or "" when
-// none is set.
-func (s *Service) primarySessionID(ctx context.Context, taskID string) (string, error) {
-	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		return "", err
-	}
-	for _, sess := range sessions {
-		if sess != nil && sess.IsPrimary {
-			return sess.ID, nil
-		}
-	}
-	return "", nil
-}
-
 func (s *Service) publishPrimarySessionUpdate(ctx context.Context, taskID, sessionID string) {
 	// Broadcast task.updated so frontend updates the primary star indicator.
 	// The task service's publisher loads primary-session info from the DB,
@@ -8986,54 +8892,6 @@ func (s *Service) rollbackPromptClaim(
 			s.completeTurnIfCurrent(ctx, sessionID, rollback.turnID)
 		}
 	}
-}
-
-// A vanished turn is not permission to overwrite a replacement execution.
-// Only an unsent claim whose durable identity and revision remain unchanged
-// may recover its own RUNNING projection.
-func (s *Service) restoreUnsentMissingTurnClaim(ctx context.Context, taskID, sessionID string, rollback promptClaimRollback) {
-	if rollback.dispatchAccepted || rollback.reservedTurnAccepted || rollback.claimedSessionUpdatedAt.IsZero() || rollback.previousSessionState == models.TaskSessionStateRunning {
-		return
-	}
-	current, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || !ownsUnsentMissingTurnSnapshot(current, taskID, sessionID, rollback) {
-		return
-	}
-	if cached, ok := s.activeTurns.Load(sessionID); ok && cached != rollback.turnID {
-		return
-	}
-	writer, ok := s.repo.(interface {
-		UpdateTaskSessionIfCurrentSnapshot(context.Context, *models.TaskSession, models.TaskSessionState, time.Time, map[string]interface{}) (bool, error)
-	})
-	if !ok {
-		return
-	}
-	current.State = rollback.previousSessionState
-	current.ErrorMessage = ""
-	current.CompletedAt = nil
-	restored, err := writer.UpdateTaskSessionIfCurrentSnapshot(ctx, current, models.TaskSessionStateRunning, rollback.claimedSessionUpdatedAt, current.Metadata)
-	if err != nil {
-		s.logger.Warn("failed to restore unsent prompt claim after owned turn disappeared", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.String("turn_id", rollback.turnID), zap.Error(err))
-		return
-	}
-	if !restored {
-		return
-	}
-	s.activeTurns.CompareAndDelete(sessionID, rollback.turnID)
-	s.publishTaskSessionStateChanged(ctx, taskID, sessionID, models.TaskSessionStateRunning, rollback.previousSessionState, "", &current.UpdatedAt, current)
-	s.republishTaskActivityOnSettle(ctx, taskID, models.TaskSessionStateRunning, rollback.previousSessionState)
-	if rollback.taskStateClaimed {
-		s.restoreLifecycleTaskState(ctx, taskID, rollback.previousTaskState)
-	}
-}
-
-// ownsUnsentMissingTurnSnapshot checks the immutable claim against the current session.
-func ownsUnsentMissingTurnSnapshot(current *models.TaskSession, taskID, sessionID string, rollback promptClaimRollback) bool {
-	identity := rollback.sessionIdentity
-	return current != nil && current.TaskID == taskID && identity.TaskID == taskID &&
-		identity.SessionID == sessionID && identity.SessionIncarnationID != "" && current.QueueIncarnationID == identity.SessionIncarnationID &&
-		current.State == models.TaskSessionStateRunning && current.AgentExecutionID == rollback.claimedExecutionID &&
-		current.ErrorMessage == "" && current.CompletedAt == nil && current.UpdatedAt.Equal(rollback.claimedSessionUpdatedAt)
 }
 
 func (s *Service) rollbackReservedPromptTurn(ctx context.Context, sessionID, turnID string) {

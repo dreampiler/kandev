@@ -96,9 +96,10 @@ func TestExecuteStepTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 	svc.stepHistoryRecorder = recorder
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "did the work",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "did the work",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -130,7 +131,7 @@ func TestExecuteStepTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 
 	// A signal is pending for step1, but this is an on_turn_start move
 	// (triggerOnEnter=false) — it must not consume or report the signal.
-	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal := models.PendingStepCompletionSignal{SignaledAt: time.Now().UTC(), StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}
@@ -184,9 +185,10 @@ func TestApplyEngineTransition_RecordsConsumedSignalMetadata(t *testing.T) {
 	svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 
 	signal := models.PendingStepCompletionSignal{
-		StepID:  "step1",
-		Source:  models.StepCompletionSourceAgent,
-		Summary: "engine path done",
+		SignaledAt: time.Now().UTC(),
+		StepID:     "step1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "engine path done",
 	}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
@@ -236,7 +238,7 @@ func TestApplyEngineTransition_OnTurnStartDoesNotAttachSignal(t *testing.T) {
 	recorder := &fakeStepHistoryRecorder{}
 	svc.stepHistoryRecorder = recorder
 
-	signal := models.PendingStepCompletionSignal{StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
+	signal := models.PendingStepCompletionSignal{SignaledAt: time.Now().UTC(), StepID: "step1", Source: models.StepCompletionSourceAgent, Summary: "premature"}
 	if err := repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyPendingStepCompletion, signal); err != nil {
 		t.Fatalf("seed pending signal: %v", err)
 	}

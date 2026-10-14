@@ -189,6 +189,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		WorkflowID:                  req.WorkflowID,
 		WorkflowStepID:              req.WorkflowStepID,
 		WorkflowAgentOverrides:      req.WorkflowAgentOverrides,
+		ExplicitAgentProfileID:      strings.TrimSpace(req.AgentProfileID),
 		ExecutorID:                  req.ExecutorID,
 		ExecutorProfileID:           req.ExecutorProfileID,
 		Title:                       title,
@@ -207,6 +208,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), taskErrorDetails(err))
+		}
 		if code, ok := repositorySelectionWSCode(err); ok {
 			return ws.NewError(msg.ID, msg.Action, code, err.Error(), taskErrorDetails(err))
 		}

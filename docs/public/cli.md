@@ -305,6 +305,11 @@ takes and verifies a fresh backup before deleting anything, written to
 `<database-dir>/backups/kandev-pre-maintenance-<timestamp>.db`; a failed or
 unverified backup aborts before any delete. The three legacy categories use one transaction.
 Delivery cleanup uses separate bounded transactions with fresh eligibility checks.
+Without `--candidate-limit`, event and prompt cleanup continues across advancing
+discovery pages for up to two minutes, so a protected first page does not end
+the pass. A positive `--candidate-limit` keeps execution to one event/prompt
+batch. The execution report lists committed retired inbox rows and matching
+generic effect rows separately; retained terminal and workflow receipts stay protected.
 A run can finish partially and reports committed counts plus the backup path.
 Pending deletion jobs also produce the partial-progress notice, even when the current job removed few rows.
 Repeat the command to continue delivery cleanup.

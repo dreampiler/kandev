@@ -79,6 +79,10 @@ Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, 
 
 Open a saved profile from the Executors hub, the Settings tree, an executor profile list, Settings search, or a task's executor disclosure to use the same complete profile editor.
 
+New task creation requires any supplied `executor_profile_id` to exist, even when `start_agent` is false. `session.launch` also rejects a missing requested profile before creating a session. The error names the missing ID: REST returns `error_code: executor_profile_not_found`, and WebSocket and MCP task creation report `NOT_FOUND`.
+
+Omitting the ID keeps the existing default and inheritance rules. An existing session can still resume without a newly supplied ID when its saved profile was deleted.
+
 ![Settings > Executors showing existing Local and Worktree profiles plus Local, Worktree, Docker, Sprites.dev, Remote Docker, SSH, and Kubernetes profile creation options.](../screenshots/settings-executors.png)
 
 <DocsVideo

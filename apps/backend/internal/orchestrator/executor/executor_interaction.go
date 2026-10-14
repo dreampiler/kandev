@@ -1203,9 +1203,12 @@ func (e *Executor) prepareModelSwitch(ctx context.Context, taskID, sessionID str
 
 	existingRunning, runErr := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
 	if runErr != nil && !errors.Is(runErr, models.ErrExecutorRunningNotFound) {
-		probe := e.resolveExecutorConfig(
+		probe, configErr := e.resolveRetainedExecutorConfig(
 			ctx, session.ExecutorID, task.WorkspaceID, cloneMetadata(session.Metadata),
 		)
+		if configErr != nil {
+			return nil, nil, "", "", nil, configErr
+		}
 		if models.ExecutorType(probe.ExecutorType) == models.ExecutorTypeKubernetes ||
 			hasKubernetesRuntimeMetadata(session.Metadata) {
 			return nil, nil, "", "", nil, fmt.Errorf("load model-switch runtime inventory: %w", runErr)
@@ -1242,7 +1245,7 @@ func (e *Executor) resolveModelSwitchExecutorConfig(
 			}
 			metadata[lifecycle.MetadataKeyExecutorProfileID] = session.ExecutorProfileID
 		}
-		return e.resolveExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata), nil
+		return e.resolveRetainedExecutorConfig(ctx, session.ExecutorID, task.WorkspaceID, metadata)
 	}
 	metadata := cloneMetadata(session.Metadata)
 	if metadata == nil {

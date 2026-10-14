@@ -157,6 +157,7 @@ func (s *Service) processOnTurnCompleteWithCause(
 
 	taskID := task.ID
 	sessionID := session.ID
+	ctx = s.captureCompletionSignal(ctx, taskID, task.WorkflowStepID, session)
 	currentStep, ok := s.loadLegacyTurnCompletionStep(ctx, task, session)
 	if !ok || !s.shouldRunLegacyTurnCompletion(ctx, task, session, currentStep, cause) {
 		return false
@@ -247,8 +248,7 @@ func (s *Service) shouldRunLegacyTurnCompletion(
 		return false
 	}
 	if cause != turnCompletionCauseUserCancellation && currentStep.AutoAdvanceRequiresSignal {
-		signal, has := models.LoadPendingStepSignal(session.Metadata)
-		if !has || signal.StepID != currentStep.ID {
+		if s.completionSignalForEntry(ctx, task.ID, currentStep.ID, session) == nil {
 			s.logger.Debug("on_turn_complete gated on explicit signal (legacy path)",
 				zap.String("step_id", currentStep.ID))
 			s.setSessionWaitingForInput(ctx, task.ID, session.ID, session)
@@ -487,6 +487,9 @@ func (s *Service) onTurnStartTaskAdmission(ctx context.Context, taskID string) (
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
 	settleFailedTransitionSession := func(transitionErr error) {
+		if errors.Is(transitionErr, models.ErrStepCompletionEntryChanged) {
+			return
+		}
 		if triggerOnEnter {
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 			return
@@ -527,16 +530,15 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// the same task snapshot. A queued destination can be promoted immediately
 	// after this write, so a post-commit metadata write would leave a race where
 	// the first prompt starts without its handoff.
-	var consumedSignal *models.PendingStepCompletionSignal
+	var consumedSource *completionSignalSource
 	signalSession, signalErr := s.repo.GetTaskSession(ctx, sessionID)
 	if signalErr != nil {
 		s.logger.Warn("failed to load session for step handoff carry",
 			zap.String("session_id", sessionID), zap.Error(signalErr))
 	} else if triggerOnEnter && signalSession != nil {
-		if signal, has := models.LoadPendingStepSignal(signalSession.Metadata); has && signal.StepID == fromStep.ID {
-			consumedSignal = &signal
-		}
-		setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+		ctx = s.captureCompletionSignal(ctx, taskID, fromStep.ID, signalSession)
+		consumedSource = s.completionSignalForEntry(ctx, taskID, fromStep.ID, signalSession)
+		setStepHandoffCarryMetadata(task, toStepID, consumedCompletionSignal(consumedSource))
 	}
 	// executeStepTransition's two callers are always a genuine session turn:
 	// on_turn_complete (triggerOnEnter=true) or on_turn_start (false).
@@ -562,6 +564,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if !applied {
 		return
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 	queued := task.QueuedForStepID != ""
 
 	// Process on_exit only after the transition is durably admitted. Reload the
@@ -606,10 +609,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	if triggerOnEnter {
 		trigger = wfmodels.StepTransitionTriggerAutoComplete
 	}
-	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedSignal, trigger)
+	s.recordAutoStepTransition(ctx, sessionID, fromStep.ID, toStepID, consumedCompletionSignal(consumedSource), trigger)
 	if queued {
 		if triggerOnEnter {
-			s.clearPendingStepSignalByID(ctx, sessionID)
+			s.clearConsumedCompletionSignal(ctx, sessionID, consumedSource)
 			s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		} else {
 			s.reportWorkflowTurnStartPreparationError(
@@ -623,15 +626,9 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 
 	if triggerOnEnter {
-		// ADR 0015 — clear any pending completion-signal bag for the
-		// step we just left. Only on_turn_complete transitions trigger
-		// gating, so the triggerOnEnter=true branch is the only one
-		// that could have consumed a signal; on_turn_start moves leave
-		// the bag alone (it's still tied to an unsignaled step we have
-		// not left). The session struct isn't used after this point,
-		// so skip the extra GetTaskSession round-trip and write
-		// straight to the DB by session_id.
-		s.clearPendingStepSignalByID(ctx, sessionID)
+		// Consume only the captured bag. Turn-start moves do not consume a
+		// completion signal, and a replacement bag belongs to its own entry.
+		s.clearConsumedCompletionSignal(ctx, sessionID, consumedSource)
 		// Automated transitions always clear review: the agent just completed
 		// a turn, so any pending review from a prior step is stale regardless
 		// of whether the new step has auto_start_agent. Match the engine path's
@@ -5361,102 +5358,6 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	)
 }
 
-// consumePendingMoveAtCurrentStep records a deferred move whose target equals
-// the task's current step. There is no transition to run, but the row and its
-// hand-off prompt must still be consumed and the session drained exactly as a
-// landed move would.
-func (s *Service) consumePendingMoveAtCurrentStep(
-	ctx context.Context,
-	taskID, sessionID string,
-	move *messagequeue.PendingMove,
-	record messagequeue.PendingMoveRecord,
-	currentStepID string,
-) {
-	var applyErr error
-	if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		applyErr = s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID, record)
-	} else {
-		applyErr = s.workflowStore.markDeferredMoveAppliedUnfenced(ctx, taskID, move.MoveID)
-	}
-	if errors.Is(applyErr, errDeferredMoveAlreadyApplied) {
-		s.logger.Info("dropping already-applied pending move at current target",
-			zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-	} else if applyErr != nil {
-		s.logger.Error("failed to record pending move at current target",
-			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(applyErr))
-		return
-	}
-	s.logger.Info("pending move target equals current step; skipping transition",
-		zap.String("task_id", taskID),
-		zap.String("step_id", currentStepID))
-	identity := messagequeue.QueueSessionIdentity{
-		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
-	}
-	s.removePendingMoveHandoffPromptForSession(ctx, identity, move.MoveID)
-	_, _ = s.drainQueuedMessageForPromptableSessionForIdentity(ctx, identity)
-	if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		s.consumeUnfencedPendingMove(ctx, taskID, sessionID, record)
-	}
-}
-
-// pendingMoveSupersededByLaterTransition reports whether the task has taken a
-// workflow-step transition since the move was armed, which makes the recorded
-// source stale even when the card is back on that step. It returns false when
-// the ledger is unreadable so an uncertain guard preserves the move rather than
-// dropping it (the move then applies as it did before this guard).
-func (s *Service) pendingMoveSupersededByLaterTransition(
-	ctx context.Context,
-	taskID string,
-	move *messagequeue.PendingMove,
-) bool {
-	reader, ok := s.repo.(workflowStepTransitionReader)
-	if !ok {
-		return false
-	}
-	latest, err := reader.GetLatestTaskStepTransitionID(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to read latest step transition for pending move; applying as before",
-			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(err))
-		return false
-	}
-	return latest != move.FromTransitionID
-}
-
-// dropSupersededPendingMove discards a deferred move whose recorded source step
-// no longer matches the task: a later move relocated the card, so replaying this
-// one would overwrite it. The row and its hand-off prompt are removed with the
-// same compare-and-delete used by the stale-move reaper, so a move that a
-// concurrent take/replace swapped out is left to its new owner.
-func (s *Service) dropSupersededPendingMove(
-	ctx context.Context,
-	taskID, sessionID string,
-	move *messagequeue.PendingMove,
-	record messagequeue.PendingMoveRecord,
-) {
-	moveID := move.MoveID
-	if moveID == "" {
-		moveID = normalizedPendingMoveID(sessionID, move)
-	}
-	handoffEntryID, listed := s.pendingMoveHandoffPromptID(ctx, sessionID, taskID, moveID)
-	if !listed {
-		s.logger.Warn("superseded pending move preserved after prompt cleanup failure",
-			pendingMoveLogFields(sessionID, move, moveID)...)
-		return
-	}
-	removed, err := s.messageQueue.DeletePendingMoveIfMatch(ctx, record, handoffEntryID)
-	if err != nil {
-		s.logger.Warn("failed to discard superseded pending move",
-			append(pendingMoveLogFields(sessionID, move, moveID), zap.Error(err))...)
-		return
-	}
-	if !removed {
-		return
-	}
-	s.logger.Info("dropping superseded pending move",
-		pendingMoveLogFields(sessionID, move, moveID)...)
-	s.pendingMoveHandoffPromptRemoved(ctx, sessionID, taskID, moveID, handoffEntryID)
-}
-
 func (s *Service) consumeUnfencedPendingMove(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -5788,76 +5689,6 @@ func (s *Service) drainQueuedMessageForPromptableSessionWithTaskAdmissionAndIden
 	lock.Lock()
 	defer lock.Unlock()
 	return s.drainQueuedMessageForPromptableSessionUnderGuard(ctx, taskID, sessionID, identity)
-}
-
-// drainQueuedMessageForPromptableSessionUncontended is the same guarded
-// take-and-dispatch for a caller that may already hold sessionID's guard: it
-// probes the guard instead of waiting for it. The queue trigger that runs right
-// after a session settles into WAITING_FOR_INPUT needs that, because the
-// handler which drove the transition frequently still holds the guard across its
-// own turn settlement, and a blocking acquisition there would wait on itself.
-// A contended guard already belongs to a take-decision that delivers,
-// supersedes, or retries on its own.
-func (s *Service) drainQueuedMessageForPromptableSessionUncontended(
-	ctx context.Context,
-	taskID, sessionID string,
-) queueDrainOutcome {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	if !lock.TryLock() {
-		return queueDrainSkipped
-	}
-	defer lock.Unlock()
-	return s.drainQueuedMessageForPromptableSessionUnderGuard(ctx, taskID, sessionID, nil)
-}
-
-// drainQueuedMessageForPromptableSessionUnderGuard holds sessionID's guard for
-// every take decision it makes: cancel ownership, a reloaded promptable state,
-// the captured queue incarnation, a live clarification, and workflow admission
-// are all re-checked here rather than trusted from the caller's earlier check.
-func (s *Service) drainQueuedMessageForPromptableSessionUnderGuard(
-	ctx context.Context,
-	taskID, sessionID string,
-	identity *messagequeue.QueueSessionIdentity,
-) queueDrainOutcome {
-	if s.isCancelInFlight(sessionID) {
-		return queueDrainSkipped
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to reload session before admission-gated drain",
-			zap.String("session_id", sessionID), zap.Error(err))
-		return queueDrainSkipped
-	}
-	if session == nil {
-		return queueDrainSkipped
-	}
-	if session.TaskID != taskID {
-		return queueDrainSkipped
-	}
-	if identity != nil && session.QueueIncarnationID != identity.SessionIncarnationID {
-		return queueDrainSkipped
-	}
-	if err := s.checkSessionRecoveryBlock(ctx, sessionID); err != nil {
-		s.logger.Info("skipping admission-gated queue drain while session recovery is required",
-			zap.String("session_id", sessionID), zap.Error(err))
-		s.autoRecoverBlockedQueue(ctx, taskID, sessionID, err)
-		return queueDrainSkipped
-	}
-	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
-		return queueDrainSkipped
-	}
-	// QueueUserPrompt can race a live clarification between its enqueue-side
-	// checks and this guarded drain. Re-read the clarification ownership while
-	// the guard is held so a parent question or human clarification still owns
-	// the turn when the queue head is reserved. Detached bundles are allowed by
-	// sessionHasLiveClarification and can therefore make progress here.
-	if s.sessionHasLiveClarification(ctx, sessionID) {
-		return queueDrainSkipped
-	}
-	return s.drainQueuedMessageForPromptableSessionLockedWithTaskAdmissionAndIdentity(
-		ctx, taskID, sessionID, identity, workflowEffectFromContext(ctx),
-	)
 }
 
 // drainQueuedMessageForPromptableSessionLocked takes the next queued
@@ -7896,6 +7727,7 @@ func (s *Service) processOnTurnCompleteViaEngineWithCause(
 		return s.processOnTurnCompleteWithCause(ctx, task, session, cause)
 	}
 
+	ctx = s.captureCompletionSignal(ctx, taskID, task.WorkflowStepID, session)
 	currentStep, eligible := s.prepareEngineTurnCompletion(ctx, taskID, task, session, cause)
 	if !eligible {
 		if cause == turnCompletionCauseUserCancellation && currentStep != nil && !currentStep.CancelTriggersTurnComplete {
@@ -8137,8 +7969,8 @@ func (s *Service) allowEngineSignalCompletion(
 	if cause == turnCompletionCauseUserCancellation || !currentStep.AutoAdvanceRequiresSignal {
 		return true
 	}
-	signal, has := models.LoadPendingStepSignal(session.Metadata)
-	if !has || signal.StepID != currentStep.ID {
+	source := s.completionSignalForEntry(ctx, taskID, currentStep.ID, session)
+	if source == nil {
 		s.logger.Debug("on_turn_complete gated on explicit signal (none received yet)",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
@@ -8159,84 +7991,11 @@ func (s *Service) allowEngineSignalCompletion(
 		zap.String("task_id", taskID),
 		zap.String("session_id", session.ID),
 		zap.String("step_id", currentStep.ID),
-		zap.String("source", signal.Source))
+		zap.String("source", source.Signal.Source))
 	// Bag is consumed once the transition executes (in
 	// applyEngineTransition's stamp + clear), so don't clear here —
 	// otherwise a failed transition would lose the signal.
 	return true
-}
-
-// workflowEntryPromptPendingForStep reports whether the workflow entry that
-// brought the task to stepID still has a valid queued entry prompt
-// (prompt_ensure or workflow_step_ensure). KANDEV-W-086: advancing on the
-// step's completion signal while that prompt was never delivered is exactly
-// the "entered the step but the step's turn never ran" skip, so the signal
-// gate holds the transition until the sweep delivers or drops the record.
-// Fail closed on ownership uncertainty: a record that cannot be read is not
-// proof the entry prompt was delivered.
-func (s *Service) workflowEntryPromptPendingForStep(
-	ctx context.Context,
-	task *models.Task,
-	stepID string,
-) bool {
-	if task == nil || stepID == "" || task.WorkflowStepID != stepID {
-		return false
-	}
-	deferral, ok := s.pendingStepEntryDeferral(ctx, task)
-	if !ok {
-		return false
-	}
-	if !isStepEntryPromptKind(deferral.Kind) {
-		return false
-	}
-	if !stepEntryBindingTargetsStep(deferral, stepID) {
-		return false
-	}
-	disposition, _, validationErr := s.validateCeilingEntry(ctx, task, deferral)
-	if validationErr != nil {
-		return true
-	}
-	return disposition == ceilingEntryValid || disposition == ceilingEntryUnavailable
-}
-
-// pendingStepEntryDeferral reads the task's ceiling-deferred launch, when one
-// exists. ok is false when there is no ceiling record at all; a record that
-// cannot be decoded is returned as-is so the caller can fail closed on it.
-func (s *Service) pendingStepEntryDeferral(
-	ctx context.Context,
-	task *models.Task,
-) (models.CeilingDeferral, bool) {
-	raw, _, err := s.repo.GetTaskDeferredLaunch(ctx, task.ID)
-	if err != nil || raw == nil {
-		return models.CeilingDeferral{}, false
-	}
-	ceilingFlag, hasCeilingFlag := raw[models.CeilingDeferredKey]
-	if !hasCeilingFlag || ceilingFlag != true {
-		return models.CeilingDeferral{}, false
-	}
-	deferral, err := models.ReadCeilingDeferral(raw)
-	if err != nil {
-		return deferral, true
-	}
-	return deferral, true
-}
-
-// isStepEntryPromptKind reports whether kind is one of the deferred launches
-// that carries a workflow step's own entry prompt.
-func isStepEntryPromptKind(kind models.CeilingLaunchKind) bool {
-	return kind == models.CeilingLaunchPromptEnsure ||
-		kind == models.CeilingLaunchWorkflowStepEnsure
-}
-
-// stepEntryBindingTargetsStep reports whether deferral carries a valid
-// workflow-entry binding addressed to stepID. A binding read error, an absent
-// binding, or a binding for another step is not this step's pending prompt.
-func stepEntryBindingTargetsStep(deferral models.CeilingDeferral, stepID string) bool {
-	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
-	if err != nil || !present {
-		return false
-	}
-	return binding.Valid() && binding.DestinationStepID == stepID
 }
 
 // transitionLifecycleMode identifies the caller-owned part of a transition.
@@ -8430,6 +8189,11 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 ) bool {
 	ctx = withWorkflowMetaCache(ctx)
 	sessionLifecycle := mode != transitionLifecycleGuardedDecision
+	var consumedSource *completionSignalSource
+	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
+		ctx = s.captureCompletionSignal(ctx, taskID, result.FromStepID, session)
+		consumedSource = s.completionSignalForEntry(ctx, taskID, result.FromStepID, session)
+	}
 	settleFailedTransitionSession := func() {
 		if !sessionLifecycle {
 			return
@@ -8498,6 +8262,10 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	}
 	applied, err := commit(applyCtx)
 	if err != nil {
+		if errors.Is(err, models.ErrStepCompletionEntryChanged) {
+			s.logger.Debug("completion source entry changed before transition", zap.String("task_id", taskID))
+			return false
+		}
 		recordWorkflowTransitionError(ctx, err)
 		s.logger.Error("failed to apply engine transition",
 			zap.String("task_id", taskID),
@@ -8510,16 +8278,12 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 		recordWorkflowTransitionError(ctx, errors.New("workflow transition commit was not applied"))
 		return false
 	}
+	ctx = models.WithStepCompletionEntry(ctx, "", models.StepCompletionEntry{})
 
 	// ADR 0015 — record the audit row before the pending signal (if any) is
 	// cleared. Only an on_turn_complete transition can have consumed a signal;
 	// guarded decision transitions do not mutate the decider's signal bag.
-	var consumedSignal *models.PendingStepCompletionSignal
-	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == result.FromStepID {
-			consumedSignal = &signal
-		}
-	}
+	consumedSignal := consumedCompletionSignal(consumedSource)
 	historyTrigger := wfmodels.StepTransitionTriggerAutoComplete
 	switch trigger {
 	case engine.TriggerOnTurnStart:
@@ -8536,7 +8300,7 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	// cleared so the next step's gating starts from a clean slate. A guarded
 	// decision must leave the decider session untouched.
 	if sessionLifecycle && trigger == engine.TriggerOnTurnComplete {
-		s.clearPendingStepSignal(ctx, session)
+		s.clearConsumedCompletionSignal(ctx, session.ID, consumedSource)
 	}
 
 	if len(result.DataPatch) > 0 && sessionLifecycle {

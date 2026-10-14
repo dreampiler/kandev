@@ -79,16 +79,16 @@ func TestFullWorkerPreparationClonesBeforeCachesAndRetainsWorkspace(t *testing.T
 		"{{git.identity_setup}}", ":",
 		"{{github.auth_setup}}", ":",
 		"{{repository.branch}}", shellQuote("main"),
-		"{{repository.clone_url}}", shellQuote(origin),
-		"{{workspace.path}}", shellQuote(workspace),
+		"{{repository.clone_url}}", shellQuote(filepath.ToSlash(origin)),
+		"{{workspace.path}}", shellQuote(filepath.ToSlash(workspace)),
 		"{{repository.setup_script}}", `test -d "$workspace/.cache/go-build" && test -d "$workspace/.npm-global"`,
 		"{{kandev.agents.install}}", ":",
-		"/opt/kandev/.workspace-clone", cloneTmp,
+		"/opt/kandev/.workspace-clone", filepath.ToSlash(cloneTmp),
 	).Replace(string(raw))
 	run := func() {
 		t.Helper()
 		cmd := exec.Command("sh", "-eu", "-c", script)
-		cmd.Env = append(os.Environ(), "HOME="+home, "PATH="+bin+":"+os.Getenv("PATH"))
+		cmd.Env = append(os.Environ(), "HOME="+home, prependPATH(bin))
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("Kubernetes prepare failed: %v\n%s", err, output)
 		}

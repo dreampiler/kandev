@@ -180,7 +180,8 @@ func observeCompletionSignalState(
 	newestRejection *time.Time,
 ) {
 	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == stepID {
-		if signalBelongsToEntry(signal, entryOccurredAt, entryKnown) {
+		entry := models.StepCompletionEntry{StepID: stepID, TransitionID: evidence.Start.TransitionID, OccurredAt: entryOccurredAt}
+		if signalBelongsToEntry(signal, entry, entryKnown) {
 			evidence.PendingStepSignal = true
 		}
 	}
@@ -195,14 +196,16 @@ func observeCompletionSignalState(
 }
 
 // signalBelongsToEntry reports whether a stored signal can suppress a reminder
-// for the current entry. An unknown entry time or a signal with no timestamp is
-// trusted so an accepted signal always suppresses; otherwise the signal must
-// not predate the entry it would hide a stall in.
-func signalBelongsToEntry(signal models.PendingStepCompletionSignal, entryOccurredAt time.Time, entryKnown bool) bool {
+// for the current entry. Native identities take precedence over clock values.
+// Unknown legacy evidence retains an accepted signal to avoid a false reminder.
+func signalBelongsToEntry(signal models.PendingStepCompletionSignal, entry models.StepCompletionEntry, entryKnown bool) bool {
+	if signal.EntryTransitionID > 0 && entry.TransitionID > 0 {
+		return models.PendingStepSignalMatchesEntry(signal, entry)
+	}
 	if !entryKnown || signal.SignaledAt.IsZero() {
 		return true
 	}
-	return !signal.SignaledAt.Before(entryOccurredAt)
+	return models.PendingStepSignalMatchesEntry(signal, entry)
 }
 
 func (p *ChildStallProducer) hasActiveTurn(ctx context.Context, sessionID string) (bool, error) {
