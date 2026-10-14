@@ -117,6 +117,41 @@ type DynamicProfileRepository interface {
 	ListDynamicProfileReferencesByExecutionProfile(ctx context.Context, profileID string) ([]models.DynamicProfileReference, error)
 }
 
+// DynamicProfileResolution carries the full replacement document for one
+// dynamic profile that references the target concrete profile being disabled
+// or deleted. ExpectedVersion is the version the caller read; the transaction
+// re-reads and rejects the whole request when it no longer matches.
+type DynamicProfileResolution struct {
+	ProfileID             string
+	ExpectedVersion       int64
+	KeepModelWhileRunning bool
+	Routes                []models.DynamicAgentRoute
+}
+
+// DynamicReferenceResolutionRepository resolves the dynamic profiles that
+// reference a concrete profile and mutates that concrete profile in one
+// transaction. It is an optional extension so lightweight controller fakes
+// keep the existing profile contract.
+type DynamicReferenceResolutionRepository interface {
+	// ResolveDynamicReferencesAndUpdateProfile writes every referencing
+	// dynamic profile document and updates the target profile's enabled state
+	// together. The transactions re-reads the current reference set and
+	// rejects a new/removed reference or any version mismatch.
+	ResolveDynamicReferencesAndUpdateProfile(
+		ctx context.Context,
+		target *models.AgentProfile,
+		enabled *bool,
+		resolutions []DynamicProfileResolution,
+	) error
+	// ResolveDynamicReferencesAndDeleteProfile writes every referencing
+	// dynamic profile document and soft-deletes the target profile together.
+	ResolveDynamicReferencesAndDeleteProfile(
+		ctx context.Context,
+		targetID string,
+		resolutions []DynamicProfileResolution,
+	) error
+}
+
 // AtomicDynamicProfileRepository updates the base profile row and its
 // optimistic-routing document in one transaction. Controllers use this
 // optional extension when a request changes both surfaces so a stale route

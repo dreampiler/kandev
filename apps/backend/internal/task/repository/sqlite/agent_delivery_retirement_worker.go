@@ -16,6 +16,12 @@ const (
 	cleanupPhasePending                 = "pending"
 	agentDeliveryRetirementDefaultLimit = 200
 	agentDeliveryRetirementTimeout      = 250 * time.Millisecond
+	// agentDeliveryMaintenanceWorkTimeout is the finite per-batch budget the
+	// offline maintenance command uses when it requests OfflineMaintenance.
+	// It is long enough for the bounded count and retirement queries to
+	// finish on a multi-million-row database, while staying finite so a
+	// stuck step surfaces as a partial result instead of hanging the run.
+	agentDeliveryMaintenanceWorkTimeout = 2 * time.Minute
 )
 
 var agentDeliveryRetirementPhases = []string{"inbox", "effects", "submissions", "cursors"}
@@ -33,7 +39,7 @@ func (r *Repository) RunAgentDeliveryRetirementBatch(
 	ctx context.Context,
 	options models.AgentDeliveryRetirementBatchOptions,
 ) (models.AgentDeliveryRetirementBatchResult, error) {
-	options = normalizeAgentDeliveryRetirementOptions(options.MaxCandidates, options.WorkTimeout)
+	options = normalizeAgentDeliveryRetirementOptions(options)
 	workCtx, cancel := context.WithTimeout(ctx, options.WorkTimeout)
 	defer cancel()
 	var result models.AgentDeliveryRetirementBatchResult
@@ -273,14 +279,18 @@ func (r *Repository) agentDeliverySessionExistsTx(ctx context.Context, tx *sqlx.
 	return exists, err
 }
 
-func normalizeAgentDeliveryRetirementOptions(limit int, timeout time.Duration) models.AgentDeliveryRetirementBatchOptions {
-	if limit <= 0 || limit > agentDeliveryRetirementDefaultLimit {
-		limit = agentDeliveryRetirementDefaultLimit
+func normalizeAgentDeliveryRetirementOptions(options models.AgentDeliveryRetirementBatchOptions) models.AgentDeliveryRetirementBatchOptions {
+	if options.MaxCandidates <= 0 || options.MaxCandidates > agentDeliveryRetirementDefaultLimit {
+		options.MaxCandidates = agentDeliveryRetirementDefaultLimit
 	}
-	if timeout <= 0 || timeout > agentDeliveryRetirementTimeout {
-		timeout = agentDeliveryRetirementTimeout
+	timeoutCap := agentDeliveryRetirementTimeout
+	if options.OfflineMaintenance {
+		timeoutCap = agentDeliveryMaintenanceWorkTimeout
 	}
-	return models.AgentDeliveryRetirementBatchOptions{MaxCandidates: limit, WorkTimeout: timeout}
+	if options.WorkTimeout <= 0 || options.WorkTimeout > timeoutCap {
+		options.WorkTimeout = timeoutCap
+	}
+	return options
 }
 
 // RunAgentDeliveryOrphanBatch schedules bounded cleanup for rows whose
@@ -289,7 +299,7 @@ func (r *Repository) RunAgentDeliveryOrphanBatch(
 	ctx context.Context,
 	options models.AgentDeliveryOrphanBatchOptions,
 ) (models.AgentDeliveryOrphanBatchResult, error) {
-	options = normalizeAgentDeliveryOrphanOptions(options.MaxCandidates, options.WorkTimeout)
+	options = normalizeAgentDeliveryOrphanOptions(options)
 	workCtx, cancel := context.WithTimeout(ctx, options.WorkTimeout)
 	defer cancel()
 	var result models.AgentDeliveryOrphanBatchResult
@@ -361,23 +371,27 @@ func (r *Repository) scheduleAgentDeliveryOrphansTx(ctx context.Context, tx *sql
 	return nil
 }
 
-func normalizeAgentDeliveryOrphanOptions(limit int, timeout time.Duration) models.AgentDeliveryOrphanBatchOptions {
-	if limit <= 0 || limit > agentDeliveryRetirementDefaultLimit {
-		limit = agentDeliveryRetirementDefaultLimit
+func normalizeAgentDeliveryOrphanOptions(options models.AgentDeliveryOrphanBatchOptions) models.AgentDeliveryOrphanBatchOptions {
+	if options.MaxCandidates <= 0 || options.MaxCandidates > agentDeliveryRetirementDefaultLimit {
+		options.MaxCandidates = agentDeliveryRetirementDefaultLimit
 	}
-	if timeout <= 0 || timeout > agentDeliveryRetirementTimeout {
-		timeout = agentDeliveryRetirementTimeout
+	timeoutCap := agentDeliveryRetirementTimeout
+	if options.OfflineMaintenance {
+		timeoutCap = agentDeliveryMaintenanceWorkTimeout
 	}
-	return models.AgentDeliveryOrphanBatchOptions{MaxCandidates: limit, WorkTimeout: timeout}
+	if options.WorkTimeout <= 0 || options.WorkTimeout > timeoutCap {
+		options.WorkTimeout = timeoutCap
+	}
+	return options
 }
 
 func (r *Repository) countUnboundWorkflowRowsTx(ctx context.Context, tx *sqlx.Tx, limit int) (int, error) {
 	var count int
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
 		SELECT COUNT(*) FROM (
-			SELECT effect_key FROM agent_delivery_effects
+			SELECT 1 FROM agent_delivery_effects
 			WHERE effect_type = ? AND (session_id = '' OR incarnation_id = '')
-			ORDER BY effect_key LIMIT ?
+			LIMIT ?
 		)`), "workflow.on_turn_complete", limit).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count bounded unbound workflow receipts: %w", err)

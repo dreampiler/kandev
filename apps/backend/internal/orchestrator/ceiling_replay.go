@@ -232,6 +232,9 @@ func (s *Service) retryOneDeferredCeilingLaunch(
 		return
 	}
 	if reasonCode, detail, drop := s.evaluateCeilingDropReasons(ctx, task, deferral); drop {
+		if reasonCode == ceilingReasonSuperseded && s.evaluateCeilingSupersedeRequeue(ctx, task, deferral, detail) {
+			return
+		}
 		s.deferredRetrySchedule.settle(task.ID)
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
@@ -381,6 +384,10 @@ func (s *Service) settleCeilingReplay(
 		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplaySuperseded:
 		s.deferredRetrySchedule.settle(task.ID)
+		if s.settleCeilingSupersedeRequeue(ctx, task, claim, deferral,
+			"workflow destination changed before dispatch") {
+			return
+		}
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonSuperseded, "workflow destination changed before dispatch")
 	case ceilingReplayRunClosed:
