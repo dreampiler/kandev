@@ -62,6 +62,11 @@ function changesPageFixture(unscrollable = false) {
     boundingBox: async () => owner.getBoundingClientRect(),
   };
   const rowLocator = {
+    scrollIntoViewIfNeeded: async () => {
+      expect(row.getBoundingClientRect().bottom).toBeLessThanOrEqual(
+        owner.getBoundingClientRect().bottom,
+      );
+    },
     evaluate: async (read: (element: HTMLElement) => unknown) =>
       read(row as unknown as HTMLElement),
     boundingBox: async () => row.getBoundingClientRect(),
