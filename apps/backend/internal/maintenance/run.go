@@ -221,7 +221,7 @@ func runExecuteAndCompact(
 
 	outcome := Outcome{Executed: true, Report: report, BackupPath: backupPath, Execution: execResult}
 	retentionOptions = applyDeliveryCandidateLimit(retentionOptions, candidateLimit)
-	retentionResult, err := executeDeliveryRetention(ctx, repo, retentionOptions)
+	retentionResult, err := executeDeliveryRetentionLimited(ctx, repo, retentionOptions, candidateLimit == 0)
 	outcome.Execution.DeletedDeliveryEventPayloads += retentionResult.DeletedDeliveryEventPayloads
 	outcome.Execution.DeletedSettledDeliveryPrompts += retentionResult.DeletedSettledDeliveryPrompts
 	outcome.Execution.RetiredDeliveryEventReceipts += retentionResult.RetiredDeliveryEventReceipts
@@ -267,21 +267,19 @@ func executeDeliveryRetention(
 	repo deliveryRetentionRepository,
 	options models.AgentDeliveryRetentionBatchOptions,
 ) (ExecutionResult, error) {
-	options.OfflineMaintenance = true
-	var execution ExecutionResult
+	return executeDeliveryRetentionLimited(ctx, repo, options, true)
+}
 
-	result, err := repo.RunAgentDeliveryRetentionBatch(ctx, options)
+func executeDeliveryRetentionLimited(
+	ctx context.Context,
+	repo deliveryRetentionRepository,
+	options models.AgentDeliveryRetentionBatchOptions,
+	drain bool,
+) (ExecutionResult, error) {
+	options.OfflineMaintenance = true
+	execution, err := executeDeliveryEventBatches(ctx, repo, options, drain)
 	if err != nil {
-		if !isTimeout(err) {
-			return execution, err
-		}
-		execution.Partial = true
-	} else {
-		execution.DeliveryBatches++
-		execution.DeletedDeliveryEventPayloads = result.EventPayloadsPruned
-		execution.DeletedSettledDeliveryPrompts = result.PromptPayloadsPruned
-		execution.RetiredDeliveryEventReceipts = result.EventRowsRetired
-		execution.Partial = result.Candidates >= deliveryCandidateLimit(options.MaxCandidates)
+		return execution, err
 	}
 
 	orphans, err := repo.RunAgentDeliveryOrphanBatch(ctx, models.AgentDeliveryOrphanBatchOptions{

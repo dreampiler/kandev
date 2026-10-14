@@ -75,6 +75,15 @@ The dominant cost is two `VACUUM INTO` copies of the full database file (the pre
 
 ### Partial runs
 
+Default offline event/prompt execution continues across bounded batches for up
+to two minutes. It follows advancing discovery frontiers even when a page is
+protected, and stops after both alternating phases make no progress. A positive
+`--candidate-limit` deliberately requests only one event/prompt batch. The
+report includes committed `retired inbox rows` and `retired generic effects rows`;
+each retired inbox prefix has exactly one validated generic effect per row.
+Terminal/workflow receipts and replay checkpoints remain protected. A time-limited
+pass preserves committed counts and reports partial before the remaining steps.
+
 The offline command gives each delivery step (payload pruning, orphan scan, retired-session purge) a longer finite per-step budget than the online background worker, in bounded batches. A step that exceeds its budget is recorded as `partial` and the remaining steps (retired-session purge and `--compact`) still run; committed deletes are preserved and are backed by the pre-execution backup. Exit status distinguishes the three outcomes: `0` complete, `1` partial, `2` failure. A partial run is simply rerun with the same command to continue the bounded work; a `--compact` that fails (for example insufficient disk space) also reports partial and leaves the live database intact.
 
 ### Steps inside vs. outside the stop window
