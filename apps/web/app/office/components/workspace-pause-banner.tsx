@@ -114,7 +114,7 @@ function PausedBanner({
   );
 }
 
-// AC-OFFICE-KILL-SWITCH-006.4's "Frontend state" error-with-no-record case:
+// Shown when a read failed and no pause record is available:
 // the absence of a banner must never be read as "running", so an explicit
 // affordance is shown instead. The pause control stays reachable here too.
 function PauseStateUnavailableBar() {
