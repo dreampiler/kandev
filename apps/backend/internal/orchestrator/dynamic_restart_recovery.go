@@ -47,9 +47,7 @@ func (s *Service) completeReadyStrandedStartingRoute(ctx context.Context, sessio
 		return false
 	}
 	current, err := s.repo.GetTaskSession(ctx, session.ID)
-	if err != nil || current == nil || !routeActivationSessionState(current.State) ||
-		current.RouteGeneration != session.RouteGeneration || current.ExecutionProfileID != session.ExecutionProfileID ||
-		current.AgentExecutionID != session.AgentExecutionID || !isStartingRouteClaim(current) {
+	if err != nil || !sameStartingRouteOwner(current, session) {
 		return false
 	}
 	if !s.hasLivePromptReadyAgent(ctx, session) {
@@ -69,6 +67,13 @@ func (s *Service) completeReadyStrandedStartingRoute(ctx context.Context, sessio
 	}
 	session.RouteState = dynamicRouteStatusActive
 	return true
+}
+
+func sameStartingRouteOwner(current, expected *models.TaskSession) bool {
+	return isStartingRouteClaim(current) && routeActivationSessionState(current.State) &&
+		current.RouteGeneration == expected.RouteGeneration &&
+		current.ExecutionProfileID == expected.ExecutionProfileID &&
+		current.AgentExecutionID == expected.AgentExecutionID
 }
 
 // isStartingRouteClaim reports whether a session carries a claimed dynamic
