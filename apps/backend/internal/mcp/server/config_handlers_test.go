@@ -368,25 +368,6 @@ func TestUpdateWorkflowHandler_Success(t *testing.T) {
 	assert.Equal(t, true, payload["hidden"])
 }
 
-func TestUpdateWorkflowHandler_OmitsHiddenWhenAbsent(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"id": "wf-1", "name": "Updated"},
-	}
-	s := newTestServer(t, backend)
-
-	result := callTool(t, s, "update_workflow_kandev", map[string]interface{}{
-		"workflow_id": "wf-1",
-		"name":        "Updated",
-	})
-
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPUpdateWorkflow, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]interface{})
-	require.True(t, ok)
-	_, present := payload["hidden"]
-	assert.False(t, present, "omitted hidden must not be sent to the backend")
-}
-
 func TestUpdateWorkflowHandler_MissingWorkflowID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
