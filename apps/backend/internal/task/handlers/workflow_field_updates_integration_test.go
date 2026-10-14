@@ -241,6 +241,42 @@ func registeredWorkflowOverlap(t *testing.T, transport string) {
 		assertWorkflowTransportEvent(t, fixtures[0], first)
 		assertWorkflowTransportEvent(t, fixtures[1], second)
 	})
+	t.Run("hidden_flag_applies_and_hides_from_list", func(t *testing.T) {
+		fixtures := registeredWorkflowFixtures(t)
+		ctx := context.Background()
+		result, ok := fixtures[0].update(ctx, t, transport, `{"hidden":true}`)
+		require.True(t, ok)
+		require.True(t, result.Hidden)
+		stored, err := fixtures[0].repo.GetWorkflow(ctx, "transport-fields")
+		require.NoError(t, err)
+		require.True(t, stored.Hidden)
+		visible, err := fixtures[0].repo.ListWorkflows(ctx, "transport-ws", false)
+		require.NoError(t, err)
+		for _, w := range visible {
+			require.NotEqual(t, "transport-fields", w.ID, "hidden workflow must leave the default list")
+		}
+		all, err := fixtures[0].repo.ListWorkflows(ctx, "transport-ws", true)
+		require.NoError(t, err)
+		found := false
+		for _, w := range all {
+			if w.ID == "transport-fields" {
+				found = true
+			}
+		}
+		require.True(t, found, "include_hidden list keeps the workflow")
+		_, ok = fixtures[1].update(ctx, t, transport, `{"name":"after hide"}`)
+		require.True(t, ok)
+		stored, err = fixtures[1].repo.GetWorkflow(ctx, "transport-fields")
+		require.NoError(t, err)
+		require.True(t, stored.Hidden, "omitting hidden preserves the stored value")
+		require.Equal(t, "after hide", stored.Name)
+		result, ok = fixtures[0].update(ctx, t, transport, `{"hidden":false}`)
+		require.True(t, ok)
+		require.False(t, result.Hidden)
+		stored, err = fixtures[0].repo.GetWorkflow(ctx, "transport-fields")
+		require.NoError(t, err)
+		require.False(t, stored.Hidden)
+	})
 }
 
 // @covers AC-TASKS-FIELD-UPDATES-002.4, AC-TASKS-FIELD-UPDATES-002.5
