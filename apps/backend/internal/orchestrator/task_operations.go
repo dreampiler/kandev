@@ -5702,6 +5702,24 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 // another owner's cleanup is never force-completed here, and the existing
 // session row/state is preserved.
 func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID string) (settled bool, cause error) {
+	if s.turnService == nil {
+		return true, nil
+	}
+	// Capture the open turn before reading the session state and settle only that
+	// exact turn. A concurrent launch/resume that opens a successor turn also
+	// moves the session to a non-settleable state, so the state read below fails
+	// closed; and completeTurnForTaskSessionCheckedOwned fails closed if the
+	// active turn changed in the meantime. A successor turn is never swept.
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		if isNoActiveTurnError(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if turn == nil {
+		return true, nil
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		if errors.Is(err, models.ErrTaskSessionNotFound) {
@@ -5724,19 +5742,6 @@ func (s *Service) settleExecutionLessSessionStop(ctx context.Context, sessionID 
 		// may be in flight and the execution may simply not be registered yet, so
 		// return the original error and leave the turn alone.
 		return false, nil
-	}
-	if s.turnService == nil {
-		return true, nil
-	}
-	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
-	if err != nil {
-		if isNoActiveTurnError(err) {
-			return true, nil
-		}
-		return false, err
-	}
-	if turn == nil {
-		return true, nil
 	}
 	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, session.TaskID, sessionID, turn.ID); err != nil {
 		return false, err
