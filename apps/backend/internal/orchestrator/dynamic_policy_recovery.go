@@ -91,19 +91,9 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(ctx context.Context, sta
 	s.markDynamicRouteActionRequired(ctx, state.SessionID, state.Generation, "orphaned_starting_route")
 }
 
-// dynamicStartingRouteIsStranded reports whether a session parked in
-// WAITING_FOR_INPUT still owns a "starting" route with no live launch owner. A
-// route reaches MarkActive only on a successful launch, so a WAITING_FOR_INPUT
-// session whose route is still "starting" had its launch owner disappear: the
-// process that owned it stopped, or a launch never completed. The exclusion in
-// isOrphanableDynamicSessionState assumes the ordinary UI explains that state,
-// but that only holds while a live executor backs the session. Once no
-// executors_running row remains, the route is genuinely stranded and no other
-// pass recovers it (the scheduling-orphan pass skips deferred intents, the
-// ceiling replay cannot bring up a runtime), so the sweep must mark it
-// action_required like any other orphaned starting route. A read error is
-// treated as "not stranded" so an unreadable row never demotes a session that
-// may still have a live launch.
+// dynamicStartingRouteIsStranded reports true only for a WAITING_FOR_INPUT
+// session with no executors_running row. A live row or a read error reports
+// false, so the session keeps its route.
 func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *models.TaskSession) bool {
 	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
 		return false
