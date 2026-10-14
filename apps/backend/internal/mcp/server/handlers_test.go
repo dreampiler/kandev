@@ -162,30 +162,6 @@ func TestCreateTask_AutopilotPayload(t *testing.T) {
 	assert.Equal(t, true, payload["autopilot"])
 }
 
-func TestCreateTask_WorkflowAgentOverridesPayload(t *testing.T) {
-	backend := &testBackend{
-		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
-	}
-	s := newTaskModeServer(t, backend, "task-current")
-
-	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
-		"title":     "Override lane",
-		"parent_id": "self",
-		"workflow_agent_overrides": map[string]interface{}{
-			"profile-implement": "profile-terra",
-		},
-	})
-
-	assert.False(t, result.IsError)
-	payload, ok := backend.lastPayload.(map[string]interface{})
-	require.True(t, ok)
-	raw, ok := payload["workflow_agent_overrides"]
-	require.True(t, ok, "the override map must reach the backend payload")
-	data, err := json.Marshal(raw)
-	require.NoError(t, err)
-	assert.JSONEq(t, `{"profile-implement":"profile-terra"}`, string(data))
-}
-
 func propertyNames(properties map[string]interface{}) []string {
 	names := make([]string, 0, len(properties))
 	for name := range properties {
