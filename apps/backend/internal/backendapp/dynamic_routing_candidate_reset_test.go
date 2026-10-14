@@ -2,16 +2,21 @@ package backendapp
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
+	"github.com/jmoiron/sqlx"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	taskreposqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // routeActionProviderStateKeys mirrors the provider-owned keys the shared
@@ -216,4 +221,91 @@ func TestDynamicCandidateProviderStateKeysMatchesAgentIdentity(t *testing.T) {
 
 	unknown := orchestrator.DynamicCandidateProviderStateKeys("agent-x", "")
 	require.Contains(t, unknown, models.SessionMetaKeyRuntimeConfigOverrides)
+}
+
+// openRouteActionRepo returns the settings and task stores plus the raw handle so
+// a test can fault-inject a store failure by closing the database.
+func openRouteActionRepo(t *testing.T) (settingsstore.Repository, *taskreposqlite.Repository, *sqlx.DB) {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "route-action-fault.db"))
+	require.NoError(t, err)
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	settingsRepo, cleanup, err := settingsstore.Provide(sqlxDB, sqlxDB, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = cleanup() })
+	taskRepo, err := taskreposqlite.NewWithDB(sqlxDB, sqlxDB, nil)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	for _, id := range []string{"dynamic", "concrete-agent"} {
+		_, err := sqlxDB.Exec(
+			`INSERT INTO agents (id, name, created_at, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			id, id,
+		)
+		require.NoError(t, err)
+	}
+	for _, profile := range []*agentsettingsmodels.AgentProfile{
+		{ID: "profile-dynamic", AgentID: "dynamic", Name: "Dyn", Enabled: true},
+		{ID: "candidate-a", AgentID: "concrete-agent", Name: "A", Model: "model-a", Enabled: true},
+		{ID: "candidate-b", AgentID: "concrete-agent", Name: "B", Model: "model-b", Enabled: true},
+	} {
+		require.NoError(t, settingsRepo.CreateAgentProfile(ctx, profile))
+	}
+	return settingsRepo, taskRepo, sqlxDB
+}
+
+func TestPersistDynamicRouteSelectionSameCandidateStoreFailureWrapsError(t *testing.T) {
+	ctx := context.Background()
+	profileRepo, repo, sqlxDB := openRouteActionRepo(t)
+	seedRouteActionSession(t, repo, "session-fail", "candidate-a")
+
+	session, err := repo.GetTaskSession(ctx, "session-fail")
+	require.NoError(t, err)
+	decision := agentruntime.ProfileExecution{
+		ExecutionProfileID: "candidate-a",
+		Generation:         1,
+		Profile:            &agentsettingsmodels.AgentProfile{ID: "candidate-a", AgentID: "concrete-agent", Model: "model-a"},
+	}
+	// Closing the pool makes the guarded write fail, so the same-candidate
+	// branch must wrap the raw store error the way the candidate-change branch
+	// does.
+	require.NoError(t, sqlxDB.Close())
+
+	changed, err := persistDynamicRouteSelection(
+		ctx, repo, profileRepo, session, session.State, decision, newRouteActionTestLogger(t),
+	)
+	require.False(t, changed)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "persist route action session state")
+}
+
+func TestPersistDynamicRouteSelectionUnchangedDoesNotLogReplacement(t *testing.T) {
+	ctx := context.Background()
+	profileRepo, repo, _ := openRouteActionRepo(t)
+	seedRouteActionSession(t, repo, "session-nolog", "candidate-a")
+	// Remove the explicit selection so the provider-recorded model is the only
+	// source and the replacement predicate would be true if the write committed.
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-nolog", models.SessionMetaKeyRuntimeConfigOverrides, nil))
+
+	session, err := repo.GetTaskSession(ctx, "session-nolog")
+	require.NoError(t, err)
+	decision := agentruntime.ProfileExecution{
+		ExecutionProfileID: "candidate-b",
+		Generation:         2,
+		Profile:            &agentsettingsmodels.AgentProfile{ID: "candidate-b", AgentID: "concrete-agent", Model: "model-b"},
+	}
+	core, obs := observer.New(zap.DebugLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	require.NoError(t, err)
+
+	// A mismatched expected state makes the guarded write a no-op (changed=false).
+	changed, err := persistDynamicRouteSelection(
+		ctx, repo, profileRepo, session, models.TaskSessionStateFailed, decision, log,
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Empty(t, obs.FilterMessage("dynamic candidate change replaces the previous candidate's recorded model").All(),
+		"a no-op write must not record a model replacement")
 }
