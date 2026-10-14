@@ -44,16 +44,18 @@ test.describe.serial("Mobile Quick Chat cancellation", () => {
     await testPage.getByTestId("mobile-quick-chat-button").tap();
 
     const quickChat = testPage.getByRole("dialog", { name: "Quick Chat" });
-    const { task_id: quickTaskId, session_id: startedSessionId } = await startQuickChatFromSetup(
-      quickChat,
-      testPage,
-    );
-    await waitForSessionSettledBaseline(apiClient, quickTaskId, startedSessionId);
+    const started = await startQuickChatFromSetup(quickChat, testPage);
+    await waitForSessionSettledBaseline(apiClient, started.task_id, started.session_id);
     await sendQuickChatMessage(quickChat, testPage, "/slow 30s");
-    await waitForAgentMessage(apiClient, startedSessionId, "Running slow response (30s total)", 30_000);
+    await waitForAgentMessage(
+      apiClient,
+      started.session_id,
+      "Running slow response (30s total)",
+      30_000,
+    );
 
     const quickSessionId = await waitForActiveQuickChatSupportsSteering(testPage);
-    expect(quickSessionId).toBe(startedSessionId);
+    expect(quickSessionId).toBe(started.session_id);
     await waitForActiveQuickChatForegroundActivity(testPage, "generating");
     const editor = quickChat.locator('.tiptap.ProseMirror[contenteditable="true"]:visible');
     await expect(editor).toHaveText("");
