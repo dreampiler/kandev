@@ -48,6 +48,10 @@
   Forward an explicit disposable home to dev-isolated.ps1. The same home is
   reused for the backend restart, subject to the launcher's isolation checks.
 
+.PARAMETER FixtureRoot
+  Required disposable scenario-repository root outside Kandev task worktrees.
+  No default is chosen; repository admission retains its existing path guards.
+
 .PARAMETER OutputPath
   Where to write the result JSON. Defaults to a file under the temp directory.
 #>
@@ -61,10 +65,14 @@ param(
   [switch]$NoBuild,
   [string]$BinDir,
   [string]$HomeDir,
+  [string]$FixtureRoot,
   [string]$OutputPath
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($FixtureRoot)) {
+  throw 'verify-release: -FixtureRoot is required; choose a disposable scenario-repository root outside Kandev task worktrees.'
+}
 # No Set-StrictMode: the script reads dynamic JSON whose optional fields are
 # legitimately absent, and strict mode would turn those reads into errors.
 
@@ -224,7 +232,7 @@ function Invoke-KandevWs {
 
 # --- Fixture ---------------------------------------------------------------
 function New-Fixture {
-  $repo = Join-Path $env:TEMP ("vrfixture-" + $BackendPort + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+  $repo = Join-Path $FixtureRoot ("resume-turn-start-" + $BackendPort + '-' + [guid]::NewGuid().ToString('N').Substring(0, 6))
   New-Item -ItemType Directory -Path $repo -Force | Out-Null
   Invoke-GitQuiet -RepoDir $repo -GitArgs @('init', '-b', 'main')
   Set-Content -LiteralPath (Join-Path $repo 'README.txt') -Value 'verify-release' -Encoding ASCII

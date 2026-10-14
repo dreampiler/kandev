@@ -142,6 +142,11 @@ for the upstream write owner, not code to add here.
   link, script/source copy, or other guard workaround is used going forward.
 - Readbacks: `GET /api/v1/system/info` for the installed revision and
   `GET /api/v1/system/liveness` for running turns.
+- The canonical rerun on 2026-10-14 used the declared binary directory and
+  an explicit `-FixtureRoot` outside Kandev task worktrees. Repository admission
+  succeeded. The JSON reported B and E passed, A and C failed, D unverified,
+  and `result=failed`; task 04 records the observations and remaining limits.
+  The original release acceptance remains unmet.
 - Existing Windows listener and snapshot test failures are recorded as existing
   failures and are not rerun.
 

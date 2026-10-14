@@ -46,7 +46,7 @@ the upstream write owner. No upstream publication happens here.
 
 - `go test ./apps/backend/internal/orchestrator/... -run 'Resume|Restart'` from
   `apps/backend`, plus `go build ./...` and `go vet ./...` for changed packages.
-- Isolated run: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release.ps1 -Commit <rev> -ReleaseRoot <root> -InstanceKind isolated`.
+- Isolated run: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-release.ps1 -Commit <rev> -ReleaseRoot <root> -InstanceKind isolated -FixtureRoot <fixture-root>`.
 
 ## Likely files
 
