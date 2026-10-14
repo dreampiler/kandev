@@ -269,17 +269,17 @@ func isManualRecoveryPromptError(err error) bool {
 		strings.Contains(message, "you've hit your usage limit")
 }
 
-// isEnsureSessionRunningTimeout reports whether the error is a timeout from
-// the bounded "ensure session is running" wait. The classifier wraps this
-// error with the "failed to ensure session is running:" prefix so callers
-// can distinguish it from other context.DeadlineExceeded sources (provider
-// timeouts, RPC deadlines, etc.) that must not be retried at the queue head.
+// isEnsureSessionRunningTimeout reports whether the error is the bounded
+// "ensure session is running" wait expiring. The classifier
+// (classifyEnsureSessionRunningFailureForPrompt) wraps that failure with the
+// "failed to ensure session is running:" prefix, so an expired runtime wait is
+// distinguishable from any other context.DeadlineExceeded in the dispatch
+// chain (provider timeouts, downstream RPC deadlines) that must keep its
+// disposition instead of blocking the head of the queue (AC 002.3).
 func isEnsureSessionRunningTimeout(err error) bool {
-	if err == nil {
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		return false
 	}
-	// The classifier (classifyEnsureSessionRunningFailureForPrompt) wraps
-	// all ensure-session-running failures with this prefix.
 	return strings.Contains(err.Error(), "failed to ensure session is running:")
 }
 

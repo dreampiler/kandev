@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -221,6 +222,28 @@ func TestQueuedMessageExecutionError_DropsNonRetryableFailure(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("non-retryable failure left %d queue entries, want none", len(entries))
+	}
+}
+
+// AC-TASKS-RESUME-PROMPT-QUEUE-002.3: a deadline raised outside the bounded
+// runtime wait (a provider or downstream RPC timeout) is not a wait expiry, so
+// it keeps its disposition instead of blocking the head of the queue.
+func TestQueuedMessageExecutionError_DropsForeignDeadline(t *testing.T) {
+	ctx := context.Background()
+	repo := messagequeue.NewMemoryRepository()
+	queue := messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger())
+	svc := &Service{messageQueue: queue, logger: testLogger()}
+	queued, reserved := reserveQueuedExecutionErrorMessage(t, queue, "session-provider-deadline", "task-provider-deadline")
+
+	providerErr := fmt.Errorf("provider stream read: %w", context.DeadlineExceeded)
+	svc.handleQueuedMessageExecutionError(ctx, queued.SessionID, reserved, nil, false, false, providerErr)
+
+	entries, err := repo.ListBySession(ctx, queued.SessionID)
+	if err != nil {
+		t.Fatalf("list queued messages: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a foreign deadline left %d queue entries, want none", len(entries))
 	}
 }
 
