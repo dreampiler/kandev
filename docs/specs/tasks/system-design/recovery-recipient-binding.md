@@ -173,7 +173,7 @@ The frontend's `use-workflow-move-preview-revision.ts` has an explicit
 `TASK_METADATA_KEYS` projection rather than invalidating on every task timestamp.
 Include the new binding in that projection and its logical profile in
 `addTaskProfileIds`, including when the registered session row is absent. Keep
-`originalSessionReference` historical. Extend the existing hook test to prove
+`originalSessionReference` historical. Use temporary hook checks to prove
 binding-only updates refresh active/background task previews and profile changes
 invalidate the same prediction. This shared state logic serves desktop and phone;
 it adds no viewport-dependent behavior, layout, navigation, or touch changes.

@@ -147,23 +147,31 @@ external operating owner.
 
 ## Verification strategy
 
-Extend only relevant existing companion unit/integration cases under the workflow's
-approved companion-test exception. Do not create a new permanent suite, E2E file,
-collector, gate, or recurring check. Use an isolated real handler/repository/engine
-fixture with a fake external agent: invoke `session.set_primary` with the explicit
+Reuse relevant existing tests and necessary existing assertion/fixture updates.
+Do not add permanent test functions or cases, including inside existing files.
+The earlier companion-test exception was an incorrect interpretation of the
+owner's test-lifetime boundary. Additional recovery checks run once in a temporary
+standalone source copy outside this worktree's normal collectors, then are cleaned
+up. Do not create a suite, collector, gate, or recurring check. Use a real
+handler/repository/engine fixture with a fake external agent: invoke
+`session.set_primary` with the explicit
 source, move through the normal entry path, inspect the saved snapshot/route/binding
 and actual next-step prompt recipient once. This is source integration acceptance,
 not live-provider or operating-installation acceptance.
 
 The work order lists exact commands and maps evidence to criteria. Reuse existing
-same-entry replay, primary binding, preview, and deleted-destination tests. Add only
-the missing transaction/routing cases to their existing files. No broad build/test
+same-entry replay, primary binding, preview, and deleted-destination tests. Keep
+missing transaction/routing checks temporary. No broad build/test
 or independent re-review of the P31 report is required for planning. Shared
 preview-state projection changes use the existing hook unit tests for both
 viewports under `/mobile-parity`'s state-only exception; no rendered UI structure,
 navigation, touch behavior, new E2E file, or ASCII layout is introduced.
 
 ## Verification results
+
+The initial results below describe the implementation at `fd68fe777918`.
+The test-lifetime correction below supersedes its collector layout and test count,
+while retaining the observed RED/GREEN behavior and unchanged production code.
 
 The direct implementation turn authorized Task 01, commit, origin push, fork PR,
 and review handoff. Upstream main was rechecked before implementation and remained
@@ -239,6 +247,53 @@ pushed head, hook receipt and exact review-source tuple are recorded in the nati
 Task Plan `79104a2a-643d-40fe-bbfa-d62ded900ca3`. Review and merge remain pending;
 merge requires controller GO. The outer fork goal and later operating acceptance
 are preserved.
+
+## Test-lifetime correction (2026-10-15 KST)
+
+The owner explicitly clarified that a new case in an existing file is still a
+permanent test addition. The companion-test exception above was incorrect and is
+withdrawn. The original conditional execution approval remains sufficient within
+Task 01; no later owner answer or new approval condition is asserted. The source
+handoff is `codex_binding_existing_execution_authority_1015.md` in the existing
+operating handoff directory. No production behavior or acceptance criterion was
+removed by this correction.
+
+Restored the original handler recovery, step-session binding, repository binding,
+service metadata and frontend hook test files from the fork comparison base.
+The final test diff retains only the six-line executor/profile seed in the existing
+deleted-route test. No new test function or case remains in normal collectors.
+
+Additional recovery checks ran in a standalone `git archive fd68fe777918` source
+copy at `D:/260720_Ai_Workspace/_Runtime/tmp/binding79104-once-20261015/source`.
+This directory is outside the worktree and its configured collectors; it has no
+Git metadata and was invoked only by the following one-off command from its
+`apps/backend` directory:
+
+```text
+go test -trimpath -p 1 ./internal/orchestrator ./internal/orchestrator/handlers ./internal/task/repository/sqlite ./internal/task/service -run 'RecoveryRecipient' -count=1
+```
+
+All four packages passed, preserving the supported handler -> real repository ->
+normal next-entry -> actual replacement prompt assertion and rejection/replay
+checks. Production sources are unchanged from that copy. The earlier RED/GREEN
+and focused race observations above remain evidence, not standing test additions.
+
+The current worktree's existing targeting/primary/metadata filter passed in
+orchestrator and service. Its handler/repository/models portions initially matched
+no tests, so the relevant existing checks were then executed explicitly:
+
+```text
+go test -trimpath -p 1 ./internal/orchestrator/handlers ./internal/task/repository/sqlite -run 'RestoreRequiredRecoveryResponse|WSLaunchSession_DurableRecovery|WorkflowSessionBinding' -count=1
+go test -trimpath -p 1 ./internal/task/models -run 'LoadOriginalSessionEffectiveConfiguration|IsOriginalTaskSession' -count=1
+```
+
+Both commands passed. The original preview-hook file passed all 10 existing tests;
+the prior binding-only assertion passed before removal with the same production
+hook. Document catalog/spec lint and whitespace checks passed. No full SQL guard,
+store conformance or race audit was repeated for this test-lifetime correction.
+The owned source copy and archive were sent to the Windows Recycle Bin after
+results were recorded. Publication and updated review-source refs are retained in
+the native Task Plan.
 
 ## Risks
 

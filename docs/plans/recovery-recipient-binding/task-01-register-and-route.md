@@ -33,14 +33,16 @@ supported action reaches the actual next-step prompt with isolated task data.
   reusing authorization, primary transaction, admission and queue-transfer helpers.
 - Shared effective recipient selection across preview/preflight and all workflow
   entry paths, preserving exact same-entry route retry and original configuration.
-- Relevant existing companion tests and the existing public sessions/workflow guide.
+- Existing tests and necessary existing assertion/fixture updates; additional
+  recovery checks are temporary. Update the existing public sessions/workflow guide.
 - Shared frontend preview-revision metadata/profile projection and its existing
   unit test; preserve the historical original-session reference.
 
 ## Out of scope
 
 Production data, installation, live incident recreation, generic metadata editing,
-new MCP tools/UI controls, schema migration, new test suites/gates/pollers, model
+new MCP tools/UI controls, schema migration, new permanent test functions/cases,
+test suites/gates/pollers, model
 or ceiling changes, Office recovery, upstream posting, and unrelated fork work.
 
 ## Acceptance
@@ -61,16 +63,22 @@ or ceiling changes, Office recovery, upstream posting, and unrelated fork work.
 From `apps/backend`, run each command separately:
 
 ```text
-go test -trimpath ./internal/orchestrator ./internal/orchestrator/handlers ./internal/task/repository/sqlite ./internal/task/models ./internal/task/service -run 'RecoveryRecipient|ProtectedTaskMetadata|WorkflowSessionTarget|ResolveInitialWorkflowSession|LoadRecordedWorkflowSessionRoute|PrepareExplicitWorkflowSession|SetPrimarySession|PreviewWorkflowSessionTarget|PreviewWorkflowMove_DoesNotBackfillLegacyInitialSessionMetadata' -count=1
-go test -trimpath -race ./internal/task/repository/sqlite ./internal/orchestrator -run 'RecoveryRecipient' -count=1
-go run ./cmd/sqlguard ./internal
-go test -trimpath -race ./internal/persistence/storeconformance -count=1
+go test -trimpath -p 1 ./internal/orchestrator ./internal/orchestrator/handlers ./internal/task/repository/sqlite ./internal/task/models ./internal/task/service -run 'ProtectedTaskMetadata|WorkflowSessionTarget|WorkflowSessionBinding|ResolveInitialWorkflowSession|LoadRecordedWorkflowSessionRoute|PrepareExplicitWorkflowSession|SetPrimarySession|PreviewWorkflowSessionTarget|PreviewWorkflowMove_DoesNotBackfillLegacyInitialSessionMetadata|RestoreRequiredRecoveryResponse|WSLaunchSession_DurableRecovery|LoadOriginalSessionEffectiveConfiguration|IsOriginalTaskSession' -count=1
 ```
 
 Use the established build tags if required by the existing local SQLite setup;
 record the exact executed command rather than assuming success. If PostgreSQL is
-available through `KANDEV_TEST_POSTGRES_DSN`, run the same new transaction cases
-there; otherwise report PostgreSQL unverified without introducing a new service.
+available through `KANDEV_TEST_POSTGRES_DSN`, the temporary transaction checks may
+use it; otherwise report PostgreSQL unverified without introducing a new service.
+Do not require unrelated full SQL guard, store-conformance or race audits.
+
+Missing recovery checks run once from a standalone tracked-source copy under
+`D:/260720_Ai_Workspace/_Runtime/tmp`, not from this worktree's collectors. Keep
+the already-created recovery checks only in that temporary copy, run the narrow
+`RecoveryRecipient` filter for orchestrator, handlers, repository and service,
+record the actual command/results, then remove the copy. The existing RED/GREEN
+evidence remains valid when temporary files are cleaned up. No new function/case
+is retained in normal collectors or in the final PR diff.
 
 From `apps/web`, reuse the existing hook unit test:
 
@@ -97,12 +105,12 @@ contents; do not publish a status or add a new checker. Run the existing public-
 check only for the guide changed by this work order.
 
 Evidence mapping: existing `workflow_session_target_test.go` covers entry replay,
-exact targeting, terminal/deleted fallback and source binding; extend its missing
-recovery cases for criteria 004.2/.3/.5. Existing repository primary/binding tests
-cover atomicity, expected-source competition and retry for 004.1/.3/.4/.5.
-Existing preview tests cover read-only agreement and missing provenance. Extend
-the existing orchestrator handler tests with a `RecoveryRecipient` integration
-case for 004.6, using real task repository and workflow entry and a fake external
+exact targeting, terminal/deleted fallback and source binding. Temporary recovery
+checks supply missing coverage for criteria 004.2/.3/.5 and atomicity,
+expected-source competition and retry for 004.1/.3/.4/.5.
+Existing preview tests cover read-only agreement and missing provenance. Run the
+temporary `RecoveryRecipient` handler integration check for 004.6, using real
+task repository and workflow entry and a fake external
 agent. Inspect prompt recipient/content and immutable records, not only counters.
 Cover different logical profiles, same-entry committed retry, ordinary spawn or
 promotion without registration, and a stale A-to-B attempt after B-to-C.
@@ -110,7 +118,7 @@ Include the existing conditional `start_created` profile-change path in the
 no-implicit-succession assertions: workflow profile precedence, immutable snapshot
 profile, and the recorded-route profile guard must remain effective. Do not turn
 that path into a generic profile PATCH or relax production checks to repair a
-missing test profile fixture. Reuse existing companion assertions; no new suite.
+missing test profile fixture. Reuse existing assertions; do not retain new cases.
 
 ## Files likely touched
 
@@ -122,8 +130,8 @@ missing test profile fixture. Reuse existing companion assertions; no new suite.
 - `apps/backend/internal/orchestrator/handlers/handlers.go`
 - `apps/backend/internal/orchestrator/workflow_session_target.go`
 - `apps/backend/internal/orchestrator/workflow_move_preview.go`
-- `apps/web/hooks/domains/kanban/use-workflow-move-preview-revision.ts` and its test
-- Existing companion primary/binding, workflow-target, preview and handler test files
+- `apps/web/hooks/domains/kanban/use-workflow-move-preview-revision.ts`
+- Existing test files only for necessary existing assertion/fixture updates
 - `docs/public/sessions-and-review.md` or the owning existing workflow guide
 - This package and its linked requirements/design
 
@@ -156,14 +164,16 @@ live reviewers, a changed primary, or missing initial metadata as recovery proof
 
 ## Results
 
-Implemented following the later direct implementation request. The supported WS
+Implemented under the owner's original conditional execution instruction and the
+existing Task 01 scope. This does not claim a new post-plan owner answer. The supported WS
 registration and real repository/engine/step-launch fixture delivers the actual
 prompt exactly once to the replacement execution. It also proves ordinary primary
 promotion creates no binding and registration preserves initial history and the
 prior committed route. Source-step profile changes retain their existing behavior;
 dynamic registration preserves logical identity without choosing a candidate.
 
-Focused ordinary and race Go checks passed, including the final affected
+Initial implementation verification at `fd68fe777918`: focused ordinary and race
+Go checks passed, including the final affected
 orchestrator/handler tests after the last production edit. Task-owned SQLite store
 conformance, the new SQL file's strict guard scan, changed-package Go lint, 11
 preview-hook tests, changed-file ESLint, documentation catalog/spec lint, diff
@@ -174,8 +184,18 @@ baseline failures detailed in [the plan](plan.md#verification-results). Storage
 path and v0.93.0 upgrade failures, plus the original missing-ep1 fixture failure,
 were reproduced on unchanged HEAD using temporary Go overlays. The relevant ep1
 fixture was corrected; no unrelated baseline source was changed. PostgreSQL is
-unverified because its DSN is unset. No new permanent suite, collector or gate was
-introduced. No operating deployment is claimed.
+unverified because its DSN is unset. The initial implementation incorrectly left
+new cases in existing collector files. The owner clarified that these are also
+prohibited permanent additions; they are removed from the final diff, with the
+existing ep1 fixture correction retained. Recovery evidence is preserved through
+temporary standalone-source checks and the plan's recorded RED/GREEN results.
+The temporary recovery checks passed in all four packages and the owned source
+copy/archive were recycled. Existing targeting/primary/metadata, handler recovery,
+repository binding and original-session model checks passed in the worktree.
+The restored hook file passed 10 existing tests. No production code changed during
+this correction. Exact commands and the initial no-match portions are recorded in
+[the plan](plan.md#test-lifetime-correction-2026-10-15-kst).
+No operating deployment is claimed.
 
 Publication and independent review follow this work order through the native Task
 Plan's actual PR/head/base/worktree records. Fork-main merge requires controller GO.

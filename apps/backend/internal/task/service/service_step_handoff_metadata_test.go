@@ -50,23 +50,6 @@ func TestProtectedTaskMetadataUpdateRejectsNewStepHandoffCarry(t *testing.T) {
 	}
 }
 
-func TestProtectedTaskMetadataRecoveryRecipientCannotBeForged(t *testing.T) {
-	const key = "workflow_initial_recipient_binding"
-	requested := map[string]interface{}{key: "forged", "ordinary": "keep"}
-	existing := map[string]interface{}{key: "saved"}
-	if got := protectedTaskMetadataUpdate(existing, requested)[key]; got != "saved" {
-		t.Fatalf("recovery binding = %v, want saved", got)
-	}
-	if _, ok := protectedTaskMetadataUpdate(nil, requested)[key]; ok {
-		t.Fatal("metadata update accepted a new recovery binding")
-	}
-	for _, trusted := range []bool{false, true} {
-		if _, ok := protectedTaskMetadataForCreate(requested, trusted)[key]; ok {
-			t.Fatal("task creation/copy accepted a recovery binding")
-		}
-	}
-}
-
 func TestProtectedTaskMetadataUpdatePreservesTaskHandoffRecords(t *testing.T) {
 	existing := map[string]interface{}{
 		models.MetaKeyHandoffSource: map[string]interface{}{"source_task_id": "source-1"},
