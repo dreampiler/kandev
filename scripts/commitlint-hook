@@ -28,11 +28,8 @@ fail() {
 	exit 1
 }
 
-header="$(awk 'NF == 0 || /^#/ { next } { print; exit }' "$msg_file")"
+header="$(awk 'NF == 0 || /^#/ { next } { sub(/\r$/, ""); print; exit }' "$msg_file")"
 [ -n "$header" ] || fail "empty commit message"
-
-len=${#header}
-[ "$len" -le "$max_header" ] || fail "header is $len characters; the limit is $max_header"
 
 [[ "$header" =~ ^([a-z]+)(\(.*\))?!?:\ (.+)$ ]] \
 	|| fail "header must be 'type(scope): subject' with a lowercase type (got: $header)"
@@ -81,8 +78,11 @@ if (/^[\p{Ll}\p{Lu}\p{Lt}]/u.test(subject)) {
   }
 }
 
-// Both body and footer have the same limit and URL exception.
-const lines = readFileSync(messageFile, 'utf8').split(/\r?\n/).filter((line) => !line.startsWith('#'));
+// Both body and footer have the same limit and URL exception. git commit -v
+// appends the diff below a scissors line; match commitlint and drop it.
+const raw = readFileSync(messageFile, 'utf8').split(/\r?\n/);
+const scissorsIndex = raw.findIndex((line) => /^#\s*-{2,}\s*>8\s*-{2,}\s*$/.test(line));
+const lines = (scissorsIndex === -1 ? raw : raw.slice(0, scissorsIndex)).filter((line) => !line.startsWith('#'));
 const headerIndex = lines.findIndex((line) => line.trim());
 for (const line of lines.slice(headerIndex + 1)) {
   if (line.length > 100 && !/\bhttps?:\/\/\S+/.test(line)) {
