@@ -13,6 +13,7 @@ acceptance_criteria:
   - AC-PLUGINS-AGENT-TOOLS-001.9
   - AC-PLUGINS-AGENT-TOOLS-001.10
   - AC-PLUGINS-AGENT-TOOLS-001.11
+  - AC-PLUGINS-AGENT-TOOLS-001.12
 system_design:
   - ../../specs/plugins/system-design/agent-tool-config-readiness.md
 ---
@@ -32,6 +33,8 @@ affecting other plugins.
 - `apps/backend/internal/plugins/service_config.go`: signal a catalog recompute after a
   committed config save, before the restart attempt.
 - `apps/backend/internal/plugins/agent_tools_test.go`: focused unit tests.
+- `apps/backend/internal/plugins/agent_tools_catalog_order_test.go`: deterministic
+  configure/clear revision-order regressions.
 - `docs/public/plugins-manifest.md` and `docs/public/plugins-authoring.md`: state that a
   plugin's tools are listed only once its required config is set.
 
@@ -99,3 +102,15 @@ service config restart at the runtime boundary, observes the newly advertised
 catalog, starts invocation, and verifies that it waits until the restart failure
 has settled. The bounded exact-source proof first failed with the premature
 missing-runtime error. Full package and race verification remain hosted checks.
+
+## Catalog revision ordering remediation
+
+`AgentToolCatalog` holds its existing snapshot mutex from required-config reads
+through revision assignment (AC 001.12). The separate permanent
+`agent_tools_catalog_order_test.go` regression pauses a pre-commit read and checks
+both configure and clear commits: their post-commit snapshots must have the newer
+revision. Standard-library synctest barriers avoid sleeps and preserve unchanged
+revision/generation behavior. Bounded exact-source RED established revision3 for
+old readiness after revision2 for committed readiness. The corrected final proof
+passes both cases and the race detector with the mutex fix. Genuine new-head package,
+race/static and full application acceptance remain hosted-CI gates.

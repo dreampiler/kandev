@@ -23,6 +23,7 @@ unchanged.
 | REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.9) | Catalog membership; readiness rule |
 | REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.10) | Recompute on config save; failure isolation |
 | REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.11) | Invocation ordering |
+| REQ-PLUGINS-AGENT-TOOLS-001 (AC 001.12) | Catalog recompute ordering |
 
 ## Problem
 
@@ -61,10 +62,11 @@ counts as set without reading the vault.
 ## Recompute on config save
 
 `UpdateConfig` calls `notifyAgentToolCatalogChanged` after the config commit and secret
-cleanup, before `restartForConfigChange`. The signal is non-blocking (the refresher
-coalesces requests on a buffered channel), so it does not extend the lifecycle or
-dispatch lock hold. Placing it before the restart means the catalog is recomputed even
-when the plugin is not running or its restart fails. A rejected or failed save does not
+cleanup, before `restartForConfigChange`. The production refresher coalesces
+requests on a buffered channel. Listener lookup can wait for an in-flight catalog
+calculation under the service snapshot mutex before queueing that refresh. Placing
+it before the restart means the catalog is recomputed even when the plugin is not
+running or its restart fails. A rejected or failed save does not
 signal. `UpdateConfig` is the only writer of plugin config; uninstall and upgrade already
 signal.
 
@@ -75,6 +77,22 @@ transition or its cleanup fails. Consumers read the authoritative registry state
 a failed record write retains the existing registry rollback behavior. Catalog
 refresh does not restart the agent or task session, while a running plugin
 subprocess still restarts to read the saved config.
+
+## Catalog recompute ordering
+
+The existing service snapshot mutex covers config-readiness reads, definition
+calculation, snapshot comparison, and revision assignment as one operation.
+Concurrent catalog requests therefore cannot publish an older config calculation
+with a newer revision than a post-commit refresh. Delayed responses retain their
+older revision, which downstream consumers can reject after seeing the newer
+snapshot. Unchanged definitions still retain their revision and service generation.
+
+Config persistence releases its store lock before notification takes the service
+mutex. Catalog readiness takes no dispatch lease; it can finish while a config
+writer holds the dispatch write lease and waits to queue its refresh. Listener
+callbacks run after notification releases the service mutex. The permanent
+regression pauses a pre-commit config read, commits a configure or clear update,
+and lets concurrent recomputes finish before comparing their snapshot revisions.
 
 ## Invocation ordering
 

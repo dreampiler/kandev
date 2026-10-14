@@ -36,13 +36,14 @@ type AgentToolInvocationContext struct {
 // required config is set. The revision changes only when the effective tool
 // set changes; generation is stable for the lifetime of the Service instance.
 func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	tools, err := buildAgentToolDefinitions(s.configReadyAgentToolRecords())
 	if err != nil {
 		return plugintools.Snapshot{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.agentToolGeneration == "" {
 		s.agentToolGeneration = fmt.Sprintf("service-%d", time.Now().UnixNano())
 	}

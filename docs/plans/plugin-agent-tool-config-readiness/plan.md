@@ -56,3 +56,8 @@ and still emits both catalog invalidation and deliverer refresh.
 Review remediation also serializes ordinary invocation with the existing config
 restart dispatch write lease, preserving immediate config-presence invalidation.
 The work order includes AC 001.11 and the deterministic blocked-restart regression.
+
+Concurrent catalog recomputes hold the snapshot mutex across readiness reads and
+revision assignment (AC 001.12). The separate permanent catalog-order regression
+covers configure and clear with a blocked pre-commit read. Full new-head hosted
+verification remains required after this review remediation.
