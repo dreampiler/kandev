@@ -2271,12 +2271,13 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 		errCh <- err
 	}()
 
+	// Wait on causal signals only: an ephemeral launch creates a scratch git
+	// repository, which can exceed any fixed bound on Windows. A hang is
+	// reported by the test binary timeout with all goroutine stacks.
 	select {
 	case <-reader.secondRead:
 	case err := <-errCh:
 		t.Fatalf("Launch returned before post-registration validation: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for post-registration session validation")
 	}
 	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); !exists {
 		t.Fatal("execution must be registered before the final session validation")
@@ -2342,12 +2343,13 @@ func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
 		errCh <- err
 	}()
 
+	// Wait on causal signals only: an ephemeral launch creates a scratch git
+	// repository, which can exceed any fixed bound on Windows. A hang is
+	// reported by the test binary timeout with all goroutine stacks.
 	select {
 	case <-reader.secondRead:
 	case err := <-errCh:
 		t.Fatalf("Launch returned before post-registration validation: %v", err)
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for post-registration session validation")
 	}
 	reader.cleanupActive.Store(true)
 	close(reader.release)

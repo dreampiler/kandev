@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -168,6 +169,48 @@ func localFileURL(local string) string {
 		p = "/" + p
 	}
 	return "file://" + p
+}
+
+// writeFakeExecutable writes a POSIX shell script named name into dir. On
+// Windows, exec.LookPath only finds PATHEXT names, so it also writes a
+// name.cmd wrapper that runs the script with Git for Windows' sh.
+func writeFakeExecutable(t *testing.T, dir, name, script string) string {
+	t.Helper()
+	scriptPath := filepath.Join(dir, name)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake %s: %v", name, err)
+	}
+	if runtime.GOOS == "windows" {
+		wrapper := "@echo off\r\n\"" + windowsTestSh(t) + "\" \"%~dp0" + name + "\" %*\r\n"
+		if err := os.WriteFile(scriptPath+".cmd", []byte(wrapper), 0o755); err != nil {
+			t.Fatalf("write fake %s.cmd: %v", name, err)
+		}
+	}
+	return scriptPath
+}
+
+// windowsTestSh locates Git for Windows' sh.exe: on PATH, or next to git
+// (<Git>\cmd\git.exe -> <Git>\usr\bin\sh.exe).
+func windowsTestSh(t *testing.T) string {
+	t.Helper()
+	if sh, err := exec.LookPath("sh"); err == nil {
+		return sh
+	}
+	if git, err := exec.LookPath("git"); err == nil {
+		sh := filepath.Join(filepath.Dir(filepath.Dir(git)), "usr", "bin", "sh.exe")
+		if _, statErr := os.Stat(sh); statErr == nil {
+			return sh
+		}
+	}
+	t.Skip("Git for Windows sh.exe is not available")
+	return ""
+}
+
+// prependPATH returns a PATH environment entry with dir in front, joined with
+// the host list separator (";" on Windows) so Git for Windows' sh still
+// converts every entry.
+func prependPATH(dir string) string {
+	return "PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH")
 }
 
 // observableFileMode is the permission os.Stat reports for a file written

@@ -1,8 +1,6 @@
 package lifecycle
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -69,10 +67,7 @@ func TestPreferNativeBinary_StandaloneLooksUpPath(t *testing.T) {
 	ag := agents.NewCopilotACP()
 
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "copilot")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write fake copilot: %v", err)
-	}
+	writeFakeExecutable(t, dir, "copilot", "#!/bin/sh\n")
 
 	t.Setenv("PATH", dir)
 	if !m.preferNativeBinary(ag, agentruntime.RuntimeStandalone, nil) {
