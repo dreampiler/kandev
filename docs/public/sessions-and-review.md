@@ -30,6 +30,11 @@ The New Session dialog does not accept a session name. Rename the session from i
 
 The empty-panel watermark has the same **New Agent** action. On mobile, open the **Sessions** picker and select **New session**.
 
+If simultaneous starts are still preparing the shared workspace, the later
+start waits for that preparation and tries to attach once. Failed or unfinished
+preparation leaves the start retryable without creating another workspace.
+Later sessions preserve the existing primary session and its initial settings.
+
 The profile picker shows only profiles compatible with the task executor. If none are available, use the link in the dialog to configure an executor or agent profile. See [Agents and profiles](agents-and-profiles.md).
 
 ### Choose starting context
@@ -680,7 +685,7 @@ For an eligible structured-chat session, right-click its tab and select **Share*
 
 Kandev creates a preview, applies heuristic redaction, and publishes the snapshot as a secret GitHub Gist after you confirm. GitHub authentication with Gist permission is required. The maximum snapshot size is 10 MiB. The returned viewing URL uses `gist.githack.com` to render the Gist through a third-party, Cloudflare-backed CDN and shows an anti-phishing interstitial on first visit. Publishing therefore exposes the snapshot not only to anyone with the unlisted URL but also to that rendering service.
 
-Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, but it cannot recognize every credential or proprietary value. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
+Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, including matching values in the task title and session agent, model, and executor metadata. It cannot recognize every credential or proprietary value. Published snapshots remain frozen; later redaction changes apply only to new previews and publications. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
 
 Use the same dialog to revoke a share. Revocation deletes the Gist and records it as revoked in Kandev.
 

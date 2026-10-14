@@ -1746,9 +1746,11 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 	if recoveryAdmission != nil {
 		createCtx = worktree.WithRecoveryAdmission(ctx, recoveryAdmission)
 	}
+	retriedWorkspaceBinding := false
 	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
 	if errors.Is(createErr, models.ErrWorkspacePreparing) {
-		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.TaskID, session.ID, createErr, func() error {
+		createErr = e.retryPreparedSessionAfterWorkspaceReady(createCtx, session.ID, createErr, func() error {
+			retriedWorkspaceBinding = true
 			primary, err := e.refreshRetriedSessionOrder(createCtx, session, isPrimarySession, appliedInitialRuntimeConfig)
 			if err != nil {
 				return err
@@ -1773,12 +1775,15 @@ func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, age
 
 	// Set primary flag only for the first session (no existing primary).
 	// Subsequent sessions do not override the established primary.
-	if isPrimarySession {
-		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
-			e.logger.Warn("failed to update primary session flag",
-				zap.String("task_id", task.ID),
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+	if session.IsPrimary {
+		// A retry has already committed its primary election with the insert.
+		if !retriedWorkspaceBinding {
+			if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+				e.logger.Warn("failed to update primary session flag",
+					zap.String("task_id", task.ID),
+					zap.String("session_id", sessionID),
+					zap.Error(err))
+			}
 		}
 		if e.onPrimarySessionSet != nil {
 			e.onPrimarySessionSet(ctx, task.ID, sessionID)
@@ -1844,74 +1849,6 @@ func (e *Executor) createPreparedSession(
 		}
 	}
 	return e.repo.CreateTaskSession(ctx, session)
-}
-
-// retryPreparedSessionAfterWorkspaceReady waits for the elected environment,
-// then retries binding once. Shared groups use the refusal's environment ID;
-// legacy same-task refusals use the task's own row. A self-owned, failed, or
-// unready environment keeps the original refusal.
-func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
-	ctx context.Context,
-	taskID, sessionID string,
-	preparingErr error,
-	create func() error,
-) error {
-	var env *models.TaskEnvironment
-	var err error
-	var preparing *models.WorkspacePreparingError
-	if errors.As(preparingErr, &preparing) && preparing.EnvironmentID != "" {
-		env, err = e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
-	} else {
-		env, err = e.repo.GetTaskEnvironmentByTaskID(ctx, taskID)
-	}
-	if err != nil || env == nil || env.ID == "" {
-		return preparingErr
-	}
-	// Waiting on the environment this session already owns would wait on
-	// itself; anything not creating/ready/stopped (a failed row another launch
-	// is reclaiming) keeps the original refusal.
-	if env.MaterializationSessionID == sessionID {
-		return preparingErr
-	}
-	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
-		e.logger.Warn("workspace was not ready after the binding election; keeping the preparing refusal",
-			zap.String("session_id", sessionID),
-			zap.String("task_environment_id", env.ID),
-			zap.Error(err))
-		return preparingErr
-	}
-	return create()
-}
-
-// refreshRetriedSessionOrder re-derives creation order and primary ownership
-// before a binding retry. The election winner may have created the task's first
-// session while this start waited, so the retry must neither claim the
-// first-session origin nor take the primary flag from the winner.
-func (e *Executor) refreshRetriedSessionOrder(
-	ctx context.Context,
-	session *models.TaskSession,
-	wasPrimary bool,
-	appliedInitialRuntimeConfig bool,
-) (bool, error) {
-	sessions, err := e.repo.ListTaskSessions(ctx, session.TaskID)
-	if err != nil {
-		return wasPrimary, fmt.Errorf("list task sessions before workspace retry: %w", err)
-	}
-	if len(sessions) > 0 {
-		delete(session.Metadata, models.SessionMetaKeyOrigin)
-		if appliedInitialRuntimeConfig {
-			delete(session.Metadata, models.SessionMetaKeyRuntimeConfigOverrides)
-		}
-	}
-	primary := wasPrimary
-	for _, existing := range sessions {
-		if existing.IsPrimary {
-			primary = false
-			break
-		}
-	}
-	session.IsPrimary = primary
-	return primary, nil
 }
 
 // taskUsesDeferredEnvironmentInheritance keeps the handoff resolver
@@ -2564,6 +2501,76 @@ func (e *Executor) launchPreparedSession(ctx context.Context, task *v1.Task, ses
 		}
 	}
 	return execution, finalizeErr
+}
+
+// refreshRetriedSessionOrder re-derives creation order and primary ownership
+// before a binding retry. The election winner may have created the task's first
+// session while this start waited, so the retry must neither claim the
+// first-session origin nor take the primary flag from the winner.
+func (e *Executor) refreshRetriedSessionOrder(
+	ctx context.Context,
+	session *models.TaskSession,
+	wasPrimary bool,
+	appliedInitialRuntimeConfig bool,
+) (bool, error) {
+	sessions, err := e.repo.ListTaskSessions(ctx, session.TaskID)
+	if err != nil {
+		return wasPrimary, fmt.Errorf("list task sessions before workspace retry: %w", err)
+	}
+	if len(sessions) > 0 {
+		delete(session.Metadata, models.SessionMetaKeyOrigin)
+		if appliedInitialRuntimeConfig {
+			delete(session.Metadata, models.SessionMetaKeyRuntimeConfigOverrides)
+		}
+	}
+	primary := wasPrimary
+	for _, existing := range sessions {
+		if existing.IsPrimary {
+			primary = false
+			break
+		}
+	}
+	session.IsPrimary = primary
+	return primary, nil
+}
+
+// retryPreparedSessionAfterWorkspaceReady waits for the environment another
+// session is materializing, then retries the session binding once. Two starts
+// for the same task's first session, or for members of one shared workspace
+// group, race the workspace election; the loser is refused with
+// ErrWorkspacePreparing while the winner materializes. Failing it immediately
+// fails a run whose workspace is about to become ready. The refusal names the
+// elected environment, which for a shared group belongs to another member task.
+// An environment this session owns, or one that fails or never becomes ready,
+// keeps the original refusal.
+func (e *Executor) retryPreparedSessionAfterWorkspaceReady(
+	ctx context.Context,
+	sessionID string,
+	preparingErr error,
+	create func() error,
+) error {
+	var preparing *models.WorkspacePreparingError
+	if !errors.As(preparingErr, &preparing) || preparing.EnvironmentID == "" {
+		return preparingErr
+	}
+	if ctx.Err() != nil {
+		return preparingErr
+	}
+	env, err := e.repo.GetTaskEnvironment(ctx, preparing.EnvironmentID)
+	if err != nil || env == nil || env.MaterializationSessionID == sessionID {
+		return preparingErr
+	}
+	if _, err := e.waitForTaskEnvironmentReady(ctx, env.ID); err != nil {
+		e.logger.Warn("workspace was not ready after the binding election; keeping the preparing refusal",
+			zap.String("session_id", sessionID),
+			zap.String("task_environment_id", env.ID),
+			zap.Error(err))
+		return preparingErr
+	}
+	if ctx.Err() != nil {
+		return preparingErr
+	}
+	return create()
 }
 
 func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
