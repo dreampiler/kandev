@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -52,7 +53,9 @@ function useScopedTaskPRs(taskId: string, workspaceId: string): ScopedTaskPRs {
   const [snapshot, setSnapshot] = useState<{ key: string; prs: TaskPR[] }>();
   const request = useRef<AbortController | null>(null);
   const currentKey = useRef(key);
-  currentKey.current = key;
+  useLayoutEffect(() => {
+    currentKey.current = key;
+  }, [key]);
   const read = useCallback(async () => {
     request.current?.abort();
     const controller = new AbortController();
@@ -96,9 +99,12 @@ function useScopedTaskPRs(taskId: string, workspaceId: string): ScopedTaskPRs {
   const refresh = useCallback(async () => {
     const client = getWebSocketClient();
     if (currentKey.current !== key || stateReadScopeIdentity(store.getState()) !== identity) return;
-    if (client)
-      await client.request("github.task_pr.sync", { task_id: taskId, explicit_refresh: true });
-    if (currentKey.current === key) await read();
+    try {
+      if (client)
+        await client.request("github.task_pr.sync", { task_id: taskId, explicit_refresh: true });
+    } finally {
+      if (currentKey.current === key) await read();
+    }
   }, [identity, key, read, store, taskId]);
   const prs = snapshot?.key === key ? snapshot.prs : EMPTY_PRS;
   const unlink = useCallback(

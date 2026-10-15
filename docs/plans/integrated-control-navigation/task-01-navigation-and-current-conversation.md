@@ -62,3 +62,25 @@ bafc39, so the same 48-case evidence applies to these identical three product
 lines. Documentation here uses only files present in the public parent, without
 pulling in unpublished conversation-index/history work. Final normal hooks and
 independent review remain required before public delivery; no push occurred.
+
+
+## Review feedback follow-up
+
+The public-parent follow-up marks all three control destination/conversation
+link groups with the required pointer class and uses alert regions for the three
+collection/partial-data errors. Loading and disabled-feature statuses stay polite.
+The separate functional follow-up formats the activity timestamp through the
+existing active-locale formatter while preserving the machine dateTime value.
+Scoped PR reads now fence the committed key in a layout effect and still read
+associations after a rejected sync, preserving the original rejection.
+
+A disposable mounted React/Suspense probe reproduced both functional PR-read
+failures against the exact pre-fix module (two REDs, three ownership mismatches
+already GREEN). All five cases passed after the fixes (1.41s total); the existing
+locale formatter suite passed all 40 cases (0.995s total). An initial probe read
+an abandoned test render rather than a committed result; its layout-only observer
+was corrected before repeating both baseline and corrected-product executions.
+No standing tests or runtime operations were added. The review request for new
+permanent test files conflicts with this work order's explicit prohibition;
+focused disposable checks are the scoped alternative, not a claim of permanent
+coverage. Public reply/resolution/publication remains with the existing owner.

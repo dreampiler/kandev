@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "@/lib/i18n/formats";
 import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
@@ -130,7 +131,9 @@ function CoordinatorFacts({ view, rows }: { view: ControlView; rows: FactRows })
                   {t("sidebar:integratedControl.updated")}:{" "}
                 </dt>
                 <dd className="inline">
-                  <time dateTime={coordinator.updated_at}>{coordinator.updated_at}</time>
+                  <time dateTime={coordinator.updated_at}>
+                    {formatDateTime(coordinator.updated_at)}
+                  </time>
                 </dd>
               </div>
             </dl>
