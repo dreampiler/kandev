@@ -196,10 +196,14 @@ func worktreeRegistrationMatches(ctx context.Context, repositoryPath, worktreePa
 	}
 	for _, block := range strings.Split(output, "\n\n") {
 		fields := strings.Split(block, "\n")
-		if len(fields) < 3 || strings.TrimPrefix(fields[0], "worktree ") != worktreePath {
+		if len(fields) < 3 || strings.TrimPrefix(fields[1], "HEAD ") != headOID ||
+			strings.TrimPrefix(fields[2], "branch ") != refName {
 			continue
 		}
-		return strings.TrimPrefix(fields[1], "HEAD ") == headOID && strings.TrimPrefix(fields[2], "branch ") == refName
+		registeredPath, err := canonicalDirectory(strings.TrimPrefix(fields[0], "worktree "))
+		if err == nil && registeredPath == worktreePath {
+			return true
+		}
 	}
 	return false
 }
