@@ -106,6 +106,7 @@ type Controller struct {
 	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
 	dynamicProfileTiersEnabled  bool
+	dynamicTierPreviewer        DynamicTierPreviewer
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner
