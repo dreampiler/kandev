@@ -1,9 +1,9 @@
-From 12f4de2619486340969c2aa383b49b74d90d1fbb Mon Sep 17 00:00:00 2001
+From 874736442b4512ca87acab03c5741c56f429b734 Mon Sep 17 00:00:00 2001
 From: dreampiler <dreampiler@gmail.com>
-Date: Thu, 15 Oct 2026 01:24:54 +0900
+Date: Thu, 15 Oct 2026 12:55:44 +0900
 Subject: [PATCH] fork(23-peer-batch): D09 peer report batch delivery
 
-Overlay patch 23-peer-batch.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+Overlay patch 23-peer-batch.patch cut from 390b8daa4b0dc9521909eef423191b27ce5c6d96 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
 ---
  .../mcp/handlers/message_task_recovery.go     |  20 ++
  .../handlers/message_task_recovery_test.go    |  72 ++++
@@ -46,7 +46,7 @@ Overlay patch 23-peer-batch.patch cut from 3368a2084825338545d56d2a82129ee9a0696
 
 diff --git a/apps/backend/internal/mcp/handlers/message_task_recovery.go b/apps/backend/internal/mcp/handlers/message_task_recovery.go
 new file mode 100644
-index 0000000000..cd310614c4
+index 00000000000..cd310614c4c
 --- /dev/null
 +++ b/apps/backend/internal/mcp/handlers/message_task_recovery.go
 @@ -0,0 +1,20 @@
@@ -72,7 +72,7 @@ index 0000000000..cd310614c4
 +}
 diff --git a/apps/backend/internal/mcp/handlers/message_task_recovery_test.go b/apps/backend/internal/mcp/handlers/message_task_recovery_test.go
 new file mode 100644
-index 0000000000..0116c9b819
+index 00000000000..0116c9b8190
 --- /dev/null
 +++ b/apps/backend/internal/mcp/handlers/message_task_recovery_test.go
 @@ -0,0 +1,72 @@
@@ -149,7 +149,7 @@ index 0000000000..0116c9b819
 +	}
 +}
 diff --git a/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go b/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
-index 957eab7c8b..afe6603e71 100644
+index 957eab7c8b7..afe6603e711 100644
 --- a/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
 +++ b/apps/backend/internal/orchestrator/event_handlers_workflow_profile_session_policy_test.go
 @@ -512,6 +512,7 @@ func TestParkSessionForProfileSwitch_DelayedTerminalEventsConsumeClaim(t *testin
@@ -162,7 +162,7 @@ index 957eab7c8b..afe6603e71 100644
  				t.Fatalf("park before delayed %s event: %v", tt.name, err)
 diff --git a/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go
 new file mode 100644
-index 0000000000..ce19d8445b
+index 00000000000..ce19d8445b8
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch.go
 @@ -0,0 +1,162 @@
@@ -330,7 +330,7 @@ index 0000000000..ce19d8445b
 +}
 diff --git a/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go
 new file mode 100644
-index 0000000000..043c59193f
+index 00000000000..043c59193f1
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/messagequeue/peer_report_batch_test.go
 @@ -0,0 +1,309 @@
@@ -644,7 +644,7 @@ index 0000000000..043c59193f
 +	require.True(t, svc.PeerReportBatchClaimRewriteSupported())
 +}
 diff --git a/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go b/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
-index 0601771267..f7640635de 100644
+index 0601771267e..f7640635de4 100644
 --- a/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
 +++ b/apps/backend/internal/orchestrator/messagequeue/repository_dispatch_recovery.go
 @@ -307,6 +307,39 @@ func (r *sqliteRepository) deletePendingQueueDispatchesBySessionTx(
@@ -689,7 +689,7 @@ index 0601771267..f7640635de 100644
  	msg *QueuedMessage,
 diff --git a/apps/backend/internal/orchestrator/peer_report_batch.go b/apps/backend/internal/orchestrator/peer_report_batch.go
 new file mode 100644
-index 0000000000..66b5fbbd79
+index 00000000000..66b5fbbd792
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/peer_report_batch.go
 @@ -0,0 +1,204 @@
@@ -899,7 +899,7 @@ index 0000000000..66b5fbbd79
 +}
 diff --git a/apps/backend/internal/orchestrator/peer_report_batch_test.go b/apps/backend/internal/orchestrator/peer_report_batch_test.go
 new file mode 100644
-index 0000000000..2466dc3992
+index 00000000000..2466dc3992e
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/peer_report_batch_test.go
 @@ -0,0 +1,254 @@
@@ -1158,7 +1158,7 @@ index 0000000000..2466dc3992
 +	}
 +}
 diff --git a/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go b/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
-index 1e3e8887b9..c5a011f057 100644
+index 1e3e8887b93..c5a011f0570 100644
 --- a/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
 +++ b/apps/backend/internal/orchestrator/workflow_profile_session_lifecycle.go
 @@ -60,6 +60,14 @@ func workflowProfileSwitchTerminalEventMatches(ctx context.Context, executionID
@@ -1253,7 +1253,7 @@ index 1e3e8887b9..c5a011f057 100644
  
 diff --git a/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go b/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go
 new file mode 100644
-index 0000000000..ea335bcaa6
+index 00000000000..ea335bcaa69
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/workflow_terminal_predecessor_test.go
 @@ -0,0 +1,59 @@
@@ -1318,7 +1318,7 @@ index 0000000000..ea335bcaa6
 +}
 diff --git a/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go b/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go
 new file mode 100644
-index 0000000000..e08273e863
+index 00000000000..e08273e8639
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/workflow_unlaunched_entry.go
 @@ -0,0 +1,36 @@
@@ -1360,7 +1360,7 @@ index 0000000000..e08273e863
 +}
 diff --git a/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go b/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go
 new file mode 100644
-index 0000000000..20a4e158b4
+index 00000000000..20a4e158b47
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/workflow_unlaunched_entry_test.go
 @@ -0,0 +1,88 @@
@@ -1454,7 +1454,7 @@ index 0000000000..20a4e158b4
 +}
 diff --git a/docs/plans/launch-durability-1013/task-01-workflow-entry.md b/docs/plans/launch-durability-1013/task-01-workflow-entry.md
 new file mode 100644
-index 0000000000..5eb8b75e0b
+index 00000000000..5eb8b75e0bc
 --- /dev/null
 +++ b/docs/plans/launch-durability-1013/task-01-workflow-entry.md
 @@ -0,0 +1,78 @@
@@ -1538,7 +1538,7 @@ index 0000000000..5eb8b75e0b
 +busy-launch error and merged-handoff queue path.
 diff --git a/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md b/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md
 new file mode 100644
-index 0000000000..55a526ed76
+index 00000000000..55a526ed766
 --- /dev/null
 +++ b/docs/plans/launch-durability-1013/task-02-peer-message-recovery.md
 @@ -0,0 +1,56 @@
@@ -1600,7 +1600,7 @@ index 0000000000..55a526ed76
 +```
 diff --git a/docs/plans/launch-durability-1013/task-03-automation-evidence.md b/docs/plans/launch-durability-1013/task-03-automation-evidence.md
 new file mode 100644
-index 0000000000..9702aef12f
+index 00000000000..9702aef12f9
 --- /dev/null
 +++ b/docs/plans/launch-durability-1013/task-03-automation-evidence.md
 @@ -0,0 +1,39 @@
@@ -1645,7 +1645,7 @@ index 0000000000..9702aef12f
 +retry-group paths.
 diff --git a/docs/plans/peer-report-batch-delivery/plan.md b/docs/plans/peer-report-batch-delivery/plan.md
 new file mode 100644
-index 0000000000..c2741537c6
+index 00000000000..c2741537c6f
 --- /dev/null
 +++ b/docs/plans/peer-report-batch-delivery/plan.md
 @@ -0,0 +1,59 @@
@@ -1711,7 +1711,7 @@ index 0000000000..c2741537c6
 \ No newline at end of file
 diff --git a/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md b/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md
 new file mode 100644
-index 0000000000..fe7da50749
+index 00000000000..fe7da50749c
 --- /dev/null
 +++ b/docs/plans/peer-report-batch-delivery/task-01-batch-peer-reports.md
 @@ -0,0 +1,56 @@
@@ -1774,7 +1774,7 @@ index 0000000000..fe7da50749
 \ No newline at end of file
 diff --git a/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md b/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md
 new file mode 100644
-index 0000000000..41bebae751
+index 00000000000..41bebae7518
 --- /dev/null
 +++ b/docs/plans/peer-report-batch-delivery/task-02-deliver-peer-report-batch.md
 @@ -0,0 +1,57 @@
@@ -1838,7 +1838,7 @@ index 0000000000..41bebae751
 \ No newline at end of file
 diff --git a/docs/specs/tasks/requirements/peer-report-batch-delivery.md b/docs/specs/tasks/requirements/peer-report-batch-delivery.md
 new file mode 100644
-index 0000000000..42ddbf1b22
+index 00000000000..42ddbf1b229
 --- /dev/null
 +++ b/docs/specs/tasks/requirements/peer-report-batch-delivery.md
 @@ -0,0 +1,81 @@
@@ -1926,7 +1926,7 @@ index 0000000000..42ddbf1b22
 \ No newline at end of file
 diff --git a/docs/specs/tasks/system-design/peer-report-batch-delivery.md b/docs/specs/tasks/system-design/peer-report-batch-delivery.md
 new file mode 100644
-index 0000000000..561d3a0a39
+index 00000000000..561d3a0a39e
 --- /dev/null
 +++ b/docs/specs/tasks/system-design/peer-report-batch-delivery.md
 @@ -0,0 +1,129 @@
@@ -2060,3 +2060,6 @@ index 0000000000..561d3a0a39
 +returns the folded rows to the head. A repository that persists no dispatch
 +claims at all needs no rewrite, so it keeps folding.
 \ No newline at end of file
+-- 
+2.55.0.windows.3
+

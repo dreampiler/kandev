@@ -1,96 +1,82 @@
-From 3a1008dde2a9c0658fa5d84f89b478aba1eb6870 Mon Sep 17 00:00:00 2001
+From f2fe4b23ca270eb91cf9cdce36b10c364e424994 Mon Sep 17 00:00:00 2001
 From: dreampiler <dreampiler@gmail.com>
-Date: Thu, 15 Oct 2026 01:24:51 +0900
+Date: Thu, 15 Oct 2026 12:55:44 +0900
 Subject: [PATCH] fork(21-provider-limits): D03 per-model provider limit
  suspension
 
-Overlay patch 21-provider-limits.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+Overlay patch 21-provider-limits.patch cut from 390b8daa4b0dc9521909eef423191b27ce5c6d96 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
 ---
- .../runtime/dynamic/account_block_test.go     | 251 +++++++++
  .../runtime/dynamic/block_policy_test.go      | 128 +++++
- .../internal/agent/runtime/dynamic/circuit.go | 247 ++++++++-
+ .../internal/agent/runtime/dynamic/circuit.go | 247 +++++++++-
  .../agent/runtime/dynamic/circuit_list.go     |  19 +
  .../agent/runtime/dynamic/circuit_policy.go   |  33 ++
  .../runtime/dynamic/continuation_safety.go    |   1 +
- .../agent/runtime/dynamic/failure_scope.go    | 510 ++++++++++++++++++
- .../agent/runtime/dynamic/midturn_failure.go  | 141 +++++
  .../agent/runtime/dynamic/provider_limit.go   |  71 +++
- .../agent/runtime/dynamic/suspension.go       | 156 ++++++
- .../agent/runtime/dynamic/suspension_test.go  | 466 ++++++++++++++++
+ .../agent/runtime/dynamic/suspension_test.go  | 466 ++++++++++++++++++
  .../dynamic_resolver_resource_wait_test.go    | 210 ++++++++
- .../agent/runtime/dynamic_resource_limits.go  | 248 +++++++++
+ .../agent/runtime/dynamic_resource_limits.go  | 248 ++++++++++
  .../runtime/lifecycle/session_mode_catalog.go |  38 ++
  .../runtime/routingerr/account_block_test.go  |  54 ++
- .../routingerr/failover_signatures_test.go    | 175 ++++++
+ .../routingerr/failover_signatures_test.go    | 175 +++++++
  .../agent/runtime/routingerr/rule_ids.go      |  74 +++
  .../settings/controller/account_block.go      |  45 ++
  .../controller/dynamic_preview_suspension.go  |  19 +
- .../settings/controller/provider_limits.go    |  90 ++++
  .../settings/controller/resource_circuit.go   |  42 ++
- .../handlers/account_block_handlers.go        |  29 +
+ .../handlers/account_block_handlers.go        |  29 ++
  .../handlers/account_block_release_test.go    |  81 +++
  .../handlers/agent_settings_org_scope_test.go |   2 +
  .../settings/handlers/circuit_release_test.go | 104 ++++
  .../handlers/provider_limit_handlers.go       |  50 ++
  .../handlers/provider_limit_handlers_test.go  |  97 ++++
  .../settings/handlers/resource_circuit.go     |  48 ++
- .../backendapp/dynamic_limit_calendar.go      | 198 +++++++
  .../backendapp/dynamic_limit_calendar_test.go | 121 +++++
  .../backendapp/dynamic_preview_suspension.go  |  48 ++
  .../dynamic_preview_suspension_test.go        |  64 +++
  .../internal/backendapp/free_model_catalog.go |  61 +++
- .../internal/backendapp/provider_limits.go    | 225 ++++++++
  .../backendapp/provider_limits_test.go        | 102 ++++
  .../internal/office/costs/modelsdev/client.go |   9 +-
  .../internal/office/costs/modelsdev/free.go   |  82 +++
  .../overview_account_block_internal_test.go   |  10 +
- .../dynamic_account_block_test.go             |  87 +++
+ .../dynamic_account_block_test.go             |  87 ++++
  .../orchestrator/dynamic_midturn_recovery.go  |  73 +++
- .../dynamic_midturn_recovery_test.go          | 256 +++++++++
+ .../dynamic_midturn_recovery_test.go          | 256 ++++++++++
  .../dynamic_resource_recovery_test.go         |  98 ++++
  .../dynamic_session_settings_test.go          | 191 +++++++
  .../orchestrator/fixed_profile_admission.go   | 157 ++++++
- .../fixed_profile_admission_test.go           | 304 +++++++++++
+ .../fixed_profile_admission_test.go           | 304 ++++++++++++
  .../repository/sqlite/circuit_policy_test.go  |  65 +++
  .../sqlite/dynamic_provider_limits.go         |  63 +++
  .../sqlite/dynamic_provider_limits_test.go    | 100 ++++
  .../settings/dynamic-preview-suspension.tsx   |  48 ++
  .../settings/provider-limits-card.test.tsx    |  77 +++
- .../settings/provider-limits-card.tsx         | 200 +++++++
  .../settings/resource-circuits-card.tsx       |  54 ++
- .../domains/settings/use-provider-limits.ts   |  50 ++
  .../settings/use-resource-circuits.test.tsx   |  77 +++
  .../domains/settings/use-resource-circuits.ts |  60 +++
- .../lib/api/domains/provider-limits-api.ts    |  48 ++
  .../api/domains/resource-circuit-api.test.ts  |  20 +
  .../lib/api/domains/resource-circuit-api.ts   |  21 +
  apps/web/lib/settings/provider-limits.ts      |  32 ++
  .../fixed-profile-resource-suspension/plan.md |  97 ++++
  .../task-01-gate-fixed-profile-circuits.md    | 104 ++++
- .../plan.md                                   |  55 ++
+ .../plan.md                                   |  55 +++
  ...k-01-classify-and-hold-blocked-accounts.md |  61 +++
  .../provider-error-signature-delta/plan.md    |  94 ++++
  ...1-classify-observed-provider-signatures.md |  68 +++
  .../resource-circuit-policy-recovery/plan.md  |  32 ++
  .../task-01-reconcile-and-release-circuits.md |  36 ++
  .../fixed-profile-resource-suspension.md      | 103 ++++
- .../provider-account-block-classification.md  |  55 ++
+ .../provider-account-block-classification.md  |  55 +++
  .../requirements/provider-error-signatures.md |  28 +-
  .../resource-circuit-policy-recovery.md       |  22 +
- .../fixed-profile-resource-suspension.md      | 197 +++++++
+ .../fixed-profile-resource-suspension.md      | 197 ++++++++
  .../provider-account-block-classification.md  |  82 +++
- .../provider-error-signatures.md              |  28 +
+ .../provider-error-signatures.md              |  28 ++
  .../resource-circuit-policy-recovery.md       |  37 ++
  .../requirements/provider-error-recovery.md   |   2 +-
- 76 files changed, 7517 insertions(+), 14 deletions(-)
- create mode 100644 apps/backend/internal/agent/runtime/dynamic/account_block_test.go
+ 66 files changed, 5648 insertions(+), 14 deletions(-)
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/block_policy_test.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/circuit_list.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/circuit_policy.go
- create mode 100644 apps/backend/internal/agent/runtime/dynamic/failure_scope.go
- create mode 100644 apps/backend/internal/agent/runtime/dynamic/midturn_failure.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/provider_limit.go
- create mode 100644 apps/backend/internal/agent/runtime/dynamic/suspension.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/suspension_test.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic_resolver_resource_wait_test.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic_resource_limits.go
@@ -100,7 +86,6 @@ Overlay patch 21-provider-limits.patch cut from 3368a2084825338545d56d2a82129ee9
  create mode 100644 apps/backend/internal/agent/runtime/routingerr/rule_ids.go
  create mode 100644 apps/backend/internal/agent/settings/controller/account_block.go
  create mode 100644 apps/backend/internal/agent/settings/controller/dynamic_preview_suspension.go
- create mode 100644 apps/backend/internal/agent/settings/controller/provider_limits.go
  create mode 100644 apps/backend/internal/agent/settings/controller/resource_circuit.go
  create mode 100644 apps/backend/internal/agent/settings/handlers/account_block_handlers.go
  create mode 100644 apps/backend/internal/agent/settings/handlers/account_block_release_test.go
@@ -108,12 +93,10 @@ Overlay patch 21-provider-limits.patch cut from 3368a2084825338545d56d2a82129ee9
  create mode 100644 apps/backend/internal/agent/settings/handlers/provider_limit_handlers.go
  create mode 100644 apps/backend/internal/agent/settings/handlers/provider_limit_handlers_test.go
  create mode 100644 apps/backend/internal/agent/settings/handlers/resource_circuit.go
- create mode 100644 apps/backend/internal/backendapp/dynamic_limit_calendar.go
  create mode 100644 apps/backend/internal/backendapp/dynamic_limit_calendar_test.go
  create mode 100644 apps/backend/internal/backendapp/dynamic_preview_suspension.go
  create mode 100644 apps/backend/internal/backendapp/dynamic_preview_suspension_test.go
  create mode 100644 apps/backend/internal/backendapp/free_model_catalog.go
- create mode 100644 apps/backend/internal/backendapp/provider_limits.go
  create mode 100644 apps/backend/internal/backendapp/provider_limits_test.go
  create mode 100644 apps/backend/internal/office/costs/modelsdev/free.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_account_block_internal_test.go
@@ -129,12 +112,9 @@ Overlay patch 21-provider-limits.patch cut from 3368a2084825338545d56d2a82129ee9
  create mode 100644 apps/backend/internal/task/repository/sqlite/dynamic_provider_limits_test.go
  create mode 100644 apps/web/components/settings/dynamic-preview-suspension.tsx
  create mode 100644 apps/web/components/settings/provider-limits-card.test.tsx
- create mode 100644 apps/web/components/settings/provider-limits-card.tsx
  create mode 100644 apps/web/components/settings/resource-circuits-card.tsx
- create mode 100644 apps/web/hooks/domains/settings/use-provider-limits.ts
  create mode 100644 apps/web/hooks/domains/settings/use-resource-circuits.test.tsx
  create mode 100644 apps/web/hooks/domains/settings/use-resource-circuits.ts
- create mode 100644 apps/web/lib/api/domains/provider-limits-api.ts
  create mode 100644 apps/web/lib/api/domains/resource-circuit-api.test.ts
  create mode 100644 apps/web/lib/api/domains/resource-circuit-api.ts
  create mode 100644 apps/web/lib/settings/provider-limits.ts
@@ -153,266 +133,9 @@ Overlay patch 21-provider-limits.patch cut from 3368a2084825338545d56d2a82129ee9
  create mode 100644 docs/specs/agents/system-design/provider-account-block-classification.md
  create mode 100644 docs/specs/agents/system-design/resource-circuit-policy-recovery.md
 
-diff --git a/apps/backend/internal/agent/runtime/dynamic/account_block_test.go b/apps/backend/internal/agent/runtime/dynamic/account_block_test.go
-new file mode 100644
-index 0000000000..d2a4b871e9
---- /dev/null
-+++ b/apps/backend/internal/agent/runtime/dynamic/account_block_test.go
-@@ -0,0 +1,251 @@
-+package dynamic
-+
-+import (
-+	"context"
-+	"errors"
-+	"testing"
-+	"time"
-+
-+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
-+)
-+
-+func accountBlockedFailure() *routingerr.Error {
-+	return routingerr.Classify(routingerr.Input{
-+		Phase: routingerr.PhasePromptSend,
-+		Stderr: `Error from provider meta-contributor: 403 Forbidden {"error":{"code":"user_blocked",` +
-+			`"message":"Your access has been restricted due to repeated policy violations."}}`,
-+	})
-+}
-+
-+// accountBlockProfile has a blocked candidate, a sibling on the same
-+// credential binding, and an unrelated candidate, in that order.
-+func accountBlockProfile(hard routingpolicy.Policy) Profile {
-+	policies := routingpolicy.DefaultDocument()
-+	policies.Hard = hard
-+	return Profile{
-+		ID: "dynamic-account-block", Version: 1,
-+		Candidates: []Candidate{
-+			{ID: "blocked", Enabled: true, BindingKey: "credential:shared", Policies: policies},
-+			{ID: "sibling", Enabled: true, BindingKey: "credential:shared", Policies: policies},
-+			{ID: "other", Enabled: true, BindingKey: "credential:other", Policies: policies},
-+		},
-+	}
-+}
-+
-+func holdAccount(t *testing.T, engine *Engine, profile Profile, sessionID string) RouteDecision {
-+	t.Helper()
-+	initial, err := engine.Select(sessionID, profile, 0, "")
-+	if err != nil || initial.ExecutionProfileID != "blocked" {
-+		t.Fatalf("initial selection = %#v, %v; want blocked", initial, err)
-+	}
-+	decision, err := engine.ApplyFailure(sessionID, profile, initial.Generation, initial.ExecutionProfileID, accountBlockedFailure())
-+	if err != nil {
-+		t.Fatalf("ApplyFailure: %v", err)
-+	}
-+	return decision
-+}
-+
-+func TestAccountBlockedHoldsOnlyFailingProfile(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	engine := NewEngine(WithClock(func() time.Time { return now }))
-+	hard := routingpolicy.DefaultPolicy()
-+	hard.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 3, InitialIntervalSeconds: 5}
-+	profile := accountBlockProfile(hard)
-+
-+	decision := holdAccount(t, engine, profile, "session-a")
-+
-+	if decision.ExecutionProfileID != "sibling" || decision.Reason != "policy_skip" ||
-+		decision.ErrorCode != routingerr.CodeAccountBlocked {
-+		t.Fatalf("decision = %#v, want the credential-sharing sibling by policy_skip", decision)
-+	}
-+	if engine.Circuits().IsOpen("credential:shared", now) {
-+		t.Fatal("account block opened the shared credential circuit")
-+	}
-+	if !engine.Circuits().IsOpen(accountBlockKey("blocked"), now) {
-+		t.Fatal("account block did not hold the failing profile")
-+	}
-+	for _, id := range []string{"sibling", "other"} {
-+		if engine.Circuits().IsOpen(accountBlockKey(id), now) {
-+			t.Fatalf("account block held %s", id)
-+		}
-+	}
-+	fresh, err := engine.Select("session-b", profile, 0, "")
-+	if err != nil || fresh.ExecutionProfileID != "sibling" {
-+		t.Fatalf("fresh selection = %#v, %v; want sibling, the next candidate in order", fresh, err)
-+	}
-+	if suspension := engine.SuspensionFor(profile.Candidates[0], now); !suspension.Blocked() ||
-+		suspension.Scope != SuspensionScopeProfile || suspension.Code != routingerr.CodeAccountBlocked ||
-+		!suspension.Until.IsZero() {
-+		t.Fatalf("held suspension = %#v, want blocked profile scope without end time", suspension)
-+	}
-+	if suspension := engine.SuspensionFor(profile.Candidates[1], now); suspension.Blocked() {
-+		t.Fatalf("sibling suspension = %#v, want available", suspension)
-+	}
-+}
-+
-+func TestAccountBlockedStopOutcomeStillHolds(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	engine := NewEngine(WithClock(func() time.Time { return now }))
-+	stop := routingpolicy.DefaultPolicy()
-+	stop.OnExhausted = routingpolicy.OutcomeStop
-+	profile := accountBlockProfile(stop)
-+	initial, err := engine.Select("session-stop", profile, 0, "")
-+	if err != nil {
-+		t.Fatalf("Select: %v", err)
-+	}
-+
-+	decision, err := engine.ApplyFailure("session-stop", profile, initial.Generation, "blocked", accountBlockedFailure())
-+
-+	if !errors.Is(err, ErrNoEligibleCandidate) || decision.Status != routeStatusActionRequired ||
-+		decision.ExecutionProfileID != "blocked" {
-+		t.Fatalf("decision = %#v, %v; want manual recovery on the failed candidate", decision, err)
-+	}
-+	if !engine.Circuits().IsOpen(accountBlockKey("blocked"), now) {
-+		t.Fatal("stop outcome did not hold the failing profile")
-+	}
-+	fresh, err := engine.Select("session-next", profile, 0, "")
-+	if err != nil || fresh.ExecutionProfileID != "sibling" {
-+		t.Fatalf("fresh selection = %#v, %v; want sibling", fresh, err)
-+	}
-+}
-+
-+func TestAccountBlockedHoldHasNoExpiryOrProbe(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	engine := NewEngine(WithClock(func() time.Time { return now }))
-+	profile := accountBlockProfile(routingpolicy.DefaultPolicy())
-+	holdAccount(t, engine, profile, "session-a")
-+	key := accountBlockKey("blocked")
-+
-+	now = now.Add(400 * 24 * time.Hour)
-+	if _, ok := engine.Circuits().AcquireProbe(key, time.Minute); ok {
-+		t.Fatal("held circuit granted a probe")
-+	}
-+	engine.RecordResourceSuccess(profile.Candidates[0])
-+	engine.Circuits().Open(key, now.Add(time.Minute), routingerr.CodeRateLimited)
-+	if status := engine.Circuits().Inspect(key, now); status.State != ResourceWaiting ||
-+		status.Code != routingerr.CodeAccountBlocked || !status.Until.IsZero() {
-+		t.Fatalf("hold after a year, output, and a timed failure = %#v, want held", status)
-+	}
-+	later, err := engine.Select("session-later", profile, 0, "")
-+	if err != nil || later.ExecutionProfileID != "sibling" {
-+		t.Fatalf("selection after a year = %#v, %v; want sibling", later, err)
-+	}
-+}
-+
-+func TestAccountBlockedHoldSurvivesRestore(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	store := newStubCircuitPersistence()
-+	clock := WithCircuitClock(func() time.Time { return now })
-+	engine := NewEngine(WithClock(func() time.Time { return now }),
-+		WithCircuitRegistry(NewCircuitRegistry(WithCircuitPersistence(store), clock)))
-+	profile := accountBlockProfile(routingpolicy.DefaultPolicy())
-+	holdAccount(t, engine, profile, "session-a")
-+
-+	restored := NewCircuitRegistry(WithCircuitPersistence(store), clock)
-+	if err := restored.Restore(context.Background()); err != nil {
-+		t.Fatalf("Restore: %v", err)
-+	}
-+	now = now.Add(30 * 24 * time.Hour)
-+	if !restored.IsOpen(accountBlockKey("blocked"), now) {
-+		t.Fatal("hold did not survive restart")
-+	}
-+	if _, ok := restored.AcquireProbe(accountBlockKey("blocked"), time.Minute); ok {
-+		t.Fatal("restored hold granted a probe")
-+	}
-+}
-+
-+func TestAccountBlockedHoldKeepsRouteManual(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	engine := NewEngine(WithClock(func() time.Time { return now }))
-+	profile := Profile{
-+		ID: "dynamic-single", Version: 1,
-+		Candidates: []Candidate{{ID: "blocked", Enabled: true, BindingKey: "credential:shared", Policies: routingpolicy.DefaultDocument()}},
-+	}
-+	initial, err := engine.Select("session-a", profile, 0, "")
-+	if err != nil {
-+		t.Fatalf("Select: %v", err)
-+	}
-+	if _, err := engine.ApplyFailure("session-a", profile, initial.Generation, "blocked", accountBlockedFailure()); err == nil {
-+		t.Fatal("a fully held route selected a candidate")
-+	}
-+	if deadline, ok := engine.resourceWaitDeadline(profile, now); ok {
-+		t.Fatalf("fully held route scheduled a resource wait until %s", deadline)
-+	}
-+}
-+
-+func TestAccountBlockedLegacyRetryTriesNext(t *testing.T) {
-+	engine := NewEngine()
-+	profile := Profile{
-+		ID: "dynamic-legacy", Version: 1,
-+		Candidates: []Candidate{
-+			{ID: "blocked", Enabled: true, Rules: map[string]Action{"on_provider_error": ActionRetrySame}},
-+			{ID: "next", Enabled: true},
-+		},
-+	}
-+	initial, err := engine.Select("session-a", profile, 0, "")
-+	if err != nil {
-+		t.Fatalf("Select: %v", err)
-+	}
-+	decision, err := engine.ApplyFailure("session-a", profile, initial.Generation, "blocked", accountBlockedFailure())
-+	if err != nil || decision.ExecutionProfileID != "next" {
-+		t.Fatalf("legacy retry decision = %#v, %v; want next", decision, err)
-+	}
-+}
-+
-+func TestReleaseAccountBlockClosesOnlyHeldProfile(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	store := newStubCircuitPersistence()
-+	engine := NewEngine(WithClock(func() time.Time { return now }),
-+		WithCircuitRegistry(NewCircuitRegistry(WithCircuitPersistence(store),
-+			WithCircuitClock(func() time.Time { return now }))))
-+	profile := accountBlockProfile(routingpolicy.DefaultPolicy())
-+	holdAccount(t, engine, profile, "session-a")
-+	engine.Circuits().Open("credential:shared", now.Add(time.Hour), routingerr.CodeRateLimited)
-+	engine.Circuits().Open("credential:other", now.Add(time.Hour), routingerr.CodeQuotaLimited)
-+
-+	for _, id := range []string{"sibling", "unknown", ""} {
-+		if released, err := engine.ReleaseAccountBlock(id); released || err != nil {
-+			t.Fatalf("release %q = %v, %v; want no hold", id, released, err)
-+		}
-+	}
-+	released, err := engine.ReleaseAccountBlock("blocked")
-+	if err != nil || !released {
-+		t.Fatalf("release blocked = %v, %v; want released", released, err)
-+	}
-+	if again, err := engine.ReleaseAccountBlock("blocked"); again || err != nil {
-+		t.Fatalf("repeated release = %v, %v; want no-op", again, err)
-+	}
-+	if engine.Circuits().IsOpen(accountBlockKey("blocked"), now) {
-+		t.Fatal("hold still open after release")
-+	}
-+	if row, ok := store.row(accountBlockKey("blocked")); !ok || row.State != CircuitClosed {
-+		t.Fatalf("persisted hold = %#v, %v; want closed", row, ok)
-+	}
-+	for _, key := range []string{"credential:shared", "credential:other"} {
-+		if !engine.Circuits().IsOpen(key, now) {
-+			t.Fatalf("release closed %s", key)
-+		}
-+	}
-+}
-+
-+func TestReleaseAccountBlockKeepsHoldWhenSaveFails(t *testing.T) {
-+	now := time.Unix(1000, 0)
-+	store := newStubCircuitPersistence()
-+	registry := NewCircuitRegistry(WithCircuitPersistence(store), WithCircuitClock(func() time.Time { return now }))
-+	key := accountBlockKey("blocked")
-+	registry.Hold(key, routingerr.CodeAccountBlocked)
-+	store.setFailing(true)
-+
-+	released, err := registry.ReleaseHold(key)
-+	if released || err == nil {
-+		t.Fatalf("release during outage = %v, %v; want error", released, err)
-+	}
-+	if !registry.IsOpen(key, now) {
-+		t.Fatal("failed release dropped the hold in memory")
-+	}
-+	store.setFailing(false)
-+	if released, err := registry.ReleaseHold(key); !released || err != nil {
-+		t.Fatalf("release after outage = %v, %v; want released", released, err)
-+	}
-+}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/block_policy_test.go b/apps/backend/internal/agent/runtime/dynamic/block_policy_test.go
 new file mode 100644
-index 0000000000..40803b23ab
+index 00000000000..40803b23ab7
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/block_policy_test.go
 @@ -0,0 +1,128 @@
@@ -545,7 +268,7 @@ index 0000000000..40803b23ab
 +	}
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/circuit.go b/apps/backend/internal/agent/runtime/dynamic/circuit.go
-index ff009794da..9dcefe0a14 100644
+index ff009794dac..9dcefe0a149 100644
 --- a/apps/backend/internal/agent/runtime/dynamic/circuit.go
 +++ b/apps/backend/internal/agent/runtime/dynamic/circuit.go
 @@ -25,6 +25,10 @@ const (
@@ -867,7 +590,7 @@ index ff009794da..9dcefe0a14 100644
  		_, alreadyPending := r.pending[key]
 diff --git a/apps/backend/internal/agent/runtime/dynamic/circuit_list.go b/apps/backend/internal/agent/runtime/dynamic/circuit_list.go
 new file mode 100644
-index 0000000000..842f0d816d
+index 00000000000..842f0d816dc
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/circuit_list.go
 @@ -0,0 +1,19 @@
@@ -892,7 +615,7 @@ index 0000000000..842f0d816d
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/circuit_policy.go b/apps/backend/internal/agent/runtime/dynamic/circuit_policy.go
 new file mode 100644
-index 0000000000..899b2e4b7f
+index 00000000000..899b2e4b7f3
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/circuit_policy.go
 @@ -0,0 +1,33 @@
@@ -930,7 +653,7 @@ index 0000000000..899b2e4b7f
 +	return snapshot.Until
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/continuation_safety.go b/apps/backend/internal/agent/runtime/dynamic/continuation_safety.go
-index aff4eddad1..579357897e 100644
+index aff4eddad13..579357897e8 100644
 --- a/apps/backend/internal/agent/runtime/dynamic/continuation_safety.go
 +++ b/apps/backend/internal/agent/runtime/dynamic/continuation_safety.go
 @@ -90,6 +90,7 @@ func skipBisectedRunForward(raw string, pos int) int {
@@ -941,672 +664,9 @@ index aff4eddad1..579357897e 100644
  		TaskDescription:   bounded(routingerr.SanitizeCredentials(continuation.TaskDescription)),
  		WorkflowStep:      bounded(continuation.WorkflowStep),
  		Conversation:      sanitizedTail(continuation.Conversation, continuationFieldLimit),
-diff --git a/apps/backend/internal/agent/runtime/dynamic/failure_scope.go b/apps/backend/internal/agent/runtime/dynamic/failure_scope.go
-new file mode 100644
-index 0000000000..4db4b569a3
---- /dev/null
-+++ b/apps/backend/internal/agent/runtime/dynamic/failure_scope.go
-@@ -0,0 +1,510 @@
-+package dynamic
-+
-+import (
-+	"context"
-+	"strings"
-+	"time"
-+
-+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-+)
-+
-+// FailureCause names why a classified provider failure happened. One cause
-+// decides how far a suspension reaches and how long it lasts, so two notices
-+// with the same wording on two paths can mean different things: OpenCode Zen's
-+// "Rate limit exceeded. Please try again later" is its free daily allowance,
-+// while the same code from another gateway is a short per-minute limit.
-+//
-+// The mapping is data: failureCauseRules picks the cause from the classifier
-+// rule, the code and the candidate's path, and failureCausePolicies gives each
-+// cause its scope and duration. A newly collected signature is one rule in
-+// routingerr plus one row here.
-+type FailureCause string
-+
-+const (
-+	// CauseAccountQuota is an exhausted subscription or prepaid plan: every
-+	// model the account reaches through this path stops until the stated reset.
-+	CauseAccountQuota FailureCause = "account_quota"
-+	// CauseGoUsageLimit is the OpenCode Go subscription usage limit. It covers
-+	// the paid models of the account; its free models keep working.
-+	CauseGoUsageLimit FailureCause = "go_usage_limit"
-+	// CauseFreeDailyLimit is a per-model free daily allowance. It resets at
-+	// 00:00 UTC (09:00 KST), so a retry the same day only spends a turn.
-+	CauseFreeDailyLimit FailureCause = "free_daily_limit"
-+	// CauseFreeAccountDailyLimit is a daily allowance shared by every free model
-+	// of one account (OpenRouter "free-models-per-day").
-+	CauseFreeAccountDailyLimit FailureCause = "free_account_daily_limit"
-+	// CauseUsageLimit is any other rate or quota limit. It keeps the metering
-+	// rules that predate this table: model scope for free and OpenCode Go
-+	// models, account scope otherwise, and the existing ladders.
-+	CauseUsageLimit FailureCause = "usage_limit"
-+	// CauseUpstreamHostLimit is a gateway's shared upstream pool that is
-+	// rate-limited for one model ("temporarily rate-limited upstream").
-+	CauseUpstreamHostLimit FailureCause = "upstream_host_limit"
-+	// CauseGatewayRateLimit is a gateway notice that does not name its window.
-+	CauseGatewayRateLimit FailureCause = "gateway_rate_limit"
-+	// CauseModelWithdrawn is a model the gateway no longer serves.
-+	CauseModelWithdrawn FailureCause = "model_withdrawn"
-+	// CauseAccountSetting is an account setting that excludes the model until
-+	// the owner changes it.
-+	CauseAccountSetting FailureCause = "account_setting"
-+	// CauseEndpointIntermittent is one model's upstream endpoint on one gateway
-+	// that drops out for minutes at a time.
-+	CauseEndpointIntermittent FailureCause = "endpoint_intermittent"
-+	// CauseModelHost is a slow or failing model host. A host serves the model
-+	// on every path, so a second path failing within the window suspends the
-+	// model everywhere.
-+	CauseModelHost FailureCause = "model_host"
-+	// CauseNetwork is a connection that could not be made or was dropped.
-+	CauseNetwork FailureCause = "network"
-+	// CauseCredential is a missing, expired or unentitled credential.
-+	CauseCredential FailureCause = "credential"
-+	// CauseAccountBlocked is an account the gateway restricted. The execution
-+	// profile is held until its owner releases it (account_block:<profile>);
-+	// the same model on another path stays available.
-+	CauseAccountBlocked FailureCause = "account_blocked"
-+	// CauseLocalRuntime is the local agent runtime failing. It is not a
-+	// provider condition and suspends nothing.
-+	CauseLocalRuntime FailureCause = "local_runtime"
-+	// CauseTransient is an unavailable, overloaded or at-capacity notice with
-+	// no more specific signature.
-+	CauseTransient FailureCause = "transient"
-+)
-+
-+// Provider prefixes of model IDs, which name the path a candidate reaches its
-+// model through.
-+const (
-+	pathOpenCodeZen = "opencode"
-+	pathOpenRouter  = "openrouter"
-+)
-+
-+// causeRule maps one classified failure to its cause. Rules are tried in
-+// order and the first one whose non-empty fields all match wins, so a
-+// signature row precedes the code-only fallback for the same code.
-+type causeRule struct {
-+	// rule is the routingerr classifier rule ID; empty matches any rule.
-+	rule string
-+	// code is the normalized code; empty matches any code.
-+	code routingerr.Code
-+	// path is the provider prefix of the candidate's model ID; empty matches
-+	// any path.
-+	path  string
-+	cause FailureCause
-+}
-+
-+// failureCauseRules is the single cause table. Evidence for each row is the
-+// 2026-10-12 failover error catalogue (signature, path, recovery and
-+// cross-path behaviour).
-+var failureCauseRules = []causeRule{
-+	// Account allowances with a stated reset or renewal.
-+	{rule: routingerr.RuleOpenCodeCredit, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleOpenCodeUsageLimit, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleClaudeQuota, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleClaudeSessionLimit, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleClaudeWeeklyLimit, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleCodexQuota, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleProviderQuotaNotice, cause: CauseAccountQuota},
-+	{rule: routingerr.RuleOpenCodeGoUsageLimit, cause: CauseGoUsageLimit},
-+	// Zen recovered after 09:00 KST in 500 of 506 observations. OpenRouter's
-+	// AI-SDK notice hides whether its free allowance is per-minute or per-day;
-+	// the single withdrawn-model observation does not establish a daily reset.
-+	{rule: routingerr.RuleOpenCodeRateTryLater, path: pathOpenCodeZen, cause: CauseFreeDailyLimit},
-+	{rule: routingerr.RuleOpenCodeRateTryLater, path: pathOpenRouter, cause: CauseGatewayRateLimit},
-+	{rule: routingerr.RuleOpenCodeFreeModelsPerDay, cause: CauseFreeAccountDailyLimit},
-+	{rule: routingerr.RuleOpenCodeModelPerDay, cause: CauseFreeDailyLimit},
-+	{rule: routingerr.RuleOpenCodeUpstreamHostLimit, cause: CauseUpstreamHostLimit},
-+	// An account restricted by its gateway (403 user_blocked) holds that
-+	// execution profile until the owner releases it. openCircuitForFailure
-+	// applies that hold before this table, so the row only names the cause.
-+	{code: routingerr.CodeAccountBlocked, cause: CauseAccountBlocked},
-+	{rule: routingerr.RuleOpenCodeModelWithdrawn, cause: CauseModelWithdrawn},
-+	{rule: routingerr.RuleOpenCodeGoAccountSetting, cause: CauseAccountSetting},
-+	{rule: routingerr.RuleOpenCodeEndpointUnavailable, cause: CauseEndpointIntermittent},
-+	{rule: routingerr.RuleProviderHeaderTimeout, cause: CauseModelHost},
-+	{rule: routingerr.RuleProviderStreamServerError, cause: CauseModelHost},
-+	{rule: routingerr.RuleProviderInternalServerError, cause: CauseModelHost},
-+	{rule: routingerr.RuleProviderNvidiaHost, cause: CauseModelHost},
-+	{rule: routingerr.RuleOpenCodeServiceFailure, cause: CauseLocalRuntime},
-+	// Code defaults.
-+	{code: routingerr.CodeRateLimited, cause: CauseUsageLimit},
-+	{code: routingerr.CodeQuotaLimited, cause: CauseUsageLimit},
-+	{code: routingerr.CodeNetworkUnavailable, cause: CauseNetwork},
-+	{code: routingerr.CodeAuthRequired, cause: CauseCredential},
-+	{code: routingerr.CodeMissingCredentials, cause: CauseCredential},
-+	{code: routingerr.CodeSubscriptionRequired, cause: CauseCredential},
-+	{code: routingerr.CodeProviderNotConfigured, cause: CauseCredential},
-+	{code: routingerr.CodeModelUnavailable, cause: CauseModelWithdrawn},
-+	{code: routingerr.CodeProviderUnavailable, cause: CauseTransient},
-+	{code: routingerr.CodeProviderOverloaded, cause: CauseTransient},
-+	{code: routingerr.CodeModelCapacity, cause: CauseTransient},
-+}
-+
-+// BlockScope is how far one cause's suspension reaches.
-+type BlockScope string
-+
-+const (
-+	// BlockNone suspends nothing.
-+	BlockNone BlockScope = "none"
-+	// BlockPathModel suspends this model on this path only.
-+	BlockPathModel BlockScope = "path_model"
-+	// BlockPath suspends the path's credential binding.
-+	BlockPath BlockScope = "path"
-+	// BlockAccount suspends every model the path's account reaches.
-+	BlockAccount BlockScope = "account"
-+	// BlockAccountTier suspends every model of the same cost tier (free or
-+	// paid) on the path's account.
-+	BlockAccountTier BlockScope = "account_tier"
-+	// BlockUsageLimit is the metering rule that predates the cause table: the
-+	// model for providers that meter models separately, the account otherwise.
-+	BlockUsageLimit BlockScope = "usage_limit"
-+)
-+
-+// causePolicy is one cause's scope and duration.
-+type causePolicy struct {
-+	scope BlockScope
-+	// ladder is the block length by consecutive strike; the last step repeats.
-+	ladder []time.Duration
-+	// usageLimitDuration keeps the ladders, calendar and monthly resets that
-+	// predate the cause table.
-+	usageLimitDuration bool
-+	// holdUntilRenewal blocks until a stated renewal instant still ahead.
-+	holdUntilRenewal bool
-+	// untilNextUTCDay blocks until the next 00:00 UTC.
-+	untilNextUTCDay bool
-+	// nextUTCDayAfterStrikes switches to the next 00:00 UTC once strikes pass
-+	// this count; zero never switches.
-+	nextUTCDayAfterStrikes int
-+	// dailyStrikes counts only failures on the current UTC date.
-+	dailyStrikes bool
-+	// crossPathWindow suspends the model on every path when another path
-+	// reported the same cause for the same model within the window.
-+	crossPathWindow time.Duration
-+	// excludeSameModel keeps the same model on other paths out of the
-+	// successor search that this failure starts.
-+	excludeSameModel bool
-+}
-+
-+// Durations. A reset hint stated by the provider always comes first.
-+var (
-+	// transientLadder lengthens repeated unavailable, overloaded and
-+	// at-capacity notices instead of retrying every minute.
-+	transientLadder = []time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
-+	// endpointLadder: 64% of "Endpoint is unavailable" recovered on the same
-+	// path within ten minutes, median twelve.
-+	endpointLadder = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute, 15 * time.Minute}
-+	// modelHostLadder: header timeouts and 5xx recovered in 1 to 22 minutes.
-+	modelHostLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
-+	// gatewayRateLadder retries notices whose per-minute/per-day window is hidden.
-+	gatewayRateLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
-+	// upstreamHostLadder: a shared upstream pool that stays limited for more
-+	// than about six hours waits for the next daily reset.
-+	upstreamHostLadder = []time.Duration{5 * time.Minute, 15 * time.Minute, 30 * time.Minute, time.Hour}
-+	// withdrawnLadder: no withdrawn model recovered; it is probed once a day.
-+	withdrawnLadder = []time.Duration{24 * time.Hour}
-+	// accountSettingLadder: the owner changed the setting 3 to 10 hours later.
-+	accountSettingLadder = []time.Duration{6 * time.Hour, 24 * time.Hour}
-+	// networkLadder: dropped connections recovered in 1 to 8 minutes.
-+	networkLadder = []time.Duration{2 * time.Minute, 5 * time.Minute}
-+	// goUsageLadder: the Go notice states no reset; the window is unknown.
-+	goUsageLadder = []time.Duration{5 * time.Hour, 24 * time.Hour, 7 * 24 * time.Hour}
-+)
-+
-+// modelHostWindow is how close in time two paths must fail for the model host
-+// to be the shared cause.
-+const modelHostWindow = 15 * time.Minute
-+
-+// upstreamHostDailyAfterStrikes is the strike count after which the upstream
-+// ladder has spent about six hours (5+15+30 minutes, then hourly).
-+const upstreamHostDailyAfterStrikes = 8
-+
-+var failureCausePolicies = map[FailureCause]causePolicy{
-+	CauseAccountQuota:          {scope: BlockAccount, usageLimitDuration: true, holdUntilRenewal: true},
-+	CauseGoUsageLimit:          {scope: BlockAccountTier, ladder: goUsageLadder},
-+	CauseFreeDailyLimit:        {scope: BlockPathModel, untilNextUTCDay: true},
-+	CauseFreeAccountDailyLimit: {scope: BlockAccountTier, untilNextUTCDay: true},
-+	CauseUsageLimit:            {scope: BlockUsageLimit, usageLimitDuration: true},
-+	CauseUpstreamHostLimit:     {scope: BlockPathModel, ladder: upstreamHostLadder, nextUTCDayAfterStrikes: upstreamHostDailyAfterStrikes},
-+	CauseGatewayRateLimit:      {scope: BlockPathModel, ladder: gatewayRateLadder, nextUTCDayAfterStrikes: upstreamHostDailyAfterStrikes, dailyStrikes: true},
-+	CauseModelWithdrawn:        {scope: BlockPathModel, ladder: withdrawnLadder},
-+	CauseAccountSetting:        {scope: BlockPathModel, ladder: accountSettingLadder},
-+	CauseEndpointIntermittent:  {scope: BlockPathModel, ladder: endpointLadder},
-+	CauseModelHost:             {scope: BlockPathModel, ladder: modelHostLadder, crossPathWindow: modelHostWindow, excludeSameModel: true},
-+	CauseNetwork:               {scope: BlockPathModel, ladder: networkLadder},
-+	CauseCredential:            {scope: BlockPath, ladder: []time.Duration{circuitBackoff}},
-+	CauseLocalRuntime:          {scope: BlockNone},
-+	// The owner-release hold is applied before the table (see
-+	// openCircuitForFailure); nothing else is suspended.
-+	CauseAccountBlocked: {scope: BlockNone},
-+	// An unrecognized unavailable notice may be the path or the host, so the
-+	// successor search keeps the same model out as it did before the table.
-+	CauseTransient: {scope: BlockPathModel, ladder: transientLadder, excludeSameModel: true},
-+}
-+
-+// FailureCauseFor returns the cause of a classified failure on a candidate.
-+func FailureCauseFor(candidate Candidate, failure *routingerr.Error) FailureCause {
-+	if failure == nil {
-+		return ""
-+	}
-+	path := ProviderOf(candidate.ModelID)
-+	for _, row := range failureCauseRules {
-+		if row.rule != "" && row.rule != failure.ClassifierRule {
-+			continue
-+		}
-+		if row.code != "" && row.code != failure.Code {
-+			continue
-+		}
-+		if row.path != "" && row.path != path {
-+			continue
-+		}
-+		return row.cause
-+	}
-+	return CauseTransient
-+}
-+
-+func policyForFailure(candidate Candidate, failure *routingerr.Error) causePolicy {
-+	return failureCausePolicies[FailureCauseFor(candidate, failure)]
-+}
-+
-+// pathModelKey is this model on this path. A model-scoped candidate already
-+// carries it; any other candidate derives it from its binding.
-+func (c Candidate) pathModelKey() string {
-+	if c.ModelKey != "" {
-+		return c.ModelKey
-+	}
-+	if c.ModelID == "" || c.BindingKey == "" {
-+		return c.BindingKey
-+	}
-+	return ResourceKey(ScopeModel, c.BindingKey+modelKeySeparator+c.ModelID)
-+}
-+
-+// accountKey is every model the candidate's account reaches through its path.
-+// Without a resolved account the binding is the narrowest safe answer.
-+func (c Candidate) accountKey() string {
-+	if c.AccountKey != "" {
-+		return c.AccountKey
-+	}
-+	return c.BindingKey
-+}
-+
-+// accountTierKey is every model of this candidate's cost tier on its account.
-+func (c Candidate) accountTierKey() string {
-+	if c.AccountKey == "" {
-+		return ""
-+	}
-+	tier := "paid"
-+	if freeCandidate(c) {
-+		tier = "free"
-+	}
-+	return c.AccountKey + modelKeySeparator + tier
-+}
-+
-+// modelIdentityKey is this model on every path.
-+func (c Candidate) modelIdentityKey() string {
-+	identity := ModelIdentity(c.ModelID)
-+	if identity == "" {
-+		return ""
-+	}
-+	return ResourceKey(ScopeModel, anyBindingMarker+modelKeySeparator+identity)
-+}
-+
-+// pathIdentity names the path a candidate reaches its model through, so two
-+// profiles of one model on one path are not counted as two paths.
-+func (c Candidate) pathIdentity() string {
-+	if c.AccountKey != "" {
-+		return c.AccountKey
-+	}
-+	return c.BindingKey
-+}
-+
-+const (
-+	modelKeySeparator = "|"
-+	// anyBindingMarker stands for "every binding" in a model identity key, in
-+	// the place a path's binding takes in a path-model key.
-+	anyBindingMarker = "*"
-+)
-+
-+// modelIdentityAliases folds a model's names on different gateways into one
-+// identity where the plain normalization cannot see they are the same model.
-+var modelIdentityAliases = map[string]string{
-+	"nemotron-3-ultra-550b-a55b": "nemotron-3-ultra",
-+}
-+
-+// ModelIdentity normalizes a model ID to the model a host serves, independent
-+// of the gateway path: "opencode-go/space-bunny-free", "opencode/space-bunny"
-+// and "openrouter/x/space-bunny:free" are one model. An unknown model has no
-+// identity.
-+func ModelIdentity(model string) string {
-+	model = strings.ToLower(strings.TrimSpace(model))
-+	if unknownInterruptionModel(model) {
-+		return ""
-+	}
-+	if index := strings.LastIndex(model, "/"); index >= 0 {
-+		model = model[index+1:]
-+	}
-+	model = strings.TrimSuffix(model, ":free")
-+	model = strings.TrimSuffix(model, "-free")
-+	if unknownInterruptionModel(model) {
-+		return ""
-+	}
-+	if alias, ok := modelIdentityAliases[model]; ok {
-+		return alias
-+	}
-+	return model
-+}
-+
-+// failureTargets lists the circuits one failure opens.
-+func failureTargets(candidate Candidate, failure *routingerr.Error, policy causePolicy) []string {
-+	var key string
-+	switch policy.scope {
-+	case BlockNone:
-+		return nil
-+	case BlockUsageLimit:
-+		key = suspensionTarget(candidate, failure.Code)
-+	case BlockPath:
-+		key = candidate.BindingKey
-+	case BlockAccount:
-+		key = candidate.accountKey()
-+	case BlockAccountTier:
-+		key = candidate.accountTierKey()
-+		if key == "" {
-+			key = candidate.pathModelKey()
-+		}
-+	default:
-+		key = candidate.pathModelKey()
-+	}
-+	if key == "" {
-+		return nil
-+	}
-+	return []string{key}
-+}
-+
-+// causeSuspensionUntil sizes one suspension of a cause. A reset instant the
-+// provider stated wins, then a stated renewal still ahead, then the cause's own
-+// rule.
-+func (e *Engine) causeSuspensionUntil(
-+	ctx context.Context,
-+	candidate Candidate,
-+	failure *routingerr.Error,
-+	policy causePolicy,
-+	strikes int,
-+	now time.Time,
-+) time.Time {
-+	floor := now.Add(circuitBackoff)
-+	if failure.ResetHint != nil && failure.ResetHint.After(floor) {
-+		return *failure.ResetHint
-+	}
-+	if policy.holdUntilRenewal && failure.RenewalAt != nil && failure.RenewalAt.After(floor) {
-+		return *failure.RenewalAt
-+	}
-+	if policy.usageLimitDuration {
-+		return e.suspensionUntil(ctx, candidate, failure, strikes, now)
-+	}
-+	if policy.untilNextUTCDay ||
-+		(policy.nextUTCDayAfterStrikes > 0 && strikes > policy.nextUTCDayAfterStrikes) {
-+		return laterOf(nextUTCDay(now), floor)
-+	}
-+	if len(policy.ladder) == 0 {
-+		return floor
-+	}
-+	return now.Add(ladderStep(policy.ladder, strikes))
-+}
-+
-+// nextUTCDay is the next 00:00 UTC, when daily allowances reset.
-+func nextUTCDay(now time.Time) time.Time {
-+	utc := now.UTC()
-+	return time.Date(utc.Year(), utc.Month(), utc.Day()+1, 0, 0, 0, 0, time.UTC)
-+}
-+
-+func laterOf(a, b time.Time) time.Time {
-+	if a.After(b) {
-+		return a
-+	}
-+	return b
-+}
-+
-+// openCircuit opens one key for a failure without ever shortening a block that
-+// is already running.
-+func (e *Engine) openCircuit(
-+	ctx context.Context,
-+	key string,
-+	candidate Candidate,
-+	failure *routingerr.Error,
-+	policy causePolicy,
-+	now time.Time,
-+) {
-+	strikes := e.circuits.NextStrike(key)
-+	if policy.dailyStrikes {
-+		strikes = e.circuits.NextDailyStrike(key)
-+	}
-+	until := e.causeSuspensionUntil(ctx, candidate, failure, policy, strikes, now)
-+	if running := e.circuits.Inspect(key, now); running.State == ResourceWaiting && running.Until.After(until) {
-+		until = running.Until
-+	}
-+	if policy.dailyStrikes {
-+		e.circuits.OpenDaily(key, until, failure.Code)
-+	} else {
-+		e.circuits.Open(key, until, failure.Code)
-+	}
-+}
-+
-+// noteCrossPathFailure records a model-host failure of one path and reports
-+// whether another path of the same model failed within the window.
-+func (e *Engine) noteCrossPathFailure(candidate Candidate, window time.Duration, now time.Time) bool {
-+	identity := ModelIdentity(candidate.ModelID)
-+	path := candidate.pathIdentity()
-+	if identity == "" || path == "" {
-+		return false
-+	}
-+	e.hostMu.Lock()
-+	defer e.hostMu.Unlock()
-+	if e.hostFailures == nil {
-+		e.hostFailures = make(map[string]map[string]time.Time)
-+	}
-+	paths := e.hostFailures[identity]
-+	if paths == nil {
-+		paths = make(map[string]time.Time)
-+		e.hostFailures[identity] = paths
-+	}
-+	shared := false
-+	for other, at := range paths {
-+		if now.Sub(at) > window {
-+			delete(paths, other)
-+			continue
-+		}
-+		if other != path {
-+			shared = true
-+		}
-+	}
-+	paths[path] = now
-+	return shared
-+}
-+
-+// sameModelCandidateIDs lists the other candidates of the profile that run the
-+// failed candidate's model on another path.
-+func sameModelCandidateIDs(profile Profile, failedCandidateID string) []string {
-+	failed, ok := candidateByID(profile, failedCandidateID)
-+	if !ok {
-+		return nil
-+	}
-+	identity := ModelIdentity(failed.ModelID)
-+	if identity == "" {
-+		return nil
-+	}
-+	var ids []string
-+	for _, candidate := range profile.Candidates {
-+		if candidate.ID != failedCandidateID && ModelIdentity(candidate.ModelID) == identity {
-+			ids = append(ids, candidate.ID)
-+		}
-+	}
-+	return ids
-+}
-+
-+// failureExclusions is the failed candidate plus, when the cause can reach the
-+// model on every path, the same model's other paths.
-+func failureExclusions(profile Profile, failedCandidateID string, failure *routingerr.Error) []string {
-+	excluded := []string{failedCandidateID}
-+	failed, ok := candidateByID(profile, failedCandidateID)
-+	if !ok || failure == nil || !policyForFailure(failed, failure).excludeSameModel {
-+		return excluded
-+	}
-+	return append(excluded, sameModelCandidateIDs(profile, failedCandidateID)...)
-+}
-diff --git a/apps/backend/internal/agent/runtime/dynamic/midturn_failure.go b/apps/backend/internal/agent/runtime/dynamic/midturn_failure.go
-new file mode 100644
-index 0000000000..2c010938a5
---- /dev/null
-+++ b/apps/backend/internal/agent/runtime/dynamic/midturn_failure.go
-@@ -0,0 +1,141 @@
-+package dynamic
-+
-+import (
-+	"context"
-+
-+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-+	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
-+)
-+
-+// InterruptedFailureAllowed is the task interruption exception, separate from
-+// pre-result retry policy and from account errors requiring user action.
-+func InterruptedFailureAllowed(failure *routingerr.Error) bool {
-+	if failure == nil || !failure.FallbackAllowed || failure.UserAction {
-+		return false
-+	}
-+	switch failure.Code {
-+	case routingerr.CodeQuotaLimited, routingerr.CodeRateLimited, routingerr.CodeProviderUnavailable,
-+		routingerr.CodeProviderOverloaded, routingerr.CodeModelCapacity:
-+		return true
-+	default:
-+		return false
-+	}
-+}
-+
-+// ApplyInterruptedFailureContext advances an owned route without replaying its
-+// model. The status claim fences resource penalties as well as successor claims.
-+func (e *Engine) ApplyInterruptedFailureContext(ctx context.Context, sessionID string, profile Profile, generation int64, candidateID string, failure *routingerr.Error) (RouteDecision, error) {
-+	if !InterruptedFailureAllowed(failure) {
-+		return RouteDecision{}, ErrNoEligibleCandidate
-+	}
-+	inputs := e.rankInputs(ctx, profile)
-+	e.mu.Lock()
-+	defer e.mu.Unlock()
-+	state, err := e.currentUnclassifiedRouteState(ctx, sessionID, profile, generation, candidateID)
-+	if err != nil {
-+		return RouteDecision{}, err
-+	}
-+	if state.Status != routeStatusActive && state.Status != routeStatusStarting {
-+		return RouteDecision{}, ErrStaleGeneration
-+	}
-+	chain, err := decodeSelectionChain(state.PolicyStateJSON)
-+	if err != nil {
-+		return RouteDecision{}, err
-+	}
-+	chain = excludeInterruptedModel(chain.forProfile(profile.ID, generation), profile, candidateID, failure)
-+	chain.Interrupted = true
-+	oldStatus, oldPolicy := state.Status, state.PolicyStateJSON
-+	state.Status = routeStatusRetrying
-+	state.PolicyStateJSON, err = carrySelectionChain("", chain)
-+	if err != nil {
-+		return RouteDecision{}, err
-+	}
-+	if err := e.persistSnapshot(ctx, oldStatus, oldPolicy, state); err != nil {
-+		return RouteDecision{}, err
-+	}
-+	e.states[sessionID] = state
-+	e.RecordResourceFailure(ctx, profile, candidateID, failure)
-+	e.observeLimit(ctx, candidateID, failure)
-+	key := probeKey(sessionID, generation, candidateID)
-+	leases := e.probes[key]
-+	delete(e.probes, key)
-+	for _, lease := range leases {
-+		e.circuits.ReleaseProbe(lease, false, circuitBackoff)
-+	}
-+	return e.selectInterruptedSuccessor(ctx, state, profile, candidateID, failure, chain, inputs)
-+}
-+
-+func (e *Engine) selectInterruptedSuccessor(ctx context.Context, state RouteState, profile Profile, candidateID string, failure *routingerr.Error, chain SelectionChain, inputs RankOptions) (RouteDecision, error) {
-+	now := e.now()
-+	generation := state.Generation + 1
-+	// The search reads circuit health without claiming anything; only the
-+	// winner claims its probe below, so expired candidates the search passes
-+	// over stay available to other sessions and to this claim.
-+	ineligible := make(map[string]string)
-+	for _, candidate := range profile.Candidates {
-+		if e.candidateBlockedNow(candidate, now) {
-+			ineligible[candidate.ID] = IneligibleCircuit
-+		}
-+	}
-+	plan := ResolveFallbackSelection(profile, candidateID, "", chain, ineligible)
-+	winner := plan.firstSelectable(inputs.at(now), func(candidate Candidate) bool {
-+		return e.claimProbe(candidate, state.SessionID, generation, now)
-+	})
-+	policy := PolicyState{SelectionChain: &chain, FailureCode: failure.Code,
-+		FailureClass: routingerr.ClassForCode(failure.Code), CatalogueVersion: routingerr.CatalogueVersion,
-+		PendingOutcome: routingpolicy.OutcomeSkip}
-+	if !winner.ok {
-+		return e.persistInterruptedExhaustion(ctx, state, policy, failure)
-+	}
-+	chain = chain.withTried(winner.candidate.ID)
-+	chain.LastTierHeadID = winner.tier.HeadID
-+	policy.SelectionChain = &chain
-+	decision := RouteDecision{SessionID: state.SessionID, LogicalProfileID: profile.ID,
-+		ExecutionProfileID: winner.candidate.ID, Generation: generation, ProfileVersion: profile.Version,
-+		Status: routeStatusStarting, Reason: selectionReason(winner.candidate, winner.tier, plan, "interrupted_try_next"),
-+		ErrorCode: failure.Code, ErrorClass: policy.FailureClass, CatalogueVersion: routingerr.CatalogueVersion,
-+		PendingOutcome: routingpolicy.OutcomeSkip}
-+	next := RouteState{SessionID: state.SessionID, LogicalProfileID: profile.ID,
-+		ExecutionProfileID: winner.candidate.ID, Generation: generation, ProfileVersion: profile.Version,
-+		Status: routeStatusStarting, PolicyStateJSON: string(mustJSON(policy)), UpdatedAt: now}
-+	if err := e.claimAndPersist(ctx, state.Generation, decision, next); err != nil {
-+		delete(e.states, state.SessionID)
-+		return RouteDecision{}, err
-+	}
-+	e.states[state.SessionID] = next
-+	e.notePickLocked(profile.ID, winner.candidate.ID, now)
-+	return decision, nil
-+}
-+
-+func (e *Engine) persistInterruptedExhaustion(ctx context.Context, state RouteState, policy PolicyState, failure *routingerr.Error) (RouteDecision, error) {
-+	oldStatus, oldPolicy := state.Status, state.PolicyStateJSON
-+	policy.PendingOutcome = routingpolicy.OutcomeStop
-+	state.Status = routeStatusActionRequired
-+	state.PolicyStateJSON = string(mustJSON(policy))
-+	state.UpdatedAt = e.now()
-+	if err := e.persistSnapshot(ctx, oldStatus, oldPolicy, state); err != nil {
-+		return RouteDecision{}, err
-+	}
-+	e.states[state.SessionID] = state
-+	return RouteDecision{SessionID: state.SessionID, LogicalProfileID: state.LogicalProfileID,
-+		ExecutionProfileID: state.ExecutionProfileID, Generation: state.Generation, ProfileVersion: state.ProfileVersion,
-+		Status: state.Status, Reason: "interrupted_candidates_exhausted", ErrorCode: failure.Code,
-+		ErrorClass: policy.FailureClass, CatalogueVersion: routingerr.CatalogueVersion,
-+		PendingOutcome: routingpolicy.OutcomeStop}, ErrRecoveryPending
-+}
-+
-+// excludeInterruptedModel spends the failed candidate in this chain and, when
-+// the failure's cause can reach the model on every path, the same model's
-+// other paths too. A cause bound to one path (a daily allowance, an
-+// intermittent endpoint, a withdrawn model) leaves the model's other paths in
-+// the search: they fail or succeed on their own.
-+func excludeInterruptedModel(chain SelectionChain, profile Profile, candidateID string, failure *routingerr.Error) SelectionChain {
-+	for _, id := range failureExclusions(profile, candidateID, failure) {
-+		chain = chain.withTried(id)
-+	}
-+	return chain
-+}
-+
-+func unknownInterruptionModel(model string) bool {
-+	return model == "" || model == "default" || model == "unknown"
-+}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/provider_limit.go b/apps/backend/internal/agent/runtime/dynamic/provider_limit.go
 new file mode 100644
-index 0000000000..fe9cc5260d
+index 00000000000..fe9cc5260d4
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/provider_limit.go
 @@ -0,0 +1,71 @@
@@ -1681,171 +741,9 @@ index 0000000000..fe9cc5260d
 +	return time.Date(firstOfMonth.Year(), firstOfMonth.Month(), day,
 +		anchor.Hour(), anchor.Minute(), anchor.Second(), 0, anchor.Location())
 +}
-diff --git a/apps/backend/internal/agent/runtime/dynamic/suspension.go b/apps/backend/internal/agent/runtime/dynamic/suspension.go
-new file mode 100644
-index 0000000000..dbb42bfe9f
---- /dev/null
-+++ b/apps/backend/internal/agent/runtime/dynamic/suspension.go
-@@ -0,0 +1,156 @@
-+package dynamic
-+
-+import (
-+	"context"
-+	"encoding/json"
-+	"fmt"
-+	"time"
-+
-+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-+)
-+
-+// IneligibleProbing marks a candidate whose expired suspension is being probed
-+// by another selection right now.
-+const IneligibleProbing = "circuit_probing"
-+
-+// RecordResourceFailure suspends the failed candidate's resource without
-+// changing the route. It covers a failure that is not routed to a successor,
-+// such as a usage limit reported after the attempt already produced output, so
-+// the next selection still avoids the exhausted resource.
-+func (e *Engine) RecordResourceFailure(ctx context.Context, profile Profile, candidateID string, failure *routingerr.Error) {
-+	if e == nil {
-+		return
-+	}
-+	e.openCircuitForFailure(ctx, profile, candidateID, failure)
-+}
-+
-+// RecordResourceSuccess clears the suspension history of a candidate whose
-+// turn completed without a provider error. Every key that gates the candidate
-+// is cleared, so the model's identity, its path and its account all start
-+// their ladders again from the first step.
-+func (e *Engine) RecordResourceSuccess(candidate Candidate) {
-+	if e == nil || e.circuits == nil {
-+		return
-+	}
-+	for _, key := range candidate.resourceKeys() {
-+		e.circuits.RecordSuccess(key)
-+	}
-+}
-+
-+// CandidateSuspension is the read-only resource health of one candidate.
-+type CandidateSuspension struct {
-+	State  ResourceState
-+	Until  time.Time
-+	Scope  SuspensionScope
-+	Source SuspensionSource
-+	Code   routingerr.Code
-+}
-+
-+// Blocked reports whether the candidate cannot be selected now.
-+func (s CandidateSuspension) Blocked() bool {
-+	return s.State == ResourceWaiting || s.State == ResourceProbing
-+}
-+
-+// SuspensionFor reports a candidate's resource health without claiming
-+// anything. A running block outranks a held probe, which outranks an expired
-+// block; among equal states the later end wins.
-+func (e *Engine) SuspensionFor(candidate Candidate, now time.Time) CandidateSuspension {
-+	result := CandidateSuspension{State: ResourceAvailable}
-+	if candidate.SuspendedUntil.After(now) {
-+		result = CandidateSuspension{
-+			State: ResourceWaiting, Until: candidate.SuspendedUntil,
-+			Scope: SuspensionScopeProvider, Source: SuspensionSourceManual,
-+		}
-+	}
-+	if e == nil || e.circuits == nil {
-+		return result
-+	}
-+	for _, key := range candidate.resourceKeys() {
-+		status := e.circuits.Inspect(key, now)
-+		if status.State == ResourceAvailable {
-+			continue
-+		}
-+		scope := SuspensionScopeCredential
-+		switch key {
-+		case candidate.ModelKey, candidate.pathModelKey(), candidate.modelIdentityKey():
-+			scope = SuspensionScopeModel
-+		case candidate.accountBlockKey():
-+			scope = SuspensionScopeProfile
-+		}
-+		next := CandidateSuspension{
-+			State: status.State, Until: status.Until, Scope: scope,
-+			Source: SuspensionSourceFailure, Code: status.Code,
-+		}
-+		if suspensionRank(next.State) > suspensionRank(result.State) ||
-+			(next.State == result.State && next.Until.After(result.Until)) {
-+			result = next
-+		}
-+	}
-+	return result
-+}
-+
-+func suspensionRank(state ResourceState) int {
-+	switch state {
-+	case ResourceWaiting:
-+		return 3
-+	case ResourceProbing:
-+		return 2
-+	case ResourceExpired:
-+		return 1
-+	default:
-+		return 0
-+	}
-+}
-+
-+// SetResourceWaitObserver registers the callback told about a selection that
-+// waits for suspended resources.
-+func (e *Engine) SetResourceWaitObserver(observer func(sessionID string, generation int64, deadline time.Time)) {
-+	if e == nil {
-+		return
-+	}
-+	e.mu.Lock()
-+	e.resourceWait = observer
-+	e.mu.Unlock()
-+}
-+
-+// resourceWaitDeadline returns the earliest instant a suspended candidate can
-+// be tried again, only when every enabled candidate is suspended. A candidate
-+// excluded for another reason, such as an unclassified failure earlier in the
-+// chain, keeps the wait manual because time alone does not make it usable.
-+func (e *Engine) resourceWaitDeadline(profile Profile, now time.Time) (time.Time, bool) {
-+	var deadline time.Time
-+	enabled := 0
-+	for _, candidate := range profile.Candidates {
-+		if !candidate.Enabled {
-+			continue
-+		}
-+		enabled++
-+		suspension := e.SuspensionFor(candidate, now)
-+		if !suspension.Blocked() || suspension.Until.IsZero() {
-+			return time.Time{}, false
-+		}
-+		if deadline.IsZero() || suspension.Until.Before(deadline) {
-+			deadline = suspension.Until
-+		}
-+	}
-+	return deadline, enabled > 0
-+}
-+
-+// withResourceWait marks an exhausted waiting state with the instant its
-+// suspended candidates can be tried again.
-+func withResourceWait(policyStateJSON string, deadline time.Time) (string, error) {
-+	state := PolicyState{}
-+	if policyStateJSON != "" {
-+		if err := json.Unmarshal([]byte(policyStateJSON), &state); err != nil {
-+			return "", fmt.Errorf("decode dynamic policy state: %w", err)
-+		}
-+	}
-+	deadline = deadline.UTC()
-+	state.Deadline = &deadline
-+	state.ResourceWait = true
-+	encoded, err := json.Marshal(state)
-+	if err != nil {
-+		return "", fmt.Errorf("encode dynamic policy state: %w", err)
-+	}
-+	return string(encoded), nil
-+}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/suspension_test.go b/apps/backend/internal/agent/runtime/dynamic/suspension_test.go
 new file mode 100644
-index 0000000000..29f7b73a26
+index 00000000000..29f7b73a265
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/suspension_test.go
 @@ -0,0 +1,466 @@
@@ -2317,7 +1215,7 @@ index 0000000000..29f7b73a26
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic_resolver_resource_wait_test.go b/apps/backend/internal/agent/runtime/dynamic_resolver_resource_wait_test.go
 new file mode 100644
-index 0000000000..a79a847d8f
+index 00000000000..a79a847d8fe
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic_resolver_resource_wait_test.go
 @@ -0,0 +1,210 @@
@@ -2533,7 +1431,7 @@ index 0000000000..a79a847d8f
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic_resource_limits.go b/apps/backend/internal/agent/runtime/dynamic_resource_limits.go
 new file mode 100644
-index 0000000000..e8d0b1b839
+index 00000000000..e8d0b1b8396
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic_resource_limits.go
 @@ -0,0 +1,248 @@
@@ -2787,7 +1685,7 @@ index 0000000000..e8d0b1b839
 +}
 diff --git a/apps/backend/internal/agent/runtime/lifecycle/session_mode_catalog.go b/apps/backend/internal/agent/runtime/lifecycle/session_mode_catalog.go
 new file mode 100644
-index 0000000000..fdaa63f0d7
+index 00000000000..fdaa63f0d77
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/lifecycle/session_mode_catalog.go
 @@ -0,0 +1,38 @@
@@ -2831,7 +1729,7 @@ index 0000000000..fdaa63f0d7
 +}
 diff --git a/apps/backend/internal/agent/runtime/routingerr/account_block_test.go b/apps/backend/internal/agent/runtime/routingerr/account_block_test.go
 new file mode 100644
-index 0000000000..03284ebbb3
+index 00000000000..03284ebbb35
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/routingerr/account_block_test.go
 @@ -0,0 +1,54 @@
@@ -2891,7 +1789,7 @@ index 0000000000..03284ebbb3
 +}
 diff --git a/apps/backend/internal/agent/runtime/routingerr/failover_signatures_test.go b/apps/backend/internal/agent/runtime/routingerr/failover_signatures_test.go
 new file mode 100644
-index 0000000000..9bb17669b7
+index 00000000000..9bb17669b7a
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/routingerr/failover_signatures_test.go
 @@ -0,0 +1,175 @@
@@ -3072,7 +1970,7 @@ index 0000000000..9bb17669b7
 +}
 diff --git a/apps/backend/internal/agent/runtime/routingerr/rule_ids.go b/apps/backend/internal/agent/runtime/routingerr/rule_ids.go
 new file mode 100644
-index 0000000000..723d0c376d
+index 00000000000..723d0c376d8
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/routingerr/rule_ids.go
 @@ -0,0 +1,74 @@
@@ -3152,7 +2050,7 @@ index 0000000000..723d0c376d
 +)
 diff --git a/apps/backend/internal/agent/settings/controller/account_block.go b/apps/backend/internal/agent/settings/controller/account_block.go
 new file mode 100644
-index 0000000000..fb5b1610aa
+index 00000000000..fb5b1610aa3
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/account_block.go
 @@ -0,0 +1,45 @@
@@ -3203,7 +2101,7 @@ index 0000000000..fb5b1610aa
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_preview_suspension.go b/apps/backend/internal/agent/settings/controller/dynamic_preview_suspension.go
 new file mode 100644
-index 0000000000..670bc46d8a
+index 00000000000..670bc46d8aa
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_preview_suspension.go
 @@ -0,0 +1,19 @@
@@ -3226,105 +2124,9 @@ index 0000000000..670bc46d8a
 +	}
 +	return row
 +}
-diff --git a/apps/backend/internal/agent/settings/controller/provider_limits.go b/apps/backend/internal/agent/settings/controller/provider_limits.go
-new file mode 100644
-index 0000000000..638455f0e6
---- /dev/null
-+++ b/apps/backend/internal/agent/settings/controller/provider_limits.go
-@@ -0,0 +1,90 @@
-+package controller
-+
-+import (
-+	"context"
-+	"errors"
-+	"time"
-+)
-+
-+// ErrProviderLimitsUnavailable means the provider limit service is not wired.
-+var ErrProviderLimitsUnavailable = errors.New("provider limits are not configured")
-+
-+// ErrInvalidProviderLimit marks a rejected provider limit update.
-+var ErrInvalidProviderLimit = errors.New("invalid provider limit")
-+
-+// ProviderLimitDTO is one provider's limit settings and the reset instants the
-+// router currently uses for it.
-+type ProviderLimitDTO struct {
-+	Provider     string `json:"provider"`
-+	ProfileCount int    `json:"profile_count"`
-+	// ModelScoped is true when usage limits of this provider pause one model
-+	// at a time.
-+	ModelScoped bool `json:"model_scoped"`
-+	// MonthlyResetAt and MonthlyResetTimezone are the operator-entered monthly
-+	// reset: one occurrence, repeated every month at the same local time.
-+	MonthlyResetAt       *time.Time `json:"monthly_reset_at,omitempty"`
-+	MonthlyResetTimezone string     `json:"monthly_reset_timezone,omitempty"`
-+	// NextMonthlyReset is the reset the router uses, from observed usage when
-+	// the provider reports one and otherwise from the operator setting.
-+	NextMonthlyReset       *time.Time `json:"next_monthly_reset,omitempty"`
-+	NextMonthlyResetSource string     `json:"next_monthly_reset_source,omitempty"`
-+	// BlockUntil pauses every paid model of the provider until that instant.
-+	BlockUntil *time.Time `json:"block_until,omitempty"`
-+	// ObservedExhaustedUntil is the latest reset among fully consumed usage
-+	// windows the provider reports.
-+	ObservedExhaustedUntil *time.Time `json:"observed_exhausted_until,omitempty"`
-+	UpdatedAt              *time.Time `json:"updated_at,omitempty"`
-+}
-+
-+// ProviderLimitsResponse lists every provider known from agent profiles or
-+// saved settings.
-+type ProviderLimitsResponse struct {
-+	Providers []ProviderLimitDTO `json:"providers"`
-+}
-+
-+// UpdateProviderLimitRequest replaces one provider's operator settings. A nil
-+// instant clears that setting.
-+type UpdateProviderLimitRequest struct {
-+	MonthlyResetAt       *time.Time `json:"monthly_reset_at"`
-+	MonthlyResetTimezone string     `json:"monthly_reset_timezone"`
-+	BlockUntil           *time.Time `json:"block_until"`
-+}
-+
-+// ProviderLimitService owns provider limit settings. The runtime composition
-+// implements it because the effective reset reads observed provider usage.
-+type ProviderLimitService interface {
-+	ListProviderLimits(ctx context.Context) ([]ProviderLimitDTO, error)
-+	UpdateProviderLimit(ctx context.Context, provider string, request UpdateProviderLimitRequest) (*ProviderLimitDTO, error)
-+}
-+
-+// SetProviderLimitService injects the provider limit service.
-+func (c *Controller) SetProviderLimitService(service ProviderLimitService) {
-+	c.providerLimits = service
-+}
-+
-+// ListProviderLimits returns every provider's limit settings.
-+func (c *Controller) ListProviderLimits(ctx context.Context) (*ProviderLimitsResponse, error) {
-+	if c.providerLimits == nil {
-+		return nil, ErrProviderLimitsUnavailable
-+	}
-+	providers, err := c.providerLimits.ListProviderLimits(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	if providers == nil {
-+		providers = []ProviderLimitDTO{}
-+	}
-+	return &ProviderLimitsResponse{Providers: providers}, nil
-+}
-+
-+// UpdateProviderLimit replaces one provider's operator settings.
-+func (c *Controller) UpdateProviderLimit(
-+	ctx context.Context,
-+	provider string,
-+	request UpdateProviderLimitRequest,
-+) (*ProviderLimitDTO, error) {
-+	if c.providerLimits == nil {
-+		return nil, ErrProviderLimitsUnavailable
-+	}
-+	return c.providerLimits.UpdateProviderLimit(ctx, provider, request)
-+}
 diff --git a/apps/backend/internal/agent/settings/controller/resource_circuit.go b/apps/backend/internal/agent/settings/controller/resource_circuit.go
 new file mode 100644
-index 0000000000..27313a6dcb
+index 00000000000..27313a6dcb1
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/resource_circuit.go
 @@ -0,0 +1,42 @@
@@ -3372,7 +2174,7 @@ index 0000000000..27313a6dcb
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/account_block_handlers.go b/apps/backend/internal/agent/settings/handlers/account_block_handlers.go
 new file mode 100644
-index 0000000000..e06a3d348e
+index 00000000000..e06a3d348e7
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/account_block_handlers.go
 @@ -0,0 +1,29 @@
@@ -3407,7 +2209,7 @@ index 0000000000..e06a3d348e
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/account_block_release_test.go b/apps/backend/internal/agent/settings/handlers/account_block_release_test.go
 new file mode 100644
-index 0000000000..2e81d7576d
+index 00000000000..2e81d7576d8
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/account_block_release_test.go
 @@ -0,0 +1,81 @@
@@ -3493,7 +2295,7 @@ index 0000000000..2e81d7576d
 +	}
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/agent_settings_org_scope_test.go b/apps/backend/internal/agent/settings/handlers/agent_settings_org_scope_test.go
-index fe51141115..75dfda05af 100644
+index fe51141115c..75dfda05af7 100644
 --- a/apps/backend/internal/agent/settings/handlers/agent_settings_org_scope_test.go
 +++ b/apps/backend/internal/agent/settings/handlers/agent_settings_org_scope_test.go
 @@ -35,6 +35,8 @@ var mutatingSettingsRoutes = []struct {
@@ -3507,7 +2309,7 @@ index fe51141115..75dfda05af 100644
  func settingsRouterAs(t *testing.T, identity authn.Identity) *gin.Engine {
 diff --git a/apps/backend/internal/agent/settings/handlers/circuit_release_test.go b/apps/backend/internal/agent/settings/handlers/circuit_release_test.go
 new file mode 100644
-index 0000000000..a655aa2bf0
+index 00000000000..a655aa2bf04
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/circuit_release_test.go
 @@ -0,0 +1,104 @@
@@ -3617,7 +2419,7 @@ index 0000000000..a655aa2bf0
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/provider_limit_handlers.go b/apps/backend/internal/agent/settings/handlers/provider_limit_handlers.go
 new file mode 100644
-index 0000000000..e7b8b21f07
+index 00000000000..e7b8b21f075
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/provider_limit_handlers.go
 @@ -0,0 +1,50 @@
@@ -3673,7 +2475,7 @@ index 0000000000..e7b8b21f07
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/provider_limit_handlers_test.go b/apps/backend/internal/agent/settings/handlers/provider_limit_handlers_test.go
 new file mode 100644
-index 0000000000..293bd70ec8
+index 00000000000..293bd70ec80
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/provider_limit_handlers_test.go
 @@ -0,0 +1,97 @@
@@ -3776,7 +2578,7 @@ index 0000000000..293bd70ec8
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/resource_circuit.go b/apps/backend/internal/agent/settings/handlers/resource_circuit.go
 new file mode 100644
-index 0000000000..024fe58664
+index 00000000000..024fe58664d
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/resource_circuit.go
 @@ -0,0 +1,48 @@
@@ -3828,213 +2630,9 @@ index 0000000000..024fe58664
 +	}
 +	return true
 +}
-diff --git a/apps/backend/internal/backendapp/dynamic_limit_calendar.go b/apps/backend/internal/backendapp/dynamic_limit_calendar.go
-new file mode 100644
-index 0000000000..aaed37247e
---- /dev/null
-+++ b/apps/backend/internal/backendapp/dynamic_limit_calendar.go
-@@ -0,0 +1,198 @@
-+package backendapp
-+
-+import (
-+	"context"
-+	"strings"
-+	"time"
-+
-+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
-+	agentusage "github.com/kandev/kandev/internal/agent/usage"
-+)
-+
-+// profileUsageReader is the observed-usage seam of one concrete profile.
-+type profileUsageReader interface {
-+	GetUsage(ctx context.Context, profileID string) (*agentusage.ProviderUsage, error)
-+}
-+
-+// providerLimitLister is the operator-entered provider settings seam.
-+type providerLimitLister interface {
-+	ListProviderLimits(ctx context.Context) ([]dynamicruntime.ProviderLimit, error)
-+}
-+
-+// dynamicLimitCalendar answers the reset instants a usage-limit suspension
-+// may wait for. Observed provider usage wins over operator settings, because
-+// it is the provider's own account state.
-+type dynamicLimitCalendar struct {
-+	usage   profileUsageReader
-+	limits  providerLimitLister
-+	timeout time.Duration
-+}
-+
-+const limitCalendarUsageTimeout = 5 * time.Second
-+
-+// minMonthlyWindow tells a monthly usage window from a five-hour or weekly one
-+// when the provider label is not "monthly".
-+const minMonthlyWindow = 27 * 24 * time.Hour
-+
-+func newDynamicLimitCalendar(usage profileUsageReader, limits providerLimitLister) *dynamicLimitCalendar {
-+	return &dynamicLimitCalendar{usage: usage, limits: limits, timeout: limitCalendarUsageTimeout}
-+}
-+
-+// ExhaustedUntil implements dynamic.LimitCalendar.
-+func (c *dynamicLimitCalendar) ExhaustedUntil(
-+	ctx context.Context,
-+	candidate dynamicruntime.Candidate,
-+	now time.Time,
-+) (time.Time, bool) {
-+	windows := c.observedWindows(ctx, candidate)
-+	if isDailyQuotaModel(candidate.ModelID) && hasExhaustedDailyWindow(windows) {
-+		// OpenRouter's free tier counts requests per UTC day, so its free daily
-+		// quota frees at the next UTC midnight whatever the provider's window
-+		// reset says. Waiting for the window's own reset would resume a fraction
-+		// of a second after the daily count was already rebuilt.
-+		return nextUTCMidnight(now), true
-+	}
-+	var until time.Time
-+	for _, window := range windows {
-+		if !window.Exhausted() || !window.ResetAt.After(now) {
-+			continue
-+		}
-+		if window.ResetAt.After(until) {
-+			until = window.ResetAt
-+		}
-+	}
-+	return until, !until.IsZero()
-+}
-+
-+// MonthlyReset implements dynamic.LimitCalendar.
-+func (c *dynamicLimitCalendar) MonthlyReset(
-+	ctx context.Context,
-+	candidate dynamicruntime.Candidate,
-+	now time.Time,
-+) (time.Time, bool) {
-+	if reset, ok := observedMonthlyReset(c.observedWindows(ctx, candidate), now); ok {
-+		return reset, true
-+	}
-+	limit, ok := c.providerLimit(ctx, dynamicruntime.ProviderOf(candidate.ModelID))
-+	if !ok {
-+		return time.Time{}, false
-+	}
-+	return limit.NextMonthlyReset(now)
-+}
-+
-+// observedWindows returns the usage windows that are this candidate's own
-+// account state. A remote execution authenticates elsewhere, so the host's
-+// reading is never borrowed for it.
-+func (c *dynamicLimitCalendar) observedWindows(
-+	ctx context.Context,
-+	candidate dynamicruntime.Candidate,
-+) []agentusage.UtilizationWindow {
-+	if c == nil || c.usage == nil || candidate.RemoteExecution || candidate.ID == "" {
-+		return nil
-+	}
-+	if c.timeout > 0 {
-+		var cancel context.CancelFunc
-+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
-+		defer cancel()
-+	}
-+	observed, err := c.usage.GetUsage(ctx, candidate.ID)
-+	if err != nil || observed == nil {
-+		return nil
-+	}
-+	windows := make([]agentusage.UtilizationWindow, 0, len(observed.Windows))
-+	for _, window := range observed.Windows {
-+		if window.ModelID != "" && window.ModelID != candidate.ModelID {
-+			continue
-+		}
-+		windows = append(windows, window)
-+	}
-+	return windows
-+}
-+
-+func (c *dynamicLimitCalendar) providerLimit(ctx context.Context, provider string) (dynamicruntime.ProviderLimit, bool) {
-+	if c == nil || c.limits == nil || provider == "" {
-+		return dynamicruntime.ProviderLimit{}, false
-+	}
-+	limits, err := c.limits.ListProviderLimits(ctx)
-+	if err != nil {
-+		return dynamicruntime.ProviderLimit{}, false
-+	}
-+	for _, limit := range limits {
-+		if dynamicruntime.NormalizeProvider(limit.Provider) == provider {
-+			return limit, true
-+		}
-+	}
-+	return dynamicruntime.ProviderLimit{}, false
-+}
-+
-+// observedMonthlyReset returns the earliest future reset among monthly usage
-+// windows.
-+func observedMonthlyReset(windows []agentusage.UtilizationWindow, now time.Time) (time.Time, bool) {
-+	var reset time.Time
-+	for _, window := range windows {
-+		if !isMonthlyWindow(window) || !window.ResetAt.After(now) {
-+			continue
-+		}
-+		if reset.IsZero() || window.ResetAt.Before(reset) {
-+			reset = window.ResetAt
-+		}
-+	}
-+	return reset, !reset.IsZero()
-+}
-+
-+func isMonthlyWindow(window agentusage.UtilizationWindow) bool {
-+	if strings.EqualFold(strings.TrimSpace(window.Label), "monthly") {
-+		return true
-+	}
-+	return time.Duration(window.DurationSeconds)*time.Second >= minMonthlyWindow
-+}
-+
-+// providerOpenRouterFree is the one provider whose free tier is known to count
-+// its quota per UTC day rather than per rolling window.
-+const providerOpenRouterFree = "openrouter"
-+
-+// dailyWindowLabelMax bounds how long a window may be and still be read as a
-+// daily one. A daily quota is a provider's own statement about a day, so the
-+// length is only a fallback for a provider that labels its window numerically.
-+const dailyWindowLabelMax = 36 * time.Hour
-+
-+// dailyWindowLabels are the labels a provider uses for its daily quota.
-+var dailyWindowLabels = []string{"daily", "per day", "per-day"}
-+
-+// isDailyQuotaModel reports whether this model's free quota is counted per UTC
-+// day. Only a free model qualifies: a paid model's daily window is one of
-+// several and must not shorten the block past its own reset.
-+func isDailyQuotaModel(modelID string) bool {
-+	return dynamicruntime.ProviderOf(modelID) == providerOpenRouterFree && dynamicruntime.IsFreeModel(modelID)
-+}
-+
-+// isDailyWindow reports whether a usage window is the provider's daily quota.
-+func isDailyWindow(window agentusage.UtilizationWindow) bool {
-+	label := strings.ToLower(strings.TrimSpace(window.Label))
-+	for _, daily := range dailyWindowLabels {
-+		if label == daily {
-+			return true
-+		}
-+	}
-+	duration := time.Duration(window.DurationSeconds) * time.Second
-+	return duration > 0 && duration <= dailyWindowLabelMax
-+}
-+
-+// hasExhaustedDailyWindow reports whether any observed window is the consumed
-+// daily quota. A window that is not exhausted proves nothing about a daily
-+// limit, so it leaves the caller on its ordinary path.
-+func hasExhaustedDailyWindow(windows []agentusage.UtilizationWindow) bool {
-+	for _, window := range windows {
-+		if window.Exhausted() && isDailyWindow(window) {
-+			return true
-+		}
-+	}
-+	return false
-+}
-+
-+// nextUTCMidnight returns the first UTC midnight strictly after now, which is
-+// when a per-UTC-day quota is rebuilt.
-+func nextUTCMidnight(now time.Time) time.Time {
-+	midnight := now.UTC().Truncate(24 * time.Hour)
-+	return midnight.Add(24 * time.Hour)
-+}
 diff --git a/apps/backend/internal/backendapp/dynamic_limit_calendar_test.go b/apps/backend/internal/backendapp/dynamic_limit_calendar_test.go
 new file mode 100644
-index 0000000000..1265a59661
+index 00000000000..1265a59661c
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/dynamic_limit_calendar_test.go
 @@ -0,0 +1,121 @@
@@ -4161,7 +2759,7 @@ index 0000000000..1265a59661
 +}
 diff --git a/apps/backend/internal/backendapp/dynamic_preview_suspension.go b/apps/backend/internal/backendapp/dynamic_preview_suspension.go
 new file mode 100644
-index 0000000000..156fab3b4c
+index 00000000000..156fab3b4cc
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/dynamic_preview_suspension.go
 @@ -0,0 +1,48 @@
@@ -4215,7 +2813,7 @@ index 0000000000..156fab3b4c
 +}
 diff --git a/apps/backend/internal/backendapp/dynamic_preview_suspension_test.go b/apps/backend/internal/backendapp/dynamic_preview_suspension_test.go
 new file mode 100644
-index 0000000000..d891c7c9e1
+index 00000000000..d891c7c9e16
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/dynamic_preview_suspension_test.go
 @@ -0,0 +1,64 @@
@@ -4285,7 +2883,7 @@ index 0000000000..d891c7c9e1
 +}
 diff --git a/apps/backend/internal/backendapp/free_model_catalog.go b/apps/backend/internal/backendapp/free_model_catalog.go
 new file mode 100644
-index 0000000000..34143d88f5
+index 00000000000..34143d88f5c
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/free_model_catalog.go
 @@ -0,0 +1,61 @@
@@ -4350,240 +2948,9 @@ index 0000000000..34143d88f5
 +	}
 +	return c.models.LookupProviderModelFree(ctx, openCodeZenCatalogProvider, model)
 +}
-diff --git a/apps/backend/internal/backendapp/provider_limits.go b/apps/backend/internal/backendapp/provider_limits.go
-new file mode 100644
-index 0000000000..c2e291f793
---- /dev/null
-+++ b/apps/backend/internal/backendapp/provider_limits.go
-@@ -0,0 +1,225 @@
-+package backendapp
-+
-+import (
-+	"context"
-+	"fmt"
-+	"regexp"
-+	"sort"
-+	"strings"
-+	"time"
-+
-+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
-+	"github.com/kandev/kandev/internal/agent/settings/controller"
-+	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
-+)
-+
-+// providerLimitStore persists operator-entered provider limit settings.
-+type providerLimitStore interface {
-+	ListProviderLimits(ctx context.Context) ([]dynamicruntime.ProviderLimit, error)
-+	SaveProviderLimit(ctx context.Context, limit dynamicruntime.ProviderLimit) error
-+}
-+
-+// providerLimitService implements controller.ProviderLimitService. Providers
-+// are the prefixes of the models agent profiles launch, plus any provider that
-+// already has saved settings.
-+type providerLimitService struct {
-+	store    providerLimitStore
-+	profiles settingsstore.Repository
-+	calendar *dynamicLimitCalendar
-+	now      func() time.Time
-+}
-+
-+var providerKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-+
-+func newProviderLimitService(
-+	store providerLimitStore,
-+	profiles settingsstore.Repository,
-+	calendar *dynamicLimitCalendar,
-+) *providerLimitService {
-+	return &providerLimitService{store: store, profiles: profiles, calendar: calendar, now: time.Now}
-+}
-+
-+// providerProfile is one local profile that launches a model of a provider.
-+type providerProfile struct {
-+	profileID string
-+	modelID   string
-+}
-+
-+// ListProviderLimits implements controller.ProviderLimitService.
-+func (s *providerLimitService) ListProviderLimits(ctx context.Context) ([]controller.ProviderLimitDTO, error) {
-+	saved, err := s.store.ListProviderLimits(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	byProvider := make(map[string]dynamicruntime.ProviderLimit, len(saved))
-+	for _, limit := range saved {
-+		byProvider[dynamicruntime.NormalizeProvider(limit.Provider)] = limit
-+	}
-+	profiles, err := s.providerProfiles(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	providers := make(map[string]struct{}, len(profiles)+len(byProvider))
-+	for provider := range profiles {
-+		providers[provider] = struct{}{}
-+	}
-+	for provider := range byProvider {
-+		providers[provider] = struct{}{}
-+	}
-+	names := make([]string, 0, len(providers))
-+	for provider := range providers {
-+		names = append(names, provider)
-+	}
-+	sort.Strings(names)
-+	now := s.now()
-+	result := make([]controller.ProviderLimitDTO, 0, len(names))
-+	for _, provider := range names {
-+		limit, hasLimit := byProvider[provider]
-+		if !hasLimit {
-+			limit = dynamicruntime.ProviderLimit{Provider: provider}
-+		}
-+		result = append(result, s.describe(ctx, limit, hasLimit, profiles[provider], now))
-+	}
-+	return result, nil
-+}
-+
-+// UpdateProviderLimit implements controller.ProviderLimitService.
-+func (s *providerLimitService) UpdateProviderLimit(
-+	ctx context.Context,
-+	provider string,
-+	request controller.UpdateProviderLimitRequest,
-+) (*controller.ProviderLimitDTO, error) {
-+	provider = dynamicruntime.NormalizeProvider(provider)
-+	if !providerKeyPattern.MatchString(provider) {
-+		return nil, fmt.Errorf("%w: provider %q", controller.ErrInvalidProviderLimit, provider)
-+	}
-+	timezone := strings.TrimSpace(request.MonthlyResetTimezone)
-+	if timezone != "" {
-+		if _, err := time.LoadLocation(timezone); err != nil {
-+			return nil, fmt.Errorf("%w: unknown timezone %q", controller.ErrInvalidProviderLimit, timezone)
-+		}
-+	}
-+	limit := dynamicruntime.ProviderLimit{
-+		Provider:             provider,
-+		MonthlyResetAt:       nonZeroTime(request.MonthlyResetAt),
-+		MonthlyResetTimezone: timezone,
-+		BlockUntil:           nonZeroTime(request.BlockUntil),
-+	}
-+	if limit.MonthlyResetAt == nil {
-+		limit.MonthlyResetTimezone = ""
-+	}
-+	if err := s.store.SaveProviderLimit(ctx, limit); err != nil {
-+		return nil, err
-+	}
-+	profiles, err := s.providerProfiles(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	now := s.now()
-+	limit.UpdatedAt = now
-+	described := s.describe(ctx, limit, true, profiles[provider], now)
-+	return &described, nil
-+}
-+
-+func (s *providerLimitService) describe(
-+	ctx context.Context,
-+	limit dynamicruntime.ProviderLimit,
-+	saved bool,
-+	profiles []providerProfile,
-+	now time.Time,
-+) controller.ProviderLimitDTO {
-+	provider := dynamicruntime.NormalizeProvider(limit.Provider)
-+	result := controller.ProviderLimitDTO{
-+		Provider:             provider,
-+		ProfileCount:         len(profiles),
-+		MonthlyResetAt:       utcTime(limit.MonthlyResetAt),
-+		MonthlyResetTimezone: limit.MonthlyResetTimezone,
-+		BlockUntil:           utcTime(limit.BlockUntil),
-+	}
-+	if saved && !limit.UpdatedAt.IsZero() {
-+		result.UpdatedAt = utcTime(&limit.UpdatedAt)
-+	}
-+	for _, profile := range profiles {
-+		if dynamicruntime.ModelScoped(profile.modelID) && !dynamicruntime.IsFreeModel(profile.modelID) {
-+			result.ModelScoped = true
-+			break
-+		}
-+	}
-+	if sample, ok := paidProfile(profiles); ok && s.calendar != nil {
-+		candidate := dynamicruntime.Candidate{ID: sample.profileID, Enabled: true, ModelID: sample.modelID}
-+		windows := s.calendar.observedWindows(ctx, candidate)
-+		if reset, ok := observedMonthlyReset(windows, now); ok {
-+			result.NextMonthlyReset, result.NextMonthlyResetSource = utcTime(&reset), "usage"
-+		}
-+		if until, ok := s.calendar.ExhaustedUntil(ctx, candidate, now); ok {
-+			result.ObservedExhaustedUntil = utcTime(&until)
-+		}
-+	}
-+	if result.NextMonthlyReset == nil {
-+		if reset, ok := limit.NextMonthlyReset(now); ok {
-+			result.NextMonthlyReset, result.NextMonthlyResetSource = utcTime(&reset), "manual"
-+		}
-+	}
-+	return result
-+}
-+
-+// providerProfiles groups the enabled local profiles by the provider prefix of
-+// their model.
-+func (s *providerLimitService) providerProfiles(ctx context.Context) (map[string][]providerProfile, error) {
-+	grouped := make(map[string][]providerProfile)
-+	if s.profiles == nil {
-+		return grouped, nil
-+	}
-+	agents, err := s.profiles.ListAgents(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	for _, agent := range agents {
-+		if agent == nil {
-+			continue
-+		}
-+		profiles, err := s.profiles.ListAgentProfiles(ctx, agent.ID)
-+		if err != nil {
-+			return nil, err
-+		}
-+		for _, profile := range profiles {
-+			if profile == nil || profile.DeletedAt != nil || !profile.Enabled {
-+				continue
-+			}
-+			model := strings.TrimSpace(profile.Model)
-+			provider := dynamicruntime.ProviderOf(model)
-+			if provider == "" {
-+				continue
-+			}
-+			grouped[provider] = append(grouped[provider], providerProfile{profileID: profile.ID, modelID: model})
-+		}
-+	}
-+	return grouped, nil
-+}
-+
-+// paidProfile picks a paid-model profile whose usage reading describes the
-+// provider account.
-+func paidProfile(profiles []providerProfile) (providerProfile, bool) {
-+	for _, profile := range profiles {
-+		if !dynamicruntime.IsFreeModel(profile.modelID) {
-+			return profile, true
-+		}
-+	}
-+	return providerProfile{}, false
-+}
-+
-+func nonZeroTime(value *time.Time) *time.Time {
-+	if value == nil || value.IsZero() {
-+		return nil
-+	}
-+	utc := value.UTC()
-+	return &utc
-+}
-+
-+func utcTime(value *time.Time) *time.Time {
-+	if value == nil || value.IsZero() {
-+		return nil
-+	}
-+	utc := value.UTC()
-+	return &utc
-+}
 diff --git a/apps/backend/internal/backendapp/provider_limits_test.go b/apps/backend/internal/backendapp/provider_limits_test.go
 new file mode 100644
-index 0000000000..cb095b4349
+index 00000000000..cb095b4349c
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/provider_limits_test.go
 @@ -0,0 +1,102 @@
@@ -4690,7 +3057,7 @@ index 0000000000..cb095b4349
 +	}
 +}
 diff --git a/apps/backend/internal/office/costs/modelsdev/client.go b/apps/backend/internal/office/costs/modelsdev/client.go
-index a694910e7e..1aad0f14a1 100644
+index a694910e7eb..1aad0f14a19 100644
 --- a/apps/backend/internal/office/costs/modelsdev/client.go
 +++ b/apps/backend/internal/office/costs/modelsdev/client.go
 @@ -47,9 +47,12 @@ type Client struct {
@@ -4711,7 +3078,7 @@ index a694910e7e..1aad0f14a1 100644
  	// refreshPhysical). CatalogVersion()'s RFC3339 string only has
 diff --git a/apps/backend/internal/office/costs/modelsdev/free.go b/apps/backend/internal/office/costs/modelsdev/free.go
 new file mode 100644
-index 0000000000..845a9e807e
+index 00000000000..845a9e807ef
 --- /dev/null
 +++ b/apps/backend/internal/office/costs/modelsdev/free.go
 @@ -0,0 +1,82 @@
@@ -4799,7 +3166,7 @@ index 0000000000..845a9e807e
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_account_block_internal_test.go b/apps/backend/internal/office/dashboard/overview_account_block_internal_test.go
 new file mode 100644
-index 0000000000..7583a2068f
+index 00000000000..7583a2068f1
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_account_block_internal_test.go
 @@ -0,0 +1,10 @@
@@ -4815,7 +3182,7 @@ index 0000000000..7583a2068f
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_account_block_test.go b/apps/backend/internal/orchestrator/dynamic_account_block_test.go
 new file mode 100644
-index 0000000000..614951d793
+index 00000000000..614951d7937
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_account_block_test.go
 @@ -0,0 +1,87 @@
@@ -4908,7 +3275,7 @@ index 0000000000..614951d793
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_midturn_recovery.go b/apps/backend/internal/orchestrator/dynamic_midturn_recovery.go
 new file mode 100644
-index 0000000000..8e78f783ef
+index 00000000000..8e78f783eff
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_midturn_recovery.go
 @@ -0,0 +1,73 @@
@@ -4987,7 +3354,7 @@ index 0000000000..8e78f783ef
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_midturn_recovery_test.go b/apps/backend/internal/orchestrator/dynamic_midturn_recovery_test.go
 new file mode 100644
-index 0000000000..0669581566
+index 00000000000..06695815664
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_midturn_recovery_test.go
 @@ -0,0 +1,256 @@
@@ -5249,7 +3616,7 @@ index 0000000000..0669581566
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_resource_recovery_test.go b/apps/backend/internal/orchestrator/dynamic_resource_recovery_test.go
 new file mode 100644
-index 0000000000..6410041148
+index 00000000000..64100411482
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_resource_recovery_test.go
 @@ -0,0 +1,98 @@
@@ -5353,7 +3720,7 @@ index 0000000000..6410041148
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_session_settings_test.go b/apps/backend/internal/orchestrator/dynamic_session_settings_test.go
 new file mode 100644
-index 0000000000..2b82d4db7f
+index 00000000000..2b82d4db7f9
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_session_settings_test.go
 @@ -0,0 +1,191 @@
@@ -5550,7 +3917,7 @@ index 0000000000..2b82d4db7f
 +}
 diff --git a/apps/backend/internal/orchestrator/fixed_profile_admission.go b/apps/backend/internal/orchestrator/fixed_profile_admission.go
 new file mode 100644
-index 0000000000..f4011e6a80
+index 00000000000..f4011e6a80b
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/fixed_profile_admission.go
 @@ -0,0 +1,157 @@
@@ -5713,7 +4080,7 @@ index 0000000000..f4011e6a80
 +}
 diff --git a/apps/backend/internal/orchestrator/fixed_profile_admission_test.go b/apps/backend/internal/orchestrator/fixed_profile_admission_test.go
 new file mode 100644
-index 0000000000..2f7c439cfb
+index 00000000000..2f7c439cfba
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/fixed_profile_admission_test.go
 @@ -0,0 +1,304 @@
@@ -6023,7 +4390,7 @@ index 0000000000..2f7c439cfb
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/circuit_policy_test.go b/apps/backend/internal/task/repository/sqlite/circuit_policy_test.go
 new file mode 100644
-index 0000000000..7d09677acb
+index 00000000000..7d09677acb5
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/circuit_policy_test.go
 @@ -0,0 +1,65 @@
@@ -6094,7 +4461,7 @@ index 0000000000..7d09677acb
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits.go b/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits.go
 new file mode 100644
-index 0000000000..d2565e8a21
+index 00000000000..d2565e8a219
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits.go
 @@ -0,0 +1,63 @@
@@ -6163,7 +4530,7 @@ index 0000000000..d2565e8a21
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits_test.go b/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits_test.go
 new file mode 100644
-index 0000000000..6c15bca4af
+index 00000000000..6c15bca4af3
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/dynamic_provider_limits_test.go
 @@ -0,0 +1,100 @@
@@ -6269,7 +4636,7 @@ index 0000000000..6c15bca4af
 +}
 diff --git a/apps/web/components/settings/dynamic-preview-suspension.tsx b/apps/web/components/settings/dynamic-preview-suspension.tsx
 new file mode 100644
-index 0000000000..df5e2902d5
+index 00000000000..df5e2902d50
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-preview-suspension.tsx
 @@ -0,0 +1,48 @@
@@ -6323,7 +4690,7 @@ index 0000000000..df5e2902d5
 +}
 diff --git a/apps/web/components/settings/provider-limits-card.test.tsx b/apps/web/components/settings/provider-limits-card.test.tsx
 new file mode 100644
-index 0000000000..4835106461
+index 00000000000..4835106461f
 --- /dev/null
 +++ b/apps/web/components/settings/provider-limits-card.test.tsx
 @@ -0,0 +1,77 @@
@@ -6404,215 +4771,9 @@ index 0000000000..4835106461
 +    expect(await screen.findByText("agents:providerLimitsSaved")).toBeTruthy();
 +  });
 +});
-diff --git a/apps/web/components/settings/provider-limits-card.tsx b/apps/web/components/settings/provider-limits-card.tsx
-new file mode 100644
-index 0000000000..efdcaf2d50
---- /dev/null
-+++ b/apps/web/components/settings/provider-limits-card.tsx
-@@ -0,0 +1,200 @@
-+"use client";
-+
-+import { useState } from "react";
-+import { useTranslation } from "react-i18next";
-+import { IconGauge } from "@tabler/icons-react";
-+import { Badge } from "@kandev/ui/badge";
-+import { Button } from "@kandev/ui/button";
-+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-+import { Input } from "@kandev/ui/input";
-+import { Label } from "@kandev/ui/label";
-+import { useFeature } from "@/hooks/domains/features/use-feature";
-+import { useProviderLimits } from "@/hooks/domains/settings/use-provider-limits";
-+import type { ProviderLimit } from "@/lib/api/domains/provider-limits-api";
-+import { formatDateTime } from "@/lib/i18n/formats";
-+import {
-+  browserTimeZone,
-+  fromLocalInputValue,
-+  toLocalInputValue,
-+} from "@/lib/settings/provider-limits";
-+import { settingsActionClassName } from "./settings-control";
-+
-+type ProviderLimitsCardProps = {
-+  /** Show only this provider, for a profile whose model belongs to it. */
-+  provider?: string;
-+};
-+
-+/**
-+ * Operator-entered provider limits for dynamic routing: the monthly reset used
-+ * when the provider does not report one, and a manual block of every paid
-+ * model until a time seen on the provider's console.
-+ */
-+export function ProviderLimitsCard({ provider }: ProviderLimitsCardProps) {
-+  const routingEnabled = useFeature("dynamicAgentRouting");
-+  if (!routingEnabled) return null;
-+  return <ProviderLimitsCardBody provider={provider} />;
-+}
-+
-+function ProviderLimitsCardBody({ provider }: ProviderLimitsCardProps) {
-+  const { t } = useTranslation();
-+  const { state, save } = useProviderLimits();
-+  const providers =
-+    state.status === "ready"
-+      ? state.providers.filter((entry) => !provider || entry.provider === provider)
-+      : [];
-+  if (provider && state.status === "ready" && providers.length === 0) return null;
-+
-+  return (
-+    <Card className="min-w-0 gap-0 py-0" data-testid="provider-limits-card">
-+      <CardHeader className="px-3 py-3">
-+        <CardTitle className="flex items-center gap-2 text-lg">
-+          <IconGauge className="h-5 w-5 shrink-0" aria-hidden />
-+          {t("agents:providerLimitsTitle")}
-+        </CardTitle>
-+        <p className="text-sm text-muted-foreground">{t("agents:providerLimitsDescription")}</p>
-+      </CardHeader>
-+      <CardContent className="grid gap-3 px-3 pb-3">
-+        {state.status === "loading" ? (
-+          <p className="text-xs text-muted-foreground" role="status">
-+            {t("agents:providerLimitsLoading")}
-+          </p>
-+        ) : null}
-+        {state.status === "failed" ? (
-+          <p className="text-xs text-destructive">{t("agents:providerLimitsLoadFailed")}</p>
-+        ) : null}
-+        {state.status === "ready" && providers.length === 0 ? (
-+          <p className="text-xs text-muted-foreground">{t("agents:providerLimitsEmpty")}</p>
-+        ) : null}
-+        {providers.map((entry) => (
-+          <ProviderLimitRow key={entry.provider} limit={entry} onSave={save} />
-+        ))}
-+      </CardContent>
-+    </Card>
-+  );
-+}
-+
-+type SaveProviderLimit = ReturnType<typeof useProviderLimits>["save"];
-+
-+function ProviderLimitRow({ limit, onSave }: { limit: ProviderLimit; onSave: SaveProviderLimit }) {
-+  const { t } = useTranslation();
-+  const [monthly, setMonthly] = useState(toLocalInputValue(limit.monthly_reset_at));
-+  const [blockUntil, setBlockUntil] = useState(toLocalInputValue(limit.block_until));
-+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-+
-+  const submit = async (nextMonthly: string, nextBlock: string) => {
-+    setStatus("saving");
-+    try {
-+      await onSave(limit.provider, {
-+        monthly_reset_at: fromLocalInputValue(nextMonthly),
-+        monthly_reset_timezone: nextMonthly ? browserTimeZone() : "",
-+        block_until: fromLocalInputValue(nextBlock),
-+      });
-+      setStatus("saved");
-+    } catch {
-+      setStatus("failed");
-+    }
-+  };
-+
-+  const monthlyId = `provider-limit-monthly-${limit.provider}`;
-+  const blockId = `provider-limit-block-${limit.provider}`;
-+  return (
-+    <div
-+      className="grid gap-2 rounded-md border p-3"
-+      data-testid={`provider-limit-${limit.provider}`}
-+    >
-+      <ProviderLimitSummary limit={limit} />
-+      <div className="grid gap-2 sm:grid-cols-2">
-+        <div className="grid gap-1">
-+          <Label htmlFor={monthlyId}>{t("agents:providerLimitsMonthlyReset")}</Label>
-+          <Input
-+            id={monthlyId}
-+            type="datetime-local"
-+            value={monthly}
-+            onChange={(event) => setMonthly(event.target.value)}
-+          />
-+          <span className="text-xs text-muted-foreground">
-+            {t("agents:providerLimitsMonthlyResetHint")}
-+          </span>
-+        </div>
-+        <div className="grid gap-1">
-+          <Label htmlFor={blockId}>{t("agents:providerLimitsBlockUntil")}</Label>
-+          <Input
-+            id={blockId}
-+            type="datetime-local"
-+            value={blockUntil}
-+            onChange={(event) => setBlockUntil(event.target.value)}
-+          />
-+          <span className="text-xs text-muted-foreground">
-+            {t("agents:providerLimitsBlockHint")}
-+          </span>
-+        </div>
-+      </div>
-+      <div className="flex flex-wrap items-center gap-2">
-+        <Button
-+          variant="outline"
-+          className={settingsActionClassName("cursor-pointer")}
-+          disabled={status === "saving"}
-+          onClick={() => void submit(monthly, blockUntil)}
-+        >
-+          {t("agents:providerLimitsSave")}
-+        </Button>
-+        <Button
-+          variant="ghost"
-+          className={settingsActionClassName("cursor-pointer")}
-+          disabled={status === "saving" || (!monthly && !blockUntil)}
-+          onClick={() => {
-+            setMonthly("");
-+            setBlockUntil("");
-+            void submit("", "");
-+          }}
-+        >
-+          {t("agents:providerLimitsClear")}
-+        </Button>
-+        {status === "saved" ? (
-+          <span className="text-xs text-muted-foreground" role="status">
-+            {t("agents:providerLimitsSaved")}
-+          </span>
-+        ) : null}
-+        {status === "failed" ? (
-+          <span className="text-xs text-destructive" role="alert">
-+            {t("agents:providerLimitsSaveFailed")}
-+          </span>
-+        ) : null}
-+      </div>
-+    </div>
-+  );
-+}
-+
-+function ProviderLimitSummary({ limit }: { limit: ProviderLimit }) {
-+  const { t } = useTranslation();
-+  return (
-+    <div className="grid gap-1">
-+      <div className="flex flex-wrap items-center gap-2">
-+        <span className="font-medium">{limit.provider}</span>
-+        <Badge variant="outline">
-+          {t("agents:providerLimitsProfileCount", { count: limit.profile_count })}
-+        </Badge>
-+        {limit.model_scoped ? (
-+          <Badge variant="secondary">{t("agents:providerLimitsModelScoped")}</Badge>
-+        ) : null}
-+      </div>
-+      {limit.next_monthly_reset ? (
-+        <span className="text-xs text-muted-foreground">
-+          {t(
-+            limit.next_monthly_reset_source === "usage"
-+              ? "agents:providerLimitsNextResetUsage"
-+              : "agents:providerLimitsNextResetManual",
-+            { time: formatDateTime(limit.next_monthly_reset) },
-+          )}
-+        </span>
-+      ) : null}
-+      {limit.observed_exhausted_until ? (
-+        <span className="text-xs text-muted-foreground">
-+          {t("agents:providerLimitsExhaustedUntil", {
-+            time: formatDateTime(limit.observed_exhausted_until),
-+          })}
-+        </span>
-+      ) : null}
-+    </div>
-+  );
-+}
 diff --git a/apps/web/components/settings/resource-circuits-card.tsx b/apps/web/components/settings/resource-circuits-card.tsx
 new file mode 100644
-index 0000000000..82f69e9667
+index 00000000000..82f69e9667b
 --- /dev/null
 +++ b/apps/web/components/settings/resource-circuits-card.tsx
 @@ -0,0 +1,54 @@
@@ -6670,65 +4831,9 @@ index 0000000000..82f69e9667
 +    </Card>
 +  );
 +}
-diff --git a/apps/web/hooks/domains/settings/use-provider-limits.ts b/apps/web/hooks/domains/settings/use-provider-limits.ts
-new file mode 100644
-index 0000000000..85a379fd75
---- /dev/null
-+++ b/apps/web/hooks/domains/settings/use-provider-limits.ts
-@@ -0,0 +1,50 @@
-+"use client";
-+
-+import { useCallback, useEffect, useState } from "react";
-+import {
-+  listProviderLimits,
-+  updateProviderLimit,
-+  type ProviderLimit,
-+  type UpdateProviderLimitRequest,
-+} from "@/lib/api/domains/provider-limits-api";
-+
-+export type ProviderLimitsState =
-+  | { status: "loading" }
-+  | { status: "failed" }
-+  | { status: "ready"; providers: ProviderLimit[] };
-+
-+/** Loads provider limit settings and saves one provider at a time. */
-+export function useProviderLimits() {
-+  const [state, setState] = useState<ProviderLimitsState>({ status: "loading" });
-+
-+  const reload = useCallback(async () => {
-+    setState({ status: "loading" });
-+    try {
-+      const response = await listProviderLimits({ cache: "no-store" });
-+      setState({ status: "ready", providers: response.providers });
-+    } catch {
-+      setState({ status: "failed" });
-+    }
-+  }, []);
-+
-+  useEffect(() => {
-+    void reload();
-+  }, [reload]);
-+
-+  const save = useCallback(async (provider: string, request: UpdateProviderLimitRequest) => {
-+    const saved = await updateProviderLimit(provider, request);
-+    setState((current) =>
-+      current.status === "ready"
-+        ? {
-+            status: "ready",
-+            providers: current.providers.map((entry) =>
-+              entry.provider === saved.provider ? saved : entry,
-+            ),
-+          }
-+        : current,
-+    );
-+    return saved;
-+  }, []);
-+
-+  return { state, reload, save };
-+}
 diff --git a/apps/web/hooks/domains/settings/use-resource-circuits.test.tsx b/apps/web/hooks/domains/settings/use-resource-circuits.test.tsx
 new file mode 100644
-index 0000000000..6055680448
+index 00000000000..6055680448b
 --- /dev/null
 +++ b/apps/web/hooks/domains/settings/use-resource-circuits.test.tsx
 @@ -0,0 +1,77 @@
@@ -6811,7 +4916,7 @@ index 0000000000..6055680448
 +});
 diff --git a/apps/web/hooks/domains/settings/use-resource-circuits.ts b/apps/web/hooks/domains/settings/use-resource-circuits.ts
 new file mode 100644
-index 0000000000..d3f9ca04a0
+index 00000000000..d3f9ca04a00
 --- /dev/null
 +++ b/apps/web/hooks/domains/settings/use-resource-circuits.ts
 @@ -0,0 +1,60 @@
@@ -6875,63 +4980,9 @@ index 0000000000..d3f9ca04a0
 +
 +  return { circuits, error, loading, releasing, refresh, release };
 +}
-diff --git a/apps/web/lib/api/domains/provider-limits-api.ts b/apps/web/lib/api/domains/provider-limits-api.ts
-new file mode 100644
-index 0000000000..1b74a65fd1
---- /dev/null
-+++ b/apps/web/lib/api/domains/provider-limits-api.ts
-@@ -0,0 +1,48 @@
-+import { fetchJson, type ApiRequestOptions } from "@/lib/api/client";
-+
-+/** Where the reset routing uses for a provider came from. */
-+export type ProviderResetSource = "usage" | "manual";
-+
-+export type ProviderLimit = {
-+  provider: string;
-+  profile_count: number;
-+  /** Usage limits of this provider pause one model at a time. */
-+  model_scoped: boolean;
-+  /** One occurrence of the operator-entered monthly reset. */
-+  monthly_reset_at?: string;
-+  monthly_reset_timezone?: string;
-+  /** The monthly reset routing uses, observed usage first. */
-+  next_monthly_reset?: string;
-+  next_monthly_reset_source?: ProviderResetSource;
-+  /** Every paid model of the provider is paused until this instant. */
-+  block_until?: string;
-+  observed_exhausted_until?: string;
-+  updated_at?: string;
-+};
-+
-+export type ProviderLimitsResponse = {
-+  providers: ProviderLimit[];
-+};
-+
-+export type UpdateProviderLimitRequest = {
-+  monthly_reset_at: string | null;
-+  monthly_reset_timezone: string;
-+  block_until: string | null;
-+};
-+
-+export async function listProviderLimits(
-+  options?: ApiRequestOptions,
-+): Promise<ProviderLimitsResponse> {
-+  return fetchJson<ProviderLimitsResponse>("/api/v1/provider-limits", options);
-+}
-+
-+export async function updateProviderLimit(
-+  provider: string,
-+  request: UpdateProviderLimitRequest,
-+  options?: ApiRequestOptions,
-+): Promise<ProviderLimit> {
-+  return fetchJson<ProviderLimit>(`/api/v1/provider-limits/${encodeURIComponent(provider)}`, {
-+    ...options,
-+    init: { method: "PUT", body: JSON.stringify(request), ...(options?.init ?? {}) },
-+  });
-+}
 diff --git a/apps/web/lib/api/domains/resource-circuit-api.test.ts b/apps/web/lib/api/domains/resource-circuit-api.test.ts
 new file mode 100644
-index 0000000000..892ea62676
+index 00000000000..892ea626760
 --- /dev/null
 +++ b/apps/web/lib/api/domains/resource-circuit-api.test.ts
 @@ -0,0 +1,20 @@
@@ -6957,7 +5008,7 @@ index 0000000000..892ea62676
 +});
 diff --git a/apps/web/lib/api/domains/resource-circuit-api.ts b/apps/web/lib/api/domains/resource-circuit-api.ts
 new file mode 100644
-index 0000000000..3b6ed2d530
+index 00000000000..3b6ed2d530d
 --- /dev/null
 +++ b/apps/web/lib/api/domains/resource-circuit-api.ts
 @@ -0,0 +1,21 @@
@@ -6984,7 +5035,7 @@ index 0000000000..3b6ed2d530
 +}
 diff --git a/apps/web/lib/settings/provider-limits.ts b/apps/web/lib/settings/provider-limits.ts
 new file mode 100644
-index 0000000000..8c919878ed
+index 00000000000..8c919878edc
 --- /dev/null
 +++ b/apps/web/lib/settings/provider-limits.ts
 @@ -0,0 +1,32 @@
@@ -7022,7 +5073,7 @@ index 0000000000..8c919878ed
 +}
 diff --git a/docs/plans/fixed-profile-resource-suspension/plan.md b/docs/plans/fixed-profile-resource-suspension/plan.md
 new file mode 100644
-index 0000000000..f6ed9cb607
+index 00000000000..f6ed9cb6073
 --- /dev/null
 +++ b/docs/plans/fixed-profile-resource-suspension/plan.md
 @@ -0,0 +1,97 @@
@@ -7125,7 +5176,7 @@ index 0000000000..f6ed9cb607
 +which concrete session caused any single occurrence.
 diff --git a/docs/plans/fixed-profile-resource-suspension/task-01-gate-fixed-profile-circuits.md b/docs/plans/fixed-profile-resource-suspension/task-01-gate-fixed-profile-circuits.md
 new file mode 100644
-index 0000000000..a6d0ccd77d
+index 00000000000..a6d0ccd77dc
 --- /dev/null
 +++ b/docs/plans/fixed-profile-resource-suspension/task-01-gate-fixed-profile-circuits.md
 @@ -0,0 +1,104 @@
@@ -7235,7 +5286,7 @@ index 0000000000..a6d0ccd77d
 +pass. The orchestrator unit tests above are pending execution.
 diff --git a/docs/plans/provider-account-block-classification/plan.md b/docs/plans/provider-account-block-classification/plan.md
 new file mode 100644
-index 0000000000..db923cbf20
+index 00000000000..db923cbf204
 --- /dev/null
 +++ b/docs/plans/provider-account-block-classification/plan.md
 @@ -0,0 +1,55 @@
@@ -7296,7 +5347,7 @@ index 0000000000..db923cbf20
 +- Not verified here: a live provider restriction on an installed runtime, and the preview UI text for a hold without an end time.
 diff --git a/docs/plans/provider-account-block-classification/task-01-classify-and-hold-blocked-accounts.md b/docs/plans/provider-account-block-classification/task-01-classify-and-hold-blocked-accounts.md
 new file mode 100644
-index 0000000000..2b3d6db92a
+index 00000000000..2b3d6db92a3
 --- /dev/null
 +++ b/docs/plans/provider-account-block-classification/task-01-classify-and-hold-blocked-accounts.md
 @@ -0,0 +1,61 @@
@@ -7363,7 +5414,7 @@ index 0000000000..2b3d6db92a
 +```
 diff --git a/docs/plans/provider-error-signature-delta/plan.md b/docs/plans/provider-error-signature-delta/plan.md
 new file mode 100644
-index 0000000000..ec33967024
+index 00000000000..ec339670248
 --- /dev/null
 +++ b/docs/plans/provider-error-signature-delta/plan.md
 @@ -0,0 +1,94 @@
@@ -7463,7 +5514,7 @@ index 0000000000..ec33967024
 +  monitoring roll-up.
 diff --git a/docs/plans/provider-error-signature-delta/task-01-classify-observed-provider-signatures.md b/docs/plans/provider-error-signature-delta/task-01-classify-observed-provider-signatures.md
 new file mode 100644
-index 0000000000..51c7c7f2f9
+index 00000000000..51c7c7f2f97
 --- /dev/null
 +++ b/docs/plans/provider-error-signature-delta/task-01-classify-observed-provider-signatures.md
 @@ -0,0 +1,68 @@
@@ -7537,7 +5588,7 @@ index 0000000000..51c7c7f2f9
 +```
 diff --git a/docs/plans/resource-circuit-policy-recovery/plan.md b/docs/plans/resource-circuit-policy-recovery/plan.md
 new file mode 100644
-index 0000000000..8dd0348586
+index 00000000000..8dd03485864
 --- /dev/null
 +++ b/docs/plans/resource-circuit-policy-recovery/plan.md
 @@ -0,0 +1,32 @@
@@ -7575,7 +5626,7 @@ index 0000000000..8dd0348586
 +Production builds/swaps and database edits are excluded. Browser evidence uses synthetic rows and the actual card through Vite.
 diff --git a/docs/plans/resource-circuit-policy-recovery/task-01-reconcile-and-release-circuits.md b/docs/plans/resource-circuit-policy-recovery/task-01-reconcile-and-release-circuits.md
 new file mode 100644
-index 0000000000..1b104b40a4
+index 00000000000..1b104b40a41
 --- /dev/null
 +++ b/docs/plans/resource-circuit-policy-recovery/task-01-reconcile-and-release-circuits.md
 @@ -0,0 +1,36 @@
@@ -7617,7 +5668,7 @@ index 0000000000..1b104b40a4
 +- Read-only production snapshot: all six legacy Go quota keys match the cap. Expected cap instants in KST are 10-14 17:33 (Qwen), 18:25 (Muse), 18:48 (MiMo), 18:59 (GLM Flash), 10-15 01:35 (DeepSeek), and 10-17 00:18 (GLM). These are policy-derived estimates, not executed production changes. Four OpenRouter generic-limit rows would initially use short retries; existing rows cannot be safely reclassified without their original cause.
 diff --git a/docs/specs/agents/requirements/fixed-profile-resource-suspension.md b/docs/specs/agents/requirements/fixed-profile-resource-suspension.md
 new file mode 100644
-index 0000000000..ae59b5e128
+index 00000000000..ae59b5e1281
 --- /dev/null
 +++ b/docs/specs/agents/requirements/fixed-profile-resource-suspension.md
 @@ -0,0 +1,103 @@
@@ -7726,7 +5777,7 @@ index 0000000000..ae59b5e128
 +- A concrete profile's interactive availability while its circuit is closed.
 diff --git a/docs/specs/agents/requirements/provider-account-block-classification.md b/docs/specs/agents/requirements/provider-account-block-classification.md
 new file mode 100644
-index 0000000000..65c847c63f
+index 00000000000..65c847c63fc
 --- /dev/null
 +++ b/docs/specs/agents/requirements/provider-account-block-classification.md
 @@ -0,0 +1,55 @@
@@ -7786,7 +5837,7 @@ index 0000000000..65c847c63f
 +- Changing Office routing, utility calls, or concrete-profile launches beyond the shared classifier result.
 +- New settings or UI controls. The release is API-only.
 diff --git a/docs/specs/agents/requirements/provider-error-signatures.md b/docs/specs/agents/requirements/provider-error-signatures.md
-index ab89a4eb2a..982fb6dd9f 100644
+index ab89a4eb2ab..982fb6dd9f1 100644
 --- a/docs/specs/agents/requirements/provider-error-signatures.md
 +++ b/docs/specs/agents/requirements/provider-error-signatures.md
 @@ -63,9 +63,35 @@ errors does not take its own healthy account out of rotation.
@@ -7828,7 +5879,7 @@ index ab89a4eb2a..982fb6dd9f 100644
  - Changing how classified failures suspend candidates or select a successor.
 diff --git a/docs/specs/agents/requirements/resource-circuit-policy-recovery.md b/docs/specs/agents/requirements/resource-circuit-policy-recovery.md
 new file mode 100644
-index 0000000000..77b2cbb20f
+index 00000000000..77b2cbb20f1
 --- /dev/null
 +++ b/docs/specs/agents/requirements/resource-circuit-policy-recovery.md
 @@ -0,0 +1,22 @@
@@ -7856,7 +5907,7 @@ index 0000000000..77b2cbb20f
 +No production database edits, runtime builds/swaps, provider calls, permission model, or automatic prompt replay. The operator's 2026-10-13 read-only observations justify conservative retry of ambiguous OpenRouter windows; they do not establish that every limit is false.
 diff --git a/docs/specs/agents/system-design/fixed-profile-resource-suspension.md b/docs/specs/agents/system-design/fixed-profile-resource-suspension.md
 new file mode 100644
-index 0000000000..85835bf55b
+index 00000000000..85835bf55b0
 --- /dev/null
 +++ b/docs/specs/agents/system-design/fixed-profile-resource-suspension.md
 @@ -0,0 +1,197 @@
@@ -8059,7 +6110,7 @@ index 0000000000..85835bf55b
 +- [Dynamic Launch Failure Classification](dynamic-launch-failure-classification.md)
 diff --git a/docs/specs/agents/system-design/provider-account-block-classification.md b/docs/specs/agents/system-design/provider-account-block-classification.md
 new file mode 100644
-index 0000000000..980489f379
+index 00000000000..980489f3790
 --- /dev/null
 +++ b/docs/specs/agents/system-design/provider-account-block-classification.md
 @@ -0,0 +1,82 @@
@@ -8146,7 +6197,7 @@ index 0000000000..980489f379
 +- Release endpoint test: permission, idempotence, unknown profile, and no change to other circuits.
 +- Orchestrator test: a post-output `account_blocked` failure holds the failing profile without launching a successor.
 diff --git a/docs/specs/agents/system-design/provider-error-signatures.md b/docs/specs/agents/system-design/provider-error-signatures.md
-index 1f05af591a..91a8f89726 100644
+index 1f05af591aa..91a8f897269 100644
 --- a/docs/specs/agents/system-design/provider-error-signatures.md
 +++ b/docs/specs/agents/system-design/provider-error-signatures.md
 @@ -59,6 +59,34 @@ active (paid) Claude [Pro|Max|Team|Enterprise] subscription", "subscription
@@ -8186,7 +6237,7 @@ index 1f05af591a..91a8f89726 100644
  only through a topic word now falls through to the next rule, the
 diff --git a/docs/specs/agents/system-design/resource-circuit-policy-recovery.md b/docs/specs/agents/system-design/resource-circuit-policy-recovery.md
 new file mode 100644
-index 0000000000..9e7ad77f41
+index 00000000000..9e7ad77f41b
 --- /dev/null
 +++ b/docs/specs/agents/system-design/resource-circuit-policy-recovery.md
 @@ -0,0 +1,37 @@
@@ -8228,7 +6279,7 @@ index 0000000000..9e7ad77f41
 +
 +Focused dynamic, settings controller/handler, dashboard, SQLite circuit, and web Vitest tests cover the contracts. An isolated Vite card preview with synthetic API responses checks desktop and phone release geometry and sibling preservation without building or connecting to production.
 diff --git a/docs/specs/platform/requirements/provider-error-recovery.md b/docs/specs/platform/requirements/provider-error-recovery.md
-index 4aa39a7dd7..10e8c7492f 100644
+index 4aa39a7dd79..10e8c7492f3 100644
 --- a/docs/specs/platform/requirements/provider-error-recovery.md
 +++ b/docs/specs/platform/requirements/provider-error-recovery.md
 @@ -37,7 +37,7 @@ duplicate transcript rows or stale recovery context.
@@ -8240,3 +6291,6 @@ index 4aa39a7dd7..10e8c7492f 100644
  - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.9:** While an eligible interactive transient retry is pending, desktop and mobile task chat shall show the retry reason, provider, attempt count, countdown, and Cancel action only while the backend owns that retry.
  - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10:** When an interactive transient retry succeeds, is exhausted, reaches a terminal state, is stopped, or is cancelled, the system shall attempt to durably retire every outstanding retry notice for the session so that a successful cleanup prevents the notice from reappearing after the session becomes idle, the task changes, the page reloads, or another viewer observes the session. If listing or deletion fails, the system shall log and swallow the failure so a later authorized cleanup can retry the remaining notices.
  - **AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.11:** After authorization, cancelling an interactive transient retry shall attempt to retire outstanding retry notices even when the retry loop has already ended. Usable Chat follows the [runtime continuity contract](transient-turn-runtime-continuity.md); otherwise, cancelling an active loop exposes Resume and Start fresh. Listing or deletion failures follow AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.10. A denied or foreign task-session pair shall not expose whether retry state or retry notices exist.
+-- 
+2.55.0.windows.3
+

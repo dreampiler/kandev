@@ -1,91 +1,83 @@
-From fb6f8ffe4156e56744f6f3e0b170604675ff193e Mon Sep 17 00:00:00 2001
+From 46040decee9333114a5cc991aa5eda6b03e66888 Mon Sep 17 00:00:00 2001
 From: dreampiler <dreampiler@gmail.com>
-Date: Thu, 15 Oct 2026 01:24:56 +0900
+Date: Thu, 15 Oct 2026 12:55:45 +0900
 Subject: [PATCH] fork(30-office-overview): D01 Office overview
 
-Overlay patch 30-office-overview.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+Overlay patch 30-office-overview.patch cut from 390b8daa4b0dc9521909eef423191b27ce5c6d96 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
 ---
  .../internal/backendapp/boot_state_routes.go  |   3 +
- .../backendapp/office_overview_wiring.go      |  73 ++
  apps/backend/internal/backendapp/storage.go   |  13 +
  .../office/dashboard/agent_summaries_test.go  |   1 +
- .../internal/office/dashboard/overview.go     | 614 +++++++++++++++++
- .../office/dashboard/overview_activity.go     | 119 ++++
- .../office/dashboard/overview_assemble.go     | 621 ++++++++++++++++++
- .../overview_automation_count_test.go         |  61 ++
- .../office/dashboard/overview_cache.go        | 113 ++++
- .../office/dashboard/overview_children.go     |  31 +
- .../dashboard/overview_dynamic_circuits.go    | 145 ++++
- .../office/dashboard/overview_lists.go        | 365 ++++++++++
- .../dashboard/overview_profile_accounts.go    |  36 +
- .../office/dashboard/overview_running.go      |  95 +++
- .../overview_server_starts_internal_test.go   | 153 +++++
- .../overview_status_internal_test.go          | 198 ++++++
- .../office/dashboard/overview_test.go         | 379 +++++++++++
+ .../office/dashboard/overview_activity.go     | 119 +++++
+ .../overview_automation_count_test.go         |  61 +++
+ .../office/dashboard/overview_cache.go        | 113 +++++
+ .../office/dashboard/overview_children.go     |  31 ++
+ .../dashboard/overview_dynamic_circuits.go    | 145 ++++++
+ .../office/dashboard/overview_lists.go        | 365 +++++++++++++++
+ .../dashboard/overview_profile_accounts.go    |  36 ++
+ .../overview_server_starts_internal_test.go   | 153 ++++++
+ .../overview_status_internal_test.go          | 198 ++++++++
+ .../office/dashboard/overview_test.go         | 379 +++++++++++++++
  .../office/dashboard/run_activity_test.go     |   7 +-
- .../sqlite/aggregate_overview_activity.go     | 259 ++++++++
- .../aggregate_overview_activity_test.go       | 125 ++++
- .../aggregate_overview_automation_test.go     | 110 ++++
+ .../sqlite/aggregate_overview_activity.go     | 259 +++++++++++
+ .../aggregate_overview_activity_test.go       | 125 +++++
+ .../aggregate_overview_automation_test.go     | 110 +++++
  .../aggregate_overview_server_starts.go       |  38 ++
  .../repository/sqlite/dashboard_test.go       |   1 +
  .../office/repository/sqlite/projects.go      |   2 +-
- .../internal/persistence/server_starts.go     | 107 +++
- .../persistence/server_starts_test.go         | 101 +++
+ .../internal/persistence/server_starts.go     | 107 +++++
+ .../persistence/server_starts_test.go         | 101 ++++
  .../internal/settingscatalog/defaults.go      |   2 +-
  .../task/models/clarification_bundle.go       |   8 +-
- .../clarification_overview_postgres_test.go   |  35 +
- .../sqlite/clarification_overview_test.go     |  61 ++
+ .../clarification_overview_postgres_test.go   |  35 ++
+ .../sqlite/clarification_overview_test.go     |  61 +++
  .../sqlite/overview_dynamic_circuits.go       |  38 ++
  .../overview_scope_index_migration_test.go    |  39 ++
  .../internal/user/controller/controller.go    |   3 +
  apps/backend/internal/user/dto/dto.go         |   9 +
- apps/backend/internal/user/models/models.go   |  63 +-
+ apps/backend/internal/user/models/models.go   |  63 ++-
  .../service/office_overview_scope_test.go     |  47 ++
  apps/backend/internal/user/service/service.go |  74 +++
  apps/backend/internal/user/store/sqlite.go    |  46 ++
- .../sqlite_office_overview_scope_test.go      |  30 +
+ .../sqlite_office_overview_scope_test.go      |  30 ++
  .../workflow/models/step_semantics.go         |  49 ++
- apps/web/app/globals.css                      |  71 +-
- .../app/office/overview/overview-accounts.ts  | 330 ++++++++++
+ apps/web/app/globals.css                      |  71 ++-
+ .../app/office/overview/overview-accounts.ts  | 330 +++++++++++++
  .../overview/overview-activity-line.test.tsx  |  42 ++
- .../office/overview/overview-event-extras.tsx | 327 +++++++++
- .../app/office/overview/overview-header.tsx   | 355 ++++++++++
- .../app/office/overview/overview-metrics.tsx  | 144 ++++
- .../app/office/overview/overview-problems.tsx |  86 +++
- .../overview/overview-provider-groups.tsx     | 173 +++++
+ .../office/overview/overview-event-extras.tsx | 327 +++++++++++++
+ .../app/office/overview/overview-header.tsx   | 355 ++++++++++++++
+ .../app/office/overview/overview-metrics.tsx  | 144 ++++++
+ .../app/office/overview/overview-problems.tsx |  86 ++++
+ .../overview/overview-provider-groups.tsx     | 173 +++++++
  .../office/overview/overview-section-card.tsx |  48 ++
- .../office/overview/overview-status-colors.ts | 165 +++++
- .../overview/overview-status-legend.tsx       |  71 ++
- .../office/overview/overview-system-cards.tsx | 402 ++++++++++++
- .../app/office/overview/overview-tables.tsx   | 314 +++++++++
+ .../office/overview/overview-status-colors.ts | 165 +++++++
+ .../overview/overview-status-legend.tsx       |  71 +++
+ .../office/overview/overview-system-cards.tsx | 402 ++++++++++++++++
+ .../app/office/overview/overview-tables.tsx   | 314 +++++++++++++
  .../task/chat/dynamic-route-recovery.tsx      |  12 +-
- .../domains/office/use-overview-list.test.tsx |  70 ++
- .../hooks/domains/office/use-overview-list.ts |  72 ++
- .../domains/office/use-workspace-overview.ts  |  59 ++
+ .../domains/office/use-overview-list.test.tsx |  70 +++
+ .../hooks/domains/office/use-overview-list.ts |  72 +++
+ .../domains/office/use-workspace-overview.ts  |  59 +++
  .../hooks/use-ensure-user-settings.test.ts    |   3 +
- .../lib/api/domains/office-overview-api.ts    |  63 ++
+ .../lib/api/domains/office-overview-api.ts    |  63 +++
  .../contract.generated.json                   |  48 ++
  .../profile-contract.generated.json           |   3 +
  apps/web/lib/settings/overview-refresh.ts     |  19 +
- apps/web/lib/ssr/user-settings.ts             |  54 +-
- .../lib/state/slices/office/overview-types.ts | 439 +++++++++++++
+ apps/web/lib/ssr/user-settings.ts             |  54 ++-
+ .../lib/state/slices/office/overview-types.ts | 439 ++++++++++++++++++
  apps/web/lib/state/slices/settings/types.ts   |   5 +
  apps/web/lib/types/http-user-settings.ts      |  11 +
- .../plans/automation-count-separation/plan.md |  28 +
- .../task-01-separate-automation-counts.md     |  62 ++
- .../task-02-overview-sections.md              |  53 ++
- 69 files changed, 7790 insertions(+), 13 deletions(-)
- create mode 100644 apps/backend/internal/backendapp/office_overview_wiring.go
- create mode 100644 apps/backend/internal/office/dashboard/overview.go
+ .../plans/automation-count-separation/plan.md |  28 ++
+ .../task-01-separate-automation-counts.md     |  62 +++
+ .../task-02-overview-sections.md              |  53 +++
+ 65 files changed, 6387 insertions(+), 13 deletions(-)
  create mode 100644 apps/backend/internal/office/dashboard/overview_activity.go
- create mode 100644 apps/backend/internal/office/dashboard/overview_assemble.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_automation_count_test.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_cache.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_children.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_dynamic_circuits.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_lists.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_profile_accounts.go
- create mode 100644 apps/backend/internal/office/dashboard/overview_running.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_server_starts_internal_test.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_status_internal_test.go
  create mode 100644 apps/backend/internal/office/dashboard/overview_test.go
@@ -125,7 +117,7 @@ Overlay patch 30-office-overview.patch cut from 3368a2084825338545d56d2a82129ee9
  create mode 100644 docs/plans/office-workspace-overview/task-02-overview-sections.md
 
 diff --git a/apps/backend/internal/backendapp/boot_state_routes.go b/apps/backend/internal/backendapp/boot_state_routes.go
-index f718101597..20d634cf0b 100644
+index f718101597e..20d634cf0bc 100644
 --- a/apps/backend/internal/backendapp/boot_state_routes.go
 +++ b/apps/backend/internal/backendapp/boot_state_routes.go
 @@ -730,6 +730,9 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
@@ -138,87 +130,8 @@ index f718101597..20d634cf0b 100644
  		"messageTimeDisplay":                usermodels.NormalizeMessageTimeDisplay(settings.MessageTimeDisplay),
  		"agentTabCloseBehavior":             usermodels.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
  		"azureDevOpsBrowsePreferences":      settings.AzureDevOpsBrowsePreferences,
-diff --git a/apps/backend/internal/backendapp/office_overview_wiring.go b/apps/backend/internal/backendapp/office_overview_wiring.go
-new file mode 100644
-index 0000000000..01bd87fe78
---- /dev/null
-+++ b/apps/backend/internal/backendapp/office_overview_wiring.go
-@@ -0,0 +1,73 @@
-+package backendapp
-+
-+import (
-+	"context"
-+
-+	officedashboard "github.com/kandev/kandev/internal/office/dashboard"
-+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
-+	"github.com/kandev/kandev/internal/orchestrator"
-+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
-+	userservice "github.com/kandev/kandev/internal/user/service"
-+)
-+
-+// sessionCapacityReader adapts the orchestrator's admission observation to the
-+// overview's lane reading. The general lane's population is the whole
-+// population minus the control lane's, because the observation reports the
-+// control lane on its own rather than a per-lane breakdown.
-+type sessionCapacityReader struct {
-+	orchestrator *orchestrator.Service
-+}
-+
-+func (r sessionCapacityReader) CurrentSessionCapacity(ctx context.Context) (officedashboard.SessionCapacityReading, error) {
-+	observation, err := r.orchestrator.CurrentSessionCeilingObservation(ctx)
-+	if err != nil {
-+		return officedashboard.SessionCapacityReading{}, err
-+	}
-+	general := observation.InUse - observation.ControlInUse
-+	if general < 0 {
-+		general = 0
-+	}
-+	return officedashboard.SessionCapacityReading{
-+		GeneralUsed:       general,
-+		GeneralLimit:      observation.Limit,
-+		ControlUsed:       observation.ControlInUse,
-+		ControlLimit:      observation.ControlLimit,
-+		ControlEnabled:    observation.ControlConfigured,
-+		PopulationKnown:   observation.Known,
-+		ControlProfileIDs: observation.ControlProfileIDs,
-+	}, nil
-+}
-+
-+// wireOfficeOverview connects the multi-workspace overview to its read
-+// surface, the answerable-question source, the caller's scope setting, and the
-+// live session-admission reading. A nil dependency leaves that part unwired: the
-+// overview then keeps its Office-only counts or Office scope, and reports no
-+// session capacity rather than a limit nothing measured.
-+func wireOfficeOverview(
-+	dashboard *officedashboard.DashboardService,
-+	officeRepo *officesqlite.Repository,
-+	taskRepo *tasksqlite.Repository,
-+	userSvc *userservice.Service,
-+	usage *usageProviderAdapter,
-+	orchestratorSvc *orchestrator.Service,
-+) {
-+	if dashboard == nil {
-+		return
-+	}
-+	if officeRepo != nil {
-+		dashboard.SetOverviewReader(officeRepo)
-+	}
-+	if taskRepo != nil {
-+		dashboard.SetAnswerableQuestionLister(taskRepo)
-+		dashboard.SetDynamicCircuitLister(taskRepo)
-+	}
-+	if usage != nil {
-+		dashboard.SetProfileAccountLister(usage)
-+	}
-+	if userSvc != nil {
-+		dashboard.SetOverviewScopeSource(userSvc)
-+	}
-+	if orchestratorSvc != nil {
-+		dashboard.SetSessionCapacityReader(sessionCapacityReader{orchestrator: orchestratorSvc})
-+	}
-+}
 diff --git a/apps/backend/internal/backendapp/storage.go b/apps/backend/internal/backendapp/storage.go
-index 32b2cd1675..3cd86c5f13 100644
+index 32b2cd16754..3cd86c5f138 100644
 --- a/apps/backend/internal/backendapp/storage.go
 +++ b/apps/backend/internal/backendapp/storage.go
 @@ -3,6 +3,7 @@ package backendapp
@@ -249,7 +162,7 @@ index 32b2cd1675..3cd86c5f13 100644
  // final required-store and health gates. Callers can therefore safely use it
  // as the last startup action before readiness publication.
 diff --git a/apps/backend/internal/office/dashboard/agent_summaries_test.go b/apps/backend/internal/office/dashboard/agent_summaries_test.go
-index 712e897241..2488575f31 100644
+index 712e897241e..2488575f317 100644
 --- a/apps/backend/internal/office/dashboard/agent_summaries_test.go
 +++ b/apps/backend/internal/office/dashboard/agent_summaries_test.go
 @@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS task_sessions (
@@ -260,629 +173,9 @@ index 712e897241..2488575f31 100644
  	started_at TIMESTAMP NOT NULL,
  	completed_at TIMESTAMP,
  	updated_at TIMESTAMP NOT NULL
-diff --git a/apps/backend/internal/office/dashboard/overview.go b/apps/backend/internal/office/dashboard/overview.go
-new file mode 100644
-index 0000000000..b8f37d5f94
---- /dev/null
-+++ b/apps/backend/internal/office/dashboard/overview.go
-@@ -0,0 +1,614 @@
-+package dashboard
-+
-+import (
-+	"context"
-+	"encoding/json"
-+	"expvar"
-+	"sort"
-+	"strconv"
-+	"strings"
-+	"sync"
-+	"time"
-+
-+	"github.com/kandev/kandev/internal/office/repository/sqlite"
-+	taskmodels "github.com/kandev/kandev/internal/task/models"
-+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-+)
-+
-+// Office overview scopes (the user setting office_overview_scope).
-+const (
-+	OverviewScopeOffice    = "office"
-+	OverviewScopeReachable = "reachable"
-+)
-+
-+// overviewPendingApprovalLimit bounds the approvals listed under "needs a
-+// person"; the count still covers every pending approval.
-+const overviewPendingApprovalLimit = 50
-+
-+// overviewEventKindLimit bounds one kind's contribution to the last-24-hours
-+// list and overviewEventMergeLimit the merged list. Both sit at or above the 50
-+// rows the screen shows, because that screen filters by kind and only then caps
-+// what it renders: a kind cut short here could never be reached through its
-+// chip.
-+const (
-+	overviewEventKindLimit  = 50
-+	overviewEventMergeLimit = 250
-+	overviewParentLimit     = 5
-+)
-+
-+// overviewEventMoveLimit bounds the step-move rows one pass groups into task
-+// runs. A run is folded from its task's rows, so this bounds how much movement a
-+// single pass reconstructs rather than how many runs reach the list; the run
-+// count stays far below it because rows are grouped, not listed.
-+const overviewEventMoveLimit = 2000
-+
-+// OverviewReader is the read-only persistence surface behind the overview.
-+// Implemented by the Office sqlite repository.
-+type OverviewReader interface {
-+	ListOverviewOpenTasks(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewTaskRow, error)
-+	CountOverviewChildren(ctx context.Context, parentIDs []string) (map[string]int, error)
-+	ListOverviewSessionsForTasks(ctx context.Context, taskIDs []string) ([]*sqlite.OverviewSessionRow, error)
-+	LastAgentOutputBySession(ctx context.Context, sessionIDs []string) (map[string]time.Time, error)
-+	ListOverviewQueues(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewQueueRow, error)
-+	FirstQueuedMessageBySession(ctx context.Context, sessionIDs []string) (map[string]string, error)
-+	ListOverviewCompleted(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) (map[string]int, []*sqlite.OverviewCompletedRow, error)
-+	ListOverviewProfileSessions(
-+		ctx context.Context, workspaceIDs []string, since time.Time,
-+	) ([]*sqlite.OverviewProfileSessionRow, error)
-+	ListOverviewProfiles(ctx context.Context, profileIDs []string) ([]*sqlite.OverviewProfileRow, error)
-+	ListOverviewBlockedProviders(ctx context.Context, workspaceIDs []string) ([]*sqlite.OverviewBlockedProviderRow, error)
-+	ListOverviewPendingApprovals(ctx context.Context, workspaceIDs []string, limit int) ([]*sqlite.OverviewApprovalRow, error)
-+	ListOverviewAutomationTasks(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewAutomationTaskRow, error)
-+	ListOverviewCreatedTasks(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewCreatedTaskRow, error)
-+
-+	// The last-24-hours sources no earlier query answered.
-+	ListOverviewModelBlocks(
-+		ctx context.Context, since, now time.Time, limit int,
-+	) ([]*sqlite.OverviewModelBlockRow, error)
-+	// ListOverviewServerStarts reads the durable backend-boot history, so the
-+	// server-started kind counts every startup in the window rather than only
-+	// the running process.
-+	ListOverviewServerStarts(
-+		ctx context.Context, since time.Time, limit int,
-+	) ([]*sqlite.OverviewServerStartRow, error)
-+	ListOverviewMergedPRs(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewMergedPRRow, error)
-+	ListOverviewAutomationFailures(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewAutomationFailureRow, error)
-+	ListOverviewDecisions(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewDecisionRow, error)
-+	ListOverviewStepTransitions(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewStepTransitionRow, error)
-+	ListOverviewFailureFollowups(
-+		ctx context.Context, workspaceIDs []string, since time.Time, limit int,
-+	) ([]*sqlite.OverviewFailureFollowupRow, error)
-+
-+	// The project-statistics reads: exact period totals per workspace and the
-+	// failed sessions behind them, grouped by reason bucket. Both are required
-+	// reads, so a snapshot that cannot answer them fails rather than presenting
-+	// a card with no statistics as if the statistics were zero.
-+	ListOverviewWorkspaceActivity(
-+		ctx context.Context, workspaceIDs []string, since time.Time,
-+	) (map[string]sqlite.OverviewWorkspaceActivityCounts, error)
-+	// ListOverviewAutomationCounts is the separate per-workspace automation
-+	// figure shown beside the period totals, read over the same window.
-+	ListOverviewAutomationCounts(
-+		ctx context.Context, workspaceIDs []string, since time.Time,
-+	) (map[string]int, error)
-+	ListOverviewFailureBuckets(
-+		ctx context.Context, workspaceIDs []string, since time.Time,
-+	) ([]*sqlite.OverviewFailureBucketRow, error)
-+}
-+
-+// AnswerableQuestionLister lists answerable clarification bundles of the
-+// given sessions. Implemented by the task repository so the overview shares
-+// the inbox's definition of "answerable".
-+type AnswerableQuestionLister interface {
-+	ListAnswerableClarificationsForSessions(
-+		ctx context.Context, sessionIDs []string,
-+	) ([]taskmodels.ClarificationBundleSummary, error)
-+}
-+
-+// OverviewScopeSource reads the caller's overview scope setting.
-+type OverviewScopeSource interface {
-+	OfficeOverviewScope(ctx context.Context) (string, error)
-+}
-+
-+// SessionCapacityReading is one bounded reading of the instance's session
-+// admission: how many sessions each lane holds and the limit that lane is
-+// admitted against.
-+type SessionCapacityReading struct {
-+	// GeneralUsed is the general lane's population and ControlUsed the control
-+	// lane's, so the two report the split rather than one total the reader has
-+	// to unpick. A population that could not be read reports Known=false while
-+	// still carrying the limits the controller enforces.
-+	GeneralUsed     int
-+	GeneralLimit    int
-+	ControlUsed     int
-+	ControlLimit    int
-+	ControlEnabled  bool
-+	PopulationKnown bool
-+	// ControlProfileIDs is the control set the same reading classified its
-+	// populations with, so a session this package already read is put in a lane
-+	// by the admission controller's own rule rather than by a second one.
-+	ControlProfileIDs []string
-+}
-+
-+// SessionCapacityReader reads the live session admission state. It is read on
-+// every overview pass rather than recorded at start, so a limit changed in
-+// Settings reaches the next refresh without a restart.
-+type SessionCapacityReader interface {
-+	CurrentSessionCapacity(ctx context.Context) (SessionCapacityReading, error)
-+}
-+
-+// SetOverviewReader wires the overview read surface. Without it the aggregate
-+// keeps its original Office-only counts and the list routes respond 503.
-+func (s *DashboardService) SetOverviewReader(r OverviewReader) { s.overviewReader = r }
-+
-+// SetAnswerableQuestionLister wires the answerable-question source.
-+func (s *DashboardService) SetAnswerableQuestionLister(l AnswerableQuestionLister) {
-+	s.questionLister = l
-+}
-+
-+// SetOverviewScopeSource wires the per-user scope setting. Without it the
-+// overview uses the Office scope.
-+func (s *DashboardService) SetOverviewScopeSource(src OverviewScopeSource) { s.scopeSource = src }
-+
-+// SetSessionCapacityReader wires the live session-admission reading. Without it
-+// the overview reports no capacity at all, so an unwired service never presents
-+// an absent reading as a measured zero.
-+func (s *DashboardService) SetSessionCapacityReader(r SessionCapacityReader) {
-+	s.capacityReader = r
-+}
-+
-+// readSessionCapacity returns the current admission reading. An unwired or
-+// failing reader yields an unknown reading: the limits are left unreported
-+// rather than guessed, because a stale or invented limit is the defect this
-+// reading exists to remove.
-+func (s *DashboardService) readSessionCapacity(ctx context.Context) (SessionCapacityReading, bool) {
-+	if s.capacityReader == nil {
-+		return SessionCapacityReading{}, false
-+	}
-+	reading, err := s.capacityReader.CurrentSessionCapacity(ctx)
-+	if err != nil {
-+		return SessionCapacityReading{}, false
-+	}
-+	return reading, true
-+}
-+
-+// SetBuildInfo records the running binary's version for the overview's
-+// server-start row. It is a setter rather than a constructor argument so the
-+// dashboard keeps one composition signature, and an unwired service reports no
-+// version rather than a placeholder one.
-+func (s *DashboardService) SetBuildInfo(version string) { s.buildVersion = version }
-+
-+// overviewSnapshot is one computed overview, shared by the summary response
-+// and the list routes for the cache lifetime.
-+type overviewSnapshot struct {
-+	resp         *WorkspaceAggregateResponse
-+	now          time.Time
-+	names        map[string]string
-+	tasks        []*overviewTask
-+	sessions     []*sqlite.OverviewSessionRow // RUNNING or STARTING
-+	queues       []*sqlite.OverviewQueueRow
-+	completed    []*sqlite.OverviewCompletedRow
-+	lastOutput   map[string]time.Time
-+	profileNames map[string]string
-+	// accountIDs maps an agent profile to the provider account it authenticates
-+	// with, so the models section can group by account. Absent leaves every
-+	// model without an account rather than inventing one.
-+	accountIDs map[string]string
-+	taskTitles map[string]string
-+
-+	firstLinesOnce sync.Once
-+	firstLines     map[string]string
-+	firstLinesErr  error
-+
-+	// circuitsAvailable records whether the dynamic-circuit source answered.
-+	// Absent means unknown, never "no circuits".
-+	circuitsAvailable bool
-+
-+	// followups maps a failed session id to what followed it, read on this same
-+	// pass so the reported recovery advances whenever the screen does.
-+	followups map[string]*sqlite.OverviewFailureFollowupRow
-+	// questions are the answerable bundles of this pass's live sessions, read
-+	// before classification so a task waiting on the owner is classified from
-+	// the same read the needs-human list renders.
-+	questions []taskmodels.ClarificationBundleSummary
-+	// buildVersion is the running binary's version for this pass, empty when
-+	// nothing wired one.
-+	buildVersion string
-+	// windowHours is the period this snapshot's statistics block covers. It is
-+	// part of the cache key, so two callers on different periods never share a
-+	// snapshot whose totals answer a different question.
-+	windowHours int
-+}
-+
-+// overviewScope resolves the caller's scope, falling back to Office.
-+func (s *DashboardService) overviewScope(ctx context.Context) string {
-+	if s.scopeSource == nil {
-+		return OverviewScopeOffice
-+	}
-+	scope, err := s.scopeSource.OfficeOverviewScope(ctx)
-+	if err != nil || scope != OverviewScopeReachable {
-+		return OverviewScopeOffice
-+	}
-+	return scope
-+}
-+
-+// loadOverviewSnapshot returns the caller's cached snapshot or builds it.
-+func (s *DashboardService) loadOverviewSnapshot(ctx context.Context, windowHours int) (*overviewSnapshot, error) {
-+	if s.workspaceLister == nil {
-+		return nil, ErrWorkspaceAggregateUnavailable
-+	}
-+	scope := s.overviewScope(ctx)
-+	key := overviewCallerKey(ctx) + "|" + scope + "|win:" + strconv.Itoa(windowHours)
-+	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
-+		return s.buildOverviewSnapshot(ctx, scope, "", windowHours)
-+	})
-+}
-+
-+// loadWorkspaceSnapshot returns the snapshot narrowed to one workspace of the
-+// caller's scope, cached under its own key so the per-workspace reads compute
-+// and expire independently of the whole-scope one.
-+func (s *DashboardService) loadWorkspaceSnapshot(
-+	ctx context.Context, workspaceID string, windowHours int,
-+) (*overviewSnapshot, error) {
-+	if s.workspaceLister == nil {
-+		return nil, ErrWorkspaceAggregateUnavailable
-+	}
-+	if workspaceID == "" {
-+		return nil, ErrOverviewWorkspaceNotFound
-+	}
-+	scope := s.overviewScope(ctx)
-+	key := overviewCallerKey(ctx) + "|" + scope + "|ws:" + workspaceID + "|win:" + strconv.Itoa(windowHours)
-+	return s.overviewCacheOrInit().get(ctx, key, func(ctx context.Context) (*overviewSnapshot, error) {
-+		return s.buildOverviewSnapshot(ctx, scope, workspaceID, windowHours)
-+	})
-+}
-+
-+func (s *DashboardService) overviewCacheOrInit() *overviewCache {
-+	s.overviewOnce.Do(func() {
-+		if s.overview == nil {
-+			s.overview = newOverviewCache(overviewCacheTTL)
-+		}
-+	})
-+	return s.overview
-+}
-+
-+// buildOverviewSnapshot computes the overview for the caller's scope, or for
-+// one workspace of it when only is set. A workspace outside the caller's scope
-+// answers ErrOverviewWorkspaceNotFound rather than an empty overview, so a
-+// foreign or nonexistent workspace is indistinguishable from a miss.
-+func (s *DashboardService) buildOverviewSnapshot(
-+	ctx context.Context, scope, only string, windowHours int,
-+) (*overviewSnapshot, error) {
-+	started := time.Now()
-+	workspaces, err := s.workspaceLister.ListWorkspaces(ctx)
-+	if err != nil {
-+		return nil, err
-+	}
-+	ordered, ids := aggregateWorkspaces(workspaces, scope)
-+	if only != "" {
-+		ordered, ids = narrowToWorkspace(ordered, only)
-+		if len(ids) == 0 {
-+			return nil, ErrOverviewWorkspaceNotFound
-+		}
-+	}
-+	resp, err := s.buildAggregateBase(ctx, ordered, ids)
-+	if err != nil {
-+		return nil, err
-+	}
-+	snap := &overviewSnapshot{
-+		resp: resp, now: started.UTC(), names: map[string]string{},
-+		buildVersion: s.buildVersion, windowHours: windowHours,
-+	}
-+	for _, w := range ordered {
-+		snap.names[w.ID] = w.Name
-+	}
-+	resp.Scope = scope
-+	if s.overviewReader != nil {
-+		if err := s.fillOverview(ctx, snap, ids); err != nil {
-+			return nil, err
-+		}
-+	}
-+	resp.GeneratedAt = snap.now
-+	resp.ComputeMs = time.Since(started).Milliseconds()
-+	return snap, nil
-+}
-+
-+// fillOverview runs the overview reads one after another on the read-only
-+// handle and assembles every section from them.
-+func (s *DashboardService) fillOverview(ctx context.Context, snap *overviewSnapshot, ids []string) error {
-+	th := defaultOverviewThresholds
-+	since := snap.now.Add(-th.Window)
-+	if err := s.loadOverviewTasks(ctx, snap, ids, th); err != nil {
-+		return err
-+	}
-+	counts, completed, err := s.overviewReader.ListOverviewCompleted(ctx, ids, since, 0)
-+	if err != nil {
-+		return err
-+	}
-+	snap.completed = completed
-+	childCounts, err := s.overviewReader.CountOverviewChildren(ctx, overviewParentIDs(snap.tasks))
-+	if err != nil {
-+		return err
-+	}
-+	assembleWorkspaceMetrics(snap, counts, childCounts)
-+	assembleRunningTasks(snap)
-+	if err := s.fillWorkspaceActivity(ctx, snap, ids); err != nil {
-+		return err
-+	}
-+	if err := s.assembleModels(ctx, snap, ids, since); err != nil {
-+		return err
-+	}
-+	if err := s.assembleNeedsHuman(ctx, snap, ids); err != nil {
-+		return err
-+	}
-+	if err := s.assembleDynamicCircuits(ctx, snap); err != nil {
-+		return err
-+	}
-+	automation, err := s.overviewReader.ListOverviewAutomationTasks(ctx, ids, since, overviewEventKindLimit)
-+	if err != nil {
-+		return err
-+	}
-+	created, err := s.overviewReader.ListOverviewCreatedTasks(ctx, ids, since, overviewEventKindLimit)
-+	if err != nil {
-+		return err
-+	}
-+	serverStarts := readOptionalEventSource(func() ([]*sqlite.OverviewServerStartRow, error) {
-+		return s.overviewReader.ListOverviewServerStarts(ctx, since, overviewEventKindLimit)
-+	})
-+	extra := s.readExtraEvents(ctx, snap, ids, since)
-+	capacity, capacityKnown := s.readSessionCapacity(ctx)
-+	assembleSystem(snap, capacity, capacityKnown, th)
-+	snap.resp.Last24h = assembleEvents(snap, serverStarts, automation, created, extra, since, processStartedAt())
-+	return nil
-+}
-+
-+// readExtraEvents reads the last-24-hours sources the original event merge does
-+// not cover, plus the failure follow-ups the failed rows carry. Model blocks are
-+// instance-wide rather than workspace-scoped, so they are read once per pass
-+// and every event they produce is install-wide by nature.
-+//
-+// Each source is read independently and a source that cannot answer contributes
-+// no events rather than failing the read, which is how the blocked-circuits
-+// source already behaves: these tables are owned by the task, automation, and
-+// code-host schemas rather than by this one, so an install whose schema predates
-+// one of them would otherwise lose the whole overview over a supplementary
-+// section. A missing source omits its kind; it never reports that kind as empty.
-+func (s *DashboardService) readExtraEvents(
-+	ctx context.Context, snap *overviewSnapshot, ids []string, since time.Time,
-+) *overviewExtraEvents {
-+	out := &overviewExtraEvents{}
-+	out.blocks = readOptionalEventSource(func() ([]*sqlite.OverviewModelBlockRow, error) {
-+		return s.overviewReader.ListOverviewModelBlocks(ctx, since, snap.now, overviewEventKindLimit)
-+	})
-+	s.nameBlockSubjects(ctx, snap, out.blocks)
-+	out.mergedPRs = readOptionalEventSource(func() ([]*sqlite.OverviewMergedPRRow, error) {
-+		return s.overviewReader.ListOverviewMergedPRs(ctx, ids, since, overviewEventKindLimit)
-+	})
-+	out.automationFailures = readOptionalEventSource(func() ([]*sqlite.OverviewAutomationFailureRow, error) {
-+		return s.overviewReader.ListOverviewAutomationFailures(ctx, ids, since, overviewEventKindLimit)
-+	})
-+	out.decisions = readOptionalEventSource(func() ([]*sqlite.OverviewDecisionRow, error) {
-+		return s.overviewReader.ListOverviewDecisions(ctx, ids, since, overviewEventKindLimit)
-+	})
-+	out.stepMoves = readOptionalEventSource(func() ([]*sqlite.OverviewStepTransitionRow, error) {
-+		return s.overviewReader.ListOverviewStepTransitions(ctx, ids, since, overviewEventMoveLimit)
-+	})
-+	s.indexFailureFollowups(ctx, snap, readOptionalEventSource(func() ([]*sqlite.OverviewFailureFollowupRow, error) {
-+		return s.overviewReader.ListOverviewFailureFollowups(ctx, ids, since, overviewEventKindLimit)
-+	}))
-+	return out
-+}
-+
-+// readOptionalEventSource runs one supplementary read and yields nothing when it
-+// fails, so one unavailable source cannot take the overview down with it.
-+func readOptionalEventSource[T any](read func() ([]*T, error)) []*T {
-+	rows, err := read()
-+	if err != nil {
-+		return nil
-+	}
-+	return rows
-+}
-+
-+// indexFailureFollowups records what followed each failed session and names the
-+// profiles the follow-up sessions ran on, so a failed row can report the model
-+// that took over without a second lookup per row. A profile that no longer
-+// resolves leaves its session unnamed rather than failing the read.
-+func (s *DashboardService) indexFailureFollowups(
-+	ctx context.Context, snap *overviewSnapshot, rows []*sqlite.OverviewFailureFollowupRow,
-+) {
-+	if len(rows) == 0 {
-+		return
-+	}
-+	snap.followups = make(map[string]*sqlite.OverviewFailureFollowupRow, len(rows))
-+	profileIDs := make([]string, 0, len(rows))
-+	for _, row := range rows {
-+		snap.followups[row.SessionID] = row
-+		if row.NextProfileID != "" {
-+			profileIDs = append(profileIDs, row.NextProfileID)
-+		}
-+	}
-+	// A profile read that fails leaves the model unnamed, which the client
-+	// reports as unknown rather than dropping the follow-up it belongs to.
-+	_ = s.loadProfileNames(ctx, snap, profileIDs)
-+}
-+
-+// loadOverviewTasks reads the open tasks, their sessions, last outputs and
-+// queues, then classifies every task.
-+func (s *DashboardService) loadOverviewTasks(
-+	ctx context.Context, snap *overviewSnapshot, ids []string, th overviewThresholds,
-+) error {
-+	rows, err := s.overviewReader.ListOverviewOpenTasks(ctx, ids)
-+	if err != nil {
-+		return err
-+	}
-+	byID := make(map[string]*overviewTask, len(rows))
-+	taskIDs := make([]string, 0, len(rows))
-+	snap.taskTitles = make(map[string]string, len(rows))
-+	for _, row := range rows {
-+		t := &overviewTask{row: row, automation: stepAutomation(row)}
-+		byID[row.ID] = t
-+		snap.tasks = append(snap.tasks, t)
-+		taskIDs = append(taskIDs, row.ID)
-+		snap.taskTitles[row.ID] = row.Title
-+	}
-+	sessions, err := s.overviewReader.ListOverviewSessionsForTasks(ctx, taskIDs)
-+	if err != nil {
-+		return err
-+	}
-+	outputIDs := groupOverviewSessions(snap, byID, sessions)
-+	if snap.lastOutput, err = s.overviewReader.LastAgentOutputBySession(ctx, outputIDs); err != nil {
-+		return err
-+	}
-+	if snap.queues, err = s.overviewReader.ListOverviewQueues(ctx, ids); err != nil {
-+		return err
-+	}
-+	for _, q := range snap.queues {
-+		if t := byID[q.TaskID]; t != nil {
-+			t.queued += q.Count
-+			if t.oldestQueue.IsZero() || q.Oldest.Before(t.oldestQueue) {
-+				t.oldestQueue = q.Oldest
-+			}
-+		}
-+		if _, ok := snap.taskTitles[q.TaskID]; !ok {
-+			snap.taskTitles[q.TaskID] = q.TaskTitle
-+		}
-+	}
-+	if err := s.loadAnswerableQuestions(ctx, snap); err != nil {
-+		return err
-+	}
-+	for _, t := range snap.tasks {
-+		t.classify(snap.now, th, snap.lastOutput)
-+	}
-+	applyChildStatus(snap.tasks)
-+	return nil
-+}
-+
-+// stepAutomation reads the step's own configuration from the row the open-task
-+// query already joined. A step whose events cannot be read is treated as one
-+// that starts nothing by itself, which reports the task as waiting for a person
-+// rather than inventing progress.
-+func stepAutomation(row *sqlite.OverviewTaskRow) wfmodels.StepAutomation {
-+	var events wfmodels.StepEvents
-+	if row.StepEventsRaw != "" {
-+		if err := json.Unmarshal([]byte(row.StepEventsRaw), &events); err != nil {
-+			events = wfmodels.StepEvents{}
-+		}
-+	}
-+	return wfmodels.StepAutomation{OnEnter: events.OnEnter, PullFromStepID: row.StepPullFromStepID}
-+}
-+
-+// groupOverviewSessions attaches sessions to their tasks, records the running
-+// ones, and returns the ids whose last output is worth looking up: every
-+// live session plus each task's newest session.
-+func groupOverviewSessions(
-+	snap *overviewSnapshot, byID map[string]*overviewTask, sessions []*sqlite.OverviewSessionRow,
-+) []string {
-+	newest := map[string]*sqlite.OverviewSessionRow{}
-+	var ids []string
-+	for _, sess := range sessions {
-+		t := byID[sess.TaskID]
-+		if t == nil {
-+			continue
-+		}
-+		t.sessions = append(t.sessions, sess)
-+		if cur := newest[sess.TaskID]; cur == nil || sess.StartedAt.After(cur.StartedAt) {
-+			newest[sess.TaskID] = sess
-+		}
-+		if isLiveSessionState(sess.State) {
-+			ids = append(ids, sess.ID)
-+		}
-+		if sess.State == sessionStateRunning || sess.State == sessionStateStarting {
-+			snap.sessions = append(snap.sessions, sess)
-+		}
-+	}
-+	for _, sess := range newest {
-+		if !isLiveSessionState(sess.State) {
-+			ids = append(ids, sess.ID)
-+		}
-+	}
-+	sort.Strings(ids)
-+	return ids
-+}
-+
-+// narrowToWorkspace keeps only the named workspace of an already ordered,
-+// already scoped list.
-+func narrowToWorkspace(ordered []*taskmodels.Workspace, workspaceID string) ([]*taskmodels.Workspace, []string) {
-+	for _, workspace := range ordered {
-+		if workspace.ID == workspaceID {
-+			return []*taskmodels.Workspace{workspace}, []string{workspaceID}
-+		}
-+	}
-+	return nil, nil
-+}
-+
-+func overviewParentIDs(tasks []*overviewTask) []string {
-+	var ids []string
-+	for _, t := range tasks {
-+		if t.row.OpenChildCount > 0 {
-+			ids = append(ids, t.row.ID)
-+		}
-+	}
-+	return ids
-+}
-+
-+// aggregateWorkspaces selects the workspaces for the scope from the
-+// identity-scoped list and sorts them by name. The Office scope keeps only
-+// workspaces with an Office workflow; the reachable scope keeps all of them.
-+func aggregateWorkspaces(workspaces []*taskmodels.Workspace, scope string) ([]*taskmodels.Workspace, []string) {
-+	ids := make([]string, 0, len(workspaces))
-+	ordered := make([]*taskmodels.Workspace, 0, len(workspaces))
-+	for _, workspace := range workspaces {
-+		if workspace == nil || workspace.ID == "" {
-+			continue
-+		}
-+		if scope != OverviewScopeReachable && workspace.OfficeWorkflowID == "" {
-+			continue
-+		}
-+		ordered = append(ordered, workspace)
-+	}
-+	sort.SliceStable(ordered, func(i, j int) bool {
-+		if ordered[i].Name != ordered[j].Name {
-+			return ordered[i].Name < ordered[j].Name
-+		}
-+		return ordered[i].ID < ordered[j].ID
-+	})
-+	for _, workspace := range ordered {
-+		ids = append(ids, workspace.ID)
-+	}
-+	return ordered, ids
-+}
-+
-+func timePtr(t time.Time) *time.Time {
-+	if t.IsZero() {
-+		return nil
-+	}
-+	return &t
-+}
-+
-+// processStartedAt reads the process start time the Office loop metrics
-+// publish; zero when unavailable.
-+func processStartedAt() time.Time {
-+	v := expvar.Get("office_loop_process_started_at")
-+	if v == nil {
-+		return time.Time{}
-+	}
-+	at, err := time.Parse(time.RFC3339Nano, strings.Trim(v.String(), `"`))
-+	if err != nil {
-+		return time.Time{}
-+	}
-+	return at.UTC()
-+}
 diff --git a/apps/backend/internal/office/dashboard/overview_activity.go b/apps/backend/internal/office/dashboard/overview_activity.go
 new file mode 100644
-index 0000000000..884004f171
+index 00000000000..884004f171b
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_activity.go
 @@ -0,0 +1,119 @@
@@ -1005,636 +298,9 @@ index 0000000000..884004f171
 +	}
 +	return out
 +}
-diff --git a/apps/backend/internal/office/dashboard/overview_assemble.go b/apps/backend/internal/office/dashboard/overview_assemble.go
-new file mode 100644
-index 0000000000..0865927311
---- /dev/null
-+++ b/apps/backend/internal/office/dashboard/overview_assemble.go
-@@ -0,0 +1,621 @@
-+package dashboard
-+
-+import (
-+	"context"
-+	"sort"
-+	"time"
-+
-+	"github.com/kandev/kandev/internal/agent/agents"
-+	"github.com/kandev/kandev/internal/office/repository/sqlite"
-+)
-+
-+// assembleWorkspaceMetrics fills each workspace entry's metrics and parent
-+// groups from the classified tasks.
-+func assembleWorkspaceMetrics(snap *overviewSnapshot, completed24h, childCounts map[string]int) {
-+	metrics := map[string]*OverviewWorkspaceMetrics{}
-+	parents := map[string][]OverviewParentTask{}
-+	worst := map[string]*overviewTask{}
-+	for i := range snap.resp.Workspaces {
-+		id := snap.resp.Workspaces[i].WorkspaceID
-+		metrics[id] = &OverviewWorkspaceMetrics{Completed24h: completed24h[id]}
-+	}
-+	for _, t := range snap.tasks {
-+		m := metrics[t.row.WorkspaceID]
-+		if m == nil {
-+			continue
-+		}
-+		addTaskMetrics(m, t, snap.lastOutput)
-+		if isProblemStatus(t.status) && worseTask(t, worst[t.row.WorkspaceID]) {
-+			worst[t.row.WorkspaceID] = t
-+		}
-+		if t.row.OpenChildCount > 0 {
-+			parents[t.row.WorkspaceID] = append(parents[t.row.WorkspaceID], OverviewParentTask{
-+				TaskID: t.row.ID, Title: t.row.Title, Status: t.status,
-+				Children: max(childCounts[t.row.ID], t.row.OpenChildCount), OpenChildren: t.row.OpenChildCount,
-+			})
-+		}
-+	}
-+	for _, q := range snap.queues {
-+		if m := metrics[q.WorkspaceID]; m != nil {
-+			m.QueuedMessages += q.Count
-+		}
-+	}
-+	for i := range snap.resp.Workspaces {
-+		entry := &snap.resp.Workspaces[i]
-+		m := metrics[entry.WorkspaceID]
-+		if t := worst[entry.WorkspaceID]; t != nil {
-+			m.TopWarning = &OverviewWarning{TaskID: t.row.ID, TaskTitle: t.row.Title, Status: t.status, Reason: t.reason}
-+		}
-+		m.Status = workspaceStatus(m)
-+		entry.Metrics = m
-+		entry.Parents = topParents(parents[entry.WorkspaceID])
-+	}
-+}
-+
-+func addTaskMetrics(m *OverviewWorkspaceMetrics, t *overviewTask, lastOutput map[string]time.Time) {
-+	m.OpenTasks++
-+	switch {
-+	case t.isOnHold():
-+		m.BlockedTasks++
-+	case t.row.OpenBlockers > 0:
-+		m.BlockedByTasks++
-+	case t.isActive():
-+		m.ActiveTasks++
-+	default:
-+		// The remaining open tasks are the ones waiting on a person or between
-+		// turns. Counting them as active work is what made this screen and the
-+		// board disagree about the same task.
-+		m.WaitingTasks++
-+	}
-+	switch t.status {
-+	case OverviewStatusError:
-+		m.Problems.Error++
-+	case OverviewStatusStalled:
-+		m.Problems.Stalled++
-+	case OverviewStatusDelayed:
-+		m.Problems.Delayed++
-+	}
-+	for _, s := range t.sessions {
-+		switch s.State {
-+		case sessionStateRunning, sessionStateStarting:
-+			m.RunningSessions++
-+		case sessionStateWaitingForInput:
-+			m.WaitingInputSessions++
-+		}
-+		if at := lastOutput[s.ID]; isLiveSessionState(s.State) && (m.LastOutputAt == nil || at.After(*m.LastOutputAt)) {
-+			if !at.IsZero() {
-+				m.LastOutputAt = timePtr(at)
-+				m.LastOutputTaskID = t.row.ID
-+			}
-+		}
-+	}
-+}
-+
-+// worseTask reports whether candidate outranks current: higher severity
-+// first, then the one that has waited longer.
-+func worseTask(candidate, current *overviewTask) bool {
-+	if current == nil {
-+		return true
-+	}
-+	if overviewStatusRank[candidate.status] != overviewStatusRank[current.status] {
-+		return overviewStatusRank[candidate.status] < overviewStatusRank[current.status]
-+	}
-+	return candidate.row.StepEnteredAt.Before(current.row.StepEnteredAt)
-+}
-+
-+func workspaceStatus(m *OverviewWorkspaceMetrics) string {
-+	switch {
-+	case m.Problems.Error > 0:
-+		return OverviewStatusError
-+	case m.Problems.Stalled > 0:
-+		return OverviewStatusStalled
-+	case m.Problems.Delayed > 0:
-+		return OverviewStatusDelayed
-+	case m.RunningSessions > 0 || m.ActiveTasks > 0:
-+		return OverviewStatusRunning
-+	case m.BlockedTasks > 0 && m.BlockedTasks == m.OpenTasks:
-+		return OverviewStatusBlocked
-+	}
-+	return OverviewStatusWaiting
-+}
-+
-+func topParents(parents []OverviewParentTask) []OverviewParentTask {
-+	sort.SliceStable(parents, func(i, j int) bool {
-+		if parents[i].OpenChildren != parents[j].OpenChildren {
-+			return parents[i].OpenChildren > parents[j].OpenChildren
-+		}
-+		return parents[i].Title < parents[j].Title
-+	})
-+	if len(parents) > overviewParentLimit {
-+		parents = parents[:overviewParentLimit]
-+	}
-+	return parents
-+}
-+
-+// assembleModels builds the per-profile model cards and blocked accounts.
-+func (s *DashboardService) assembleModels(
-+	ctx context.Context, snap *overviewSnapshot, ids []string, since time.Time,
-+) error {
-+	sessions, err := s.overviewReader.ListOverviewProfileSessions(ctx, ids, since)
-+	if err != nil {
-+		return err
-+	}
-+	cards := map[string]*OverviewModel{}
-+	errorKinds := map[string]map[string]int{}
-+	card := func(profileID string) *OverviewModel {
-+		if cards[profileID] == nil {
-+			// Concrete until the profile row names a dynamic agent; an
-+			// unreadable profile is not evidence of a dynamic profile.
-+			cards[profileID] = &OverviewModel{AgentProfileID: profileID, Kind: OverviewModelKindConcrete}
-+			errorKinds[profileID] = map[string]int{}
-+		}
-+		return cards[profileID]
-+	}
-+	for _, row := range sessions {
-+		if row.AgentProfileID == "" {
-+			continue
-+		}
-+		c := card(row.AgentProfileID)
-+		c.Sessions24h++
-+		if row.State == sessionStateFailed {
-+			c.Failed24h++
-+		}
-+		if kind := errorKind(row.ErrorMessage); kind != "" {
-+			errorKinds[row.AgentProfileID][kind]++
-+		}
-+	}
-+	for _, sess := range snap.sessions {
-+		if sess.AgentProfileID != "" {
-+			card(sess.AgentProfileID).Running++
-+		}
-+	}
-+	if err := s.nameModels(ctx, snap, cards); err != nil {
-+		return err
-+	}
-+	s.accountIDsByProfile(ctx, snap)
-+	nameModelAccounts(cards, snap.accountIDs)
-+	snap.resp.Models = sortedModels(cards, errorKinds)
-+	return s.assembleBlockedAccounts(ctx, snap, ids)
-+}
-+
-+// nameModelAccounts attaches the provider account of every model card, so a
-+// client can group the cards by the account they run on instead of scattering
-+// one account's models across the list. A dynamic profile routes through other
-+// profiles and is not itself an account, so it keeps no account.
-+func nameModelAccounts(cards map[string]*OverviewModel, accountIDs map[string]string) {
-+	for _, c := range cards {
-+		if c.Kind == OverviewModelKindDynamic {
-+			continue
-+		}
-+		c.AccountID = accountIDs[c.AgentProfileID]
-+	}
-+}
-+
-+func (s *DashboardService) nameModels(ctx context.Context, snap *overviewSnapshot, cards map[string]*OverviewModel) error {
-+	profileIDs := make([]string, 0, len(cards))
-+	for id := range cards {
-+		profileIDs = append(profileIDs, id)
-+	}
-+	sort.Strings(profileIDs)
-+	profiles, err := s.overviewReader.ListOverviewProfiles(ctx, profileIDs)
-+	if err != nil {
-+		return err
-+	}
-+	snap.profileNames = map[string]string{}
-+	for _, p := range profiles {
-+		name := profileDisplayName(p)
-+		snap.profileNames[p.ID] = name
-+		if c := cards[p.ID]; c != nil {
-+			c.AgentID, c.AgentName, c.Name = p.AgentID, p.AgentName, name
-+			c.Kind = modelKind(p.AgentID)
-+		}
-+	}
-+	return nil
-+}
-+
-+// profileDisplayName is the one name a profile has across the overview: the
-+// agent display name qualifies the profile name, so the same profile reads the
-+// same in a model card and in a blocked circuit.
-+func profileDisplayName(p *sqlite.OverviewProfileRow) string {
-+	if p.DisplayName != "" && p.DisplayName != p.Name {
-+		return p.DisplayName + " · " + p.Name
-+	}
-+	return p.Name
-+}
-+
-+// modelKind separates a dynamic profile, which routes one logical session
-+// through ordered concrete profiles, from a concrete profile that is one model
-+// on its own. The agent identity is the same discriminator the profile editor
-+// uses, so a profile cannot look different in two places.
-+func modelKind(agentID string) string {
-+	if agentID == agents.DynamicAgentID {
-+		return OverviewModelKindDynamic
-+	}
-+	return OverviewModelKindConcrete
-+}
-+
-+func sortedModels(cards map[string]*OverviewModel, errorKinds map[string]map[string]int) []OverviewModel {
-+	out := make([]OverviewModel, 0, len(cards))
-+	for id, c := range cards {
-+		for kind, count := range errorKinds[id] {
-+			c.Errors = append(c.Errors, OverviewErrorKind{Kind: kind, Count: count})
-+		}
-+		sort.Slice(c.Errors, func(i, j int) bool {
-+			if c.Errors[i].Count != c.Errors[j].Count {
-+				return c.Errors[i].Count > c.Errors[j].Count
-+			}
-+			return c.Errors[i].Kind < c.Errors[j].Kind
-+		})
-+		out = append(out, *c)
-+	}
-+	sort.SliceStable(out, func(i, j int) bool {
-+		if out[i].Running != out[j].Running {
-+			return out[i].Running > out[j].Running
-+		}
-+		if out[i].Sessions24h != out[j].Sessions24h {
-+			return out[i].Sessions24h > out[j].Sessions24h
-+		}
-+		return out[i].Name < out[j].Name
-+	})
-+	return out
-+}
-+
-+func (s *DashboardService) assembleBlockedAccounts(ctx context.Context, snap *overviewSnapshot, ids []string) error {
-+	rows, err := s.overviewReader.ListOverviewBlockedProviders(ctx, ids)
-+	if err != nil {
-+		return err
-+	}
-+	for _, row := range rows {
-+		snap.resp.BlockedAccounts = append(snap.resp.BlockedAccounts, OverviewBlockedAccount{
-+			WorkspaceID: row.WorkspaceID, ProviderID: row.ProviderID, Scope: row.Scope,
-+			ScopeValue: row.ScopeValue, State: row.State, ErrorCode: row.ErrorCode, RetryAt: timePtr(row.RetryAt),
-+		})
-+	}
-+	return nil
-+}
-+
-+// loadAnswerableQuestions reads the answerable question bundles of this pass's
-+// live sessions once and records which tasks owe an answer, so classification can
-+// treat a task waiting on the owner as waiting rather than as delayed and the
-+// needs-human list renders from the same read instead of asking again.
-+func (s *DashboardService) loadAnswerableQuestions(ctx context.Context, snap *overviewSnapshot) error {
-+	var liveIDs []string
-+	for _, t := range snap.tasks {
-+		for _, sess := range t.sessions {
-+			if isLiveSessionState(sess.State) {
-+				liveIDs = append(liveIDs, sess.ID)
-+			}
-+		}
-+	}
-+	if s.questionLister == nil || len(liveIDs) == 0 {
-+		return nil
-+	}
-+	questions, err := s.questionLister.ListAnswerableClarificationsForSessions(ctx, liveIDs)
-+	if err != nil {
-+		return err
-+	}
-+	snap.questions = questions
-+	owning := make(map[string]bool, len(questions))
-+	for _, q := range questions {
-+		owning[q.TaskID] = true
-+	}
-+	for _, t := range snap.tasks {
-+		t.awaitingOwner = owning[t.row.ID]
-+	}
-+	return nil
-+}
-+
-+// assembleNeedsHuman lists answerable questions on live sessions and pending
-+// approvals.
-+func (s *DashboardService) assembleNeedsHuman(ctx context.Context, snap *overviewSnapshot, ids []string) error {
-+	var items []OverviewHumanItem
-+	taskWorkspace := map[string]string{}
-+	for _, t := range snap.tasks {
-+		taskWorkspace[t.row.ID] = t.row.WorkspaceID
-+	}
-+	for _, q := range snap.questions {
-+		ws := taskWorkspace[q.TaskID]
-+		items = append(items, OverviewHumanItem{
-+			Kind: "question", ID: q.PendingID, WorkspaceID: ws, WorkspaceName: snap.names[ws],
-+			TaskID: q.TaskID, TaskTitle: snap.taskTitles[q.TaskID], SessionID: q.SessionID,
-+			Count: 1, CreatedAt: q.CreatedAt,
-+			// questionKey is the bundle's question identity, so the same
-+			// question asked again after a task restart collapses into one
-+			// row. A bundle without one keeps its own row rather than
-+			// joining an unrelated question.
-+			questionKey: q.QuestionID,
-+		})
-+	}
-+	approvals, err := s.overviewReader.ListOverviewPendingApprovals(ctx, ids, overviewPendingApprovalLimit)
-+	if err != nil {
-+		return err
-+	}
-+	for _, a := range approvals {
-+		items = append(items, OverviewHumanItem{
-+			Kind: "approval", ID: a.ID, WorkspaceID: a.WorkspaceID, WorkspaceName: snap.names[a.WorkspaceID],
-+			ApprovalType: a.Type, Count: 1, CreatedAt: a.CreatedAt, questionKey: a.Type,
-+		})
-+	}
-+	snap.resp.NeedsHuman = collapseHumanItems(items)
-+	return nil
-+}
-+
-+// collapseHumanItems merges the occurrences that ask the same thing of the same
-+// task into one row, keeping the newest occurrence as the one to answer and the
-+// number of occurrences as its count. Occurrences without a question identity
-+// stay separate rows, because merging them would merge different questions. The
-+// result is oldest first, so the longest-waiting item is read first.
-+func collapseHumanItems(items []OverviewHumanItem) []OverviewHumanItem {
-+	type group struct {
-+		key  string
-+		item *OverviewHumanItem
-+	}
-+	byKey := map[string]*OverviewHumanItem{}
-+	order := make([]group, 0, len(items))
-+	for i := range items {
-+		item := items[i]
-+		key := item.questionKey
-+		if key == "" {
-+			separate := item
-+			order = append(order, group{item: &separate})
-+			continue
-+		}
-+		groupKey := item.Kind + "|" + item.WorkspaceID + "|" + item.TaskID + "|" + key
-+		if existing, ok := byKey[groupKey]; ok {
-+			existing.Count++
-+			if item.CreatedAt.After(existing.CreatedAt) {
-+				existing.ID, existing.SessionID = item.ID, item.SessionID
-+				existing.CreatedAt = item.CreatedAt
-+			}
-+			continue
-+		}
-+		merged := item
-+		merged.questionKey = ""
-+		byKey[groupKey] = &merged
-+		order = append(order, group{key: groupKey, item: &merged})
-+	}
-+	out := make([]OverviewHumanItem, 0, len(order))
-+	for _, entry := range order {
-+		out = append(out, *entry.item)
-+	}
-+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-+	return out
-+}
-+
-+func assembleSystem(snap *overviewSnapshot, capacity SessionCapacityReading, capacityKnown bool, thresholds overviewThresholds) {
-+	sys := &OverviewSystem{StartedAt: timePtr(processStartedAt())}
-+	for _, entry := range snap.resp.Workspaces {
-+		if m := entry.Metrics; m != nil {
-+			sys.ActiveTasks += m.ActiveTasks
-+			sys.RunningSessions += m.RunningSessions
-+			sys.WaitingInputSessions += m.WaitingInputSessions
-+			sys.QueuedMessages += m.QueuedMessages
-+			sys.Problems += m.Problems.Error + m.Problems.Stalled + m.Problems.Delayed
-+		}
-+		sys.NeedsHuman += entry.PendingApprovals
-+	}
-+	// The card counts what the list shows: one entry per distinct thing to
-+	// answer, not the occurrences behind it and not the raw approval total.
-+	// Counting the list keeps the two from disagreeing when either is capped.
-+	for _, item := range snap.resp.NeedsHuman {
-+		if item.Kind == "question" {
-+			sys.NeedsHuman++
-+		}
-+	}
-+	for _, q := range snap.queues {
-+		if status, _ := classifyQueue(q, snap.now, thresholds); status == OverviewQueueUndeliverable {
-+			sys.UndeliverableMessages += q.Count
-+		}
-+	}
-+	seen := map[string]bool{}
-+	for _, acct := range snap.resp.BlockedAccounts {
-+		key := acct.ProviderID + "|" + acct.Scope + "|" + acct.ScopeValue
-+		if !seen[key] {
-+			seen[key] = true
-+			sys.BlockedAccounts++
-+		}
-+		earliestUnblockAt(sys, snap.now, acct.RetryAt)
-+	}
-+	circuits := 0
-+	for _, circuit := range snap.resp.BlockedCircuits {
-+		// A circuit the router already recovered from is reported for its strike
-+		// history, not as a block, so it counts neither here nor in the clear-at
-+		// instant the card shows.
-+		if !circuit.Blocking {
-+			continue
-+		}
-+		circuits++
-+		earliestUnblockAt(sys, snap.now, circuit.Until)
-+	}
-+	if snap.circuitsAvailable {
-+		total := sys.BlockedAccounts + circuits
-+		sys.BlockedAccountsTotal = &total
-+	}
-+	sys.ProblemThresholds = overviewThresholdsWire(thresholds)
-+	assembleSessionCapacity(snap, sys, capacity, capacityKnown)
-+	snap.resp.System = sys
-+}
-+
-+// assembleSessionCapacity reports the running-session card's denominators from
-+// the admission reading taken on this pass, together with each lane's own share
-+// of the scope's waiting-input sessions. A reading that did not arrive leaves
-+// the capacities absent, so the client shows the scope's own running count
-+// without a limit rather than a denominator nothing measured.
-+func assembleSessionCapacity(snap *overviewSnapshot, sys *OverviewSystem, capacity SessionCapacityReading, known bool) {
-+	if !known {
-+		return
-+	}
-+	lanes := &OverviewSessionLanes{
-+		GeneralLimit: capacity.GeneralLimit,
-+		ControlLimit: capacity.ControlLimit,
-+	}
-+	if capacity.PopulationKnown {
-+		general, control := capacity.GeneralUsed, capacity.ControlUsed
-+		lanes.GeneralRunningSessions = &general
-+		lanes.ControlRunningSessions = &control
-+		generalWaiting, controlWaiting := laneWaitingInput(snap, capacity.ControlProfileIDs)
-+		lanes.GeneralWaitingInputSessions = &generalWaiting
-+		lanes.ControlWaitingInputSessions = &controlWaiting
-+	}
-+	sys.SessionLanes = lanes
-+}
-+
-+// earliestUnblockAt keeps the soonest clear instant across both block sources.
-+func earliestUnblockAt(sys *OverviewSystem, now time.Time, at *time.Time) {
-+	if at == nil || !at.After(now) {
-+		return
-+	}
-+	if sys.EarliestUnblockAt == nil || at.Before(*sys.EarliestUnblockAt) {
-+		sys.EarliestUnblockAt = at
-+	}
-+}
-+
-+// overviewThresholdsWire reports the limits the status rules actually applied,
-+// so the client explains the same numbers the classification used.
-+func overviewThresholdsWire(th overviewThresholds) *OverviewThresholds {
-+	return &OverviewThresholds{
-+		NoOutputMinutes:        int(th.NoOutput / time.Minute),
-+		StartingMinutes:        int(th.Starting / time.Minute),
-+		NotAdvancingMinutes:    int(th.NotAdvancing / time.Minute),
-+		QueueIdleMinutes:       int(th.QueueIdle / time.Minute),
-+		QueueBusyMinutes:       int(th.QueueBusy / time.Minute),
-+		DwellInProgressMinutes: int(th.DwellInProgress / time.Minute),
-+		DwellReviewMinutes:     int(th.DwellReview / time.Minute),
-+		WindowHours:            int(th.Window / time.Hour),
-+	}
-+}
-+
-+// assembleEvents merges the last-24-hours sources, newest first. Each kind
-+// contributes up to overviewEventKindLimit rows and the merge is bounded
-+// separately, so the screen can filter down to one kind before it caps what it
-+// renders.
-+func assembleEvents(
-+	snap *overviewSnapshot,
-+	serverStarts []*sqlite.OverviewServerStartRow,
-+	automation []*sqlite.OverviewAutomationTaskRow,
-+	created []*sqlite.OverviewCreatedTaskRow,
-+	extra *overviewExtraEvents,
-+	since time.Time,
-+	fallback time.Time,
-+) []OverviewEvent {
-+	var events []OverviewEvent
-+	events = append(events, serverStartEvents(serverStarts, snap.buildVersion, since, fallback)...)
-+	events = append(events, createdTaskEvents(created)...)
-+	for _, row := range automation {
-+		events = append(events, OverviewEvent{
-+			Kind: overviewEventAutomationRun, At: row.CreatedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
-+			AutomationID: row.AutomationID,
-+		})
-+	}
-+	if extra != nil {
-+		events = append(events, extraEvents(extra, snap.profileNames)...)
-+	}
-+	for i, row := range snap.completed {
-+		if i >= overviewEventKindLimit {
-+			break
-+		}
-+		events = append(events, OverviewEvent{
-+			Kind: overviewEventTaskCompleted, At: row.CompletedAt, WorkspaceID: row.WorkspaceID, TaskID: row.ID, Title: row.Title,
-+		})
-+	}
-+	events = append(events, failedSessionEvents(snap, since)...)
-+	sortEventsNewest(events)
-+	if len(events) > overviewEventMergeLimit {
-+		events = events[:overviewEventMergeLimit]
-+	}
-+	return events
-+}
-+
-+// serverStartEvents renders one server-started row per durable boot record in
-+// the window. The records are already bounded and newest-first from the read,
-+// and each carries the version that booted, so the list and its chip count
-+// every startup rather than only the running process. A record written without
-+// a version falls back to the running binary's version, so the row is never
-+// blank.
-+//
-+// When the durable history has no in-window record, the running process's own
-+// start is rendered instead, so a reachable overview never reports zero
-+// startups while a server is up. This covers a fresh install, an upgrade, and a
-+// boot whose record write failed. Startups before the record began are not
-+// reconstructed from logs, so the running process is the only entry until the
-+// next boot records itself. The fallback is dropped when it predates the
-+// window, so a server that has run longer than the window reports no startups.
-+func serverStartEvents(
-+	starts []*sqlite.OverviewServerStartRow, buildVersion string, since, fallback time.Time,
-+) []OverviewEvent {
-+	out := make([]OverviewEvent, 0, len(starts)+1)
-+	for _, start := range starts {
-+		if start == nil || start.At.Before(since) {
-+			continue
-+		}
-+		version := start.Version
-+		if version == "" {
-+			version = buildVersion
-+		}
-+		out = append(out, OverviewEvent{Kind: overviewEventServerStarted, At: start.At, Version: version})
-+	}
-+	if len(out) == 0 && !fallback.IsZero() && !fallback.Before(since) {
-+		out = append(out, OverviewEvent{Kind: overviewEventServerStarted, At: fallback, Version: buildVersion})
-+	}
-+	return out
-+}
-+
-+// extraEvents renders the additional last-24-hours sources into events, keeping
-+// the per-kind bound each one carries. The profile names are the ones this pass
-+// already resolved, so a model block names its subject the way the
-+// blocked-circuits card does.
-+func extraEvents(extra *overviewExtraEvents, profileNames map[string]string) []OverviewEvent {
-+	var events []OverviewEvent
-+	events = append(events, modelBlockEvents(extra.blocks, profileNames)...)
-+	events = append(events, mergedPREvents(extra.mergedPRs)...)
-+	events = append(events, automationFailureEvents(extra.automationFailures)...)
-+	events = append(events, decisionEvents(extra.decisions)...)
-+	return append(events, stepMoveEvents(extra.stepMoves)...)
-+}
-+
-+// createdTaskEvents reports tasks a person or the control plane created, with
-+// the parent task's title as the supporting detail.
-+func createdTaskEvents(created []*sqlite.OverviewCreatedTaskRow) []OverviewEvent {
-+	events := make([]OverviewEvent, 0, min(len(created), overviewEventKindLimit))
-+	for i, row := range created {
-+		if i >= overviewEventKindLimit {
-+			break
-+		}
-+		events = append(events, OverviewEvent{
-+			Kind: overviewEventTaskCreated, At: row.CreatedAt, WorkspaceID: row.WorkspaceID,
-+			TaskID: row.ID, Title: row.Title, Detail: row.ParentTitle,
-+		})
-+	}
-+	return events
-+}
-+
-+func failedSessionEvents(snap *overviewSnapshot, since time.Time) []OverviewEvent {
-+	var events []OverviewEvent
-+	for _, t := range snap.tasks {
-+		for _, sess := range t.sessions {
-+			// The failure time is when the session ended. A later write to an old
-+			// FAILED row (a step move rewrites every session's primary flag)
-+			// moves updated_at and must not resurface the failure as new.
-+			failedAt := sess.EndedAt()
-+			if sess.State != sessionStateFailed || failedAt.Before(since) {
-+				continue
-+			}
-+			event := OverviewEvent{
-+				Kind: overviewEventSessionFailed, At: failedAt, WorkspaceID: t.row.WorkspaceID,
-+				TaskID: t.row.ID, SessionID: sess.ID, Title: t.row.Title, Detail: errorFirstLine(sess.ErrorMessage),
-+			}
-+			// The follow-up is read on this same pass, so the line describing
-+			// what happened after the failure advances whenever the screen does
-+			// rather than staying as it was when the failure first appeared.
-+			if followup := snap.followups[sess.ID]; followup != nil {
-+				event.Failure = failureFor(followup, snap.now, snap.profileNames)
-+			}
-+			events = append(events, event)
-+		}
-+	}
-+	sort.SliceStable(events, func(i, j int) bool { return events[i].At.After(events[j].At) })
-+	if len(events) > overviewEventKindLimit {
-+		events = events[:overviewEventKindLimit]
-+	}
-+	return events
-+}
 diff --git a/apps/backend/internal/office/dashboard/overview_automation_count_test.go b/apps/backend/internal/office/dashboard/overview_automation_count_test.go
 new file mode 100644
-index 0000000000..35dd824a02
+index 00000000000..35dd824a023
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_automation_count_test.go
 @@ -0,0 +1,61 @@
@@ -1701,7 +367,7 @@ index 0000000000..35dd824a02
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_cache.go b/apps/backend/internal/office/dashboard/overview_cache.go
 new file mode 100644
-index 0000000000..ac1eb831bb
+index 00000000000..ac1eb831bb6
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_cache.go
 @@ -0,0 +1,113 @@
@@ -1820,7 +486,7 @@ index 0000000000..ac1eb831bb
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_children.go b/apps/backend/internal/office/dashboard/overview_children.go
 new file mode 100644
-index 0000000000..080aa95853
+index 00000000000..080aa958536
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_children.go
 @@ -0,0 +1,31 @@
@@ -1857,7 +523,7 @@ index 0000000000..080aa95853
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_dynamic_circuits.go b/apps/backend/internal/office/dashboard/overview_dynamic_circuits.go
 new file mode 100644
-index 0000000000..0d7f44bf30
+index 00000000000..0d7f44bf304
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_dynamic_circuits.go
 @@ -0,0 +1,145 @@
@@ -2008,7 +674,7 @@ index 0000000000..0d7f44bf30
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_lists.go b/apps/backend/internal/office/dashboard/overview_lists.go
 new file mode 100644
-index 0000000000..170b663e44
+index 00000000000..170b663e44b
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_lists.go
 @@ -0,0 +1,365 @@
@@ -2379,7 +1045,7 @@ index 0000000000..170b663e44
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_profile_accounts.go b/apps/backend/internal/office/dashboard/overview_profile_accounts.go
 new file mode 100644
-index 0000000000..2195ef693c
+index 00000000000..2195ef693c3
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_profile_accounts.go
 @@ -0,0 +1,36 @@
@@ -2419,110 +1085,9 @@ index 0000000000..2195ef693c
 +	}
 +	snap.accountIDs = ids
 +}
-diff --git a/apps/backend/internal/office/dashboard/overview_running.go b/apps/backend/internal/office/dashboard/overview_running.go
-new file mode 100644
-index 0000000000..33f9e84c6b
---- /dev/null
-+++ b/apps/backend/internal/office/dashboard/overview_running.go
-@@ -0,0 +1,95 @@
-+package dashboard
-+
-+import "sort"
-+
-+// overviewRunningTaskLimit bounds how many running tasks one workspace card
-+// names. The card's summary line answers "what is moving here", so it stops at
-+// a few and reports the remainder as a count rather than growing without bound.
-+const overviewRunningTaskLimit = 5
-+
-+// assembleRunningTasks attaches each workspace's running tasks to its card, most
-+// severe first and then the one that has waited longest in its step, which is the
-+// order the rest of the card already uses. It reads the tasks this pass already
-+// classified, so the card's summary line and its figures come from one read
-+// rather than a second list that only loads once the card is expanded.
-+func assembleRunningTasks(snap *overviewSnapshot) {
-+	byWorkspace := map[string][]*overviewTask{}
-+	for _, t := range snap.tasks {
-+		if t.runningSession() == nil {
-+			continue
-+		}
-+		byWorkspace[t.row.WorkspaceID] = append(byWorkspace[t.row.WorkspaceID], t)
-+	}
-+	for i := range snap.resp.Workspaces {
-+		entry := &snap.resp.Workspaces[i]
-+		tasks := byWorkspace[entry.WorkspaceID]
-+		sort.SliceStable(tasks, func(a, b int) bool { return worseTask(tasks[a], tasks[b]) })
-+		entry.Running, entry.RunningTruncated = runningTaskItems(snap, tasks)
-+	}
-+}
-+
-+// runningTaskItems renders the bounded list a card names. A task beyond the limit
-+// is counted rather than dropped, so the card can say how many more exist.
-+func runningTaskItems(snap *overviewSnapshot, tasks []*overviewTask) ([]OverviewRunningTask, int) {
-+	if len(tasks) == 0 {
-+		return nil, 0
-+	}
-+	truncated := max(len(tasks)-overviewRunningTaskLimit, 0)
-+	if truncated > 0 {
-+		tasks = tasks[:overviewRunningTaskLimit]
-+	}
-+	items := make([]OverviewRunningTask, 0, len(tasks))
-+	for _, t := range tasks {
-+		items = append(items, runningTaskItem(snap, t))
-+	}
-+	return items, truncated
-+}
-+
-+// runningTaskItem is one running task with that task's own session counts, so a
-+// line says how much of the task is working and how much of it waits on a
-+// person. A task with no executing session has no line at all.
-+func runningTaskItem(snap *overviewSnapshot, t *overviewTask) OverviewRunningTask {
-+	running, waiting := 0, 0
-+	for _, s := range t.sessions {
-+		switch s.State {
-+		case sessionStateRunning, sessionStateStarting:
-+			running++
-+		case sessionStateWaitingForInput:
-+			waiting++
-+		}
-+	}
-+	return OverviewRunningTask{
-+		TaskID:               t.row.ID,
-+		Title:                t.row.Title,
-+		Status:               t.status,
-+		StepName:             t.row.StepName,
-+		AgentName:            snap.profileNames[t.runningSession().AgentProfileID],
-+		RunningSessions:      running,
-+		WaitingInputSessions: waiting,
-+	}
-+}
-+
-+// laneWaitingInput splits this scope's waiting-input sessions by admission lane,
-+// using the same control profile set the capacity reading classified its
-+// populations with. The two counts therefore add up to the scope's own waiting
-+// figure, and an install with no control lane puts every waiting session in the
-+// general lane exactly as classOfLocked does.
-+func laneWaitingInput(snap *overviewSnapshot, controlProfiles []string) (general, control int) {
-+	controlSet := map[string]struct{}{}
-+	for _, id := range controlProfiles {
-+		controlSet[id] = struct{}{}
-+	}
-+	for _, t := range snap.tasks {
-+		for _, s := range t.sessions {
-+			if s.State != sessionStateWaitingForInput {
-+				continue
-+			}
-+			if _, isControl := controlSet[s.AgentProfileID]; isControl {
-+				control++
-+				continue
-+			}
-+			general++
-+		}
-+	}
-+	return general, control
-+}
 diff --git a/apps/backend/internal/office/dashboard/overview_server_starts_internal_test.go b/apps/backend/internal/office/dashboard/overview_server_starts_internal_test.go
 new file mode 100644
-index 0000000000..c41c66fb83
+index 00000000000..c41c66fb830
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_server_starts_internal_test.go
 @@ -0,0 +1,153 @@
@@ -2681,7 +1246,7 @@ index 0000000000..c41c66fb83
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_status_internal_test.go b/apps/backend/internal/office/dashboard/overview_status_internal_test.go
 new file mode 100644
-index 0000000000..a3feef4082
+index 00000000000..a3feef4082a
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_status_internal_test.go
 @@ -0,0 +1,198 @@
@@ -2885,7 +1450,7 @@ index 0000000000..a3feef4082
 +}
 diff --git a/apps/backend/internal/office/dashboard/overview_test.go b/apps/backend/internal/office/dashboard/overview_test.go
 new file mode 100644
-index 0000000000..7213533db8
+index 00000000000..7213533db88
 --- /dev/null
 +++ b/apps/backend/internal/office/dashboard/overview_test.go
 @@ -0,0 +1,379 @@
@@ -3269,7 +1834,7 @@ index 0000000000..7213533db8
 +	}
 +}
 diff --git a/apps/backend/internal/office/dashboard/run_activity_test.go b/apps/backend/internal/office/dashboard/run_activity_test.go
-index 5cb0fe8185..81bbf2aabb 100644
+index 5cb0fe81853..81bbf2aabbb 100644
 --- a/apps/backend/internal/office/dashboard/run_activity_test.go
 +++ b/apps/backend/internal/office/dashboard/run_activity_test.go
 @@ -38,9 +38,10 @@ func createTaskSessionsTable(t *testing.T, deps *testDeps) {
@@ -3288,7 +1853,7 @@ index 5cb0fe8185..81bbf2aabb 100644
  		)
 diff --git a/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity.go b/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity.go
 new file mode 100644
-index 0000000000..b65a0adec0
+index 00000000000..b65a0adec0d
 --- /dev/null
 +++ b/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity.go
 @@ -0,0 +1,259 @@
@@ -3553,7 +2118,7 @@ index 0000000000..b65a0adec0
 +}
 diff --git a/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity_test.go b/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity_test.go
 new file mode 100644
-index 0000000000..251384e622
+index 00000000000..251384e622e
 --- /dev/null
 +++ b/apps/backend/internal/office/repository/sqlite/aggregate_overview_activity_test.go
 @@ -0,0 +1,125 @@
@@ -3684,7 +2249,7 @@ index 0000000000..251384e622
 +}
 diff --git a/apps/backend/internal/office/repository/sqlite/aggregate_overview_automation_test.go b/apps/backend/internal/office/repository/sqlite/aggregate_overview_automation_test.go
 new file mode 100644
-index 0000000000..6c116c2ec0
+index 00000000000..6c116c2ec0d
 --- /dev/null
 +++ b/apps/backend/internal/office/repository/sqlite/aggregate_overview_automation_test.go
 @@ -0,0 +1,110 @@
@@ -3800,7 +2365,7 @@ index 0000000000..6c116c2ec0
 +}
 diff --git a/apps/backend/internal/office/repository/sqlite/aggregate_overview_server_starts.go b/apps/backend/internal/office/repository/sqlite/aggregate_overview_server_starts.go
 new file mode 100644
-index 0000000000..1480425fc5
+index 00000000000..1480425fc5a
 --- /dev/null
 +++ b/apps/backend/internal/office/repository/sqlite/aggregate_overview_server_starts.go
 @@ -0,0 +1,38 @@
@@ -3843,7 +2408,7 @@ index 0000000000..1480425fc5
 +	return out, nil
 +}
 diff --git a/apps/backend/internal/office/repository/sqlite/dashboard_test.go b/apps/backend/internal/office/repository/sqlite/dashboard_test.go
-index 57aff50cc8..9ecbe620e9 100644
+index 57aff50cc86..9ecbe620e9e 100644
 --- a/apps/backend/internal/office/repository/sqlite/dashboard_test.go
 +++ b/apps/backend/internal/office/repository/sqlite/dashboard_test.go
 @@ -23,6 +23,7 @@ func ensureSessionTables(t *testing.T, repo *sqlite.Repository) {
@@ -3855,7 +2420,7 @@ index 57aff50cc8..9ecbe620e9 100644
  			completed_at TIMESTAMP,
  			updated_at TIMESTAMP NOT NULL
 diff --git a/apps/backend/internal/office/repository/sqlite/projects.go b/apps/backend/internal/office/repository/sqlite/projects.go
-index c3bd421ddc..d1b91d2156 100644
+index c3bd421ddc7..d1b91d21564 100644
 --- a/apps/backend/internal/office/repository/sqlite/projects.go
 +++ b/apps/backend/internal/office/repository/sqlite/projects.go
 @@ -209,7 +209,7 @@ func (r *Repository) ListProjectsWithCounts(
@@ -3869,7 +2434,7 @@ index c3bd421ddc..d1b91d2156 100644
  	var rows []projectCountsRow
 diff --git a/apps/backend/internal/persistence/server_starts.go b/apps/backend/internal/persistence/server_starts.go
 new file mode 100644
-index 0000000000..55bae5f65e
+index 00000000000..55bae5f65eb
 --- /dev/null
 +++ b/apps/backend/internal/persistence/server_starts.go
 @@ -0,0 +1,107 @@
@@ -3982,7 +2547,7 @@ index 0000000000..55bae5f65e
 +}
 diff --git a/apps/backend/internal/persistence/server_starts_test.go b/apps/backend/internal/persistence/server_starts_test.go
 new file mode 100644
-index 0000000000..9006cfd690
+index 00000000000..9006cfd690d
 --- /dev/null
 +++ b/apps/backend/internal/persistence/server_starts_test.go
 @@ -0,0 +1,101 @@
@@ -4088,7 +2653,7 @@ index 0000000000..9006cfd690
 +	}
 +}
 diff --git a/apps/backend/internal/settingscatalog/defaults.go b/apps/backend/internal/settingscatalog/defaults.go
-index fd8b387a08..4f1f57873e 100644
+index fd8b387a084..4f1f57873e3 100644
 --- a/apps/backend/internal/settingscatalog/defaults.go
 +++ b/apps/backend/internal/settingscatalog/defaults.go
 @@ -645,7 +645,7 @@ func userSettingsDomain() DomainDescriptor {
@@ -4101,7 +2666,7 @@ index fd8b387a08..4f1f57873e 100644
  		"sidebar_hover_enabled", "sidebar hover enabled", "boolean", "sidebar_hover_delay_ms", "sidebar hover delay", "integer",
  		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 diff --git a/apps/backend/internal/task/models/clarification_bundle.go b/apps/backend/internal/task/models/clarification_bundle.go
-index 98bae9454f..d6e404642a 100644
+index 98bae9454f2..d6e404642a2 100644
 --- a/apps/backend/internal/task/models/clarification_bundle.go
 +++ b/apps/backend/internal/task/models/clarification_bundle.go
 @@ -10,7 +10,13 @@ type ClarificationBundleSummary struct {
@@ -4121,7 +2686,7 @@ index 98bae9454f..d6e404642a 100644
  // ListClarificationBundlesOptions filters and paginates
 diff --git a/apps/backend/internal/task/repository/sqlite/clarification_overview_postgres_test.go b/apps/backend/internal/task/repository/sqlite/clarification_overview_postgres_test.go
 new file mode 100644
-index 0000000000..90a8aca127
+index 00000000000..90a8aca127c
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/clarification_overview_postgres_test.go
 @@ -0,0 +1,35 @@
@@ -4162,7 +2727,7 @@ index 0000000000..90a8aca127
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/clarification_overview_test.go b/apps/backend/internal/task/repository/sqlite/clarification_overview_test.go
 new file mode 100644
-index 0000000000..95f763d2bb
+index 00000000000..95f763d2bb8
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/clarification_overview_test.go
 @@ -0,0 +1,61 @@
@@ -4229,7 +2794,7 @@ index 0000000000..95f763d2bb
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/overview_dynamic_circuits.go b/apps/backend/internal/task/repository/sqlite/overview_dynamic_circuits.go
 new file mode 100644
-index 0000000000..95c4ce90a8
+index 00000000000..95c4ce90a82
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/overview_dynamic_circuits.go
 @@ -0,0 +1,38 @@
@@ -4273,7 +2838,7 @@ index 0000000000..95c4ce90a8
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/overview_scope_index_migration_test.go b/apps/backend/internal/task/repository/sqlite/overview_scope_index_migration_test.go
 new file mode 100644
-index 0000000000..8716de1dd2
+index 00000000000..8716de1dd20
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/overview_scope_index_migration_test.go
 @@ -0,0 +1,39 @@
@@ -4317,7 +2882,7 @@ index 0000000000..8716de1dd2
 +	}
 +}
 diff --git a/apps/backend/internal/user/controller/controller.go b/apps/backend/internal/user/controller/controller.go
-index 8f2000463c..09dc9ff905 100644
+index 8f2000463c5..09dc9ff9054 100644
 --- a/apps/backend/internal/user/controller/controller.go
 +++ b/apps/backend/internal/user/controller/controller.go
 @@ -145,6 +145,9 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
@@ -4331,7 +2896,7 @@ index 8f2000463c..09dc9ff905 100644
  		AgentTabCloseBehavior:             req.AgentTabCloseBehavior,
  		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 diff --git a/apps/backend/internal/user/dto/dto.go b/apps/backend/internal/user/dto/dto.go
-index 2873136ce9..49620f195e 100644
+index 2873136ce9a..49620f195e3 100644
 --- a/apps/backend/internal/user/dto/dto.go
 +++ b/apps/backend/internal/user/dto/dto.go
 @@ -77,6 +77,9 @@ type UserSettingsDTO struct {
@@ -4365,7 +2930,7 @@ index 2873136ce9..49620f195e 100644
  		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
  		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 diff --git a/apps/backend/internal/user/models/models.go b/apps/backend/internal/user/models/models.go
-index b3394fbe7c..7654f3f99b 100644
+index b3394fbe7c2..7654f3f99bc 100644
 --- a/apps/backend/internal/user/models/models.go
 +++ b/apps/backend/internal/user/models/models.go
 @@ -45,6 +45,62 @@ func NormalizeStartupPage(value string) string {
@@ -4447,7 +3012,7 @@ index b3394fbe7c..7654f3f99b 100644
  	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 diff --git a/apps/backend/internal/user/service/office_overview_scope_test.go b/apps/backend/internal/user/service/office_overview_scope_test.go
 new file mode 100644
-index 0000000000..3211d7f249
+index 00000000000..3211d7f2492
 --- /dev/null
 +++ b/apps/backend/internal/user/service/office_overview_scope_test.go
 @@ -0,0 +1,47 @@
@@ -4499,7 +3064,7 @@ index 0000000000..3211d7f249
 +	}
 +}
 diff --git a/apps/backend/internal/user/service/service.go b/apps/backend/internal/user/service/service.go
-index 7de5f761bc..9e6a6fa3d6 100644
+index 7de5f761bcd..9e6a6fa3d67 100644
 --- a/apps/backend/internal/user/service/service.go
 +++ b/apps/backend/internal/user/service/service.go
 @@ -106,6 +106,9 @@ type UpdateUserSettingsRequest struct {
@@ -4612,7 +3177,7 @@ index 7de5f761bc..9e6a6fa3d6 100644
  		"system_metrics_display":                   settings.SystemMetricsDisplay,
  		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 diff --git a/apps/backend/internal/user/store/sqlite.go b/apps/backend/internal/user/store/sqlite.go
-index eba240f5a6..986de89b44 100644
+index eba240f5a66..986de89b443 100644
 --- a/apps/backend/internal/user/store/sqlite.go
 +++ b/apps/backend/internal/user/store/sqlite.go
 @@ -673,6 +673,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
@@ -4698,7 +3263,7 @@ index eba240f5a6..986de89b44 100644
  		return models.AgentTabCloseBehaviorDeleteSession
 diff --git a/apps/backend/internal/user/store/sqlite_office_overview_scope_test.go b/apps/backend/internal/user/store/sqlite_office_overview_scope_test.go
 new file mode 100644
-index 0000000000..2e7e8118e9
+index 00000000000..2e7e8118e9f
 --- /dev/null
 +++ b/apps/backend/internal/user/store/sqlite_office_overview_scope_test.go
 @@ -0,0 +1,30 @@
@@ -4734,7 +3299,7 @@ index 0000000000..2e7e8118e9
 +}
 diff --git a/apps/backend/internal/workflow/models/step_semantics.go b/apps/backend/internal/workflow/models/step_semantics.go
 new file mode 100644
-index 0000000000..339a2390be
+index 00000000000..339a2390be6
 --- /dev/null
 +++ b/apps/backend/internal/workflow/models/step_semantics.go
 @@ -0,0 +1,49 @@
@@ -4788,7 +3353,7 @@ index 0000000000..339a2390be
 +	return !StepRunsOnEntry(step)
 +}
 diff --git a/apps/web/app/globals.css b/apps/web/app/globals.css
-index eedb3ce840..ecafbb4788 100644
+index eedb3ce840f..ecafbb47883 100644
 --- a/apps/web/app/globals.css
 +++ b/apps/web/app/globals.css
 @@ -50,6 +50,26 @@
@@ -4902,7 +3467,7 @@ index eedb3ce840..ecafbb4788 100644
    --ring: #555555;
 diff --git a/apps/web/app/office/overview/overview-accounts.ts b/apps/web/app/office/overview/overview-accounts.ts
 new file mode 100644
-index 0000000000..9f46310718
+index 00000000000..9f46310718e
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-accounts.ts
 @@ -0,0 +1,330 @@
@@ -5238,7 +3803,7 @@ index 0000000000..9f46310718
 +}
 diff --git a/apps/web/app/office/overview/overview-activity-line.test.tsx b/apps/web/app/office/overview/overview-activity-line.test.tsx
 new file mode 100644
-index 0000000000..5bd38f1bf6
+index 00000000000..5bd38f1bf6a
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-activity-line.test.tsx
 @@ -0,0 +1,42 @@
@@ -5286,7 +3851,7 @@ index 0000000000..5bd38f1bf6
 +});
 diff --git a/apps/web/app/office/overview/overview-event-extras.tsx b/apps/web/app/office/overview/overview-event-extras.tsx
 new file mode 100644
-index 0000000000..700c0871d1
+index 00000000000..700c0871d16
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-event-extras.tsx
 @@ -0,0 +1,327 @@
@@ -5619,7 +4184,7 @@ index 0000000000..700c0871d1
 +}
 diff --git a/apps/web/app/office/overview/overview-header.tsx b/apps/web/app/office/overview/overview-header.tsx
 new file mode 100644
-index 0000000000..d1b8add246
+index 00000000000..d1b8add2467
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-header.tsx
 @@ -0,0 +1,355 @@
@@ -5980,7 +4545,7 @@ index 0000000000..d1b8add246
 +}
 diff --git a/apps/web/app/office/overview/overview-metrics.tsx b/apps/web/app/office/overview/overview-metrics.tsx
 new file mode 100644
-index 0000000000..7c1b467976
+index 00000000000..7c1b4679767
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-metrics.tsx
 @@ -0,0 +1,144 @@
@@ -6130,7 +4695,7 @@ index 0000000000..7c1b467976
 +}
 diff --git a/apps/web/app/office/overview/overview-problems.tsx b/apps/web/app/office/overview/overview-problems.tsx
 new file mode 100644
-index 0000000000..47cdc6aba2
+index 00000000000..47cdc6aba2c
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-problems.tsx
 @@ -0,0 +1,86 @@
@@ -6222,7 +4787,7 @@ index 0000000000..47cdc6aba2
 +}
 diff --git a/apps/web/app/office/overview/overview-provider-groups.tsx b/apps/web/app/office/overview/overview-provider-groups.tsx
 new file mode 100644
-index 0000000000..b478f6b348
+index 00000000000..b478f6b3481
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-provider-groups.tsx
 @@ -0,0 +1,173 @@
@@ -6401,7 +4966,7 @@ index 0000000000..b478f6b348
 +}
 diff --git a/apps/web/app/office/overview/overview-section-card.tsx b/apps/web/app/office/overview/overview-section-card.tsx
 new file mode 100644
-index 0000000000..197934c2e5
+index 00000000000..197934c2e53
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-section-card.tsx
 @@ -0,0 +1,48 @@
@@ -6455,7 +5020,7 @@ index 0000000000..197934c2e5
 +}
 diff --git a/apps/web/app/office/overview/overview-status-colors.ts b/apps/web/app/office/overview/overview-status-colors.ts
 new file mode 100644
-index 0000000000..283e912e23
+index 00000000000..283e912e230
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-status-colors.ts
 @@ -0,0 +1,165 @@
@@ -6626,7 +5191,7 @@ index 0000000000..283e912e23
 +}
 diff --git a/apps/web/app/office/overview/overview-status-legend.tsx b/apps/web/app/office/overview/overview-status-legend.tsx
 new file mode 100644
-index 0000000000..2444ae410c
+index 00000000000..2444ae410c9
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-status-legend.tsx
 @@ -0,0 +1,71 @@
@@ -6703,7 +5268,7 @@ index 0000000000..2444ae410c
 +}
 diff --git a/apps/web/app/office/overview/overview-system-cards.tsx b/apps/web/app/office/overview/overview-system-cards.tsx
 new file mode 100644
-index 0000000000..4dadf86b4f
+index 00000000000..4dadf86b4fb
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-system-cards.tsx
 @@ -0,0 +1,402 @@
@@ -7111,7 +5676,7 @@ index 0000000000..4dadf86b4f
 +}
 diff --git a/apps/web/app/office/overview/overview-tables.tsx b/apps/web/app/office/overview/overview-tables.tsx
 new file mode 100644
-index 0000000000..f2f646aabc
+index 00000000000..f2f646aabc6
 --- /dev/null
 +++ b/apps/web/app/office/overview/overview-tables.tsx
 @@ -0,0 +1,314 @@
@@ -7430,7 +5995,7 @@ index 0000000000..f2f646aabc
 +  );
 +}
 diff --git a/apps/web/components/task/chat/dynamic-route-recovery.tsx b/apps/web/components/task/chat/dynamic-route-recovery.tsx
-index 0ce5f9236c..58e55c1bc2 100644
+index 0ce5f9236cb..58e55c1bc26 100644
 --- a/apps/web/components/task/chat/dynamic-route-recovery.tsx
 +++ b/apps/web/components/task/chat/dynamic-route-recovery.tsx
 @@ -18,6 +18,16 @@ const ROUTE_REASON_KEYS: Record<string, string> = {
@@ -7461,7 +6026,7 @@ index 0ce5f9236c..58e55c1bc2 100644
      deadline && !Number.isNaN(deadline.getTime())
 diff --git a/apps/web/hooks/domains/office/use-overview-list.test.tsx b/apps/web/hooks/domains/office/use-overview-list.test.tsx
 new file mode 100644
-index 0000000000..cd841cca87
+index 00000000000..cd841cca87d
 --- /dev/null
 +++ b/apps/web/hooks/domains/office/use-overview-list.test.tsx
 @@ -0,0 +1,70 @@
@@ -7537,7 +6102,7 @@ index 0000000000..cd841cca87
 +});
 diff --git a/apps/web/hooks/domains/office/use-overview-list.ts b/apps/web/hooks/domains/office/use-overview-list.ts
 new file mode 100644
-index 0000000000..257bab1feb
+index 00000000000..257bab1febb
 --- /dev/null
 +++ b/apps/web/hooks/domains/office/use-overview-list.ts
 @@ -0,0 +1,72 @@
@@ -7615,7 +6180,7 @@ index 0000000000..257bab1feb
 +}
 diff --git a/apps/web/hooks/domains/office/use-workspace-overview.ts b/apps/web/hooks/domains/office/use-workspace-overview.ts
 new file mode 100644
-index 0000000000..f6436b09bf
+index 00000000000..f6436b09bf8
 --- /dev/null
 +++ b/apps/web/hooks/domains/office/use-workspace-overview.ts
 @@ -0,0 +1,59 @@
@@ -7679,7 +6244,7 @@ index 0000000000..f6436b09bf
 +  return state;
 +}
 diff --git a/apps/web/hooks/use-ensure-user-settings.test.ts b/apps/web/hooks/use-ensure-user-settings.test.ts
-index d517abe0bb..554e39a803 100644
+index d517abe0bb8..554e39a8038 100644
 --- a/apps/web/hooks/use-ensure-user-settings.test.ts
 +++ b/apps/web/hooks/use-ensure-user-settings.test.ts
 @@ -109,6 +109,9 @@ function makeUnloadedSettings(): UserSettingsState {
@@ -7694,7 +6259,7 @@ index d517abe0bb..554e39a803 100644
      sidebarFastActionsEnabled: false,
 diff --git a/apps/web/lib/api/domains/office-overview-api.ts b/apps/web/lib/api/domains/office-overview-api.ts
 new file mode 100644
-index 0000000000..b656125297
+index 00000000000..b6561252979
 --- /dev/null
 +++ b/apps/web/lib/api/domains/office-overview-api.ts
 @@ -0,0 +1,63 @@
@@ -7762,7 +6327,7 @@ index 0000000000..b656125297
 +  );
 +}
 diff --git a/apps/web/lib/settings-discovery/contract.generated.json b/apps/web/lib/settings-discovery/contract.generated.json
-index eb19198e8c..1f31a7fd84 100644
+index eb19198e8c2..1f31a7fd848 100644
 --- a/apps/web/lib/settings-discovery/contract.generated.json
 +++ b/apps/web/lib/settings-discovery/contract.generated.json
 @@ -5406,6 +5406,51 @@
@@ -7828,7 +6393,7 @@ index eb19198e8c..1f31a7fd84 100644
        "prevent_auto_start_agent_on_open",
        "quick_chat_tab_order_by_workspace",
 diff --git a/apps/web/lib/settings-discovery/profile-contract.generated.json b/apps/web/lib/settings-discovery/profile-contract.generated.json
-index 62738fa83a..897aaadbb5 100644
+index 62738fa83a4..897aaadbb53 100644
 --- a/apps/web/lib/settings-discovery/profile-contract.generated.json
 +++ b/apps/web/lib/settings-discovery/profile-contract.generated.json
 @@ -483,6 +483,9 @@
@@ -7843,7 +6408,7 @@ index 62738fa83a..897aaadbb5 100644
        "quick_chat_tab_order_by_workspace",
 diff --git a/apps/web/lib/settings/overview-refresh.ts b/apps/web/lib/settings/overview-refresh.ts
 new file mode 100644
-index 0000000000..bd8fa895fe
+index 00000000000..bd8fa895fec
 --- /dev/null
 +++ b/apps/web/lib/settings/overview-refresh.ts
 @@ -0,0 +1,19 @@
@@ -7867,7 +6432,7 @@ index 0000000000..bd8fa895fe
 +  return Math.round(seconds);
 +}
 diff --git a/apps/web/lib/ssr/user-settings.ts b/apps/web/lib/ssr/user-settings.ts
-index 22b71f14ea..568fe40dd7 100644
+index 22b71f14eae..568fe40dd72 100644
 --- a/apps/web/lib/ssr/user-settings.ts
 +++ b/apps/web/lib/ssr/user-settings.ts
 @@ -17,10 +17,18 @@ import {
@@ -7958,7 +6523,7 @@ index 22b71f14ea..568fe40dd7 100644
        current.messageTimeDisplay,
 diff --git a/apps/web/lib/state/slices/office/overview-types.ts b/apps/web/lib/state/slices/office/overview-types.ts
 new file mode 100644
-index 0000000000..1c7bb9dba1
+index 00000000000..1c7bb9dba1a
 --- /dev/null
 +++ b/apps/web/lib/state/slices/office/overview-types.ts
 @@ -0,0 +1,439 @@
@@ -8402,7 +6967,7 @@ index 0000000000..1c7bb9dba1
 +  needs_human?: OverviewHumanItem[];
 +};
 diff --git a/apps/web/lib/state/slices/settings/types.ts b/apps/web/lib/state/slices/settings/types.ts
-index e66e96dc6b..20c03cee05 100644
+index e66e96dc6bc..20c03cee05f 100644
 --- a/apps/web/lib/state/slices/settings/types.ts
 +++ b/apps/web/lib/state/slices/settings/types.ts
 @@ -14,6 +14,8 @@ import type {
@@ -8425,7 +6990,7 @@ index e66e96dc6b..20c03cee05 100644
    systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
    appStatusBarEnabled: boolean;
 diff --git a/apps/web/lib/types/http-user-settings.ts b/apps/web/lib/types/http-user-settings.ts
-index 58dba1d34b..054a61911d 100644
+index 58dba1d34b9..054a61911d1 100644
 --- a/apps/web/lib/types/http-user-settings.ts
 +++ b/apps/web/lib/types/http-user-settings.ts
 @@ -4,6 +4,11 @@ export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
@@ -8462,7 +7027,7 @@ index 58dba1d34b..054a61911d 100644
    app_status_bar_enabled?: boolean;
 diff --git a/docs/plans/automation-count-separation/plan.md b/docs/plans/automation-count-separation/plan.md
 new file mode 100644
-index 0000000000..b37a0fc98a
+index 00000000000..b37a0fc98ad
 --- /dev/null
 +++ b/docs/plans/automation-count-separation/plan.md
 @@ -0,0 +1,28 @@
@@ -8496,7 +7061,7 @@ index 0000000000..b37a0fc98a
 +| [task-01](task-01-separate-automation-counts.md) | Separate automation executions from the overview counts |
 diff --git a/docs/plans/automation-count-separation/task-01-separate-automation-counts.md b/docs/plans/automation-count-separation/task-01-separate-automation-counts.md
 new file mode 100644
-index 0000000000..73778fe98a
+index 00000000000..73778fe98ad
 --- /dev/null
 +++ b/docs/plans/automation-count-separation/task-01-separate-automation-counts.md
 @@ -0,0 +1,62 @@
@@ -8564,7 +7129,7 @@ index 0000000000..73778fe98a
 +Implemented in fork PR https://github.com/dreampiler/kandev/pull/234 (`dreampiler/kandev`, base `main`, head `feature/24-311`). One predicate applied to the count reads; the separate automation figure is reported on the project-statistics line and localized with the existing `common:automation` copy.
 diff --git a/docs/plans/office-workspace-overview/task-02-overview-sections.md b/docs/plans/office-workspace-overview/task-02-overview-sections.md
 new file mode 100644
-index 0000000000..acdb952abd
+index 00000000000..acdb952abdb
 --- /dev/null
 +++ b/docs/plans/office-workspace-overview/task-02-overview-sections.md
 @@ -0,0 +1,53 @@
@@ -8621,3 +7186,6 @@ index 0000000000..acdb952abd
 +## Implementation result
 +
 +The aggregate snapshot, caller scope setting, lazy list endpoints, localized sections, and direct task/session links are implemented. Unit tests cover caller-separated caching, shared computation, status classification, route guards, locale copy, and visibility-aware refresh. Screenshots and click results accompany the pull request. Organization-wide scope, operational status files, and configurable thresholds remain separate work.
+-- 
+2.55.0.windows.3
+

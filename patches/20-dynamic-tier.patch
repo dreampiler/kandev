@@ -1,9 +1,9 @@
-From 418d2dc0c14898953568ae11de04c512bf49c6ba Mon Sep 17 00:00:00 2001
+From 267f28f01bb58d4774ee686b37ec0f6c68d03b3d Mon Sep 17 00:00:00 2001
 From: dreampiler <dreampiler@gmail.com>
-Date: Thu, 15 Oct 2026 01:24:49 +0900
+Date: Thu, 15 Oct 2026 12:55:43 +0900
 Subject: [PATCH] fork(20-dynamic-tier): D02 dynamic profile tier selection
 
-Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a0696977 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
+Overlay patch 20-dynamic-tier.patch cut from 390b8daa4b0dc9521909eef423191b27ce5c6d96 on base 51af93dcd86beb66f15d0495a92bb6c846ff2177.
 ---
  apps/backend/internal/agent/agents/billing.go |   6 +-
  .../agent/runtime/dynamic/chain_test.go       | 359 ++++++++++++++
@@ -29,7 +29,6 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  .../usage/client_api_key_internal_test.go     | 219 ++++++++
  .../internal/agent/usage/client_llmgateway.go | 101 ++++
  .../agent/usage/client_opencode_go.go         | 119 +++++
- .../internal/agent/usage/client_openrouter.go | 104 ++++
  .../usage/client_windows_routing_test.go      | 175 +++++++
  .../internal/agent/usage/model_catalog.go     | 150 ++++++
  .../usage/model_catalog_internal_test.go      |  84 ++++
@@ -40,7 +39,6 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  .../internal/backendapp/proxy_usage.go        |  22 +-
  .../backendapp/teamclaude_usage_test.go       |   4 +-
  apps/backend/internal/backendapp/types.go     |   5 +-
- .../internal/backendapp/usage_internal.go     | 187 +++++++
  .../backendapp/usage_internal_test.go         | 126 +++++
  .../backendapp/usage_list_internal.go         | 109 ++++
  apps/backend/internal/common/config/source.go |   5 +
@@ -48,11 +46,8 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  .../dynamic_keep_model_continuity_test.go     | 141 ++++++
  .../dynamic_remote_execution_test.go          | 168 +++++++
  .../sqlite/dynamic_account_usage_test.go      |  40 ++
- .../repository/sqlite/dynamic_manual_usage.go | 134 +++++
  .../dynamic_manual_usage_postgres_test.go     | 142 ++++++
  .../sqlite/dynamic_manual_usage_test.go       | 201 ++++++++
- .../sqlite/usage_limit_observations.go        | 124 +++++
- .../sqlite/usage_limit_observations_test.go   |  63 +++
  ...namic-agent-candidate-list.mobile.test.tsx | 117 +++++
  .../dynamic-agent-candidate-list.test.tsx     | 167 +++++++
  .../settings/dynamic-agent-candidate-list.tsx | 287 +++++++----
@@ -87,7 +82,7 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  .../task-02-agents-list-usage.md              |  65 +++
  ...k-03-selection-modes-and-internal-usage.md |  69 +++
  docs/public/configuration.md                  |   2 +
- 82 files changed, 11708 insertions(+), 119 deletions(-)
+ 77 files changed, 11096 insertions(+), 119 deletions(-)
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/chain_test.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/choice.go
  create mode 100644 apps/backend/internal/agent/runtime/dynamic/choice_test.go
@@ -111,7 +106,6 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  create mode 100644 apps/backend/internal/agent/usage/client_api_key_internal_test.go
  create mode 100644 apps/backend/internal/agent/usage/client_llmgateway.go
  create mode 100644 apps/backend/internal/agent/usage/client_opencode_go.go
- create mode 100644 apps/backend/internal/agent/usage/client_openrouter.go
  create mode 100644 apps/backend/internal/agent/usage/client_windows_routing_test.go
  create mode 100644 apps/backend/internal/agent/usage/model_catalog.go
  create mode 100644 apps/backend/internal/agent/usage/model_catalog_internal_test.go
@@ -119,17 +113,13 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  create mode 100644 apps/backend/internal/agent/usage/windows_test.go
  create mode 100644 apps/backend/internal/backendapp/dynamic_usage_remote_binding_test.go
  create mode 100644 apps/backend/internal/backendapp/dynamic_usage_snapshot_test.go
- create mode 100644 apps/backend/internal/backendapp/usage_internal.go
  create mode 100644 apps/backend/internal/backendapp/usage_internal_test.go
  create mode 100644 apps/backend/internal/backendapp/usage_list_internal.go
  create mode 100644 apps/backend/internal/orchestrator/dynamic_keep_model_continuity_test.go
  create mode 100644 apps/backend/internal/orchestrator/dynamic_remote_execution_test.go
  create mode 100644 apps/backend/internal/task/repository/sqlite/dynamic_account_usage_test.go
- create mode 100644 apps/backend/internal/task/repository/sqlite/dynamic_manual_usage.go
  create mode 100644 apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_postgres_test.go
  create mode 100644 apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_test.go
- create mode 100644 apps/backend/internal/task/repository/sqlite/usage_limit_observations.go
- create mode 100644 apps/backend/internal/task/repository/sqlite/usage_limit_observations_test.go
  create mode 100644 apps/web/components/settings/dynamic-agent-candidate-list.mobile.test.tsx
  create mode 100644 apps/web/components/settings/dynamic-agent-candidate-list.test.tsx
  create mode 100644 apps/web/components/settings/dynamic-agent-candidate-row.tsx
@@ -159,7 +149,7 @@ Overlay patch 20-dynamic-tier.patch cut from 3368a2084825338545d56d2a82129ee9a06
  create mode 100644 docs/plans/provider-account-usage/task-03-selection-modes-and-internal-usage.md
 
 diff --git a/apps/backend/internal/agent/agents/billing.go b/apps/backend/internal/agent/agents/billing.go
-index bfe9166305..7c70d9c418 100644
+index bfe91663050..7c70d9c418f 100644
 --- a/apps/backend/internal/agent/agents/billing.go
 +++ b/apps/backend/internal/agent/agents/billing.go
 @@ -16,8 +16,12 @@ func defaultBillingType() usage.BillingType {
@@ -178,7 +168,7 @@ index bfe9166305..7c70d9c418 100644
  		return usage.BillingTypeAPIKey
 diff --git a/apps/backend/internal/agent/runtime/dynamic/chain_test.go b/apps/backend/internal/agent/runtime/dynamic/chain_test.go
 new file mode 100644
-index 0000000000..ab16a63b12
+index 00000000000..ab16a63b12c
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/chain_test.go
 @@ -0,0 +1,359 @@
@@ -543,7 +533,7 @@ index 0000000000..ab16a63b12
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/choice.go b/apps/backend/internal/agent/runtime/dynamic/choice.go
 new file mode 100644
-index 0000000000..89516bd3fe
+index 00000000000..89516bd3fea
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/choice.go
 @@ -0,0 +1,88 @@
@@ -637,7 +627,7 @@ index 0000000000..89516bd3fe
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/choice_test.go b/apps/backend/internal/agent/runtime/dynamic/choice_test.go
 new file mode 100644
-index 0000000000..01c41d9647
+index 00000000000..01c41d9647d
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/choice_test.go
 @@ -0,0 +1,183 @@
@@ -826,7 +816,7 @@ index 0000000000..01c41d9647
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/execution_environment_test.go b/apps/backend/internal/agent/runtime/dynamic/execution_environment_test.go
 new file mode 100644
-index 0000000000..752aff045a
+index 00000000000..752aff045a1
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/execution_environment_test.go
 @@ -0,0 +1,31 @@
@@ -863,7 +853,7 @@ index 0000000000..752aff045a
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/limit_observer.go b/apps/backend/internal/agent/runtime/dynamic/limit_observer.go
 new file mode 100644
-index 0000000000..2478dd4348
+index 00000000000..2478dd43483
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/limit_observer.go
 @@ -0,0 +1,30 @@
@@ -899,7 +889,7 @@ index 0000000000..2478dd4348
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/preview_test.go b/apps/backend/internal/agent/runtime/dynamic/preview_test.go
 new file mode 100644
-index 0000000000..d568f794a3
+index 00000000000..d568f794a34
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/preview_test.go
 @@ -0,0 +1,188 @@
@@ -1093,7 +1083,7 @@ index 0000000000..d568f794a3
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/rank_inputs.go b/apps/backend/internal/agent/runtime/dynamic/rank_inputs.go
 new file mode 100644
-index 0000000000..0691e5b41c
+index 00000000000..0691e5b41c9
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/rank_inputs.go
 @@ -0,0 +1,93 @@
@@ -1192,7 +1182,7 @@ index 0000000000..0691e5b41c
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/ranking_exhausted_test.go b/apps/backend/internal/agent/runtime/dynamic/ranking_exhausted_test.go
 new file mode 100644
-index 0000000000..f5865d82f9
+index 00000000000..f5865d82f9c
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/ranking_exhausted_test.go
 @@ -0,0 +1,43 @@
@@ -1241,7 +1231,7 @@ index 0000000000..f5865d82f9
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/reason_test.go b/apps/backend/internal/agent/runtime/dynamic/reason_test.go
 new file mode 100644
-index 0000000000..73e04d09eb
+index 00000000000..73e04d09eb0
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/reason_test.go
 @@ -0,0 +1,109 @@
@@ -1356,7 +1346,7 @@ index 0000000000..73e04d09eb
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/selection.go b/apps/backend/internal/agent/runtime/dynamic/selection.go
 new file mode 100644
-index 0000000000..51664a0fd2
+index 00000000000..51664a0fd24
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/selection.go
 @@ -0,0 +1,175 @@
@@ -1537,7 +1527,7 @@ index 0000000000..51664a0fd2
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic/unclassified_tier_test.go b/apps/backend/internal/agent/runtime/dynamic/unclassified_tier_test.go
 new file mode 100644
-index 0000000000..938c35a80a
+index 00000000000..938c35a80ab
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic/unclassified_tier_test.go
 @@ -0,0 +1,218 @@
@@ -1761,7 +1751,7 @@ index 0000000000..938c35a80a
 +}
 diff --git a/apps/backend/internal/agent/runtime/dynamic_selection_resolver_test.go b/apps/backend/internal/agent/runtime/dynamic_selection_resolver_test.go
 new file mode 100644
-index 0000000000..5531918fee
+index 00000000000..5531918feef
 --- /dev/null
 +++ b/apps/backend/internal/agent/runtime/dynamic_selection_resolver_test.go
 @@ -0,0 +1,184 @@
@@ -1951,7 +1941,7 @@ index 0000000000..5531918fee
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_preview_test.go b/apps/backend/internal/agent/settings/controller/dynamic_preview_test.go
 new file mode 100644
-index 0000000000..2562ecf6b4
+index 00000000000..2562ecf6b4d
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_preview_test.go
 @@ -0,0 +1,168 @@
@@ -2125,7 +2115,7 @@ index 0000000000..2562ecf6b4
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_selection.go b/apps/backend/internal/agent/settings/controller/dynamic_selection.go
 new file mode 100644
-index 0000000000..2ae00a7797
+index 00000000000..2ae00a77973
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_selection.go
 @@ -0,0 +1,257 @@
@@ -2388,7 +2378,7 @@ index 0000000000..2ae00a7797
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_selection_group.go b/apps/backend/internal/agent/settings/controller/dynamic_selection_group.go
 new file mode 100644
-index 0000000000..828b1c4ca9
+index 00000000000..828b1c4ca9b
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_selection_group.go
 @@ -0,0 +1,114 @@
@@ -2508,7 +2498,7 @@ index 0000000000..828b1c4ca9
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_selection_test.go b/apps/backend/internal/agent/settings/controller/dynamic_selection_test.go
 new file mode 100644
-index 0000000000..1a0f343b55
+index 00000000000..1a0f343b553
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_selection_test.go
 @@ -0,0 +1,465 @@
@@ -2979,7 +2969,7 @@ index 0000000000..1a0f343b55
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/dynamic_window_scope_test.go b/apps/backend/internal/agent/settings/controller/dynamic_window_scope_test.go
 new file mode 100644
-index 0000000000..404d8f3a76
+index 00000000000..404d8f3a76e
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/dynamic_window_scope_test.go
 @@ -0,0 +1,71 @@
@@ -3056,7 +3046,7 @@ index 0000000000..404d8f3a76
 +}
 diff --git a/apps/backend/internal/agent/settings/controller/profile_usage.go b/apps/backend/internal/agent/settings/controller/profile_usage.go
 new file mode 100644
-index 0000000000..8cc4296cfc
+index 00000000000..8cc4296cfc1
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/controller/profile_usage.go
 @@ -0,0 +1,34 @@
@@ -3096,7 +3086,7 @@ index 0000000000..8cc4296cfc
 +}
 diff --git a/apps/backend/internal/agent/settings/handlers/dynamic_preview_handlers.go b/apps/backend/internal/agent/settings/handlers/dynamic_preview_handlers.go
 new file mode 100644
-index 0000000000..a34baa0ab2
+index 00000000000..a34baa0ab2d
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/handlers/dynamic_preview_handlers.go
 @@ -0,0 +1,50 @@
@@ -3152,7 +3142,7 @@ index 0000000000..a34baa0ab2
 +}
 diff --git a/apps/backend/internal/agent/settings/store/sqlite_dynamic_selection_test.go b/apps/backend/internal/agent/settings/store/sqlite_dynamic_selection_test.go
 new file mode 100644
-index 0000000000..57e3f25841
+index 00000000000..57e3f25841f
 --- /dev/null
 +++ b/apps/backend/internal/agent/settings/store/sqlite_dynamic_selection_test.go
 @@ -0,0 +1,206 @@
@@ -3364,7 +3354,7 @@ index 0000000000..57e3f25841
 +var _ = sql.ErrNoRows
 diff --git a/apps/backend/internal/agent/usage/client_api_key_internal_test.go b/apps/backend/internal/agent/usage/client_api_key_internal_test.go
 new file mode 100644
-index 0000000000..ee2102ddce
+index 00000000000..ee2102ddce7
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/client_api_key_internal_test.go
 @@ -0,0 +1,219 @@
@@ -3589,7 +3579,7 @@ index 0000000000..ee2102ddce
 +}
 diff --git a/apps/backend/internal/agent/usage/client_llmgateway.go b/apps/backend/internal/agent/usage/client_llmgateway.go
 new file mode 100644
-index 0000000000..63b80796bf
+index 00000000000..63b80796bf8
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/client_llmgateway.go
 @@ -0,0 +1,101 @@
@@ -3696,7 +3686,7 @@ index 0000000000..63b80796bf
 +}
 diff --git a/apps/backend/internal/agent/usage/client_opencode_go.go b/apps/backend/internal/agent/usage/client_opencode_go.go
 new file mode 100644
-index 0000000000..94417bb346
+index 00000000000..94417bb346a
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/client_opencode_go.go
 @@ -0,0 +1,119 @@
@@ -3819,119 +3809,9 @@ index 0000000000..94417bb346
 +	}
 +	return window
 +}
-diff --git a/apps/backend/internal/agent/usage/client_openrouter.go b/apps/backend/internal/agent/usage/client_openrouter.go
-new file mode 100644
-index 0000000000..defed5dcb3
---- /dev/null
-+++ b/apps/backend/internal/agent/usage/client_openrouter.go
-@@ -0,0 +1,104 @@
-+package usage
-+
-+import (
-+	"context"
-+	"net/http"
-+	"time"
-+)
-+
-+const (
-+	openRouterKeyURL    = "https://openrouter.ai/api/v1/key"
-+	openRouterModelsURL = "https://openrouter.ai/api/v1/models"
-+	openRouterProvider  = "openrouter"
-+
-+	// openRouterDailyLabel names the account's free-model request quota.
-+	openRouterDailyLabel = "1-day"
-+)
-+
-+// OpenRouterFreeDailyRequests is the free-model allowance of an account that
-+// has bought at least $10 of credits. Free-model requests are counted across
-+// the whole account; each free model is separately limited per minute.
-+const OpenRouterFreeDailyRequests = 1000
-+
-+// OpenRouterUsageClient reads the account's free-model daily request count.
-+// OpenRouter counts free-model requests across the whole account, so the
-+// provider's own count is used rather than a local one, measured against the
-+// configured daily allowance.
-+type OpenRouterUsageClient struct {
-+	key        OpenCodeKeySource
-+	keyURL     string
-+	dailyLimit int
-+	httpClient *http.Client
-+	now        func() time.Time
-+}
-+
-+// NewOpenRouterUsageClient creates a client that authenticates with the
-+// OpenRouter key in the OpenCode auth file at authPath. A non-positive
-+// dailyLimit uses the limit the provider reports.
-+func NewOpenRouterUsageClient(authPath string, dailyLimit int) *OpenRouterUsageClient {
-+	return &OpenRouterUsageClient{
-+		key:        OpenCodeKeySource{Path: authPath, Providers: []string{"openrouter"}},
-+		keyURL:     openRouterKeyURL,
-+		dailyLimit: dailyLimit,
-+		httpClient: &http.Client{Timeout: apiKeyUsageHTTPTimeout},
-+		now:        time.Now,
-+	}
-+}
-+
-+type openRouterKeyResponse struct {
-+	Data struct {
-+		IsFreeTier             bool `json:"is_free_tier"`
-+		FreeModelDailyRequests *struct {
-+			Used  float64 `json:"used"`
-+			Limit float64 `json:"limit"`
-+		} `json:"free_model_daily_requests"`
-+	} `json:"data"`
-+}
-+
-+// FetchUsage implements ProviderUsageClient.
-+func (c *OpenRouterUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
-+	apiKey, err := c.key.APIKey(openRouterProvider)
-+	if err != nil {
-+		return nil, err
-+	}
-+	var raw openRouterKeyResponse
-+	if err := getBearerJSON(ctx, c.httpClient, openRouterProvider, c.keyURL, apiKey, &raw); err != nil {
-+		return nil, err
-+	}
-+	return parseOpenRouterUsage(raw, c.now(), c.dailyLimit), nil
-+}
-+
-+// parseOpenRouterUsage turns the free-request counter into a daily window. The
-+// quota resets at midnight UTC, so the window spans the current UTC day. The
-+// configured allowance wins over the provider's limit field; a response
-+// without the counter yields no window rather than a guessed count.
-+func parseOpenRouterUsage(raw openRouterKeyResponse, now time.Time, configuredLimit int) *ProviderUsage {
-+	plan := "credits"
-+	if raw.Data.IsFreeTier {
-+		plan = "free"
-+	}
-+	usage := &ProviderUsage{Provider: openRouterProvider, Plan: plan, Windows: []UtilizationWindow{}, FetchedAt: now}
-+	counter := raw.Data.FreeModelDailyRequests
-+	if counter == nil {
-+		return usage
-+	}
-+	limit := counter.Limit
-+	if configuredLimit > 0 {
-+		limit = float64(configuredLimit)
-+	}
-+	if limit <= 0 {
-+		return usage
-+	}
-+	start := now.UTC().Truncate(24 * time.Hour)
-+	reset := start.Add(24 * time.Hour)
-+	usage.Windows = append(usage.Windows, UtilizationWindow{
-+		Label:           openRouterDailyLabel,
-+		UtilizationPct:  100 * counter.Used / limit,
-+		ResetAt:         reset,
-+		StartAt:         start,
-+		DurationSeconds: int64(24 * time.Hour / time.Second),
-+		Scope:           WindowScopeFreeModels,
-+		LimitReached:    counter.Used >= limit,
-+	})
-+	return usage
-+}
 diff --git a/apps/backend/internal/agent/usage/client_windows_routing_test.go b/apps/backend/internal/agent/usage/client_windows_routing_test.go
 new file mode 100644
-index 0000000000..6649b82aa1
+index 00000000000..6649b82aa10
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/client_windows_routing_test.go
 @@ -0,0 +1,175 @@
@@ -4112,7 +3992,7 @@ index 0000000000..6649b82aa1
 +func itoa(value int64) string { return strconv.FormatInt(value, 10) }
 diff --git a/apps/backend/internal/agent/usage/model_catalog.go b/apps/backend/internal/agent/usage/model_catalog.go
 new file mode 100644
-index 0000000000..f6151af49a
+index 00000000000..f6151af49ad
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/model_catalog.go
 @@ -0,0 +1,150 @@
@@ -4268,7 +4148,7 @@ index 0000000000..f6151af49a
 +}
 diff --git a/apps/backend/internal/agent/usage/model_catalog_internal_test.go b/apps/backend/internal/agent/usage/model_catalog_internal_test.go
 new file mode 100644
-index 0000000000..50b875b3ff
+index 00000000000..50b875b3ffa
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/model_catalog_internal_test.go
 @@ -0,0 +1,84 @@
@@ -4358,7 +4238,7 @@ index 0000000000..50b875b3ff
 +}
 diff --git a/apps/backend/internal/agent/usage/windows.go b/apps/backend/internal/agent/usage/windows.go
 new file mode 100644
-index 0000000000..69a3953628
+index 00000000000..69a3953628f
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/windows.go
 @@ -0,0 +1,283 @@
@@ -4647,7 +4527,7 @@ index 0000000000..69a3953628
 +}
 diff --git a/apps/backend/internal/agent/usage/windows_test.go b/apps/backend/internal/agent/usage/windows_test.go
 new file mode 100644
-index 0000000000..a3e90cfb53
+index 00000000000..a3e90cfb53a
 --- /dev/null
 +++ b/apps/backend/internal/agent/usage/windows_test.go
 @@ -0,0 +1,227 @@
@@ -4880,7 +4760,7 @@ index 0000000000..a3e90cfb53
 +}
 diff --git a/apps/backend/internal/backendapp/dynamic_usage_remote_binding_test.go b/apps/backend/internal/backendapp/dynamic_usage_remote_binding_test.go
 new file mode 100644
-index 0000000000..311685c6eb
+index 00000000000..311685c6eb6
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/dynamic_usage_remote_binding_test.go
 @@ -0,0 +1,163 @@
@@ -5049,7 +4929,7 @@ index 0000000000..311685c6eb
 +}
 diff --git a/apps/backend/internal/backendapp/dynamic_usage_snapshot_test.go b/apps/backend/internal/backendapp/dynamic_usage_snapshot_test.go
 new file mode 100644
-index 0000000000..d33452110e
+index 00000000000..d33452110ea
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/dynamic_usage_snapshot_test.go
 @@ -0,0 +1,467 @@
@@ -5521,7 +5401,7 @@ index 0000000000..d33452110e
 +	return parsed
 +}
 diff --git a/apps/backend/internal/backendapp/proxy_usage.go b/apps/backend/internal/backendapp/proxy_usage.go
-index afdfa013e5..598467b242 100644
+index afdfa013e52..598467b2425 100644
 --- a/apps/backend/internal/backendapp/proxy_usage.go
 +++ b/apps/backend/internal/backendapp/proxy_usage.go
 @@ -20,17 +20,22 @@ const claudeACPAgentID = "claude-acp"
@@ -5575,7 +5455,7 @@ index afdfa013e5..598467b242 100644
  	}
  	if profileEnvValue(profile, usageProxyVendorEnv) != "teamclaude" {
 diff --git a/apps/backend/internal/backendapp/teamclaude_usage_test.go b/apps/backend/internal/backendapp/teamclaude_usage_test.go
-index 8afdcc6839..7b900aecc4 100644
+index 8afdcc68397..7b900aecc43 100644
 --- a/apps/backend/internal/backendapp/teamclaude_usage_test.go
 +++ b/apps/backend/internal/backendapp/teamclaude_usage_test.go
 @@ -25,12 +25,12 @@ func TestTeamClaudeStatusURL(t *testing.T) {
@@ -5594,7 +5474,7 @@ index 8afdcc6839..7b900aecc4 100644
  				t.Fatalf("teamClaudeStatusURL = %q, %v; want %q, %v", got, ok, tc.want, tc.ok)
  			}
 diff --git a/apps/backend/internal/backendapp/types.go b/apps/backend/internal/backendapp/types.go
-index 141cf82e4e..cdf99749b5 100644
+index 141cf82e4ed..cdf99749b5a 100644
 --- a/apps/backend/internal/backendapp/types.go
 +++ b/apps/backend/internal/backendapp/types.go
 @@ -87,7 +87,10 @@ type Services struct {
@@ -5609,202 +5489,9 @@ index 141cf82e4e..cdf99749b5 100644
  	// Org owns organizations. Always non-nil; Enabled() reports whether the
  	// multi-tenancy feature is on.
  	Org           *org.Service
-diff --git a/apps/backend/internal/backendapp/usage_internal.go b/apps/backend/internal/backendapp/usage_internal.go
-new file mode 100644
-index 0000000000..38b8cd81c5
---- /dev/null
-+++ b/apps/backend/internal/backendapp/usage_internal.go
-@@ -0,0 +1,187 @@
-+package backendapp
-+
-+import (
-+	"context"
-+	"sort"
-+	"strings"
-+	"sync"
-+	"time"
-+
-+	"github.com/google/uuid"
-+	"go.uber.org/zap"
-+
-+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
-+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
-+	"github.com/kandev/kandev/internal/common/logger"
-+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
-+)
-+
-+// Internal accumulation windows. Kandev's own ledger is summed over trailing
-+// windows ending now; the ranking window is one day because the undisclosed
-+// free quotas this serves reset daily.
-+const (
-+	internalRankingWindow = 24 * time.Hour
-+	internalCacheTTL      = 30 * time.Second
-+	window5h              = 5 * time.Hour
-+	windowWeek            = 7 * 24 * time.Hour
-+)
-+
-+// accountUsageReader sums recorded usage for the profiles on one account.
-+type accountUsageReader struct {
-+	usage  *usageProviderAdapter
-+	ledger accountWindowTotalsReader
-+
-+	mu    sync.Mutex
-+	cache map[string]cachedInternal
-+}
-+
-+type cachedInternal struct {
-+	at    time.Time
-+	value dynamicruntime.InternalUsage
-+}
-+
-+func newAccountUsageReader(usage *usageProviderAdapter, ledger accountWindowTotalsReader) *accountUsageReader {
-+	return &accountUsageReader{usage: usage, ledger: ledger, cache: make(map[string]cachedInternal)}
-+}
-+
-+// accountProfiles lists the profiles whose usage counts against the same
-+// account as profileID. A profile without an identifiable account counts alone.
-+func (r *accountUsageReader) accountProfiles(ctx context.Context, profileID string) []string {
-+	if r.usage != nil {
-+		if ids, err := r.usage.AccountProfileIDs(ctx, profileID); err == nil && len(ids) > 0 {
-+			return ids
-+		}
-+	}
-+	return []string{profileID}
-+}
-+
-+// totals sums the account's recorded usage over [now-span, now).
-+func (r *accountUsageReader) totals(
-+	ctx context.Context,
-+	profileIDs []string,
-+	span time.Duration,
-+	now time.Time,
-+) (sqliterepo.ManualWindowUsage, error) {
-+	return r.ledger.GetManualWindowUsageForProfiles(ctx, profileIDs, now.Add(-span), now)
-+}
-+
-+// Internal returns the candidate's account usage over the ranking window. A
-+// short cache keeps one decision from re-reading the ledger per candidate.
-+func (r *accountUsageReader) Internal(ctx context.Context, profileID string, now time.Time) dynamicruntime.InternalUsage {
-+	if r == nil || r.ledger == nil {
-+		return dynamicruntime.InternalUsage{}
-+	}
-+	ids := r.accountProfiles(ctx, profileID)
-+	key := accountCacheKey(ids)
-+	r.mu.Lock()
-+	cached, ok := r.cache[key]
-+	r.mu.Unlock()
-+	if ok && now.Sub(cached.at) < internalCacheTTL && !now.Before(cached.at) {
-+		return cached.value
-+	}
-+	totals, err := r.totals(ctx, ids, internalRankingWindow, now)
-+	if err != nil {
-+		return dynamicruntime.InternalUsage{}
-+	}
-+	value := dynamicruntime.InternalUsage{Known: true, Turns: totals.EventCount, Tokens: totals.TokensTotal}
-+	r.mu.Lock()
-+	r.cache[key] = cachedInternal{at: now, value: value}
-+	r.mu.Unlock()
-+	return value
-+}
-+
-+func accountCacheKey(ids []string) string {
-+	sorted := append([]string(nil), ids...)
-+	sort.Strings(sorted)
-+	return strings.Join(sorted, ",")
-+}
-+
-+// usageLimitLedger stores limit observations.
-+type usageLimitLedger interface {
-+	InsertUsageLimitObservation(ctx context.Context, observation sqliterepo.UsageLimitObservation) error
-+}
-+
-+// usageLimitRecorder implements dynamic.LimitObserver. It snapshots the
-+// account's recorded usage when a candidate hits a limit, off the routing path,
-+// so the decision that reported the failure is never delayed by the ledger.
-+type usageLimitRecorder struct {
-+	accounts *accountUsageReader
-+	store    usageLimitLedger
-+	log      *logger.Logger
-+	wg       sync.WaitGroup
-+}
-+
-+func newUsageLimitRecorder(accounts *accountUsageReader, store usageLimitLedger, log *logger.Logger) *usageLimitRecorder {
-+	return &usageLimitRecorder{accounts: accounts, store: store, log: log}
-+}
-+
-+// ObserveLimit implements dynamic.LimitObserver.
-+func (r *usageLimitRecorder) ObserveLimit(_ context.Context, profileID string, code routingerr.Code, at time.Time) {
-+	if r == nil || r.store == nil || r.accounts == nil || r.accounts.ledger == nil {
-+		return
-+	}
-+	r.wg.Add(1)
-+	go func() {
-+		defer r.wg.Done()
-+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-+		defer cancel()
-+		if err := r.record(ctx, profileID, code, at); err != nil && r.log != nil {
-+			r.log.Warn("usage.limit_observation_failed", zap.String("profile_id", profileID), zap.Error(err))
-+		}
-+	}()
-+}
-+
-+// wait blocks until pending observations are stored; tests use it.
-+func (r *usageLimitRecorder) wait() { r.wg.Wait() }
-+
-+func (r *usageLimitRecorder) record(ctx context.Context, profileID string, code routingerr.Code, at time.Time) error {
-+	ids := r.accounts.accountProfiles(ctx, profileID)
-+	observation := sqliterepo.UsageLimitObservation{
-+		ID: uuid.NewString(), ExecutionProfileID: profileID, Code: string(code), ObservedAt: at,
-+		AccountKey: r.accounts.accountKey(ctx, profileID),
-+	}
-+	short, err := r.accounts.totals(ctx, ids, window5h, at)
-+	if err != nil {
-+		return err
-+	}
-+	day, err := r.accounts.totals(ctx, ids, internalRankingWindow, at)
-+	if err != nil {
-+		return err
-+	}
-+	week, err := r.accounts.totals(ctx, ids, windowWeek, at)
-+	if err != nil {
-+		return err
-+	}
-+	observation.Turns5h, observation.Tokens5h = short.EventCount, short.TokensTotal
-+	observation.TurnsDay, observation.TokensDay, observation.CostSubcentsDay = day.EventCount, day.TokensTotal, day.CostSubcents
-+	observation.TurnsWeek, observation.TokensWeek = week.EventCount, week.TokensTotal
-+	return r.store.InsertUsageLimitObservation(ctx, observation)
-+}
-+
-+// accountKey identifies the profile's account for grouping observations. A
-+// profile without a binding is its own account.
-+func (r *accountUsageReader) accountKey(ctx context.Context, profileID string) string {
-+	if r.usage != nil {
-+		if profile, agentType, ok := r.usage.loadProfile(ctx, profileID); ok {
-+			if binding, bound := r.usage.bindingFor(profile, agentType); bound && binding.accountKey != "" {
-+				return binding.accountKey
-+			}
-+		}
-+	}
-+	return "profile:" + profileID
-+}
-+
-+// routeSelectionHistory adapts the route attempt log to dynamic.SelectionHistory.
-+type routeSelectionHistory struct {
-+	repo interface {
-+		LastDynamicRouteSelections(ctx context.Context, logicalProfileID string) (map[string]time.Time, error)
-+	}
-+}
-+
-+// LastSelections implements dynamic.SelectionHistory.
-+func (h routeSelectionHistory) LastSelections(ctx context.Context, logicalProfileID string) (map[string]time.Time, error) {
-+	if h.repo == nil {
-+		return nil, nil
-+	}
-+	return h.repo.LastDynamicRouteSelections(ctx, logicalProfileID)
-+}
 diff --git a/apps/backend/internal/backendapp/usage_internal_test.go b/apps/backend/internal/backendapp/usage_internal_test.go
 new file mode 100644
-index 0000000000..b4f70c7325
+index 00000000000..b4f70c73251
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/usage_internal_test.go
 @@ -0,0 +1,126 @@
@@ -5936,7 +5623,7 @@ index 0000000000..b4f70c7325
 +}
 diff --git a/apps/backend/internal/backendapp/usage_list_internal.go b/apps/backend/internal/backendapp/usage_list_internal.go
 new file mode 100644
-index 0000000000..d8cb4b5c35
+index 00000000000..d8cb4b5c354
 --- /dev/null
 +++ b/apps/backend/internal/backendapp/usage_list_internal.go
 @@ -0,0 +1,109 @@
@@ -6050,7 +5737,7 @@ index 0000000000..d8cb4b5c35
 +	return sorted[(len(sorted)-1)/2]
 +}
 diff --git a/apps/backend/internal/common/config/source.go b/apps/backend/internal/common/config/source.go
-index 72a8b2724c..b344dc8112 100644
+index 72a8b2724ca..b344dc8112d 100644
 --- a/apps/backend/internal/common/config/source.go
 +++ b/apps/backend/internal/common/config/source.go
 @@ -78,6 +78,7 @@ var yamlOnlyStartupKeys = map[string]struct{}{
@@ -6080,7 +5767,7 @@ index 72a8b2724c..b344dc8112 100644
  	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
  	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)
 diff --git a/apps/backend/internal/common/config/validation.go b/apps/backend/internal/common/config/validation.go
-index fa4748a75f..13e4dc25c4 100644
+index fa4748a75f3..13e4dc25c49 100644
 --- a/apps/backend/internal/common/config/validation.go
 +++ b/apps/backend/internal/common/config/validation.go
 @@ -15,6 +15,7 @@ func validateStartupSettings(cfg *Config) error {
@@ -6093,7 +5780,7 @@ index fa4748a75f..13e4dc25c4 100644
  	errs = append(errs, configuredValidation(cfg, "agentctl.idleReaperInterval", cfg.Agentctl.IdleReaperInterval <= 0, "agentctl.idleReaperInterval must be positive")...)
 diff --git a/apps/backend/internal/orchestrator/dynamic_keep_model_continuity_test.go b/apps/backend/internal/orchestrator/dynamic_keep_model_continuity_test.go
 new file mode 100644
-index 0000000000..0d35833fed
+index 00000000000..0d35833fedd
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_keep_model_continuity_test.go
 @@ -0,0 +1,141 @@
@@ -6240,7 +5927,7 @@ index 0000000000..0d35833fed
 +}
 diff --git a/apps/backend/internal/orchestrator/dynamic_remote_execution_test.go b/apps/backend/internal/orchestrator/dynamic_remote_execution_test.go
 new file mode 100644
-index 0000000000..b35637cf86
+index 00000000000..b35637cf86f
 --- /dev/null
 +++ b/apps/backend/internal/orchestrator/dynamic_remote_execution_test.go
 @@ -0,0 +1,168 @@
@@ -6414,7 +6101,7 @@ index 0000000000..b35637cf86
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_account_usage_test.go b/apps/backend/internal/task/repository/sqlite/dynamic_account_usage_test.go
 new file mode 100644
-index 0000000000..fd610ad846
+index 00000000000..fd610ad8469
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/dynamic_account_usage_test.go
 @@ -0,0 +1,40 @@
@@ -6458,149 +6145,9 @@ index 0000000000..fd610ad846
 +		t.Fatal("an empty profile list must be rejected rather than matching everything")
 +	}
 +}
-diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage.go b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage.go
-new file mode 100644
-index 0000000000..4fcf49e7cb
---- /dev/null
-+++ b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage.go
-@@ -0,0 +1,134 @@
-+package sqlite
-+
-+import (
-+	"context"
-+	"fmt"
-+	"time"
-+
-+	"github.com/jmoiron/sqlx"
-+
-+	"github.com/kandev/kandev/internal/task/models"
-+)
-+
-+// ManualWindowUsage is the recorded usage of one concrete execution profile
-+// inside one reset window. It is a recorded-only total: usage that Kandev never
-+// observed, and spend deleted outside the ledger, cannot be recovered by this
-+// query, so the value is a lower bound rather than a provider-wide remaining
-+// quota.
-+type ManualWindowUsage struct {
-+	TokensTotal     int64
-+	CostSubcents    int64
-+	EventCount      int64
-+	UnpricedCount   int64
-+	IncompleteCount int64
-+	// TurnsAttributed counts rows resolved through the stored concrete turn
-+	// profile, which is the preferred evidence. ProfileAttributed counts the
-+	// narrower fallback where a concrete event profile was proven directly.
-+	TurnsAttributed   int64
-+	ProfileAttributed int64
-+}
-+
-+// Complete reports whether every contributing event carried both a price and a
-+// complete measurement. An incomplete total is still returned, so the caller can
-+// show a recorded lower bound instead of pretending the window is exhausted.
-+func (u ManualWindowUsage) Complete() bool {
-+	return u.UnpricedCount == 0 && u.IncompleteCount == 0
-+}
-+
-+// usageCompletenessComplete is the ledger's complete measurement marker.
-+const usageCompletenessComplete = "complete"
-+
-+// manualWindowUsageQuery resolves a usage event to the concrete profile that
-+// actually executed it.
-+//
-+// task_usage_events.agent_profile_id carries the logical session profile, which
-+// for a dynamic session is the dynamic profile rather than the concrete
-+// candidate. The concrete identity therefore comes from the stored turn
-+// (task_session_turns.execution_profile_id), never from the session's mutable
-+// current route. A row whose turn is missing or deleted is unattributed, except
-+// for the narrow fallback where the event itself proves a concrete profile,
-+// which the caller has already established is not a dynamic profile.
-+const manualWindowUsageQuery = `
-+	SELECT
-+		COUNT(*),
-+		COALESCE(SUM(COALESCE(e.tokens_total, 0)), 0),
-+		COALESCE(SUM(COALESCE(e.cost_subcents, 0)), 0),
-+		COALESCE(SUM(CASE WHEN e.cost_source = ? THEN 1 ELSE 0 END), 0),
-+		COALESCE(SUM(CASE WHEN e.usage_completeness <> ? THEN 1 ELSE 0 END), 0),
-+		COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN 1 ELSE 0 END), 0)
-+	  FROM task_usage_events e
-+	 LEFT JOIN task_session_turns t ON t.id = e.turn_id
-+	 WHERE e.occurred_at >= ?
-+	   AND e.occurred_at < ?
-+	   AND (
-+	     t.execution_profile_id IN (?)
-+	     OR (t.id IS NULL AND e.agent_profile_id IN (?))
-+	   )
-+`
-+
-+// GetManualWindowUsage aggregates one concrete execution profile's recorded
-+// usage over the half-open interval [start, end). The interval is clamped by
-+// the caller to [windowStart, min(now, reset)), so a reset boundary excludes the
-+// event exactly at the reset instant.
-+//
-+// A successful query with no rows is zero *recorded* usage, which is not proof
-+// that a subscription has never been used.
-+func (r *Repository) GetManualWindowUsage(
-+	ctx context.Context,
-+	executionProfileID string,
-+	start time.Time,
-+	end time.Time,
-+) (ManualWindowUsage, error) {
-+	return r.GetManualWindowUsageForProfiles(ctx, []string{executionProfileID}, start, end)
-+}
-+
-+// GetManualWindowUsageForProfiles aggregates the recorded usage of several
-+// concrete execution profiles over [start, end). It answers an account-scoped
-+// window, where a provider enforces one quota across every profile that uses
-+// the same account. Each event is attributed exactly as for a single profile,
-+// so an event counts once even when several of the profiles are listed.
-+func (r *Repository) GetManualWindowUsageForProfiles(
-+	ctx context.Context,
-+	executionProfileIDs []string,
-+	start time.Time,
-+	end time.Time,
-+) (ManualWindowUsage, error) {
-+	ids := make([]string, 0, len(executionProfileIDs))
-+	for _, id := range executionProfileIDs {
-+		if id != "" {
-+			ids = append(ids, id)
-+		}
-+	}
-+	if len(ids) == 0 {
-+		return ManualWindowUsage{}, fmt.Errorf("manual window usage requires a concrete execution profile")
-+	}
-+	if !end.After(start) {
-+		return ManualWindowUsage{}, nil
-+	}
-+	query, args, err := sqlx.In(manualWindowUsageQuery,
-+		costSourceUnpriced, usageCompletenessComplete, start, end, ids, ids)
-+	if err != nil {
-+		return ManualWindowUsage{}, err
-+	}
-+	usage := ManualWindowUsage{}
-+	var attributedByTurn int64
-+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), args...).Scan(
-+		&usage.EventCount,
-+		&usage.TokensTotal,
-+		&usage.CostSubcents,
-+		&usage.UnpricedCount,
-+		&usage.IncompleteCount,
-+		&attributedByTurn,
-+	)
-+	if err != nil {
-+		return ManualWindowUsage{}, err
-+	}
-+	usage.TurnsAttributed = attributedByTurn
-+	usage.ProfileAttributed = usage.EventCount - attributedByTurn
-+	if usage.ProfileAttributed < 0 {
-+		usage.ProfileAttributed = 0
-+	}
-+	return usage, nil
-+}
-+
-+var _ = models.TaskUsageTotals{}
 diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_postgres_test.go b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_postgres_test.go
 new file mode 100644
-index 0000000000..acc79d557d
+index 00000000000..acc79d557db
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_postgres_test.go
 @@ -0,0 +1,142 @@
@@ -6748,7 +6295,7 @@ index 0000000000..acc79d557d
 +}
 diff --git a/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_test.go b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_test.go
 new file mode 100644
-index 0000000000..49d2621240
+index 00000000000..49d26212407
 --- /dev/null
 +++ b/apps/backend/internal/task/repository/sqlite/dynamic_manual_usage_test.go
 @@ -0,0 +1,201 @@
@@ -6953,208 +6500,9 @@ index 0000000000..49d2621240
 +}
 +
 +var _ = models.TaskUsageTotals{}
-diff --git a/apps/backend/internal/task/repository/sqlite/usage_limit_observations.go b/apps/backend/internal/task/repository/sqlite/usage_limit_observations.go
-new file mode 100644
-index 0000000000..be1845129e
---- /dev/null
-+++ b/apps/backend/internal/task/repository/sqlite/usage_limit_observations.go
-@@ -0,0 +1,124 @@
-+package sqlite
-+
-+import (
-+	"context"
-+	"fmt"
-+	"time"
-+)
-+
-+// UsageLimitObservation is the recorded usage of a provider account at the
-+// moment one of its candidates hit a usage or rate limit. Kandev keeps it so the
-+// point where an undisclosed limit bites can be estimated from its own ledger.
-+// Values are recorded-only lower bounds over trailing windows ending at the hit.
-+type UsageLimitObservation struct {
-+	ID                 string    `db:"id"`
-+	ExecutionProfileID string    `db:"execution_profile_id"`
-+	AccountKey         string    `db:"account_key"`
-+	Code               string    `db:"code"`
-+	ObservedAt         time.Time `db:"observed_at"`
-+	Turns5h            int64     `db:"turns_5h"`
-+	Tokens5h           int64     `db:"tokens_5h"`
-+	TurnsDay           int64     `db:"turns_day"`
-+	TokensDay          int64     `db:"tokens_day"`
-+	CostSubcentsDay    int64     `db:"cost_subcents_day"`
-+	TurnsWeek          int64     `db:"turns_week"`
-+	TokensWeek         int64     `db:"tokens_week"`
-+}
-+
-+// initUsageLimitObservationsSchema creates the limit observation log and the
-+// route attempt index that round-robin continuation reads. Both are new, so
-+// CREATE ... IF NOT EXISTS is complete.
-+func (r *Repository) initUsageLimitObservationsSchema() error {
-+	_, err := r.db.ExecContext(r.migrationContext(), `
-+		CREATE TABLE IF NOT EXISTS usage_limit_observations (
-+			id TEXT PRIMARY KEY,
-+			execution_profile_id TEXT NOT NULL,
-+			account_key TEXT NOT NULL DEFAULT '',
-+			code TEXT NOT NULL DEFAULT '',
-+			observed_at TIMESTAMP NOT NULL,
-+			turns_5h BIGINT NOT NULL DEFAULT 0,
-+			tokens_5h BIGINT NOT NULL DEFAULT 0,
-+			turns_day BIGINT NOT NULL DEFAULT 0,
-+			tokens_day BIGINT NOT NULL DEFAULT 0,
-+			cost_subcents_day BIGINT NOT NULL DEFAULT 0,
-+			turns_week BIGINT NOT NULL DEFAULT 0,
-+			tokens_week BIGINT NOT NULL DEFAULT 0
-+		);
-+
-+		CREATE INDEX IF NOT EXISTS idx_usage_limit_observations_account
-+			ON usage_limit_observations(account_key, observed_at);
-+
-+		CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_logical_created
-+			ON dynamic_route_attempts(logical_profile_id, created_at);
-+	`)
-+	if err != nil {
-+		return fmt.Errorf("create usage limit observations: %w", err)
-+	}
-+	return nil
-+}
-+
-+// InsertUsageLimitObservation appends one observation.
-+func (r *Repository) InsertUsageLimitObservation(ctx context.Context, observation UsageLimitObservation) error {
-+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-+		INSERT INTO usage_limit_observations (
-+			id, execution_profile_id, account_key, code, observed_at,
-+			turns_5h, tokens_5h, turns_day, tokens_day, cost_subcents_day, turns_week, tokens_week
-+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-+	`),
-+		observation.ID, observation.ExecutionProfileID, observation.AccountKey, observation.Code,
-+		observation.ObservedAt.UTC(),
-+		observation.Turns5h, observation.Tokens5h, observation.TurnsDay, observation.TokensDay,
-+		observation.CostSubcentsDay, observation.TurnsWeek, observation.TokensWeek,
-+	)
-+	return err
-+}
-+
-+// ListUsageLimitObservationsSince returns observations at or after since,
-+// newest first.
-+func (r *Repository) ListUsageLimitObservationsSince(
-+	ctx context.Context,
-+	since time.Time,
-+) ([]UsageLimitObservation, error) {
-+	var observations []UsageLimitObservation
-+	err := r.ro.SelectContext(ctx, &observations, r.ro.Rebind(`
-+		SELECT id, execution_profile_id, account_key, code, observed_at,
-+		       turns_5h, tokens_5h, turns_day, tokens_day, cost_subcents_day, turns_week, tokens_week
-+		  FROM usage_limit_observations
-+		 WHERE observed_at >= ?
-+		 ORDER BY observed_at DESC
-+	`), since.UTC())
-+	return observations, err
-+}
-+
-+// LastDynamicRouteSelections returns when each concrete candidate of a logical
-+// dynamic profile was last selected, from the durable route attempt log. The
-+// scan is bounded to recent attempts because only the latest per candidate
-+// matters.
-+func (r *Repository) LastDynamicRouteSelections(
-+	ctx context.Context,
-+	logicalProfileID string,
-+) (map[string]time.Time, error) {
-+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-+		SELECT execution_profile_id, created_at
-+		  FROM dynamic_route_attempts
-+		 WHERE logical_profile_id = ? AND execution_profile_id <> ''
-+		 ORDER BY created_at DESC
-+		 LIMIT 500
-+	`), logicalProfileID)
-+	if err != nil {
-+		return nil, err
-+	}
-+	defer func() { _ = rows.Close() }()
-+	latest := make(map[string]time.Time)
-+	for rows.Next() {
-+		var candidateID string
-+		var createdAt time.Time
-+		if err := rows.Scan(&candidateID, &createdAt); err != nil {
-+			return nil, err
-+		}
-+		if _, seen := latest[candidateID]; !seen {
-+			latest[candidateID] = createdAt
-+		}
-+	}
-+	return latest, rows.Err()
-+}
-diff --git a/apps/backend/internal/task/repository/sqlite/usage_limit_observations_test.go b/apps/backend/internal/task/repository/sqlite/usage_limit_observations_test.go
-new file mode 100644
-index 0000000000..5b90eaed5c
---- /dev/null
-+++ b/apps/backend/internal/task/repository/sqlite/usage_limit_observations_test.go
-@@ -0,0 +1,63 @@
-+package sqlite
-+
-+import (
-+	"context"
-+	"testing"
-+	"time"
-+)
-+
-+func insertRouteAttempt(t *testing.T, repo *Repository, id, sessionID, logical, candidate string, generation int64, at time.Time) {
-+	t.Helper()
-+	if _, err := repo.db.Exec(repo.db.Rebind(`
-+		INSERT INTO dynamic_route_attempts
-+			(id, session_id, logical_profile_id, execution_profile_id, route_generation, profile_version, reason, created_at)
-+		VALUES (?, ?, ?, ?, ?, 1, 'tier_round_robin', ?)
-+	`), id, sessionID, logical, candidate, generation, at); err != nil {
-+		t.Fatalf("insert attempt %s: %v", id, err)
-+	}
-+}
-+
-+// TestLastDynamicRouteSelectionsKeepsTheLatestPerCandidate pins the durable
-+// source round-robin selection continues from after a restart.
-+func TestLastDynamicRouteSelectionsKeepsTheLatestPerCandidate(t *testing.T) {
-+	repo := newUsageEventsTestRepo(t)
-+	createUsageEventsTestTask(t, repo, "task-rr")
-+	createUsageEventsTestSession(t, repo, "session-rr", "task-rr")
-+	base := time.Date(2026, 10, 4, 1, 0, 0, 0, time.UTC)
-+	insertRouteAttempt(t, repo, "a1", "session-rr", "dynamic", "a", 1, base)
-+	insertRouteAttempt(t, repo, "b1", "session-rr", "dynamic", "b", 2, base.Add(time.Minute))
-+	insertRouteAttempt(t, repo, "a2", "session-rr", "dynamic", "a", 3, base.Add(2*time.Minute))
-+	insertRouteAttempt(t, repo, "x1", "session-rr", "other", "x", 4, base.Add(3*time.Minute))
-+
-+	latest, err := repo.LastDynamicRouteSelections(context.Background(), "dynamic")
-+	if err != nil {
-+		t.Fatalf("LastDynamicRouteSelections: %v", err)
-+	}
-+	if len(latest) != 2 || !latest["a"].Equal(base.Add(2*time.Minute)) || !latest["b"].Equal(base.Add(time.Minute)) {
-+		t.Fatalf("latest = %v, want the newest attempt per candidate of this profile", latest)
-+	}
-+}
-+
-+func TestUsageLimitObservationsRoundTrip(t *testing.T) {
-+	repo := newUsageEventsTestRepo(t)
-+	ctx := context.Background()
-+	at := time.Date(2026, 10, 4, 3, 0, 0, 0, time.UTC)
-+	for index, turns := range []int64{120, 80} {
-+		if err := repo.InsertUsageLimitObservation(ctx, UsageLimitObservation{
-+			ID: []string{"o1", "o2"}[index], ExecutionProfileID: "zen", AccountKey: "opencode-zen:auth",
-+			Code: "quota_limited", ObservedAt: at.Add(time.Duration(index) * time.Hour), TurnsDay: turns,
-+		}); err != nil {
-+			t.Fatalf("insert: %v", err)
-+		}
-+	}
-+	observations, err := repo.ListUsageLimitObservationsSince(ctx, at.Add(-time.Hour))
-+	if err != nil {
-+		t.Fatalf("list: %v", err)
-+	}
-+	if len(observations) != 2 || observations[0].ID != "o2" || observations[1].TurnsDay != 120 {
-+		t.Fatalf("observations = %#v, want both, newest first", observations)
-+	}
-+	if later, _ := repo.ListUsageLimitObservationsSince(ctx, at.Add(2*time.Hour)); len(later) != 0 {
-+		t.Fatalf("later = %#v, want none after the lookback start", later)
-+	}
-+}
 diff --git a/apps/web/components/settings/dynamic-agent-candidate-list.mobile.test.tsx b/apps/web/components/settings/dynamic-agent-candidate-list.mobile.test.tsx
 new file mode 100644
-index 0000000000..797aee0b41
+index 00000000000..797aee0b413
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-candidate-list.mobile.test.tsx
 @@ -0,0 +1,117 @@
@@ -7277,7 +6625,7 @@ index 0000000000..797aee0b41
 +});
 diff --git a/apps/web/components/settings/dynamic-agent-candidate-list.test.tsx b/apps/web/components/settings/dynamic-agent-candidate-list.test.tsx
 new file mode 100644
-index 0000000000..fab08c70d4
+index 00000000000..fab08c70d48
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-candidate-list.test.tsx
 @@ -0,0 +1,167 @@
@@ -7449,7 +6797,7 @@ index 0000000000..fab08c70d4
 +  });
 +});
 diff --git a/apps/web/components/settings/dynamic-agent-candidate-list.tsx b/apps/web/components/settings/dynamic-agent-candidate-list.tsx
-index 5764ad972a..4f383c0611 100644
+index 5764ad972ac..4f383c0611c 100644
 --- a/apps/web/components/settings/dynamic-agent-candidate-list.tsx
 +++ b/apps/web/components/settings/dynamic-agent-candidate-list.tsx
 @@ -1,22 +1,30 @@
@@ -7789,7 +7137,7 @@ index 5764ad972a..4f383c0611 100644
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-candidate-row.tsx b/apps/web/components/settings/dynamic-agent-candidate-row.tsx
 new file mode 100644
-index 0000000000..5b703c099c
+index 00000000000..5b703c099c4
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-candidate-row.tsx
 @@ -0,0 +1,205 @@
@@ -8000,7 +7348,7 @@ index 0000000000..5b703c099c
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-inset-surface.tsx b/apps/web/components/settings/dynamic-agent-inset-surface.tsx
 new file mode 100644
-index 0000000000..14812b5945
+index 00000000000..14812b59452
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-inset-surface.tsx
 @@ -0,0 +1,66 @@
@@ -8072,7 +7420,7 @@ index 0000000000..14812b5945
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-manual-window-editor.tsx b/apps/web/components/settings/dynamic-agent-manual-window-editor.tsx
 new file mode 100644
-index 0000000000..7db8cca6c4
+index 00000000000..7db8cca6c43
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-manual-window-editor.tsx
 @@ -0,0 +1,203 @@
@@ -8281,7 +7629,7 @@ index 0000000000..7db8cca6c4
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-model-settings.tsx b/apps/web/components/settings/dynamic-agent-model-settings.tsx
 new file mode 100644
-index 0000000000..ce4e0ec89b
+index 00000000000..ce4e0ec89b3
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-model-settings.tsx
 @@ -0,0 +1,208 @@
@@ -8494,7 +7842,7 @@ index 0000000000..ce4e0ec89b
 +
 +export { isManualWindowValid };
 diff --git a/apps/web/components/settings/dynamic-agent-policy-editor.tsx b/apps/web/components/settings/dynamic-agent-policy-editor.tsx
-index 9150072f99..6cccb4f06f 100644
+index 9150072f99f..6cccb4f06fd 100644
 --- a/apps/web/components/settings/dynamic-agent-policy-editor.tsx
 +++ b/apps/web/components/settings/dynamic-agent-policy-editor.tsx
 @@ -14,7 +14,7 @@ import {
@@ -8536,7 +7884,7 @@ index 9150072f99..6cccb4f06f 100644
          </div>
          {policy.waitForReset.enabled && (
 diff --git a/apps/web/components/settings/dynamic-agent-profile-editor.tsx b/apps/web/components/settings/dynamic-agent-profile-editor.tsx
-index d62c67c059..a9c4567434 100644
+index d62c67c0597..a9c45674347 100644
 --- a/apps/web/components/settings/dynamic-agent-profile-editor.tsx
 +++ b/apps/web/components/settings/dynamic-agent-profile-editor.tsx
 @@ -9,9 +9,11 @@ import { Separator } from "@kandev/ui/separator";
@@ -8625,7 +7973,7 @@ index d62c67c059..a9c4567434 100644
    );
 diff --git a/apps/web/components/settings/dynamic-agent-tier-settings.tsx b/apps/web/components/settings/dynamic-agent-tier-settings.tsx
 new file mode 100644
-index 0000000000..b4ba5637a9
+index 00000000000..b4ba5637a91
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-tier-settings.tsx
 @@ -0,0 +1,176 @@
@@ -8807,7 +8155,7 @@ index 0000000000..b4ba5637a9
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-tiers.test.ts b/apps/web/components/settings/dynamic-agent-tiers.test.ts
 new file mode 100644
-index 0000000000..a50138938b
+index 00000000000..a50138938b5
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-tiers.test.ts
 @@ -0,0 +1,238 @@
@@ -9051,7 +8399,7 @@ index 0000000000..a50138938b
 +});
 diff --git a/apps/web/components/settings/dynamic-agent-tiers.ts b/apps/web/components/settings/dynamic-agent-tiers.ts
 new file mode 100644
-index 0000000000..31b6f0937b
+index 00000000000..31b6f0937b1
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-tiers.ts
 @@ -0,0 +1,320 @@
@@ -9377,7 +8725,7 @@ index 0000000000..31b6f0937b
 +];
 diff --git a/apps/web/components/settings/dynamic-agent-unclassified-bulk-apply.tsx b/apps/web/components/settings/dynamic-agent-unclassified-bulk-apply.tsx
 new file mode 100644
-index 0000000000..999f39e22b
+index 00000000000..999f39e22b9
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-unclassified-bulk-apply.tsx
 @@ -0,0 +1,71 @@
@@ -9454,7 +8802,7 @@ index 0000000000..999f39e22b
 +}
 diff --git a/apps/web/components/settings/dynamic-agent-unclassified-editor.tsx b/apps/web/components/settings/dynamic-agent-unclassified-editor.tsx
 new file mode 100644
-index 0000000000..fa48a0a84d
+index 00000000000..fa48a0a84df
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-agent-unclassified-editor.tsx
 @@ -0,0 +1,101 @@
@@ -9561,7 +8909,7 @@ index 0000000000..fa48a0a84d
 +}
 diff --git a/apps/web/components/settings/dynamic-settings-touch-targets.test.tsx b/apps/web/components/settings/dynamic-settings-touch-targets.test.tsx
 new file mode 100644
-index 0000000000..e97c7dc272
+index 00000000000..e97c7dc2723
 --- /dev/null
 +++ b/apps/web/components/settings/dynamic-settings-touch-targets.test.tsx
 @@ -0,0 +1,81 @@
@@ -9647,7 +8995,7 @@ index 0000000000..e97c7dc272
 +  });
 +});
 diff --git a/apps/web/components/settings/settings-control.ts b/apps/web/components/settings/settings-control.ts
-index 143d5043a6..1d62e5f01f 100644
+index 143d5043a63..1d62e5f01fc 100644
 --- a/apps/web/components/settings/settings-control.ts
 +++ b/apps/web/components/settings/settings-control.ts
 @@ -16,3 +16,25 @@ export function settingsCredentialClassName(className?: string) {
@@ -9678,7 +9026,7 @@ index 143d5043a6..1d62e5f01f 100644
 +}
 diff --git a/apps/web/e2e/helpers/dynamic-tier-selection.ts b/apps/web/e2e/helpers/dynamic-tier-selection.ts
 new file mode 100644
-index 0000000000..cd99e7e0ab
+index 00000000000..cd99e7e0abd
 --- /dev/null
 +++ b/apps/web/e2e/helpers/dynamic-tier-selection.ts
 @@ -0,0 +1,123 @@
@@ -9806,7 +9154,7 @@ index 0000000000..cd99e7e0ab
 +    .toBe(true);
 +}
 diff --git a/apps/web/e2e/tests/settings/dynamic-agent-profile-card.spec.ts b/apps/web/e2e/tests/settings/dynamic-agent-profile-card.spec.ts
-index 2303a39075..e1c2137d01 100644
+index 2303a39075e..e1c2137d01c 100644
 --- a/apps/web/e2e/tests/settings/dynamic-agent-profile-card.spec.ts
 +++ b/apps/web/e2e/tests/settings/dynamic-agent-profile-card.spec.ts
 @@ -1,4 +1,10 @@
@@ -10052,7 +9400,7 @@ index 2303a39075..e1c2137d01 100644
 +  });
 +});
 diff --git a/apps/web/e2e/tests/settings/mobile-dynamic-agent-profile-card.spec.ts b/apps/web/e2e/tests/settings/mobile-dynamic-agent-profile-card.spec.ts
-index 1626442cd2..ad04e2cecf 100644
+index 1626442cd2c..ad04e2cecf8 100644
 --- a/apps/web/e2e/tests/settings/mobile-dynamic-agent-profile-card.spec.ts
 +++ b/apps/web/e2e/tests/settings/mobile-dynamic-agent-profile-card.spec.ts
 @@ -1,4 +1,11 @@
@@ -10209,7 +9557,7 @@ index 1626442cd2..ad04e2cecf 100644
 +});
 diff --git a/apps/web/hooks/domains/settings/use-agent-profile-usage.test.tsx b/apps/web/hooks/domains/settings/use-agent-profile-usage.test.tsx
 new file mode 100644
-index 0000000000..8858f28f0f
+index 00000000000..8858f28f0f5
 --- /dev/null
 +++ b/apps/web/hooks/domains/settings/use-agent-profile-usage.test.tsx
 @@ -0,0 +1,58 @@
@@ -10273,7 +9621,7 @@ index 0000000000..8858f28f0f
 +});
 diff --git a/apps/web/hooks/domains/settings/use-dynamic-selection-preview.test.tsx b/apps/web/hooks/domains/settings/use-dynamic-selection-preview.test.tsx
 new file mode 100644
-index 0000000000..78d4a4e181
+index 00000000000..78d4a4e181f
 --- /dev/null
 +++ b/apps/web/hooks/domains/settings/use-dynamic-selection-preview.test.tsx
 @@ -0,0 +1,94 @@
@@ -10373,7 +9721,7 @@ index 0000000000..78d4a4e181
 +});
 diff --git a/apps/web/hooks/domains/settings/use-dynamic-selection-preview.ts b/apps/web/hooks/domains/settings/use-dynamic-selection-preview.ts
 new file mode 100644
-index 0000000000..e39781c324
+index 00000000000..e39781c3249
 --- /dev/null
 +++ b/apps/web/hooks/domains/settings/use-dynamic-selection-preview.ts
 @@ -0,0 +1,73 @@
@@ -10452,7 +9800,7 @@ index 0000000000..e39781c324
 +}
 diff --git a/apps/web/lib/api/domains/agent-profile-selection.test.ts b/apps/web/lib/api/domains/agent-profile-selection.test.ts
 new file mode 100644
-index 0000000000..b6115d266e
+index 00000000000..b6115d266ea
 --- /dev/null
 +++ b/apps/web/lib/api/domains/agent-profile-selection.test.ts
 @@ -0,0 +1,197 @@
@@ -10655,7 +10003,7 @@ index 0000000000..b6115d266e
 +});
 diff --git a/apps/web/lib/api/domains/agent-profile-window-scope.test.ts b/apps/web/lib/api/domains/agent-profile-window-scope.test.ts
 new file mode 100644
-index 0000000000..95d56993bc
+index 00000000000..95d56993bca
 --- /dev/null
 +++ b/apps/web/lib/api/domains/agent-profile-window-scope.test.ts
 @@ -0,0 +1,71 @@
@@ -10732,7 +10080,7 @@ index 0000000000..95d56993bc
 +});
 diff --git a/docs/plans/dynamic-profile-tier-selection/plan.md b/docs/plans/dynamic-profile-tier-selection/plan.md
 new file mode 100644
-index 0000000000..0392d5c6ef
+index 00000000000..0392d5c6ef1
 --- /dev/null
 +++ b/docs/plans/dynamic-profile-tier-selection/plan.md
 @@ -0,0 +1,375 @@
@@ -11113,7 +10461,7 @@ index 0000000000..0392d5c6ef
 +and uncommitted. Final affected-document validation is recorded in the task plan.
 diff --git a/docs/plans/dynamic-profile-tier-selection/task-01-selection-contract.md b/docs/plans/dynamic-profile-tier-selection/task-01-selection-contract.md
 new file mode 100644
-index 0000000000..a5422e8f88
+index 00000000000..a5422e8f886
 --- /dev/null
 +++ b/docs/plans/dynamic-profile-tier-selection/task-01-selection-contract.md
 @@ -0,0 +1,176 @@
@@ -11295,7 +10643,7 @@ index 0000000000..a5422e8f88
 +work order adds is the foundation they consume.
 diff --git a/docs/plans/dynamic-profile-tier-selection/task-02-tier-routing.md b/docs/plans/dynamic-profile-tier-selection/task-02-tier-routing.md
 new file mode 100644
-index 0000000000..63778650e6
+index 00000000000..63778650e60
 --- /dev/null
 +++ b/docs/plans/dynamic-profile-tier-selection/task-02-tier-routing.md
 @@ -0,0 +1,456 @@
@@ -11757,7 +11105,7 @@ index 0000000000..63778650e6
 +docs, three-model RV, fork PR) are untouched.
 diff --git a/docs/plans/dynamic-profile-tier-selection/task-03-settings-interaction.md b/docs/plans/dynamic-profile-tier-selection/task-03-settings-interaction.md
 new file mode 100644
-index 0000000000..abe95cc30c
+index 00000000000..abe95cc30cf
 --- /dev/null
 +++ b/docs/plans/dynamic-profile-tier-selection/task-03-settings-interaction.md
 @@ -0,0 +1,286 @@
@@ -12049,7 +11397,7 @@ index 0000000000..abe95cc30c
 +
 diff --git a/docs/plans/dynamic-profile-tier-selection/task-04-delivery-review.md b/docs/plans/dynamic-profile-tier-selection/task-04-delivery-review.md
 new file mode 100644
-index 0000000000..0b4f9eaeac
+index 00000000000..0b4f9eaeace
 --- /dev/null
 +++ b/docs/plans/dynamic-profile-tier-selection/task-04-delivery-review.md
 @@ -0,0 +1,302 @@
@@ -12357,7 +11705,7 @@ index 0000000000..0b4f9eaeac
 +performed during planning.
 diff --git a/docs/plans/provider-account-usage/plan.md b/docs/plans/provider-account-usage/plan.md
 new file mode 100644
-index 0000000000..dfbea3c041
+index 00000000000..dfbea3c041e
 --- /dev/null
 +++ b/docs/plans/provider-account-usage/plan.md
 @@ -0,0 +1,81 @@
@@ -12444,7 +11792,7 @@ index 0000000000..dfbea3c041
 +readback after replacement.
 diff --git a/docs/plans/provider-account-usage/task-01-backend-usage-sources.md b/docs/plans/provider-account-usage/task-01-backend-usage-sources.md
 new file mode 100644
-index 0000000000..19015c2f46
+index 00000000000..19015c2f46b
 --- /dev/null
 +++ b/docs/plans/provider-account-usage/task-01-backend-usage-sources.md
 @@ -0,0 +1,78 @@
@@ -12528,7 +11876,7 @@ index 0000000000..19015c2f46
 +  times out on the Windows host when run alone, independent of this change.
 diff --git a/docs/plans/provider-account-usage/task-02-agents-list-usage.md b/docs/plans/provider-account-usage/task-02-agents-list-usage.md
 new file mode 100644
-index 0000000000..8abf8123cf
+index 00000000000..8abf8123cf0
 --- /dev/null
 +++ b/docs/plans/provider-account-usage/task-02-agents-list-usage.md
 @@ -0,0 +1,65 @@
@@ -12599,7 +11947,7 @@ index 0000000000..8abf8123cf
 +  changed files, and vitest over the changed and adjacent settings tests pass.
 diff --git a/docs/plans/provider-account-usage/task-03-selection-modes-and-internal-usage.md b/docs/plans/provider-account-usage/task-03-selection-modes-and-internal-usage.md
 new file mode 100644
-index 0000000000..1d34e5b122
+index 00000000000..1d34e5b1227
 --- /dev/null
 +++ b/docs/plans/provider-account-usage/task-03-selection-modes-and-internal-usage.md
 @@ -0,0 +1,69 @@
@@ -12673,7 +12021,7 @@ index 0000000000..1d34e5b122
 +  issues. An existing test that pinned row order for all-unknown pace now pins
 +  the random draw required by the owner.
 diff --git a/docs/public/configuration.md b/docs/public/configuration.md
-index 18a2e71af8..374cf15343 100644
+index 18a2e71af88..374cf15343a 100644
 --- a/docs/public/configuration.md
 +++ b/docs/public/configuration.md
 @@ -231,6 +231,7 @@ See [delivery retention operations](operations.md#backend-delivery-retention) fo
@@ -12692,3 +12040,6 @@ index 18a2e71af8..374cf15343 100644
  
  messageQueue:
    maxPerSession: 10
+-- 
+2.55.0.windows.3
+
