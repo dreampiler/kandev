@@ -27,6 +27,7 @@ export type TaskActionsMenuBoardRow = {
   workflowStepId?: string | null;
   state?: TaskState;
   priority?: TaskPriority;
+  executionGrade?: string;
   repositoryId?: string;
   repositories?: Array<{
     id: string;

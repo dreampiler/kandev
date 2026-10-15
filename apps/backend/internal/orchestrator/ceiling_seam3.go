@@ -114,6 +114,7 @@ func (s *Service) admitOrDeferWorkflowStepEnsureWithBinding(
 	}
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic, seam: "startSessionForWorkflowStepPreConsult",
+		workflowStepID: workflowStepID,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

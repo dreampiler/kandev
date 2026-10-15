@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { ExecutionGradeField } from "@/components/settings/execution-grade-field";
 import type { SelectConfigOption } from "@/components/model-config-selector";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -26,6 +27,7 @@ import type {
 
 export type ProfileFormData = {
   name: string;
+  execution_grade?: string;
   model: string;
   /** Optional single fallback model applied when `model` is unavailable. */
   fallback_model?: string;
@@ -215,6 +217,13 @@ export function ProfileFormFields({
         baselineName={baselineProfile?.name}
         visible={!hideNameField}
       />
+
+      {!hideNameField && (
+        <ExecutionGradeField
+          value={profile.execution_grade ?? ""}
+          onChange={(execution_grade) => onChange({ execution_grade })}
+        />
+      )}
 
       <ProfileCapabilitiesSection
         profile={profile}

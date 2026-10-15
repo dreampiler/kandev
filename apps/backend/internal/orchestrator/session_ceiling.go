@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"sync"
 	"time"
 
@@ -39,6 +41,7 @@ const (
 // Reason codes carried verbatim by the admission log line and the card surface.
 const (
 	ceilingReasonRefused           = "ceiling"
+	ceilingReasonGradeRefused      = "ceiling_execution_grade"
 	ceilingReasonManualOverride    = "ceiling_manual_override"
 	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
 	ceilingReasonSuperseded        = "ceiling_superseded"
@@ -74,16 +77,23 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
+	grade     string
 	sessionID string
 	takenAt   time.Time
 }
 
 // admissionRequest is one launch asking for capacity.
 type admissionRequest struct {
-	taskID    string
-	sessionID string
-	origin    launchOrigin
-	seam      string
+	grade           string
+	profileID       string
+	profileExplicit bool
+	startSelection  *explicitWorkflowStartSelection
+	workflowStepID  string
+	reservationHeld bool
+	taskID          string
+	sessionID       string
+	origin          launchOrigin
+	seam            string
 }
 
 // admissionDecision is the controller's answer.
@@ -112,14 +122,20 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
-	mu           sync.Mutex
-	ceiling      int
-	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	runSessions  RunSessionCapacitySource
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
+	policy          string
+	gradeLimits     map[string]int
+	persistedGrades map[string]string
+	resolveGrade    func(context.Context, admissionRequest) (string, error)
+	persistGrade    func(context.Context, string, string) error
+	profileGrade    func(context.Context, string) (string, error)
+	mu              sync.Mutex
+	ceiling         int
+	reservations    map[string]*ceilingReservation
+	lister          admittedSessionLister
+	runSessions     RunSessionCapacitySource
+	logger          *zap.Logger
+	now             func() time.Time
+	newKey          func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -232,24 +248,16 @@ func (s *Service) SessionCapacity() int {
 // decision time rather than kept as a running tally, so a restart, a panic or a
 // missed release cannot leak capacity permanently.
 func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
-	counted := make(map[string]struct{})
-	if c.lister != nil {
-		ids, err := c.lister.ListAdmittedSessionIDs(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, id := range ids {
-			counted[id] = struct{}{}
-		}
+	if c.lister == nil && c.policy == sessioncapacity.PolicyAll {
+		return nil, fmt.Errorf("task execution population unavailable")
 	}
-	if c.runSessions != nil {
-		ids, err := c.runSessions.ListAdmittedRunSessionIDs(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, id := range ids {
-			counted[runSessionCapacityKey(id)] = struct{}{}
-		}
+	counted := make(map[string]struct{})
+	c.persistedGrades = make(map[string]string)
+	if err := c.appendTaskPopulationLocked(ctx, counted); err != nil {
+		return nil, err
+	}
+	if err := c.appendRunPopulationLocked(ctx, counted); err != nil {
+		return nil, err
 	}
 	return counted, nil
 }
@@ -274,12 +282,16 @@ func (c *sessionCeilingController) populationLocked(counted map[string]struct{})
 
 // reserveLocked records an in-flight reservation, keyed by session id where one
 // exists and by a launch-scoped identifier otherwise.
-func (c *sessionCeilingController) reserveLocked(sessionID string) string {
+func (c *sessionCeilingController) reserveLocked(sessionID string, grade ...string) string {
 	key := sessionID
 	if key == "" {
 		key = c.newKey()
 	}
-	c.reservations[key] = &ceilingReservation{sessionID: sessionID, takenAt: c.now()}
+	value := ""
+	if len(grade) > 0 {
+		value = grade[0]
+	}
+	c.reservations[key] = &ceilingReservation{sessionID: sessionID, takenAt: c.now(), grade: value}
 	return key
 }
 
@@ -303,15 +315,24 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+	return c.admitLocked(ctx, req, origin)
+}
+
+func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) admissionDecision {
+	var gradeErr error
+	req, gradeErr = c.requestGradeLocked(ctx, req)
+	if gradeErr != nil {
+		return c.decideUnknownPopulationLocked(req, origin, gradeErr)
+	}
+	if c.ceiling == unlimitedSessionCeiling && len(c.gradeLimits) == 0 {
+		return c.persistDecisionLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
 	if err != nil {
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
-	return c.decideLocked(req, origin, counted)
+	return c.persistDecisionLocked(ctx, req, c.decideLocked(req, origin, counted))
 }
 
 // admitUnlimitedLocked keeps launch ownership and callback accounting intact
@@ -324,7 +345,7 @@ func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, or
 			return decision
 		}
 	}
-	decision.reservationKey = c.reserveLocked(req.sessionID)
+	decision.reservationKey = c.reserveLocked(req.sessionID, req.grade)
 	c.logDecision(req, origin, decision)
 	return decision
 }
@@ -333,6 +354,9 @@ func (c *sessionCeilingController) admitUnlimitedLocked(req admissionRequest, or
 // caller has already read inside the critical section.
 func (c *sessionCeilingController) decideLocked(req admissionRequest, origin launchOrigin, counted map[string]struct{}) admissionDecision {
 	population := c.populationLocked(counted)
+	if decision, ok := c.reserveSelectedStartLocked(req, counted, population); ok {
+		return decision
+	}
 
 	if decision, ok := c.alreadyAdmittedLocked(req, counted, population); ok {
 		return decision
@@ -344,14 +368,16 @@ func (c *sessionCeilingController) decideLocked(req admissionRequest, origin lau
 		ceiling:         c.ceiling,
 	}
 	switch {
+	case c.gradeFullLocked(counted, req.grade):
+		decision.reasonCode = ceilingReasonGradeRefused
 	case c.ceiling == unlimitedSessionCeiling || population < c.ceiling:
 		decision.admitted = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
-	case origin == launchOriginManual:
+		decision.reservationKey = c.reserveLocked(req.sessionID, req.grade)
+	case origin == launchOriginManual && c.policy != sessioncapacity.PolicyAll:
 		decision.admitted = true
 		decision.manualOverride = true
 		decision.reasonCode = ceilingReasonManualOverride
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveLocked(req.sessionID, req.grade)
 	default:
 		decision.reasonCode = ceilingReasonRefused
 	}
@@ -394,10 +420,10 @@ func (c *sessionCeilingController) decideUnknownPopulationLocked(req admissionRe
 		ceiling:    c.ceiling,
 		reasonCode: ceilingReasonUnknownPopulation,
 	}
-	if origin == launchOriginManual {
+	if origin == launchOriginManual && c.policy != sessioncapacity.PolicyAll {
 		decision.admitted = true
 		decision.manualOverride = true
-		decision.reservationKey = c.reserveLocked(req.sessionID)
+		decision.reservationKey = c.reserveLocked(req.sessionID, req.grade)
 	}
 	c.logDecision(req, origin, decision)
 	return decision
@@ -411,6 +437,7 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID),
 		zap.String("origin", string(origin)),
+		zap.String("execution_grade", req.grade),
 		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
 	}
@@ -516,8 +543,13 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.ceiling == unlimitedSessionCeiling {
-		return c.admitUnlimitedLocked(req, origin)
+	var gradeErr error
+	req, gradeErr = c.requestGradeLocked(ctx, req)
+	if gradeErr != nil {
+		return c.decideUnknownPopulationLocked(req, origin, gradeErr)
+	}
+	if c.ceiling == unlimitedSessionCeiling && len(c.gradeLimits) == 0 {
+		return c.persistDecisionLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
 
 	counted, err := c.countedRowsLocked(ctx)
@@ -525,7 +557,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		return c.decideUnknownPopulationLocked(req, origin, err)
 	}
 	if _, isCounted := counted[req.sessionID]; req.sessionID == "" || !isCounted {
-		return c.decideLocked(req, origin, counted)
+		return c.persistDecisionLocked(ctx, req, c.decideLocked(req, origin, counted))
 	}
 
 	decision := admissionDecision{
@@ -536,7 +568,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 		populationKnown: true,
 		ceiling:         c.ceiling,
 	}
-	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now()}
+	c.reservations[req.sessionID] = &ceilingReservation{sessionID: req.sessionID, takenAt: c.now(), grade: req.grade}
 	c.logDecision(req, origin, decision)
 	return decision
 }

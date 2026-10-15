@@ -194,6 +194,7 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
+	ExecutionGrade              string                         `json:"execution_grade"`
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
 	WorkflowID                  string                         `json:"workflow_id"`
@@ -403,9 +404,10 @@ type SessionRecoveryBlockDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade string `json:"admitted_execution_grade"`
+	ID                     string `json:"id"`
+	TaskID                 string `json:"task_id"`
+	QueueIncarnationID     string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name               string `json:"name"`
@@ -600,9 +602,10 @@ func WorkspaceRecoveryFromOperation(
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID                 string `json:"id"`
-	TaskID             string `json:"task_id"`
-	QueueIncarnationID string `json:"queue_incarnation_id"`
+	AdmittedExecutionGrade string `json:"admitted_execution_grade"`
+	ID                     string `json:"id"`
+	TaskID                 string `json:"task_id"`
+	QueueIncarnationID     string `json:"queue_incarnation_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
 	Name               string `json:"name"`
@@ -1156,6 +1159,7 @@ func FromTaskWithSessionInfo(
 		Description:                 task.Description,
 		State:                       task.State,
 		Priority:                    task.Priority,
+		ExecutionGrade:              task.ExecutionGrade,
 		WIPAdmitted:                 task.WIPAdmitted,
 		QueuedForStepID:             task.QueuedForStepID,
 		QueuedAt:                    task.QueuedAt,
@@ -1207,35 +1211,36 @@ func FromTaskWithSessionInfo(
 // FromTaskSessionSummary converts a session model to a summary DTO (no snapshot fields).
 func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
-		ID:                 session.ID,
-		TaskID:             session.TaskID,
-		QueueIncarnationID: session.QueueIncarnationID,
-		Name:               session.Name,
-		AgentExecutionID:   session.AgentExecutionID,
-		ContainerID:        session.ContainerID,
-		AgentProfileID:     session.AgentProfileID,
-		ExecutionProfileID: session.ExecutionProfileID,
-		RouteGeneration:    session.RouteGeneration,
-		RouteState:         session.RouteState,
-		RouteReason:        session.RouteReason,
-		ExecutorID:         session.ExecutorID,
-		ExecutorProfileID:  session.ExecutorProfileID,
-		EnvironmentID:      session.EnvironmentID,
-		RepositoryID:       session.RepositoryID,
-		BaseBranch:         session.BaseBranch,
-		BaseCommitSHA:      session.BaseCommitSHA,
-		WorkspacePath:      session.WorkspacePath,
-		State:              session.State,
-		ErrorMessage:       session.ErrorMessage,
-		Metadata:           session.Metadata,
-		StartedAt:          session.StartedAt,
-		CompletedAt:        session.CompletedAt,
-		UpdatedAt:          session.UpdatedAt,
-		IsPrimary:          session.IsPrimary,
-		IsPassthrough:      session.IsPassthrough,
-		ReviewStatus:       session.ReviewStatus,
-		TaskEnvironmentID:  session.TaskEnvironmentID,
-		LastReadMessageID:  session.LastReadMessageID,
+		ID:                     session.ID,
+		TaskID:                 session.TaskID,
+		QueueIncarnationID:     session.QueueIncarnationID,
+		Name:                   session.Name,
+		AgentExecutionID:       session.AgentExecutionID,
+		ContainerID:            session.ContainerID,
+		AgentProfileID:         session.AgentProfileID,
+		ExecutionProfileID:     session.ExecutionProfileID,
+		AdmittedExecutionGrade: session.AdmittedExecutionGrade,
+		RouteGeneration:        session.RouteGeneration,
+		RouteState:             session.RouteState,
+		RouteReason:            session.RouteReason,
+		ExecutorID:             session.ExecutorID,
+		ExecutorProfileID:      session.ExecutorProfileID,
+		EnvironmentID:          session.EnvironmentID,
+		RepositoryID:           session.RepositoryID,
+		BaseBranch:             session.BaseBranch,
+		BaseCommitSHA:          session.BaseCommitSHA,
+		WorkspacePath:          session.WorkspacePath,
+		State:                  session.State,
+		ErrorMessage:           session.ErrorMessage,
+		Metadata:               session.Metadata,
+		StartedAt:              session.StartedAt,
+		CompletedAt:            session.CompletedAt,
+		UpdatedAt:              session.UpdatedAt,
+		IsPrimary:              session.IsPrimary,
+		IsPassthrough:          session.IsPassthrough,
+		ReviewStatus:           session.ReviewStatus,
+		TaskEnvironmentID:      session.TaskEnvironmentID,
+		LastReadMessageID:      session.LastReadMessageID,
 	}
 	if worktrees := session.WorktreesAPI(); len(worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -1254,34 +1259,35 @@ func FromTaskSessionSummaryObservation(observation *models.TaskSessionSummaryObs
 
 func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
-		ID:                   session.ID,
-		TaskID:               session.TaskID,
-		QueueIncarnationID:   session.QueueIncarnationID,
-		Name:                 session.Name,
-		AgentExecutionID:     session.AgentExecutionID,
-		ContainerID:          session.ContainerID,
-		AgentProfileID:       session.AgentProfileID,
-		ExecutionProfileID:   session.ExecutionProfileID,
-		RouteGeneration:      session.RouteGeneration,
-		RouteState:           session.RouteState,
-		RouteReason:          session.RouteReason,
-		ExecutorID:           session.ExecutorID,
-		ExecutorProfileID:    session.ExecutorProfileID,
-		EnvironmentID:        session.EnvironmentID,
-		RepositoryID:         session.RepositoryID,
-		BaseBranch:           session.BaseBranch,
-		BaseCommitSHA:        session.BaseCommitSHA,
-		WorkspacePath:        session.WorkspacePath,
-		State:                session.State,
-		ErrorMessage:         session.ErrorMessage,
-		Metadata:             session.Metadata,
-		AgentProfileSnapshot: session.AgentProfileSnapshot,
-		ExecutorSnapshot:     session.ExecutorSnapshot,
-		EnvironmentSnapshot:  session.EnvironmentSnapshot,
-		RepositorySnapshot:   session.RepositorySnapshot,
-		StartedAt:            session.StartedAt,
-		CompletedAt:          session.CompletedAt,
-		UpdatedAt:            session.UpdatedAt,
+		ID:                     session.ID,
+		TaskID:                 session.TaskID,
+		QueueIncarnationID:     session.QueueIncarnationID,
+		Name:                   session.Name,
+		AgentExecutionID:       session.AgentExecutionID,
+		ContainerID:            session.ContainerID,
+		AgentProfileID:         session.AgentProfileID,
+		ExecutionProfileID:     session.ExecutionProfileID,
+		AdmittedExecutionGrade: session.AdmittedExecutionGrade,
+		RouteGeneration:        session.RouteGeneration,
+		RouteState:             session.RouteState,
+		RouteReason:            session.RouteReason,
+		ExecutorID:             session.ExecutorID,
+		ExecutorProfileID:      session.ExecutorProfileID,
+		EnvironmentID:          session.EnvironmentID,
+		RepositoryID:           session.RepositoryID,
+		BaseBranch:             session.BaseBranch,
+		BaseCommitSHA:          session.BaseCommitSHA,
+		WorkspacePath:          session.WorkspacePath,
+		State:                  session.State,
+		ErrorMessage:           session.ErrorMessage,
+		Metadata:               session.Metadata,
+		AgentProfileSnapshot:   session.AgentProfileSnapshot,
+		ExecutorSnapshot:       session.ExecutorSnapshot,
+		EnvironmentSnapshot:    session.EnvironmentSnapshot,
+		RepositorySnapshot:     session.RepositorySnapshot,
+		StartedAt:              session.StartedAt,
+		CompletedAt:            session.CompletedAt,
+		UpdatedAt:              session.UpdatedAt,
 		// Workflow fields
 		IsPrimary:             session.IsPrimary,
 		IsPassthrough:         session.IsPassthrough,

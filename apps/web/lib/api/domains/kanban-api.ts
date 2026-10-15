@@ -118,6 +118,7 @@ export async function createTask(
     start_when_unblocked?: boolean;
     workspace_path?: string;
     priority?: TaskPriority;
+    execution_grade?: string;
     project_id?: string;
     metadata?: Record<string, unknown>;
     /** Office agent instance to seat as the task's runner at create time. */
@@ -157,6 +158,7 @@ export async function updateTask(
     /** Human assignee. "" unassigns; omitting the field leaves it alone. */
     assignee_user_id?: string;
     priority?: TaskPriority;
+    execution_grade?: string;
   },
   options?: ApiRequestOptions,
 ) {

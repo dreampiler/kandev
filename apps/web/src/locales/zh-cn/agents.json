@@ -436,5 +436,11 @@
   "profileDragStart": "已选取配置档 {{name}}。第 {{position}} 个，共 {{total}} 个。",
   "profileDragOver": "配置档 {{name}} 已移动到第 {{position}} 个位置，共 {{total}} 个。",
   "profileDragEnd": "配置档 {{name}} 已放到第 {{position}} 个位置，共 {{total}} 个。",
-  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。"
+  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。",
+  "executionGradeLabel": "执行等级",
+  "executionGradeNone": "无等级",
+  "executionGradeInherit": "继承逻辑配置",
+  "executionGradeInvalid": "最多输入64个字符，不得包含控制字符。",
+  "executionGradeProfileHelp": "使用系统执行上限中配置的等级名称。留空时仅应用总上限。更改从下次执行开始生效，模型切换不会改变等级。",
+  "executionGradeTaskHelp": "留空时继承逻辑配置的执行等级。任务指定的等级从下次执行开始生效，不改变任务优先级。"
 }

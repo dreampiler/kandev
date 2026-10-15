@@ -153,6 +153,7 @@ func provideOrchestrator(
 	}
 
 	orchestratorSvc := orchestrator.NewService(serviceCfg, eventBus, agentManagerClient, taskRepoAdapter, taskRepo, userSvc, secretStore, msgQueue, log)
+	orchestratorSvc.SetExecutionCapacity(sessionCapacityResolution.Effective)
 	orchestratorSvc.SetStartupRecoveryOwnerContextResolver(func(ctx context.Context, ownerID, orgID string) (context.Context, error) {
 		return startupRecoveryOwnerContext(ctx, authSvc, ownerID, orgID)
 	})

@@ -262,6 +262,9 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     id: agentProfileId(pickString(profile, "id", "id")),
     ...(kind === "dynamic" || kind === "concrete" ? { kind: kind as AgentProfileKind } : {}),
     name: pickString(profile, "name", "name"),
+    ...((profile.executionGrade ?? profile.execution_grade) !== undefined
+      ? { executionGrade: pickString(profile, "executionGrade", "execution_grade") }
+      : {}),
     agentId: pickString(profile, "agentId", "agent_id"),
     agentDisplayName: pickString(profile, "agentDisplayName", "agent_display_name"),
     model: pickString(profile, "model", "model"),
@@ -342,6 +345,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "id", profile.id);
   setPayloadField(payload, "kind", profile.kind);
   setPayloadField(payload, "name", profile.name);
+  setPayloadField(payload, "execution_grade", profile.executionGrade);
   setPayloadField(payload, "agent_id", profile.agentId);
   setPayloadField(payload, "agent_display_name", profile.agentDisplayName);
   setPayloadField(payload, "model", profile.model);

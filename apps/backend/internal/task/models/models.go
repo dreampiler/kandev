@@ -1528,6 +1528,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade string `json:"execution_grade"`
 	ID             string `json:"id"`
 	WorkspaceID    string `json:"workspace_id"`
 	WorkflowID     string `json:"workflow_id"`
@@ -2373,6 +2374,7 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
+	AdmittedExecutionGrade string                 `json:"admitted_execution_grade"`
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
 	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
@@ -2495,22 +2497,23 @@ type ActiveSessionRecoveryCandidate struct {
 // TODO: Add v1.TaskSession type to pkg/api/v1/
 func (s *TaskSession) ToAPI() map[string]interface{} {
 	result := map[string]interface{}{
-		"id":                   s.ID,
-		"task_id":              s.TaskID,
-		"queue_incarnation_id": s.QueueIncarnationID,
-		"agent_execution_id":   s.AgentExecutionID,
-		"container_id":         s.ContainerID,
-		"agent_profile_id":     s.AgentProfileID,
-		"execution_profile_id": s.ExecutionProfileID,
-		"executor_id":          s.ExecutorID,
-		"executor_profile_id":  s.ExecutorProfileID,
-		"environment_id":       s.EnvironmentID,
-		"repository_id":        s.RepositoryID,
-		"base_branch":          s.BaseBranch,
-		"base_commit_sha":      s.BaseCommitSHA,
-		"state":                string(s.State),
-		"started_at":           s.StartedAt,
-		"updated_at":           s.UpdatedAt,
+		"id":                       s.ID,
+		"task_id":                  s.TaskID,
+		"queue_incarnation_id":     s.QueueIncarnationID,
+		"agent_execution_id":       s.AgentExecutionID,
+		"container_id":             s.ContainerID,
+		"agent_profile_id":         s.AgentProfileID,
+		"execution_profile_id":     s.ExecutionProfileID,
+		"admitted_execution_grade": s.AdmittedExecutionGrade,
+		"executor_id":              s.ExecutorID,
+		"executor_profile_id":      s.ExecutorProfileID,
+		"environment_id":           s.EnvironmentID,
+		"repository_id":            s.RepositoryID,
+		"base_branch":              s.BaseBranch,
+		"base_commit_sha":          s.BaseCommitSHA,
+		"state":                    string(s.State),
+		"started_at":               s.StartedAt,
+		"updated_at":               s.UpdatedAt,
 	}
 	if s.RouteGeneration > 0 {
 		result["route_generation"] = s.RouteGeneration
@@ -3629,6 +3632,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Description:       t.Description,
 		State:             t.State,
 		Priority:          t.Priority,
+		ExecutionGrade:    t.ExecutionGrade,
 		Repositories:      repositories,
 		CreatedAt:         t.CreatedAt,
 		UpdatedAt:         t.UpdatedAt,

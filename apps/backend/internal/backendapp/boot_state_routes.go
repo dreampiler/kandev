@@ -874,6 +874,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
 		"parentTaskId":                nullString(task.ParentID),
 		"priority":                    task.Priority,
+		"executionGrade":              task.ExecutionGrade,
 		"updatedAt":                   task.UpdatedAt,
 		"createdAt":                   task.CreatedAt,
 		// Dependency projection. This mapper is a camelCase whitelist writing

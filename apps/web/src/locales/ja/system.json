@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "初回実行はバックアップ準備後に開始",
   "toolPayload.analysisDetails": "分析詳細",
   "toolPayload.runDetails": "実行詳細",
-  "storageGoCacheBusyPolicySnapshot": "今回の実行では、タスク実行中の Go キャッシュクリーンアップが有効でした。"
+  "storageGoCacheBusyPolicySnapshot": "今回の実行では、タスク実行中の Go キャッシュクリーンアップが有効でした。",
+  "executionCapacityPolicy": "AI実行上限ポリシー",
+  "executionCapacityAutomatic": "自動開始",
+  "executionCapacityAll": "すべての実行",
+  "executionCapacityPolicyHelp": "自動開始では既存のセッション上限を維持します。すべての実行では手動・MCP開始にも適用し、等級別の上限も設定できます。ワークフローのWIP上限は別です。",
+  "executionCapacityAllHelp": "手動・MCP開始も空きを待ちます。等級や管理役に予約枠はありません。",
+  "executionCapacityOverallMaximum": "AI同時実行の最大数",
+  "executionCapacityOverallHelp": "全体の上限には正の整数を入力してください。等級別上限もこの容量を共有します。",
+  "executionGradeLimits": "実行等級別の上限",
+  "executionGradeLimitsHelp": "等級名は前後の空白を除いて重複せず、制御文字なしの64文字以内にしてください。上限は0〜2147483647の整数で、0の等級は待機します。一覧にない等級には全体の上限が適用されます。",
+  "executionGradeName": "実行等級 {{number}}",
+  "executionGradeMaximum": "等級の上限 {{number}}",
+  "executionGradeRemoveRow": "等級 {{number}} を削除",
+  "executionGradeRemove": "削除",
+  "executionGradeAdd": "等級を追加",
+  "executionGradesInvalid": "制御文字なしの1〜64文字の一意な等級名と、0〜2147483647の整数上限を入力してください。",
+  "executionGradeAllRequired": "自動開始を選択する前に等級別の上限を削除してください。",
+  "executionCapacityTitle": "AI同時実行の制限"
 }

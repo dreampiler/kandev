@@ -66,6 +66,7 @@ const agentInstanceColumns = `
 	COALESCE(desired_skills, '[]')          AS desired_skills,
 	COALESCE(executor_preference, '')       AS executor_preference,
 	COALESCE(execution_agent_profile_id, '') AS execution_agent_profile_id,
+	COALESCE(execution_grade, '') AS execution_grade,
 	COALESCE(pause_reason, '')              AS pause_reason,
 	COALESCE(consecutive_failures, 0)       AS consecutive_failures,
 	NULLIF(failure_threshold, 0)            AS failure_threshold,

@@ -108,6 +108,8 @@ export type AgentProfile = {
   /** Versioned routing document for the dynamic execution family. */
   dynamic?: DynamicAgentProfile;
   name: string;
+  /** Explicit capacity grade of the logical profile, independent of routing candidates. */
+  executionGrade?: string;
   /** ID of the agent (CLI) this profile belongs to. */
   agentId: string;
   /** Human display name for the agent CLI (e.g. "Claude Code"). */
@@ -244,6 +246,7 @@ export type AgentProfilePayload = {
   kind?: AgentProfileKind;
   name: string;
   agent_display_name: string;
+  execution_grade?: string;
   model: string;
   fallback_model?: string;
   auto_fallback?: boolean;

@@ -474,6 +474,7 @@ function buildKanbanTaskUpsert(
     position: task.position ?? 0,
     state: task.state,
     priority: task.priority,
+    executionGrade: task.execution_grade ?? existing?.executionGrade,
     origin: task.origin,
     repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
     repositories: mapTaskRepositories(task.repositories),

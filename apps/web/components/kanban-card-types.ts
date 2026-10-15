@@ -14,6 +14,7 @@ export interface Task {
   workflowStepId: string;
   state?: TaskState;
   priority?: TaskPriority;
+  executionGrade?: string;
   description?: string;
   position?: number;
   repositoryId?: string;

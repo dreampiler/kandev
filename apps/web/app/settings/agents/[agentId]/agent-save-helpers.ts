@@ -29,6 +29,7 @@ const MCP_SERVERS_KEY = "mcpServers";
 
 const profilePatchFieldMap: Array<[keyof ProfileFormData, keyof AgentProfile]> = [
   ["name", "name"],
+  ["execution_grade", "executionGrade"],
   ["model", "model"],
   ["fallback_model", "fallbackModel"],
   ["auto_fallback", "autoFallback"],
@@ -244,6 +245,7 @@ export type SaveAgentCallbacks = {
 function buildCreateProfilePayload(profile: DraftProfile) {
   return {
     name: profile.name,
+    execution_grade: profile.executionGrade?.trim(),
     model: profile.model,
     kind: profile.kind,
     fallback_model: profile.fallbackModel ?? "",
@@ -301,6 +303,10 @@ function areSelectedServerIdsEqual(left: string[] = [], right: string[] = []): b
 function buildUpdateProfilePayload(profile: DraftProfile, savedProfile: AgentProfile) {
   return {
     name: profile.name,
+    execution_grade:
+      (profile.executionGrade ?? "") === (savedProfile.executionGrade ?? "")
+        ? undefined
+        : (profile.executionGrade ?? "").trim(),
     model: profile.model,
     kind: profile.kind,
     fallback_model: profile.fallbackModel ?? "",
@@ -621,6 +627,7 @@ function isProfileIdentityDirty(draft: DraftProfile, saved: AgentProfile): boole
     (draft.kind ?? "concrete") !== (saved.kind ?? "concrete"),
     JSON.stringify(draft.dynamic ?? null) !== JSON.stringify(saved.dynamic ?? null),
     draft.name !== saved.name,
+    (draft.executionGrade ?? "") !== (saved.executionGrade ?? ""),
     draft.model !== saved.model,
     (draft.mode ?? "") !== (saved.mode ?? ""),
     (draft.fallbackModel ?? "") !== (saved.fallbackModel ?? ""),

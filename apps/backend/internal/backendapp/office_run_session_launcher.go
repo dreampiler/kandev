@@ -90,7 +90,12 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		CreatedAt:      now,
 		Version:        1,
 	}
-	reservation, admitted := l.capacity.ReserveRunSessionCapacity(ctx, session.ID)
+	grade, err := l.capacity.ProfileExecutionGrade(ctx, agent.ID)
+	if err != nil {
+		return officeservice.RunSessionLaunch{}, fmt.Errorf("resolve execution grade: %w", err)
+	}
+	session.AdmittedExecutionGrade = grade
+	reservation, admitted := l.capacity.ReserveRunSessionCapacity(ctx, session.ID, grade)
 	if !admitted {
 		return officeservice.RunSessionLaunch{}, officeservice.ErrRunSessionCapacityUnavailable
 	}

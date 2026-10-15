@@ -57,6 +57,7 @@ function hydrateCreatedTask(
             workflowId: task.workflow_id,
             workflowStepId: task.workflow_step_id,
             title: task.title,
+            executionGrade: task.execution_grade,
             description: task.description ?? undefined,
             position: task.position ?? 0,
             state: task.state,
@@ -85,6 +86,7 @@ export function hydrateEditedTask(
           ? {
               ...item,
               title: task.title,
+              executionGrade: task.execution_grade ?? item.executionGrade,
               description: task.description ?? undefined,
               repositoryId: task.repositories?.[0]?.repository_id ?? item.repositoryId,
             }

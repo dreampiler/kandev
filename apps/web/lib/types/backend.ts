@@ -114,6 +114,7 @@ export type TaskEventPayload = {
   description?: string;
   state?: TaskState;
   priority?: TaskPriority;
+  execution_grade?: string;
   wip_admitted?: boolean;
   queued_for_step_id?: string | null;
   queued_at?: string | null;

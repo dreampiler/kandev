@@ -156,6 +156,7 @@ function useFormStateValues(workflowId: string | null) {
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [executionGrade, setExecutionGrade] = useState("");
   return {
     taskName,
     setTaskName,
@@ -199,6 +200,8 @@ function useFormStateValues(workflowId: string | null) {
     setAutopilot,
     priority,
     setPriority,
+    executionGrade,
+    setExecutionGrade,
   };
 }
 
@@ -274,6 +277,7 @@ export function useDialogFormState(
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
       setPriority: form.setPriority,
+      setExecutionGrade: form.setExecutionGrade,
     },
   });
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isExecutionGradeValid } from "@/lib/execution-grade";
 import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -27,11 +28,14 @@ import {
 type DynamicAgentProfileEditorStateProps = {
   agent: Agent;
   profile: AgentProfile;
-  onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic" | "enabled">) => void;
+  onDraftChange?: (
+    patch: Pick<AgentProfile, "name" | "dynamic" | "enabled" | "executionGrade">,
+  ) => void;
 };
 
 export type DynamicAgentProfileEditorState = {
   name: string;
+  executionGrade: string;
   profileEnabled: boolean;
   standalone: boolean;
   hasExternalConflict: boolean;
@@ -40,6 +44,7 @@ export type DynamicAgentProfileEditorState = {
   concreteProfiles: AgentProfile[];
   availableProfileOptions: ReturnType<typeof toAgentProfileOption>[];
   updateName: (name: string) => void;
+  updateExecutionGrade: (grade: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
@@ -59,9 +64,11 @@ export function dynamicProfilePayload(
   enabled: boolean,
   version: number,
   candidates: DynamicAgentCandidate[],
+  executionGrade?: string,
 ) {
   return {
     name: name.trim(),
+    ...(executionGrade !== undefined ? { execution_grade: executionGrade.trim() } : {}),
     enabled,
     dynamic: {
       version,
@@ -156,6 +163,7 @@ export function useDynamicAgentProfileEditorState({
     if (
       !routingEnabled ||
       !draft.name.trim() ||
+      !isExecutionGradeValid(draft.executionGrade) ||
       draft.candidates.length === 0 ||
       !profile.dynamic ||
       draft.hasExternalConflict
@@ -179,6 +187,9 @@ export function useDynamicAgentProfileEditorState({
         draft.profileEnabled,
         draft.dynamicVersion,
         draft.candidates,
+        draft.executionGrade === (draft.savedProfile.executionGrade ?? "")
+          ? undefined
+          : draft.executionGrade,
       );
       if (onDraftChange) {
         onDraftChange(draftPayload);
@@ -215,11 +226,17 @@ export function useDynamicAgentProfileEditorState({
     }
   };
 
-  const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  const draftRevision = dynamicDraftRevision(
+    draft.name,
+    draft.candidates,
+    draft.profileEnabled,
+    draft.executionGrade,
+  );
   const savedRevision = dynamicDraftRevision(
     draft.savedProfile.name,
     draft.savedProfile.dynamic?.candidates ?? [],
     draft.savedProfile.enabled !== false,
+    draft.savedProfile.executionGrade ?? "",
   );
   const policiesValid = draft.candidates.every(
     (candidate) =>
@@ -228,6 +245,8 @@ export function useDynamicAgentProfileEditorState({
   );
   let invalidReason = t("agents:dynamicPolicyValidation");
   if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
+  else if (!isExecutionGradeValid(draft.executionGrade))
+    invalidReason = t("agents:executionGradeInvalid");
   else if (draft.candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
   else if (draft.hasExternalConflict)
     invalidReason = t("agents:profileExternalChangeInvalidReason");
@@ -241,7 +260,8 @@ export function useDynamicAgentProfileEditorState({
       !draft.hasExternalConflict &&
       Boolean(draft.name.trim()) &&
       draft.candidates.length > 0 &&
-      policiesValid,
+      policiesValid &&
+      isExecutionGradeValid(draft.executionGrade),
     invalidReason,
     save,
     discard: () => {
@@ -252,6 +272,7 @@ export function useDynamicAgentProfileEditorState({
 
   return {
     name: draft.name,
+    executionGrade: draft.executionGrade,
     profileEnabled: draft.profileEnabled,
     standalone,
     hasExternalConflict: draft.hasExternalConflict,
@@ -260,6 +281,7 @@ export function useDynamicAgentProfileEditorState({
     concreteProfiles,
     availableProfileOptions,
     updateName: draft.updateName,
+    updateExecutionGrade: draft.updateExecutionGrade,
     updateProfileEnabled: draft.updateProfileEnabled,
     addCandidate: draft.addCandidate,
     moveCandidate: draft.moveCandidate,

@@ -449,6 +449,7 @@ export type Task = ActiveSubagentCountFields & {
   autopilot?: boolean;
   state: TaskState;
   priority: TaskPriority;
+  execution_grade?: string;
   wip_admitted?: boolean;
   queued_for_step_id?: string;
   queued_at?: string | null;

@@ -159,6 +159,7 @@ type TaskWorkspaceFolder struct {
 
 // Task represents a Kanban task
 type Task struct {
+	ExecutionGrade   string                 `json:"execution_grade"`
 	ID               string                 `json:"id"`
 	WorkspaceID      string                 `json:"workspace_id"`
 	WorkflowID       string                 `json:"workflow_id"`

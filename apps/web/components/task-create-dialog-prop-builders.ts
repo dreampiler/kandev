@@ -189,7 +189,8 @@ export function buildDialogFooterProps(
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
       setup.savedBaseSubmitBlockedReason ??
-      workflowAgentOverridesBlockedReason,
+      workflowAgentOverridesBlockedReason ??
+      setup.executionGradeBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

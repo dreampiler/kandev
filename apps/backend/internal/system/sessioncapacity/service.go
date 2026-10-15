@@ -83,7 +83,11 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 	if err != nil {
 		return Response{}, err
 	}
-	s.target.SetSessionCapacity(resolution.Effective.MaxSessions)
+	if target, ok := s.target.(interface{ SetExecutionCapacity(Effective) }); ok {
+		target.SetExecutionCapacity(resolution.Effective)
+	} else {
+		s.target.SetSessionCapacity(resolution.Effective.MaxSessions)
+	}
 	return resolution.Response, nil
 }
 

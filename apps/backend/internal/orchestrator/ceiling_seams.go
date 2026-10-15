@@ -51,6 +51,7 @@ type seam1Reservation struct {
 	key        string
 	rebound    bool
 	consumed   bool
+	selection  *explicitWorkflowStartSelection
 
 	// manualOverride, population, populationKnown and ceiling are the
 	// admission decision's own reading, carried forward so AC-14/AC-53's
@@ -66,14 +67,22 @@ type seam1Reservation struct {
 // operation rather than a release followed by an acquire (AC-6a). The local
 // key is updated to match, so a later release (if the launch never reaches
 // consume) still targets the reservation the controller is actually holding.
-func (r *seam1Reservation) rebindToSession(sessionID string) {
+func (r *seam1Reservation) rebindToSession(sessionID string, contexts ...context.Context) error {
 	if r == nil || r.controller == nil || r.rebound || sessionID == "" {
-		return
+		return nil
+	}
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	if err := r.controller.persistReservationGrade(ctx, r.key, sessionID); err != nil {
+		return err
 	}
 	if r.controller.rebind(r.key, sessionID) {
 		r.rebound = true
 		r.key = sessionID
 	}
+	return nil
 }
 
 // consume marks the reservation as belonging to a launch that actually
@@ -189,16 +198,30 @@ func seam1StartPayload(
 // calling reservation.rebindToSession once the session exists, and calling
 // reservation.consume once the launch actually succeeds.
 func (s *Service) admitOrDeferSeam1(
-	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{}, logicalProfiles ...string,
 ) (reservation *seam1Reservation, deferred bool, err error) {
+	profileID := stringCeilingPayload(startPayload, metaKeyAgentProfileID)
+	if len(logicalProfiles) > 0 {
+		profileID = logicalProfiles[0]
+	}
+	profileExplicit, _ := startPayload["profile_explicit"].(bool)
+	selection := &explicitWorkflowStartSelection{entryID: int64Field(startPayload, "workflow_entry_id")}
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
-		origin: origin,
-		seam:   "startTask",
+		taskID: taskID, profileID: profileID, profileExplicit: profileExplicit,
+		startSelection: selection,
+		workflowStepID: stringCeilingPayload(startPayload, metaKeyWorkflowStepID),
+		origin:         origin, seam: "startTask",
 	})
+	return s.completeSeam1Admission(ctx, taskID, startPayload, decision, selection)
+}
+
+func (s *Service) completeSeam1Admission(
+	ctx context.Context, taskID string, startPayload map[string]interface{}, decision admissionDecision, selection *explicitWorkflowStartSelection,
+) (*seam1Reservation, bool, error) {
 	if decision.admitted {
 		return &seam1Reservation{
 			controller: s.sessionCeiling, key: decision.reservationKey,
+			selection:      selection,
 			manualOverride: decision.manualOverride, population: decision.population,
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
 		}, false, nil

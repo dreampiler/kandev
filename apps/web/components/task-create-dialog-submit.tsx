@@ -1,5 +1,7 @@
 "use client";
 
+import { executionGradeTaskPatch, isExecutionGradeValid } from "@/lib/execution-grade";
+
 /* eslint-disable max-lines -- create and edit submit flows share one lifecycle boundary. */
 
 import { useCallback, useRef, FormEvent } from "react";
@@ -321,6 +323,7 @@ export function useTaskSubmitHandlers({
   noRepository,
   workspacePath,
   priority,
+  executionGrade = "",
   workflowAgentOverrides,
   workflowAgentOverridesBlockedReason,
   blockedBy,
@@ -552,6 +555,7 @@ export function useTaskSubmitHandlers({
 
   const performTaskUpdate = useCallback(async () => {
     if (!editingTask) return null;
+    if (!isExecutionGradeValid(executionGrade)) return null;
     if (!areEditDependenciesReady(isEditMode, editDependencies)) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
@@ -573,6 +577,7 @@ export function useTaskSubmitHandlers({
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
       ...(titleChanged && { title: trimmedTitle }),
+      ...executionGradeTaskPatch(executionGrade, editingTask.executionGrade),
       ...(!isStartedEdit && { description: trimmedDescription }),
       ...(!isStartedEdit && repositoriesDirty && { repositories: repositoriesPayload }),
     };
@@ -590,6 +595,7 @@ export function useTaskSubmitHandlers({
     });
   }, [
     editingTask,
+    executionGrade,
     taskName,
     descriptionInputRef,
     getRepositoriesPayload,
@@ -735,6 +741,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          executionGrade,
           workflowAgentOverrides,
           blockedBy,
         });
@@ -795,6 +802,7 @@ export function useTaskSubmitHandlers({
       noRepository,
       workspacePath,
       priority,
+      executionGrade,
       onSuccess,
       onOpenChange,
       preserveTaskCreateLastUsedOnClose,
@@ -1043,6 +1051,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          executionGrade,
           workflowAgentOverrides,
           blockedBy,
         });
@@ -1079,6 +1088,7 @@ export function useTaskSubmitHandlers({
     autopilot,
     workspacePath,
     priority,
+    executionGrade,
     validateForCreate,
     hasRemoteSubmitBlocker,
     getRepositoriesPayload,

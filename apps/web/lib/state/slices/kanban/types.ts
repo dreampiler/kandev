@@ -110,6 +110,7 @@ export type KanbanState = {
     description?: string;
     autopilot?: boolean;
     priority?: TaskPriority;
+    executionGrade?: string;
     origin?: TaskOrigin | string;
     position: number;
     state?: TaskStatus;

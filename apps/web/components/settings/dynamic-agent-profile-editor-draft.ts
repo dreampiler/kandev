@@ -17,11 +17,14 @@ import {
 
 type DynamicAgentProfileEditorDraftProps = {
   profile: AgentProfile;
-  onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic" | "enabled">) => void;
+  onDraftChange?: (
+    patch: Pick<AgentProfile, "name" | "dynamic" | "enabled" | "executionGrade">,
+  ) => void;
 };
 
 export type DynamicAgentProfileEditorDraft = {
   name: string;
+  executionGrade: string;
   candidates: DynamicAgentCandidate[];
   profileEnabled: boolean;
   dynamicVersion: number;
@@ -29,6 +32,7 @@ export type DynamicAgentProfileEditorDraft = {
   savedProfile: AgentProfile;
   hasExternalConflict: boolean;
   updateName: (name: string) => void;
+  updateExecutionGrade: (grade: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
@@ -62,8 +66,14 @@ export function dynamicDraftRevision(
   name: string,
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
+  executionGrade = "",
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({
+    name,
+    candidates,
+    enabled,
+    ...(executionGrade ? { executionGrade } : {}),
+  });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.
@@ -72,6 +82,7 @@ export function useDynamicAgentProfileEditorDraft({
   onDraftChange,
 }: DynamicAgentProfileEditorDraftProps): DynamicAgentProfileEditorDraft {
   const [name, setName] = useState(profile.name);
+  const [executionGrade, setExecutionGrade] = useState(profile.executionGrade ?? "");
   const [candidates, setCandidates] = useState<DynamicAgentCandidate[]>(
     profile.dynamic?.candidates ?? [],
   );
@@ -87,6 +98,7 @@ export function useDynamicAgentProfileEditorDraft({
   const currentProfile = {
     ...profile,
     name,
+    executionGrade,
     enabled: profileEnabled,
     dynamic: { version: dynamicVersion, candidates },
   };
@@ -97,9 +109,11 @@ export function useDynamicAgentProfileEditorDraft({
     nextName: string,
     nextCandidates: DynamicAgentCandidate[],
     nextEnabled = profileEnabled,
+    nextGrade = executionGrade,
   ) => {
     onDraftChange?.({
       name: nextName,
+      executionGrade: nextGrade,
       enabled: nextEnabled,
       dynamic: { version: dynamicVersion, candidates: nextCandidates },
     });
@@ -108,6 +122,11 @@ export function useDynamicAgentProfileEditorDraft({
   const updateName = (nextName: string) => {
     setName(nextName);
     notifyDraft(nextName, candidates);
+  };
+
+  const updateExecutionGrade = (grade: string) => {
+    setExecutionGrade(grade);
+    notifyDraft(name, candidates, profileEnabled, grade);
   };
 
   const updateProfileEnabled = (enabled: boolean) => {
@@ -188,6 +207,7 @@ export function useDynamicAgentProfileEditorDraft({
   const reset = () => {
     const nextProfile = savedProfileRef.current;
     setName(nextProfile.name);
+    setExecutionGrade(nextProfile.executionGrade ?? "");
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
@@ -197,6 +217,7 @@ export function useDynamicAgentProfileEditorDraft({
 
   const applyProfile = useCallback((nextProfile: AgentProfile) => {
     setName(nextProfile.name);
+    setExecutionGrade(nextProfile.executionGrade ?? "");
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
@@ -248,6 +269,7 @@ export function useDynamicAgentProfileEditorDraft({
 
   return {
     name,
+    executionGrade,
     candidates,
     profileEnabled,
     dynamicVersion,
@@ -255,6 +277,7 @@ export function useDynamicAgentProfileEditorDraft({
     savedProfile,
     hasExternalConflict,
     updateName,
+    updateExecutionGrade,
     updateProfileEnabled,
     addCandidate,
     moveCandidate,

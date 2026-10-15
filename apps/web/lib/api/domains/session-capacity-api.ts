@@ -6,7 +6,7 @@ import type {
 
 const SESSION_CAPACITY_SETTINGS_PATH = "/api/v1/system/session-capacity/settings";
 
-/** Fetches the saved and effective automatic session capacity settings. */
+/** Fetches saved and effective execution capacity, including policy and grade limits. */
 export async function fetchSessionCapacitySettings(
   options?: ApiRequestOptions,
 ): Promise<SessionCapacitySettingsResponse> {
@@ -16,7 +16,7 @@ export async function fetchSessionCapacitySettings(
   });
 }
 
-/** Applies a partial automatic session capacity update. */
+/** Applies a partial execution capacity update; omitted fields retain saved values. */
 export async function updateSessionCapacitySettings(
   payload: SessionCapacitySettingsPatch,
   options?: ApiRequestOptions,

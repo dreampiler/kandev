@@ -86,6 +86,7 @@ function TaskActionsMenuEditDialog({
       editingTask={{
         id: taskId,
         title: taskTitle,
+        executionGrade: boardRow.executionGrade,
         description: boardRow.description,
         workflowStepId: boardRow.workflowStepId ?? "",
         state: boardRow.state,

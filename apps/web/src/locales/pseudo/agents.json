@@ -436,5 +436,11 @@
   "profileDragStart": "Ƥŕōƒĩĺē {{name}} ƥĩćķēď ũƥ. Ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragOver": "Ƥŕōƒĩĺē {{name}} ḿōvēď ţō ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragEnd": "Ƥŕōƒĩĺē {{name}} ďŕōƥƥēď àţ ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
-  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď."
+  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď.",
+  "executionGradeLabel": "Ēxēćũţĩōń ĝŕàďē",
+  "executionGradeNone": "Ńō ĝŕàďē",
+  "executionGradeInherit": "Ĩńĥēŕĩţ ĺōĝĩćàĺ ƥŕōƒĩĺē",
+  "executionGradeInvalid": "Ũśē àţ ḿōśţ 64 ćĥàŕàćţēŕś ŵĩţĥōũţ ćōńţŕōĺ ćĥàŕàćţēŕś.",
+  "executionGradeProfileHelp": "Ũśē à ĝŕàďē ƒŕōḿ Śŷśţēḿ ćàƥàćĩţŷ śēţţĩńĝś. Ɓĺàńķ àƥƥĺĩēś ōńĺŷ ţĥē ōvēŕàĺĺ ĺĩḿĩţ. Ćĥàńĝēś àƥƥĺŷ ţō ţĥē ńēxţ ēxēćũţĩōń; ḿōďēĺ ƒàĺĺƀàćķ ķēēƥś ţĥē ĝŕàďē.",
+  "executionGradeTaskHelp": "Ɓĺàńķ ĩńĥēŕĩţś ţĥē ĺōĝĩćàĺ ƥŕōƒĩĺē'ś ēxēćũţĩōń ĝŕàďē. À ţàśķ ōvēŕŕĩďē àƥƥĺĩēś ţō ĩţś ńēxţ ēxēćũţĩōń àńď ďōēś ńōţ ćĥàńĝē ĩţś ƥŕĩōŕĩţŷ."
 }

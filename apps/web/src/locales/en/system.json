@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "First run starts after backup preparation.",
   "toolPayload.analysisDetails": "Analysis details",
   "toolPayload.runDetails": "Run details",
-  "storageGoCacheBusyPolicySnapshot": "Go cache cleanup during active tasks was enabled for this run."
+  "storageGoCacheBusyPolicySnapshot": "Go cache cleanup during active tasks was enabled for this run.",
+  "executionCapacityPolicy": "Execution capacity policy",
+  "executionCapacityAutomatic": "Automatic starts",
+  "executionCapacityAll": "All executions",
+  "executionCapacityPolicyHelp": "Automatic starts retain the existing session limit. All executions also limits manual and MCP starts, with optional grade limits. Workflow WIP remains separate.",
+  "executionCapacityAllHelp": "Manual and MCP starts also wait for capacity. No grade or coordinator receives reserved slots.",
+  "executionCapacityOverallMaximum": "Maximum AI executions",
+  "executionCapacityOverallHelp": "Enter a positive whole number for the overall limit. Grade limits share this capacity.",
+  "executionGradeLimits": "Execution grade limits",
+  "executionGradeLimitsHelp": "Grade names must be unique after trimming, at most 64 characters, with no control characters. Limits are whole numbers from 0 to 2147483647; 0 keeps that grade waiting. Unlisted grades use the overall limit.",
+  "executionGradeName": "Execution grade {{number}}",
+  "executionGradeMaximum": "Grade maximum {{number}}",
+  "executionGradeRemoveRow": "Remove grade {{number}}",
+  "executionGradeRemove": "Remove",
+  "executionGradeAdd": "Add grade",
+  "executionGradesInvalid": "Enter unique grade names of 1 to 64 characters without control characters and whole-number limits from 0 to 2147483647.",
+  "executionGradeAllRequired": "Remove grade limits before choosing Automatic starts.",
+  "executionCapacityTitle": "Limit AI executions"
 }

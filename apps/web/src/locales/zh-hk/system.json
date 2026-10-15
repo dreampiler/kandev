@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "首次執行將在備份準備完成後開始。",
   "toolPayload.analysisDetails": "分析詳情",
   "toolPayload.runDetails": "執行詳情",
-  "storageGoCacheBusyPolicySnapshot": "本次執行已啓用任務執行期間清理 Go 快取的設定。"
+  "storageGoCacheBusyPolicySnapshot": "本次執行已啓用任務執行期間清理 Go 快取的設定。",
+  "executionCapacityPolicy": "AI 執行容量策略",
+  "executionCapacityAutomatic": "自動啓動",
+  "executionCapacityAll": "所有執行",
+  "executionCapacityPolicyHelp": "自動啓動保留現有工作階段上限。所有執行還限制手動和 MCP 啓動，並可設定等級上限。工作流程 WIP 上限保持獨立。",
+  "executionCapacityAllHelp": "手動和 MCP 啓動也會等待可用容量。任何等級或協調者都沒有預留名額。",
+  "executionCapacityOverallMaximum": "AI 併發執行上限",
+  "executionCapacityOverallHelp": "請輸入正整數作為總上限。各等級上限共享此容量。",
+  "executionGradeLimits": "執行等級上限",
+  "executionGradeLimitsHelp": "等級名稱去除首尾空白後必須唯一，最多 64 個字符，且不能包含控制字符。上限為 0 到 2147483647 的整數；0 會使該等級保持等待。未列出的等級使用總上限。",
+  "executionGradeName": "執行等級 {{number}}",
+  "executionGradeMaximum": "等級上限 {{number}}",
+  "executionGradeRemoveRow": "移除等級 {{number}}",
+  "executionGradeRemove": "移除",
+  "executionGradeAdd": "新增等級",
+  "executionGradesInvalid": "請輸入不含控制字符的 1 到 64 字符唯一等級名稱，以及 0 到 2147483647 的整數上限。",
+  "executionGradeAllRequired": "選擇自動啓動前，請先移除等級上限。",
+  "executionCapacityTitle": "限制 AI 並行執行"
 }

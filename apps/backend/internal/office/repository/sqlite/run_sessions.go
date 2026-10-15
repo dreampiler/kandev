@@ -34,14 +34,14 @@ func (r *Repository) ReserveRunSession(ctx context.Context, session *models.RunS
 		INSERT INTO office_run_sessions (
 			id, workspace_id, agent_profile_id, run_id, attempt, state,
 			execution_id, execution_profile_id, adapter, model, acp_session_id,
-			created_at, started_at, finished_at, cancel_requested_at, error_message, version
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			created_at, started_at, finished_at, cancel_requested_at, error_message, version, admitted_execution_grade
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT DO NOTHING
 	`), session.ID, session.WorkspaceID, session.AgentProfileID, session.RunID,
 		session.Attempt, session.State, session.ExecutionID, session.ExecutionProfileID,
 		session.Adapter, session.Model, session.ACPSessionID, session.CreatedAt,
 		session.StartedAt, session.FinishedAt, session.CancelRequestedAt,
-		session.ErrorMessage, session.Version)
+		session.ErrorMessage, session.Version, session.AdmittedExecutionGrade)
 	if err != nil {
 		return false, fmt.Errorf("reserve run session: insert: %w", err)
 	}

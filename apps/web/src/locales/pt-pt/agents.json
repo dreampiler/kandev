@@ -436,5 +436,11 @@
   "profileDragStart": "Perfil {{name}} selecionado. Posição {{position}} de {{total}}.",
   "profileDragOver": "Perfil {{name}} movido para a posição {{position}} de {{total}}.",
   "profileDragEnd": "Perfil {{name}} colocado na posição {{position}} de {{total}}.",
-  "profileDragCancel": "Reordenação do perfil {{name}} cancelada."
+  "profileDragCancel": "Reordenação do perfil {{name}} cancelada.",
+  "executionGradeLabel": "Categoria de execução",
+  "executionGradeNone": "Sem categoria",
+  "executionGradeInherit": "Herdar do perfil lógico",
+  "executionGradeInvalid": "Use até 64 caracteres, sem caracteres de controlo.",
+  "executionGradeProfileHelp": "Use uma categoria das definições de capacidade do Sistema. Em branco, aplica-se apenas o limite global. As alterações aplicam-se à próxima execução; a mudança de modelo mantém a categoria.",
+  "executionGradeTaskHelp": "Em branco, herda a categoria de execução do perfil lógico. A categoria da tarefa aplica-se à próxima execução e não altera a prioridade."
 }

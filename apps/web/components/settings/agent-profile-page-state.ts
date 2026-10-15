@@ -212,6 +212,10 @@ function buildProfileUpdatePatch(
 ): Parameters<typeof updateAgentProfileAction>[1] {
   return {
     name: draft.name,
+    execution_grade:
+      (draft.executionGrade ?? "") === (savedProfile.executionGrade ?? "")
+        ? undefined
+        : (draft.executionGrade ?? "").trim(),
     model: draft.model,
     fallback_model: draft.fallbackModel ?? "",
     auto_fallback: draft.autoFallback ?? false,

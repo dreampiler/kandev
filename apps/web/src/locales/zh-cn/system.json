@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "首次运行将在备份准备完成后开始。",
   "toolPayload.analysisDetails": "分析详情",
   "toolPayload.runDetails": "运行详情",
-  "storageGoCacheBusyPolicySnapshot": "本次运行已启用任务执行期间清理 Go 缓存的设置。"
+  "storageGoCacheBusyPolicySnapshot": "本次运行已启用任务执行期间清理 Go 缓存的设置。",
+  "executionCapacityPolicy": "AI 执行容量策略",
+  "executionCapacityAutomatic": "自动启动",
+  "executionCapacityAll": "所有执行",
+  "executionCapacityPolicyHelp": "自动启动保留现有会话上限。所有执行还限制手动和 MCP 启动，并可设置等级上限。工作流 WIP 上限保持独立。",
+  "executionCapacityAllHelp": "手动和 MCP 启动也会等待可用容量。任何等级或协调者都没有预留名额。",
+  "executionCapacityOverallMaximum": "AI 并发执行上限",
+  "executionCapacityOverallHelp": "请输入正整数作为总上限。各等级上限共享此容量。",
+  "executionGradeLimits": "执行等级上限",
+  "executionGradeLimitsHelp": "等级名称去除首尾空白后必须唯一，最多 64 个字符，且不能包含控制字符。上限为 0 到 2147483647 的整数；0 会使该等级保持等待。未列出的等级使用总上限。",
+  "executionGradeName": "执行等级 {{number}}",
+  "executionGradeMaximum": "等级上限 {{number}}",
+  "executionGradeRemoveRow": "移除等级 {{number}}",
+  "executionGradeRemove": "移除",
+  "executionGradeAdd": "添加等级",
+  "executionGradesInvalid": "请输入不含控制字符的 1 到 64 字符唯一等级名称，以及 0 到 2147483647 的整数上限。",
+  "executionGradeAllRequired": "选择自动启动前，请先移除等级上限。",
+  "executionCapacityTitle": "限制 AI 并发执行"
 }

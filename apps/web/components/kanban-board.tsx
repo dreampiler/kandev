@@ -559,6 +559,7 @@ function KanbanBoardDialogs({
             ? {
                 id: editingTask.id,
                 title: editingTask.title,
+                executionGrade: editingTask.executionGrade,
                 description: editingTask.description,
                 workflowStepId: editingTask.workflowStepId,
                 state: editingTask.state as BackendTask["state"],

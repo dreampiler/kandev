@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"sync"
 
 	"go.uber.org/zap"
@@ -50,11 +51,16 @@ func (r *RunSessionCapacityReservation) Release() {
 
 // ReserveRunSessionCapacity shares the task admission mutex and population.
 // Office launches are automatic; transport and provider tier grant no bypass.
-func (s *Service) ReserveRunSessionCapacity(ctx context.Context, sessionID string) (*RunSessionCapacityReservation, bool) {
+func (s *Service) ReserveRunSessionCapacity(ctx context.Context, sessionID string, grades ...string) (*RunSessionCapacityReservation, bool) {
 	if s == nil || s.sessionCeiling == nil {
 		return nil, true
 	}
+	grade := ""
+	if len(grades) > 0 {
+		grade = grades[0]
+	}
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
+		grade:     grade,
 		sessionID: runSessionCapacityKey(sessionID),
 		origin:    launchOriginAutomatic, seam: "officeRunSession",
 	})
@@ -74,23 +80,47 @@ func (s *Service) retryRunSessionCapacity(ctx context.Context) {
 	}
 	c.mu.Lock()
 	source := c.runSessions
-	available := 0
-	if source != nil && c.ceiling != unlimitedSessionCeiling {
-		counted, err := c.countedRowsLocked(ctx)
-		if err != nil {
-			c.mu.Unlock()
-			return
-		}
-		available = c.ceiling - c.populationLocked(counted)
-		if available <= 0 {
-			c.mu.Unlock()
-			return
-		}
+	if source == nil {
+		c.mu.Unlock()
+		return
 	}
+	available, gradeAvailable, known := c.runCapacityAvailableLocked(ctx)
 	c.mu.Unlock()
-	if source != nil {
+	if known {
+		if graded, ok := source.(interface {
+			ResumeExecutionCapacityRuns(context.Context, int, map[string]int) error
+		}); ok && len(gradeAvailable) > 0 {
+			if err := graded.ResumeExecutionCapacityRuns(ctx, available, gradeAvailable); err != nil {
+				s.logger.Warn("could not resume grade-deferred Office runs", zap.Error(err))
+			}
+			return
+		}
 		if err := source.ResumeSessionCapacityRuns(ctx, available); err != nil {
 			s.logger.Warn("could not resume capacity-deferred Office runs", zap.Error(err))
 		}
 	}
+}
+
+func (c *sessionCeilingController) runCapacityAvailableLocked(ctx context.Context) (int, map[string]int, bool) {
+	gradeAvailable := map[string]int{}
+	if c.ceiling == unlimitedSessionCeiling && len(c.gradeLimits) == 0 {
+		return 0, gradeAvailable, true
+	}
+	counted, err := c.countedRowsLocked(ctx)
+	if err != nil {
+		return 0, nil, false
+	}
+	available := 0
+	if c.ceiling != unlimitedSessionCeiling {
+		available = c.ceiling - c.populationLocked(counted)
+		if available <= 0 {
+			return 0, nil, false
+		}
+	}
+	if c.policy == sessioncapacity.PolicyAll {
+		for grade, maximum := range c.gradeLimits {
+			gradeAvailable[grade] = max(0, maximum-c.gradePopulationLocked(counted, grade))
+		}
+	}
+	return available, gradeAvailable, true
 }

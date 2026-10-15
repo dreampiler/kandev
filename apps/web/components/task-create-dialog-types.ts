@@ -50,6 +50,7 @@ export type TaskEditTarget = {
   title: string;
   description?: string;
   workflowStepId: string;
+  executionGrade?: string;
   state?: Task["state"];
   repositoryId?: string;
   repositories?: TaskRepositorySnapshot[];
@@ -198,6 +199,7 @@ export type StepType = {
 
 export type TaskCreateDialogInitialValues = {
   title: string;
+  executionGrade?: string;
   description?: string;
   /** Create-mode source preset: start without a repository in a scratch workspace. */
   noRepository?: boolean;
@@ -518,6 +520,8 @@ export type DialogFormState = {
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
   setPriority: (v: TaskPriority) => void;
+  executionGrade?: string;
+  setExecutionGrade?: (value: string) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -604,6 +608,7 @@ export type SubmitHandlersDeps = {
   workspacePath: string;
   /** Priority to submit with the created task. Defaults to `medium`. */
   priority: TaskPriority;
+  executionGrade?: string;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides: Record<string, string>;
   /** Create-mode validation shared by the footer and every submit entry point. */

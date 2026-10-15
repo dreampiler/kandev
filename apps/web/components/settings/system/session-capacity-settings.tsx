@@ -20,6 +20,8 @@ import {
   sessionCapacitySourceLabelKey,
   useSessionCapacitySettings,
 } from "./use-session-capacity-settings";
+import { ExecutionGradeSettings } from "./execution-grade-settings";
+import { executionGradeDraft } from "./execution-grade-draft";
 
 const ENVIRONMENT_VARIABLE = "KANDEV_MAX_CONCURRENT_SESSIONS";
 
@@ -58,24 +60,28 @@ function SessionCapacitySwitch({
   checked,
   disabled,
   onChange,
+  allExecutions,
 }: {
   checked: boolean;
   disabled: boolean;
   onChange: (value: boolean) => void;
+  allExecutions: boolean;
 }) {
   const { t } = useTranslation();
   const label = t("system:sessionCapacityEnabledLabel");
   return (
     <SettingsRow
       label={label}
-      description={t("settings:sessionLimitShort")}
+      description={t(
+        allExecutions ? "system:executionCapacityAllHelp" : "settings:sessionLimitShort",
+      )}
       controlId="session-capacity-enabled"
       touchTarget="switch"
       controlWrapperTestId="session-capacity-enabled-touch-target"
       info={
         <SettingsInfo label={label}>
           <p>{t("system:sessionCapacityEnabledDescription")}</p>
-          <p>{t("system:sessionCapacityBehaviorHelp")}</p>
+          <p>{t("system:executionCapacityPolicyHelp")}</p>
         </SettingsInfo>
       }
       control={
@@ -98,23 +104,35 @@ function MaximumField({
   disabled,
   error,
   onChange,
+  allExecutions,
 }: {
   value: string;
   disabled: boolean;
   error?: string;
   onChange: (value: string) => void;
+  allExecutions: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <SettingsRow
-        label={t("system:sessionCapacityMaximumLabel")}
-        description={t("settings:sessionMaximumShort")}
+        label={t(
+          allExecutions
+            ? "system:executionCapacityOverallMaximum"
+            : "system:sessionCapacityMaximumLabel",
+        )}
+        description={t(
+          allExecutions ? "system:executionCapacityOverallHelp" : "settings:sessionMaximumShort",
+        )}
         descriptionId="session-capacity-maximum-help"
         controlId="session-capacity-maximum"
         info={
           <SettingsInfo label={t("system:sessionCapacityMaximumLabel")}>
-            {t("system:sessionCapacityMaximumHelp")}
+            {t(
+              allExecutions
+                ? "system:executionCapacityOverallHelp"
+                : "system:sessionCapacityMaximumHelp",
+            )}
           </SettingsInfo>
         }
         control={
@@ -234,6 +252,24 @@ export function SessionCapacitySettings() {
   return <SessionCapacitySettingsContent state={state} />;
 }
 
+function SessionCapacityAccessNotices({ state }: SessionCapacitySettingsContentProps) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {state.isLocked && <SessionCapacityManagedNotice />}
+      {!state.isAdmin && (
+        <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
+      )}
+      {state.saveFailed && (
+        <Alert variant="destructive">
+          <IconAlertCircle className="size-4" />
+          <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
+        </Alert>
+      )}
+    </>
+  );
+}
+
 function SessionCapacitySettingsReady({
   state,
   withinGroup,
@@ -245,6 +281,10 @@ function SessionCapacitySettingsReady({
   const controlsDisabled = !state.isAdmin || state.isLocked;
   const effectiveEnabled = state.isLocked ? effective.enabled : state.enabledDraft;
   const effectiveMaximum = state.isLocked ? effective.max_sessions : settings.max_sessions;
+  const allExecutions = (state.isLocked ? effective.policy : state.gradeDraft.policy) === "all";
+  const title = t(
+    allExecutions ? "system:executionCapacityTitle" : "system:sessionCapacityLimitTitle",
+  );
   const maximumError = sessionCapacityMaximumError({
     isAdmin: state.isAdmin,
     isLocked: state.isLocked,
@@ -257,11 +297,11 @@ function SessionCapacitySettingsReady({
     <>
       {withinGroup ? (
         <div className="space-y-1 pb-3">
-          <h4 className="text-sm font-semibold">{t("system:sessionCapacityLimitTitle")}</h4>
+          <h4 className="text-sm font-semibold">{title}</h4>
         </div>
       ) : (
         <CardHeader>
-          <CardTitle className="text-base">{t("system:sessionCapacityLimitTitle")}</CardTitle>
+          <CardTitle className="text-base">{title}</CardTitle>
         </CardHeader>
       )}
       <CardContent className={withinGroup ? "min-w-0 space-y-5 px-0" : "min-w-0 space-y-5"}>
@@ -269,6 +309,7 @@ function SessionCapacitySettingsReady({
           checked={effectiveEnabled}
           disabled={controlsDisabled}
           onChange={state.setEnabledDraft}
+          allExecutions={allExecutions}
         />
         {effectiveEnabled && (
           <MaximumField
@@ -276,24 +317,22 @@ function SessionCapacitySettingsReady({
             disabled={controlsDisabled}
             error={maximumError}
             onChange={state.setMaxDraft}
+            allExecutions={allExecutions}
           />
         )}
+        <ExecutionGradeSettings
+          draft={state.isLocked ? executionGradeDraft(effective) : state.gradeDraft}
+          setDraft={state.setGradeDraft}
+          disabled={controlsDisabled}
+          error={controlsDisabled ? undefined : state.gradeError}
+        />
         <EffectiveCapacity
           enabled={effective.enabled}
           maximum={effectiveMaximum}
           source={effective.source}
           isDirty={state.isDirty}
         />
-        {state.isLocked && <SessionCapacityManagedNotice />}
-        {!state.isAdmin && (
-          <p className="text-sm text-muted-foreground">{t("system:sessionCapacityAdminOnly")}</p>
-        )}
-        {state.saveFailed && (
-          <Alert variant="destructive">
-            <IconAlertCircle className="size-4" />
-            <AlertDescription>{t("system:sessionCapacitySaveFailed")}</AlertDescription>
-          </Alert>
-        )}
+        <SessionCapacityAccessNotices state={state} />
       </CardContent>
     </>
   );

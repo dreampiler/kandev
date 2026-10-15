@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"net/http"
 	"strconv"
 	"strings"
@@ -467,6 +468,7 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
+	ExecutionGrade          string                 `json:"execution_grade,omitempty"`
 	Name                    string                 `json:"name"`
 	Model                   string                 `json:"model"`
 	FallbackModel           string                 `json:"fallback_model,omitempty"`
@@ -497,6 +499,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
+			ExecutionGrade:          profile.ExecutionGrade,
 			Name:                    profile.Name,
 			Model:                   profile.Model,
 			FallbackModel:           profile.FallbackModel,
@@ -517,6 +520,7 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
+			errors.Is(err, sessioncapacity.ErrValidation) ||
 			errors.Is(err, controller.ErrInvalidProviderConfig) ||
 			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

@@ -591,13 +591,35 @@ When a task launch waits for session capacity, Kandev keeps the selected
 destination and retries it automatically. Inspecting another session does not
 change the workflow's selected step or primary session. You can open another
 session and use its normal controls. Kandev resumes it when the session can run;
-the automatic session ceiling still applies unless you explicitly start,
-resume, or message the session.
+the **Automatic starts** capacity policy allows an explicit start, resume, or
+message to override its automatic session ceiling. The **All executions**
+policy applies the shared limit to those manual and MCP starts as well.
 
 Taskless Office runs use the same automatic session ceiling as task sessions.
 Preparing or running Office sessions occupy a slot. When capacity is full, the
 Office run stays queued and retries the same run when a slot becomes available;
 this wait does not consume its provider retry budget.
+
+Under **Settings > System**, **Limit AI executions** retains the existing
+**Automatic starts** policy by default. Choose **All executions** to apply one
+overall maximum and optional named execution grade maxima to both task and
+Office sessions, including explicit human and MCP starts. This increment does
+not yet count separate utility and code-review inference children; their common
+admission integration is required before this becomes a complete AI execution
+limit. No coordinator or role receives reserved slots.
+
+Set **Execution grade** on a concrete or dynamic logical profile, or override it
+in a task's create/edit dialog. An empty task grade inherits the logical profile;
+an empty profile grade uses only the overall maximum. Model candidates and task
+priority do not assign a grade. Names may contain up to 64 characters without
+control characters. A grade maximum of zero keeps new work in that grade waiting;
+an unlisted grade uses the overall maximum. Both maxima apply together.
+
+Editing a task/profile grade affects later admissions. Already admitted sessions
+keep their grade until their execution settles. Reducing a maximum does not stop
+work already running. Disabling the limit remembers the saved settings and
+leaves execution unlimited. The numeric environment override retains its
+existing automatic-policy behavior and locks this editor.
 
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity

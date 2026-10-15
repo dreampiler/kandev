@@ -1,5 +1,7 @@
 "use client";
 
+import { ExecutionGradeField } from "@/components/settings/execution-grade-field";
+
 import {
   FormEvent,
   useCallback,
@@ -211,6 +213,14 @@ function DialogFormBody(props: DialogFormBodyProps) {
         launchPreview={props.launchPreview}
         workflowLocked={props.workflowLocked}
       />
+      {!isSessionMode && (
+        <ExecutionGradeField
+          value={props.fs.executionGrade ?? ""}
+          onChange={(value) => props.fs.setExecutionGrade?.(value)}
+          inherit
+          disabled={props.isCreatingSession || props.isCreatingTask}
+        />
+      )}
       <TaskCreateAdvancedSettings
         isCreateMode={isCreateMode}
         isTaskStarted={isTaskStarted}

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useState } from "react";
+import { useTaskGradeValues, taskGradeBlockedReason } from "@/components/task-execution-grade";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import type { Repository } from "@/lib/types/http";
@@ -221,6 +222,7 @@ function useSubmitHandlersWiring({
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
     priority: fs.priority,
+    executionGrade: fs.executionGrade,
     workflowAgentOverrides: fs.workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
     blockedBy: fs.blockedBy,
@@ -426,14 +428,7 @@ export function useTaskCreateDialogSetup(
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
 ) {
   const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
-  const {
-    open,
-    mode = "create",
-    workspaceId,
-    workflowId,
-    editingTask,
-    initialValues,
-  } = resolvedProps;
+  const { open, mode = "create", workspaceId, workflowId, editingTask } = resolvedProps;
   const { isSessionMode, isEditMode, isTaskStarted } = resolveDialogMode(mode, editingTask);
   const agentGeneratedTaskTitles = useAppStore(
     (state) => state.userSettings.agentGeneratedTaskTitles,
@@ -443,7 +438,7 @@ export function useTaskCreateDialogSetup(
     open,
     workspaceId,
     workflowId,
-    initialValues,
+    useTaskGradeValues(isEditMode, editingTask, resolvedProps.initialValues),
     resolvedProps.lockedFields?.workflow === true,
   );
   const editDependencies = useEditDialogDependencies(
@@ -478,11 +473,13 @@ export function useTaskCreateDialogSetup(
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
     workflowAgentOverridesBlockedReason,
   });
+  const executionGradeBlockedReason = taskGradeBlockedReason(isSessionMode, fs.executionGrade);
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
     resolvedProps.submitBlockedReason ??
       savedBaseSubmitBlockedReason ??
-      workflowAgentOverridesBlockedReason,
+      workflowAgentOverridesBlockedReason ??
+      executionGradeBlockedReason,
     !isTaskStarted && computed.noCompatibleAgent,
   );
   const enhance = useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open);
@@ -516,6 +513,7 @@ export function useTaskCreateDialogSetup(
     handleLinearImport,
     editDependencies,
     savedBaseSubmitBlockedReason,
+    executionGradeBlockedReason,
     workflowAgentOverrideValidation,
   };
 }

@@ -516,6 +516,7 @@ func (r *Repository) createRunTables() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS office_run_sessions (
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		agent_profile_id TEXT NOT NULL,

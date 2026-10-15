@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { isExecutionGradeValid } from "@/lib/execution-grade";
 import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
@@ -77,6 +78,7 @@ function toProfileFormData(
   const pv = profilePermissionValues(profile, permissionSettings);
   return {
     name: profile.name,
+    execution_grade: profile.executionGrade ?? "",
     model: profile.model,
     fallback_model: profile.fallbackModel ?? "",
     auto_fallback: profile.autoFallback ?? false,
@@ -388,6 +390,9 @@ function ProfileEditor({
     model: draft.model,
     cliPassthrough: draft.cliPassthrough,
   });
+  const executionGradeInvalidReason = isExecutionGradeValid(draft.executionGrade ?? "")
+    ? undefined
+    : t("agents:executionGradeInvalid");
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
@@ -397,13 +402,16 @@ function ProfileEditor({
       Boolean(draft.name.trim()) &&
       !modelConfigResolutionPending &&
       !hasExternalConflict &&
-      !providerInvalidKey,
+      !providerInvalidKey &&
+      isExecutionGradeValid(draft.executionGrade ?? ""),
     invalidReason: resolveProfileEditorInvalidReason(
       {
         nativeCodexUnavailable,
         hasExternalConflict,
         profileInvalidReason: profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
-        providerInvalidReason: providerInvalidKey ? t(providerInvalidKey) : undefined,
+        providerInvalidReason: providerInvalidKey
+          ? t(providerInvalidKey)
+          : executionGradeInvalidReason,
       },
       t,
     ),

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"maps"
 	"net/url"
 	"os"
@@ -101,7 +102,7 @@ type pendingTaskTitleSetter interface {
 
 func isPriorityOnlyTaskUpdate(req *UpdateTaskRequest) bool {
 	return req != nil &&
-		req.Priority != nil &&
+		req.Priority != nil && req.ExecutionGrade == nil &&
 		req.Title == nil &&
 		req.Description == nil &&
 		req.State == nil &&
@@ -851,6 +852,9 @@ func (s *Service) inheritParentProject(ctx context.Context, req *CreateTaskReque
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := sessioncapacity.ValidateGrade(req.ExecutionGrade); err != nil {
+		return err
+	}
 	if err := validateTaskTitle(req.Title); err != nil {
 		return err
 	}
@@ -1050,6 +1054,7 @@ func (s *Service) buildTask(ctx context.Context, req *CreateTaskRequest, workflo
 		Description:            req.Description,
 		State:                  state,
 		Priority:               priority,
+		ExecutionGrade:         req.ExecutionGrade,
 		Position:               req.Position,
 		Metadata:               metadata,
 		IsEphemeral:            req.IsEphemeral,
@@ -2071,6 +2076,11 @@ func (s *Service) ListTaskRepositoryIDsByTaskIDs(ctx context.Context, taskIDs []
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
+	if req.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*req.ExecutionGrade); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
@@ -2109,7 +2119,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		}
 	}
 	update := models.TaskFieldUpdate{
-		Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Title: req.Title, Description: req.Description, Priority: req.Priority, ExecutionGrade: req.ExecutionGrade,
 		State: req.State, WorkflowStepID: req.WorkflowStepID, Position: req.Position,
 		ParentID: req.ParentID, Metadata: req.Metadata,
 	}

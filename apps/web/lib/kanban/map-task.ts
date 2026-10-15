@@ -40,6 +40,7 @@ export type TaskLike = {
   position?: number;
   state?: TaskState;
   priority?: TaskPriority;
+  execution_grade?: string;
   origin?: TaskOrigin | string | null;
   repositories?: Array<{
     id?: string;
@@ -285,6 +286,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     description: source.description ?? undefined,
     autopilot: source.autopilot,
     priority: source.priority,
+    ...(source.execution_grade !== undefined ? { executionGrade: source.execution_grade } : {}),
     origin: source.origin,
     position: source.position ?? 0,
     state: source.state,

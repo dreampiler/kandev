@@ -436,5 +436,11 @@
   "profileDragStart": "프로필 {{name}}을 선택했습니다. {{total}}개 중 {{position}}번째입니다.",
   "profileDragOver": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치로 이동했습니다.",
   "profileDragEnd": "프로필 {{name}}을 {{total}}개 중 {{position}}번째 위치에 놓았습니다.",
-  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다."
+  "profileDragCancel": "프로필 {{name}}의 순서 변경을 취소했습니다.",
+  "executionGradeLabel": "실행 등급",
+  "executionGradeNone": "등급 없음",
+  "executionGradeInherit": "논리 프로필에서 상속",
+  "executionGradeInvalid": "제어 문자 없이 64자 이내로 입력하세요.",
+  "executionGradeProfileHelp": "시스템 실행 제한에 설정한 등급 이름을 사용합니다. 비워두면 전체 상한만 적용합니다. 다음 실행부터 적용되며 모델이 바뀌어도 등급은 유지됩니다.",
+  "executionGradeTaskHelp": "비워두면 논리 프로필의 실행 등급을 상속합니다. 작업에서 지정한 등급은 다음 실행부터 적용되며 우선순위는 바꾸지 않습니다."
 }

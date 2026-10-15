@@ -818,6 +818,7 @@ func startAgentInfrastructure(
 	// reconciler when its agent type left the registry) self-heal on the
 	// next poll instead of looping on "profile not found" forever.
 	orchestratorSvc.SetProfileLookup(&profileLookupAdapter{store: repos.AgentSettings})
+	orchestratorSvc.SetExecutionGradeSource(repos.AgentSettings)
 	// Watcher dispatch self-heals a binding whose repository was soft-deleted
 	// after the watch was configured, instead of creating an orphan task row.
 	orchestratorSvc.SetRepositoryChecker(&repositoryLookupAdapter{svc: services.Task})

@@ -719,6 +719,7 @@ func (r *Repository) initInfraSchema() error {
 func (r *Repository) initTaskSchema() error {
 	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS tasks (
+		execution_grade TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL DEFAULT '',
 		workflow_id TEXT NOT NULL DEFAULT '',
@@ -1380,6 +1381,7 @@ const sessionWorktreeSchemaDDL = `
  );
 
 	CREATE TABLE IF NOT EXISTS task_sessions (
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
 		queue_incarnation_id TEXT NOT NULL DEFAULT '',

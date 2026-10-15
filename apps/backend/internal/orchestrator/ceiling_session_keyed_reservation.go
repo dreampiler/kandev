@@ -34,13 +34,17 @@ type sessionKeyedCeilingReservation struct {
 // population never momentarily drops. Only seam 2's on_turn_start redirect
 // needs this; seam 4 never changes session id mid-resume and simply never
 // calls it.
-func (r *sessionKeyedCeilingReservation) rekeyToSession(ctx context.Context, sessionID string) {
+func (r *sessionKeyedCeilingReservation) rekeyToSession(ctx context.Context, sessionID string) error {
 	if r == nil || r.controller == nil || r.consumed || sessionID == "" || sessionID == r.key {
-		return
+		return nil
+	}
+	if err := r.controller.persistReservationGrade(ctx, r.key, sessionID); err != nil {
+		return err
 	}
 	if r.controller.rekey(ctx, r.key, sessionID) {
 		r.key = sessionID
 	}
+	return nil
 }
 
 // consume marks the reservation as belonging to a session that is now actually
@@ -73,7 +77,8 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 	kind models.CeilingLaunchKind, payload map[string]interface{}, failureContext string,
 ) (*sessionKeyedCeilingReservation, bool, error) {
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
+		profileID: stringCeilingPayload(payload, metaKeyAgentProfileID),
+		taskID:    taskID, sessionID: sessionID, origin: origin, seam: seam,
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

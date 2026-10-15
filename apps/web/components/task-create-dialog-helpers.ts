@@ -213,6 +213,7 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
+  executionGrade?: string;
   /** Task-only replacements for fixed workflow step agent profiles. */
   workflowAgentOverrides?: Record<string, string>;
 };
@@ -283,6 +284,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     ...buildCreateTaskState(args.withAgent),
     ...buildOptionalCreateTaskFields(args),
     priority: args.priority ?? "medium",
+    ...(args.executionGrade?.trim() ? { execution_grade: args.executionGrade.trim() } : {}),
     workflow_agent_overrides: nonEmptyRecord(args.workflowAgentOverrides),
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather

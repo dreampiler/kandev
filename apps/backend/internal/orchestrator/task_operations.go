@@ -944,7 +944,9 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
-		seam2Res.rekeyToSession(ctx, activeSession.ID)
+		if err := seam2Res.rekeyToSession(ctx, activeSession.ID); err != nil {
+			return nil, err
+		}
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
@@ -1511,21 +1513,18 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 	workflowSessionConfigStepID string,
 	entryIDs ...int64,
 ) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
-	if workflowSessionConfigStepID == "" || s.workflowStepGetter == nil {
-		return nil, "", nil, nil
-	}
-
-	candidateStep, err := s.workflowStepGetter.GetStep(ctx, workflowSessionConfigStepID)
-	if err != nil {
-		return nil, "", nil, fmt.Errorf("load workflow step for session target: %w", err)
-	}
-	if candidateStep == nil || candidateStep.SessionTarget == nil {
-		return nil, "", nil, nil
-	}
-
-	selectedSession, profileID, err := s.selectExplicitWorkflowStartSession(ctx, taskID, candidateStep)
+	selectedSession, profileID, route, err := s.resolveExplicitWorkflowStartRoute(ctx, taskID, workflowSessionConfigStepID, nil, entryIDs...)
 	if err != nil {
 		return nil, "", nil, err
+	}
+	return s.prepareSelectedWorkflowStartRoute(ctx, taskID, selectedSession, profileID, route)
+}
+
+func (s *Service) prepareSelectedWorkflowStartRoute(
+	ctx context.Context, taskID string, selectedSession *models.TaskSession, profileID string, route *models.WorkflowSessionRoute,
+) (*models.TaskSession, string, *models.WorkflowSessionRoute, error) {
+	if route == nil {
+		return selectedSession, profileID, nil, nil
 	}
 	if s.profileExecutionResolver != nil {
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, profileID); err != nil {
@@ -1533,22 +1532,6 @@ func (s *Service) prepareExplicitWorkflowStartRoute(
 		}
 	}
 
-	startPolicy := s.resolveStepProfileSessionStartPolicy(candidateStep)
-	route := &models.WorkflowSessionRoute{
-		OperationID:       workflowSessionRouteID(taskID, candidateStep.ID, s.workflowEntryIdentity(ctx, taskID, entryIDs...), candidateStep.SessionTarget, startPolicy),
-		DestinationStepID: candidateStep.ID,
-		EntryIdentity:     s.workflowEntryIdentity(ctx, taskID, entryIDs...),
-		TargetKind:        string(candidateStep.SessionTarget.Kind),
-		TargetStepID:      candidateStep.SessionTarget.StepID,
-		AgentProfileID:    profileID,
-		Phase:             workflowSessionRoutePrepared,
-	}
-	if recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, route.OperationID, candidateStep, profileID); err != nil {
-		return nil, "", nil, err
-	} else if recordedSession != nil {
-		selectedSession = recordedSession
-		route = recordedRoute
-	}
 	if selectedSession != nil || !s.supportsAtomicWorkflowSessionRouteCreation() {
 		if err := s.persistWorkflowSessionRoute(ctx, taskID, *route); err != nil {
 			return nil, "", nil, err
@@ -1672,8 +1655,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
-	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin,
-		seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts))
+	seam1Payload := seam1StartPayload(agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, opts)
+	seam1Res, deferred, err := s.admitOrDeferSeam1(ctx, taskID, origin, seam1Payload, preflightProfileID)
 	if err != nil {
 		return nil, err
 	}
@@ -1818,12 +1801,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// have its result discarded, or a step-targeted session/executor could
 	// still be picked underneath the overwritten profile.
 	if !opts.ProfileExplicit {
-		selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
-			ctx,
-			task.ID,
-			workflowSessionConfigStepID,
-			opts.WorkflowEntryID,
-		)
+		if selection := seam1Res.selection; selection != nil && selection.resolved {
+			selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareSelectedWorkflowStartRoute(
+				ctx, task.ID, selection.session, selection.profileID, selection.route,
+			)
+		} else {
+			selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
+				ctx, task.ID, workflowSessionConfigStepID, opts.WorkflowEntryID,
+			)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -1857,6 +1843,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 		if !promoted {
 			selectedExplicitSession = nil
+			if seam1Res.selection != nil && seam1Res.selection.credited {
+				decision := seam1Res.controller.readmitSelectedStart(ctx, seam1Res.key, admissionRequest{
+					taskID: taskID, profileID: explicitProfileID, profileExplicit: true, origin: origin, seam: "startTask",
+				})
+				seam1Res, deferred, err = s.completeSeam1Admission(ctx, taskID, seam1Payload, decision, nil)
+				if err != nil {
+					return nil, err
+				}
+				if deferred {
+					return nil, ErrCeilingLaunchDeferred
+				}
+				defer seam1Res.releaseIfNotConsumed()
+			}
 		}
 	}
 	if sessionID == "" {
@@ -1878,7 +1877,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, failPreparedLaunch(fmt.Errorf("explicit workflow start session became terminal before promotion"))
 		}
 	}
-	seam1Res.rebindToSession(sessionID)
+	if err := seam1Res.rebindToSession(sessionID, ctx); err != nil {
+		return nil, failPreparedLaunch(err)
+	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
 	// Session preparation can reuse an Office session that was parked after a

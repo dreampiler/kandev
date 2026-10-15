@@ -38,6 +38,7 @@ export function isProfileDirty(
 function hasCoreProfileFieldsChanged(draft: AgentProfile, savedProfile: AgentProfile): boolean {
   return [
     draft.name !== savedProfile.name,
+    (draft.executionGrade ?? "") !== (savedProfile.executionGrade ?? ""),
     draft.model !== savedProfile.model,
     (draft.fallbackModel ?? "") !== (savedProfile.fallbackModel ?? ""),
     (draft.autoFallback ?? false) !== (savedProfile.autoFallback ?? false),

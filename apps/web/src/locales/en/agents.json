@@ -436,5 +436,11 @@
   "profileDragStart": "Profile {{name}} picked up. Position {{position}} of {{total}}.",
   "profileDragOver": "Profile {{name}} moved to position {{position}} of {{total}}.",
   "profileDragEnd": "Profile {{name}} dropped at position {{position}} of {{total}}.",
-  "profileDragCancel": "Reordering profile {{name}} cancelled."
+  "profileDragCancel": "Reordering profile {{name}} cancelled.",
+  "executionGradeLabel": "Execution grade",
+  "executionGradeNone": "No grade",
+  "executionGradeInherit": "Inherit logical profile",
+  "executionGradeInvalid": "Use at most 64 characters without control characters.",
+  "executionGradeProfileHelp": "Use a grade from System capacity settings. Blank applies only the overall limit. Changes apply to the next execution; model fallback keeps the grade.",
+  "executionGradeTaskHelp": "Blank inherits the logical profile's execution grade. A task override applies to its next execution and does not change its priority."
 }

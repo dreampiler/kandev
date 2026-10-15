@@ -810,5 +810,22 @@
   "agentRuntimeRetry": "에이전트 런타임 다시 시도",
   "agentRuntimeRetryFailed": "Kandev에서 런타임 복구를 시작할 수 없습니다. 다시 시도하세요.",
   "agentRuntimeRetryStale": "런타임 상태가 변경되었습니다. 최신 상태가 표시될 때까지 기다린 후 다시 시도하세요.",
-  "storageGoCacheBusyPolicySnapshot": "이번 실행에서는 작업 중 Go 캐시 정리 설정이 켜져 있었습니다."
+  "storageGoCacheBusyPolicySnapshot": "이번 실행에서는 작업 중 Go 캐시 정리 설정이 켜져 있었습니다.",
+  "executionCapacityPolicy": "AI 실행 한도 정책",
+  "executionCapacityAutomatic": "자동 시작",
+  "executionCapacityAll": "모든 실행",
+  "executionCapacityPolicyHelp": "자동 시작은 기존 세션 한도를 유지합니다. 모든 실행은 수동·MCP 시작에도 적용하며 등급별 한도를 설정할 수 있습니다. 워크플로 WIP 한도는 별도입니다.",
+  "executionCapacityAllHelp": "수동·MCP 시작도 용량을 기다립니다. 등급이나 관제 역할에 예약된 자리는 없습니다.",
+  "executionCapacityOverallMaximum": "최대 AI 동시 실행 수",
+  "executionCapacityOverallHelp": "전체 한도는 양의 정수로 입력하세요. 등급별 한도도 이 용량을 함께 사용합니다.",
+  "executionGradeLimits": "실행등급별 한도",
+  "executionGradeLimitsHelp": "등급 이름은 앞뒤 공백을 제거한 뒤 서로 달라야 하며, 제어 문자 없이 64자 이하여야 합니다. 한도는 0~2147483647의 정수이며 0이면 해당 등급이 대기합니다. 목록에 없는 등급에는 전체 한도를 적용합니다.",
+  "executionGradeName": "실행등급 {{number}}",
+  "executionGradeMaximum": "등급 한도 {{number}}",
+  "executionGradeRemoveRow": "등급 {{number}} 삭제",
+  "executionGradeRemove": "삭제",
+  "executionGradeAdd": "등급 추가",
+  "executionGradesInvalid": "제어 문자 없이 1~64자의 중복되지 않는 등급 이름과 0~2147483647의 정수 한도를 입력하세요.",
+  "executionGradeAllRequired": "자동 시작 정책을 선택하려면 먼저 등급별 한도를 삭제하세요.",
+  "executionCapacityTitle": "AI 동시 실행 제한"
 }

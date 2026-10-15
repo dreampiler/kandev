@@ -3,6 +3,7 @@ import type { AgentProfile } from "@/lib/types/agent-profile";
 
 const EDITABLE_FIELDS = [
   "name",
+  "executionGrade",
   "model",
   "fallbackModel",
   "autoFallback",
@@ -47,6 +48,7 @@ function editableSnapshot(profile: AgentProfile): EditableProfile {
     ...fields,
     mcpSelectionMode: profile.mcpSelectionMode ?? "inherit",
     mcpSelectedServers: [...(profile.mcpSelectedServers ?? [])].sort(),
+    executionGrade: profile.executionGrade ?? "",
   } as EditableProfile;
 }
 

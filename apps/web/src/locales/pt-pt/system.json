@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "A primeira execução começa após a preparação da cópia de segurança.",
   "toolPayload.analysisDetails": "Detalhes da análise",
   "toolPayload.runDetails": "Detalhes da execução",
-  "storageGoCacheBusyPolicySnapshot": "A limpeza da cache Go durante tarefas ativas esteve ativada nesta execução."
+  "storageGoCacheBusyPolicySnapshot": "A limpeza da cache Go durante tarefas ativas esteve ativada nesta execução.",
+  "executionCapacityPolicy": "Política de capacidade de execução",
+  "executionCapacityAutomatic": "Inícios automáticos",
+  "executionCapacityAll": "Todas as execuções",
+  "executionCapacityPolicyHelp": "Os inícios automáticos mantêm o limite de sessões existente. Todas as execuções também limita os inícios manuais e MCP, com limites opcionais por grau. O WIP do fluxo continua separado.",
+  "executionCapacityAllHelp": "Os inícios manuais e MCP também aguardam capacidade. Nenhum grau ou coordenador tem lugares reservados.",
+  "executionCapacityOverallMaximum": "Máximo de execuções de IA",
+  "executionCapacityOverallHelp": "Introduza um inteiro positivo para o limite global. Os limites por grau partilham esta capacidade.",
+  "executionGradeLimits": "Limites por grau de execução",
+  "executionGradeLimitsHelp": "Os nomes dos graus devem ser únicos após remover espaços nas extremidades, ter até 64 caracteres e não conter caracteres de controlo. Os limites são inteiros de 0 a 2147483647; 0 mantém esse grau em espera. Os graus não listados usam o limite global.",
+  "executionGradeName": "Grau de execução {{number}}",
+  "executionGradeMaximum": "Máximo do grau {{number}}",
+  "executionGradeRemoveRow": "Remover grau {{number}}",
+  "executionGradeRemove": "Remover",
+  "executionGradeAdd": "Adicionar grau",
+  "executionGradesInvalid": "Introduza nomes de grau únicos com 1 a 64 caracteres, sem caracteres de controlo, e limites inteiros de 0 a 2147483647.",
+  "executionGradeAllRequired": "Remova os limites por grau antes de escolher Inícios automáticos.",
+  "executionCapacityTitle": "Limitar execuções de IA"
 }

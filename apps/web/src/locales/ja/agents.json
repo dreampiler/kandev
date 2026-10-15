@@ -436,5 +436,11 @@
   "profileDragStart": "プロフィール {{name}} を選びました。{{total}} 件中 {{position}} 番目です。",
   "profileDragOver": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に移動しました。",
   "profileDragEnd": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に配置しました。",
-  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。"
+  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。",
+  "executionGradeLabel": "実行グレード",
+  "executionGradeNone": "グレードなし",
+  "executionGradeInherit": "論理プロファイルから継承",
+  "executionGradeInvalid": "制御文字を含めず、64文字以内で入力してください。",
+  "executionGradeProfileHelp": "システムの実行上限に設定したグレード名を使用します。空欄の場合は全体の上限のみを適用します。変更は次の実行から適用され、モデルが切り替わってもグレードは変わりません。",
+  "executionGradeTaskHelp": "空欄の場合は論理プロファイルの実行グレードを継承します。タスクの指定は次の実行から適用され、優先度は変更しません。"
 }

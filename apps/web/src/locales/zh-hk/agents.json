@@ -436,5 +436,11 @@
   "profileDragStart": "已選取設定檔 {{name}}。第 {{position}} 個，共 {{total}} 個。",
   "profileDragOver": "設定檔 {{name}} 已移動到第 {{position}} 個位置，共 {{total}} 個。",
   "profileDragEnd": "設定檔 {{name}} 已放到第 {{position}} 個位置，共 {{total}} 個。",
-  "profileDragCancel": "已取消設定檔 {{name}} 的重新排序。"
+  "profileDragCancel": "已取消設定檔 {{name}} 的重新排序。",
+  "executionGradeLabel": "執行等級",
+  "executionGradeNone": "無等級",
+  "executionGradeInherit": "繼承邏輯設定",
+  "executionGradeInvalid": "最多輸入64個字符，不得包含控制字符。",
+  "executionGradeProfileHelp": "使用系統執行上限中設定的等級名稱。留空時僅應用總上限。更改從下次執行開始生效，模型切換不會改變等級。",
+  "executionGradeTaskHelp": "留空時繼承邏輯設定的執行等級。任務指定的等級從下次執行開始生效，不改變任務優先級。"
 }

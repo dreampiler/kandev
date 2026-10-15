@@ -87,6 +87,7 @@ export async function createAgentAction(payload: {
   profiles?: Array<
     {
       name: string;
+      execution_grade?: string;
       model: string;
       kind?: AgentProfileKind;
       mode?: string;
@@ -132,6 +133,7 @@ export async function createAgentProfileAction(
   agentId: string,
   payload: {
     name: string;
+    execution_grade?: string;
     model: string;
     kind?: AgentProfileKind;
     fallback_model?: string;
@@ -167,6 +169,7 @@ export async function updateAgentProfileAction(
   id: string,
   payload: {
     name?: string;
+    execution_grade?: string;
     model?: string;
     kind?: AgentProfileKind;
     fallback_model?: string;

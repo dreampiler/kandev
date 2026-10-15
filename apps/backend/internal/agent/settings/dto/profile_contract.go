@@ -2,6 +2,7 @@ package dto
 
 import (
 	"fmt"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"strings"
 )
 
@@ -9,6 +10,7 @@ import (
 // creation. Value fields retain the existing create defaults; omitted optional
 // fields are left at their domain defaults.
 type ProfileCreateRequest struct {
+	ExecutionGrade          string                  `json:"execution_grade,omitempty"`
 	AgentID                 string                  `json:"agent_id"`
 	Name                    string                  `json:"name"`
 	Model                   string                  `json:"model,omitempty"`
@@ -37,6 +39,7 @@ type ProfileCreateRequest struct {
 // means that the caller omitted the field. A non-nil pointer preserves an
 // explicit false, empty string, empty map, or empty list.
 type ProfileUpdateRequest struct {
+	ExecutionGrade    *string             `json:"execution_grade,omitempty"`
 	ID                string              `json:"id"`
 	Name              *string             `json:"name,omitempty"`
 	Model             *string             `json:"model,omitempty"`
@@ -66,6 +69,9 @@ type ProfileUpdateRequest struct {
 }
 
 func (r ProfileCreateRequest) Validate() error {
+	if err := sessioncapacity.ValidateGrade(r.ExecutionGrade); err != nil {
+		return err
+	}
 	if strings.TrimSpace(r.AgentID) == "" {
 		return fmt.Errorf("agent_id is required")
 	}
@@ -76,6 +82,11 @@ func (r ProfileCreateRequest) Validate() error {
 }
 
 func (r ProfileUpdateRequest) Validate() error {
+	if r.ExecutionGrade != nil {
+		if err := sessioncapacity.ValidateGrade(*r.ExecutionGrade); err != nil {
+			return err
+		}
+	}
 	if strings.TrimSpace(r.ID) == "" {
 		return fmt.Errorf("id is required")
 	}

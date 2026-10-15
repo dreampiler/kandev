@@ -14,6 +14,7 @@ export type SidebarTaskEditTarget = {
   id: string;
   title: string;
   description?: string;
+  executionGrade?: string;
   workflowId: string;
   workflowStepId: string;
   state?: Task["state"];
@@ -35,6 +36,7 @@ export function buildSidebarTaskEditTarget(
   return {
     id: sourceTask.id,
     title: sourceTask.title,
+    executionGrade: sourceTask.executionGrade,
     description: sourceTask.description,
     workflowId: item.workflowId,
     workflowStepId,
@@ -95,6 +97,7 @@ export function SidebarTaskEditDialog({
           ? {
               id: target.id,
               title: target.title,
+              executionGrade: target.executionGrade,
               description: target.description,
               workflowStepId: target.workflowStepId,
               state: target.state,

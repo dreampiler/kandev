@@ -810,5 +810,22 @@
   "toolPayload.firstRun": "Ƒĩŕśţ ŕũń śţàŕţś àƒţēŕ ƀàćķũƥ ƥŕēƥàŕàţĩōń.",
   "toolPayload.analysisDetails": "Àńàĺŷśĩś ďēţàĩĺś",
   "toolPayload.runDetails": "Ŕũń ďēţàĩĺś",
-  "storageGoCacheBusyPolicySnapshot": "Ĝō ćàćĥē ćĺēàńũƥ ďũŕĩńĝ àćţĩvē ţàśķś ŵàś ēńàƀĺēď ƒōŕ ţĥĩś ŕũń."
+  "storageGoCacheBusyPolicySnapshot": "Ĝō ćàćĥē ćĺēàńũƥ ďũŕĩńĝ àćţĩvē ţàśķś ŵàś ēńàƀĺēď ƒōŕ ţĥĩś ŕũń.",
+  "executionCapacityPolicy": "Ēxēćũţĩōń ćàƥàćĩţŷ ƥōĺĩćŷ",
+  "executionCapacityAutomatic": "Àũţōḿàţĩć śţàŕţś",
+  "executionCapacityAll": "Àĺĺ ēxēćũţĩōńś",
+  "executionCapacityPolicyHelp": "Àũţōḿàţĩć śţàŕţś ŕēţàĩń ţĥē ēxĩśţĩńĝ śēśśĩōń ĺĩḿĩţ. Àĺĺ ēxēćũţĩōńś àĺśō ĺĩḿĩţś ḿàńũàĺ àńď ḾĆƤ śţàŕţś, ŵĩţĥ ōƥţĩōńàĺ ĝŕàďē ĺĩḿĩţś. Ŵōŕķƒĺōŵ ŴĨƤ ŕēḿàĩńś śēƥàŕàţē.",
+  "executionCapacityAllHelp": "Ḿàńũàĺ àńď ḾĆƤ śţàŕţś àĺśō ŵàĩţ ƒōŕ ćàƥàćĩţŷ. Ńō ĝŕàďē ōŕ ćōōŕďĩńàţōŕ ŕēćēĩvēś ŕēśēŕvēď śĺōţś.",
+  "executionCapacityOverallMaximum": "Ḿàxĩḿũḿ ÀĨ ēxēćũţĩōńś",
+  "executionCapacityOverallHelp": "Ēńţēŕ à ƥōśĩţĩvē ŵĥōĺē ńũḿƀēŕ ƒōŕ ţĥē ōvēŕàĺĺ ĺĩḿĩţ. Ĝŕàďē ĺĩḿĩţś śĥàŕē ţĥĩś ćàƥàćĩţŷ.",
+  "executionGradeLimits": "Ēxēćũţĩōń ĝŕàďē ĺĩḿĩţś",
+  "executionGradeLimitsHelp": "Ĝŕàďē ńàḿēś ḿũśţ ƀē ũńĩqũē àƒţēŕ ţŕĩḿḿĩńĝ, àţ ḿōśţ 64 ćĥàŕàćţēŕś, ŵĩţĥ ńō ćōńţŕōĺ ćĥàŕàćţēŕś. Ĺĩḿĩţś àŕē ŵĥōĺē ńũḿƀēŕś ƒŕōḿ 0 ţō 2147483647; 0 ķēēƥś ţĥàţ ĝŕàďē ŵàĩţĩńĝ. Ũńĺĩśţēď ĝŕàďēś ũśē ţĥē ōvēŕàĺĺ ĺĩḿĩţ.",
+  "executionGradeName": "Ēxēćũţĩōń ĝŕàďē {{number}}",
+  "executionGradeMaximum": "Ĝŕàďē ḿàxĩḿũḿ {{number}}",
+  "executionGradeRemoveRow": "Ŕēḿōvē ĝŕàďē {{number}}",
+  "executionGradeRemove": "Ŕēḿōvē",
+  "executionGradeAdd": "Àďď ĝŕàďē",
+  "executionGradesInvalid": "Ēńţēŕ ũńĩqũē ĝŕàďē ńàḿēś ōƒ 1 ţō 64 ćĥàŕàćţēŕś ŵĩţĥōũţ ćōńţŕōĺ ćĥàŕàćţēŕś àńď ŵĥōĺē-ńũḿƀēŕ ĺĩḿĩţś ƒŕōḿ 0 ţō 2147483647.",
+  "executionGradeAllRequired": "Ŕēḿōvē ĝŕàďē ĺĩḿĩţś ƀēƒōŕē ćĥōōśĩńĝ Àũţōḿàţĩć śţàŕţś.",
+  "executionCapacityTitle": "Ĺĩḿĩţ ÀĨ ēxēćũţĩōńś"
 }

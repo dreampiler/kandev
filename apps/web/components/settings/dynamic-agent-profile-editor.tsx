@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import { ExecutionGradeField } from "@/components/settings/execution-grade-field";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -19,7 +20,9 @@ type DynamicAgentProfileEditorProps = {
   profile: AgentProfile;
   isCreating?: boolean;
   /** When supplied, render as a draft editor owned by the parent save flow. */
-  onDraftChange?: (patch: Pick<AgentProfile, "name" | "dynamic" | "enabled">) => void;
+  onDraftChange?: (
+    patch: Pick<AgentProfile, "name" | "dynamic" | "enabled" | "executionGrade">,
+  ) => void;
 };
 
 function DynamicRoutingPolicyHelp() {
@@ -112,6 +115,7 @@ export function DynamicAgentProfileEditor({
         value={state.name}
         onChange={state.updateName}
       />
+      <ExecutionGradeField value={state.executionGrade} onChange={state.updateExecutionGrade} />
       <DynamicRoutingPolicyHelp />
       <DynamicAgentCandidateList
         candidates={state.candidates}
