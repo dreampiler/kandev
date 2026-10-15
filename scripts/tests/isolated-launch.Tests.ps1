@@ -122,8 +122,14 @@ try {
     Copy-Item -Destination $copyScripts
   New-Item -ItemType File -Path (Join-Path $webDir 'vite.js') | Out-Null
   $fixtureExe = Join-Path $script:binDir 'kandev.exe'
-  Add-Type -TypeDefinition (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'isolated-launch-fixture.cs') -Raw) `
-    -OutputAssembly $fixtureExe -OutputType ConsoleApplication
+  $compiledFixture = Join-Path $env:TEMP ('isolated-fixture-' + [guid]::NewGuid().ToString('N') + '.exe')
+  try {
+    Add-Type -TypeDefinition (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'isolated-launch-fixture.cs') -Raw) `
+      -OutputAssembly $compiledFixture -OutputType ConsoleApplication
+    Copy-Item -LiteralPath $compiledFixture -Destination $fixtureExe
+  } finally {
+    Remove-Item -LiteralPath $compiledFixture -Force -ErrorAction SilentlyContinue
+  }
   foreach ($name in @('node.exe', 'agentctl.exe', 'mock-agent.exe')) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $script:binDir $name)
   }
