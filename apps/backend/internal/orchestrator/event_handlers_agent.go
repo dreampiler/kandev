@@ -586,6 +586,21 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 		s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 		return
 	}
+	deliveryReady := s.prepareBootDeliveryReadiness(ctx, data.SessionID, data.AgentExecutionID)
+	if !deliveryReady {
+		s.logger.Debug("agent.boot_ready: delivery recovery remains required",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+	}
+	// Reconciliation can update recovery metadata in its own transaction.
+	session, err = s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session after delivery reconciliation",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		// Retry through the state writer without a stale metadata snapshot.
+		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID)
+		return
+	}
 	s.clearDynamicStartupStreakForBootReady(ctx, data, session)
 	if err := s.persistProviderRestoredResumeNotice(ctx, session, data); err != nil {
 		s.logger.Warn("failed to create provider-restored resume notice",
@@ -630,6 +645,11 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 	} else {
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
+	}
+	// Native boot resolves its captured provider failure even when delivery
+	// retirement is pending. The durable fence independently blocks new work.
+	if !deliveryReady {
+		return
 	}
 	// Drain any orphaned queued message. handleAgentReady drains on turn-end,
 	// but a session that crashed mid-turn (or never started its first turn)
@@ -4629,5 +4649,8 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // terminal state unless an active LSP lease still owns that execution. This
 // runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
-	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
+	ctx := context.Background()
+	if executionID != "" && s.cleanupAgentExecutionWithReason(ctx, executionID, taskID, sessionID, completedExecutionCleanupReason) {
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, executionID)
+	}
 }

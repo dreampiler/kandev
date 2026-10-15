@@ -91,6 +91,17 @@ A later failure keeps its own recovery controls.
 
 <a id="experimental-interruption-continuation"></a>
 
+### Background workload cleanup
+
+Kandev marks open background workloads as **Ended** once it confirms that their
+owning agent process is gone. This also cleans up stale entries after a backend
+restart. Ended means that the process stopped without a reported outcome; it does
+not mean the work succeeded.
+
+A live process, failed liveness probe, or unresolved retained-agent recovery keeps
+work open. A terminal session state alone does not prove that teardown finished.
+If a delayed provider completion arrives, Kandev retains its actual outcome.
+
 ### Interruption continuation
 
 Interrupted conversation continuation is supported by default for eligible
@@ -154,7 +165,15 @@ the same native conversation without resending the old prompt. **Retry connectio
 and **Stop** remain available. A successful load alone cannot replace missing
 proof about the original process, so automatic recovery may leave this action
 to you. If Resume cannot verify the saved evidence, it keeps the session blocked
-and reports the cause.
+and reports the cause. If the saved delivery already has a fully recorded
+terminal result, Kandev reconciles the matching stale block when the idle native
+conversation is restored. The old result remains unchanged, and no previous
+prompt is sent again.
+
+A resumed runtime checks delivery recovery before enabling new work. If the saved
+evidence needs explicit recovery, the Resume controls appear before you send a
+new instruction. An existing draft is retained while recovery runs; send it once
+after the conversation is ready.
 
 After a backend restart, Kandev uses durable evidence to verify the saved owner
 and native conversation. If they match, Kandev restores the same task session

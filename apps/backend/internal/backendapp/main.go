@@ -839,6 +839,9 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	if services.DynamicProfileResolver != nil {
+		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
 	// but deleting the profile would leave the schedule firing into nothing —
@@ -2103,10 +2106,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
-	// A ceiling-deferred Office launch is replayed by the orchestrator's own
-	// sweep, independent of this scheduler; it needs a fresh runtime JWT
-	// rather than the one captured (and redacted) at defer time.
-	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
+	// Bind Office credentials to the concrete launch session before dispatch.
+	// Deferred starts refresh credentials after their persisted-token redaction.
+	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can

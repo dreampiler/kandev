@@ -523,7 +523,7 @@ Each candidate has a policy for two shared provider-error classes:
 - **Transient errors** include capacity, overload, network, timeout, rate, and
   provider-availability failures.
 - **Hard errors** include authentication, subscription, quota, credit, model,
-  and provider-configuration failures.
+  provider-configuration failures, and provider account restrictions.
 
 For each class, configure exponential same-candidate retries, the maximum
 retry count, the initial interval, reset-date waiting with a maximum wait, and
@@ -558,7 +558,9 @@ failures; a disabled policy must use a threshold of `0`.
 Kandev counts only a current task-session failure that has complete trusted
 evidence and no output or tool activity. Eligible errors are a terminal
 `unknown_provider_error` before output, or a typed agent process-start or
-session-initialization `agent_runtime_error`. For provider errors, each counted
+session-initialization `agent_runtime_error`. A turn that ends normally
+(`end_turn`) with no assistant text, reasoning, or tool activity also counts;
+consecutive empty turns match each other. For provider errors, each counted
 failure must have the same code, origin, phase, provider, and complete
 diagnostic. Kandev normalizes whitespace only; case and punctuation remain
 significant. Diagnostics that need redaction or truncation stay on manual
@@ -606,6 +608,54 @@ candidate is eligible, the session waits for a recovery action. After the
 current turn settles, use **Retry current agent** or **Try next agent** in the
 session recovery surface. These actions use the current route generation, so a
 stale browser action does not replace a newer route decision.
+
+#### Release a provider account hold
+
+An account restriction has a different recovery path from a timed backoff.
+When a gateway diagnostic starts with `Error from provider ...: 403 Forbidden`
+and contains `user_blocked` or `your access has been restricted`, dynamic
+routing holds the failed concrete execution profile. A plain or structured
+HTTP 403 does not establish this hold. Other profiles, including profiles
+sharing credentials, remain eligible.
+
+The hold has no expiry or health probe and survives a restart after its state
+is saved. Retries, reset waits, retained-route resumes, and selected launches
+cannot bypass it. A hold never replays a prompt or starts another agent by
+itself; the existing output and tool-effect safeguards still decide whether
+fallback is safe.
+
+Find the affected `execution_profile_id` in the backend's
+`routing.metric.account_block_hold` log event. A failed save also emits a
+persistence warning: the hold remains active in memory and its save is retried
+on later circuit changes, but a restart before a successful save can lose it.
+
+Resolve the restriction with the provider first. Release is currently API-only;
+there is no release button. From a signed-in Kandev browser tab with settings
+configuration access, open the developer console and replace the profile ID
+in this request:
+
+```js
+const profileId = "replace-with-execution-profile-id";
+const boot = await (await fetch("/api/v1/app-state", { credentials: "same-origin" })).json();
+const response = await fetch(`/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`, {
+  method: "POST",
+  credentials: "same-origin",
+  headers: { "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken },
+});
+console.log(response.status, await response.json());
+```
+
+HTTP 200 with `{"released":true}` means the hold was durably closed;
+`{"released":false}` means there was no hold. Release changes no credentials,
+profile settings, other holds, or candidate order, and does not resume a task
+automatically. Use the session recovery action when ready.
+
+HTTP 404 means the profile is missing or workspace-scoped. HTTP 503 means the
+routing release runtime is unavailable. HTTP 500 means release failed and the
+hold remains. A 401 or 403 requires checking authentication, settings access,
+and the current per-boot interlock. Bearer credentials are rejected on this
+settings route. The interlock is an accidental-mutation guard, not an
+authentication credential; see [Scope agent profiles](security.md#scope-agent-profiles).
 
 ### Host probes and executor model catalogs
 
@@ -864,7 +914,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Agent unavailable after install:** confirm the executable as Kandev's service user, select **Rescan**, and compare the service `PATH` with your shell.
 - **Login required:** use the agent card's login terminal or sign in under Kandev's operating-system user; signing in as another user does not help the service.
 - **Model, mode, or command probe fails:** authenticate first, refresh discovery, and choose a value advertised by the installed version.
-- **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
+- **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes. If a queued automatic launch has an invalid built agent or continue command, Kandev drops that launch instead of retrying it. Correct the profile before starting the task again. Temporary provider or environment failures are not command-validation failures.
 - **Managed npm runtime cannot start:** Retry is limited to strict exact-package `ETARGET`, recognized temporary npm errors, and an ordinary pre-ACP exit with complete generation-matched evidence of empty stderr. Other permanent or unclassified errors and incomplete evidence do not retry. Kandev confirms cleanup and keeps the selected package and npm trees. If startup still fails, review the card's technical details and verify the service user's npm configuration and registry. Use **Settings > Agents** to prepare another trusted stable version when needed. Do not start with `npm cache clean --force`.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
