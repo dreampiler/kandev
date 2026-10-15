@@ -67,6 +67,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	cfg := authz.RequireOrgScope(authz.ScopeOrgConfigManage)
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
+	api.GET("/agent-profiles/usage", h.httpListProfileUsage)
 	api.GET("/agents", h.httpListAgents)
 	api.GET("/agents/:id/mcp-discovery", h.httpDiscoverAgentMCP)
 	api.POST("/agents", cfg, h.interlock, h.httpCreateAgent)

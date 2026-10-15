@@ -101,8 +101,8 @@ transaction. Existing drafts, imports, later permission increases, and
 revoked grants still require human review; source metadata and manifests never
 grant authority.
 Canvas scopes expose `canvas_data_scope_transition_total` with fixed transition and result labels. Lifecycle events carry IDs; metrics never label task data.
-
 ## Key Concepts
+**Provider usage:** `features.providerUsageLimits` gates on-demand agent-setting snapshots through Office's shared cache. Host scope and unavailable readings remain explicit; numeric admission is separate.
 
 **Orchestrator** coordinates task execution:
 - Receives task start/stop/resume requests via WebSocket

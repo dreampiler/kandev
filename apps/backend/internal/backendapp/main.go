@@ -1488,10 +1488,15 @@ func startGatewayAndServe(
 
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
-	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+	// The added settings read surface shares this cache but is independently gated.
+	if cfg.Features.ProviderUsageLimits || (services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil) {
 		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
+			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		}
+		if cfg.Features.ProviderUsageLimits {
+			agentSettingsController.SetProfileUsageProvider(newProfileUsageSnapshot(usageAdapter))
+		}
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)

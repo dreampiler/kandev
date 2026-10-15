@@ -62,6 +62,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.providerUsageLimits",
+			EnvVar:          "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS",
+			Kind:            KindFeature,
+			Label:           "Provider usage and limits",
+			Description:     "Shows account-aware provider usage snapshots in agent settings. This increment does not enforce numeric limits.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Reads supported local provider accounts on demand. Unsupported bindings remain unknown; execution admission is unchanged.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,
