@@ -285,7 +285,10 @@ test.describe("Integration navigation hotkeys", () => {
         await testPage.keyboard.press(INTEGRATION_CHORD);
         await expect(testPage).toHaveURL(new RegExp(`${destination}$`));
         await testPage.goto(KEYBOARD_SETTINGS_PATH);
-        await recorder.locator("..").getByRole("button", { name: "Reset (clear shortcut)" }).click();
+        await recorder
+          .locator("..")
+          .getByRole("button", { name: "Reset (clear shortcut)" })
+          .click();
         await saveIntegrationShortcuts(testPage);
         await testPage.reload();
         await expect(recorder).toContainText("Unbound");
