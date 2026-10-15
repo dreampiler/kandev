@@ -11,6 +11,8 @@ import type {
 import { settingsControlClassName } from "./settings-control";
 import { TIER_LABELS } from "@/lib/settings/provider-tier-limits";
 import { ProviderTierBudgets } from "./provider-tier-budgets";
+import { ProviderTierScopes } from "./provider-tier-scopes";
+import { PROVENANCE_LABELS } from "@/lib/settings/provider-tier-limits";
 
 type NumericField =
   | "max_concurrent_turns"
@@ -30,6 +32,8 @@ const FREE_FIELDS: { field: NumericField; label: string }[] = [
 type Props = {
   accountId: string;
   tier: BillingTier;
+  /** Provider model IDs of the account's free-tier profiles. */
+  models: string[];
   state: ProviderAccountLimit["tiers"][BillingTier];
   override: TierLimits;
   onChange: (patch: Partial<TierLimits>) => void;
@@ -39,6 +43,7 @@ type Props = {
 export function ProviderTierEditor({
   accountId,
   tier,
+  models,
   state,
   override,
   onChange,
@@ -77,20 +82,32 @@ export function ProviderTierEditor({
               learned: state.learned[field] ?? t("agents:providerTierUnknown"),
               override: override[field] ?? t("agents:providerTierInherited"),
             })}
+            {state.defaults.provenance?.[field]
+              ? ` ${t("agents:providerLimitProvenance", { provenance: t(PROVENANCE_LABELS[state.defaults.provenance[field]]) })}`
+              : ""}
           </span>
         </div>
       ))}
       {tier === "free" ? (
-        <div className="grid gap-1">
-          <Label htmlFor={`${prefix}-daily-reset`}>{t("agents:providerTierDailyReset")}</Label>
-          <Input
-            id={`${prefix}-daily-reset`}
-            className={settingsControlClassName()}
-            value={override.daily_reset ?? ""}
-            placeholder={state.effective.daily_reset || t("agents:providerTierDailyResetExample")}
-            onChange={(event) => onChange({ daily_reset: event.target.value || undefined })}
+        <>
+          <div className="grid gap-1">
+            <Label htmlFor={`${prefix}-daily-reset`}>{t("agents:providerTierDailyReset")}</Label>
+            <Input
+              id={`${prefix}-daily-reset`}
+              className={settingsControlClassName()}
+              value={override.daily_reset ?? ""}
+              placeholder={state.effective.daily_reset || t("agents:providerTierDailyResetExample")}
+              onChange={(event) => onChange({ daily_reset: event.target.value || undefined })}
+            />
+          </div>
+          <ProviderTierScopes
+            prefix={prefix}
+            models={models}
+            state={state}
+            override={override}
+            onChange={onChange}
           />
-        </div>
+        </>
       ) : (
         <ProviderTierBudgets
           prefix={prefix}

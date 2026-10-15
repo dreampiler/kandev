@@ -1,0 +1,69 @@
+{
+  "entries": [
+    {
+      "providers": ["openrouter"],
+      "tier": "free",
+      "provenance": { "requests_per_minute": "published", "requests_per_day": "published" }
+    },
+    {
+      "providers": ["openrouter"],
+      "tier": "free",
+      "purchased_credits": true,
+      "provenance": { "requests_per_day": "measured" }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "free",
+      "provenance": { "requests_per_minute": "published", "requests_per_window": "published" }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "subscription",
+      "provenance": { "requests_per_minute": "measured" }
+    },
+    {
+      "providers": ["llmgateway"],
+      "tier": "paid",
+      "provenance": { "requests_per_minute": "published", "max_concurrent_turns": "published" }
+    },
+    {
+      "providers": ["opencode", "opencode-zen"],
+      "tier": "free",
+      "provenance": { "daily_reset": "measured" },
+      "scopes": [
+        {
+          "id": "model:nemotron-3-ultra-free",
+          "kind": "model",
+          "models": ["nemotron-3-ultra-free"],
+          "requests_per_day": 1000,
+          "daily_reset": "00:00 UTC",
+          "provenance": "measured"
+        },
+        {
+          "id": "model:step-5-preview-free",
+          "kind": "model",
+          "models": ["step-5-preview-free"],
+          "requests_per_day": 1000,
+          "daily_reset": "00:00 UTC",
+          "provenance": "measured"
+        },
+        {
+          "id": "model:longcat-2.5-preview-free",
+          "kind": "model",
+          "models": ["longcat-2.5-preview-free"],
+          "requests_per_day": 120,
+          "daily_reset": "00:00 UTC",
+          "provenance": "approximate"
+        },
+        {
+          "id": "group:zen-free-shared",
+          "kind": "group",
+          "models": ["big-pickle", "muse-spark-1.3-contributor-free", "space-bunny-free"],
+          "requests_per_day": 500,
+          "daily_reset": "00:00 UTC",
+          "provenance": "approximate"
+        }
+      ]
+    }
+  ]
+}

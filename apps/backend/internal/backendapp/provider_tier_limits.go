@@ -104,11 +104,21 @@ func (s *providerTierLimitService) defaultLimits(c tierLimitContext) agentusage.
 	if c.tier == agentusage.TierFree && c.observed != nil && c.observed.FreeModelDailyRequests != nil {
 		v := c.observed.FreeModelDailyRequests.Limit
 		defaults.RequestsPerDay = &v
+		defaults.Provenance = withProvenance(defaults.Provenance, "requests_per_day", agentusage.ProvenanceProvider)
 	}
 	if c.tier == agentusage.TierSubscription {
 		defaults.Windows = appendProviderBudgets(defaults.Windows, c.observed)
 	}
 	return defaults
+}
+
+func withProvenance(labels map[string]string, field, provenance string) map[string]string {
+	result := make(map[string]string, len(labels)+1)
+	for key, value := range labels {
+		result[key] = value
+	}
+	result[field] = provenance
+	return result
 }
 
 func (s *providerTierLimitService) accountTierProfiles(ctx context.Context, c tierLimitContext) []string {
@@ -239,7 +249,10 @@ func (s *providerTierLimitService) Check(ctx context.Context, id, exclude string
 	if err != nil {
 		return agentusage.LimitAdmission{}, err
 	}
-	return agentusage.EvaluateTierLimits(c.effective, used, now), nil
+	if admission := agentusage.EvaluateTierLimits(c.effective, used, now); admission.Reason != "" {
+		return admission, nil
+	}
+	return agentusage.EvaluateScopeLimits(c.effective.Scopes, c.profile.Model, used, now), nil
 }
 
 func (s *providerTierLimitService) ListAccounts(ctx context.Context) (map[string][]controller.ProviderAccountLimitDTO, error) {
@@ -261,7 +274,7 @@ func (s *providerTierLimitService) ListAccounts(ctx context.Context) (map[string
 			byKey[c.key] = account
 			providers[c.key] = c.provider
 		}
-		account.Profiles = append(account.Profiles, controller.ProviderTierProfileDTO{ID: c.profile.ID, Name: c.profile.Name, Tier: c.tier})
+		account.Profiles = append(account.Profiles, controller.ProviderTierProfileDTO{ID: c.profile.ID, Name: c.profile.Name, Tier: c.tier, Model: agentusage.ScopeModelID(c.profile.Model)})
 		used, _ := s.readUsage(ctx, c, "", time.Now())
 		account.Tiers[c.tier] = controller.ProviderTierLimitDTO{Defaults: c.defaults, Learned: c.learned.Tiers[c.tier], Override: c.owner.Tiers[c.tier], Effective: c.effective, Usage: used}
 		for _, tier := range billingTiers {
@@ -329,5 +342,7 @@ func ownerTierLimits(limits agentusage.TierLimits) agentusage.TierLimits {
 		limits.Windows[i].Learned = false
 		limits.Windows[i].WindowEstimated = false
 	}
+	limits.Scopes = agentusage.OwnerScopes(limits.Scopes)
+	limits.Provenance = nil
 	return limits
 }

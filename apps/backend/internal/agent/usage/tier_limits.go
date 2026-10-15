@@ -21,15 +21,18 @@ const (
 // an explicit zero disables that configured allowance.
 type TierLimits struct {
 	learnedFields        map[string]bool
-	MaxConcurrentTurns   *float64      `json:"max_concurrent_turns,omitempty"`
-	RequestsPerMinute    *float64      `json:"requests_per_minute,omitempty"`
-	RequestsPerDay       *float64      `json:"requests_per_day,omitempty"`
-	DailyReset           string        `json:"daily_reset,omitempty"`
-	RequestsPerWindow    *float64      `json:"requests_per_window,omitempty"`
-	RequestWindowSeconds int64         `json:"request_window_seconds,omitempty"`
-	RequestsPerModel     bool          `json:"requests_per_model,omitempty"`
-	Windows              []LimitBudget `json:"windows,omitempty"`
-	Learned              bool          `json:"learned,omitempty"`
+	MaxConcurrentTurns   *float64       `json:"max_concurrent_turns,omitempty"`
+	RequestsPerMinute    *float64       `json:"requests_per_minute,omitempty"`
+	RequestsPerDay       *float64       `json:"requests_per_day,omitempty"`
+	DailyReset           string         `json:"daily_reset,omitempty"`
+	RequestsPerWindow    *float64       `json:"requests_per_window,omitempty"`
+	RequestWindowSeconds int64          `json:"request_window_seconds,omitempty"`
+	RequestsPerModel     bool           `json:"requests_per_model,omitempty"`
+	Windows              []LimitBudget  `json:"windows,omitempty"`
+	Scopes               []RequestScope `json:"scopes,omitempty"`
+	// Provenance labels default values by JSON field name.
+	Provenance map[string]string `json:"provenance,omitempty"`
+	Learned    bool              `json:"learned,omitempty"`
 }
 
 type LimitBudget struct {
@@ -60,6 +63,7 @@ type LimitUsage struct {
 	TurnsDay       int64                `json:"turns_day"`
 	TokensDay      int64                `json:"tokens_day"`
 	Windows        map[string]float64   `json:"windows"`
+	Scopes         map[string]float64   `json:"scopes,omitempty"`
 	Resets         map[string]time.Time `json:"resets,omitempty"`
 	Estimated      bool                 `json:"estimated"`
 }
@@ -159,7 +163,7 @@ func DefaultTierLimits(provider string, tier BillingTier, plan string, purchased
 			limits.Windows = []LimitBudget{{Window: "5h", Unit: "usd", Value: limitNumber(12), Reset: "rolling"}, {Window: "week", Unit: "usd", Value: limitNumber(30), Reset: "provider"}, {Window: "month", Unit: "usd", Value: limitNumber(60), Reset: "provider"}}
 		}
 	}
-	return limits
+	return applyCatalogDefaults(limits, provider, tier, purchasedCredits)
 }
 
 func LearnTierLimits(current TierLimits, dimension string, used LimitUsage) TierLimits {
@@ -353,6 +357,7 @@ func MergeTierLimits(base, next TierLimits) TierLimits {
 			base.Windows = append(base.Windows, b)
 		}
 	}
+	base.Scopes = mergeRequestScopes(base.Scopes, next.Scopes, next.Learned)
 	base.Learned = base.Learned || next.Learned
 	return base
 }
@@ -387,6 +392,11 @@ func ValidateTierLimits(limits TierLimits) error {
 	}
 	for _, b := range limits.Windows {
 		if err := validateLimitBudget(b); err != nil {
+			return err
+		}
+	}
+	for _, scope := range limits.Scopes {
+		if err := validateRequestScope(scope); err != nil {
 			return err
 		}
 	}

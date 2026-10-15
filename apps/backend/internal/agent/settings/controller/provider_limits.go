@@ -66,6 +66,9 @@ type ProviderTierProfileDTO struct {
 	ID   string                 `json:"id"`
 	Name string                 `json:"name"`
 	Tier agentusage.BillingTier `json:"tier"`
+	// Model is the provider model ID without the provider prefix, so the card
+	// can offer the account's models for a new request scope.
+	Model string `json:"model,omitempty"`
 }
 
 type ProviderTierLimitDTO struct {

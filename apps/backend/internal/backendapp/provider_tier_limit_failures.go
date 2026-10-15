@@ -66,7 +66,9 @@ func classifyLimitDimension(c dynamicruntime.Candidate, failure *routingerr.Erro
 	switch dynamicruntime.FailureCauseFor(c, failure) {
 	case dynamicruntime.CauseAccountMinuteLimit:
 		return "minute"
-	case dynamicruntime.CauseFreeDailyLimit, dynamicruntime.CauseFreeAccountDailyLimit:
+	case dynamicruntime.CauseFreeDailyLimit:
+		return limitDimensionModelDaily
+	case dynamicruntime.CauseFreeAccountDailyLimit:
 		return "daily"
 	}
 	if failure.ClassifierRule == routingerr.RuleClaudeWeeklyLimit {
@@ -117,6 +119,9 @@ func (s *providerTierLimitService) enrichObservation(ctx context.Context, candid
 	windows, err := s.snapshotLimitWindows(ctx, c, observation.ObservedAt, observation)
 	if err != nil {
 		return err
+	}
+	if dimension == limitDimensionModelDaily {
+		return s.learnModelScope(ctx, c, used, observation.ObservedAt)
 	}
 	used.Windows = learningTokenWindows(windows)
 	base := agentusage.MergeTierLimits(c.defaults, c.learned.Tiers[c.tier])
