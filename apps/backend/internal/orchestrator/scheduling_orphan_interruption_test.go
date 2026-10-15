@@ -38,6 +38,23 @@ func newOrphanInterruptionFixture(t *testing.T) *schedulingOrphanFixture {
 	return f
 }
 
+func orphanTaskWithEntry(t *testing.T, f *schedulingOrphanFixture, taskID string) *models.Task {
+	t.Helper()
+	tasks, err := f.repo.ListSchedulingTasks(t.Context())
+	require.NoError(t, err)
+	for _, task := range tasks {
+		if task.ID == taskID {
+			_, _, entryID, err := f.repo.GetTaskWorkflowStepEntry(t.Context(), taskID)
+			require.NoError(t, err)
+			require.Positive(t, entryID)
+			require.Equal(t, entryID, task.WorkflowStepTransitionID)
+			return task
+		}
+	}
+	t.Fatalf("SCHEDULING task %s was not listed", taskID)
+	return nil
+}
+
 func seedOrphanResumableExecution(t *testing.T, f *schedulingOrphanFixture, taskID, sessionID string) {
 	t.Helper()
 	f.seedSession(t, taskID, sessionID, models.TaskSessionStateWaitingForInput)
@@ -191,15 +208,13 @@ func TestSchedulingOrphanEntryStampSeparatesVisitsAtTheSameClockTime(t *testing.
 			f := newOrphanInterruptionFixture(t)
 			f.seedTask(t, "same-clock-task", orphanAutoStep, nil)
 			f.seedSession(t, "same-clock-task", "same-clock-session", models.TaskSessionStateWaitingForInput)
-			task, err := f.repo.GetTask(t.Context(), "same-clock-task")
-			require.NoError(t, err)
+			task := orphanTaskWithEntry(t, f, "same-clock-task")
 			previousEntryID := task.WorkflowStepTransitionID
 			task.WorkflowStepID = orphanHoldStep
 			require.NoError(t, f.repo.UpdateTask(t.Context(), task))
 			task.WorkflowStepID = orphanAutoStep
 			require.NoError(t, f.repo.UpdateTask(t.Context(), task))
-			task, err = f.repo.GetTask(t.Context(), task.ID)
-			require.NoError(t, err)
+			task = orphanTaskWithEntry(t, f, task.ID)
 			entryID := previousEntryID
 			if currentEntry {
 				entryID = task.WorkflowStepTransitionID

@@ -4197,7 +4197,10 @@ func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error
 // pass lists it. Oldest update first, so recovery order is deterministic.
 func (r *Repository) ListSchedulingTasks(ctx context.Context) ([]*models.Task, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT `+taskSelectColumns("t")+`
+		SELECT `+taskSelectColumns("t")+`, COALESCE((
+			SELECT id FROM task_step_transitions
+			WHERE task_id = t.id ORDER BY id DESC LIMIT 1
+		), 0)
 		FROM tasks t
 		WHERE t.state = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 		ORDER BY t.updated_at ASC, t.created_at ASC, t.id ASC
@@ -4206,7 +4209,8 @@ func (r *Repository) ListSchedulingTasks(ctx context.Context) ([]*models.Task, e
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	return r.scanTasks(rows)
+	// Entry identity and task revision belong to the same statement snapshot.
+	return r.scanTaskRows(rows, true)
 }
 
 // ListTasksWithMetadataKey returns active, non-ephemeral tasks carrying a
@@ -4724,6 +4728,10 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 
 // scanTasks is a helper to scan task rows
 func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
+	return r.scanTaskRows(rows, false)
+}
+
+func (r *Repository) scanTaskRows(rows *sql.Rows, includeEntryIdentity bool) ([]*models.Task, error) {
 	var result []*models.Task
 	for rows.Next() {
 		task := &models.Task{}
@@ -4734,7 +4742,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		var identifier sql.NullString
 		var externalID sql.NullString
 		var externalIDSettledAt sql.NullTime
-		err := rows.Scan(
+		destinations := []interface{}{
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID, &workflowAgentOverrides,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
 			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
@@ -4742,7 +4750,11 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.AssigneeUserID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &externalID, &externalIDSettledAt, &task.IsFromOffice,
-		)
+		}
+		if includeEntryIdentity {
+			destinations = append(destinations, &task.WorkflowStepTransitionID)
+		}
+		err := rows.Scan(destinations...)
 		if err != nil {
 			return nil, err
 		}

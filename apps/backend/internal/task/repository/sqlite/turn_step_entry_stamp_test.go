@@ -17,7 +17,8 @@ func exerciseTurnEntryStampAcrossRevisit(t *testing.T, repo *Repository, receipt
 	seedTurnStepStampSession(t, repo, taskID, "step-a", sessionID)
 	task, err := repo.GetTask(t.Context(), taskID)
 	require.NoError(t, err)
-	firstEntryID := task.WorkflowStepTransitionID
+	_, _, firstEntryID, err := repo.GetTaskWorkflowStepEntry(t.Context(), taskID)
+	require.NoError(t, err)
 	require.Positive(t, firstEntryID)
 	create := repo.CreateTurnWithStepStamp
 	if receipt {
@@ -40,12 +41,14 @@ func exerciseTurnEntryStampAcrossRevisit(t *testing.T, repo *Repository, receipt
 	require.NoError(t, repo.UpdateTask(t.Context(), task))
 	task, err = repo.GetTask(t.Context(), taskID)
 	require.NoError(t, err)
-	require.Greater(t, task.WorkflowStepTransitionID, firstEntryID)
+	_, _, currentEntryID, err := repo.GetTaskWorkflowStepEntry(t.Context(), taskID)
+	require.NoError(t, err)
+	require.Greater(t, currentEntryID, firstEntryID)
 	currentTurn := &models.Turn{ID: "entry-stamp-current", TaskID: taskID, TaskSessionID: sessionID, StartedAt: capturedAt}
 	_, err = create(t.Context(), currentTurn)
 	require.NoError(t, err)
 
-	for id, entryID := range map[string]int64{oldTurn.ID: firstEntryID, currentTurn.ID: task.WorkflowStepTransitionID} {
+	for id, entryID := range map[string]int64{oldTurn.ID: firstEntryID, currentTurn.ID: currentEntryID} {
 		stored, err := repo.GetTurn(t.Context(), id)
 		require.NoError(t, err)
 		require.Equal(t, "step-a", stored.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart])

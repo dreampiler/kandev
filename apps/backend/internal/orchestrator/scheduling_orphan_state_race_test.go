@@ -53,8 +53,7 @@ func TestSchedulingOrphanRepairCannotSettleSuccessorEntry(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("startup recovery did not reach the turn-evidence boundary")
 			}
-			task, err := f.repo.GetTask(t.Context(), taskID)
-			require.NoError(t, err)
+			task := orphanTaskWithEntry(t, f, taskID)
 			previousEntryID := task.WorkflowStepTransitionID
 			task.WorkflowStepID = orphanHoldStep
 			require.NoError(t, f.repo.UpdateTask(t.Context(), task))
@@ -66,8 +65,7 @@ func TestSchedulingOrphanRepairCannotSettleSuccessorEntry(t *testing.T) {
 			release()
 			f.svc.lifecycleSweepWorkers.Wait()
 
-			successor, err := f.repo.GetTask(t.Context(), taskID)
-			require.NoError(t, err)
+			successor := orphanTaskWithEntry(t, f, taskID)
 			require.Greater(t, successor.WorkflowStepTransitionID, previousEntryID)
 			require.Equal(t, v1.TaskStateScheduling, successor.State, "old turn evidence settled a successor entry")
 			require.Equal(t, task.WorkflowStepID, successor.WorkflowStepID)

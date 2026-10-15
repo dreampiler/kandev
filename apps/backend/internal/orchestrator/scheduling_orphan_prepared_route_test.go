@@ -16,12 +16,10 @@ func TestSchedulingOrphanPreparedDestinationKeepsAcceptedTransition(t *testing.T
 	f.seedTask(t, taskID, orphanHoldStep, nil)
 	seedOrphanResumableExecution(t, f, taskID, selectedID)
 	f.seedSession(t, taskID, preparedID, models.TaskSessionStateIdle)
-	task, err := f.repo.GetTask(t.Context(), taskID)
-	require.NoError(t, err)
+	task := orphanTaskWithEntry(t, f, taskID)
 	task.WorkflowStepID = orphanAutoStep
 	require.NoError(t, f.repo.UpdateTask(t.Context(), task))
-	task, err = f.repo.GetTask(t.Context(), taskID)
-	require.NoError(t, err)
+	task = orphanTaskWithEntry(t, f, taskID)
 	acceptedEntryID := task.WorkflowStepTransitionID
 	require.Positive(t, acceptedEntryID)
 	steps := f.svc.workflowStepGetter.(*mockStepGetter)
@@ -30,8 +28,7 @@ func TestSchedulingOrphanPreparedDestinationKeepsAcceptedTransition(t *testing.T
 		testAgentProfileID, workflowEntryIdentityForID(acceptedEntryID), f.svc.resolveStepProfileSessionStartPolicy(step))
 	route.DestinationID = preparedID
 	require.NoError(t, f.repo.SetTaskMetadataKey(t.Context(), taskID, models.MetaKeyWorkflowSessionRoute, route))
-	task, err = f.repo.GetTask(t.Context(), taskID)
-	require.NoError(t, err)
+	task = orphanTaskWithEntry(t, f, taskID)
 	selected, err := f.svc.schedulingOrphanRecoverableSession(t.Context(), taskID)
 	require.NoError(t, err)
 	require.Equal(t, selectedID, selected.ID)
@@ -86,16 +83,14 @@ func TestSchedulingOrphanCommittedRecipientNeedsNoSourceTransition(t *testing.T)
 	f := newOrphanInterruptionFixture(t)
 	f.seedTask(t, "orphan-committed", orphanAutoStep, nil)
 	f.seedSession(t, "orphan-committed", "committed-recipient", models.TaskSessionStateWaitingForInput)
-	task, err := f.repo.GetTask(t.Context(), "orphan-committed")
-	require.NoError(t, err)
+	task := orphanTaskWithEntry(t, f, "orphan-committed")
 	route := models.WorkflowSessionRoute{
 		OperationID: "committed-entry", DestinationStepID: orphanAutoStep,
 		DestinationID: "committed-recipient", TargetKind: "profile", Phase: workflowSessionRouteCommitted,
 		EntryIdentity: workflowEntryIdentityForID(task.WorkflowStepTransitionID),
 	}
 	require.NoError(t, f.repo.SetTaskMetadataKey(t.Context(), task.ID, models.MetaKeyWorkflowSessionRoute, route))
-	task, err = f.repo.GetTask(t.Context(), task.ID)
-	require.NoError(t, err)
+	task = orphanTaskWithEntry(t, f, task.ID)
 	session, err := f.repo.GetTaskSession(t.Context(), route.DestinationID)
 	require.NoError(t, err)
 	entryID, source := f.svc.schedulingOrphanEntryContext(t.Context(), task, session)
