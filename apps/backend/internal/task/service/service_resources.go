@@ -718,7 +718,8 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return s.filterWorkspacesForCaller(ctx, workspaces), nil
+	workspaces = s.filterWorkspacesForCaller(ctx, workspaces)
+	return s.filterCollaborationWorkspaces(ctx, workspaces)
 }
 
 // Workflow operations

@@ -154,7 +154,7 @@ func (s *Service) AuthorizeWorkspaceScope(ctx context.Context, workspaceID strin
 func (s *Service) requireWorkspaceScope(
 	ctx context.Context, workspaceID string, scope authz.Scope, notFound error,
 ) (authz.Decision, error) {
-	if _, scoped := callerScope(ctx); !scoped || workspaceID == "" {
+	if !s.needsWorkspaceAuthorization(ctx) || workspaceID == "" {
 		return authz.ResolveWorkspace(authz.Subject{Unscoped: true}, authz.WorkspaceRef{}), nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, workspaceID)
@@ -167,6 +167,9 @@ func (s *Service) requireWorkspaceScope(
 	}
 	if !decision.Has(scope) {
 		return decision, ErrForbidden
+	}
+	if err := s.authorizeWorkspaceCollaboration(ctx, workspaceID, collaborationAction(scope)); err != nil {
+		return authz.Denied(), err
 	}
 	return decision, nil
 }
@@ -194,7 +197,7 @@ func (s *Service) AuthorizeTaskPromptScope(ctx context.Context, taskID string) e
 	if err != nil {
 		return err
 	}
-	return s.authorizeTaskScope(ctx, taskID, scope)
+	return s.authorizeTaskScopeAction(ctx, taskID, scope, models.CollaborationPrompt)
 }
 
 // coordinatorPromptScope resolves the scope required to start a turn on
@@ -204,7 +207,7 @@ func (s *Service) AuthorizeTaskPromptScope(ctx context.Context, taskID string) e
 // it; the GetTask lookup here would be pure overhead for that path.
 func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (authz.Scope, error) {
 	scope := authz.ScopeSessionPrompt
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return scope, nil
 	}
 	task, err := s.tasks.GetTask(ctx, taskID)
@@ -231,7 +234,11 @@ func (s *Service) coordinatorPromptScope(ctx context.Context, taskID string) (au
 }
 
 func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	return s.authorizeTaskScopeAction(ctx, taskID, scope, collaborationAction(scope))
+}
+
+func (s *Service) authorizeTaskScopeAction(ctx context.Context, taskID string, scope authz.Scope, action models.WorkspaceCollaborationAction) error {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	task, err := s.tasks.GetTask(ctx, taskID)
@@ -242,6 +249,9 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 		return repoerrors.ErrTaskNotFound
 	}
 	if task.WorkspaceID == "" {
+		if s.collaborationApplies(ctx) {
+			return repoerrors.ErrTaskNotFound
+		}
 		return nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
@@ -250,6 +260,9 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 		// A task can outlive its workspace row during durable cleanup. Its
 		// own row remains readable because there is no workspace owner left
 		// to authorize against.
+		if s.collaborationApplies(ctx) {
+			return repoerrors.ErrTaskNotFound
+		}
 		return nil
 	case err != nil:
 		return err
@@ -263,12 +276,12 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 	if !decision.Has(scope) {
 		return ErrForbidden
 	}
-	return nil
+	return s.authorizeWorkspaceCollaboration(ctx, task.WorkspaceID, action)
 }
 
 // authorizeWorkflowID checks reach of a workflow via its workspace.
 func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
@@ -311,14 +324,14 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		// does not exist at all.
 		return repoerrors.ErrWorkflowNotFound
 	}
-	return nil
+	return s.authorizeWorkspaceCollaboration(ctx, workflow.WorkspaceID, models.CollaborationRead)
 }
 
 // authorizeWorkflowScope checks reach and one action scope for a workflow.
 // Workflow access is resolved through its workspace so callers that can read
 // a board but cannot write its tasks receive ErrForbidden.
 func (s *Service) authorizeWorkflowScope(ctx context.Context, workflowID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
@@ -348,8 +361,7 @@ func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string
 // authorizing the workflow, so step-count endpoints cannot disclose another
 // workspace's task count.
 func (s *Service) AuthorizeWorkflowStepAccess(ctx context.Context, stepID string) error {
-	_, scoped := callerScope(ctx)
-	if !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	if s.workflowStepGetter == nil {
@@ -383,7 +395,7 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 // authz.ScopeSessionExec so a viewer who may read a transcript never gets a
 // shell in the worktree.
 func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -407,13 +419,23 @@ func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, 
 	if err != nil {
 		return err
 	}
-	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, scope)
+	if err := s.authorizeTaskScopeAction(ctx, taskID, scope, models.CollaborationPrompt); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
 }
 
 // AuthorizeSessionPromptAccess applies the task's prompt scope to a session,
 // including message replays whose task identity comes from the session row.
 func (s *Service) AuthorizeSessionPromptAccess(ctx context.Context, sessionID string) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -472,7 +494,7 @@ func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmen
 
 // AuthorizeEnvironmentScope enforces one scope on a task environment.
 func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironmentID string, scope authz.Scope) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
@@ -498,7 +520,7 @@ func (s *Service) AuthorizeEnvironmentScope(ctx context.Context, taskEnvironment
 // row's owning task is legitimately a different task in both. What establishes
 // the pair is a session of this task pointing at this environment.
 func (s *Service) AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, taskEnvironmentID string) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
@@ -529,7 +551,7 @@ func (s *Service) AuthorizeTaskEnvironmentAccess(ctx context.Context, taskID, ta
 // authorizeRepositoryID checks reach of a repository via its workspace.
 // Denials use ErrRepositoryNotFound (no existence leak).
 func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string) error {
-	if _, scoped := callerScope(ctx); !scoped {
+	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
 	repo, err := s.repoEntities.GetRepository(ctx, repositoryID)

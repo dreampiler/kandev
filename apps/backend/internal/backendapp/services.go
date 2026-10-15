@@ -104,6 +104,9 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+	taskSvc.SetWorkspaceCollaboration(&workspaceCollaborationBoundary{
+		enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task,
+	}, repos.Task)
 
 	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
 

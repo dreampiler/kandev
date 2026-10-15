@@ -62,6 +62,22 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key:             "features.workspaceCollaboration",
+			EnvVar:          "KANDEV_FEATURES_WORKSPACE_COLLABORATION",
+			Kind:            KindFeature,
+			Label:           "Workspace collaboration",
+			Description:     "Applies workspace grants to native conversation APIs. Plugin tool calls through Host are not yet covered. Disabling restores native permissions and retains saved grants.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskHigh,
+			RiskDescription: "Coverage is incomplete: plugin Host callbacks retain their existing permissions. Covered calls fail closed on grant lookup errors; disabling explicitly restores their native permissions.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             "features.lspBrowserContinuity",
 			EnvVar:          "KANDEV_FEATURES_LSP_BROWSER_CONTINUITY",
 			Kind:            KindFeature,
