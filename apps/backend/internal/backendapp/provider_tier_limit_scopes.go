@@ -61,29 +61,83 @@ func scopeProfileIDs(models map[string]string, scope agentusage.RequestScope) []
 	return ids
 }
 
+// sameMinuteWindow bounds how far apart two per-model daily blocks may be to
+// count as one shared group allowance running out.
+const sameMinuteWindow = time.Minute
+
 // learnModelScope records the requests counted in the scope covering the
 // profile's model as that scope's learned value. A model without a scope gets
-// a learned model scope of its own.
+// a learned model scope of its own; same-minute blocks of unconfigured models
+// form a provisional group instead.
 func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLimitContext, used agentusage.LimitUsage, at time.Time) error {
-	scope, ok := agentusage.CoveringScope(c.effective.Scopes, c.profile.Model)
-	counted := used.Scopes[scope.ID]
-	if !ok {
-		model := agentusage.ScopeModelID(c.profile.Model)
-		scope = agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
-		start, _, err := agentusage.DailyLimitWindow(at, "")
-		if err != nil {
-			return err
-		}
-		counted, err = s.readRequestCount(ctx, scopeProfileIDs(s.profileModels(ctx, c.ids), scope), start, at)
-		if err != nil {
-			return err
-		}
-	}
-	if counted <= 0 {
-		return nil
+	models := s.profileModels(ctx, c.ids)
+	scope, counted, err := s.scopeToLearn(ctx, c, models, used, at)
+	if err != nil || counted <= 0 {
+		return err
 	}
 	tier := c.learned.Tiers[c.tier]
+	if scope.Provisional {
+		tier.Scopes = agentusage.WithoutLearnedModelScopes(tier.Scopes, scope.Models)
+	}
 	tier.Scopes = agentusage.LearnScope(tier.Scopes, scope, counted, at)
 	c.learned.Tiers[c.tier] = tier
 	return s.store.SaveAccountTierLearned(ctx, c.key, c.learned)
+}
+
+func (s *providerTierLimitService) scopeToLearn(ctx context.Context, c tierLimitContext, models map[string]string, used agentusage.LimitUsage, at time.Time) (agentusage.RequestScope, float64, error) {
+	if group, ok := s.sameMinuteGroup(ctx, c, models, at); ok {
+		counted, err := s.countScope(ctx, models, group, at)
+		return group, counted, err
+	}
+	if scope, ok := agentusage.CoveringScope(c.effective.Scopes, c.profile.Model); ok {
+		return scope, used.Scopes[scope.ID], nil
+	}
+	model := agentusage.ScopeModelID(c.profile.Model)
+	scope := agentusage.RequestScope{ID: agentusage.ModelScopeID(model), Kind: agentusage.ScopeKindModel, Models: []string{model}}
+	counted, err := s.countScope(ctx, models, scope, at)
+	return scope, counted, err
+}
+
+func (s *providerTierLimitService) countScope(ctx context.Context, models map[string]string, scope agentusage.RequestScope, at time.Time) (float64, error) {
+	start, _, err := agentusage.DailyLimitWindow(at, scope.DailyReset)
+	if err != nil {
+		return 0, err
+	}
+	return s.readRequestCount(ctx, scopeProfileIDs(models, scope), start, at)
+}
+
+// sameMinuteGroup finds other unconfigured models of the account whose
+// per-model daily block was observed within a minute of this one. Observation
+// read errors fall back to model learning.
+func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLimitContext, models map[string]string, at time.Time) (agentusage.RequestScope, bool) {
+	configured := configuredScopes(c)
+	if agentusage.ConfiguredScopeCovers(configured, c.profile.Model) {
+		return agentusage.RequestScope{}, false
+	}
+	observations, err := s.store.ListUsageLimitObservationsSince(ctx, at.Add(-sameMinuteWindow))
+	if err != nil {
+		return agentusage.RequestScope{}, false
+	}
+	var partners []string
+	for _, o := range observations {
+		if o.AccountKey != c.key || o.Dimension != limitDimensionModelDaily || o.ExecutionProfileID == c.profile.ID || o.ObservedAt.After(at.Add(sameMinuteWindow)) {
+			continue
+		}
+		if model, ok := models[o.ExecutionProfileID]; ok && !agentusage.ConfiguredScopeCovers(configured, model) {
+			partners = append(partners, model)
+		}
+	}
+	return agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
+}
+
+// configuredScopes are catalog defaults and owner-defined scopes; owner
+// value-only entries for learned scopes do not count.
+func configuredScopes(c tierLimitContext) []agentusage.RequestScope {
+	configured := append([]agentusage.RequestScope(nil), c.defaults.Scopes...)
+	for _, scope := range c.owner.Tiers[c.tier].Scopes {
+		if scope.Kind != "" && len(scope.Models) > 0 {
+			configured = append(configured, scope)
+		}
+	}
+	return configured
 }

@@ -743,7 +743,10 @@ both. When a provider reports a per-model daily limit, Kandev replaces that
 model's or group's learned value with the requests it counted in the scope so
 far, including a lower value after a provider reduction. Learning never raises a
 limit beyond what admission already allowed, so enter an owner value when a
-provider raises an allowance.
+provider raises an allowance. When models without a configured limit hit their
+daily limit within the same minute, Kandev records a provisional shared group
+for them with their combined count. The card marks it provisional; enter 0 to
+disable it if the models were unrelated.
 
 | Provider | Free defaults | Subscription defaults | Paid defaults |
 | --- | --- | --- | --- |

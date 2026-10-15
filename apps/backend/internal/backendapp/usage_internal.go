@@ -181,10 +181,7 @@ func (r *usageLimitRecorder) recordClassified(ctx context.Context, candidate dyn
 
 	observation := sqliterepo.UsageLimitObservation{ID: uuid.NewString(), ExecutionProfileID: candidate.ID, AccountKey: r.accounts.accountKey(ctx, candidate.ID), Code: string(failure.Code), ObservedAt: at}
 
-	if err := r.accounts.usage.tierLimits.enrichObservation(ctx, candidate, failure, &observation); err != nil {
-		return err
-	}
-	return r.store.InsertUsageLimitObservation(ctx, observation)
+	return r.accounts.usage.tierLimits.recordObservation(ctx, candidate, failure, &observation)
 }
 
 // accountKey identifies the profile's account for grouping observations. A
