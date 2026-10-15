@@ -20,8 +20,11 @@ and detached failure-write context remain in place.
 
 Admission settles that native run through the existing terminal-guarded
 `FailRun` service, preserving its row, findings, recorded duration and history.
-Only a confirmed terminal result permits fresh admission. A read or settlement
-error returns to the caller and releases the new claim without dispatching work.
+A confirmed terminal result is followed by another active lookup because the
+newest row can hide older retained runs. Only exhausting native runs without an
+older agent/legacy owner permits fresh admission. An inconsistent terminal active
+row, read error or settlement error returns to the caller and releases the new
+claim without dispatching work.
 The runner serializes this settlement with its explicit cancellation write,
 separately from the worker-claim mutex. This prevents a cancellation that already
 returned from being overwritten by the service's later failure write. Inference

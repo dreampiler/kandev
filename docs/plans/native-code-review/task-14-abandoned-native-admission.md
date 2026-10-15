@@ -50,3 +50,21 @@ Go lint, documentation catalog and specification lint passed. An initial
 synctest fixture was interrupted because mutex waits are not durably blocked;
 that fixture result supplies no production failure or passing evidence.
 No live provider, database or installed-runtime acceptance is claimed.
+
+## Multiple retained runs follow-up
+
+The active lookup returns only the newest pending/running row. A disposable
+actual-runner case reproduced a fresh dispatch while an older native row was
+still running, and another fresh dispatch that bypassed an older agent owner
+(RED, review 0.183s). Recovery now rechecks the active lookup after each confirmed
+native settlement under the existing cancellation mutex. It rejoins any older
+agent/legacy owner, and reports inconsistent terminal active rows instead of
+admitting a duplicate. Existing history and entry identity stay intact.
+
+The existing `apps/backend/internal/review/runner_test.go` fake now excludes its
+terminal pointer from ActiveRun, matching the actual service contract; no new
+standing test was added. Collector-excluded multiple-run, native manual/workflow,
+agent preservation and cancellation-settlement probes passed together under
+race (GREEN, review 1.145s). The full review package with the same overlay also passed under race (1.194s).
+Final normal hooks retain scoped lint responsibility; this does not claim a new
+public head or installed acceptance.
