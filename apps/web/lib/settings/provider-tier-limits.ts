@@ -29,17 +29,28 @@ export function scopeRows(effective: TierLimits, override: TierLimits): RequestS
   return rows;
 }
 
-/** Sets or clears the owner value of one scope; owner-defined scopes keep their entry. */
+/**
+ * Sets or clears the owner value of one scope. An existing owner entry keeps
+ * its other fields (kind, models, daily reset); clearing drops the entry only
+ * when the value was all it carried.
+ */
 export function updateScopeOverride(
   overrides: RequestScope[],
   scope: RequestScope,
   value: number | undefined,
 ): RequestScope[] {
   const previous = overrides.find((entry) => entry.id === scope.id);
-  const others = overrides.filter((entry) => entry.id !== scope.id);
-  if (previous?.kind) return [...others, { ...previous, requests_per_day: value }];
-  if (value === undefined) return others;
-  return [...others, { id: scope.id, requests_per_day: value }];
+  if (!previous) {
+    return value === undefined
+      ? overrides
+      : [...overrides, { id: scope.id, requests_per_day: value }];
+  }
+  const next = { ...previous, requests_per_day: value };
+  const keep = Object.entries(next).some(
+    ([key, field]) => key !== "id" && key !== "requests_per_day" && field !== undefined,
+  );
+  if (value === undefined && !keep) return overrides.filter((entry) => entry.id !== scope.id);
+  return overrides.map((entry) => (entry.id === scope.id ? next : entry));
 }
 
 /** An owner scope for the selected models: one model or a shared group. */
