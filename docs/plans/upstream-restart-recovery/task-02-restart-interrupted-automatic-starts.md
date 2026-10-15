@@ -91,3 +91,11 @@ accepted transition and source step. The startup worker join remains bounded by
 the existing 10-second timeout and does not guarantee quiescence after expiry.
 Permanent SQL-backed regressions and hosted checks are required for acceptance;
 the independently reproduced RED was a contained synthetic decision proof.
+
+The state-only repair also requires the observed workflow entry and task revision
+inside the persistence transaction. Deterministic startup barriers commit a
+successor after the turn-evidence read, for both different-step and same-step
+moves, and assert unchanged Scheduling state and no stale publication. Repository
+cases pin the same timestamp across entries and run on SQLite and configured
+PostgreSQL. The current-entry control verifies a committed state change and one
+normal task-service publication.

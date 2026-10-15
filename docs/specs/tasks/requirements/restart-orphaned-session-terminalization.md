@@ -75,7 +75,9 @@ never delivered its entry prompt, not an interrupted conversation.
   created. Lifecycle-only turns and turns from an earlier visit to the same step shall
   not prove delivery of the current entry. When that session already accepted
   this entry's prompt, only the stale
-  `SCHEDULING` state shall be repaired. A `CREATED`, `STARTING`, or `RUNNING`
+  `SCHEDULING` state shall be repaired only while the observed entry still owns
+  the task. A later entry, including a revisit to the same step, shall remain
+  unchanged and shall receive no stale state-change event. A `CREATED`, `STARTING`, or `RUNNING`
   session shall be left alone.
 - **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.4:** The pass shall run once per
   startup, before the lifecycle-token sweep, and shall not start a second

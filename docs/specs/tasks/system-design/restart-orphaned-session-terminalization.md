@@ -124,6 +124,14 @@ entry cannot suppress this context. `processOnEnter` retains the normal route,
 recipient, credential, session lifecycle, and admission guards. Office ownership
 read errors leave the task unchanged.
 
+State-only repair uses `UpdateTaskStateIfCurrentEntry`. Its transaction takes
+the task row lock before re-reading the ledger, and compares the observed
+workflow, step, entry ID, task state, revision, and archive boundary before the
+write. Same-step revisits cannot reuse old turn evidence even when timestamps
+match. Only a committed repair publishes through the existing task-service event
+publisher, with the timestamp returned by the write; a refused repair emits no
+state-change event.
+
 This pass does not resume interrupted conversations. A session with accepted evidence for the current entry is not prompted again, so `002.2` and `002.3` still hold.
 
 ## UI and verification

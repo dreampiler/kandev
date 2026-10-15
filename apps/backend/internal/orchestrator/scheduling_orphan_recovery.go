@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -45,8 +46,12 @@ type schedulingOrphanSessionLister interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 }
 
+type schedulingOrphanStateRepairer interface {
+	UpdateTaskStateIfCurrentEntry(context.Context, *models.Task, v1.TaskState) (bool, time.Time, error)
+}
+
 // reconcileSchedulingOrphansOnStartup restarts automatic step starts that a
-// backend restart interrupted before they produced a running session
+// backend restart interrupted before they produced a running session.
 // Such a task is in SCHEDULING with no
 // deferred_launch record, no queue destination, and no lifecycle token, so no
 // other startup pass lists it: the lifecycle sweep lists durable tokens, the
@@ -364,17 +369,25 @@ func (s *Service) schedulingOrphanEntryContext(
 // repairSchedulingOrphanTaskState clears a stale SCHEDULING state for a task
 // whose session already accepted a prompt. The turn-start projection that
 // would have moved the task to IN_PROGRESS was lost to the same restart, so the
-// state is repaired by compare-and-set without running the step again.
+// state is repaired by a compare-and-set over its exact workflow entry and
+// observed task revision, without running the step again.
 func (s *Service) repairSchedulingOrphanTaskState(ctx context.Context, task *models.Task) {
-	updated, err := s.taskRepo.UpdateTaskStateIfCurrentIn(
-		ctx, task.ID, v1.TaskStateInProgress, []v1.TaskState{v1.TaskStateScheduling},
-	)
+	writer, ok := s.repo.(schedulingOrphanStateRepairer)
+	if !ok {
+		s.logger.Warn(schedulingOrphanEvent + ": repository cannot guard task state by accepted entry")
+		return
+	}
+	updated, updatedAt, err := writer.UpdateTaskStateIfCurrentEntry(ctx, task, v1.TaskStateInProgress)
 	if err != nil {
 		s.logger.Warn(schedulingOrphanEvent+": failed to repair stale SCHEDULING task state",
 			zap.String("task_id", task.ID), zap.Error(err))
 		return
 	}
 	if updated {
+		repaired := *task
+		repaired.State = v1.TaskStateInProgress
+		repaired.UpdatedAt = updatedAt
+		s.publishTaskStateChanged(ctx, &repaired, task.State)
 		s.logger.Info(schedulingOrphanEvent+": repaired stale SCHEDULING task state for a session with prompt history",
 			zap.String("task_id", task.ID))
 	}

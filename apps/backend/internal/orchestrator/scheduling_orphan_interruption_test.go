@@ -125,6 +125,8 @@ func TestSchedulingOrphanLifecycleTurnDoesNotConsumeAcceptedEntry(t *testing.T) 
 func TestSchedulingOrphanCurrentEntryTurnRepairsSQLStateWithoutPrompt(t *testing.T) {
 	f := newOrphanInterruptionFixture(t)
 	const taskID, sessionID = "orphan-current-turn", "orphan-current-turn-session"
+	publication := &recordingTaskEventPublisher{}
+	f.svc.SetTaskEventPublisher(publication)
 	f.seedTask(t, taskID, orphanAutoStep, nil)
 	seedOrphanResumableExecution(t, f, taskID, sessionID)
 	_, err := f.repo.CreateTurnWithStepStamp(t.Context(), &models.Turn{
@@ -140,6 +142,7 @@ func TestSchedulingOrphanCurrentEntryTurnRepairsSQLStateWithoutPrompt(t *testing
 	require.Equal(t, 0, f.launches.count())
 	require.Equal(t, 0, orphanPromptCount(f))
 	require.Equal(t, 1, sessionCount(t, f.repo, taskID))
+	require.Equal(t, []recordedStateChange{{taskID: taskID, oldState: v1.TaskStateScheduling, newState: v1.TaskStateInProgress}}, publication.stateChanges)
 }
 
 func TestSchedulingOrphanMalformedDeferredIntentKeepsItsOwner(t *testing.T) {

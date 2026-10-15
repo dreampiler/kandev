@@ -199,7 +199,9 @@ func TestSchedulingOrphanWithPromptHistoryOnlyRepairsState(t *testing.T) {
 
 	f.runStartupSweep(t)
 	require.False(t, f.launches.awaitLaunch(0), "a session with a turn for the current step was started again")
-	require.Equal(t, v1.TaskStateInProgress, f.taskState("orphan-prompted"))
+	task, err := f.repo.GetTask(context.Background(), "orphan-prompted")
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateInProgress, task.State)
 	require.Empty(t, f.agentMgr.capturedPrompts)
 	require.Equal(t, 1, sessionCount(t, f.repo, "orphan-prompted"))
 }
@@ -256,8 +258,8 @@ func TestSchedulingOrphanReentersWaitingForInputSessionWithoutPromptHistory(t *t
 }
 
 // AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3: the detached re-entry work is owned
-// by the service, so shutdown joins it before returning instead of leaving the
-// entry to touch repository and agent state after teardown begins.
+// by the service. Shutdown waits for a released worker within its bounded join;
+// the bound does not guarantee quiescence for a worker that ignores cancellation.
 func TestStopOrphanReentryWorkersJoinsTrackedWork(t *testing.T) {
 	f := newSchedulingOrphanFixture(t)
 
