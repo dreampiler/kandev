@@ -7,10 +7,8 @@ import (
 )
 
 // primaryCandidateRank orders sessions for an automatic primary promotion. The
-// ranking only expresses preference: an unmatched session still wins when
-// nothing matches, because a task without a primary strands its default
-// conversation, which is worse than promoting a session the workflow has moved
-// past.
+// ranking prefers a workflow-compatible session, then an unmatched session,
+// then a parked session. Any eligible fallback can retain the primary role.
 type primaryCandidateRank int
 
 const (
@@ -63,8 +61,7 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 }
 
 // bestPrimarySessionCandidate returns the session an automatic promotion
-// should take, or "" when no session is eligible
-// (REQ-TASKS-PRIMARY-SESSION-OWNERSHIP-001).
+// should take, or "" when no session is eligible.
 //
 // Terminal sessions are never candidates. activeOnly keeps each caller's
 // eligibility: maybePromotePrimary passes true, so only an active session can

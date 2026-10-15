@@ -2113,11 +2113,9 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 		}
 		return
 	}
-	// The deferred start is a task-level launch intent
-	// (REQ-TASKS-DEFERRED-START-STEP-ENTRY-001). A step move into a step that
-	// cannot run an agent, such as a hold or predecessor wait, leaves it for
-	// the next agent step; launching it here would start the task with settings
-	// edited while it waited. Other events keep their eligibility.
+	// A deferred start is task-level intent. A move into an agentless step
+	// preserves the record for the next agent step. Other events retain their
+	// existing deferred-launch eligibility.
 	retainDeferredStart := eventName == events.TaskMoved && !workflowmove.ShouldAutoStartAgent(step, nil)
 	if !retainDeferredStart && s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
 		return

@@ -16,7 +16,10 @@ func exerciseStateRepairRequiresCurrentEntry(t *testing.T, repo *Repository) {
 	require.NoError(t, repo.UpdateTaskState(t.Context(), "state-entry-task", v1.TaskStateScheduling))
 	observed, err := repo.GetTask(t.Context(), "state-entry-task")
 	require.NoError(t, err)
+	previousClock := repo.clockNow
+	repo.clockNow = func() time.Time { return time.Date(2026, 10, 15, 13, 0, 0, 123456789, time.UTC) }
 	changed, committedAt, err := repo.UpdateTaskStateIfCurrentEntry(t.Context(), observed, v1.TaskStateInProgress)
+	repo.clockNow = previousClock
 	require.NoError(t, err)
 	require.True(t, changed)
 	stored, err := repo.GetTask(t.Context(), observed.ID)

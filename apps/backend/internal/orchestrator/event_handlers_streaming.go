@@ -2084,7 +2084,7 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 
 	// Only an active session can inherit the role after a stop. The shared
 	// selector prefers the current step's profile and ranks a parked session
-	// last, so a predecessor the workflow moved past does not become primary.
+	// last; a parked session remains eligible when no better active session exists.
 	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {

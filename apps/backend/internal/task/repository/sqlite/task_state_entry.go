@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -23,16 +24,12 @@ func (r *Repository) UpdateTaskStateIfCurrentEntry(
 		return false, time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	workflowID, stepID, found, err := r.readTaskStepInTx(ctx, tx, observed.ID)
-	if err != nil || !found || workflowID != observed.WorkflowID || stepID != observed.WorkflowStepID {
-		return false, time.Time{}, err
-	}
-	entryID, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, observed.ID)
-	if err != nil || entryID != observed.WorkflowStepTransitionID {
+	current, err := r.taskStateRepairEntryIsCurrentTx(ctx, tx, observed)
+	if err != nil || !current {
 		return false, time.Time{}, err
 	}
 	if err := r.guardTaskCompletionTransitionTx(ctx, tx, observed.ID, observed.State, state,
-		workflowID, stepID, workflowID, stepID); err != nil {
+		observed.WorkflowID, observed.WorkflowStepID, observed.WorkflowID, observed.WorkflowStepID); err != nil {
 		return false, time.Time{}, err
 	}
 	updatedAt := r.nowUTC()
@@ -47,8 +44,21 @@ func (r *Repository) UpdateTaskStateIfCurrentEntry(
 	if err != nil || rows == 0 {
 		return false, time.Time{}, err
 	}
+	// Publish the value stored by the database, including its timestamp precision.
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT updated_at FROM tasks WHERE id = ?`), observed.ID).Scan(&updatedAt); err != nil {
+		return false, time.Time{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return false, time.Time{}, err
 	}
 	return true, updatedAt, nil
+}
+
+func (r *Repository) taskStateRepairEntryIsCurrentTx(ctx context.Context, tx *sql.Tx, observed *models.Task) (bool, error) {
+	workflowID, stepID, found, err := r.readTaskStepInTx(ctx, tx, observed.ID)
+	if err != nil || !found || workflowID != observed.WorkflowID || stepID != observed.WorkflowStepID {
+		return false, err
+	}
+	entryID, err := r.getLatestTaskStepTransitionIDTx(ctx, tx, observed.ID)
+	return err == nil && entryID == observed.WorkflowStepTransitionID, err
 }
