@@ -13,6 +13,7 @@ import { useSessionResumption } from "@/hooks/domains/session/use-session-resump
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import { useTaskRouteSessionHydrated } from "@/components/task/task-route-session-hydration";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
 import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
@@ -261,6 +262,14 @@ function useTaskDetailsReconnectRefresh(
   }, [connectionStatus, routeDataReady, refreshFromForeground]);
 }
 
+function retainDetailTask(
+  store: ReturnType<typeof useAppStoreApi>,
+  task: Task,
+  overviewReadId: string,
+) {
+  store.getState().retainTaskOverviews("detail", [toKanbanTask(task)], overviewReadId);
+}
+
 export function useTaskDetails(activeTaskId: string | null, initialTask: Task | null) {
   const store = useAppStoreApi();
   const routeDataReady = useTaskRouteSessionHydrated();
@@ -299,6 +308,7 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
       if (!taskId || effectiveTaskIdRef.current !== taskId) return;
       const requestedTaskId = taskId;
       const requestId = ++taskDetailsRequestIdRef.current;
+      const overviewReadId = store.getState().beginTaskOverviewRead();
       try {
         const response = await readTaskNavigationIdentity(store, requestedTaskId, {
           refresh,
@@ -307,12 +317,15 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
           foregroundRecoveryEpisode,
         });
         if (!isCurrentTaskDetailsRequest(requestId, requestedTaskId)) return;
+        retainDetailTask(store, response.task, overviewReadId);
         setTaskDetails(response.task);
         setTaskLoadError(null);
       } catch (error) {
         if (!isCurrentTaskDetailsRequest(requestId, requestedTaskId)) return;
         console.error("[TaskPageContent] Failed to load task details:", error);
         setTaskLoadError(error);
+      } finally {
+        store.getState().finishTaskOverviewRead(overviewReadId);
       }
     },
     [effectiveTaskId, store],
@@ -320,16 +333,14 @@ export function useTaskDetails(activeTaskId: string | null, initialTask: Task | 
   const refreshFromForeground = useForegroundTaskDetailsRefresh(effectiveTaskId, loadTaskDetails);
 
   useEffect(() => {
+    setTaskLoadError(null);
     if (
       !routeDataReady ||
       !effectiveTaskId ||
       taskDetails?.id === effectiveTaskId ||
       initialTask?.id === effectiveTaskId
-    ) {
-      setTaskLoadError(null);
+    )
       return;
-    }
-    setTaskLoadError(null);
     void loadTaskDetails(false, effectiveTaskId);
   }, [routeDataReady, effectiveTaskId, taskDetails?.id, initialTask?.id, loadTaskDetails]);
 
