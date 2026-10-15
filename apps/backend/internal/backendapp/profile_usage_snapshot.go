@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 const (
 	snapshotCodexACPAgentID = "codex-acp"
 	snapshotHostDefault     = "host_default"
+	snapshotWindowsOS       = "windows"
 )
 
 // profileUsageSnapshot is composed only for the enabled native read surface.
@@ -186,20 +188,28 @@ func (s *profileUsageSnapshot) read(ctx context.Context, b snapshotBinding, entr
 		entry.State, entry.Reason = "unavailable", "no_reading"
 		return entry
 	}
-	entry.State, entry.Plan = "ok", reading.Plan
+	entry.Plan = reading.Plan
 	if !reading.FetchedAt.IsZero() {
 		fetchedAt := reading.FetchedAt
 		entry.FetchedAt = &fetchedAt
 	}
 	for _, window := range reading.Windows {
+		if window.Observation == nil || !window.Observation.UtilizationObserved {
+			continue
+		}
 		converted := dto.AgentProfileUsageWindowDTO{Label: window.Label, UtilizationPct: window.UtilizationPct,
 			Scope: window.Scope, LimitReached: window.LimitReached}
-		if !window.ResetAt.IsZero() {
+		if window.Observation.ResetAtObserved && !window.ResetAt.IsZero() {
 			resetAt := window.ResetAt
 			converted.ResetAt = &resetAt
 		}
 		entry.Windows = append(entry.Windows, converted)
 	}
+	if len(entry.Windows) == 0 {
+		entry.State, entry.Reason = "unavailable", "no_reading"
+		return entry
+	}
+	entry.State = "ok"
 	return entry
 }
 
@@ -213,8 +223,8 @@ func snapshotHostBinding(profile *settingsmodels.AgentProfile) bool {
 		return false
 	}
 	for _, env := range profile.EnvVars {
-		switch env.Key {
-		case "HOME", "USERPROFILE", "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR":
+		switch snapshotEnvKey(env.Key) {
+		case "HOME", "USERPROFILE", "XDG_DATA_HOME", "CODEX_HOME", "CLAUDE_CONFIG_DIR", "OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT":
 			return false
 		}
 	}
@@ -223,12 +233,19 @@ func snapshotHostBinding(profile *settingsmodels.AgentProfile) bool {
 
 func snapshotCredentialOverride(profile *settingsmodels.AgentProfile) bool {
 	for _, env := range profile.EnvVars {
-		switch env.Key {
+		switch snapshotEnvKey(env.Key) {
 		case "ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "OPENAI_API_KEY", "OPENAI_BASE_URL", "USAGE_PROXY_VENDOR":
 			return true
 		}
 	}
 	return false
+}
+
+func snapshotEnvKey(key string) string {
+	if runtime.GOOS == snapshotWindowsOS {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func snapshotProcessOverride(agentName string) bool {

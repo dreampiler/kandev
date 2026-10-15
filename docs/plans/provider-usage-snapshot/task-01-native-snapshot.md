@@ -123,3 +123,57 @@ review, publication and any later installed desktop/phone acceptance.
 The disposable probe sources, overlays and baseline copy were removed after
 inspection. No permanent tests, background runner or persistent heap setting
 were added.
+
+Independent review corrected two snapshot-only accuracy defects: profile
+`OPENCODE_CONFIG_CONTENT` now prevents a host-default reading, and additive
+provider observation metadata distinguishes absent/null/negative percentages
+from measured zero and fallback resets from reported resets. Existing Office
+values, wire format, shared cache and binding registration remain intact.
+Disposable overlay checks reproduced the old snapshot reporting an unobserved
+zero as `ok`; the corrected reader and profile override check passed. Codex,
+Claude legacy/limits, TeamClaude and Go checks preserve measured zero and reset
+uncertainty, and existing affected client/service tests passed. No permanent
+test was added; these review probes remain outside test collection for root
+readback and cleanup.
+
+Review correction commands (from `apps/backend`; `PROBE` below denotes the
+disposable `provider-usage-observation-20261015` directory):
+
+```text
+go test -p 2 -overlay PROBE/before-overlay.json ./internal/backendapp -run '^TestSnapshotRejectsUnobservedZero$' -count=1
+go test -p 2 -overlay PROBE/overlay.json ./internal/agent/usage ./internal/backendapp -run 'TestObservation|TestSnapshotRejectsUnobservedZero|TestSnapshotPreservesObservedZeroWithoutInventingReset|TestSnapshotPreservesReportedReset|TestSnapshotProfileContentOverrideRemainsUnknown' -count=1
+go test -p 2 ./internal/agent/usage -run 'TestUsageService|TestTeamClaude|TestCodexFetchUsage|TestCodexRefreshRejectsEmptyAccessToken|TestCodexHasSubscriptionCredentials|TestClaude' -count=1
+```
+
+The first exited 1 as expected with the original reader: unobserved utilization
+became `State: ok`, `0%` and a fallback reset. Both corrected runs exited 0.
+The exact observation tests were `TestObservationCodexPresence`,
+`TestObservationClaudeLegacyAndLimits`, `TestObservationTeamClaudeAndGoZero`,
+and `TestObservationDoesNotChangeOfficeWire`. The corrected snapshot tests in
+the command all passed, including the root-provided profile override probe.
+The existing PR-docs coverage function returned `covered`, `ok: true`,
+`errors: []` for all eight changed paths and the four referenced document bodies;
+`git diff --check` exited 0.
+
+The same binding review found no uppercase normalization in validation, DTO
+conversion or launch-environment assembly. Windows-only key folding now covers
+both host-path and credential overrides; Unix comparisons keep their original
+case. The following targeted probe first exited 1 against the pre-fold reader
+(`codex_home` incorrectly accepted), then exited 0 against the correction. It
+also checks mixed-case `OPENCODE_CONFIG_CONTENT`, `OPENAI_API_KEY`, and the local
+Windows environment's case-insensitive lookup using a synthetic value only.
+
+```text
+go test -p 2 -overlay PROBE/envcase-before-overlay.json ./internal/backendapp -run '^TestSnapshotProfileEnvKeyUsesHostCaseRules$' -count=1
+go test -p 2 -overlay PROBE/overlay.json ./internal/backendapp -run '^TestSnapshotProfileEnvKeyUsesHostCaseRules$' -count=1
+```
+
+Final changed-package lint exited 0 with `0 issues.`:
+
+```text
+golangci-lint run --allow-serial-runners ./internal/agent/usage ./internal/backendapp --new-from-rev=HEAD --timeout=5m --concurrency=2
+```
+
+Its first run reported only a repeated `windows` literal (`goconst`); extracting
+that literal to a local constant resolved it. No broader consumer or full test
+suite was repeated for this correction.

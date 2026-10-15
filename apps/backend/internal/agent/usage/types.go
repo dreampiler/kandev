@@ -28,6 +28,25 @@ type UtilizationWindow struct {
 	LimitReached    bool      `json:"limit_reached,omitempty"`
 	StartAt         time.Time `json:"start_at,omitempty"`
 	DurationSeconds int64     `json:"duration_seconds,omitempty"`
+	// Observation is additive provenance for strict readers; legacy values and wire data are unchanged.
+	Observation *WindowObservation `json:"-"`
+}
+
+// WindowObservation distinguishes provider measurements from legacy defaults.
+type WindowObservation struct {
+	UtilizationObserved bool
+	ResetAtObserved     bool
+}
+
+func legacyUtilization(value *float64) float64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func utilizationObserved(value *float64) bool {
+	return value != nil && *value >= 0
 }
 
 // ProviderUsage is the full utilization response for one provider credential.

@@ -145,10 +145,12 @@ func openCodeGoWindows(raw openCodeGoResponse) []UtilizationWindow {
 		if entry.raw == nil || entry.raw.Percent == nil || *entry.raw.Percent < 0 {
 			continue
 		}
-		w := UtilizationWindow{Label: entry.label, UtilizationPct: *entry.raw.Percent, Scope: "paid_models"}
+		w := UtilizationWindow{Label: entry.label, UtilizationPct: *entry.raw.Percent, Scope: "paid_models",
+			Observation: &WindowObservation{UtilizationObserved: true}}
 		w.LimitReached = entry.raw.Status != "" && !strings.EqualFold(entry.raw.Status, "ok")
 		if reset, err := time.Parse(time.RFC3339, entry.raw.ResetsAt); err == nil {
 			w.ResetAt = reset
+			w.Observation.ResetAtObserved = !reset.IsZero()
 			w.StartAt = reset.Add(-entry.span)
 			if entry.span == 0 {
 				w.StartAt = reset.AddDate(0, -1, 0)

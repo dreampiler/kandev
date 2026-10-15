@@ -39,7 +39,15 @@ the observation scope explicit: a profile can later run with an executor or task
 override, so this snapshot does not claim to measure that execution's account.
 Explicit loopback proxies use `local_proxy`; unresolved bindings stay unknown.
 Go windows retain their paid-model scope and explicit provider exhaustion.
-Existing provider clients, fetch coalescing and cache TTL remain unchanged.
+Existing provider fetch behavior, fetch coalescing and cache TTL remain unchanged.
+
+Provider windows carry internal observation metadata, excluded from the existing
+Office JSON. The snapshot accepts a percentage only when the provider reported
+a valid number, including zero, and includes a reset only when reported by the
+provider. Legacy Office scalar defaults and fallback resets are preserved.
+Profile `OPENCODE_CONFIG_CONTENT` overrides also leave the host binding unknown.
+Profile environment-key comparisons follow host OS rules: Windows ignores case;
+Unix preserves case. The stored profile and launch environment are not rewritten.
 
 ## Settings display
 
