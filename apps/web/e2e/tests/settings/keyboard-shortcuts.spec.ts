@@ -1,5 +1,6 @@
 import {
   INTEGRATION_CHORD,
+  navigateHomeWithinApp,
   recordIntegrationShortcut,
   saveIntegrationShortcuts,
 } from "./integration-shortcuts-helpers";
@@ -281,7 +282,7 @@ test.describe("Integration navigation hotkeys", () => {
         // Re-recording the already saved chord must stay in settings.
         await recordIntegrationShortcut(testPage, slug);
         await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
-        await testPage.goto("/");
+        await navigateHomeWithinApp(testPage);
         await testPage.keyboard.press(INTEGRATION_CHORD);
         await expect(testPage).toHaveURL(new RegExp(`${destination}$`));
         await testPage.goto(KEYBOARD_SETTINGS_PATH);
@@ -295,7 +296,7 @@ test.describe("Integration navigation hotkeys", () => {
         expect(
           (await apiClient.getUserSettings()).settings.keyboard_shortcuts ?? {},
         ).not.toHaveProperty(`integration:${slug}`);
-        await testPage.goto("/");
+        await navigateHomeWithinApp(testPage);
         await testPage.keyboard.press("Control+k");
         await expect(testPage.getByRole("dialog")).toBeVisible();
       });
