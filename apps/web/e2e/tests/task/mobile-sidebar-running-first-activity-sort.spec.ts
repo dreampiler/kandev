@@ -147,7 +147,8 @@ test("phone drawer edits and saves a touch-reachable sort chain and group inset"
     await testPage.keyboard.press("ArrowDown");
     await testPage.keyboard.press("Escape");
     await expect(drawer).toBeVisible();
-    await expect(cancelHandle).toHaveAttribute("aria-pressed", "false");
+    await expect(cancelHandle).not.toHaveAttribute("aria-pressed");
+    await expect(savedPopover.locator('[data-dragging="true"]')).toHaveCount(0);
     await expect(cancelHandle).toBeFocused();
     await expect.poll(readSortKeys).toEqual(["Running", "Color", "Last activity"]);
     await testPage.keyboard.press("Escape");

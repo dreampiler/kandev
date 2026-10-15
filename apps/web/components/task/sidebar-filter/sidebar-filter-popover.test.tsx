@@ -184,7 +184,8 @@ describe("SidebarFilterPopover keyboard cancellation", () => {
       try {
         fireEvent.keyDown(handle, { key: "ArrowDown", code: "ArrowDown" });
         fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
-        await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBe("false"));
+        await waitFor(() => expect(handle.getAttribute("aria-pressed")).toBeNull());
+        expect(handle.closest('[data-dragging="true"]')).toBeNull();
         expect(bubbleListener.mock.calls.some(([event]) => event.key === "Escape")).toBe(true);
         expect(onOpenChange).not.toHaveBeenCalledWith(false);
         expect(state.updateSidebarDraft).not.toHaveBeenCalled();

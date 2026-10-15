@@ -190,7 +190,8 @@ test("desktop sorts a complete paged tree by running, color, and activity", asyn
     await testPage.keyboard.press("ArrowDown");
     await testPage.keyboard.press("Escape");
     await expect(reloadPopover).toBeVisible();
-    await expect(firstHandle).toHaveAttribute("aria-pressed", "false");
+    await expect(firstHandle).not.toHaveAttribute("aria-pressed");
+    await expect(reloadPopover.locator('[data-dragging="true"]')).toHaveCount(0);
     await expect(firstHandle).toBeFocused();
     await expect
       .poll(() =>
