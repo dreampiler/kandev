@@ -2113,6 +2113,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if initialTurnCreated {
 			s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 		}
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+			return nil, err
+		}
 		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, failPreparedLaunch(err))
 	}
 
