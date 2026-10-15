@@ -146,7 +146,7 @@ describe("SidebarFilterPopover task-row editor", () => {
   });
 });
 
-describe("SidebarFilterPopover editor state", () => {
+describe("SidebarFilterPopover keyboard cancellation", () => {
   it.each(["desktop", "phone"])(
     "cancels a keyboard reorder before ordinary Escape dismisses the %s editor",
     async (surface) => {
@@ -197,7 +197,9 @@ describe("SidebarFilterPopover editor state", () => {
       }
     },
   );
+});
 
+describe("SidebarFilterPopover editor state", () => {
   it("keeps view settings collapsed until the user opens them", () => {
     render(
       <SidebarFilterPopover
