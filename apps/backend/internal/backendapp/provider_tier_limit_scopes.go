@@ -77,7 +77,7 @@ func (s *providerTierLimitService) learnModelScope(ctx context.Context, c tierLi
 	}
 	tier := c.learned.Tiers[c.tier]
 	if scope.Provisional {
-		tier.Scopes = agentusage.WithoutLearnedModelScopes(tier.Scopes, scope.Models)
+		tier.Scopes = agentusage.WithoutLearnedModelScopes(tier.Scopes, scope.Models, ownerScopeIDs(c))
 	}
 	tier.Scopes = agentusage.LearnScope(tier.Scopes, scope, counted, at)
 	c.learned.Tiers[c.tier] = tier
@@ -130,14 +130,33 @@ func (s *providerTierLimitService) sameMinuteGroup(ctx context.Context, c tierLi
 	return agentusage.ProvisionalGroupFor(c.learned.Tiers[c.tier].Scopes, c.profile.Model, partners)
 }
 
-// configuredScopes are catalog defaults and owner-defined scopes; owner
-// value-only entries for learned scopes do not count.
+// configuredScopes are catalog defaults and every scope the owner set. An
+// owner entry that carries only an ID (the card's value or reset edit of a
+// learned scope) resolves to the current scope definition, so its models stay
+// configured and keep their owner value instead of being grouped.
 func configuredScopes(c tierLimitContext) []agentusage.RequestScope {
 	configured := append([]agentusage.RequestScope(nil), c.defaults.Scopes...)
 	for _, scope := range c.owner.Tiers[c.tier].Scopes {
 		if scope.Kind != "" && len(scope.Models) > 0 {
 			configured = append(configured, scope)
+			continue
+		}
+		for _, effective := range c.effective.Scopes {
+			if effective.ID == scope.ID && len(effective.Models) > 0 {
+				configured = append(configured, effective)
+				break
+			}
 		}
 	}
 	return configured
+}
+
+// ownerScopeIDs are the scope IDs the owner set; their learned definitions
+// must survive so the owner entry keeps covering its models.
+func ownerScopeIDs(c tierLimitContext) map[string]bool {
+	ids := make(map[string]bool)
+	for _, scope := range c.owner.Tiers[c.tier].Scopes {
+		ids[scope.ID] = true
+	}
+	return ids
 }

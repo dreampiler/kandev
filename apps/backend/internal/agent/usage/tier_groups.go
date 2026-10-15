@@ -62,11 +62,12 @@ func ProvisionalGroupFor(learned []RequestScope, model string, partners []string
 }
 
 // WithoutLearnedModelScopes drops learned single-model scopes of the given
-// models once they share a group allowance.
-func WithoutLearnedModelScopes(scopes []RequestScope, models []string) []RequestScope {
+// models once they share a group allowance. Scopes whose ID the owner set are
+// kept so the owner entry never loses the definition it applies to.
+func WithoutLearnedModelScopes(scopes []RequestScope, models []string, ownerIDs map[string]bool) []RequestScope {
 	result := make([]RequestScope, 0, len(scopes))
 	for _, scope := range scopes {
-		if scope.Kind == ScopeKindModel && scope.Learned && coversAny(scope, models) {
+		if scope.Kind == ScopeKindModel && scope.Learned && !ownerIDs[scope.ID] && coversAny(scope, models) {
 			continue
 		}
 		result = append(result, scope)
