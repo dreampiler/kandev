@@ -54,7 +54,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
                 )}
               </p>
               {byWorkspace[workspace.id]?.error && (
-                <p role="status" className="mt-2 text-sm text-destructive">
+                <p role="alert" className="mt-2 text-sm text-destructive">
                   {t("sidebar:integratedControl.loadError")}
                 </p>
               )}
@@ -70,7 +70,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         </p>
       )}
       {Object.values(byWorkspace).some((list) => list.error) && (
-        <p role="status" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {t("sidebar:integratedControl.partialData")}
         </p>
       )}
@@ -159,7 +159,7 @@ function CoordinatorFacts({ view, rows }: { view: ControlView; rows: FactRows })
           )}
           {coordinator.conversation_task_id ? (
             <Link
-              className="inline-flex min-h-7 items-center gap-2 rounded text-sm underline underline-offset-4 [@media(pointer:coarse)]:min-h-11"
+              className="inline-flex min-h-7 cursor-pointer items-center gap-2 rounded text-sm underline underline-offset-4 [@media(pointer:coarse)]:min-h-11"
               href={controlHref(view, workspace.id, coordinator.id)}
             >
               {t("sidebar:integratedControl.currentConversation")}

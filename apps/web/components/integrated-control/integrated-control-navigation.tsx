@@ -45,7 +45,7 @@ export function IntegratedControlNavigation({
               aria-current={view === item ? "page" : undefined}
               onNavigated={onNavigate}
               className={cn(
-                "flex min-h-7 items-center gap-2 rounded-md px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11",
+                "flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11",
                 view === item ? "bg-accent font-medium" : "hover:bg-muted",
               )}
               data-testid={`control-nav-${item}`}
@@ -112,7 +112,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
               </p>
             )}
             {control.data?.byWorkspace[workspace.id]?.error && (
-              <p role="status" className="p-2 text-xs text-destructive">
+              <p role="alert" className="p-2 text-xs text-destructive">
                 {t("sidebar:integratedControl.loadError")}
               </p>
             )}
@@ -131,7 +131,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
                         ? "page"
                         : undefined
                     }
-                    className="ml-3 flex min-h-7 items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
+                    className="ml-3 flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
                     data-testid={`control-conversation-${coordinator.id}`}
                   >
                     <IconMessage className="size-3.5 shrink-0" aria-hidden />
