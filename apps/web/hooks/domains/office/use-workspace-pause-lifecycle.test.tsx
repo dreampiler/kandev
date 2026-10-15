@@ -1,13 +1,18 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { WorkspacePauseState, WorkspacePauseTopbarActions } from "@/app/office/components/workspace-pause-banner";
+import {
+  WorkspacePauseState,
+  WorkspacePauseTopbarActions,
+} from "@/app/office/components/workspace-pause-banner";
 import { t } from "@/lib/i18n";
 import { useWorkspacePause } from "./use-workspace-pause";
 
 function deferred() {
   let resolve!: (response: Response) => void;
-  const promise = new Promise<Response>((yes) => { resolve = yes; });
+  const promise = new Promise<Response>((yes) => {
+    resolve = yes;
+  });
   return { promise, resolve };
 }
 
@@ -15,11 +20,14 @@ const requests: (ReturnType<typeof deferred> & { url: string; method: string })[
 const actions: Promise<unknown>[] = [];
 
 beforeEach(() => {
-  vi.stubGlobal("fetch", vi.fn((url: string, init?: RequestInit) => {
-    const request = { ...deferred(), url: String(url), method: init?.method ?? "GET" };
-    requests.push(request);
-    return request.promise;
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((url: string, init?: RequestInit) => {
+      const request = { ...deferred(), url: String(url), method: init?.method ?? "GET" };
+      requests.push(request);
+      return request.promise;
+    }),
+  );
 });
 
 afterEach(async () => {
@@ -32,33 +40,55 @@ afterEach(async () => {
 });
 
 function response(paused: boolean, workspace = "ws-1") {
-  return new Response(JSON.stringify({
-    workspace_id: workspace,
-    paused,
-    pause: paused ? {
-      id: "pause-1", reason: "incident", created_by: "operator",
-      created_by_kind: "user", created_at: "2026-10-15T00:00:00Z",
-    } : null,
-  }), { status: 200, headers: { "Content-Type": "application/json" } });
+  return new Response(
+    JSON.stringify({
+      workspace_id: workspace,
+      paused,
+      pause: paused
+        ? {
+            id: "pause-1",
+            reason: "incident",
+            created_by: "operator",
+            created_by_kind: "user",
+            created_at: "2026-10-15T00:00:00Z",
+          }
+        : null,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
 }
 
 function mount() {
-  let current!: { value: ReturnType<typeof useWorkspacePause>; store: ReturnType<typeof useAppStoreApi> };
+  let current!: {
+    value: ReturnType<typeof useWorkspacePause>;
+    store: ReturnType<typeof useAppStoreApi>;
+  };
   function Consumer() {
     const workspace = useAppStore((state) => state.workspaces.activeId);
     const value = useWorkspacePause(workspace);
     current = { value, store: useAppStoreApi() };
     const view = { activeWorkspaceId: workspace, ...value };
-    return <><WorkspacePauseState view={view} /><WorkspacePauseTopbarActions view={view} /></>;
+    return (
+      <>
+        <WorkspacePauseState view={view} />
+        <WorkspacePauseTopbarActions view={view} />
+      </>
+    );
   }
   function tree(key: number) {
-    return <StateProvider initialState={{ workspaces: { items: [], activeId: "ws-1", activeIdRevision: 0 } }}>
-      <Consumer key={key} />
-    </StateProvider>;
+    return (
+      <StateProvider
+        initialState={{ workspaces: { items: [], activeId: "ws-1", activeIdRevision: 0 } }}
+      >
+        <Consumer key={key} />
+      </StateProvider>
+    );
   }
   const rendered = render(tree(0));
   return {
-    get current() { return current; },
+    get current() {
+      return current;
+    },
     remount: () => rendered.rerender(tree(1)),
     unmount: rendered.unmount,
   };
@@ -68,30 +98,41 @@ type View = ReturnType<typeof mount>;
 
 async function succeed(index: number, paused = false, workspace = "ws-1") {
   expect(requests[index]).toBeDefined();
-  await act(async () => { requests[index].resolve(response(paused, workspace)); });
+  await act(async () => {
+    requests[index].resolve(response(paused, workspace));
+  });
 }
 
 async function fail(index: number) {
   expect(requests[index]).toBeDefined();
   await act(async () => {
-    requests[index].resolve(new Response(JSON.stringify({ error: "service unavailable" }), {
-      status: 503, headers: { "Content-Type": "application/json" },
-    }));
+    requests[index].resolve(
+      new Response(JSON.stringify({ error: "service unavailable" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
   });
 }
 
 function start(view: View, kind: "read" | "pause" | "resume") {
   let pending!: Promise<unknown>;
   act(() => {
-    pending = kind === "read" ? view.current.value.refresh()
-      : kind === "pause" ? view.current.value.pause("incident") : view.current.value.resume();
+    pending =
+      kind === "read"
+        ? view.current.value.refresh()
+        : kind === "pause"
+          ? view.current.value.pause("incident")
+          : view.current.value.resume();
     actions.push(pending);
   });
   return pending;
 }
 
 function expectLoading() {
-  expect(screen.getByTestId("office-workspace-pause-loading").textContent).toBe(t("office:pauseStateLoading"));
+  expect(screen.getByTestId("office-workspace-pause-loading").textContent).toBe(
+    t("office:pauseStateLoading"),
+  );
   expect(screen.queryByTestId("office-workspace-pause-unavailable")).toBeNull();
 }
 
@@ -139,7 +180,9 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     expectLoading();
     await fail(0);
     expect(screen.queryByTestId("office-workspace-pause-loading")).toBeNull();
-    expect(screen.getByTestId("office-workspace-pause-unavailable").textContent).toBe(t("office:pauseStateUnavailable"));
+    expect(screen.getByTestId("office-workspace-pause-unavailable").textContent).toBe(
+      t("office:pauseStateUnavailable"),
+    );
   });
 
   it("retains the cached record as stale after revalidation fails", async () => {
@@ -147,7 +190,9 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await succeed(0, true);
     view.remount();
     await fail(1);
-    expect(screen.getByTestId("office-workspace-paused-banner").textContent).toContain(t("office:pauseStateStale"));
+    expect(screen.getByTestId("office-workspace-paused-banner").textContent).toContain(
+      t("office:pauseStateStale"),
+    );
     expect(view.current.value.record?.reason).toBe("incident");
   });
 
@@ -160,17 +205,26 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     expect(screen.getByTestId("office-workspace-paused-banner")).toBeTruthy();
   });
 
-  it.each(["read-first", "mutation-first"])("settles failed GET and POST in %s order", async (order) => {
-    const view = mount();
-    const pending = start(view, "pause");
-    expect(requests[0].method).toBe("GET");
-    expect(requests[1].method).toBe("POST");
-    if (order === "read-first") { await fail(0); await fail(1); }
-    else { await fail(1); expectLoading(); await fail(0); }
-    expect(await pending).toMatchObject({ ok: false });
-    expect(view.current.value.isMutating).toBe(false);
-    expect(screen.getByTestId("office-workspace-pause-unavailable")).toBeTruthy();
-  });
+  it.each(["read-first", "mutation-first"])(
+    "settles failed GET and POST in %s order",
+    async (order) => {
+      const view = mount();
+      const pending = start(view, "pause");
+      expect(requests[0].method).toBe("GET");
+      expect(requests[1].method).toBe("POST");
+      if (order === "read-first") {
+        await fail(0);
+        await fail(1);
+      } else {
+        await fail(1);
+        expectLoading();
+        await fail(0);
+      }
+      expect(await pending).toMatchObject({ ok: false });
+      expect(view.current.value.isMutating).toBe(false);
+      expect(screen.getByTestId("office-workspace-pause-unavailable")).toBeTruthy();
+    },
+  );
 
   it("accepts an outstanding successful GET after a newer POST fails", async () => {
     const view = mount();
@@ -188,7 +242,9 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await fail(0);
     expect(await pending).toMatchObject({ ok: true });
     expect(view.current.value.status).toBe("known");
-    expect(screen.getByTestId("office-workspace-paused-banner").textContent).not.toContain(t("office:pauseStateStale"));
+    expect(screen.getByTestId("office-workspace-paused-banner").textContent).not.toContain(
+      t("office:pauseStateStale"),
+    );
   });
 
   it("keeps the newer read outcome when an older read completes afterward", async () => {

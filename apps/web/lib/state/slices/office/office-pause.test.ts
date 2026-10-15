@@ -66,7 +66,9 @@ describe("office pause cached workspace ownership", () => {
       store.getState().beginPauseRead(WS_1);
       const tag = store.getState().beginPauseRequest(kind === "read-success" ? "read" : "mutate");
       store.getState().applyPauseResponse(tag, WS_2, WS_2, {
-        kind, paused: true, record: makeRecord(),
+        kind,
+        paused: true,
+        record: makeRecord(),
       });
       expect(store.getState().office.pause.workspaceId).toBe(WS_2);
       store.getState().beginPauseRead(WS_2);
