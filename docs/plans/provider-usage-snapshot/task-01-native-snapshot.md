@@ -177,3 +177,27 @@ golangci-lint run --allow-serial-runners ./internal/agent/usage ./internal/backe
 Its first run reported only a repeated `windows` literal (`goconst`); extracting
 that literal to a local constant resolved it. No broader consumer or full test
 suite was repeated for this correction.
+
+## Browser evidence supplement
+
+The earlier timeout remains a failed fixture attempt. A smaller disposable Vite
+surface subsequently reused the actual AgentProfilesSubList, ProfileRow,
+AgentProfileUsageLine, usage hook and feature/auth StateProvider from source
+bc4bd0b7. It supplied synthetic HTTP snapshots and performed no provider, model,
+credential or installed-runtime operation.
+
+Chrome rendered a 1440-by-1280 desktop and a 390-by-844 phone surface. Shared paid
+accounts, explicit host-default/local-proxy scope, unavailable readings, measured
+zero and free/no-API rows were visible. The initial render issued one usage GET;
+explicit Refresh issued one more and updated both shared-account rows. OFF
+issued zero usage GETs. No WebSocket, external request or page error occurred.
+Document/usage scroll widths matched their client widths, and the phone Refresh
+target was 44 pixels high. Top and bottom phone captures include the full list.
+Integration read the result JSON and all three PNGs directly.
+
+The fixture initially lacked the app-owned vertical scroller, clipping its own
+capture. Adding the scroller only in the disposable fixture resolved that
+fixture defect; product source was unchanged. The isolated Vite process was
+interrupted after capture and its handle collected. This proves browser
+rendering and fake-transport behavior, not live account or installed acceptance.
+No standing browser case or new runner was added.
