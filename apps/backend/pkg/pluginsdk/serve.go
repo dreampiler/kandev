@@ -133,14 +133,15 @@ func (p *GRPCPlugin) GRPCServer(broker *hcplugin.GRPCBroker, s *grpc.Server) err
 // to start serving it on hostBrokerID so the plugin subprocess can call
 // back. See the file header.
 func (p *GRPCPlugin) GRPCClient(_ context.Context, broker *hcplugin.GRPCBroker, conn *grpc.ClientConn) (interface{}, error) {
+	origins := newPluginCallOrigins(p.Host)
 	if p.Host != nil {
 		go broker.AcceptAndServe(hostBrokerID, func(opts []grpc.ServerOption) *grpc.Server {
-			s := grpc.NewServer(opts...)
+			s := grpc.NewServer(append(opts, grpc.ChainUnaryInterceptor(origins.intercept))...)
 			registerHostServer(s, p.Host)
 			return s
 		})
 	}
-	return &RemotePlugin{client: pluginv1.NewPluginClient(conn)}, nil
+	return &RemotePlugin{client: pluginv1.NewPluginClient(pluginCallClientConn{ClientConnInterface: conn, origins: origins}), origins: origins}, nil
 }
 
 // dialBrokerWithRetry retries broker.Dial(id) with backoff until it
@@ -169,7 +170,8 @@ func dialBrokerWithRetry(ctx context.Context, broker *hcplugin.GRPCBroker, id ui
 // RemotePlugin is the Go-native client kandev's runtime manager uses to
 // call a running plugin, returned by Dispense(pluginsdk.PluginMapKey).
 type RemotePlugin struct {
-	client pluginv1.PluginClient
+	client  pluginv1.PluginClient
+	origins *pluginCallOrigins
 }
 
 // DeliverEvent calls the plugin's DeliverEvent RPC. Timeout/retry policy

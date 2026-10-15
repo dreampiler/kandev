@@ -26,6 +26,14 @@ type workspaceCollaborationBoundary struct {
 
 func (b *workspaceCollaborationBoundary) Enabled() bool { return b.enabled }
 
+func (b *workspaceCollaborationBoundary) validatePluginCall(ctx context.Context, agentTool bool) error {
+	if !b.enabled || (!agentTool && !b.IsConversation(ctx)) {
+		return nil
+	}
+	_, err := b.caller(ctx)
+	return err
+}
+
 func (b *workspaceCollaborationBoundary) IsConversation(ctx context.Context) bool {
 	if _, ok := mcpscope.PrincipalFromContext(ctx); ok {
 		return true

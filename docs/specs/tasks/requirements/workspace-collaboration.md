@@ -36,6 +36,11 @@ owners:
   human browser requests and internal schedulers shall retain their native
   behavior. A grant shall never widen owner, tenant, membership or capability
   permissions or start a model merely by being edited or read.
+- **AC-TASKS-WORKSPACE-COLLABORATION-001.8:** Plugin Host callbacks shall retain
+  the verified caller and native permissions of their live server invocation.
+  Concurrent calls and plugins shall remain separate; canceled, returned or
+  unidentified domain callbacks shall not regain legacy authority when enabled.
+  Verified native plugin RPC contexts remain distinct from conversations.
 
 ## Scope
 
@@ -43,9 +48,10 @@ The first slice covers task/session conversation callers, native grant APIs,
 task-domain read/prompt/control boundaries and append-only reports. Profile
 inheritance, delegated authority, taskless Office principals, a full grant-editor
 UI and the independent aggregate-navigation feature remain subsequent slices.
-The generic plugin Host callback also needs verified conversation-origin
-propagation before the main MCP plugin-tool flow satisfies this overall goal;
-the first API/domain slice does not claim that coverage.
+Task 02 carries verified conversation origin through the generic plugin Host
+broker. The dedicated report remains an HTTP/WS primitive; an advertised plugin
+report consumer is separate remaining work. The first API/domain slice alone
+does not claim transport coverage or completion of the overall goal.
 
 ## System design
 

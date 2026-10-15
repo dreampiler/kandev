@@ -91,28 +91,69 @@ No new poller, queue, permanent test framework or operating ACL update is needed
 
 ## Transport coverage and original remaining work
 
+### Plugin invocation context increment
+
+The SDK binds each outbound plugin RPC to its original server context for that
+RPC's lifetime, separately for each plugin Host instance. The Host broker checks
+the returned metadata reference before restoring original context values; native
+plugin capabilities still apply. Agent tool calls additionally require the
+server-verified conversation principal. Event/action/webhook callbacks use their
+actual native server context, including any original user identity.
+
+The original tool InvocationID remains correlation data. Its MCP request field
+can be repeated, so a fresh server call reference prevents a delayed callback
+from acquiring a later invocation with the same ID. No proto field, persistent
+ledger, global principal or task identity supplied by a plugin is introduced.
+The SDK forwards metadata only from the handler's incoming context. Authors must
+retain that context when calling Host; dropping it cannot confer background
+authority. Domain Host calls with missing, expired, canceled or other-plugin
+references fail closed while enabled. Plugin-owned state/config/secrets/events
+retain existing capability rules for startup work. An unidentified startup job
+cannot use domain data authority while enabled; an actual native RPC callback
+can. Off keeps the original native path and stored grants.
+
+While enabled, plugin-authored `plugin.<id>.*` events carry a host-installed
+envelope containing the emitting plugin and its opaque live call reference.
+This is separate from plugin payload and is retained by JSON serialization and
+the existing delivery queue/ring buffer. Each attempt resolves the reference
+against the issuing RemotePlugin's existing map, including delivery to another
+subscriber. The receiver's new RPC inherits the original principal, owner and
+cancellation. No additional registry or persisted identity is introduced.
+Missing, returned, canceled or restarted origins still permit notification
+delivery under an unidentified context; domain Host operations reject that
+context. Re-emitting it cannot restore native authority. Existing bounded retries
+and buffering remain responsible for delivery outcomes.
+
+This rule concerns events whose payload and publication are directly selected
+by plugin code, including an agent tool's call to EmitEvent. Native domain events
+such as `task.updated`, emitted after an authorized state transition and consumed
+by a registered automation owner, retain that owner's existing independent
+authority. A mutation's causal origin does not add a general taint policy to
+native automation, human or background work.
+
+Verification for Task 02 must exercise the actual SDK plugin-RPC and broker-Host
+path, concurrent conversations/native RPCs, cancellation and late/mismatched
+references, with real domain read/report/prompt/control effects. The earlier
+API/domain/store checks remain valid and need not be repeated.
+
 The implemented boundary consumes trusted conversation contexts at task-domain
 entry points. The native in-session stream installs those contexts through
 `agent/runtime/lifecycle/mcp_identity.go` and `mcp/scope/principal.go`; ordinary
 human HTTP/WS and internal scheduler calls remain native. The new report primitive
 is an HTTP/WS API, not yet an advertised MCP tool or full grant-editor UI.
 
-The generic plugin Host return path is an explicit remaining gap. The server
-passes `AgentToolInvocationContext` into a plugin tool RPC, but
-`pkg/pluginsdk/serve.go` constructs one long-lived broker Host service and
-`pkg/pluginsdk/host.go` forwards each incoming Host RPC context independently.
-The current callback carries plugin capability authority, without restoring the
-originating conversation principal. Caller task/session fields in tool/request
-JSON are not sufficient evidence to restore that authority. No such payload is
-trusted by this implementation. A generic Host call without verified conversation
-origin therefore remains governed by existing plugin/native permissions; it is
-not covered by this conversation grant boundary and may bypass its narrowing.
+Task 01 recorded the generic Host return path's missing origin as a transport
+gap. Task 02 closes that callback boundary with the live SDK context bridge
+above, without trusting tool JSON identity or placing one principal on a shared
+Host. Domain mutations retain their native control scope: the legacy task
+update/move adapter reads only a write-authorized placement/version snapshot
+and write-authorized management claim, rather than accidentally requiring a
+separate collaboration read grant for its internal CAS preflight. Existing
+resource versions and management claim generations still fence the mutation.
 
-The main MCP plugin-tool flow cannot be described as protected until a separate
-bounded origin-propagation change connects the actual broker callback, owner
-identity and action to this boundary while preserving non-agent plugin work.
-This first API/domain slice does not complete the overall workspace-collaboration
-permission goal. It does not solve that gap by disabling existing native APIs,
-requiring plugin installation, treating payload IDs as credentials or granting
-authority from watches. Profile inheritance, delegation and taskless callers also
-remain original follow-up work. Aggregate navigation is independent of this gap.
+The dedicated report remains an HTTP/WS primitive. Existing generic Host messages
+are prompts, including when the caller only holds report permission. Advertising
+a dedicated report consumer, profile inheritance, delegation, taskless callers
+and the full grant editor remain original subsequent work. Aggregate navigation
+is independent. None of these increments changes operating permissions, installs
+plugins, starts a model on grant edits or derives authority from watches.

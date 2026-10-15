@@ -24,5 +24,9 @@ behavior or prerequisites for this slice.
 
 The [transport coverage](../../specs/tasks/system-design/workspace-collaboration.md#transport-coverage-and-original-remaining-work)
 records the generic plugin Host callback's missing verified conversation origin.
-This slice is an API/domain foundation and does not claim to enforce grants across
-the main MCP plugin-tool flow until that origin is propagated and verified.
+Task 01 is an API/domain foundation and does not alone claim to enforce grants
+across the main MCP plugin-tool flow.
+
+[Task 02](task-02-plugin-caller-context.md) connects that remaining transport
+boundary through the existing SDK/gRPC broker. Preserve Task 01's verified
+domain corrections and reuse its valid authorization/store results.
