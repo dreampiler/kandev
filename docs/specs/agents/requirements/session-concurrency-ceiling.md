@@ -62,7 +62,10 @@ bounded instance capacity, so that one installation does not overload its host.
   caller shall receive an explicit conflict so it retains ownership.
 - **AC-AGENTS-SESSION-CEILING-001.5:** A retry sweep shall replay deferred
   launches by their stored kind. It shall preserve a record when capacity is
-  still full or replay fails for a non-ceiling reason.
+  still full or replay fails for a non-ceiling reason, except for the
+  permanent failures in AC-AGENTS-SESSION-CEILING-001.11 and
+  AC-AGENTS-SESSION-CEILING-001.12. The log entry for a preserved non-ceiling
+  failure shall name its cause.
 - **AC-AGENTS-SESSION-CEILING-001.6:** A callback from an older execution shall
   not release or confirm a reservation held by a successor execution for the
   same session.
@@ -96,8 +99,20 @@ bounded instance capacity, so that one installation does not overload its host.
   so the next sweep drops it instead of replaying it. If the task is deleted
   while its start waits, the unbound run shall fail and release its concurrency
   slot.
+- **AC-AGENTS-SESSION-CEILING-001.11:** When a replayed launch fails validation
+  of its built agent or continue command, the sweep shall drop the record with
+  a launch-invalid reason instead of preserving it. A later pass would build the
+  same command and leave another failed session. Wrapping the command-validation
+  error shall not change this disposition. A transient failure whose message
+  only mentions validation shall still be preserved.
+- **AC-AGENTS-SESSION-CEILING-001.12:** When a record's workflow entry can never
+  become valid, the sweep shall drop it as superseded. This covers a legacy
+  `start` with no recipient session, a binding that cannot be derived or is
+  incomplete, an unrouted entry whose step now routes sessions, and a task with
+  no durable entry identity. A failed step, transition, or task read during that
+  check shall preserve the record for a later pass.
 
-- **AC-AGENTS-SESSION-CEILING-001.11:** Each retry pass shall consider eligible,
+- **AC-AGENTS-SESSION-CEILING-001.14:** Each retry pass shall consider eligible,
   due ceiling-deferred tasks by priority (critical, high, medium, low, other),
   then position, then original ceiling queue time, then task ID, all ascending
   except priority urgency. An unreadable or absent queue time sorts after valid
@@ -105,11 +120,11 @@ bounded instance capacity, so that one installation does not overload its host.
   refusals shall not change this order. Normal per-step WIP admission retains
   its existing position-first ordering.
 
-- **AC-AGENTS-SESSION-CEILING-001.12:** When sufficient capacity becomes
+- **AC-AGENTS-SESSION-CEILING-001.15:** When sufficient capacity becomes
   available and remains available, an eligible deferred `start_created` launch
   shall be retried within five minutes, including periodic sweep alignment.
   New automatic launches in the same lane shall yield available capacity to
-  eligible deferred launches in the order defined by .11. A queued launch that a
+  eligible deferred launches in the order defined by .14. A queued launch that a
   dispatcher already holds a valid, unexpired dispatch claim for is being
   launched now and claims no additional priority, so it shall not hold a free
   unit against later launches until its claim lease expires; the launch that

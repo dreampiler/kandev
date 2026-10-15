@@ -380,6 +380,7 @@ func initDynamicRuntimeResolver(
 		dynamicruntime.WithSelectionHistory(routeSelectionHistory{repo: repos.Task}),
 		dynamicruntime.WithLimitObserver(newUsageLimitRecorder(accounts, repos.Task, log)),
 		dynamicruntime.WithLimitCalendar(newDynamicLimitCalendar(usageAdapter, repos.Task)),
+		dynamicruntime.WithEngineLogger(log.Zap()),
 	)
 	dynamicBindingResolver, err := dynamicruntime.NewPersistentCredentialBindingResolver(ctx, repos.Task)
 	if err != nil {

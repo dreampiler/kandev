@@ -9,6 +9,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -25,13 +26,12 @@ var retryDelays = []time.Duration{
 
 // HandleRunFailure handles a failed run by scheduling a retry or
 // marking it as permanently failed and escalating to the CEO agent.
-// A deterministic launch-validation failure is never retried: the
-// configuration the next attempt would launch with is unchanged, so a
-// retry would only burn a session per attempt.
+// A launch-validation failure is never retried: the next attempt would build
+// the same command and leave another failed session.
 func (s *Service) HandleRunFailure(
 	ctx context.Context, run *models.Run, runErr error,
 ) error {
-	if isDeterministicLaunchValidationError(runErr) {
+	if routingerr.IsBuiltCommandValidationError(runErr) {
 		return s.escalateFailure(ctx, run, runErr)
 	}
 	if run.RetryCount < MaxRetryCount {

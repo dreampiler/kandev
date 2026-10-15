@@ -209,13 +209,6 @@ func (r *ProfileExecutionResolver) RecordResourceSuccess(ctx context.Context, ex
 
 // ReleaseAccountBlock closes the owner-release hold that a provider account
 // restriction placed on one concrete profile, and reports whether one was held.
-func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {
-	if r == nil || r.engine == nil {
-		return false, nil
-	}
-	return r.engine.ReleaseAccountBlock(executionProfileID)
-}
-
 // ReleaseResourceCircuit releases exactly the key selected in agent settings.
 func (r *ProfileExecutionResolver) ReleaseResourceCircuit(_ context.Context, key string) (bool, error) {
 	if r == nil || r.engine == nil {

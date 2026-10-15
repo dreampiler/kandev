@@ -19,13 +19,13 @@ var hermesLogoDark []byte
 
 const hermesBin = "hermes"
 
-// hermesCheckRetryTimeout bounds the second ACP check. `hermes acp --check`
-// resolves the ACP extra on every run and takes about 2s on an idle host, and
-// discovery runs every agent's IsInstalled concurrently, so the shared 5s
-// bound can elapse purely from that contention while the check is healthy.
+// hermesCheckRetryTimeout bounds the second ACP check.
 // commandCheckTimeout + hermesCheckRetryTimeout stays inside the 15s
 // detection sweep budget.
 const hermesCheckRetryTimeout = 8 * time.Second
+
+// hermesCommandCheckRunner runs one bounded ACP check.
+var hermesCommandCheckRunner = runCommandCheck
 
 var (
 	_ Agent            = (*HermesACP)(nil)
@@ -99,7 +99,7 @@ func withHermesACPCheck(first, second time.Duration) DetectOption {
 		if err != nil {
 			return false, "", nil
 		}
-		found, timedOut, err := runCommandCheck(ctx, path, first, "acp", "--check")
+		found, timedOut, err := hermesCommandCheckRunner(ctx, path, first, "acp", "--check")
 		if err != nil {
 			return false, "", err
 		}
@@ -109,7 +109,7 @@ func withHermesACPCheck(first, second time.Duration) DetectOption {
 		if !timedOut {
 			return false, "", nil
 		}
-		found, _, err = runCommandCheck(ctx, path, second, "acp", "--check")
+		found, _, err = hermesCommandCheckRunner(ctx, path, second, "acp", "--check")
 		if err != nil {
 			return false, "", err
 		}

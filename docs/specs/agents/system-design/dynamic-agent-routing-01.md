@@ -13,7 +13,7 @@ owners:
 
 ## Purpose and boundaries
 
-This design preserves the technical source detail for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001` during migration.
+Migrated source for `REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001`.
 
 ## Requirement mapping
 
@@ -525,8 +525,8 @@ and never derive historical attribution from current session state.
 
 - Existing agent-profile list and selection APIs expose `kind` and safe summary
   fields for dynamic profiles.
-- Profile-consuming APIs continue to accept one selected `agent_profile_id`.
-  They never require the caller to resolve or submit a concrete candidate.
+- Profile-consuming APIs accept one selected `agent_profile_id`; callers never
+  resolve or submit concrete candidates.
 - Dynamic profile CRUD uses the agent settings profile API and accepts the
   candidate and per-class policy contract as one versioned transaction. It
   returns field-addressable validation errors and always returns the normalized
@@ -542,6 +542,10 @@ and never derive historical attribution from current session state.
   returns the current route snapshot. A stale generation returns a conflict
   with the authoritative snapshot. An action during an active turn returns a
   failed-precondition response.
+  The browser applies an action response against the current session row. A
+  session projection received after the request owns the same or a newer route
+  generation; a delayed action response cannot replace that projection. The
+  response must not recreate a removed session or invent a session timestamp.
 - Route events use the contracts described above. All route-scoped user actions
   include the expected generation so a stale Retry now or Skip now action cannot
   affect a successor route.
@@ -573,9 +577,8 @@ retirement after the base implementation plan is complete.
 - This feature ships the virtual family, transparent resolution, fixed order,
   classified-error fallback, shared circuits and probes, continuation, restart
   recovery, and Kanban, utility, and Office integration.
-- Session-cost and subscription-usage routing are a separate future feature.
-  They are not part of this feature's implementation or release criteria. See
-  Dynamic Agent Telemetry Routing is deferred and has no active specification.
+- Session-cost, subscription-usage, and Dynamic Agent Telemetry Routing remain
+  deferred, outside this feature's implementation and release criteria.
 - Upgrade does not translate or delete existing Office routing rows. Office
   stops displaying those settings and requires a concrete or dynamic execution
   profile selection for new routing behavior.

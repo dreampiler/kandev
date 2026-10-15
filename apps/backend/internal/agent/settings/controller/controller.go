@@ -72,10 +72,10 @@ var (
 
 type Controller struct {
 	repo                        store.Repository
+	accountBlockReleaser        AccountBlockReleaser
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
 	dynamicPreview              DynamicPreviewProvider
-	accountBlockReleaser        AccountBlockReleaser
 	profileUsage                ProfileUsageProvider
 	providerLimits              ProviderLimitService
 	sessionChecker              SessionChecker

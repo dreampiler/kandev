@@ -8,7 +8,6 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -26,8 +25,6 @@ import (
 // generation's unresolved journal work.
 
 const (
-	dynamicRouteStatusStarting = "starting"
-	dynamicRouteStatusRetrying = "retrying"
 
 	// interruptedTurnAutoRecoveryCooldown bounds automatic continuation
 	// attempts per session so a persistently failing recovery is not retried
@@ -407,39 +404,4 @@ func (s *Service) finishInterruptedTurnAutoRecovery(sessionID, recordKey string)
 	}
 	state.running = false
 	s.interruptedTurnAutoRecovery[sessionID] = state
-}
-
-// activateResumedDynamicRoute completes the durable "starting" -> "active"
-// route transition once a resumed dynamic session's runtime is ready. A
-// resume re-claims the persisted route as "starting" (applyResolvedExecution)
-// but settles the session to WAITING_FOR_INPUT, which the process-start
-// callback did not treat as a successful start; the route then stayed
-// "starting" and every later explicit recovery was suppressed as
-// dynamic_route_pending.
-func (s *Service) activateResumedDynamicRoute(ctx context.Context, session *models.TaskSession) {
-	if session == nil || session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return
-	}
-	if session.RouteState != dynamicRouteStatusStarting && session.RouteState != dynamicRouteStatusRetrying {
-		return
-	}
-	s.markDynamicRouteActive(context.WithoutCancel(ctx), session.ID, session.RouteGeneration)
-}
-
-// explicitRecoveryOwnsStrandedStartingRoute lets an explicit recovery action
-// resume a dynamic session whose route claim was left "starting" with no live
-// runtime behind it (for example by a restart, or by a resume that predates
-// activateResumedDynamicRoute). The recovery re-claims the same persisted
-// candidate; a live launch owner keeps the dynamic_route_pending guard.
-func (s *Service) explicitRecoveryOwnsStrandedStartingRoute(
-	ctx context.Context,
-	session *models.TaskSession,
-	options executor.ResumeOptions,
-) bool {
-	if session == nil || options.RecoveryAction == "" ||
-		session.RouteState != dynamicRouteStatusStarting ||
-		session.RouteGeneration <= 0 || session.ExecutionProfileID == "" {
-		return false
-	}
-	return s.agentManager == nil || !s.agentManager.IsAgentRunningForSession(ctx, session.ID)
 }

@@ -52,7 +52,7 @@ The existing POST task move endpoint adds an optional entry_options object. The 
 
 The legacy MCP prompt argument remains accepted for compatibility. A non-empty legacy prompt is copied to entry_options.instructions only when the nested field is empty; providing both values is a validation error. Responses include the normalized entry_options when supplied and identify immediate versus deferred acceptance with disposition. A deferred MCP response returns the authoritative source task until turn-end applies the move.
 
-`move_task_kandev` rejects a prompt or entry_options when the target step is a manual step that does not start work on entry (no auto_start_agent, queue_run, queue_run_for_each_participant, run_code_review, or pull source), for example Waiting, Blocked, Hold, or Done. An agent caller cannot rely on a parked or terminal step to consume a one-shot hand-off, so the move must omit options and record the instruction in the task description or plan. The HTTP and WebSocket move surfaces keep the session-or-auto-start rule above.
+`move_task_kandev` rejects a prompt or entry_options when the target step is a manual step that does not start work on entry (no auto_start_agent, queue_run, queue_run_for_each_participant, run_code_review, or pull source), for example Waiting, Blocked, or Done. The rejection applies even when the task has a session that the service could hand the options to. This is a deliberately narrower agent-surface contract: an agent caller cannot rely on a parked or terminal step to consume a one-shot hand-off, so the move must omit options and record the instruction in the task description or plan. The HTTP and WebSocket move surfaces keep the session-or-auto-start rule above.
 
 The task.moved event includes move_id when a direct move carries options; it never exposes instructions or option values. Deferred moves include the complete typed value in PendingMove. No new task or workflow endpoint is introduced.
 
@@ -84,7 +84,7 @@ The existing task move authorization and MCP session authorization remain unchan
 - Invalid target, cross-workspace target, archived task, active-session conflict, or invalid override leaves the task in its original step. A full limited destination accepts the move into its destination queue and defers destination entry and option consumption until promotion.
 - A pending move survives backend restart with its override object. Invalid target data discovered at turn end is dropped using the existing pending-move cleanup path and cannot deliver its prompt to the source session.
 - If prompt queueing fails after a direct move has been persisted, the task remains at the target and the backend records a sanitized warning; the prompt is not silently redelivered.
-- A target without auto-start and without an existing session rejects agent-facing overrides rather than accepting an option that has no recipient.
+- Agent `move_task_kandev` calls reject overrides for a manual target, regardless of existing sessions. A target with an entry work action or pull source accepts overrides. HTTP and WebSocket moves retain their session-or-auto-start rule.
 - Repeated task.moved or agent-ready signals do not apply the same override twice. Existing transition and queue idempotence remains the guard.
 - A move waiting for WIP capacity retains its private options unconsumed; promotion applies them once after admission.
 

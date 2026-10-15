@@ -32,21 +32,18 @@ type AgentToolInvocationContext struct {
 	ManagedToolPolicy *mcpprofile.ManagedToolPolicy
 }
 
-// AgentToolCatalog returns the current active-plugin tool snapshot. The
-// revision changes only when the effective tool set changes; generation is
-// stable for the lifetime of the Service instance.
+// AgentToolCatalog returns the current tool snapshot of active plugins whose
+// required config is set. The revision changes only when the effective tool
+// set changes; generation is stable for the lifetime of the Service instance.
 func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
-	records, err := s.configuredAgentToolRecords()
-	if err != nil {
-		return plugintools.Snapshot{}, err
-	}
-	tools, err := buildAgentToolDefinitions(records)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tools, err := buildAgentToolDefinitions(s.configReadyAgentToolRecords())
 	if err != nil {
 		return plugintools.Snapshot{}, err
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.agentToolGeneration == "" {
 		s.agentToolGeneration = fmt.Sprintf("service-%d", time.Now().UnixNano())
 	}
@@ -62,52 +59,50 @@ func (s *Service) AgentToolCatalog() (plugintools.Snapshot, error) {
 	return plugintools.Normalize(s.agentToolSnapshot), nil
 }
 
-// configuredAgentToolRecords returns the active plugin records whose declared
-// required config is satisfied. A plugin that declares required config fields
-// but has none set cannot serve its agent tools, so it contributes nothing
-// until the operator configures it; saving config republishes the catalog.
-func (s *Service) configuredAgentToolRecords() ([]*store.Record, error) {
+// configReadyAgentToolRecords returns the active plugin records whose
+// required config is set. A plugin that cannot serve its tools until the
+// operator configures it contributes none; UpdateConfig recomputes the
+// catalog once the config is saved.
+func (s *Service) configReadyAgentToolRecords() []*store.Record {
 	records := s.registry.List()
-	configured := make([]*store.Record, 0, len(records))
+	ready := make([]*store.Record, 0, len(records))
 	for _, record := range records {
-		if record.Status != StatusActive {
-			continue
-		}
-		ok, err := s.requiredConfigSatisfied(record)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			configured = append(configured, record)
+		if record.Status == StatusActive && s.requiredConfigSet(record) {
+			ready = append(ready, record)
 		}
 	}
-	return configured, nil
+	return ready
 }
 
-// requiredConfigSatisfied reports whether every field the manifest lists in
-// config_schema.required holds a set value. A missing config file, or a
-// required field that is absent or zero, leaves the plugin unconfigured. A
-// record with no required fields is always configured, so plugins that need no
-// operator input keep contributing tools.
-func (s *Service) requiredConfigSatisfied(record *store.Record) (bool, error) {
+// requiredConfigSet reports whether every field in the record's
+// config_schema "required" list holds a set value (see
+// isRequiredConfigValueSet). A record without required fields needs no
+// config. A config that cannot be read leaves only this plugin unready, so
+// one broken config file cannot drop the other plugins' tools; the warning
+// carries the plugin ID only because the error can quote config content.
+func (s *Service) requiredConfigSet(record *store.Record) bool {
 	required := requiredConfigFields(record.ConfigSchema)
 	if len(required) == 0 {
-		return true, nil
+		return true
 	}
 	config, err := s.store.GetConfig(record.ID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return false, err
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) && s.log != nil {
+			s.log.Warn("plugins: agent tools hidden because the plugin config could not be read",
+				zap.String("plugin_id", record.ID))
+		}
+		return false
 	}
 	for _, field := range required {
-		if value, present := config[field]; !present || isZeroConfigValue(value) {
-			return false, nil
+		if !isRequiredConfigValueSet(config[field]) {
+			return false
 		}
 	}
-	return true, nil
+	return true
 }
 
-// requiredConfigFields extracts the string entries of a config_schema's
-// "required" list, ignoring malformed entries (mirroring validateConfigSchema).
+// requiredConfigFields returns the string entries of a config_schema
+// "required" list, ignoring malformed entries like checkRequiredKeys does.
 func requiredConfigFields(schema map[string]any) []string {
 	required, _ := schema["required"].([]any)
 	fields := make([]string, 0, len(required))
@@ -117,6 +112,22 @@ func requiredConfigFields(schema map[string]any) []string {
 		}
 	}
 	return fields
+}
+
+// isRequiredConfigValueSet mirrors the settings "Setup required" badge
+// (isConfigured in apps/web/hooks/domains/plugins/use-plugin-setup-status.ts):
+// an absent key, null, or blank string is unset; any other value, including
+// false and 0, is set. A saved secret holds its non-empty vault reference.
+// isZeroConfigValue is not used because it treats false and 0 as unset.
+func isRequiredConfigValueSet(value any) bool {
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	default:
+		return true
+	}
 }
 
 func buildAgentToolDefinitions(records []*store.Record) ([]plugintools.Definition, error) {
@@ -218,6 +229,11 @@ func (s *Service) InvokeAgentTool(ctx context.Context, pluginID, localName strin
 			zap.Duration("duration", time.Since(started)),
 			zap.String("outcome", outcome))
 	}()
+
+	// Keep record lookup and the RPC in one dispatch lease across lifecycle changes.
+	dispatchLock := s.dispatchLocks.lockFor(pluginID)
+	dispatchLock.RLock()
+	defer dispatchLock.RUnlock()
 
 	record, err := s.Get(pluginID)
 	if err != nil {

@@ -529,16 +529,41 @@ func (s *Service) workflowReplacementRoute(
 // the task creation stamp. The identity must not depend on the current primary
 // session because a retry can legitimately reload a different primary.
 //
-// Read failures collapse to the legacy sentinel so best-effort callers keep
-// their fail-closed behavior. Replay validation uses
+// A failed transition read falls back to the task row's own identity so a
+// transient error does not make a route creator miss the route it already
+// recorded and start a duplicate session. Replay validation uses
 // readWorkflowEntryIdentity instead so a read failure retries rather than
 // terminating the record.
 func (s *Service) workflowEntryIdentity(ctx context.Context, taskID string, entryIDs ...int64) string {
 	identity, err := s.readWorkflowEntryIdentity(ctx, taskID, entryIDs...)
 	if err != nil {
+		if fallback, ok := s.taskRowWorkflowEntryIdentity(ctx, taskID); ok {
+			return fallback
+		}
 		return legacyWorkflowEntryIdentity
 	}
 	return identity
+}
+
+// taskRowWorkflowEntryIdentity derives the entry identity from the task row's
+// own latest transition or creation stamp. It reports ok=false when the task
+// cannot be read or carries no durable identity, so the best-effort caller keeps
+// its legacy sentinel.
+func (s *Service) taskRowWorkflowEntryIdentity(ctx context.Context, taskID string) (string, bool) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return "", false
+	}
+	if task.WorkflowStepTransitionID > 0 {
+		return fmt.Sprintf("entry:%020d", task.WorkflowStepTransitionID), true
+	}
+	if !task.CreatedAt.IsZero() {
+		return "created:" + task.CreatedAt.UTC().Format(time.RFC3339Nano), true
+	}
+	if !task.UpdatedAt.IsZero() {
+		return "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano), true
+	}
+	return "", false
 }
 
 // readWorkflowEntryIdentity reports how workflowEntryIdentity derives its

@@ -75,20 +75,17 @@ var runtimeEnvironmentRules = []runtimeRule{
 		},
 	},
 	{
-		// DeepSeek thinking-mode 400 surfaced through the ACP prompt error
-		// after the saved assistant history lost its `reasoning_content`.
-		// Classified as a post-start agent-runtime failure so it enters the
-		// repeated-unclassified no-result path rather than the low-confidence
-		// phase fallback, giving it a stable diagnostic identity to count.
-		// The saved state cannot be replayed (see IsResumeCorrupted), so a
-		// recognized failure discards the observed turn output and the
-		// successor is a fresh session.
-		id:      reasoningContentMissingRuleID,
-		pattern: reasoningContentMissingRe,
+		// Route the bounded DeepSeek missing-reasoning diagnostic through the
+		// existing manual fresh-session recovery policy across adapters.
+		// Require the raw signature too, so redaction cannot shorten its gap.
+		id:       reasoningContentNonReplayableRuleID,
+		pattern:  reasoningContentMissingRe,
+		rawMatch: reasoningContentMissingRe.MatchString,
 		build: func(string) *Error {
 			return &Error{
-				Code:       CodeAgentRuntime,
-				Confidence: ConfHigh,
+				Code:            CodeResumeCorrupted,
+				Confidence:      ConfHigh,
+				RemediationPath: RemediationStartFreshSession,
 			}
 		},
 	},
@@ -216,7 +213,7 @@ var cancellationOrDeadlineRe = regexp.MustCompile(`(?i)\bcontext (?:canceled|dea
 
 const resumeCorruptedRuleID = "anthropic.thinking_blocks.immutable.v1"
 
-const reasoningContentMissingRuleID = "deepseek.reasoning_content.no_result.v1"
+const reasoningContentNonReplayableRuleID = "deepseek.reasoning_content.nonreplayable.v1"
 
 const overloadedRuleID = "anthropic.overloaded.529.v1"
 
@@ -362,21 +359,19 @@ func isTransientProviderError(e *Error) bool {
 // an unrelated "cannot be modified".
 var thinkingBlocksImmutableRe = regexp.MustCompile(`(?i)(?:redacted_)?thinking[^\n]*blocks[^\n]*cannot be modified`)
 
-// reasoningContentMissingRe matches the DeepSeek thinking-mode 400 that an agent
-// surfaces after the persisted assistant history lost its `reasoning_content`:
-// the API rejects the reconstructed messages because the thinking-mode turn must
-// be echoed back verbatim. Like the Anthropic thinking-blocks 400, the failure
-// is a property of the saved session state, not the model or provider, so a
-// resume replays the same poisoned history and fails identically. The gap is
-// bounded to one line so unrelated prose cannot bridge into it.
-var reasoningContentMissingRe = regexp.MustCompile(`(?i)reasoning_content[^\n]{0,80}must be passed back`)
+// reasoningContentMissingRe accepts the canonical bare DeepSeek diagnostic or
+// an error line carrying both phrases within 80 characters. Anchoring rejects
+// agent prose quoting the diagnostic. The signature does not identify whether
+// saved history or the adapter omitted the required reasoning field.
+var reasoningContentMissingRe = regexp.MustCompile(
+	`(?i)(?:\A\s*The \x60?reasoning_content\x60? in the thinking mode must be passed back to the API\.\s*\z|` +
+		`(?:\A|\n)[ \t]*(?:AI_APICallError|Error|Internal[ \t]+error|API[ \t]+Error):[^\n]*reasoning_content[^\n]{0,80}must be passed back)`,
+)
 
-// IsResumeCorrupted reports whether the error message carries a
-// resume-corrupted signature: the Anthropic thinking-blocks-immutable 400 or
-// the DeepSeek thinking-mode `reasoning_content` must-be-passed-back 400. Both
-// mean the saved reasoning state cannot be replayed on a resume. Exposed for
-// callers outside the classify path (e.g. the orchestrator's recovery UI) that
-// need to steer toward a fresh session without re-running full Classify.
+// IsResumeCorrupted reports whether the message matches an Anthropic
+// thinking-blocks-immutable or DeepSeek missing-reasoning signature assigned
+// to the existing fresh-session guidance. Callers outside the classify path
+// can select that guidance without re-running full Classify.
 func IsResumeCorrupted(message string) bool {
 	if message == "" {
 		return false

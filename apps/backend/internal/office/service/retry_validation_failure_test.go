@@ -3,8 +3,10 @@ package service_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/service"
 )
 
@@ -12,31 +14,35 @@ import (
 // budget: the run fails immediately and escalates, so no new session is
 // created per retry.
 func TestHandleRunFailure_ValidationFailureDoesNotRetry(t *testing.T) {
-	svc, _ := newTestServiceWithBus(t)
-	ctx := context.Background()
+	for _, command := range []string{"agent", "continue"} {
+		t.Run(command, func(t *testing.T) {
+			svc, _ := newTestServiceWithBus(t)
+			ctx := context.Background()
 
-	createTestAgent(t, svc, "ws-1", "agent-validation")
-	taskID := "task-validation"
-	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-validation")
-	run := queueAndReadRun(t, svc, "agent-validation", taskID)
+			createTestAgent(t, svc, "ws-1", "agent-validation")
+			taskID := "task-validation"
+			insertSyntheticTask(t, svc, taskID, "ws-1", "agent-validation")
+			run := queueAndReadRun(t, svc, "agent-validation", taskID)
 
-	launchErr := errors.New("validate agent command: agent command cannot be empty")
-	if err := svc.HandleRunFailure(ctx, run, launchErr); err != nil {
-		t.Fatalf("handle failure: %v", err)
-	}
+			launchErr := fmt.Errorf("launch agent: %w", &routingerr.BuiltCommandValidationError{Command: command, Cause: errors.New("agent command cannot be empty")})
+			if err := svc.HandleRunFailure(ctx, run, launchErr); err != nil {
+				t.Fatalf("handle failure: %v", err)
+			}
 
-	refreshed, err := svc.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatalf("get run: %v", err)
-	}
-	if refreshed.Status != service.RunStatusFailed {
-		t.Fatalf("run status = %q, want %q (validation failures must fail, not retry)", refreshed.Status, service.RunStatusFailed)
-	}
-	if refreshed.RetryCount != 0 {
-		t.Fatalf("retry_count = %d, want 0 (no retry consumed)", refreshed.RetryCount)
-	}
-	if refreshed.ScheduledRetryAt != nil {
-		t.Fatal("expected scheduled_retry_at to remain unset")
+			refreshed, err := svc.GetRun(ctx, run.ID)
+			if err != nil {
+				t.Fatalf("get run: %v", err)
+			}
+			if refreshed.Status != service.RunStatusFailed {
+				t.Fatalf("run status = %q, want %q (validation failures must fail, not retry)", refreshed.Status, service.RunStatusFailed)
+			}
+			if refreshed.RetryCount != 0 {
+				t.Fatalf("retry_count = %d, want 0 (no retry consumed)", refreshed.RetryCount)
+			}
+			if refreshed.ScheduledRetryAt != nil {
+				t.Fatal("expected scheduled_retry_at to remain unset")
+			}
+		})
 	}
 }
 
@@ -50,7 +56,7 @@ func TestHandleRunFailure_TransientFailureStillRetriesBounded(t *testing.T) {
 	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-transient-kept")
 	run := queueAndReadRun(t, svc, "agent-transient-kept", taskID)
 
-	if err := svc.HandleRunFailure(ctx, run, errors.New("connection reset by peer")); err != nil {
+	if err := svc.HandleRunFailure(ctx, run, errors.New("validate agent command: provider read temporarily unavailable")); err != nil {
 		t.Fatalf("handle failure: %v", err)
 	}
 

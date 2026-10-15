@@ -297,14 +297,13 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 				_ = windows.CloseHandle(child)
 				return checkErr
 			}
-			if reparse {
-				_ = windows.CloseHandle(child)
-				continue
+			if !reparse {
+				if err := removeWindowsDependencyContents(ctx, child); err != nil {
+					_ = windows.CloseHandle(child)
+					return err
+				}
 			}
-			if err := removeWindowsDependencyContents(ctx, child); err != nil {
-				_ = windows.CloseHandle(child)
-				return err
-			}
+			// Reparse points are unlinked through their own handle, never traversed.
 			err := markWindowsDependencyForDelete(child)
 			_ = windows.CloseHandle(child)
 			if err != nil {
@@ -316,14 +315,10 @@ func removeWindowsDependencyContents(ctx context.Context, dirHandle windows.Hand
 		if fileErr != nil {
 			return fmt.Errorf("open dependency entry %s: %w", name, fileErr)
 		}
-		reparse, checkErr := windowsDependencyHandleIsReparsePoint(file)
+		_, checkErr := windowsDependencyHandleIsReparsePoint(file)
 		if checkErr != nil {
 			_ = windows.CloseHandle(file)
 			return checkErr
-		}
-		if reparse {
-			_ = windows.CloseHandle(file)
-			continue
 		}
 		err = markWindowsDependencyForDelete(file)
 		_ = windows.CloseHandle(file)

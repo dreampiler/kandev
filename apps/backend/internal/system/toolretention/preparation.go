@@ -5,6 +5,8 @@ import (
 	"errors"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"strings"
+	"unicode/utf8"
 )
 
 func (s *Service) stepPreparation(ctx context.Context) error {
@@ -51,8 +53,8 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 	if backupErr != nil {
 		code = "backup_failed"
 		detail = limitPreparationDetail(backupErr.Error())
-		s.logFailure(ctx, "tool payload retention preparation failed", backupErr)
 	}
+	failed := false
 	_, err := s.change(ctx, func(r *record, tx *sqlx.Tx) error {
 		if r.Policy.Revision != prepared.Policy.Revision || r.Preparation.State != stateRunning || r.Operation == nil || r.Operation.ID != prepared.Operation.ID {
 			return nil
@@ -62,6 +64,7 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 			r.Preparation.Error = code
 			r.PreparationDetail = detail
 			finishOperation(r, stateFailed, code, s.opts.Now())
+			failed = true
 			return nil
 		}
 		r.Preparation.State = stateReady
@@ -76,20 +79,30 @@ func (s *Service) finishPreparation(ctx context.Context, prepared record, receip
 		return err
 	}
 	if backupErr != nil {
+		if failed && !errors.Is(backupErr, context.Canceled) {
+			s.logFailure(ctx, "tool payload retention backup preparation failed", backupErr)
+		}
 		return errors.New(code)
 	}
 	return nil
 }
 
-// preparationDetailLimit bounds the stored failure cause so a runaway error
+// preparationDetailLimit bounds the stored failure cause so a long error
 // message cannot bloat the settings row.
 const preparationDetailLimit = 1024
 
+// limitPreparationDetail normalizes invalid UTF-8 before bounding the persisted
+// message, so JSON encoding cannot expand invalid bytes beyond the limit.
 func limitPreparationDetail(message string) string {
+	message = strings.ToValidUTF8(message, "\ufffd")
 	if len(message) <= preparationDetailLimit {
 		return message
 	}
-	return message[:preparationDetailLimit]
+	cut := preparationDetailLimit
+	for cut > 0 && !utf8.RuneStart(message[cut]) {
+		cut--
+	}
+	return message[:cut]
 }
 
 func (s *Service) recoverPreparation(ctx context.Context, observed record) error {

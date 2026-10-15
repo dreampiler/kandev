@@ -291,10 +291,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 
 	case streams.EventTypeTurnStarted:
 		s.persistNativeCodexTurnID(ctx, payload)
-		// A new turn retires any no-output-turn marker left by the previous
-		// turn. The marker is execution+generation keyed, so this is housekeeping
-		// rather than the correctness fence.
-		s.clearDynamicEmptyTurn(sessionID)
+		s.retireCountedEmptyTurn(sessionID)
 		// D3: the single turn boundary for the whole feature. Clearing here,
 		// on the same ordered stream consumer that applies the attestation
 		// (handleToolCallEvent / trackBackgroundToolUpdate above), guarantees
@@ -1381,6 +1378,9 @@ func (s *Service) updateTaskSessionStateWithHook(
 	// first sample, AC-21) and leaving it (immediate clear, AC-68) regardless
 	// of which of this function's many call sites drove the transition.
 	s.onSessionStateChangedForParkedProjection(ctx, taskID, sessionID, oldState, nextState)
+	if isTerminalSessionState(nextState) {
+		s.settleOpenBackgroundWork(ctx, sessionID)
+	}
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
@@ -3267,29 +3267,6 @@ func (s *Service) handleCompleteStreamEvent(ctx context.Context, payload *lifecy
 // local prompt evidence here (it is cleared only after this handler returns),
 // so a no-output turn is classified from current evidence rather than a race
 // with the later agent.completed process-exit path.
-func (s *Service) routeDynamicEmptyTurnCompletionFromComplete(
-	ctx context.Context,
-	payload *lifecycle.AgentStreamEventPayload,
-	session *models.TaskSession,
-) bool {
-	if session == nil || payload == nil || payload.SessionID == "" || payload.Data == nil {
-		return false
-	}
-	executionID := payload.ExecutionID
-	if executionID == "" {
-		executionID = payload.AgentID
-	}
-	data := watcher.AgentEventData{
-		TaskID:           payload.TaskID,
-		SessionID:        payload.SessionID,
-		OwnerKind:        string(payload.OwnerKind),
-		AgentExecutionID: executionID,
-		AgentProfileID:   payload.AgentProfileID,
-		PromptGeneration: payload.Data.PromptGeneration,
-	}
-	data = s.withPromptAttemptEvidence(data)
-	return s.routeDynamicEmptyTurnCompletion(ctx, data, session)
-}
 
 func (s *Service) loadCompleteEventSession(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) (*models.TaskSession, bool) {
 	if payload.SessionID == "" {
@@ -3345,12 +3322,15 @@ func (s *Service) handleCompleteStreamEventWithGuardRelease(
 		return
 	}
 
-	// A dynamic turn that finishes with no assistant output or tool effect is
-	// counted as an unclassified failure for its candidate. A launched successor
-	// takes over the turn, so skip the ordinary completion follow-up. Below the
-	// threshold the route parks the session through the manual-recovery path and
-	// this returns false, leaving the ordinary completion to settle the turn.
-	if s.routeDynamicEmptyTurnCompletionFromComplete(ctx, payload, session) {
+	completion := emptyTurnCompletionFromPayload(payload)
+	if completion.completeOutput {
+		s.observePromptAttempt(completion.data.SessionID, completion.data.AgentExecutionID,
+			completion.data.PromptGeneration, true, false)
+		s.markDynamicStreakResetPending(completion.data)
+		s.flushPendingDynamicStreakReset(ctx, completion.data.SessionID, &completion.data)
+	}
+	// A launched successor owns the turn, as on the error path.
+	if s.routeDynamicEmptyTurn(ctx, completion, session, streamGuard) {
 		return
 	}
 
@@ -3620,6 +3600,46 @@ func sessionStateString(session *models.TaskSession) string {
 		return ""
 	}
 	return string(session.State)
+}
+
+func emptyTurnCompletionFromPayload(payload *lifecycle.AgentStreamEventPayload) emptyTurnCompletion {
+	executionID := payload.ExecutionID
+	if executionID == "" {
+		executionID = payload.AgentID
+	}
+	return emptyTurnCompletion{
+		data: watcher.AgentEventData{
+			TaskID:             payload.TaskID,
+			SessionID:          payload.SessionID,
+			OwnerKind:          string(payload.OwnerKind),
+			AgentExecutionID:   executionID,
+			AgentProfileID:     payload.AgentProfileID,
+			ExecutionProfileID: payload.ExecutionProfileID,
+			PromptGeneration:   payload.Data.PromptGeneration,
+		},
+		stopReason:     extractStopReason(payload),
+		isError:        extractCompleteIsError(payload),
+		completeOutput: completeFrameCarriesOutput(payload),
+	}
+}
+
+// completeFrameCarriesOutput reports whether a completion frame itself carries
+// assistant output: message text (persisted by saveAgentTextForTurn) or plan
+// content (persisted by publishAgentPlanForTurn). Output present only here, and
+// not in earlier stream events, still means the turn produced content.
+func completeFrameCarriesOutput(payload *lifecycle.AgentStreamEventPayload) bool {
+	if payload == nil || payload.Data == nil {
+		return false
+	}
+	if strings.TrimSpace(payload.Data.Text) != "" {
+		return true
+	}
+	if data, ok := payload.Data.Data.(map[string]interface{}); ok {
+		if planContent, ok := data["plan_content"].(string); ok && strings.TrimSpace(planContent) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // Mirrors the same read in lifecycle/manager_events.go.

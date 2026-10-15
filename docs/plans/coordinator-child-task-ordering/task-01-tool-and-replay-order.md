@@ -16,7 +16,7 @@ acceptance_criteria:
   - AC-TASKS-COORDINATOR-CHILD-TASK-ORDERING-001.5
   - AC-TASKS-COORDINATOR-CHILD-TASK-ORDERING-001.6
   - AC-TASKS-COORDINATOR-CHILD-TASK-ORDERING-001.7
-  - AC-AGENTS-SESSION-CEILING-001.11
+  - AC-AGENTS-SESSION-CEILING-001.14
 system_design:
   - ../../specs/tasks/system-design/coordinator-child-task-ordering.md
   - ../../specs/agents/system-design/session-concurrency-ceiling.md
@@ -31,7 +31,7 @@ Plan: [Coordinator Child Task Ordering](plan.md)
 - `REQ-TASKS-COORDINATOR-CHILD-TASK-ORDERING-001`, acceptance criteria .1 through .7:
   [requirements](../../specs/tasks/requirements/coordinator-child-task-ordering.md),
   [design](../../specs/tasks/system-design/coordinator-child-task-ordering.md).
-- `REQ-AGENTS-SESSION-CEILING-001`, `AC-AGENTS-SESSION-CEILING-001.11`:
+- `REQ-AGENTS-SESSION-CEILING-001`, `AC-AGENTS-SESSION-CEILING-001.14`:
   [requirements](../../specs/agents/requirements/session-concurrency-ceiling.md),
   [design](../../specs/agents/system-design/session-concurrency-ceiling.md).
 

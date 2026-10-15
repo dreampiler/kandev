@@ -1298,6 +1298,9 @@ func (m *Manager) inspectRecoverySlot(
 	if wt == nil || wt.Path == "" {
 		return recoverySlotInspection{}, nil
 	}
+	if _, err := m.validateWorkspaceAdoptionBinding(ctx, wt); err != nil {
+		return recoverySlotInspection{}, err
+	}
 	if _, err := os.Lstat(wt.Path); errors.Is(err, os.ErrNotExist) {
 		return m.inspectMissingCheckoutSlot(ctx, taskID, ownershipGeneration, slot, allowBranchReplacement)
 	} else if err != nil {

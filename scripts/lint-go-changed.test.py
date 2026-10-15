@@ -22,6 +22,8 @@ class ChangedGoLintTest(unittest.TestCase):
         self.calls = self.repo / "lint-calls.jsonl"
         self.env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
         self.env.pop("SKIP", None)
+        for key in ("GOMEMLIMIT", "GOMAXPROCS", "GOFLAGS"):
+            self.env.pop(key, None)
         self.env["GO_LINT_TEST_CALLS"] = str(self.calls)
         self.env["PATH"] = f"{self.repo / 'bin'}{os.pathsep}{self.env['PATH']}"
         self.write(
@@ -33,7 +35,9 @@ class ChangedGoLintTest(unittest.TestCase):
                 import sys
 
                 with open(os.environ["GO_LINT_TEST_CALLS"], "a") as calls:
-                    calls.write(json.dumps({"cwd": os.getcwd(), "args": sys.argv[1:]}) + "\\n")
+                    calls.write(json.dumps({"cwd": os.getcwd(), "args": sys.argv[1:],
+                        "env": {key: os.environ.get(key) for key in
+                            ("GOMEMLIMIT", "GOMAXPROCS", "GOFLAGS")}}) + "\\n")
                 sys.exit(int(os.environ.get("GO_LINT_TEST_EXIT", "0")))
                 """),
         ).chmod(0o755)
@@ -78,12 +82,6 @@ class ChangedGoLintTest(unittest.TestCase):
             return []
         return [json.loads(line) for line in self.calls.read_text().splitlines()]
 
-    def expected_args(self, *packages):
-        return [
-            "run", *packages,
-            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
-        ]
-
     def test_lints_each_staged_package_once(self):
         for filename in ("one.go", "two_test.go"):
             self.write(f"apps/backend/internal/first/{filename}", "package first\n// staged\n")
@@ -94,10 +92,12 @@ class ChangedGoLintTest(unittest.TestCase):
         result = self.run_hook()
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        calls = self.lint_calls()
-        self.assertEqual(len(calls), 1, calls)
-        self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
-        self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
+        self.assertEqual(self.lint_calls(), [{
+            "cwd": str(self.repo / "apps/backend"),
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+                     "--concurrency=2", "--allow-parallel-runners"],
+            "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
+        }])
         self.assertEqual(other.read_text(), unstaged)
 
     def test_lints_multiple_packages_in_one_process_without_recursing(self):
@@ -117,8 +117,31 @@ class ChangedGoLintTest(unittest.TestCase):
         self.assertEqual(len(calls), 1, calls)
         self.assertCountEqual(calls[0]["args"], [
             "run", ".", "./internal/first", "./internal/first/child", "./internal/second",
-            f"--new-from-rev={self.base}", "--timeout=5m", "--allow-parallel-runners",
+            f"--new-from-rev={self.base}", "--timeout=5m", "--concurrency=2", "--allow-parallel-runners",
         ])
+
+    def test_preserves_explicit_resource_overrides(self):
+        self.env.update({
+            "GOMEMLIMIT": "512MiB", "GOMAXPROCS": "4", "GOFLAGS": "-trimpath -p=1",
+        })
+
+        result = self.run_hook("--files", "apps/backend/internal/first/one.go")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call, = self.lint_calls()
+        self.assertEqual(call["env"], {
+            "GOMEMLIMIT": "512MiB", "GOMAXPROCS": "4", "GOFLAGS": "-trimpath -p=1",
+        })
+        self.assertIn("--concurrency=4", call["args"])
+
+    def test_bounds_build_workers_without_dropping_other_go_flags(self):
+        self.env["GOFLAGS"] = "-trimpath -tags=fts5"
+
+        result = self.run_hook("--files", "apps/backend/internal/first/one.go")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        call, = self.lint_calls()
+        self.assertEqual(call["env"]["GOFLAGS"], "-trimpath -tags=fts5 -p=2")
 
     def test_non_go_commit_skips_lint(self):
         self.write("README.md", "Fixture\n")
@@ -174,10 +197,12 @@ class ChangedGoLintTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        calls = self.lint_calls()
-        self.assertEqual(len(calls), 1, calls)
-        self.assertEqual(calls[0]["cwd"], str(self.repo / "apps/backend"))
-        self.assertEqual(calls[0]["args"], self.expected_args("./internal/first"))
+        self.assertEqual(self.lint_calls(), [{
+            "cwd": str(self.repo / "apps/backend"),
+            "args": ["run", "./internal/first", f"--new-from-rev={self.base}", "--timeout=5m",
+                     "--concurrency=2", "--allow-parallel-runners"],
+            "env": {"GOMEMLIMIT": "3GiB", "GOMAXPROCS": "2", "GOFLAGS": "-p=2"},
+        }])
 
 
 if __name__ == "__main__":

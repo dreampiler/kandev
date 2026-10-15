@@ -35,7 +35,11 @@ const (
 // launches. A generic session launch with no workflow hint keeps its terminal
 // drop: with no entry identity there is nothing safe to retarget.
 func ceilingSupersedeEligibleForRequeue(deferral models.CeilingDeferral) bool {
-	if _, bound, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); err == nil && bound {
+	_, bound, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
+	if err != nil {
+		return false
+	}
+	if bound {
 		return true
 	}
 	if ceilingPayloadHasWorkflowEntryHint(deferral.Payload) {

@@ -243,9 +243,9 @@ func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID s
 }
 
 // getLatestTaskStepTransitionIDTx reads the task's latest ledger id inside the
-// caller's write transaction. A deferred move captures its arm-time id and
+// caller's write transaction. A deferred move captures its request-time id and
 // compares it here, atomically with the task row the move is about to relocate,
-// so a later step change cannot slip between the pre-check read and the commit.
+// so a later step change cannot slip between the replay check and the commit.
 func (r *Repository) getLatestTaskStepTransitionIDTx(ctx context.Context, tx stepTransitionTx, taskID string) (int64, error) {
 	var id int64
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`

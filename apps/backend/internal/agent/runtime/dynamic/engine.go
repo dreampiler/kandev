@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 )
@@ -46,6 +48,16 @@ func WithPersistence(persistence Persistence) EngineOption {
 	}
 }
 
+// WithEngineLogger sets the logger used for routing lifecycle events, such as
+// an account-block hold and its owner release. It defaults to a no-op logger.
+func WithEngineLogger(log *zap.Logger) EngineOption {
+	return func(engine *Engine) {
+		if log != nil {
+			engine.logger = log
+		}
+	}
+}
+
 type Engine struct {
 	// turnAdmissionMu serializes selection and final turn claims.
 	// It is acquired before mu; capacity reads leave mu available.
@@ -68,6 +80,7 @@ type Engine struct {
 	// resourceWait is notified after a selection exhausts every candidate
 	// because each one is suspended, with the earliest suspension end.
 	resourceWait func(sessionID string, generation int64, deadline time.Time)
+	logger       *zap.Logger
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -88,6 +101,7 @@ func NewEngine(options ...EngineOption) *Engine {
 		circuits:    NewCircuitRegistry(),
 		states:      make(map[string]RouteState),
 		probes:      make(map[string][]ProbeLease),
+		logger:      zap.NewNop(),
 		retryClaims: make(map[string]int64),
 		pick:        defaultRandomPick,
 	}
@@ -432,26 +446,14 @@ func (c Candidate) resourceKeys() []string {
 
 // accountBlockKey is the circuit that holds this execution profile after its
 // provider account was restricted.
+
 func (c Candidate) accountBlockKey() string {
 	return accountBlockKey(c.ID)
-}
-
-func accountBlockKey(executionProfileID string) string {
-	if executionProfileID == "" {
-		return ""
-	}
-	return ResourceKey(ScopeAccountBlock, executionProfileID)
 }
 
 // ReleaseAccountBlock closes the owner-release hold of one execution profile
 // and reports whether a hold was closed. Credential, model, and other
 // profiles' circuits are never read or changed.
-func (e *Engine) ReleaseAccountBlock(executionProfileID string) (bool, error) {
-	if e == nil || e.circuits == nil {
-		return false, nil
-	}
-	return e.circuits.ReleaseHold(accountBlockKey(executionProfileID))
-}
 
 // candidateBlockedNow reports, without claiming any probe lease, whether a
 // candidate cannot be selected now: it is disabled, under an operator block, or
@@ -596,8 +598,7 @@ func actionForCandidate(candidate Candidate, code routingerr.Code) Action {
 	if candidate.Policies.Version == 0 {
 		action := actionForRules(candidate.Rules, code)
 		if action == ActionRetrySame && routingerr.HoldsUntilRelease(code) {
-			// A held candidate cannot serve the retry, so the legacy retry
-			// moves on to the next candidate instead.
+			// A held candidate cannot serve the retry, so it moves on.
 			return ActionTryNext
 		}
 		return action
@@ -751,6 +752,13 @@ func decodePolicyState(raw string) PolicyState {
 		return PolicyState{}
 	}
 	return state
+}
+
+// CandidateUnclassifiedEnabled reports whether a candidate's repeated
+// unclassified policy is enabled with a threshold the engine will admit.
+func CandidateUnclassifiedEnabled(profile Profile, candidateID string) bool {
+	_, threshold := candidateUnclassifiedThreshold(profile, candidateID)
+	return threshold >= 2 && threshold <= 10
 }
 
 func candidateUnclassifiedThreshold(profile Profile, candidateID string) (Candidate, int64) {
@@ -1626,6 +1634,9 @@ func (e *Engine) resumePending(
 		}
 	}
 	now := e.now()
+	if e.circuits.IsHeld(accountBlockKey(state.ExecutionProfileID)) {
+		return RouteDecision{}, e.holdPendingRouteLocked(ctx, state, now)
+	}
 	if !force && policyState.Deadline != nil && now.Before(*policyState.Deadline) {
 		return RouteDecision{}, ErrRecoveryNotDue
 	}
@@ -1644,6 +1655,22 @@ func (e *Engine) resumePending(
 		CatalogueVersion: policyState.CatalogueVersion,
 		RetryOrdinal:     policyState.RetryOrdinal, PendingOutcome: policyState.PendingOutcome,
 	}, nil
+}
+
+// holdPendingRouteLocked refuses to resume a route on a profile that another
+// failure held after the route started waiting. The route returns to manual
+// recovery so the operator can skip to another candidate or release the hold.
+func (e *Engine) holdPendingRouteLocked(ctx context.Context, state RouteState, now time.Time) error {
+	if state.Status != routeStatusActionRequired {
+		expectedStatus := state.Status
+		state.Status = routeStatusActionRequired
+		state.UpdatedAt = now
+		if err := e.persistExpectedStatus(ctx, state.Generation, expectedStatus, state); err != nil {
+			return err
+		}
+		e.states[state.SessionID] = state
+	}
+	return ErrExecutionProfileHeld
 }
 
 // ReleaseProbe closes a successful half-open resource probe or applies the
@@ -1679,9 +1706,9 @@ func (e *Engine) openCircuitForFailure(ctx context.Context, profile Profile, can
 	if routingerr.HoldsUntilRelease(failure.Code) {
 		// The restriction belongs to this execution profile's account; its
 		// credential binding and model stay available to sibling profiles.
-		if candidate, ok := candidateByID(profile, candidateID); ok {
-			e.circuits.Hold(candidate.accountBlockKey(), failure.Code)
-		}
+		// A failed save is logged and kept pending by the registry, and the
+		// hold stays in memory, so routing proceeds without the profile.
+		_ = e.HoldAccountBlock(candidateID, failure.Code)
 		return
 	}
 	if !qualifiesForCircuit(failure.Code) {

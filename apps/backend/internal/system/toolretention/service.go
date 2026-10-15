@@ -110,19 +110,19 @@ func (s *Service) Save(ctx context.Context, u Update) (Status, error) {
 	return r.Status, err
 }
 
+// logFailure reports an internal failure cause that the status endpoint does
+// not expose. The scheduler only counts returned errors, so without this the
+// cause of a failed preparation is lost once it is stored as a code.
+func (s *Service) logFailure(ctx context.Context, message string, err error) {
+	if s.opts.Log != nil {
+		s.opts.Log(ctx, message, err)
+	}
+}
+
 func (s *Service) notify() {
 	select {
 	case s.wake <- struct{}{}:
 	default:
-	}
-}
-
-// logFailure reports an internal failure detail that must not reach the status
-// endpoint. The scheduler counts failures without logging, so without this the
-// real cause of a failed preparation is lost once it is stored as a code.
-func (s *Service) logFailure(ctx context.Context, message string, err error) {
-	if s.opts.Log != nil {
-		s.opts.Log(ctx, message, err)
 	}
 }
 

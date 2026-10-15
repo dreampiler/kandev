@@ -34,6 +34,10 @@ var (
 	// fail closed rather than silently degrade to a generation-only claim,
 	// which would let two concurrent callers both win the same transition.
 	ErrStatusClaimUnsupported = errors.New("dynamic route persistence does not support status-fenced claims")
+	// ErrExecutionProfileHeld refuses to resume a route on a profile held
+	// until its owner releases it. It is a pending recovery, so route action
+	// callers report the durable manual-recovery state.
+	ErrExecutionProfileHeld = fmt.Errorf("%w: execution profile is held until its owner releases it", ErrRecoveryPending)
 )
 
 type Candidate struct {
@@ -189,20 +193,10 @@ type UnclassifiedFailureOrigin string
 const (
 	UnclassifiedOriginTerminalProvider UnclassifiedFailureOrigin = "terminal_provider_result"
 	UnclassifiedOriginAgentStartup     UnclassifiedFailureOrigin = "agent_startup"
-	// UnclassifiedOriginEmptyTurnCompletion is a turn that finished without any
-	// assistant output or tool effect. It carries no provider diagnostic, so the
-	// provider-diagnostic evidence requirements are relaxed for this origin only
-	// (see safeBeforeResult/trustedFailureShape and the origin-scoped fingerprint).
-	UnclassifiedOriginEmptyTurnCompletion UnclassifiedFailureOrigin = "empty_turn_completion"
-	// UnclassifiedOriginPostStartNoResult is a post-start failure (prompt send or
-	// later) that arrived before any assistant output or tool effect and carried
-	// no complete provider diagnostic, such as a provider header timeout or a
-	// runtime execution error. It is safe to retry on another candidate for the
-	// same reason the other pre-result origins are: no output or effect was
-	// produced. The DiagnosticComplete/ProviderID requirements are relaxed for
-	// this origin only, and its fingerprint is a normalized error-type prefix so
-	// repeated identical failures accumulate.
-	UnclassifiedOriginPostStartNoResult UnclassifiedFailureOrigin = "post_start_no_result"
+	// UnclassifiedOriginEmptyTurn is a normal end_turn completion with no
+	// assistant text, reasoning, or tool activity. It has no provider
+	// diagnostic, so its identity is a fixed tuple instead.
+	UnclassifiedOriginEmptyTurn UnclassifiedFailureOrigin = "empty_turn_completion"
 )
 
 // UnclassifiedFailureEvidence is the typed, default-deny context for the
@@ -230,14 +224,6 @@ type UnclassifiedFailureEvidence struct {
 	EvidenceKnown      bool
 	OutputObserved     bool
 	EffectObserved     bool
-	// NonReplayable marks a failure whose saved session state cannot be
-	// replayed: a resume repeats the identical failure, so the successor must
-	// be a fresh session. Because that successor discards the failed attempt's
-	// turn output rather than continuing from it, the pre-result no-output
-	// safety requirement does not apply. It is set only from a trusted,
-	// recognized diagnostic signature (routingerr.IsResumeCorrupted), never
-	// from caller-supplied booleans.
-	NonReplayable bool
 }
 
 func (e UnclassifiedFailureEvidence) currentFor(
@@ -259,25 +245,15 @@ func (e UnclassifiedFailureEvidence) permits(failure *routingerr.Error) bool {
 }
 
 func (e UnclassifiedFailureEvidence) safeBeforeResult() bool {
-	base := e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto && e.EvidenceKnown
-	if !e.NonReplayable {
-		// A replayable successor must not throw away a completed result, so an
-		// authoritative no-output/no-effect signal is required.
-		base = base && !e.OutputObserved && !e.EffectObserved
-	}
-	if e.relaxesProviderDiagnostic() {
-		// These origins have no complete provider diagnostic to require.
-		return base
-	}
-	return base && e.DiagnosticComplete
+	return e.TaskScope && e.TaskID != "" && e.StepKnown && !e.StepVeto &&
+		e.EvidenceKnown && !e.OutputObserved && !e.EffectObserved &&
+		(e.DiagnosticComplete || e.waivesProviderDiagnostic())
 }
 
-// relaxesProviderDiagnostic reports whether the origin supplies its own bounded
-// diagnostic instead of a provider-complete one. The relaxation is origin
-// scoped: every other origin still requires DiagnosticComplete and a ProviderID.
-func (e UnclassifiedFailureEvidence) relaxesProviderDiagnostic() bool {
-	return e.Origin == UnclassifiedOriginEmptyTurnCompletion ||
-		e.Origin == UnclassifiedOriginPostStartNoResult
+// waivesProviderDiagnostic reports whether the origin derives its identity
+// without a complete provider diagnostic or provider ID.
+func (e UnclassifiedFailureEvidence) waivesProviderDiagnostic() bool {
+	return e.Origin == UnclassifiedOriginEmptyTurn
 }
 
 func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Error) bool {
@@ -288,11 +264,7 @@ func (e UnclassifiedFailureEvidence) trustedFailureShape(failure *routingerr.Err
 		return false
 	}
 	if routingerr.ClassForCode(failure.Code) != routingerr.ClassUnclassified ||
-		failure.Phase != e.Phase {
-		return false
-	}
-	if e.Origin != UnclassifiedOriginEmptyTurnCompletion && e.ProviderID == "" &&
-		e.Origin != UnclassifiedOriginPostStartNoResult {
+		failure.Phase != e.Phase || (e.ProviderID == "" && !e.waivesProviderDiagnostic()) {
 		return false
 	}
 	return true
@@ -305,23 +277,8 @@ func (e UnclassifiedFailureEvidence) failureMatchesOrigin(failure *routingerr.Er
 	case UnclassifiedOriginAgentStartup:
 		return failure.Code == routingerr.CodeAgentRuntime &&
 			(e.Phase == routingerr.PhaseProcessStart || e.Phase == routingerr.PhaseSessionInit)
-	case UnclassifiedOriginEmptyTurnCompletion:
+	case UnclassifiedOriginEmptyTurn:
 		return failure.Code == routingerr.CodeAgentRuntime && e.Phase == routingerr.PhasePromptSend
-	case UnclassifiedOriginPostStartNoResult:
-		return failure.Code == routingerr.CodeAgentRuntime && isPostStartEvidencePhase(e.Phase)
-	default:
-		return false
-	}
-}
-
-// isPostStartEvidencePhase reports whether phase is a post-start phase where a
-// no-result failure can be adopted. It mirrors the post-start set the error
-// classifier uses for phase.poststart.unknown; shutdown is excluded because the
-// session is already stopping.
-func isPostStartEvidencePhase(phase routingerr.Phase) bool {
-	switch phase {
-	case routingerr.PhasePromptSend, routingerr.PhaseStreaming, routingerr.PhaseToolExecution:
-		return true
 	default:
 		return false
 	}

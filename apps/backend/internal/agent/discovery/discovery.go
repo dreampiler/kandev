@@ -279,6 +279,8 @@ func (r *Registry) detectAll(ctx context.Context) []Availability {
 collect:
 	versionChecks.Wait()
 
+	versionChecks.Wait()
+
 	results := make([]Availability, 0, len(sweep))
 	for i, v := range valid {
 		if v {

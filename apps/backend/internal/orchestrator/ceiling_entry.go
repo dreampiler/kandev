@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -154,7 +155,10 @@ func (s *Service) deriveCeilingEntryBinding(
 	if s.workflowStepGetter != nil {
 		var stepErr error
 		step, stepErr = s.workflowStepGetter.GetStep(ctx, requestedStepID)
-		if stepErr != nil {
+		// A deleted step is a structural dead end, not a failed read: resolve it
+		// as not-derived so validation drops the record instead of retrying it
+		// forever. Every other read error is retryable.
+		if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
 			return models.CeilingWorkflowEntryBinding{}, false, stepErr
 		}
 		if step == nil {
@@ -553,7 +557,7 @@ func (s *Service) enrichCeilingDeferralBinding(
 	defer release()
 	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
 	if err != nil {
-		s.logger.Zap().Warn("could not decode deferred workflow entry binding; using legacy validation",
+		s.logger.Zap().Warn("could not decode deferred workflow entry binding",
 			zap.String("task_id", taskID), zap.Error(err))
 		return deferral, nil
 	}
@@ -689,7 +693,7 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 	}
 	binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload)
 	if err != nil {
-		return ceilingEntryUnavailable, err.Error(), nil
+		return ceilingEntryPermanentlyUnavailable, err.Error(), nil
 	}
 	route, routePresent := models.LoadWorkflowSessionRoute(task.Metadata)
 	payloadStepID := stringField(deferral.Payload, metaKeyWorkflowStepID)
@@ -762,7 +766,9 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 	}
 	if s.workflowStepGetter != nil {
 		step, stepErr := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
-		if stepErr != nil {
+		// A deleted step (not-found) resolves to a nil step and supersedes the
+		// record; only a genuine read failure stays retryable.
+		if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
 			return ceilingEntryUnavailable, "workflow destination step could not be read", stepErr
 		}
 		// Some legacy workflow-step providers return the step without its
@@ -786,7 +792,9 @@ func (s *Service) validateUnroutedWorkflowEntry(
 		return ceilingEntryUnavailable, "workflow destination step cannot be read", nil
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, binding.DestinationStepID)
-	if err != nil {
+	// A deleted step is a structural dead end, so it supersedes the record;
+	// only a genuine read failure stays retryable.
+	if err != nil && !errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
 		return ceilingEntryUnavailable, "workflow destination step could not be read", err
 	}
 	if step == nil {
@@ -855,13 +863,8 @@ func (s *Service) validateCeilingDestination(
 	// claimed RUNNING; the task-owned route and session identity remain guarded.
 	if checkDestinationState {
 		if session.State == models.TaskSessionStateStarting || session.State == models.TaskSessionStateRunning {
-			// KANDEV-W-086: a record that still carries its workflow-entry
-			// binding is the step entry's own prompt waiting for capacity,
-			// not a retargeted successor. Dropping it as superseded would
-			// lose the entry prompt forever, letting the step advance on a
-			// later completion signal without its own turn ever running.
-			// Keep it for a later pass; an unbound legacy record keeps the
-			// historical superseded disposition.
+			// Bound workflow entry prompts retain their record while the
+			// destination is active. Unbound prompts remain superseded.
 			if binding.Valid() {
 				return ceilingEntryUnavailable
 			}
