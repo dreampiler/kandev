@@ -389,6 +389,50 @@ registration or old-head review as completion of this correction. Operating677
 remains separate; normal exact-source review and controller-GO integration still
 apply. No upstream posting or full unrelated audit is part of this repair.
 
+## Required settings-preview sibling correction (2026-10-15 KST)
+
+The owner's focused independent source review found a remaining downstream
+omission in `183f0d2e9751131802369b14d20e15a1541830f2`. The task-aware preview
+assembler correctly returned no original for deleted historical A, but settings
+preview re-elected B from sessions alone. A supported implicit profile/current
+recipient step with `configure_session` therefore predicted a change the actual
+entry skipped. This supersedes the earlier complete-consumer claim for that
+specific sibling; the accepted recorded-ID, read-error and producer repairs stay.
+
+Remove the redundant fallback and its now-unused private helper. The assembler's
+resolved original, including nil, remains authoritative through settings preview.
+Genuinely unrecorded legacy election stays in the existing task-aware lookup.
+The existing pure-builder conditional-set fixture now supplies `OriginalSession`,
+as the production assembler does; its assertions and case identity are unchanged.
+No public API, type, table, permission, policy or standing case is added.
+
+Temporary verification used a separate tracked backend source archive under
+`D:/260720_Ai_Workspace/_Runtime/tmp/binding79104-preview-20261015/source`.
+It first proved an unrecorded legacy original still projects the rule, then
+registered A-to-B through the existing atomic repository entry, deleted A using
+`DeleteTaskSession`, and called actual `PreviewWorkflowMove` with no explicit
+session target. Actual configuration admission and the normal on-enter config
+path retained B's `before` model and `medium` effort. RED observed preview
+`after`/`max` instead. After the fallback removal the same check passed (0.958s),
+including unchanged recipient, `missing_original_snapshot`, unchanged binding
+and no fabricated initial snapshot. The external source copy alone contains
+the one-off test; this worktree's normal collector never contained it.
+
+Executed commands, separately from their indicated backend roots:
+
+```text
+go test -trimpath -p 1 ./internal/orchestrator -run '^TestRecoveryRecipientConfigurePreviewOnce$' -count=1
+go test -trimpath -p 1 ./internal/orchestrator -run 'PreviewWorkflowMove|BuildWorkflowMovePreview|PreviewConfigureSelectionNotice|ProcessOnEnterConfigureSession|ResolveWorkflowSessionConfig' -count=1
+```
+
+The first command is the temporary RED/GREEN check. The second reuses the
+worktree's existing preview/configuration cases and passed (2.356s), with no new
+function/case or weakened assertion. No broad audit or unchanged source review
+was repeated. Publication, normal hooks, narrow independent delta review and
+temporary cleanup receipts belong to the native Task Plan. Controller GO is
+still required for the new exact head; neither an old verdict nor operating677
+completion authorizes merging this correction.
+
 ## Risks
 
 - The fork's best-effort step-binding refresh must not substitute for atomic

@@ -213,3 +213,13 @@ absence without adding a standing case.
 
 Publication and independent review follow this work order through the native Task
 Plan's actual PR/head/base/worktree records. Fork-main merge requires controller GO.
+
+The focused follow-up found and removed settings preview's downstream session-only
+original election. It now retains the assembler's task-aware nil when historical
+A is missing; actual entry and preview both leave B's model/config unchanged.
+An external one-off normal-input check produced RED before the fix and GREEN
+after it. The existing preview/configuration filter passed, with only the
+conditional-set builder's resolved-original fixture input updated and all original
+assertions retained. Exact results and scope are in the plan's settings-preview
+correction section. No new permanent test function/case or public contract was
+introduced; changed-head review and controller GO remain delivery requirements.
