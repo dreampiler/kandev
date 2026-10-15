@@ -49,7 +49,7 @@ other files stay in the remainder.
 | 30 | `30-office-overview.patch` | D01 Office overview with #174, #180, #189, #192 | 65 | 6,400 (+6,387/-13) | kdlbs/kandev#4045 open, then Organization scope (#4018 direction), then #208 | open | #4045 merged, general parts proposed upstream, operating judgments moved to a plugin (E13 + PL2) |
 | 90 | `90-fork-remainder.patch` | Fork changes not yet attributed to one bundle | 1,451 | 129,642 (+123,638/-6,004) | Per commit in [the correspondence map](../docs/fork/commit-map.csv) | open | Split into named bundles as classification attributes shared files; each part follows its own condition |
 
-**Total:** 6 patches, 1,697 files, 155,955 changed lines (+148,597/-6,358).
+**Total:** 6 patches, 1,697 files, 155,955 changed lines (+149,597/-6,358).
 
 ## Reproduction record
 
@@ -75,6 +75,7 @@ The `git diff --quiet` compared the overlay with the source revision
 
 Adoption input (no ref): merge object
 `956628924fe5259f194bbc30840cef60202f2376` with parents `c35a2455a18` (the
-branch head, whose tree is `main` plus `patches/`) and `f66c0796b02` (the
-overlay). The merge tree equals the `c35a2455a18` tree, and `c35a2455a18`, the
-overlay, fork `main` `1cabfe1d`, and `51af93` are all ancestors.
+branch head, which contains source `390b8daa4b0` plus `patches/`) and
+`f66c0796b02` (the overlay). The merge tree equals the `c35a2455a18` tree, and
+`c35a2455a18`, the overlay, fork `main` `1cabfe1d`, and `51af93` are all
+ancestors. This is a no-ref input test; it is not the real `main` adoption.
