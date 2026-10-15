@@ -332,6 +332,37 @@ try {
     Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid'))) 'Invalid host must fail before backend launch.'
   }
 
+  Invoke-LaunchCase 'Command Processor AutoRun cannot restore host settings in isolated children' {
+    $key = 'HKCU:\Software\Microsoft\Command Processor'
+    $keyExisted = Test-Path -LiteralPath $key
+    if (-not $keyExisted) { New-Item -Path $key -Force | Out-Null }
+    $registry = Get-Item -LiteralPath $key
+    $hadValue = $registry.GetValueNames() -contains 'AutoRun'
+    $previous = if ($hadValue) { $registry.GetValue('AutoRun', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { $null }
+    $previousKind = if ($hadValue) { $registry.GetValueKind('AutoRun') } else { [Microsoft.Win32.RegistryValueKind]::String }
+    $marker = Join-Path $env:TEMP ('isolated-autorun-' + [guid]::NewGuid().ToString('N') + '.txt')
+    $script:injectionMarker = $marker
+    try {
+      $registry.SetValue('AutoRun', 'set KANDEV_DATABASE_DRIVER=autorun-host&set DOCKER_HOST=autorun-host&echo ran>"' + $marker + '"', [Microsoft.Win32.RegistryValueKind]::String)
+      # Prove this exact registry payload is active before testing the launcher.
+      & "$env:SystemRoot\System32\cmd.exe" /c exit 0
+      Assert-Launch (Test-Path -LiteralPath $marker) 'AutoRun positive control was not executed.'
+      Remove-Item -LiteralPath $marker -Force
+      $run = Start-TestLauncher -Extra '-Web'
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -eq 0) 'Both isolated children must launch despite an operator AutoRun.'
+      Assert-Launch (-not (Test-Path -LiteralPath $marker)) 'Isolated launch executed Command Processor AutoRun.'
+      foreach ($role in @('backend', 'web')) {
+        Assert-Launch ((Get-Content -LiteralPath (Join-Path $script:homeDir ($role + '.environment')) -Raw) -eq '||') `
+          "$role received settings restored by AutoRun."
+      }
+    } finally {
+      if ($hadValue) { $registry.SetValue('AutoRun', $previous, $previousKind) } else { $registry.DeleteValue('AutoRun', $false) }
+      $registry.Dispose()
+      if (-not $keyExisted) { Remove-Item -LiteralPath $key -Force }
+    }
+  }
+
   Invoke-LaunchCase 'square brackets in repository paths remain literal' {
     $savedLauncher = $script:launcher
     $savedBin = $script:binDir

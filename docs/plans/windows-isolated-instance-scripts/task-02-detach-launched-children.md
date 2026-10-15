@@ -1,7 +1,7 @@
 ---
 id: "02-detach-launched-children"
 title: "Detach launched children from the caller"
-status: in_progress
+status: done
 wave: 2
 depends_on:
   - "01-windows-isolated-scripts"
@@ -102,6 +102,10 @@ Also run the PowerShell parser check for the three launcher scripts.
   alive; a repository path containing brackets failed in `Start-Process`.
 - The first compiler fixture failure was setup-only. Earlier masked ownership,
   cleanup, and host cases are excluded from regression evidence.
-- Native helper reuse, script fixes, and final hosted full-suite acceptance are
-  in progress. Exact revision, all-attempt raw logs, binary hashes, and final
-  outcomes are retained in task evidence, outside tracked delivery documents.
+- The fixed launcher passed all 19 permanent real Windows launch cases, plus
+  native supervisor tests and the existing home/environment guards. Hosted
+  workflow and documentation contracts passed. A subsequent test-only AutoRun
+  control and Windows binary retention complete the review coverage; final
+  exact-head full-suite acceptance remains an external delivery gate. Exact
+  revisions, all-attempt raw logs, binary hashes, and final outcomes are
+  retained in task evidence, outside tracked delivery documents.

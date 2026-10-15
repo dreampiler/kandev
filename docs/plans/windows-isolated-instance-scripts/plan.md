@@ -1,6 +1,6 @@
 ---
 created: 2026-09-28
-status: in_progress
+status: done
 requirements:
   - REQ-LAUNCHER-ISOLATED-SCRIPTS-001
 system_design:
@@ -71,7 +71,7 @@ Backend path-filter contract tests keep PowerShell inputs selected in future CI.
 ## Work orders
 
 - [x] [Task 01: Windows isolated-instance scripts](task-01-windows-isolated-scripts.md)
-- [ ] [Task 02: Detach launched children from the caller](task-02-detach-launched-children.md)
+- [x] [Task 02: Detach launched children from the caller](task-02-detach-launched-children.md)
 
 ## Risks
 
