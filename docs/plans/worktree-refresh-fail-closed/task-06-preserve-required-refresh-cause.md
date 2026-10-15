@@ -74,6 +74,18 @@ Windows preparation worktree it fails with `fatal: not a git repository`, and
 the same failure occurs on the untouched base, so it is an environment-limited
 run rather than a change-caused result.
 
+The focused regression
+`TestFetchBranchToLocal_RequiredRetryRefreshReportsProbeCause`
+(`manager_fetch_retry_fallback_test.go`) drives the required arm with a fake git:
+the first `<branch>:<branch>` fetch is refused, the `origin <branch>` retry
+succeeds, and both `merge-base --is-ancestor` probes exit 128, so
+`resolveRetryStartPoint` records the fixed probe detail. It passed on Linux
+(`golang:1.26`), where the fake `#!/bin/sh` git is resolvable; on Windows
+`exec.LookPath("git")` resolves the real `git.exe` and skips the extensionless
+fake, so the container run is the real check. Reverting the fix in a read-only
+copy makes the test fail with the generic command error, confirming it guards
+the preserved cause.
+
 ## Files likely touched
 
 - `apps/backend/internal/worktree/manager_lifecycle.go`
@@ -84,9 +96,10 @@ None.
 
 ## Risks
 
-- Error wrapping can leak raw Git output. The detail is the bounded fetch
-  output already produced by the refresh retry; do not append additional raw
-  command output.
+- Error wrapping could leak raw Git output. On the required arm the detail is
+  the fixed probe string from `resolveRetryStartPoint` (or, when that is empty,
+  the user-facing `Warning`), so it carries no credentials, remote URLs, or raw
+  command output; do not append additional raw command output.
 
 ## Parallelism
 
@@ -105,5 +118,7 @@ None.
   `WarningDetail` with a `Warning` fallback, logs branch/detail at warn, and
   includes the detail in the returned error before `%w`. The warning records no
   raw command output, matching `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14`.
-- `gofmt -l`, `go build`, and `go vet` on the package passed. The `go test`
-  selection is an environment-limited run (see Verification).
+- `gofmt -l`, `go build`, and `go vet` on the package passed. The broad `go test`
+  selection is an environment-limited run on Windows (see Verification); the
+  focused required-arm regression was verified on Linux and fails when the fix is
+  reverted.
