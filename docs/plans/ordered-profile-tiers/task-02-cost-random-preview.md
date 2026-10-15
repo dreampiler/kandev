@@ -135,8 +135,8 @@ only that fixture. The narrowed Save case then passed, verifying actual PATCH
 mode/cost fields, preserved opaque windows, and the subsequent preview body.
 The other two valid cases were retained. Outputs are `frontend-focused-result.txt`
 (2 pass, 1 fixture failure) and `frontend-save-final.txt` (1 pass, 2 unselected).
-The existing three frontend files passed all 37 tests. No permanent test or
-operating server was added and no browser/installed-provider acceptance is claimed.
+The existing three frontend files passed all 37 tests. No permanent test or operating server was added. The component-browser
+supplement below was performed later; installed-provider acceptance is not claimed.
 
 The existing PR documentation validator consumed the actual 30 changed paths and
 five document contents: `status: covered`, `ok: true`, `errors: []`
@@ -173,3 +173,41 @@ and only synthetic existing logo GETs. Supplemental captures are
 The earlier four valid mode/preview PNGs remain intact. Existing 37+3 frontend,
 native behavior and geometry proofs were not rerun. Browser handles closed;
 the disposable Vite server was stopped and port 37447 had no listener.
+
+
+## Root readback and actual editor viewport supplement
+
+Root read the selector, circuit precedence, native controller/HTTP, shared
+ranking and frontend draft/preview source, plus original native/frontend outputs.
+Actual Chrome mounted DynamicAgentProfileEditor with native state, locale,
+tooltip, toast and Save providers over synthetic HTTP only. It verified desktop
+1440x1100 28px selectors/preview, phone 390x844 44px selectors/preview, viewport
+and parent containment, order-to-cost/random, preserved unknown cost/windows,
+read-only preview, denied-preview draft preservation and OFF with zero preview
+requests. Existing native logo GETs are allowed reads, not preview execution.
+
+The first browser assertion wrongly counted that logo read as an OFF preview
+request. Its original failure remains in browser-first-result.json; valid
+behavior/geometry results were retained. A narrowed finish phase corrected only
+that path classification and completed captures. The initial fixture also lacked
+the native internal scroller and SettingsShell bottom reservation. Reusing that
+existing wrapper geometry corrected capture visibility, without production CSS
+or layout changes. The four final mode/preview PNGs and two later caption PNGs
+were all opened by root; browser-result.json and caption-browser-result.json
+report no page errors or external requests. No full production route or live
+provider acceptance is claimed. Browser/server handles ended and port 37447 had
+no listener.
+
+Root also corrected the feature registry's stale ordered-only description to
+the actual order/cost/random scope and existing Dynamic agent routing dependency.
+Runtime-flag binding/metadata focused checks passed (0.036s), without changing
+flag key, OFF defaults or restart policy. Final coverage used all 31 paths and
+five document bodies: covered, errors [].
+
+The first normal full commit hook's Go lint reached its five-minute timeout
+with 0 issues, exit 4, and is not a pass. After the independent compile/link
+work completed and warmed shared artifacts, the normal commit ran with existing
+process-local 3GiB, two-worker resource choices; all hooks and Conventional
+Commit validation passed. Earlier native/frontend success evidence was reused.
+No global resource setting, lint threshold, skipped check or permanent procedure
+was added.
