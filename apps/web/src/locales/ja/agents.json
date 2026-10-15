@@ -1,4 +1,6 @@
 {
+  "orderedTierNumber": "階層 {{tier}}",
+  "orderedTierJoin": "前の階層に結合",
   "actionCannotBeUndone": "この操作は元に戻せません。",
   "add": "追加",
   "addProfile": "プロファイルを追加",

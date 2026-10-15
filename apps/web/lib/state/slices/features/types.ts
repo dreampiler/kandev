@@ -13,6 +13,7 @@ export const defaultFeatureFlags = {
   canvases: false,
   multiTenancy: false,
   dynamicAgentRouting: false,
+  dynamicProfileTiers: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   needsYouInbox: false,
