@@ -1,7 +1,7 @@
 ---
 id: 15-dynamic-candidate-timeout
 title: Reuse utility routing after native reviewer request timeouts
-status: done
+status: building
 wave: 3
 depends_on: []
 plan: plan.md
@@ -36,9 +36,9 @@ operating endpoint health and child capacity/provider admission remain separate.
 The shared utility-service helper replaces both handler loops. Review profile
 lookup uses the existing ProfileExecutionResolver, with a transient run-local
 route passed through ReviewerIdentity across batches. The callback still executes
-the concrete profile through native session/host utility. A typed child deadline
-with a live parent enters the existing transient policy; the original error and
-child-deadline diagnostic remain distinct from that policy code. Existing retry
+the concrete profile through native session/host utility. The initial version
+treated a typed deadline with a live parent as transient; the follow-up below
+supersedes that assumption because it does not prove child termination. Existing retry
 deadlines resume through ResumePendingRoute. No global deadline text rule, new
 run, ledger, candidate ordering or timeout value was introduced.
 
@@ -154,3 +154,23 @@ PASS, 1.123s
 golangci-lint run --allow-serial-runners ./internal/utility/service --new-from-rev=HEAD --timeout=5m --concurrency=2
 exit 0; 0 issues. (natural completion)
 ```
+
+## Unconfirmed transport deadline follow-up
+
+A disposable actual ExecuteProfilePrompt callback returned a wrapped
+DeadlineExceeded while its parent remained active. The previous classifier
+called candidate A and then B and returned nil error (RED, service 0.113s), even
+though the first child's termination was unconfirmed. That deadline now remains
+unclassified, with no automatic retry/fallback; the original wrapped error is
+retained. The same case passed under race (GREEN, service 1.416s).
+
+This supersedes the earlier synthetic claims that a plain typed deadline alone
+proved a safe fallback. AC-AGENTS-NATIVE-REVIEW-TIMEOUT-001.2 remains incomplete
+until the native child owner supplies exact terminal proof. Requirements are
+preserved, not weakened to match this safe intermediate result. Parent stop,
+empty transport response and live parent context do not supply that proof.
+
+The original uncommitted ordered-success controller/service follow-up remains
+preserved in this worktree outside this atomic public deadline guard. Its separate
+integration evidence does not establish public child-deadline recovery. Final
+normal hooks and independent review remain required before public delivery.

@@ -75,12 +75,13 @@ func profileFallbackAllowed(resolver ExecutionFailureResolver, route *PromptRequ
 
 func profilePromptFailure(err error, response *agentctlutil.PromptResponse, provider string) *routingerr.Error {
 	if errors.Is(err, context.DeadlineExceeded) {
-		// This is a policy class, not evidence of a network outage. The caller's
-		// original wrapped request error remains the diagnostic cause.
-		return &routingerr.Error{Code: routingerr.CodeNetworkUnavailable, Class: routingerr.ClassTransient,
-			CatalogueVersion: routingerr.CatalogueVersion, Confidence: routingerr.ConfHigh,
-			Phase: routingerr.PhasePromptSend, FallbackAllowed: true, AutoRetryable: true,
-			ClassifierRule: "utility.child_request_deadline", RawExcerpt: routingerr.Sanitize("child inference request deadline while parent context remains active: " + err.Error())}
+		// A live parent does not prove the child stopped: an HTTP transport
+		// deadline can return while its provider operation remains active.
+		// Preserve the original cause without authorizing another invocation.
+		return &routingerr.Error{Code: routingerr.CodeUnknownProvider, Class: routingerr.ClassUnclassified,
+			CatalogueVersion: routingerr.CatalogueVersion, Confidence: routingerr.ConfLow,
+			Phase: routingerr.PhasePromptSend, ClassifierRule: "utility.unconfirmed_request_deadline",
+			RawExcerpt: routingerr.Sanitize(err.Error())}
 	}
 	message := ""
 	if response != nil {

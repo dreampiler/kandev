@@ -23,19 +23,20 @@ retry/reset deadlines. A due pending decision is resumed through the existing
 ResumePendingRoute method; a caller-context timer waits for that deadline without
 a polling loop. Neither the helper nor review changes the configured policy.
 
-Only a typed request-local deadline with a live parent is mapped to the existing
-network_unavailable transient class. Provider prose containing deadline wording
-is not promoted to typed evidence. Parent cancellation/deadline prevents host
-fallback and further dispatch. A child request deadline goes to routing rather
-than retrying the same candidate through the host. User-visible partial output
-ends fallback. The existing 600-second review-run budget, five-minute HTTP client
-budget and ten-second detached failure-write budget remain unchanged.
+A typed request-local deadline with a live parent does not establish that its
+child terminated: the HTTP transport can time out while provider execution is
+still active. Until the native child owner supplies exact terminal proof, that
+error remains unclassified and cannot authorize automatic retry or fallback.
+This is a conservative intermediate implementation; the original typed-child
+deadline acceptance remains open. Provider prose is not promoted to typed proof.
+Parent cancellation/deadline and user-visible partial output stop further
+dispatch. Existing classified provider failures still use the saved routing
+policy. The 600-second review-run budget, five-minute HTTP client budget and
+ten-second detached failure-write budget remain unchanged.
 
-The classification name is a policy mapping, not a diagnosed network outage.
-Its diagnostic identifies a child inference deadline with a live parent and
-retains the sanitized original request error; terminal errors keep the wrapped
-cause. Bound utility/default profiles retain their native default-model behavior.
-Explicit reviewer profiles retain their prior model validation.
+Unconfirmed deadlines retain their sanitized original error and wrapped cause.
+Bound utility/default profiles keep their native default-model behavior;
+explicit reviewer profiles keep their prior model validation.
 
 The lifecycle/host-utility callback still owns actual child creation, admission
 and settlement. This change does not treat a timeout as proof of child exit or
