@@ -216,3 +216,83 @@ agent/runtime facade, changed the composition import to that facade, and named
 the repeated ID. There is no runtime or policy behavior change. The failed
 architecture/Go lint attempt is not a pass; normal hooks remain required after
 this correction. Existing valid claim/binding/runtime proofs are retained.
+
+
+After that facade/constant correction, the normal full staged hooks and
+Conventional Commit validation completed successfully. Source commit c7890462d
+contains 27 paths; integration confirmed a clean worktree and actual 27-path/
+four-document coverage with status covered and no errors. The public guide
+supplement explains the native API, units, opt-in settings, preserved off state
+and current consumer/budget limits. It changes documentation only and reuses
+the valid source checks.
+
+## Verified settlement while admission is disabled
+
+An OFF backend previously left the lifecycle allowance dependency nil, including
+its completion and confirmed-stop settlement methods. A claim acquired before
+the flag change could therefore remain `claimed` after the native turn ended and
+block the next ON turn at a concurrency limit of one. The restart-required flag
+does not imply that this was reproduced by changing a live pointer: the narrow
+proof constructs a new OFF Manager over the existing SQLite claims, reconstructs
+the same execution identity, and calls the native retained-outcome application
+path. That path seeds the generation from the retained completion, processes it
+and acknowledges it. Before correction, the row remained `claimed` and the next
+ON prompt failed with `shared Kandev turn allowance reached: concurrent_turns`.
+
+The task repository now supplies a settlement-only interface independently of
+admission. Backend composition installs it beside the delivery repository before
+`lifecycleMgr.Start`, so startup outcome recovery also sees it. Provider binding,
+usage reads, settings APIs and new claims retain their existing feature gate.
+OFF prompts therefore acquire no claim and perform no allowance/provider
+admission read. Settlement only updates existing claimed rows: validated current
+completion matches execution/generation, while a confirmed native runtime stop
+settles that execution's concurrency. Both retain period charges. The existing
+current-submission completion guard can supply a generation for a matching
+stable submission; missing, foreign or late evidence does not settle a claim.
+No missing-execution scan, timeout refund or new state owner was added.
+
+Native startup recovery preserves the inventory execution ID; retained outcome
+application or live recovery restores the numbered completion through the
+existing generation guard. Durable adoption already validates session,
+incarnation, harness, stream and stable submission ownership. This correction
+does not infer identity when that recovery evidence is absent, does not rebind
+an old claim to a newly launched execution while OFF, and is not a full operating
+restart test. Previously unavailable/ambiguous evidence remains conservative.
+
+An allowance settlement error after a successful native stop is logged and
+leaves its claim unresolved. It no longer returns before the existing native
+secret/owner cleanup. A synthetic settlement failure exercised the actual
+`StopAgentWithReason` branch with its existing backend fixture: runtime stop and
+tracking cleanup still finished, the affected claim stayed `claimed`, and a
+different account's claim was unchanged.
+
+Disposable proof used the existing real SQLite/native mock-agentctl fixture and
+the existing retained-outcome/stop fixtures outside test collection:
+
+```text
+go test -trimpath -p 2 -overlay OVERLAY ./internal/agent/runtime/lifecycle -run '^TestAllowanceOffSettlementRecoveredCompletion$' -count=1 -timeout 60s -v
+before: FAIL, 0.278s; native completion acknowledged, row=claimed, ON successor refused
+after: PASS, 0.291s; row=completed, ON successor admitted
+
+go test -trimpath -p 2 -overlay OVERLAY ./internal/agent/runtime/lifecycle -run '^TestAllowanceOffSettlement(RejectsLateAndUnknown|ConfirmedStop|NewPromptUnmetered)$' -count=1 -timeout 60s -v
+PASS, 0.814s: late/foreign/unnumbered evidence retained; confirmed-stop success and settlement-error cleanup; OFF new prompt has zero claims
+
+go test -trimpath -p 2 -overlay OVERLAY ./internal/agent/runtime/lifecycle -run '^TestAllowanceOffSettlementPreservesEarlierAttempt$' -count=1 -timeout 60s -v
+PASS, 0.225s: matching current submission settled only its generation; earlier ambiguous claim and both period charges remained
+```
+
+The full earlier allowance matrix and frontend checks were not repeated. The
+original remaining consumer, provider-request/token/USD, account/model/group,
+learning and editor scope above remains unchanged. Proof source and original
+outputs are retained outside collection for integration readback, then cleanup.
+
+Final correction validation:
+
+```text
+golangci-lint run --allow-serial-runners ./internal/agent/runtime/lifecycle ./internal/backendapp --new-from-rev=HEAD --timeout=5m --concurrency=2
+exit 0; 0 issues. (natural completion)
+```
+
+The existing documentation coverage function received the actual six changed
+paths and linked document bodies: `covered`, `errors: []`. `git diff --check`
+passed. Integration's pre-existing public-guide/doc changes were preserved.

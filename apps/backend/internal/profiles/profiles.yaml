@@ -37,7 +37,7 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
-  # Account-aware provider usage snapshots. This increment is read-only.
+  # Provider usage snapshots and optional shared native turn allowances.
   KANDEV_FEATURES_PROVIDER_USAGE_LIMITS:
     prod: "false"
     dev:  "false"

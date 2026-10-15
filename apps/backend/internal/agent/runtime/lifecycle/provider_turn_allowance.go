@@ -23,15 +23,32 @@ type ProviderTurnRequest struct {
 	SubmissionID    string
 }
 
-type ProviderTurnAdmission interface {
-	AdmitProviderTurn(context.Context, ProviderTurnRequest) (bool, error)
+type ProviderTurnSettlement interface {
 	FinishProviderTurn(context.Context, string, uint64, bool) error
 	CompleteProviderExecution(context.Context, string) error
+}
+
+type ProviderTurnAdmission interface {
+	ProviderTurnSettlement
+	AdmitProviderTurn(context.Context, ProviderTurnRequest) (bool, error)
 }
 
 // SetProviderTurnAdmission is wired only for the enabled native usage feature.
 func (m *Manager) SetProviderTurnAdmission(admission ProviderTurnAdmission) {
 	m.sessionManager.providerTurnAdmission = admission
+}
+
+// SetProviderTurnSettlement preserves verified settlement across feature changes.
+// It is installed before native runtime recovery and never admits new claims.
+func (m *Manager) SetProviderTurnSettlement(settler ProviderTurnSettlement) {
+	m.sessionManager.providerTurnSettler = settler
+}
+
+func (sm *SessionManager) providerTurnSettlement() ProviderTurnSettlement {
+	if sm.providerTurnSettler != nil {
+		return sm.providerTurnSettler
+	}
+	return sm.providerTurnAdmission
 }
 
 func (sm *SessionManager) admitProviderTurn(ctx context.Context, execution *AgentExecution, generation uint64, submission string) (bool, error) {
@@ -86,19 +103,21 @@ func (sm *SessionManager) providerExecutionRunning(id string) bool {
 }
 
 func (sm *SessionManager) finishProviderTurn(execution string, generation uint64, refund bool) {
-	if sm.providerTurnAdmission == nil {
+	settler := sm.providerTurnSettlement()
+	if settler == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := sm.providerTurnAdmission.FinishProviderTurn(ctx, execution, generation, refund); err != nil {
+	if err := settler.FinishProviderTurn(ctx, execution, generation, refund); err != nil {
 		sm.logger.Error("provider turn claim settlement failed", zap.Error(err))
 	}
 }
 
 func (m *Manager) completeProviderExecution(ctx context.Context, execution string) error {
-	if m.sessionManager.providerTurnAdmission == nil {
+	settler := m.sessionManager.providerTurnSettlement()
+	if settler == nil {
 		return nil
 	}
-	return m.sessionManager.providerTurnAdmission.CompleteProviderExecution(ctx, execution)
+	return settler.CompleteProviderExecution(ctx, execution)
 }

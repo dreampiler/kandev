@@ -700,6 +700,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER

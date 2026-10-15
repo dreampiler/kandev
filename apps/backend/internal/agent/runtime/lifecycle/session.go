@@ -65,6 +65,7 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
 	providerTurnAdmission    ProviderTurnAdmission
+	providerTurnSettler      ProviderTurnSettlement
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
