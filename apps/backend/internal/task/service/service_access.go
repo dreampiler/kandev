@@ -139,7 +139,11 @@ func (s *Service) WorkspaceDecisionByID(ctx context.Context, workspaceID string)
 
 // authorizeWorkspaceID checks reach of a workspace by ID.
 func (s *Service) authorizeWorkspaceID(ctx context.Context, workspaceID string) error {
-	_, err := s.requireWorkspaceScope(ctx, workspaceID, authz.ScopeWorkspaceRead, repoerrors.ErrWorkspaceNotFound)
+	return s.authorizeWorkspaceAction(ctx, workspaceID, models.CollaborationRead)
+}
+
+func (s *Service) authorizeWorkspaceAction(ctx context.Context, workspaceID string, action models.WorkspaceCollaborationAction) error {
+	_, err := s.requireWorkspaceScopeAction(ctx, workspaceID, authz.ScopeWorkspaceRead, repoerrors.ErrWorkspaceNotFound, action)
 	return err
 }
 
@@ -153,6 +157,12 @@ func (s *Service) AuthorizeWorkspaceScope(ctx context.Context, workspaceID strin
 // requireWorkspaceScope resolves the decision and applies the 404-vs-403 rule.
 func (s *Service) requireWorkspaceScope(
 	ctx context.Context, workspaceID string, scope authz.Scope, notFound error,
+) (authz.Decision, error) {
+	return s.requireWorkspaceScopeAction(ctx, workspaceID, scope, notFound, collaborationAction(scope))
+}
+
+func (s *Service) requireWorkspaceScopeAction(
+	ctx context.Context, workspaceID string, scope authz.Scope, notFound error, action models.WorkspaceCollaborationAction,
 ) (authz.Decision, error) {
 	if !s.needsWorkspaceAuthorization(ctx) || workspaceID == "" {
 		return authz.ResolveWorkspace(authz.Subject{Unscoped: true}, authz.WorkspaceRef{}), nil
@@ -168,7 +178,7 @@ func (s *Service) requireWorkspaceScope(
 	if !decision.Has(scope) {
 		return decision, ErrForbidden
 	}
-	if err := s.authorizeWorkspaceCollaboration(ctx, workspaceID, collaborationAction(scope)); err != nil {
+	if err := s.authorizeWorkspaceCollaboration(ctx, workspaceID, action); err != nil {
 		return authz.Denied(), err
 	}
 	return decision, nil
@@ -281,6 +291,11 @@ func (s *Service) authorizeTaskScopeAction(ctx context.Context, taskID string, s
 
 // authorizeWorkflowID checks reach of a workflow via its workspace.
 func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) error {
+	return s.authorizeWorkflowAction(ctx, workflowID, models.CollaborationRead)
+}
+
+// authorizeWorkflowAction intersects native reach with the conversation action.
+func (s *Service) authorizeWorkflowAction(ctx context.Context, workflowID string, action models.WorkspaceCollaborationAction) error {
 	if !s.needsWorkspaceAuthorization(ctx) {
 		return nil
 	}
@@ -324,7 +339,35 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 		// does not exist at all.
 		return repoerrors.ErrWorkflowNotFound
 	}
-	return s.authorizeWorkspaceCollaboration(ctx, workflow.WorkspaceID, models.CollaborationRead)
+	return s.authorizeWorkspaceCollaboration(ctx, workflow.WorkspaceID, action)
+}
+
+// WorkflowMutationReadOnly resolves policy without granting conversation reads.
+func (s *Service) WorkflowMutationReadOnly(ctx context.Context, workflowID string) (synced, workspaceReadOnly bool, err error) {
+	if err := s.authorizeWorkflowAction(ctx, workflowID, models.CollaborationControl); err != nil {
+		return false, false, err
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return false, false, err
+	}
+	if workflow.Source == models.WorkflowSourceGitHub {
+		return true, false, nil
+	}
+	if workflow.WorkspaceID == "" {
+		return false, false, nil
+	}
+	readOnly, err := s.WorkspaceWorkflowMutationReadOnly(ctx, workflow.WorkspaceID)
+	return false, readOnly, err
+}
+
+// WorkspaceWorkflowMutationReadOnly exposes only the mutation policy decision.
+func (s *Service) WorkspaceWorkflowMutationReadOnly(ctx context.Context, workspaceID string) (bool, error) {
+	workspace, err := s.getWorkspaceAction(ctx, workspaceID, models.CollaborationControl)
+	if err != nil {
+		return false, err
+	}
+	return workspace.IsImproveKandev(), nil
 }
 
 // authorizeWorkflowScope checks reach and one action scope for a workflow.

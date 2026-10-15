@@ -169,3 +169,65 @@ and publication. The shared lint slot
 was returned to the next worker after the result was collected; no parallel-lock
 bypass was used. An earlier lint attempt was interrupted during coordination and
 is not counted as a pass.
+
+## Review correction: workspace and workflow action boundaries
+
+Independent review found that individual workspace reads bypassed the new read
+grant, workspace management used only native permissions, and workflow update,
+delete and reorder reused read authorization. A verified conversation could
+therefore read without a grant or mutate with read-only access. The correction
+adds the missing read/control intersections while retaining the existing native
+checks and explicit-off behavior. Read helpers continue to require only read;
+control does not imply read. Both ordinary and version-fenced reorder use control.
+
+Existing HTTP/WS workflow policy checks also performed ordinary reads before
+mutations. With independent control-only access, those reads would either block
+create/reorder or skip the GitHub/Improve Kandev immutable checks on update/delete.
+They now request action-authorized boolean policy decisions from the task service,
+without exposing workspace/workflow metadata or granting reads. Existing native
+policy outcomes and transport error handling remain in place. This correction
+does not extend the documented plugin Host coverage or complete remaining T3 work.
+
+Disposable probes reused the real backend SQLite service fixture and stored
+`ScopePrincipal` identities, outside test collection. The before-source overlay
+reproduced the missing-grant/read-only/store-error/synthetic authorization failures.
+After correction, `TestCollaborationGrantSeamDelta` passed all 13 subcases in
+`3.355s`: no grant, all-false, read-only, control-only, native denial, grant-store
+error, synthetic conversation, same-workspace, browser, internal, explicit-off
+with retained grants, and both workspace deletion denial contexts. These results
+were retained rather than repeating unaffected cases.
+
+```text
+go test -trimpath -overlay OVERLAY ./internal/backendapp -run '^TestCollaborationGrantSeamDelta$' -count=1 -timeout 90s -v
+ok github.com/kandev/kandev/internal/backendapp 3.355s
+
+go test -trimpath ./internal/task/handlers -run '^TestHTTP(CreateWorkflow|WorkflowMutationsRejectReadOnlyWorkflows|ReorderWorkflows)' -count=1 -timeout 90s
+ok github.com/kandev/kandev/internal/task/handlers 0.262s
+```
+
+The new HTTP/WS policy probe exercised manual mutations and immutable GitHub/
+Improve Kandev targets under both on and off. Its first run passed 38 of 40
+subcases and exposed read authorization in both reorder methods; only the two
+affected on/manual/reorder cases were rerun after that correction, and both
+passed. A separate read-only reorder check verified denial in both ordinary and
+version-fenced paths. Its first retention assertion incorrectly assumed the
+repository preserves a requested initial sort order; the fixture was corrected
+to compare the actual stored order before and after denial. No production change
+was needed for that fixture correction.
+
+```text
+go test -trimpath -overlay OVERLAY ./internal/backendapp -run '^TestCollaborationMutationPolicyDelta$/^(on=true|reorder-read-only)$/^(http|ws)$/^manual$/^reorder$' -count=1 -timeout 90s -v
+PASS: on=true/http/manual/reorder; on=true/ws/manual/reorder
+exit 1 only for the temporary initial-sort-order assertion described above
+
+go test -trimpath -overlay OVERLAY ./internal/backendapp -run '^TestCollaborationMutationPolicyDelta$/^reorder-read-only$' -count=1 -timeout 90s -v
+ok github.com/kandev/kandev/internal/backendapp 5.346s
+
+golangci-lint run --allow-serial-runners ./internal/task/service ./internal/task/handlers --new-from-rev=HEAD --timeout=5m --concurrency=2
+exit 0; 0 issues.
+```
+
+The shared lint slot was returned after natural completion. Temporary overlay
+sources and before-source copies were removed after verification; no permanent
+tests, runtime settings, operating data or Git references changed. Integration
+owns the normal commit hooks and subsequent transport work.
