@@ -4938,6 +4938,10 @@ func (h *Handlers) deleteRecordedUserMessageWithoutTurnRollback(ctx context.Cont
 // Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
 // rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
+	// An MCP-issued message is agent-initiated: mark the context so a prompt
+	// that has to wake the session is admitted as automatic instead of riding
+	// the manual override past the session ceiling.
+	ctx = orchestrator.WithAutomaticLaunch(ctx)
 	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return taskMessageStatusSent, nil

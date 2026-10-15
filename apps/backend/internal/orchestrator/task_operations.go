@@ -6685,7 +6685,7 @@ func (s *Service) persistSessionCommit(ctx context.Context, sessionID string, tr
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
-	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual, promptTaskOptions{})
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOrigin(ctx), promptTaskOptions{})
 }
 
 // PromptTaskWithPromptContext delivers an accepted direct message together
@@ -6739,7 +6739,7 @@ func (s *Service) promptTaskWithPromptContext(
 	initialTaskBriefDispatchOwner bool,
 ) (*PromptResult, error) {
 	return s.promptTask(
-		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, launchOriginManual,
+		ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, promptTaskOrigin(ctx),
 		promptTaskOptions{
 			promptAlreadyComposed:         true,
 			fallbackUsesEffectivePrompt:   true,
