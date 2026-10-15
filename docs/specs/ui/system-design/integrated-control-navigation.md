@@ -27,7 +27,9 @@ The central adapter resolves only `conversation_task_id` already returned by
 the coordinator list and existing sessions of that task. It verifies the task's
 workspace/origin/coordinator relationship and session ownership. It never calls
 the coordinator conversation POST. The existing QuickChatSessionView is reused
-with automatic recovery disabled and without an initial prompt or draft. Existing
+with automatic recovery disabled and without an initial prompt or draft. Focus and visibility
+recovery respect that inspection guard; changing it invalidates pending
+automatic recovery responses before session resume. Existing
 session draft storage remains responsible for input continuity. Terminal and
 archived state is read from the original task/session; selection never makes a
 replacement. The existing management permission gates interaction.

@@ -39,3 +39,26 @@ task/session, preserves a draft across selection, and starts no execution or
 conversation POST. Unknown, failed, denied, missing-task and missing-session
 outcomes are visible without creating replacements. The phone drawer uses the
 same navigation tree. Scope limitations are retained as original remaining work.
+
+## Read-only automatic recovery follow-up
+
+The shared resumption focus listener omitted skipAutomaticRecovery. A disposable
+copy of the existing lifecycle harness reproduced status/resume/restore calls
+while inspecting a read-only conversation, and a pending startup response still
+resuming after inspection became read-only. Focus now uses the same guard and
+effect dependency; changing the flag invalidates the existing committed request
+generation before pending automatic responses can dispatch a resume.
+
+All 46 existing cases and both disposable cases passed together (48 GREEN,
+vitest 3.71s), retaining explicit manual retry coverage. The first disposable
+copy had unresolved relative imports and ran zero tests; correcting temporary
+aliases produced the actual two REDs and GREEN. No standing test was added.
+
+This atomic candidate starts at public PR4515 head5f74fd4083736392ddb762ce7b915b4796c1bef0
+in the already-existing control worktree. The original conversation-history
+worktree, localbafc39 and its local follow-upa8f435 remain preserved. Product
+hook, its existing test, vitest config and lockfile have no diff between5f74 and
+bafc39, so the same 48-case evidence applies to these identical three product
+lines. Documentation here uses only files present in the public parent, without
+pulling in unpublished conversation-index/history work. Final normal hooks and
+independent review remain required before public delivery; no push occurred.
