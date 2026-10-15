@@ -85,7 +85,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	}
 	s.sortCeilingReplayQueue(ctx, tasks)
 	paced := isPeriodicCeilingSweep(ctx)
-	allowDispatch := func(models.CeilingDeferral) bool { return true }
+	allowDispatch := func(*models.Task, models.CeilingDeferral) bool { return true }
 	if paced {
 		deferred := make(map[string]struct{}, len(tasks))
 		for _, task := range tasks {
@@ -104,8 +104,8 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 				zap.Error(freeErr))
 			return
 		}
-		allowDispatch = func(deferral models.CeilingDeferral) bool {
-			if s.sessionCeiling.classOf(s.ceilingDeferredProfile(ctx, deferral)) == ceilingClassControl {
+		allowDispatch = func(task *models.Task, deferral models.CeilingDeferral) bool {
+			if s.sessionCeiling.classOf(s.ceilingDeferredProfile(ctx, deferral), ceilingDeferredWorkflow(task, deferral)) == ceilingClassControl {
 				return controlFree
 			}
 			return workerFree
@@ -126,7 +126,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 // Its claim lease keeps a following pass from dispatching the same record
 // twice.
 func (s *Service) replayOneDeferredCeilingLaunchGuarded(
-	ctx context.Context, task *models.Task, allowDispatch func(models.CeilingDeferral) bool,
+	ctx context.Context, task *models.Task, allowDispatch func(*models.Task, models.CeilingDeferral) bool,
 ) {
 	if task == nil || task.ID == "" {
 		return
@@ -224,7 +224,7 @@ func (s *Service) reconcileDeferredCeilingTaskState(
 // enrichment, state repair, and drop evaluation always run, so the periodic
 // backstop keeps detecting eligibility changes. A nil gate dispatches.
 func (s *Service) retryOneDeferredCeilingLaunch(
-	ctx context.Context, task *models.Task, allowDispatch func(models.CeilingDeferral) bool,
+	ctx context.Context, task *models.Task, allowDispatch func(*models.Task, models.CeilingDeferral) bool,
 ) {
 	task, deferral, ok := s.loadDeferredCeilingRetry(ctx, task)
 	if !ok {
@@ -238,7 +238,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral, reasonCode, detail)
 		return
 	}
-	if !s.deferredCeilingRetryAllowed(ctx, task.ID, deferral, allowDispatch) {
+	if !s.deferredCeilingRetryAllowed(ctx, task, deferral, allowDispatch) {
 		return
 	}
 	claim, found, claimErr := s.claimCeilingDeferredLaunch(
@@ -340,20 +340,20 @@ func (s *Service) loadDeferredCeilingRetry(
 // reason must have finished its short wait. It never signals the sweep, so a
 // waiting refusal cannot drive itself.
 func (s *Service) deferredCeilingRetryAllowed(
-	ctx context.Context, taskID string, deferral models.CeilingDeferral,
-	allowDispatch func(models.CeilingDeferral) bool,
+	ctx context.Context, task *models.Task, deferral models.CeilingDeferral,
+	allowDispatch func(*models.Task, models.CeilingDeferral) bool,
 ) bool {
-	if allowDispatch != nil && !allowDispatch(deferral) {
+	if allowDispatch != nil && !allowDispatch(task, deferral) {
 		// No admission input changed in this record's lane: it is still
 		// saturated, so re-running admission cannot change the outcome. Leave
 		// the record exactly as stored for the pass that follows a release, a
 		// capacity change, or the next tick that sees free capacity.
-		s.logCeilingReplayPause(ctx, taskID, deferral, "lane_saturated", "the record's lane has no free capacity in this pass")
+		s.logCeilingReplayPause(ctx, task.ID, deferral, "lane_saturated", "the record's lane has no free capacity in this pass")
 		return false
 	}
 	if isPeriodicCeilingSweep(ctx) &&
-		s.deferredRetrySchedule.failureWaiting(taskID, ceilingDeferralIdentityKey(deferral)) {
-		s.logCeilingReplayPause(ctx, taskID, deferral, "failure_backoff", "a non-capacity failure is still backing off")
+		s.deferredRetrySchedule.failureWaiting(task.ID, ceilingDeferralIdentityKey(deferral)) {
+		s.logCeilingReplayPause(ctx, task.ID, deferral, "failure_backoff", "a non-capacity failure is still backing off")
 		return false
 	}
 	return true

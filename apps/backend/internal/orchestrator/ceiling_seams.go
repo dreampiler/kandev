@@ -256,6 +256,7 @@ func (s *Service) admitOrDeferSeam1(
 		origin:         origin,
 		seam:           "startTask",
 		agentProfileID: agentProfileID,
+		workflowID:     s.ceilingWorkflowIDForTask(ctx, taskID),
 	})
 	if decision.admitted {
 		return &seam1Reservation{

@@ -35,6 +35,7 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 		MaxSessions:        DefaultMaxSessions,
 		ControlMaxSessions: DefaultControlMaxSessions,
 		ControlProfileIDs:  []string{},
+		ControlWorkflowIDs: []string{},
 	}) {
 		t.Fatalf("initial settings = %+v", initial.Settings)
 	}
@@ -58,6 +59,7 @@ func TestHandlerGetAndPatchSessionCapacitySettings(t *testing.T) {
 		MaxSessions:        6,
 		ControlMaxSessions: DefaultControlMaxSessions,
 		ControlProfileIDs:  []string{},
+		ControlWorkflowIDs: []string{},
 	}) {
 		t.Fatalf("updated settings = %+v", updated.Settings)
 	}

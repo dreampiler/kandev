@@ -41,13 +41,16 @@ var (
 // Settings is the saved capacity contract. MaxSessions is the worker ceiling;
 // ControlMaxSessions is an additional ceiling for the control lane that is not
 // drawn from it, so the two lanes admit independently and the aggregate
-// maximum is their sum. ControlProfileIDs names the agent profiles whose
-// sessions belong to the control lane.
+// maximum is their sum. A session belongs to the control lane when its agent
+// profile is one of ControlProfileIDs OR its workflow is one of
+// ControlWorkflowIDs; both lists default to empty, which keeps the profile-only
+// behavior.
 type Settings struct {
 	Enabled            bool     `json:"enabled"`
 	MaxSessions        int      `json:"max_sessions"`
 	ControlMaxSessions int      `json:"control_max_sessions"`
 	ControlProfileIDs  []string `json:"control_profile_ids"`
+	ControlWorkflowIDs []string `json:"control_workflow_ids"`
 }
 
 // SettingsPatch is a partial update. A nil field means that the field was
@@ -57,6 +60,7 @@ type SettingsPatch struct {
 	MaxSessions        *int      `json:"max_sessions"`
 	ControlMaxSessions *int      `json:"control_max_sessions"`
 	ControlProfileIDs  *[]string `json:"control_profile_ids"`
+	ControlWorkflowIDs *[]string `json:"control_workflow_ids"`
 }
 
 // UnmarshalJSON rejects null values because null cannot represent an omitted
@@ -109,6 +113,15 @@ func (p *SettingsPatch) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("control_profile_ids must be an array of strings: %w", err)
 			}
 			decoded.ControlProfileIDs = &value
+		case "control_workflow_ids":
+			if isJSONNull(raw) {
+				return errors.New("control_workflow_ids must be an array of strings")
+			}
+			var value []string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("control_workflow_ids must be an array of strings: %w", err)
+			}
+			decoded.ControlWorkflowIDs = &value
 		default:
 			return fmt.Errorf("unknown session capacity setting %q", field)
 		}
@@ -133,15 +146,18 @@ func (p SettingsPatch) Apply(base Settings) Settings {
 		base.ControlMaxSessions = *p.ControlMaxSessions
 	}
 	if p.ControlProfileIDs != nil {
-		base.ControlProfileIDs = normalizeControlProfileIDs(*p.ControlProfileIDs)
+		base.ControlProfileIDs = normalizeIDs(*p.ControlProfileIDs)
+	}
+	if p.ControlWorkflowIDs != nil {
+		base.ControlWorkflowIDs = normalizeIDs(*p.ControlWorkflowIDs)
 	}
 	return base
 }
 
-// normalizeControlProfileIDs trims, drops blanks and de-duplicates while
-// preserving first-seen order, so two spellings of the same profile cannot
-// consume two control slots or make the saved value order-dependent.
-func normalizeControlProfileIDs(ids []string) []string {
+// normalizeIDs trims, drops blanks and de-duplicates while preserving
+// first-seen order, so two spellings of the same id cannot consume two control
+// slots or make the saved value order-dependent.
+func normalizeIDs(ids []string) []string {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -174,11 +190,13 @@ type Effective struct {
 	MaxSessions int  `json:"max_sessions"`
 	// ControlMaxSessions is the control lane's own ceiling. It is independent
 	// of Enabled: the control lane exists only when it is positive AND at least
-	// one control profile is configured, so disabling automatic capacity never
-	// silently closes the lane the operator reserved for monitors.
+	// one control profile or control workflow is configured, so disabling
+	// automatic capacity never silently closes the lane the operator reserved
+	// for monitors.
 	ControlMaxSessions int      `json:"control_max_sessions"`
 	TotalMaxSessions   int      `json:"total_max_sessions"`
 	ControlProfileIDs  []string `json:"control_profile_ids"`
+	ControlWorkflowIDs []string `json:"control_workflow_ids"`
 	Source             Source   `json:"source"`
 	Locked             bool     `json:"locked"`
 	// ControlLocked reports that the environment alone owns the control
@@ -230,9 +248,32 @@ func Validate(settings Settings) error {
 }
 
 // ControlLaneConfigured reports whether a control lane exists at all. A
-// positive ceiling with no profile would admit nothing extra and a profile with
-// no ceiling would leave that lane unbounded, which is the one shape this
-// feature must never take: both halves are required.
+// positive ceiling with no profile or workflow would admit nothing extra and a
+// profile/workflow with no ceiling would leave that lane unbounded, which is
+// the one shape this feature must never take: both halves are required.
 func ControlLaneConfigured(settings Settings) bool {
-	return settings.ControlMaxSessions > 0 && len(settings.ControlProfileIDs) > 0
+	return settings.ControlMaxSessions > 0 &&
+		(len(settings.ControlProfileIDs) > 0 || len(settings.ControlWorkflowIDs) > 0)
+}
+
+// IsControlSession is the single classification rule: a session belongs to the
+// control lane when its agent profile is one of controlProfileIDs OR its
+// workflow is one of controlWorkflowIDs. Either identity matching is enough
+// (OR); an absent identity never matches. Every consumer that classifies a
+// session shares this predicate so the controller, the memory gate, and the
+// dashboard split cannot restate it differently.
+func IsControlSession(agentProfileID, workflowID string, controlProfileIDs, controlWorkflowIDs []string) bool {
+	return containsID(controlProfileIDs, agentProfileID) || containsID(controlWorkflowIDs, workflowID)
+}
+
+func containsID(ids []string, id string) bool {
+	if id == "" {
+		return false
+	}
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }

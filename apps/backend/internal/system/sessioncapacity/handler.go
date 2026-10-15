@@ -79,15 +79,21 @@ func decodePatch(body io.Reader) (SettingsPatch, error) {
 	return patch, nil
 }
 
-// wireResponse keeps control_profile_ids an array on the wire. The service uses
-// nil for "no control profiles", which encodes as null, and the settings screen
-// reads its length.
+// wireResponse keeps the control id lists arrays on the wire. The service uses
+// nil for "none configured", which encodes as null, and the settings screen
+// reads their length.
 func wireResponse(response Response) Response {
 	if response.Settings.ControlProfileIDs == nil {
 		response.Settings.ControlProfileIDs = []string{}
 	}
 	if response.Effective.ControlProfileIDs == nil {
 		response.Effective.ControlProfileIDs = []string{}
+	}
+	if response.Settings.ControlWorkflowIDs == nil {
+		response.Settings.ControlWorkflowIDs = []string{}
+	}
+	if response.Effective.ControlWorkflowIDs == nil {
+		response.Effective.ControlWorkflowIDs = []string{}
 	}
 	return response
 }

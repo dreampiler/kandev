@@ -28,13 +28,14 @@ func (r sessionCapacityReader) CurrentSessionCapacity(ctx context.Context) (offi
 		general = 0
 	}
 	return officedashboard.SessionCapacityReading{
-		GeneralUsed:       general,
-		GeneralLimit:      observation.Limit,
-		ControlUsed:       observation.ControlInUse,
-		ControlLimit:      observation.ControlLimit,
-		ControlEnabled:    observation.ControlConfigured,
-		PopulationKnown:   observation.Known,
-		ControlProfileIDs: observation.ControlProfileIDs,
+		GeneralUsed:        general,
+		GeneralLimit:       observation.Limit,
+		ControlUsed:        observation.ControlInUse,
+		ControlLimit:       observation.ControlLimit,
+		ControlEnabled:     observation.ControlConfigured,
+		PopulationKnown:    observation.Known,
+		ControlProfileIDs:  observation.ControlProfileIDs,
+		ControlWorkflowIDs: observation.ControlWorkflowIDs,
 	}, nil
 }
 

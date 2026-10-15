@@ -1,6 +1,10 @@
 package dashboard
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
+)
 
 // overviewRunningTaskLimit bounds how many running tasks one workspace card
 // names. The card's summary line answers "what is moving here", so it stops at
@@ -70,21 +74,22 @@ func runningTaskItem(snap *overviewSnapshot, t *overviewTask) OverviewRunningTas
 }
 
 // laneWaitingInput splits this scope's waiting-input sessions by admission lane,
-// using the same control profile set the capacity reading classified its
-// populations with. The two counts therefore add up to the scope's own waiting
-// figure, and an install with no control lane puts every waiting session in the
-// general lane exactly as classOfLocked does.
-func laneWaitingInput(snap *overviewSnapshot, controlProfiles []string) (general, control int) {
-	controlSet := map[string]struct{}{}
-	for _, id := range controlProfiles {
-		controlSet[id] = struct{}{}
-	}
+// using the control sets the capacity reading classified its populations with.
+// It calls sessioncapacity.IsControlSession, the admission controller's own
+// rule, so a session is never put in a lane by a second rule. The two counts add
+// up to the scope's own waiting figure, and an install with no control lane puts
+// every waiting session in the general lane.
+func laneWaitingInput(snap *overviewSnapshot, controlProfiles, controlWorkflows []string) (general, control int) {
 	for _, t := range snap.tasks {
+		var workflowID string
+		if t.row != nil {
+			workflowID = t.row.WorkflowID
+		}
 		for _, s := range t.sessions {
 			if s.State != sessionStateWaitingForInput {
 				continue
 			}
-			if _, isControl := controlSet[s.AgentProfileID]; isControl {
+			if sessioncapacity.IsControlSession(s.AgentProfileID, workflowID, controlProfiles, controlWorkflows) {
 				control++
 				continue
 			}

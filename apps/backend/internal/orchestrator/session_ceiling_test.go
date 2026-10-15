@@ -16,9 +16,10 @@ type fakeAdmittedLister struct {
 	mu sync.Mutex
 	// ids and profiles are separate so a test can express a persisted session
 	// that carries no agent profile at all.
-	ids      []string
-	profiles map[string]string
-	err      error
+	ids       []string
+	profiles  map[string]string
+	workflows map[string]string
+	err       error
 }
 
 func (f *fakeAdmittedLister) ListAdmittedSessionRefs(context.Context) ([]models.AdmittedSessionRef, error) {
@@ -29,7 +30,7 @@ func (f *fakeAdmittedLister) ListAdmittedSessionRefs(context.Context) ([]models.
 	}
 	refs := make([]models.AdmittedSessionRef, 0, len(f.ids))
 	for _, id := range f.ids {
-		refs = append(refs, models.AdmittedSessionRef{ID: id, ProfileID: f.profiles[id]})
+		refs = append(refs, models.AdmittedSessionRef{ID: id, ProfileID: f.profiles[id], WorkflowID: f.workflows[id]})
 	}
 	return refs, nil
 }
@@ -38,6 +39,16 @@ func (f *fakeAdmittedLister) set(ids ...string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ids = ids
+}
+
+// setWorkflow records the workflow one admitted session row belongs to.
+func (f *fakeAdmittedLister) setWorkflow(id, workflowID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.workflows == nil {
+		f.workflows = map[string]string{}
+	}
+	f.workflows[id] = workflowID
 }
 
 func (f *fakeAdmittedLister) fail(err error) {
