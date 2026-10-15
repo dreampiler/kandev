@@ -58,6 +58,24 @@ describe("office pause store actions: begin/read", () => {
   });
 });
 
+describe("office pause cached workspace ownership", () => {
+  it.each(["read-success", "mutate-success"] as const)(
+    "an accepted %s synchronizes the cache owner before a later remount",
+    (kind) => {
+      const store = makeStore();
+      store.getState().beginPauseRead(WS_1);
+      const tag = store.getState().beginPauseRequest(kind === "read-success" ? "read" : "mutate");
+      store.getState().applyPauseResponse(tag, WS_2, WS_2, {
+        kind, paused: true, record: makeRecord(),
+      });
+      expect(store.getState().office.pause.workspaceId).toBe(WS_2);
+      store.getState().beginPauseRead(WS_2);
+      expect(store.getState().office.pause.status).toBe("loading");
+      expect(store.getState().office.pause.record?.id).toBe("pause-1");
+    },
+  );
+});
+
 describe("office pause store actions: read-success", () => {
   it("applies the record when the workspace matches and the tag is fresh", () => {
     const store = makeStore();
