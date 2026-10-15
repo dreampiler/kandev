@@ -205,7 +205,7 @@ func (e *CodexAppServerInferenceExecutor) start(
 	if err != nil {
 		return nil, nil, stderr, fmt.Errorf("stdout pipe: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startInferenceCommand(ctx, cmd); err != nil {
 		return nil, nil, stderr, fmt.Errorf("start: %w", err)
 	}
 	lifecycle, lifecycleErr := installACPCommandLifecycle(cmd)
@@ -287,6 +287,7 @@ func executeCodexUtilityTurn(ctx context.Context, client *protocol.Client, threa
 		params.Model = &model
 	}
 	var startResponse protocol.TurnStartResponse
+	markInferenceDispatch(ctx)
 	startErr := make(chan error, 1)
 	go func() { startErr <- client.Call(ctx, protocol.MethodTurnStart, params, &startResponse) }()
 	return waitForCodexUtilityTurn(ctx, startErr, completed, &startResponse, &mu, &response)

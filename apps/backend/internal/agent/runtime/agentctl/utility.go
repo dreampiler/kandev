@@ -47,9 +47,13 @@ func (c *Client) doLongRunningJSON(ctx context.Context, path, label string, in, 
 // InferencePrompt executes a one-shot inference prompt via agentctl.
 // Uses the long-running HTTP client since LLM inference can take several minutes.
 func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest) (*utility.PromptResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("inference prompt request is nil")
+	}
+	request := *req
 	var result utility.PromptResponse
-	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", req, &result); err != nil {
-		return nil, err
+	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", &request, &result); err != nil {
+		return nil, &InferenceAttemptError{AttemptID: request.AttemptID, Cause: err}
 	}
 	return &result, nil
 }
