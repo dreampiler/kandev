@@ -186,11 +186,13 @@ func TestQueuedMessageExecutionError_RequeuesExpiredRuntimeWait(t *testing.T) {
 	svc := &Service{messageQueue: queue, logger: testLogger()}
 	queued, reserved := reserveQueuedExecutionErrorMessage(t, queue, "session-wait-expired", "task-wait-expired")
 
-	// The same classification promptTask applies when a joined resume attempt
-	// outlives its wait.
+	// Drive the real readiness-wait boundary with an expired context.
+	waitCtx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+	expired := svc.waitForSessionReady(waitCtx, queued.SessionID)
 	waitErr := svc.classifyEnsureSessionRunningFailureForPrompt(
 		ctx, queued.TaskID, queued.SessionID, "keep me", "", false, nil, false,
-		promptTaskOptions{}, context.DeadlineExceeded,
+		promptTaskOptions{}, expired,
 	)
 	svc.handleQueuedMessageExecutionError(ctx, queued.SessionID, reserved, nil, false, false, waitErr)
 
@@ -200,6 +202,10 @@ func TestQueuedMessageExecutionError_RequeuesExpiredRuntimeWait(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].ID != queued.ID || entries[0].IsReservedInFlight() {
 		t.Fatalf("expired runtime wait left %d queue entries, want one unreserved original message", len(entries))
+	}
+	if entries[0].SessionID != queued.SessionID || entries[0].TaskID != queued.TaskID ||
+		entries[0].Content != queued.Content || !entries[0].QueuedAt.Equal(queued.QueuedAt) {
+		t.Fatal("runtime wait changed the original queue target, payload, or FIFO timestamp")
 	}
 }
 
@@ -314,5 +320,25 @@ func TestReuseSessionRestoresPrimaryWhenQueueTransferFails(t *testing.T) {
 				t.Fatal("reused session remained primary after failed queue transfer")
 			}
 		}
+	}
+}
+
+func TestQueuedMessageExecutionErrorDropsClassifiedProviderDeadline(t *testing.T) {
+	ctx := t.Context()
+	repo := messagequeue.NewMemoryRepository()
+	queue := messagequeue.NewService(repo, messagequeue.DefaultMaxPerSession, testLogger())
+	svc := &Service{messageQueue: queue, logger: testLogger()}
+	queued, reserved := reserveQueuedExecutionErrorMessage(t, queue, "session-nested-deadline", "task-nested-deadline")
+	providerErr := fmt.Errorf("failed to resume session: provider handshake: %w", context.DeadlineExceeded)
+	classified := svc.classifyEnsureSessionRunningFailureForPrompt(
+		ctx, queued.TaskID, queued.SessionID, "keep me", "", false, nil, false, promptTaskOptions{}, providerErr,
+	)
+	svc.handleQueuedMessageExecutionError(ctx, queued.SessionID, reserved, nil, false, false, classified)
+	entries, err := repo.ListBySession(ctx, queued.SessionID)
+	if err != nil {
+		t.Fatalf("list queued messages: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("a classified provider deadline left %d queue entries, want none", len(entries))
 	}
 }

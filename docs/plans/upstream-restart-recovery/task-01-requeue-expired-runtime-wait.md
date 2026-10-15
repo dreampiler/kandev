@@ -63,3 +63,16 @@ From the repository root:
   except `TestHandleAgentReady_PassthroughQueuedAttachmentUsesAttachmentAwarePrompt`,
   which also fails without this change on Windows because the attachment path
   uses `\` separators.
+
+### Independent classifier-boundary repair
+
+The generic ensure-session classifier also wraps provider and resume failures.
+A wrapped deadline and that prefix alone therefore do not identify a readiness
+wait. The actual shared-resume and readiness wait owners now mark expiry only
+when their own bounded context expires; the queue predicate requires that
+marker. Permanent queue tests drive the actual readiness boundary, preserve the
+original target, payload and FIFO timestamp, and reject a provider deadline
+passed through the real classifier. Readiness tests preserve context cancellation.
+The contained exact-predicate RED is synthetic boundary evidence; full queue and
+runtime acceptance remains a hosted gate. No timeout, retry loop, or admission
+limit changes.
