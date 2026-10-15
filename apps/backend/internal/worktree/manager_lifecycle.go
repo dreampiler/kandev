@@ -1291,8 +1291,7 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 				}
 				m.logger.Warn("required checkout branch refresh could not verify the refreshed ref",
 					zap.String("branch", branch),
-					zap.String("detail", detail),
-					zap.String("fetch_output", strings.TrimSpace(outputStr)))
+					zap.String("detail", detail))
 				return nil, fmt.Errorf(
 					"required refresh of checkout branch %q could not verify the refreshed ref: %s: %w",
 					branch, detail, ErrGitCommandFailed,

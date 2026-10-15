@@ -35,8 +35,7 @@ not distinguish a ref-verification refusal from a real command failure.
 
 - Resolve the diagnostic detail as `WarningDetail`, falling back to `Warning`
   when the detail is empty.
-- Emit one structured warning with the branch, the resolved detail, and the
-  bounded fetch output.
+- Emit one structured warning with the branch and the resolved detail.
 - Carry the resolved detail in the returned error before `ErrGitCommandFailed`.
 
 ## Out of scope
@@ -50,9 +49,10 @@ not distinguish a ref-verification refusal from a real command failure.
 
 - A required checkout-branch refresh that cannot verify the refreshed ref
   returns an error that contains the resolved verification cause.
-- A structured warning records the branch, the resolved detail, and the fetch
-  output; the preserved cause contains no credentials, remote URLs, or raw
-  command output beyond the bounded fetch output already captured.
+- A structured warning records the branch and the resolved detail; the preserved
+  cause contains no credentials, remote URLs, or raw command output. The
+  resolved detail is the fixed probe string from `resolveRetryStartPoint`, not
+  captured Git command output.
 - A verified refreshed ref, an empty warning, the non-required result, and every
   fallback decision keep their current behavior.
 
@@ -102,7 +102,8 @@ None.
 ## Results
 
 - Implemented in `manager_lifecycle.go`: the required path now resolves
-  `WarningDetail` with a `Warning` fallback, logs branch/detail/fetch output at
-  warn, and includes the detail in the returned error before `%w`.
+  `WarningDetail` with a `Warning` fallback, logs branch/detail at warn, and
+  includes the detail in the returned error before `%w`. The warning records no
+  raw command output, matching `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.14`.
 - `gofmt -l`, `go build`, and `go vet` on the package passed. The `go test`
   selection is an environment-limited run (see Verification).

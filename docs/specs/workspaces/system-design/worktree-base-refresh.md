@@ -553,12 +553,13 @@ diagnostic `WarningDetail`, and the best-effort path returns them to the caller.
 
 The required path shall reuse those values instead of discarding them. Resolve
 the detail as `WarningDetail`, falling back to `Warning` when the detail is
-empty. Emit one structured warning that records the branch, the resolved detail,
-and the bounded fetch output, and carry the resolved detail in the returned
-error before `ErrGitCommandFailed`. The existing suppression of a result whose
-warning is empty, the non-required result, and every fallback decision remain
-unchanged. The detail is a fixed Git diagnostic; it is not a raw credential or
-remote URL.
+empty. Emit one structured warning that records the branch and the resolved
+detail, and carry the resolved detail in the returned error before
+`ErrGitCommandFailed`. The warning records no raw command output. The existing
+suppression of a result whose warning is empty, the non-required result, and
+every fallback decision remain unchanged. On this path the detail is the fixed
+probe string from `resolveRetryStartPoint`; it is not a raw credential or remote
+URL.
 
 Delivery: [Fail-closed worktree refresh](../../../plans/worktree-refresh-fail-closed/plan.md).
 
