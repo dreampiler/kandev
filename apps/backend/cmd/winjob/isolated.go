@@ -18,7 +18,7 @@ func writeIsolatedIdentity(path string, identity isolatedIdentity) error {
 	if err != nil {
 		return fmt.Errorf("create identity: %w", err)
 	}
-	defer os.Remove(file.Name())
+	defer func() { _ = os.Remove(file.Name()) }()
 	if err := json.NewEncoder(file).Encode(identity); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("encode identity: %w", err)
