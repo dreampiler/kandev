@@ -180,6 +180,8 @@ try {
   foreach ($name in @('node.exe', 'agentctl.exe', 'mock-agent.exe', 'make.exe', 'go.exe')) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $script:binDir $name)
   }
+  $winjobSource = Join-Path (Split-Path -Parent $scriptsDir) 'apps\backend\bin\winjob.exe'
+  Copy-Item -LiteralPath $winjobSource -Destination (Join-Path $script:binDir 'winjob.exe')
   Set-Content -LiteralPath (Join-Path $script:testRoot 'repo\apps\backend\newer.go') -Value '// fixture build input' -Encoding ASCII
 
   Invoke-LaunchCase 'real backend and Vite listeners outlive caller pipe EOF; literal paths and isolated environment' {

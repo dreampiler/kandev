@@ -1,7 +1,7 @@
 ---
 id: "02-detach-launched-children"
 title: "Detach launched children from the caller"
-status: done
+status: in_progress
 wave: 2
 depends_on:
   - "01-windows-isolated-scripts"
@@ -24,30 +24,26 @@ listeners that teardown verifies.
 
 ## In scope
 
-- Launch the backend and Vite through `cmd.exe /c` with file redirection inside
-  the command line, using one outer quote pair so paths and the error redirect
-  survive `cmd`'s quote stripping. Pass the binary, script, and log paths
-  through child environment variables so `cmd` percent expansion cannot change
-  them. Drop the `stdin.empty` input redirect.
-- Discover the actual backend (`kandev.exe`) and Vite (`node.exe` running vite)
-  PIDs from their listening ports, checking every listener row on the port, and
-  accept only a listener created after this launch. Discovery and the health
-  wait each take up to `-Timeout` seconds.
-- On discovery failure, print the log tails and stop the `cmd.exe` wrapper and
-  its direct children before failing. Health checks use the discovered PIDs.
-- If the web launch fails before its pidfiles are written, stop the discovered
-  Vite listener while it keeps its recorded start time, and the wrapper through
-  its process handle, before the backend teardown.
-- Let `go build -v` stderr through the build step without a terminating
-  `NativeCommandError`; the build exit code still decides success.
-- Check out `scripts/dev-isolated.ps1` with CRLF line endings.
+- Reuse the native `winjob.exe` helper to launch backend and Vite children with
+  file-backed stdout/stderr and NUL stdin. The hidden supervisor has its own
+  console and assigns each suspended child to its Job Object before resuming it.
+- Discover only the supervisor-published child PID and creation time, with an
+  exact executable and parent check across all listener rows. Never adopt a
+  compatible unrelated listener started concurrently or left by an earlier run.
+- On discovery, health, or metadata-write failure, stop both retained supervisor
+  handles so their Job Objects terminate every owned descendant. Create metadata
+  without replacing existing files and remove only this launch's records.
+- Validate host arguments before launch and pass all paths/arguments directly
+  without shell interpretation, including paths containing percent signs,
+  brackets, spaces, and other legal Windows filename characters.
+- Preserve isolated-home/environment guards, native build stderr diagnostics,
+  independent discovery/readiness timeout windows, and CRLF script checkout.
+- Add permanent real Windows launch regressions and future CI path selection.
 
 ## Out of scope
 
-- Changing `kandev-kill.ps1`, `kandev-instances.ps1`, the module, ports, home
-  isolation, or the child environment allowlist.
-- Recursive cleanup of grandchildren on discovery failure and an early exit
-  keyed on the `cmd.exe` wrapper.
+- Changing the Unix helpers, native launcher modes, or production data.
+- Changing normal `kandev-kill.ps1` identity and guarded-port contracts.
 
 ## Acceptance
 
@@ -63,6 +59,9 @@ Run on Windows from the repository root:
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
+go test -trimpath -race -count=1 ./cmd/winjob # from apps/backend
+go build -trimpath -o bin/winjob.exe ./cmd/winjob # from apps/backend
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-launch.Tests.ps1
 git diff --check
 ```
 
@@ -96,17 +95,13 @@ Also run the PowerShell parser check for the three launcher scripts.
 
 ## Results
 
-- PowerShell parser: zero errors for `dev-isolated.ps1`, `kandev-kill.ps1`, and
-  `kandev-instances.ps1`; `isolated-instance.psm1` loads.
-- `scripts/tests/isolated-instance.Tests.ps1`: passed.
-- The launch-time `CreationDate` comparison that rejects an earlier listener
-  was checked in isolation; a stale-listener launch was not reproduced.
-- Review follow-up, checked once with the script's own discovery loops, launch
-  strings, and web catch block and mocked cmdlets: an old listener alone is not
-  adopted, and a new listener is selected even when an old row comes first, for
-  both backend and Vite. Through a real hidden `cmd.exe`, a path containing
-  `%P33_PROBE_TOKEN%` stayed literal for the backend and Vite command lines,
-  while the previous interpolated form failed. A simulated web pidfile write
-  failure stopped the live Vite PID and the wrapper, skipped a reused Vite PID,
-  ran the backend teardown, and rethrew.
-- A full `dev-isolated.ps1` launch was not run for this change.
+- Permanent hosted Windows RED on the original production implementation:
+  the healthy backend/Vite listener and caller-pipe positive control passed;
+  a concurrent unrelated backend was adopted; discovery failure left an actual
+  fixture grandchild alive; backend metadata-write failure left the backend
+  alive; a repository path containing brackets failed in `Start-Process`.
+- The first compiler fixture failure was setup-only. Earlier masked ownership,
+  cleanup, and host cases are excluded from regression evidence.
+- Native helper reuse, script fixes, and final hosted full-suite acceptance are
+  in progress. Exact revision, all-attempt raw logs, binary hashes, and final
+  outcomes are retained in task evidence, outside tracked delivery documents.

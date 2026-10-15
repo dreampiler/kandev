@@ -10,6 +10,8 @@ on:
       - 'scripts/tests/isolated-*'
       - '.gitattributes'
       - '.github/workflows/isolated-windows-tests.yml'
+      - 'apps/backend/cmd/winjob/**'
+      - 'apps/backend/internal/common/winproc/**'
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +21,8 @@ on:
       - 'scripts/tests/isolated-*'
       - '.gitattributes'
       - '.github/workflows/isolated-windows-tests.yml'
+      - 'apps/backend/cmd/winjob/**'
+      - 'apps/backend/internal/common/winproc/**'
   workflow_dispatch:
 
 permissions:
@@ -29,6 +33,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Validate workflow and documentation contracts
+        run: |
+          python3 .github/scripts/changed-paths_test.py
+          python3 .github/scripts/lint-action-pinning_test.py
+          python3 .github/scripts/lint-action-pinning.py
+          python3 scripts/list-docs.py validate
+          python3 scripts/lint-spec-files.py --all
+          node --test scripts/validate-public-docs.test.mjs
+          node scripts/validate-public-docs.mjs
   isolated-launch:
     runs-on: windows-latest
     timeout-minutes: 12
@@ -40,6 +61,17 @@ jobs:
       - name: Existing home and environment guards
         shell: cmd
         run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-instance.Tests.ps1
+      - name: Set up Go
+        uses: actions/setup-go@5064d95ba18d4a9dda7c4cc67adeb03aea1a2a14 # v7.0.0
+        with:
+          go-version-file: apps/backend/go.mod
+          cache: false
+      - name: Test native isolated supervisor
+        working-directory: apps/backend
+        run: go test -trimpath -race -count=1 -timeout 3m ./cmd/winjob
+      - name: Build native isolated supervisor
+        working-directory: apps/backend
+        run: go build -trimpath -o bin/winjob.exe ./cmd/winjob
       - name: Real Windows launch and cleanup regressions
         shell: cmd
         run: powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File scripts\tests\isolated-launch.Tests.ps1

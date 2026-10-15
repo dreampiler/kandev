@@ -57,8 +57,9 @@ public static class IsolatedLaunchFixture
             port = int.Parse(args[index + 1]);
             host = args[Array.IndexOf(args, "--host") + 1];
         }
-        var addresses = Dns.GetHostAddresses(host.Trim('[', ']'));
-        var listener = new TcpListener(addresses[0], port);
+        IPAddress address;
+        if (!IPAddress.TryParse(host.Trim('[', ']'), out address)) address = Dns.GetHostAddresses(host)[0];
+        var listener = new TcpListener(address, port);
         listener.Start();
         Console.Error.WriteLine(role + " fixture diagnostic");
         while (true)
