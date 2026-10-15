@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/stretchr/testify/require"
 )
@@ -423,6 +424,16 @@ func TestPrepareExplicitWorkflowSessionReplacesDeletedRouteDestinationOnce(t *te
 			ctx := context.Background()
 			startPolicy := models.WorkflowProfileSessionStartPolicyNew
 			fixture := newProfileSwitchFixture(t, startPolicy, models.WorkflowProfileSessionEndPolicyPark)
+			if _, err := fixture.repo.GetExecutor(ctx, "exec-local"); errors.Is(err, models.ErrExecutorNotFound) {
+				require.NoError(t, fixture.repo.CreateExecutor(ctx, &models.Executor{ID: "exec-local", Name: "Local", Type: models.ExecutorTypeLocal}))
+			} else {
+				require.NoError(t, err)
+			}
+			if _, err := fixture.repo.GetExecutorProfile(ctx, "ep1"); errors.Is(err, repoerrors.ErrExecutorProfileNotFound) {
+				require.NoError(t, fixture.repo.CreateExecutorProfile(ctx, &models.ExecutorProfile{ID: "ep1", ExecutorID: "exec-local", Name: "Local test"}))
+			} else {
+				require.NoError(t, err)
+			}
 			target := &wfmodels.WorkflowSessionTarget{Kind: wfmodels.WorkflowSessionTargetInitial}
 			step := &wfmodels.WorkflowStep{
 				ID: "step-review", WorkflowID: "wf1", Position: 1,
