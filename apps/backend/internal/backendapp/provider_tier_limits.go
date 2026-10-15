@@ -20,6 +20,7 @@ type tierLimitStore interface {
 	CountLimitActiveTurns(context.Context, []string, string) (int64, error)
 	GetManualWindowUsageForProfiles(context.Context, []string, time.Time, time.Time) (sqliterepo.ManualWindowUsage, error)
 	InsertUsageLimitObservation(context.Context, sqliterepo.UsageLimitObservation) error
+	ListUsageLimitObservationsSince(context.Context, time.Time) ([]sqliterepo.UsageLimitObservation, error)
 }
 
 type providerTierLimitService struct {

@@ -92,12 +92,23 @@ func classifyLimitDimension(c dynamicruntime.Candidate, failure *routingerr.Erro
 	return limitDimensionUnknown
 }
 
+// recordObservation enriches and stores one observation under the learning
+// lock, so a near-simultaneous block of another model sees this one when it
+// looks for a same-minute partner.
+func (s *providerTierLimitService) recordObservation(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, observation *sqliterepo.UsageLimitObservation) error {
+	s.learningMu.Lock()
+	defer s.learningMu.Unlock()
+	if err := s.enrichObservation(ctx, candidate, failure, observation); err != nil {
+		return err
+	}
+	return s.store.InsertUsageLimitObservation(ctx, *observation)
+}
+
+// enrichObservation runs under learningMu (see recordObservation).
 func (s *providerTierLimitService) enrichObservation(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error, observation *sqliterepo.UsageLimitObservation) error {
 	if candidate.RemoteExecution {
 		return nil
 	}
-	s.learningMu.Lock()
-	defer s.learningMu.Unlock()
 	c, err := s.contextFor(ctx, candidate.ID)
 	if err != nil {
 		return err

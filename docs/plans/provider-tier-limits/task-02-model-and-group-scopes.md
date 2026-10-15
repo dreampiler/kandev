@@ -11,7 +11,7 @@ Add model and shared-group request scopes beside the existing account-wide daily
 Delivery is two sequential fork PRs on this work order:
 
 1. Scopes: types and merge, catalog defaults with provenance, scope usage and admission, `model_daily` learning into known or new model scopes, and card editing. This also stops a per-model Zen block from learning the account-wide daily allowance from the whole account count.
-2. Group recognition: record the observed model on limit observations through an idempotent migration and create provisional groups from same-minute `model_daily` observations.
+2. Group recognition: create provisional groups from same-minute `model_daily` observations, identifying each observed model through the observation's execution profile (no migration).
 
 Excluded: route reordering, model choice, idle-timeout changes, tier/monthly-reset/paid-block behavior changes, production or operating-data writes, credential changes, runtime builds/swaps, synthetic quota exhaustion, recurring probes, new approval gates, new settings screens or permissions, and new integration/E2E/CI or recurring test infrastructure. Depends on [the plan](plan.md) and fork PR #302.
 
@@ -39,7 +39,10 @@ Installed card readback and one naturally occurring learned-value readback happe
 
 ## Current execution results
 
-PR 1 (scopes) is implemented on fork main `2829183ecf`. PR 2 (group recognition) has not started.
+PR 1 (scopes) merged as fork PR #338, including a review fix that keeps an owner scope's reset when its value changes. PR 2 (group recognition) is implemented on fork main `6a81bbdbaf`.
+
+- PR 2 disposable `backendapp` checks with fake stores were removed before commit. They showed that a second per-model daily block within 30 seconds forms a provisional group with the combined count and replaces the first model's learned scope. A third model 20 seconds later joins under the same ID, and admission then defers the group's models. Catalog-scoped models blocked in the same minute keep separate scopes. Blocks two minutes apart stay separate, and an owner zero disables the group. Ambiguous membership in two groups, the same model twice, and a block with no partner all form no group.
+- PR 2 existing focused tests passed: `go test ./internal/agent/usage ./internal/backendapp -run 'Tier|Limit|Scope|Catalog|Usage|Provider|Observation|Recorder'`. Build and vet passed for both packages.
 
 - Disposable source-adjacent Go checks, removed before commit, covered the following: catalog decoding, Zen/OpenRouter/DevPass defaults and provenance, and scope merge precedence (owner > learned > default, owner zero disables). They also covered learned replacement, including downward values; no learning from a zero count; the learned 5% reserve; and validation. In `backendapp`, with fake stores, they covered default Zen scopes, scope request counts, group exhaustion deferring only the group's models, and owner override. They also covered `model_daily` learning into the covering model scope and a new scope for an unscoped model. The account-wide daily value stayed unlearned. The settings DTO carries scopes, usage and profile models.
 - Existing focused tests passed: `go test ./internal/agent/usage -run 'Tier|Limit|Scope|Catalog'`, and `go test ./internal/backendapp ./internal/agent/settings/controller -run 'Usage|Limit|Tier|Provider|Calendar|Observation'`. `go build ./...` passed. `golangci-lint --new-from-rev=origin/main` on the changed packages reported 0 issues.
