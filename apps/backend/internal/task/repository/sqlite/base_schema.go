@@ -52,6 +52,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
+		r.initProviderTurnAllowancesSchema,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,

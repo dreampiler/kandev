@@ -1495,7 +1495,9 @@ func startGatewayAndServe(
 			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 		}
 		if cfg.Features.ProviderUsageLimits {
-			agentSettingsController.SetProfileUsageProvider(newProfileUsageSnapshot(usageAdapter))
+			allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+			agentSettingsController.SetProfileUsageProvider(allowances)
+			lifecycleMgr.SetProviderTurnAdmission(allowances)
 		}
 	}
 

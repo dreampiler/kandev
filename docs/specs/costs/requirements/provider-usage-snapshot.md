@@ -34,4 +34,18 @@ installation are separate remaining work, not completed by this read surface.
 
 ## Implementation plans
 
+### REQ-COSTS-PROVIDER-TURN-ALLOWANCE-002: Shared native turn admission
+
+#### Acceptance criteria
+
+- **AC-COSTS-PROVIDER-TURN-ALLOWANCE-002.1:** Enabled native settings APIs shall configure optional shared-credential maximum concurrent Kandev turns, turns per fixed reset window, and an explicit block-until instant. Omitted owner fields and stored learned/unknown fields shall survive partial saves. A Kandev turn is not a provider HTTP request or a prepaid token/USD amount.
+- **AC-COSTS-PROVIDER-TURN-ALLOWANCE-002.2:** Immediately before the common agentctl prompt dispatch, configured allowances shall atomically reserve one durable turn across profiles sharing the verified account. Existing submission/generation identity shall make retransmission and an in-flight steer idempotent.
+- **AC-COSTS-PROVIDER-TURN-ALLOWANCE-002.3:** Confirmed unsent failures shall return the reservation; a validated completion or confirmed runtime stop shall return concurrency while retaining the admitted turn in its period. Ambiguous delivery shall retain the claim. A restart shall not silently erase claims.
+- **AC-COSTS-PROVIDER-TURN-ALLOWANCE-002.4:** A host-default observation shall be used only after verifying actual local executor, profile and effective credential environment. An unresolved binding with potentially applicable configured limits shall reject dispatch; a verified disjoint native provider family shall not inherit another provider's limitation. Free models shall not consume paid provider windows. Unknown provider usage shall remain unknown.
+- **AC-COSTS-PROVIDER-TURN-ALLOWANCE-002.5:** The existing native flag shall close added settings and dispatch enforcement when off while retaining stored settings/claims. Existing queue, grade admission, generation, cancellation, task/session history and model order shall remain owned by their current consumers.
+
+This first allowance increment does not complete numeric provider-request,
+token/USD, model/group budgets, natural-error learning adapters, actual remote
+credential binding or the reset/learned-value editor. Those remain original work.
+
 - [Provider usage snapshot](../../../plans/provider-usage-snapshot/plan.md)

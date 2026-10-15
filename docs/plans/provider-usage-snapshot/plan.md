@@ -3,6 +3,7 @@ created: 2026-10-15
 status: in_progress
 requirements:
   - REQ-COSTS-PROVIDER-USAGE-SNAPSHOT-001
+  - REQ-COSTS-PROVIDER-TURN-ALLOWANCE-002
 system_design:
   - ../../specs/costs/system-design/provider-usage-snapshot.md
 legacy_specs: []
@@ -10,13 +11,15 @@ legacy_specs: []
 
 # Provider usage snapshot implementation
 
-Deliver one native settings/API/client slice on current upstream. This package
-covers provider snapshots only; numeric limits, learning and final-call admission
-remain separate increments.
+Deliver native provider snapshots and the first shared Kandev-turn allowance
+backend increment on current upstream. Provider HTTP request, token/USD,
+model/group limits, learning and other consumer/binding coverage remain original
+increments; a turn is not renamed as one provider request.
 
 ## Work orders
 
 - [ ] [01: Native snapshot and settings](task-01-native-snapshot.md)
+- [x] [02: Shared Kandev-turn allowances](task-02-shared-turn-allowances.md)
 
 ## Compatibility
 

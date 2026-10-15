@@ -15,9 +15,11 @@ import (
 )
 
 const (
-	snapshotCodexACPAgentID = "codex-acp"
-	snapshotHostDefault     = "host_default"
-	snapshotWindowsOS       = "windows"
+	snapshotCodexACPAgentID       = "codex-acp"
+	snapshotCodexAppServerAgentID = "codex-app-server"
+	snapshotHostDefault           = "host_default"
+	snapshotWindowsOS             = "windows"
+	snapshotBindingUnknown        = "binding_unknown"
 )
 
 // profileUsageSnapshot is composed only for the enabled native read surface.
@@ -30,10 +32,11 @@ type profileUsageSnapshot struct {
 }
 
 type snapshotBinding struct {
-	profile *settingsmodels.AgentProfile
-	entry   dto.AgentProfileUsageDTO
-	client  agentusage.ProviderUsageClient
-	key     string
+	agentType string
+	profile   *settingsmodels.AgentProfile
+	entry     dto.AgentProfileUsageDTO
+	client    agentusage.ProviderUsageClient
+	key       string
 }
 
 func newProfileUsageSnapshot(adapter *usageProviderAdapter) *profileUsageSnapshot {
@@ -96,12 +99,16 @@ func (s *profileUsageSnapshot) bindings(ctx context.Context) ([]snapshotBinding,
 }
 
 func (s *profileUsageSnapshot) bind(profile *settingsmodels.AgentProfile, agentName string) snapshotBinding {
-	b := snapshotBinding{profile: profile, entry: dto.AgentProfileUsageDTO{
+	return s.bindWithProviderSelection(profile, agentName, snapshotClaudeProviderUncertain(profile))
+}
+
+func (s *profileUsageSnapshot) bindWithProviderSelection(profile *settingsmodels.AgentProfile, agentName string, providerUnknown bool) snapshotBinding {
+	b := snapshotBinding{profile: profile, agentType: agentName, entry: dto.AgentProfileUsageDTO{
 		ProfileID: profile.ID, ModelID: profile.Model, State: "unsupported", Source: "none",
 		Windows: []dto.AgentProfileUsageWindowDTO{},
 	}}
-	if s.home == "" || !snapshotHostBinding(profile) {
-		b.entry.Reason = "binding_unknown"
+	if s.hostBindingUncertain(profile, agentName, providerUnknown) {
+		b.entry.Reason = snapshotBindingUnknown
 		return b
 	}
 	// The existing proxy resolver consumes an agent type, whereas the stored
@@ -117,7 +124,7 @@ func (s *profileUsageSnapshot) bind(profile *settingsmodels.AgentProfile, agentN
 		}
 	}
 	if snapshotCredentialOverride(profile) || snapshotProcessOverride(agentName) {
-		b.entry.Reason = "binding_unknown"
+		b.entry.Reason = snapshotBindingUnknown
 		return b
 	}
 	switch agentName {
@@ -129,7 +136,7 @@ func (s *profileUsageSnapshot) bind(profile *settingsmodels.AgentProfile, agentN
 			b.client, b.key = client, agentusage.CacheKey("anthropic", path)
 			b.entry.ModelClass = "subscription"
 		}
-	case snapshotCodexACPAgentID, "codex-app-server":
+	case snapshotCodexACPAgentID, snapshotCodexAppServerAgentID:
 		path := filepath.Join(s.home, ".codex", "auth.json")
 		client := agentusage.NewCodexUsageClientWithPath(path)
 		b.entry.Provider = "openai"
@@ -149,6 +156,10 @@ func (s *profileUsageSnapshot) bind(profile *settingsmodels.AgentProfile, agentN
 		b.entry.Source = "provider_api"
 	}
 	return b
+}
+
+func (s *profileUsageSnapshot) hostBindingUncertain(profile *settingsmodels.AgentProfile, agentName string, providerUnknown bool) bool {
+	return (agentName == claudeACPAgentID && providerUnknown) || s.home == "" || !snapshotHostBinding(profile)
 }
 
 func (s *profileUsageSnapshot) openCodeBinding(b snapshotBinding) snapshotBinding {
@@ -253,7 +264,7 @@ func snapshotProcessOverride(agentName string) bool {
 	switch agentName {
 	case claudeACPAgentID:
 		keys = []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"}
-	case snapshotCodexACPAgentID, "codex-app-server":
+	case snapshotCodexACPAgentID, snapshotCodexAppServerAgentID:
 		keys = []string{"CODEX_HOME", "OPENAI_API_KEY", "OPENAI_BASE_URL"}
 	case "opencode-acp":
 		keys = []string{"OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR", "OPENCODE_CONFIG_CONTENT"}

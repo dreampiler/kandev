@@ -1426,6 +1426,9 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
+	if err := m.completeProviderExecution(stopCtx, executionID); err != nil {
+		return err
+	}
 	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())

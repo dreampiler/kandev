@@ -605,6 +605,9 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	if !claimed {
 		return false
 	}
+	if event.PromptGeneration != 0 {
+		m.sessionManager.finishProviderTurn(execution.ID, event.PromptGeneration, false)
+	}
 	if event.DeliverySubmissionID != "" {
 		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
 		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)

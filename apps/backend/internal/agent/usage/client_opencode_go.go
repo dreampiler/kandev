@@ -131,6 +131,12 @@ func (c *OpenCodeGoUsageClient) apiKey() (string, error) {
 	return "", &UsageReadError{Reason: "credential_missing"}
 }
 
+// HasCredentials verifies local binding without fetching paid utilization.
+func (c *OpenCodeGoUsageClient) HasCredentials() bool {
+	_, err := c.apiKey()
+	return err == nil
+}
+
 func openCodeGoWindows(raw openCodeGoResponse) []UtilizationWindow {
 	windows := make([]UtilizationWindow, 0, 3)
 	for _, entry := range []struct {
