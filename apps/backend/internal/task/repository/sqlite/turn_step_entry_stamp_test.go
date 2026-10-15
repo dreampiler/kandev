@@ -41,6 +41,7 @@ func exerciseTurnEntryStampAcrossRevisit(t *testing.T, repo *Repository, receipt
 	require.NoError(t, repo.UpdateTask(t.Context(), task))
 	task, err = repo.GetTask(t.Context(), taskID)
 	require.NoError(t, err)
+	require.Equal(t, "step-a", task.WorkflowStepID)
 	_, _, currentEntryID, err := repo.GetTaskWorkflowStepEntry(t.Context(), taskID)
 	require.NoError(t, err)
 	require.Greater(t, currentEntryID, firstEntryID)
