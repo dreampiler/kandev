@@ -16,6 +16,22 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 	if !ok {
 		return nil
 	}
+	if err := s.settlePendingAgentDeliveryEffects(ctx, sessionID, settlements); err != nil {
+		return err
+	}
+	if s.reconcileResidualDeliverySettlements(ctx, sessionID) {
+		// Newly committed residual evidence must reach guarded completion in
+		// this call, even when no later session event will trigger reconciliation.
+		return s.settlePendingAgentDeliveryEffects(ctx, sessionID, settlements)
+	}
+	return nil
+}
+
+func (s *Service) settlePendingAgentDeliveryEffects(
+	ctx context.Context,
+	sessionID string,
+	settlements repository.AgentDeliverySettlementRepository,
+) error {
 	effects, err := settlements.ListPendingAgentDeliverySettlements(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("list pending delivery terminal settlements: %w", err)
@@ -31,10 +47,6 @@ func (s *Service) reconcileAgentDeliverySettlements(ctx context.Context, session
 			}
 		}
 	}
-	// The startup (sessionID == "") and per-turn reconcile call sites are the
-	// existing entry points for the two residual passes; they are bounded and
-	// idempotent, so running them here never changes the settlement result.
-	s.reconcileResidualDeliverySettlements(ctx, sessionID)
 	return nil
 }
 
