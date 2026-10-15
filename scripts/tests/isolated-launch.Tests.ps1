@@ -29,9 +29,9 @@ function Quote-PowerShellLiteral {
 }
 
 function Start-TestLauncher {
-  param([string]$Extra = '', [int]$Timeout = 4)
+  param([string]$Extra = '', [int]$Timeout = 4, [switch]$Build, [int]$BuildExit = 0)
   $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-PowerShellLiteral $script:launcher) +
-    ' -NoBuild -BackendPort ' + $script:backendPort + ' -WebPort ' + $script:webPort +
+    $(if ($Build) { '' } else { ' -NoBuild' }) + ' -BackendPort ' + $script:backendPort + ' -WebPort ' + $script:webPort +
     ' -HomeDir ' + (Quote-PowerShellLiteral $script:homeDir) + ' -Timeout ' + $Timeout + ' ' + $Extra
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
   $start = New-Object Diagnostics.ProcessStartInfo
@@ -45,6 +45,7 @@ function Start-TestLauncher {
   $start.EnvironmentVariables['KANDEV_DATABASE_DRIVER'] = 'must-not-inherit'
   $start.EnvironmentVariables['DOCKER_HOST'] = 'must-not-inherit'
   $start.EnvironmentVariables['VITE_SECRET_FOR_TEST'] = 'must-not-inherit'
+  $start.EnvironmentVariables['KANDEV_FIXTURE_BUILD_EXIT'] = [string]$BuildExit
   $process = [Diagnostics.Process]::Start($start)
   return [pscustomobject]@{
     Process = $process
@@ -110,7 +111,7 @@ function Invoke-LaunchCase {
 }
 
 $scriptsDir = Split-Path -Parent $PSScriptRoot
-$script:testRoot = Join-Path $env:TEMP ('isolated launch %TEMP% ! & ^ (x) [literal] ' + [guid]::NewGuid().ToString('N'))
+$script:testRoot = Join-Path $env:TEMP ('isolated launch %TEMP% ! & ^ (x) ' + [guid]::NewGuid().ToString('N'))
 $script:binDir = Join-Path $script:testRoot 'repo\apps\backend\bin'
 $webDir = Join-Path $script:testRoot 'repo\apps\web\node_modules\vite\bin'
 $copyScripts = Join-Path $script:testRoot 'repo\scripts'
@@ -133,6 +134,13 @@ try {
   foreach ($name in @('node.exe', 'agentctl.exe', 'mock-agent.exe')) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $script:binDir $name)
   }
+  Set-Content -LiteralPath (Join-Path $script:binDir 'make.cmd') -Encoding ASCII -Value @'
+@echo off
+echo fixture build diagnostic 1>&2
+exit /b %KANDEV_FIXTURE_BUILD_EXIT%
+'@
+  Set-Content -LiteralPath (Join-Path $script:binDir 'go.cmd') -Value '@exit /b 0' -Encoding ASCII
+  Set-Content -LiteralPath (Join-Path $script:testRoot 'repo\apps\backend\newer.go') -Value '// fixture build input' -Encoding ASCII
 
   Invoke-LaunchCase 'real backend and Vite listeners outlive caller pipe EOF; literal paths and isolated environment' {
     $run = Start-TestLauncher -Extra '-Web'
@@ -214,8 +222,43 @@ try {
     $run = Start-TestLauncher -Extra ('-Web -WebHost ' + (Quote-PowerShellLiteral $hostArgument))
     $exitCode = @(Complete-TestLauncher $run)[-1]
     Assert-Launch ($exitCode -ne 0) 'Shell-source host argument must be rejected.'
+    Assert-Launch ($script:lastOutput -match 'WebHost') 'Host rejection must identify the invalid parameter.'
     Assert-Launch (-not (Test-Path -LiteralPath $marker)) 'WebHost was evaluated as shell source.'
     Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid'))) 'Invalid host must fail before backend launch.'
+  }
+
+  Invoke-LaunchCase 'square brackets in repository paths remain literal' {
+    $savedLauncher = $script:launcher
+    $savedBin = $script:binDir
+    $literalRepo = Join-Path $script:testRoot 'repo [literal]'
+    Copy-Item -LiteralPath (Join-Path $script:testRoot 'repo') -Destination $literalRepo -Recurse
+    try {
+      $script:launcher = Join-Path $literalRepo 'scripts\dev-isolated.ps1'
+      $script:binDir = Join-Path $literalRepo 'apps\backend\bin'
+      $run = Start-TestLauncher -Extra '-Web'
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -eq 0) 'Literal repository path must launch both listeners.'
+      Assert-Launch (Test-Path -LiteralPath (Join-Path $script:homeDir 'web.pid')) 'Vite positive control did not start.'
+    } finally {
+      $script:launcher = $savedLauncher
+      $script:binDir = $savedBin
+    }
+  }
+
+  Invoke-LaunchCase 'successful build stderr remains diagnostic' {
+    $run = Start-TestLauncher -Build
+    $exitCode = @(Complete-TestLauncher $run)[-1]
+    Assert-Launch ($exitCode -eq 0) 'Successful build with diagnostic stderr must launch.'
+    Assert-Launch ($script:lastOutput -match 'fixture build diagnostic') 'Build stderr positive control was not observed.'
+    Assert-Launch (Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid')) 'Backend must launch after successful build.'
+  }
+
+  Invoke-LaunchCase 'failed native build never launches a backend' {
+    $run = Start-TestLauncher -Build -BuildExit 7
+    $exitCode = @(Complete-TestLauncher $run)[-1]
+    Assert-Launch ($exitCode -ne 0) 'Failed native build must fail startup.'
+    Assert-Launch ($script:lastOutput -match 'build failed \(exit 7\)') 'Build failure must preserve the actual native exit.'
+    Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid'))) 'Failed build started a backend.'
   }
 } finally {
   Remove-Item -LiteralPath $script:testRoot -Recurse -Force -ErrorAction SilentlyContinue
