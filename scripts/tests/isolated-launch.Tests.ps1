@@ -29,8 +29,21 @@ function Quote-PowerShellLiteral {
 }
 
 function Start-TestLauncher {
-  param([string]$Extra = '', [int]$Timeout = 4, [switch]$Build, [int]$BuildExit = 0)
-  $command = '$ErrorActionPreference = ''Stop''; & ' + (Quote-PowerShellLiteral $script:launcher) +
+  param([string]$Extra = '', [int]$Timeout = 4, [switch]$Build, [int]$BuildExit = 0, [switch]$StaleFirst)
+  $command = '$ErrorActionPreference = ''Stop''; $ProgressPreference = ''SilentlyContinue''; '
+  if ($StaleFirst) {
+    # Keep the actual OS rows, ordered so the unrelated listener is first.
+    $command += @'
+function Get-NetTCPConnection {
+  [CmdletBinding()]
+  param([string]$State, [int]$LocalPort)
+  NetTCPIP\Get-NetTCPConnection @PSBoundParameters | Sort-Object {
+    (Get-CimInstance Win32_Process -Filter "ProcessId = $($_.OwningProcess)").CreationDate
+  }
+};
+'@
+  }
+  $command += '& ' + (Quote-PowerShellLiteral $script:launcher) +
     $(if ($Build) { '' } else { ' -NoBuild' }) + ' -BackendPort ' + $script:backendPort + ' -WebPort ' + $script:webPort +
     ' -HomeDir ' + (Quote-PowerShellLiteral $script:homeDir) + ' -Timeout ' + $Timeout + ' ' + $Extra
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -69,6 +82,33 @@ function Read-FixturePid {
   return [int](Get-Content -LiteralPath (Join-Path $script:homeDir ($Role + '.pid')) -Raw)
 }
 
+function Start-CompetingListener {
+  param([string]$Role, [int]$Port, [string]$HostAddress = '127.0.0.1')
+  $competitorHome = Join-Path $script:homeDir ('competitor-' + $Role)
+  New-Item -ItemType Directory -Path $competitorHome | Out-Null
+  Set-Content -LiteralPath (Join-Path $competitorHome 'release') -Value 'go'
+  $start = New-Object Diagnostics.ProcessStartInfo
+  $start.FileName = Join-Path $script:binDir $(if ($Role -eq 'web') { 'node.exe' } else { 'kandev.exe' })
+  $start.Arguments = if ($Role -eq 'web') {
+    'node_modules/vite/bin/vite.js --host ' + $HostAddress + ' --port ' + $Port + ' --strictPort'
+  } else { '__backend' }
+  $start.UseShellExecute = $false
+  $start.CreateNoWindow = $true
+  $start.EnvironmentVariables['KANDEV_HOME_DIR'] = $competitorHome
+  $start.EnvironmentVariables['KANDEV_SERVER_PORT'] = [string]$Port
+  $start.EnvironmentVariables['KANDEV_SERVER_HOST'] = $HostAddress
+  $competitor = [Diagnostics.Process]::Start($start)
+  try {
+    Wait-Until { @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess }) -contains $competitor.Id } `
+      'Concurrent compatible listener failed to bind.'
+    return $competitor
+  } catch {
+    if (-not $competitor.HasExited) { $competitor.Kill(); $competitor.WaitForExit() }
+    $competitor.Dispose()
+    throw
+  }
+}
+
 function Assert-FixtureGone {
   foreach ($file in @(Get-ChildItem -LiteralPath $script:homeDir -Filter '*.pid' -ErrorAction SilentlyContinue)) {
     $target = [int](Get-Content -LiteralPath $file.FullName -Raw)
@@ -85,6 +125,7 @@ function Invoke-LaunchCase {
   do { $script:webPort = Get-FreeTestPort } while ($script:webPort -eq $script:backendPort)
   $script:pidfile = Join-Path $env:TEMP ("kandev-dev-isolated-$($script:backendPort).pid")
   $script:lastOutput = ''
+  $script:injectionMarker = $null
   Set-Content -LiteralPath (Join-Path $script:binDir 'backend.mode') -Value 'healthy' -Encoding ASCII
   Set-Content -LiteralPath (Join-Path $script:binDir 'web.mode') -Value 'healthy' -Encoding ASCII
   try {
@@ -100,13 +141,18 @@ function Invoke-LaunchCase {
       $target = [int](Get-Content -LiteralPath $file.FullName -Raw)
       $info = Get-CimInstance Win32_Process -Filter "ProcessId = $target" -ErrorAction SilentlyContinue
       if ($info -and $info.ExecutablePath -and $info.ExecutablePath.StartsWith($script:testRoot)) {
-        & "$env:SystemRoot\System32\taskkill.exe" /PID $target /T /F 2>&1 | Out-Null
+        $previousErrorAction = $ErrorActionPreference
+        try {
+          $ErrorActionPreference = 'Continue'
+          & "$env:SystemRoot\System32\taskkill.exe" /PID $target /T /F 2>&1 | Out-Null
+        } finally { $ErrorActionPreference = $previousErrorAction }
       }
     }
     foreach ($suffix in @('.pid', '.backend.started', '.home', '.web.pid', '.web.started')) {
       $metadata = $script:pidfile -replace '\.pid$', $suffix
       Remove-Item -LiteralPath $metadata -Force -Recurse -ErrorAction SilentlyContinue
     }
+    if ($script:injectionMarker) { Remove-Item -LiteralPath $script:injectionMarker -Force -ErrorAction SilentlyContinue }
   }
 }
 
@@ -131,15 +177,9 @@ try {
   } finally {
     Remove-Item -LiteralPath $compiledFixture -Force -ErrorAction SilentlyContinue
   }
-  foreach ($name in @('node.exe', 'agentctl.exe', 'mock-agent.exe')) {
+  foreach ($name in @('node.exe', 'agentctl.exe', 'mock-agent.exe', 'make.exe', 'go.exe')) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $script:binDir $name)
   }
-  Set-Content -LiteralPath (Join-Path $script:binDir 'make.cmd') -Encoding ASCII -Value @'
-@echo off
-echo fixture build diagnostic 1>&2
-exit /b %KANDEV_FIXTURE_BUILD_EXIT%
-'@
-  Set-Content -LiteralPath (Join-Path $script:binDir 'go.cmd') -Value '@exit /b 0' -Encoding ASCII
   Set-Content -LiteralPath (Join-Path $script:testRoot 'repo\apps\backend\newer.go') -Value '// fixture build input' -Encoding ASCII
 
   Invoke-LaunchCase 'real backend and Vite listeners outlive caller pipe EOF; literal paths and isolated environment' {
@@ -159,29 +199,53 @@ exit /b %KANDEV_FIXTURE_BUILD_EXIT%
     Assert-FixtureGone
   }
 
-  Invoke-LaunchCase 'a concurrently started compatible unrelated listener is never adopted or stopped' {
-    Set-Content -LiteralPath (Join-Path $script:binDir 'backend.mode') -Value 'delay' -Encoding ASCII
+  foreach ($competitorHealth in @('healthy', 'unhealthy')) {
+  Invoke-LaunchCase "a concurrent unrelated backend ($competitorHealth) is never adopted or stopped" {
+    Set-Content -LiteralPath (Join-Path $script:binDir 'backend.mode') -Value ('delay ' + $competitorHealth) -Encoding ASCII
     $run = Start-TestLauncher
     Wait-Until { Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid') } 'Owned backend never reached the launch barrier.'
-    $competitorHome = Join-Path $script:homeDir 'competitor'
-    New-Item -ItemType Directory -Path $competitorHome | Out-Null
-    Set-Content -LiteralPath (Join-Path $competitorHome 'release') -Value 'go'
-    $start = New-Object Diagnostics.ProcessStartInfo
-    $start.FileName = $fixtureExe
-    $start.Arguments = '__backend'
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.EnvironmentVariables['KANDEV_HOME_DIR'] = $competitorHome
-    $start.EnvironmentVariables['KANDEV_SERVER_PORT'] = [string]$script:backendPort
-    $competitor = [Diagnostics.Process]::Start($start)
+    $competitor = Start-CompetingListener -Role backend -Port $script:backendPort
     try {
-      Wait-Until { @(Get-NetTCPConnection -State Listen -LocalPort $script:backendPort -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess }) -contains $competitor.Id } `
-        'Concurrent compatible listener failed to bind.'
       Set-Content -LiteralPath (Join-Path $script:homeDir 'release') -Value 'go'
       $exitCode = @(Complete-TestLauncher $run)[-1]
       Assert-Launch ($exitCode -ne 0) 'Launcher adopted the concurrent unrelated backend listener.'
       Assert-Launch (-not $competitor.HasExited) 'Failure cleanup stopped the unrelated listener.'
       Assert-Launch (-not (Test-Path -LiteralPath $script:pidfile)) 'Failed launch left adopted metadata.'
+      Assert-FixtureGone
+    } finally {
+      if (-not $competitor.HasExited) { $competitor.Kill(); $competitor.WaitForExit() }
+      $competitor.Dispose()
+    }
+  }
+  }
+
+  Invoke-LaunchCase 'a stale first listener row does not hide the owned backend' {
+    $competitor = Start-CompetingListener -Role backend -Port $script:backendPort -HostAddress '127.0.0.2'
+    try {
+      $run = Start-TestLauncher -StaleFirst
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -eq 0) 'The owned listener must be selected from mixed listener rows.'
+      Assert-Launch (@(Get-NetTCPConnection -State Listen -LocalPort $script:backendPort).Count -ge 2) 'Mixed-listener positive control needs two real rows.'
+      Assert-Launch ([int](Get-Content -LiteralPath $script:pidfile -Raw) -eq (Read-FixturePid backend)) 'Metadata selected the stale unrelated listener.'
+      & (Join-Path $copyScripts 'kandev-kill.ps1') -Pidfile $script:pidfile -Yes
+      Assert-Launch (-not $competitor.HasExited) 'Normal teardown stopped the unrelated stale listener.'
+      Assert-FixtureGone
+    } finally {
+      if (-not $competitor.HasExited) { $competitor.Kill(); $competitor.WaitForExit() }
+      $competitor.Dispose()
+    }
+  }
+
+  Invoke-LaunchCase 'a concurrent unrelated Vite listener is never adopted or stopped' {
+    Set-Content -LiteralPath (Join-Path $script:binDir 'web.mode') -Value 'delay' -Encoding ASCII
+    $run = Start-TestLauncher -Extra '-Web'
+    Wait-Until { Test-Path -LiteralPath (Join-Path $script:homeDir 'web.pid') } 'Owned Vite never reached its launch barrier.'
+    $competitor = Start-CompetingListener -Role web -Port $script:webPort
+    try {
+      Set-Content -LiteralPath (Join-Path $script:homeDir 'release') -Value 'go'
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -ne 0) 'Launcher adopted a concurrent unrelated Vite listener.'
+      Assert-Launch (-not $competitor.HasExited) 'Failure cleanup stopped the unrelated Vite listener.'
       Assert-FixtureGone
     } finally {
       if (-not $competitor.HasExited) { $competitor.Kill(); $competitor.WaitForExit() }
@@ -216,14 +280,53 @@ exit /b %KANDEV_FIXTURE_BUILD_EXIT%
     Assert-FixtureGone
   }
 
+  Invoke-LaunchCase 'web metadata write failure cleans both owned trees' {
+    New-Item -ItemType Directory -Path ($script:pidfile -replace '\.pid$', '.web.started') | Out-Null
+    Set-Content -LiteralPath (Join-Path $script:binDir 'web.mode') -Value 'healthy tree' -Encoding ASCII
+    $run = Start-TestLauncher -Extra '-Web'
+    $exitCode = @(Complete-TestLauncher $run)[-1]
+    Assert-Launch ($exitCode -ne 0) 'Injected web metadata write failure must fail startup.'
+    Assert-Launch (Test-Path -LiteralPath (Join-Path $script:homeDir 'web.pid')) 'Vite positive control did not start.'
+    Assert-Launch (Test-Path -LiteralPath (Join-Path $script:homeDir 'descendant-grandchild.pid')) 'Web grandchild positive control did not start.'
+    Assert-FixtureGone
+  }
+
+  foreach ($hostAddress in @('localhost', '::1', '[::1]', '0.0.0.0')) {
+    Invoke-LaunchCase "legitimate web bind host $hostAddress" {
+      $run = Start-TestLauncher -Extra ('-Web -WebHost ' + (Quote-PowerShellLiteral $hostAddress))
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -eq 0) 'A legitimate host must launch.'
+      Assert-Launch ($script:lastOutput -match 'Vite target') 'The selected host must actually become ready.'
+      Assert-Launch (Test-Path -LiteralPath (Join-Path $script:homeDir 'web.pid')) 'Vite positive control did not start.'
+    }
+  }
+
+  foreach ($role in @('backend', 'web')) {
+    Invoke-LaunchCase "$role start-time mismatch refuses teardown; matching identity stops it" {
+      $run = Start-TestLauncher -Extra '-Web'
+      $exitCode = @(Complete-TestLauncher $run)[-1]
+      Assert-Launch ($exitCode -eq 0) 'Identity guard positive control must launch.'
+      $startedFile = $script:pidfile -replace '\.pid$', $(if ($role -eq 'web') { '.web.started' } else { '.backend.started' })
+      $recorded = Get-Content -LiteralPath $startedFile -Raw
+      Set-Content -LiteralPath $startedFile -Value '0' -Encoding ASCII
+      & (Join-Path $copyScripts 'kandev-kill.ps1') -Pidfile $script:pidfile -Yes
+      Assert-Launch ($LASTEXITCODE -eq 4) 'Mismatched start time must refuse teardown.'
+      Assert-Launch ($null -ne (Get-Process -Id (Read-FixturePid $role) -ErrorAction SilentlyContinue)) 'Identity mismatch stopped the protected listener.'
+      Set-Content -LiteralPath $startedFile -Value $recorded -Encoding ASCII
+      & (Join-Path $copyScripts 'kandev-kill.ps1') -Pidfile $script:pidfile -Yes
+      Assert-FixtureGone
+    }
+  }
+
   Invoke-LaunchCase 'WebHost shell metacharacters are refused before launching' {
-    $marker = Join-Path $script:homeDir 'injected.txt'
+    $marker = Join-Path $env:TEMP ('isolated-host-injection-' + [guid]::NewGuid().ToString('N') + '.txt')
+    $script:injectionMarker = $marker
     $hostArgument = '127.0.0.1 & echo INJECTED>"' + $marker + '" & rem '
     $run = Start-TestLauncher -Extra ('-Web -WebHost ' + (Quote-PowerShellLiteral $hostArgument))
     $exitCode = @(Complete-TestLauncher $run)[-1]
     Assert-Launch ($exitCode -ne 0) 'Shell-source host argument must be rejected.'
-    Assert-Launch ($script:lastOutput -match 'WebHost') 'Host rejection must identify the invalid parameter.'
     Assert-Launch (-not (Test-Path -LiteralPath $marker)) 'WebHost was evaluated as shell source.'
+    Assert-Launch ($script:lastOutput -match 'WebHost') 'Host rejection must identify the invalid parameter.'
     Assert-Launch (-not (Test-Path -LiteralPath (Join-Path $script:homeDir 'backend.pid'))) 'Invalid host must fail before backend launch.'
   }
 

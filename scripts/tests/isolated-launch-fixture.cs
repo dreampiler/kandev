@@ -13,7 +13,14 @@ public static class IsolatedLaunchFixture
     {
         string home = Environment.GetEnvironmentVariable("KANDEV_HOME_DIR");
         string executable = Process.GetCurrentProcess().MainModule.FileName;
-        string role = Path.GetFileNameWithoutExtension(executable) == "node" ? "web" : "backend";
+        string name = Path.GetFileNameWithoutExtension(executable);
+        if (name == "make")
+        {
+            Console.Error.WriteLine("fixture build diagnostic");
+            return int.Parse(Environment.GetEnvironmentVariable("KANDEV_FIXTURE_BUILD_EXIT"));
+        }
+        if (name == "go") return 0;
+        string role = name == "node" ? "web" : "backend";
         if (args.Length > 0 && args[0].StartsWith("--descendant"))
         {
             File.WriteAllText(Path.Combine(home, args[0].Substring(2) + ".pid"), Process.GetCurrentProcess().Id.ToString());
@@ -39,7 +46,11 @@ public static class IsolatedLaunchFixture
         if (mode.Contains("no-listener")) { Thread.Sleep(120000); return 0; }
         int port;
         string host = "127.0.0.1";
-        if (role == "backend") port = int.Parse(Environment.GetEnvironmentVariable("KANDEV_SERVER_PORT"));
+        if (role == "backend")
+        {
+            port = int.Parse(Environment.GetEnvironmentVariable("KANDEV_SERVER_PORT"));
+            host = Environment.GetEnvironmentVariable("KANDEV_SERVER_HOST") ?? host;
+        }
         else
         {
             int index = Array.IndexOf(args, "--port");
