@@ -325,12 +325,11 @@ version 2 never bypasses closed-kind or source-reference validation.
 
 ### Initial provenance and entry routing
 
-Deliver initial targeting end to end before source-step targeting. Both remain
-in scope; the plan owns the implementation milestones. The first slice adds
-no per-step binding table. It accepts only `kind: initial`; unknown kinds are
-rejected. The second slice extends the closed union with `kind: step` and
-validates it. Both use portable version 2: an initial-only reader must reject
-the unknown step kind even though it recognizes the envelope version.
+Initial and source-step targeting use portable version 2. An initial-only reader
+must reject unknown target kinds even when it recognizes the envelope version.
+Explicit recovery successors follow the separate
+[recovery binding design](recovery-recipient-binding.md) without changing original
+provenance or treating primary promotion as recovery registration.
 
 The original-session marker consumed by `originalTaskSession` remains the
 authority for discovering initial identity. Persist a write-once

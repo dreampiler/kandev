@@ -817,7 +817,19 @@ func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*w
 	if errResp != nil {
 		return errResp, nil
 	}
-	if err := h.service.SetPrimarySessionTransferringQueue(ctx, req.SessionID); err != nil {
+	var recovery struct {
+		SourceSessionID *string `json:"replaces_initial_recipient_session_id"`
+	}
+	if err := msg.ParsePayload(&recovery); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid recovery payload", nil)
+	}
+	var err error
+	if recovery.SourceSessionID != nil {
+		err = h.service.RecoverInitialWorkflowRecipient(ctx, req.SessionID, *recovery.SourceSessionID)
+	} else {
+		err = h.service.SetPrimarySessionTransferringQueue(ctx, req.SessionID)
+	}
+	if err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
 	}

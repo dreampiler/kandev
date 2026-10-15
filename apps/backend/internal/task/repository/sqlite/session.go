@@ -1204,6 +1204,9 @@ func (r *Repository) persistWorkflowSessionRouteTx(
 		return nil
 	}
 	prepared := *route
+	if err := r.validateInitialRecipientRouteWithExecutor(ctx, exec, taskID, &prepared); err != nil {
+		return err
+	}
 	if prepared.DestinationID == "" {
 		prepared.DestinationID = destinationID
 	}
@@ -1306,15 +1309,29 @@ func (r *Repository) prepareWorkflowInitialSessionTx(ctx context.Context, tx *sq
 		return fmt.Errorf("check task sessions before workflow snapshot: %w", err)
 	}
 	if sessionCount == 0 {
-		if session.Metadata == nil {
-			session.Metadata = make(map[string]interface{})
+		var metadataJSON sql.NullString
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), session.TaskID).Scan(&metadataJSON); err != nil {
+			return fmt.Errorf("load task initial identity: %w", err)
 		}
-		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
-		_, err := r.setTaskMetadataKeyIfAbsentWithoutTimestampWithExecutor(ctx, tx, session.TaskID, models.MetaKeyWorkflowInitialSession, models.WorkflowInitialSessionSnapshot{
-			SessionID:      session.ID,
-			AgentProfileID: session.AgentProfileID,
-		})
-		return err
+		var metadata map[string]interface{}
+		if err := unmarshalSessionJSON(metadataJSON.String, &metadata, "task metadata"); err != nil {
+			return err
+		}
+		initialID, err := models.RecordedWorkflowInitialSessionID(metadata)
+		if err != nil {
+			return err
+		}
+		if initialID == "" {
+			if session.Metadata == nil {
+				session.Metadata = make(map[string]interface{})
+			}
+			session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+			_, err := r.setTaskMetadataKeyIfAbsentWithoutTimestampWithExecutor(ctx, tx, session.TaskID, models.MetaKeyWorkflowInitialSession, models.WorkflowInitialSessionSnapshot{
+				SessionID:      session.ID,
+				AgentProfileID: session.AgentProfileID,
+			})
+			return err
+		}
 	}
 	if models.IsOriginalTaskSession(session.Metadata) {
 		delete(session.Metadata, models.SessionMetaKeyOrigin)
@@ -4999,6 +5016,7 @@ func (r *Repository) setSessionPrimary(
 	requireNonterminal bool,
 	requireCurrentPrimaryTerminal bool,
 	route *models.WorkflowSessionRoute,
+	recoveryBindings ...models.WorkflowInitialRecipientBinding,
 ) (bool, error) {
 	now := time.Now().UTC()
 
@@ -5061,6 +5079,11 @@ func (r *Repository) setSessionPrimary(
 		}
 	}
 
+	if len(recoveryBindings) > 0 {
+		if err := r.commitInitialRecipientBindingTx(ctx, tx, taskID, sessionID, recoveryBindings[0], now); err != nil {
+			return false, err
+		}
+	}
 	if route != nil {
 		if err := r.commitWorkflowSessionRouteTx(ctx, tx, taskID, sessionID, route, now); err != nil {
 			return false, err
