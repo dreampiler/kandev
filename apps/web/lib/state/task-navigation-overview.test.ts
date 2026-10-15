@@ -16,6 +16,9 @@ function task(id = TARGET, step = "working"): Task {
   return {
     id: taskId(id),
     title: "Task",
+    description: "",
+    state: "CREATED",
+    priority: "medium",
     workspace_id: workspaceId(WORKSPACE),
     workflow_id: workflowId(WORKFLOW),
     workflow_step_id: step,
@@ -23,7 +26,7 @@ function task(id = TARGET, step = "working"): Task {
     created_at: STAMP,
     repositories: [],
     position: 0,
-  } as Task;
+  };
 }
 
 function setup(activeTaskId: string | null) {

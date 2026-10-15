@@ -74,6 +74,9 @@ function makeTask(step = "working", id = TASK_A): Task {
   return {
     id: taskId(id),
     title: "Current task",
+    description: "",
+    state: "CREATED",
+    priority: "medium",
     workspace_id: workspaceId(WORKSPACE),
     workflow_id: workflowId(WORKFLOW),
     workflow_step_id: step,
@@ -81,7 +84,7 @@ function makeTask(step = "working", id = TASK_A): Task {
     created_at: "2026-10-15T09:00:00Z",
     repositories: [],
     position: 0,
-  } as Task;
+  };
 }
 
 function mountRefreshingDetail() {
