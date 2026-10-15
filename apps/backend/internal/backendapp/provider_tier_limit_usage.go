@@ -28,6 +28,9 @@ func (s *providerTierLimitService) readUsage(ctx context.Context, c tierLimitCon
 			used.Resets[budget.Key()] = reset
 		}
 	}
+	if err := s.readScopeUsage(ctx, c, now, &used); err != nil {
+		return used, err
+	}
 	return used, nil
 }
 

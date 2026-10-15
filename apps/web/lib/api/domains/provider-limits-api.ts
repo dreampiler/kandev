@@ -44,7 +44,22 @@ export type LimitBudget = {
   timezone?: string;
   scope?: string;
 };
+export type LimitProvenance = "published" | "measured" | "approximate" | "provider";
+/** A daily request allowance for one model or a shared group of models. */
+export type RequestScope = {
+  id: string;
+  kind?: "model" | "group";
+  models?: string[];
+  requests_per_day?: number;
+  daily_reset?: string;
+  provenance?: LimitProvenance;
+  learned?: boolean;
+  provisional?: boolean;
+  learned_at?: string;
+};
 export type TierLimits = {
+  scopes?: RequestScope[];
+  provenance?: Record<string, LimitProvenance>;
   max_concurrent_turns?: number;
   requests_per_minute?: number;
   requests_per_day?: number;
@@ -64,7 +79,7 @@ export type AccountTierConfig = {
 export type ProviderAccountLimit = {
   account_id: string;
   account_kind: string;
-  profiles: { id: string; name: string; tier: BillingTier }[];
+  profiles: { id: string; name: string; tier: BillingTier; model?: string }[];
   overrides: AccountTierConfig;
   tiers: Record<
     BillingTier,
@@ -79,6 +94,7 @@ export type ProviderAccountLimit = {
         requests_day?: number;
         turns_day?: number;
         tokens_day?: number;
+        scopes?: Record<string, number>;
         estimated?: boolean;
       };
     }

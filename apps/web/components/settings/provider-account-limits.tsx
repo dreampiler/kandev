@@ -12,6 +12,7 @@ import { ProviderTierEditor } from "./provider-tier-editor";
 import {
   BILLING_TIERS,
   TIER_LABELS,
+  freeTierModels,
   getProviderTierState,
 } from "@/lib/settings/provider-tier-limits";
 import { ProviderAccountOptions, ProviderProfileTiers } from "./provider-account-options";
@@ -34,6 +35,7 @@ export function ProviderAccountLimits({
     save,
   );
   const visibleTiers = isMobile ? [selected] : BILLING_TIERS;
+  const freeModels = freeTierModels(account);
   const statusLabels = {
     idle: "",
     saving: "agents:providerTierSaving",
@@ -73,6 +75,7 @@ export function ProviderAccountLimits({
             key={tier}
             accountId={account.account_id}
             tier={tier}
+            models={freeModels}
             state={getProviderTierState(account, tier)}
             override={draft.tiers[tier] ?? {}}
             onChange={(patch) => updateTier(tier, patch)}
