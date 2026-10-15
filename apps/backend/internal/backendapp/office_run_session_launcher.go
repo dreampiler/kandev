@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/orchestrator"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -26,6 +27,7 @@ type officeRunSessionLauncher struct {
 	recovery runtimeapi.RunOwnerRecovery
 	resolver *runtimeapi.ProfileExecutionResolver
 	logger   *logger.Logger
+	capacity *orchestrator.Service
 }
 
 var _ officeservice.RunSessionLauncher = (*officeRunSessionLauncher)(nil)
@@ -34,15 +36,20 @@ var _ runtimeapi.OwnerAdmission = (*officeRunSessionLauncher)(nil)
 func newOfficeRunSessionLauncher(
 	repo *officesqlite.Repository, runtimeBackend runtimeapi.Backend,
 	resolver *runtimeapi.ProfileExecutionResolver, log *logger.Logger,
+	capacity ...*orchestrator.Service,
 ) *officeRunSessionLauncher {
 	recovery, _ := runtimeBackend.(runtimeapi.RunOwnerRecovery)
-	return &officeRunSessionLauncher{
+	launcher := &officeRunSessionLauncher{
 		repo:     repo,
 		runtime:  runtimeapi.New(runtimeBackend),
 		recovery: recovery,
 		resolver: resolver,
 		logger:   log.WithFields(zap.String("component", "office-run-session-launcher")),
 	}
+	if len(capacity) > 0 {
+		launcher.capacity = capacity[0]
+	}
+	return launcher
 }
 
 //nolint:cyclop,funlen // The launch sequence keeps reservation, identity binding, admission, and cleanup together.
@@ -52,7 +59,7 @@ func (l *officeRunSessionLauncher) StartRunSession(
 	agent *models.AgentInstance,
 	launch officeservice.LaunchContext,
 	route *officeservice.RouteOverride,
-) (officeservice.RunSessionLaunch, error) {
+) (result officeservice.RunSessionLaunch, launchErr error) {
 	if run == nil || agent == nil {
 		return officeservice.RunSessionLaunch{}, errors.New("run-session launch requires run and agent")
 	}
@@ -65,6 +72,9 @@ func (l *officeRunSessionLauncher) StartRunSession(
 	}
 	attempt := 1
 	for _, existing := range sessions {
+		if existing.State == models.RunSessionStatePreparing || existing.State == models.RunSessionStateRunning {
+			return officeservice.RunSessionLaunch{}, fmt.Errorf("run %q still has an unfinished attempt %d", run.ID, existing.Attempt)
+		}
 		if existing.Attempt >= attempt {
 			attempt = existing.Attempt + 1
 		}
@@ -80,6 +90,39 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		CreatedAt:      now,
 		Version:        1,
 	}
+	reservation, admitted := l.capacity.ReserveRunSessionCapacity(ctx, session.ID)
+	if !admitted {
+		return officeservice.RunSessionLaunch{}, officeservice.ErrRunSessionCapacityUnavailable
+	}
+	reservedAttempt := false
+	startedAttempt := false
+	executionID := ""
+	defer func() {
+		if startedAttempt {
+			reservation.Confirm()
+			return
+		}
+		if !reservedAttempt {
+			reservation.Release()
+			return
+		}
+		cleanupCtx := context.WithoutCancel(ctx)
+		if executionID != "" {
+			if err := l.runtime.Stop(cleanupCtx, executionID, "run_session_start_failed"); err != nil && !runtimeapi.IsNotFound(err) {
+				l.logger.Error("failed taskless launch still owns capacity", zap.String("run_session_id", session.ID), zap.Error(err))
+				return
+			}
+		}
+		message := "run session launch failed"
+		if launchErr != nil {
+			message = launchErr.Error()
+		}
+		if _, err := l.repo.FinishRunSession(cleanupCtx, session.ID, models.RunSessionStateFailed, message); err != nil {
+			l.logger.Error("could not finish failed taskless launch", zap.String("run_session_id", session.ID), zap.Error(err))
+			return
+		}
+		reservation.Release()
+	}()
 	reserved, err := l.repo.ReserveRunSession(ctx, session)
 	if err != nil {
 		return officeservice.RunSessionLaunch{}, err
@@ -87,6 +130,8 @@ func (l *officeRunSessionLauncher) StartRunSession(
 	if !reserved {
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("run %q attempt %d was not admitted", run.ID, attempt)
 	}
+	reservedAttempt = true
+	reservation.Confirm()
 	if agent.ExecutionAgentProfileID != "" {
 		// A bound dynamic profile owns candidate selection. Workspace routing
 		// must not replace that selection for this Office identity.
@@ -107,7 +152,6 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		// AgentProfileID.
 		resolved, err := l.resolveTasklessDynamicExecution(ctx, agent, session.ID)
 		if err != nil {
-			_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 			return officeservice.RunSessionLaunch{}, fmt.Errorf("resolve taskless execution profile: %w", err)
 		}
 		executionProfileID = resolved.ExecutionProfileID
@@ -169,13 +213,12 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		Owner:          owner,
 		OwnerAdmission: l,
 	})
+	executionID = ref.ID
 	if err != nil {
-		_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("start run session: %w", err)
 	}
 	execution, err := l.runtime.GetExecution(ctx, ref.ID)
 	if err != nil {
-		_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("read started run session: %w", err)
 	}
 	adapter := agent.AgentID
@@ -199,38 +242,29 @@ func (l *officeRunSessionLauncher) StartRunSession(
 		ctx, session.ID, ref.ID, executionProfileID, adapter, model, execution.ACPSessionID,
 	)
 	if err != nil {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_identity_persist_failed")
 		return officeservice.RunSessionLaunch{}, err
 	}
 	if !bound {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_not_admitted")
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("run session %q was no longer preparing", session.ID)
 	}
 	if err := l.AdmitExecution(ctx, owner); err != nil {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_start_admission_failed")
-		_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateInterrupted, err.Error())
 		return officeservice.RunSessionLaunch{}, err
 	}
 	if err := l.runtime.StartExecution(ctx, ref.ID); err != nil {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_start_failed")
-		_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("start run session: %w", err)
 	}
 	execution, err = l.runtime.GetExecution(ctx, ref.ID)
 	if err != nil {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_state_read_failed")
-		_, _ = l.repo.FinishRunSession(context.WithoutCancel(ctx), session.ID, models.RunSessionStateFailed, err.Error())
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("read started run session: %w", err)
 	}
 	started, err := l.repo.MarkRunSessionStarted(ctx, session.ID, ref.ID, executionProfileID, adapter, model, execution.ACPSessionID)
 	if err != nil {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_persist_failed")
 		return officeservice.RunSessionLaunch{}, err
 	}
 	if !started {
-		_ = l.runtime.Stop(context.WithoutCancel(ctx), ref.ID, "run_session_not_admitted")
 		return officeservice.RunSessionLaunch{}, fmt.Errorf("run session %q was no longer preparing", session.ID)
 	}
+	startedAttempt = true
 	l.logger.Info("started taskless Office run",
 		zap.String("run_id", run.ID), zap.String("run_session_id", session.ID),
 		zap.String("execution_id", ref.ID), zap.Int("attempt", attempt))

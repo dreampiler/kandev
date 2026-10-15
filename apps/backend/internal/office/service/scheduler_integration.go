@@ -725,6 +725,16 @@ func (si *SchedulerIntegration) launchAgent(
 			zap.Int("prompt_len", len(launch.Prompt)))
 		var route *RouteOverride
 		result, err := si.svc.runSessionLauncher.StartRunSession(ctx, run, agent, launch, route)
+		if errors.Is(err, ErrRunSessionCapacityUnavailable) {
+			si.releaseCheckoutIfNeeded(ctx, run)
+			if parkErr := si.svc.repo.ParkRunForSessionCapacity(ctx, run.ID, run.ClaimedAt); parkErr != nil {
+				si.logger.Error("could not defer taskless run for session capacity", zap.Error(parkErr))
+			}
+			si.svc.AppendRunEvent(ctx, runID, "adapter.invoke", "info", map[string]interface{}{
+				"phase": "deferred", "reason": "session_ceiling",
+			})
+			return false
+		}
 		if err != nil {
 			si.logger.Error("taskless agent launch failed", zap.String("run_id", runID), zap.Error(err))
 			si.svc.AppendRunEvent(ctx, runID, "error", "error", map[string]interface{}{

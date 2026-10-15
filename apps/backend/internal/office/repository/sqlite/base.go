@@ -66,10 +66,11 @@ func RunnerProjection(alias string) string {
 type Repository struct {
 	*runssqlite.Repository
 
-	db      *sqlx.DB // writer
-	ro      *sqlx.DB // reader
-	log     *logger.Logger
-	migrate *db.MigrateLogger
+	db                         *sqlx.DB // writer
+	ro                         *sqlx.DB // reader
+	log                        *logger.Logger
+	migrate                    *db.MigrateLogger
+	runSessionCapacityReleased func()
 
 	// failBudgetPolicyUpdateErr is a test-only failpoint: when set,
 	// updateBudgetPolicyTx returns it after the claim discard has run but

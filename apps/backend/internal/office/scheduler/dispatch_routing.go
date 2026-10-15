@@ -84,7 +84,15 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: list prior: %w", err)
 	}
-	if len(prior) >= MaxAttemptsPerRun {
+	providerAttempts := len(prior)
+	if extractRunTaskID(run.Payload) == "" {
+		for _, attempt := range prior {
+			if attempt.Outcome == RouteAttemptOutcomeDeferredCapacity {
+				providerAttempts--
+			}
+		}
+	}
+	if providerAttempts >= MaxAttemptsPerRun {
 		if perr := ss.parkRunMaxAttempts(ctx, run, agent.WorkspaceID); perr != nil {
 			return false, false, perr
 		}
@@ -276,7 +284,7 @@ func (ss *SchedulerService) tryCandidates(
 			return false, nil, err
 		}
 		sessionID, launchErr := ss.launchCandidate(ctx, run, agent, candidate, candidateLaunch)
-		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) {
+		if errors.Is(launchErr, service.ErrLaunchDeferredByCapacity) || errors.Is(launchErr, service.ErrRunSessionCapacityUnavailable) {
 			return ss.handleLaunchDeferred(ctx, run, agent.WorkspaceID, seq)
 		}
 		if launchErr == nil {
@@ -529,6 +537,12 @@ func (ss *SchedulerService) handleLaunchDeferred(
 	})
 	hydrated := ss.hydrateAttempt(ctx, run.ID, seq, attempt)
 	ss.publishRouteAttemptAppended(ctx, run.ID, hydrated)
+	if extractRunTaskID(run.Payload) == "" {
+		if err := ss.repo.ParkRunForSessionCapacity(ctx, run.ID, run.ClaimedAt); err != nil {
+			return false, nil, err
+		}
+		return false, &routing.BlockReason{Status: sqliterepo.RunSessionCapacityBlockedStatus}, nil
+	}
 	if err := ss.repo.ParkRunForProviderCapacity(ctx,
 		run.ID, routing.StatusBlockedActionRequired, time.Time{}); err != nil {
 		return false, nil, err

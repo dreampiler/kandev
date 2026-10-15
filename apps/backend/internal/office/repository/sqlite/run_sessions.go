@@ -280,5 +280,8 @@ func (r *Repository) FinishRunSession(
 	if err != nil {
 		return false, fmt.Errorf("finish run session: rows affected: %w", err)
 	}
+	if wrote == 1 && r.runSessionCapacityReleased != nil {
+		r.runSessionCapacityReleased()
+	}
 	return wrote == 1, nil
 }

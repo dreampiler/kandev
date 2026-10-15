@@ -28,6 +28,10 @@ are implemented. Delivery and verification are recorded in the
 - **Manual origin:** A direct user action. It can use a manual override when the
   ceiling is full.
 
+Taskless Office run sessions participate in the same population through their
+preparing/running states, without creating task-session records. Their capacity
+wait remains in the existing Office run queue.
+
 ## Requirements
 
 ### REQ-AGENTS-SESSION-CEILING-001: Bound instance agent sessions
@@ -48,6 +52,13 @@ bounded instance capacity, so that one installation does not overload its host.
 - **AC-AGENTS-SESSION-CEILING-001.3:** The ceiling shall count sessions in
   `STARTING` and `RUNNING` state together with in-flight reservations, and shall
   release a reservation only after its launch reaches a counted state or fails.
+- **AC-AGENTS-SESSION-CEILING-001.13:** An enabled ceiling shall atomically include
+  preparing/running taskless Office run sessions and their in-flight reservations.
+  A refused taskless launch shall create no attempt, preserve the same queued run
+  and automatically regain scheduling eligibility when capacity returns. Capacity
+  waits shall not become provider failures or operator-required blocks. Duplicate
+  or late terminal events shall not release another attempt's capacity. Disabled
+  capacity shall retain its existing unlimited behavior.
 - **AC-AGENTS-SESSION-CEILING-001.4:** A deferred launch shall retain its first
   payload when a different launch for the same task arrives, and the second
   caller shall receive an explicit conflict so it retains ownership.

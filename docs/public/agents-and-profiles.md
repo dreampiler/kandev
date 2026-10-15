@@ -594,6 +594,11 @@ session and use its normal controls. Kandev resumes it when the session can run;
 the automatic session ceiling still applies unless you explicitly start,
 resume, or message the session.
 
+Taskless Office runs use the same automatic session ceiling as task sessions.
+Preparing or running Office sessions occupy a slot. When capacity is full, the
+Office run stays queued and retries the same run when a slot becomes available;
+this wait does not consume its provider retry budget.
+
 Opening or refocusing a conversation parked by the ACP idle policy also uses
 automatic admission. With **Limit automatic sessions** enabled and capacity
 full, it stays parked without a manual-override notice. A queued focus resume,

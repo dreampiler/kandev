@@ -312,11 +312,12 @@ func (r *Repository) ListRunsWaitingOnProvider(
 		SELECT w.* FROM runs w
 		JOIN agent_profiles a ON a.id = w.agent_profile_id
 		WHERE w.routing_blocked_status IS NOT NULL
+		  AND w.routing_blocked_status != ?
 		  AND w.status = 'queued'
 		  AND a.workspace_id = ?
 		  AND w.logical_provider_order LIKE ? ESCAPE '\'
 		LIMIT 50
-	`), workspaceID, "%\""+escaped+"\"%")
+	`), RunSessionCapacityBlockedStatus, workspaceID, "%\""+escaped+"\"%")
 	if err != nil {
 		return nil, fmt.Errorf("run_routing: list waiting: %w", err)
 	}
@@ -373,11 +374,12 @@ func (r *Repository) ClearAllParkedRoutingForWorkspace(
 		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE routing_blocked_status IS NOT NULL
 		  AND routing_blocked_status != ?
+		  AND routing_blocked_status != ?
 		  AND agent_profile_id IN (
 		    SELECT id FROM agent_profiles WHERE workspace_id = ?
 		  )
 	`), runsmodels.PriorityClassHuman, runsmodels.PriorityClassRecovery,
-		runsmodels.RoutingBlockedSessionRecoveryRequired, workspaceID)
+		runsmodels.RoutingBlockedSessionRecoveryRequired, RunSessionCapacityBlockedStatus, workspaceID)
 	if err != nil {
 		return fmt.Errorf("run_routing: clear parked workspace=%s: %w",
 			workspaceID, err)

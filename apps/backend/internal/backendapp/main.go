@@ -1833,7 +1833,9 @@ func newRunProcessorService(
 		AgentctlBinaryPath: agentctlBinaryPath,
 		EventBus:           eventBus,
 	})
-	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log))
+	orchestratorSvc.SetRunSessionCapacitySource(repos.Office)
+	repos.Office.SetRunSessionCapacityReleased(orchestratorSvc.NotifyRunSessionCapacityReleased)
+	svc.SetRunSessionLauncher(newOfficeRunSessionLauncher(repos.Office, lifecycleMgr, services.DynamicProfileResolver, log, orchestratorSvc))
 	return svc
 }
 

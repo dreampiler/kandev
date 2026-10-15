@@ -148,6 +148,24 @@ define structural composition and states.
 
 ## Admission and replay
 
+### Taskless Office population
+
+The composition root optionally supplies preparing/running Office run-session
+IDs to the same controller. Their namespaced IDs are unioned with task-session
+rows and in-flight reservations under the admission mutex. The Office launcher
+reserves before allocating an attempt or runtime and confirms immediately after
+the preparing row commits. Pre-persistence failures return their reservation;
+later failures retain the persisted row until exact-attempt cleanup. A successful terminal
+run-session CAS signals the existing ceiling sweep. Failed cleanup retains the
+persisted attempt in the population until its lifecycle is resolved.
+
+A taskless refusal has no task deferred-launch record. It leaves the same run
+queued under `blocked_session_capacity`, distinct from provider/user-action
+blocks. The existing sweep makes at most the observed free-slot count eligible
+through Office's existing scheduler, or all such runs when disabled. Provider
+retry does not clear these blocks. Existing task replay remains unchanged.
+See [delivery plan](../../../plans/taskless-session-capacity/plan.md).
+
 The flow is:
 
 ```text

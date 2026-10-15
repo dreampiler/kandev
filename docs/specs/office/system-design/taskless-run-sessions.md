@@ -201,6 +201,15 @@ which is why run history reads the session table rather than that column.
 
 ## Launch flow
 
+When install-wide session capacity is enabled, the launcher reserves in the
+orchestrator's existing controller before reserving the attempt. Preparing and
+running run-session rows count alongside task sessions. A capacity refusal creates
+no attempt and keeps the same run queued with a capacity-only block; the existing
+ceiling release/sweep driver restores its eligibility automatically. Provider
+blocks and operator decisions remain separate. A failed runtime cleanup retains
+the unfinished attempt and its capacity; a successor cannot overlap it.
+See [taskless session capacity](../../../plans/taskless-session-capacity/plan.md).
+
 1. Claim the existing run and apply admission/idle gates.
 2. Reserve a fresh attempt/session; build runtime context and scoped credentials.
 3. Resolve provider/executor, prepare the runtime with run ownership and register

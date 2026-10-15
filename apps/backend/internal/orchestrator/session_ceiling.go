@@ -116,6 +116,7 @@ type sessionCeilingController struct {
 	ceiling      int
 	reservations map[string]*ceilingReservation
 	lister       admittedSessionLister
+	runSessions  RunSessionCapacitySource
 	logger       *zap.Logger
 	now          func() time.Time
 	newKey       func() string
@@ -231,16 +232,24 @@ func (s *Service) SessionCapacity() int {
 // decision time rather than kept as a running tally, so a restart, a panic or a
 // missed release cannot leak capacity permanently.
 func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[string]struct{}, error) {
-	if c.lister == nil {
-		return map[string]struct{}{}, nil
+	counted := make(map[string]struct{})
+	if c.lister != nil {
+		ids, err := c.lister.ListAdmittedSessionIDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			counted[id] = struct{}{}
+		}
 	}
-	ids, err := c.lister.ListAdmittedSessionIDs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	counted := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		counted[id] = struct{}{}
+	if c.runSessions != nil {
+		ids, err := c.runSessions.ListAdmittedRunSessionIDs(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range ids {
+			counted[runSessionCapacityKey(id)] = struct{}{}
+		}
 	}
 	return counted, nil
 }
