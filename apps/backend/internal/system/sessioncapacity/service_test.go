@@ -210,7 +210,7 @@ type fakeTarget struct {
 // SetSessionCapacity takes both lanes because the live controller applies them
 // together; the control arguments are recorded so a caller can still assert the
 // worker ceiling it already cared about.
-func (t *fakeTarget) SetSessionCapacity(workerCeiling, _ int, _ []string) {
+func (t *fakeTarget) SetSessionCapacity(workerCeiling, _ int, _, _ []string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.capacity = workerCeiling

@@ -79,6 +79,18 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 //
 //nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
 func (r *Repository) runMigrations(ctx context.Context) error {
+	for _, column := range []struct{ name, definition string }{
+		{"tier", "TEXT NOT NULL DEFAULT ''"},
+		{"dimension", "TEXT NOT NULL DEFAULT ''"},
+		{"requests_minute", "DOUBLE PRECISION NOT NULL DEFAULT 0"},
+		{"requests_day", "DOUBLE PRECISION NOT NULL DEFAULT 0"},
+		{"active_turns", "BIGINT NOT NULL DEFAULT 0"},
+		{"window_usage_json", "TEXT NOT NULL DEFAULT '{}'"},
+	} {
+		if err := r.migrate.Apply("usage_limit_observations."+column.name, "ALTER TABLE usage_limit_observations ADD COLUMN "+column.name+" "+column.definition); err != nil {
+			return err
+		}
+	}
 	for _, migration := range []struct{ name, query string }{
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
@@ -89,6 +101,7 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 		{"session_recovery_blocks.delivery_sequence", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_sequence BIGINT NOT NULL DEFAULT 0`},
 		{"session_recovery_blocks.delivery_turn_id", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_turn_id TEXT NOT NULL DEFAULT ''`},
 		{"session_recovery_blocks.delivery_outcome", `ALTER TABLE session_recovery_blocks ADD COLUMN delivery_outcome TEXT NOT NULL DEFAULT ''`},
+		{"session_recovery_blocks.auto_recovery_attempts", `ALTER TABLE session_recovery_blocks ADD COLUMN auto_recovery_attempts INTEGER NOT NULL DEFAULT 0`},
 		{"session_restore_attempts.checkpoint_json", `ALTER TABLE session_restore_attempts ADD COLUMN checkpoint_json TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.session_id", `ALTER TABLE agent_delivery_effects ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
 		{"agent_delivery_effects.incarnation_id", `ALTER TABLE agent_delivery_effects ADD COLUMN incarnation_id TEXT NOT NULL DEFAULT ''`},

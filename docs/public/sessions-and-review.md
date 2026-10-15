@@ -89,6 +89,41 @@ and does not report a successful recovery. The matching failure remains
 **Resolved** even when a separate success notice is missing from the loaded chat.
 A later failure keeps its own recovery controls.
 
+### Register a recovered initial recipient
+
+Operator integrations can explicitly register a replacement conversation for
+future workflow steps that target **Initial agent session**. On a server that
+supports recovery recipient bindings, send the existing `session.set_primary`
+WebSocket action with this payload:
+
+```json
+{
+  "session_id": "replacement-session-id",
+  "replaces_initial_recipient_session_id": "replaced-session-id"
+}
+```
+
+Both conversations must belong to the same task. The replaced conversation must
+have no active execution or owned turn, and the replacement must remain eligible.
+The source must be the historical initial conversation or its currently registered
+successor. The operation can register a replacement that is already primary.
+Office tasks retain scheduler-owned recovery.
+
+Registration preserves initial history and an existing entry's committed recipient.
+For a registered legacy task without an initial snapshot, deleting the original
+conversation keeps its historical ID in the binding. Kandev does not replace that
+history with the successor's profile or model snapshot.
+The next new initial-target entry uses the replacement's logical profile: reuse
+selects that conversation, while new-session policy creates a fresh one. Ordinary
+primary selection, spawning, and conditional profile changes do not register
+succession. Missing or ambiguous initial provenance cannot be replaced with an
+invented initial record.
+
+Older servers can ignore unknown payload fields. Confirm the task's
+`workflow_initial_recipient_binding` and the next entry's committed route and
+actual prompt recipient before reporting recovery complete. Primary status or a
+successful launch response alone is insufficient.
+
 <a id="experimental-interruption-continuation"></a>
 
 ### Interruption continuation

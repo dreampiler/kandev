@@ -50,7 +50,8 @@ func resolve(
 			return Resolution{}, err
 		}
 		settings = *configured
-		settings.ControlProfileIDs = normalizeControlProfileIDs(settings.ControlProfileIDs)
+		settings.ControlProfileIDs = normalizeIDs(settings.ControlProfileIDs)
+		settings.ControlWorkflowIDs = normalizeIDs(settings.ControlWorkflowIDs)
 		source = SourceSetting
 	}
 
@@ -131,7 +132,8 @@ func effectiveFor(settings Settings, source Source) Effective {
 	effective := Effective{
 		Source:             source,
 		ControlMaxSessions: settings.ControlMaxSessions,
-		ControlProfileIDs:  normalizeControlProfileIDs(settings.ControlProfileIDs),
+		ControlProfileIDs:  normalizeIDs(settings.ControlProfileIDs),
+		ControlWorkflowIDs: normalizeIDs(settings.ControlWorkflowIDs),
 	}
 	if settings.Enabled {
 		effective.Enabled = true

@@ -117,7 +117,7 @@ func (e *Engine) SetResourceWaitObserver(observer func(sessionID string, generat
 // be tried again, only when every enabled candidate is suspended. A candidate
 // excluded for another reason, such as an unclassified failure earlier in the
 // chain, keeps the wait manual because time alone does not make it usable.
-func (e *Engine) resourceWaitDeadline(profile Profile, now time.Time) (time.Time, bool) {
+func (e *Engine) resourceWaitDeadline(profile Profile, now time.Time, admission map[string]PaceScore) (time.Time, bool) {
 	var deadline time.Time
 	enabled := 0
 	for _, candidate := range profile.Candidates {
@@ -126,6 +126,13 @@ func (e *Engine) resourceWaitDeadline(profile Profile, now time.Time) (time.Time
 		}
 		enabled++
 		suspension := e.SuspensionFor(candidate, now)
+		score := admission[candidate.ID]
+		if until := score.AdmissionRetryAt; score.AdmissionReason != "" && until.After(now) {
+			if !suspension.Blocked() || until.After(suspension.Until) {
+				suspension.State = ResourceWaiting
+				suspension.Until = until
+			}
+		}
 		if !suspension.Blocked() || suspension.Until.IsZero() {
 			return time.Time{}, false
 		}

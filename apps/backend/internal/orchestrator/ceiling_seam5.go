@@ -68,6 +68,7 @@ func (s *Service) admitOrDeferSeam5WithBinding(
 		origin:                origin,
 		seam:                  "relaunchDynamicTaskAfterFailure",
 		agentProfileID:        agentProfileID,
+		workflowID:            s.ceilingWorkflowIDForTask(ctx, taskID),
 		replacesFailedAttempt: replacesFailedDynamicAttempt(ctx),
 	})
 	if decision.admitted {

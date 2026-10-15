@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-08-31
 owners:
@@ -120,7 +120,8 @@ requiring its profile to be known when the workflow is authored.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.1:** Every step shall offer
   **Initial agent session**. It shall refer to the task's original agent,
   resolved when the task obtains its first session, regardless of later
-  primary-session or workflow-default changes.
+  primary-session or workflow-default changes. An explicitly registered recovery
+  successor follows requirement 004 without changing that historical identity.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.2:** The selector shall offer each
   earlier step with an explicit profile override, labelled by step and profile.
   Two steps using the same profile shall remain distinct choices. Workflow
@@ -141,7 +142,8 @@ requiring its profile to be known when the workflow is authored.
   It shall keep the identity of the original task conversation unchanged.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.6:** When the referenced conversation
   is absent or terminal but its profile is known, **Reuse an available session**
-  shall create a fresh conversation for that profile. It shall not revive a
+  shall create a fresh conversation for that profile, subject to requirement
+  004's registered recovery recipient. It shall not revive a
   terminal conversation or select an unrelated conversation. The selector shall
   explain this fallback and the need to park a conversation for later reuse.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-002.7:** When a step changes sessions,
@@ -187,7 +189,47 @@ requiring its profile to be known when the workflow is authored.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.4:** Delayed, repeated, and reordered updates shall focus the matching recipient at most once. An unrelated session, stale entry, foreign session, or prepared route shall not qualify. Missing or ambiguous identity shall preserve the current view.
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-003.5:** A failed move shall preserve the selected conversation and show the existing error. A queued entry without a committed recipient shall preserve selection until its recipient becomes available, subject to criterion 003.3. A step with no recipient shall not create one for navigation.
 
+### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-004: Explicit recovery recipient succession
+
+**Intent:** Let a supported recovery replace the recipient of future initial-target
+entries while retaining the original conversation and already accepted entry choices.
+
+#### Acceptance criteria
+
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.1:** An authorized recovery shall be
+  able to identify the conversation being replaced and register an eligible
+  replacement on the same task. An ordinary spawn, primary change, session
+  selection, or profile match shall not register a recovery successor.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.2:** After registration, a new
+  initial-target entry using reuse shall select that exact replacement and its
+  logical profile. New-session policy shall use the registered logical profile
+  and retain its fresh-conversation behavior. Dynamic candidate order, admission
+  limits, question barriers, and completion ownership shall remain unchanged.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.3:** Registration shall preserve the
+  immutable initial identity, original markers, conversation history, and
+  committed entry selection. Retrying a committed entry shall keep its recorded
+  recipient, subject to the existing absent/terminal-destination rules. A later
+  recovery shall replace only the currently registered recipient; a stale
+  competing recovery shall not redirect it.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.4:** Foreign, terminal, or ineligible
+  replacement recipients, live source executions, ambiguous initial provenance,
+  and persistence errors shall reject registration without partial primary or
+  binding changes. Missing initial history shall not be manufactured from current
+  assignment. The existing unambiguous legacy-original resolution remains valid.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.5:** The binding shall survive restart
+  and workflow changes on its task, and shall not copy to another task. If its
+  recipient is subsequently absent or terminal, routing shall retain its known
+  logical profile for the existing fresh fallback; it shall not silently choose
+  another live session. Corrupt or unreadable binding data shall surface an error.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-004.6:** Through the supported recovery
+  entry point and normal workflow transition, the next step's actual prompt shall
+  reach the registered replacement once. Registration success or primary status
+  alone shall not count as successful handoff. Existing queue transfer and
+  explicit-session message targeting shall retain their separate contracts.
+
 ## Implementation plans
+
+- [Recovery recipient binding](../../../plans/recovery-recipient-binding/plan.md)
 
 - [Dynamic workflow completion repair](../../../plans/dynamic-workflow-completion/plan.md)
 
@@ -206,7 +248,8 @@ Implement's eligible conversation, subject to Implement's end setting.
 
 - A workflow-wide lifecycle setting or workflow-wide override.
 - Lifecycle settings on transition edges.
-- Reusing a session from a different agent profile.
+- Implicitly reusing a session from a different agent profile. Requirement 004
+  permits a recovery to register a different logical profile explicitly.
 - Keeping an inactive agent process or executor backend running.
 - Automatic revival of a terminal session. Explicit completed-chat follow-ups
   belong to [task completion](task-completion.md); existing FAILED/CANCELLED

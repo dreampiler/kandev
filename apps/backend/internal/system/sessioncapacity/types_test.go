@@ -156,7 +156,7 @@ func TestSettingsAndPatchUseSnakeCaseAndPreserveOmittedFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal settings: %v", err)
 	}
-	if string(settingsJSON) != `{"enabled":true,"max_sessions":8,"control_max_sessions":0,"control_profile_ids":null}` {
+	if string(settingsJSON) != `{"enabled":true,"max_sessions":8,"control_max_sessions":0,"control_profile_ids":null,"control_workflow_ids":null}` {
 		t.Fatalf("settings JSON = %s", settingsJSON)
 	}
 

@@ -33,12 +33,21 @@ export function useProviderLimits() {
 
   const save = useCallback(async (provider: string, request: UpdateProviderLimitRequest) => {
     const saved = await updateProviderLimit(provider, request);
+    if (
+      request.account_id &&
+      !saved.accounts?.some((entry) => entry.account_id === request.account_id)
+    ) {
+      // i18n-exempt: Internal protocol error, displayed through the localized save failure state.
+      throw new Error("Provider limit response omitted the saved account");
+    }
     setState((current) =>
       current.status === "ready"
         ? {
             status: "ready",
             providers: current.providers.map((entry) =>
-              entry.provider === saved.provider ? saved : entry,
+              entry.provider === saved.provider
+                ? { ...saved, accounts: saved.accounts ?? entry.accounts }
+                : entry,
             ),
           }
         : current,

@@ -114,6 +114,9 @@ func (s *dynamicUsageSnapshot) UsageSnapshot(
 	scores := make(map[string]dynamicruntime.PaceScore, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
 		score := s.scoreFor(ctx, candidate, observations[candidate.ID], observedAt)
+		if admission, err := s.CheckAdmission(ctx, candidate, profile.AdmissionSessionID, observedAt); err == nil {
+			score.AdmissionReason, score.AdmissionRetryAt = admission.AdmissionReason, admission.AdmissionRetryAt
+		}
 		if !score.Known && s.internal != nil {
 			score.Internal = s.internal.Internal(ctx, candidate.ID, observedAt)
 		}

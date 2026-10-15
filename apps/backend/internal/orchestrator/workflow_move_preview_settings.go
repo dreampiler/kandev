@@ -107,9 +107,6 @@ func previewConfigureSessionRule(
 ) (*wfmodels.ConfigureSessionRule, bool) {
 	original := input.OriginalSession
 	if original == nil {
-		original = previewOriginalFromSessions(input.Sessions)
-	}
-	if original == nil {
 		input.Notices = appendPreviewNoticeOnce(input.Notices, workflowMovePreviewNotice("missing_original_snapshot", nil))
 		return nil, false
 	}
@@ -130,13 +127,6 @@ func previewConfigureSessionRule(
 		return nil, false
 	}
 	return selection.rule, true
-}
-
-func previewOriginalFromSessions(sessions []*models.TaskSession) *models.TaskSession {
-	if original, resolved := markedOriginalTaskSession(sessions); resolved {
-		return original
-	}
-	return legacyOriginalTaskSession(sessions)
 }
 
 func applyPreviewSessionMode(

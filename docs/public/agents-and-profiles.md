@@ -710,6 +710,79 @@ cannot guarantee equal host and executor model catalogs.
 
 ### Monitor capability and subscription status
 
+### Configure provider account limits
+
+With dynamic routing enabled, open **Settings > Agents > Provider limits**.
+Each account has separate **Free**, **Subscription**, and **Paid** editors.
+Desktop shows three columns; phones show one tier at a time. Set a profile's
+tier when its provider or plan metadata cannot distinguish subscription from
+pay-as-you-go billing.
+
+Configure concurrent turns and requests per minute for each tier. Free accounts
+also support daily requests and an `HH:MM timezone` reset, such as `00:00 UTC`.
+The short request window preserves limits such as five requests per ten minutes
+per model. Subscriptions support rolling five-hour, weekly, and monthly budgets
+in provider percentages, tokens, or USD. Paid accounts support daily and monthly
+spend caps. Reset rules can follow the provider, a rolling window, the UTC
+calendar, or an owner-entered ISO timestamp and time zone.
+
+Each field shows its default, learned value, and owner override. A blank field
+inherits the derived value; zero disables that admission limit. Clearing account
+overrides restores derived limits without deleting observations. Existing
+provider-wide manual blocks, monthly-reset fallbacks, and owner-release controls
+remain available in the same settings section.
+
+The Free editor's daily requests are the account-wide allowance. Below it,
+**Model and group limits** lists daily request limits for one model or for a
+shared group of models with one combined allowance. Each limit shows today's
+count, its reset, its default, learned, and owner values, and whether the
+default is published, measured, approximate, or read from a provider counter.
+Select one of the account's free models to add a model limit, or several to add
+a shared group limit. A model with both a model limit and a group limit must fit
+both. When a provider reports a per-model daily limit, Kandev replaces that
+model's or group's learned value with the requests it counted in the scope so
+far, including a lower value after a provider reduction. Learning never raises a
+limit beyond what admission already allowed, so enter an owner value when a
+provider raises an allowance. When models without a configured limit hit their
+daily limit within the same minute, Kandev records a provisional shared group
+for them with their combined count. The card marks it provisional; enter 0 to
+disable it if the models were unrelated.
+
+| Provider | Free defaults | Subscription defaults | Paid defaults |
+| --- | --- | --- | --- |
+| OpenRouter | 20 requests/minute; key counter reports 50 or 1000/day; midnight UTC | No published defaults | Owner configured |
+| LLM Gateway | Zero credits: 5/10 minutes/model. Purchased credits: 20/minute/model | DevPass: 120/minute, 50 concurrent turns; reported usage windows | Tier 0: 600/minute, 100 concurrent turns, $25 UTC day, $250 UTC month |
+| OpenCode Zen | Midnight UTC. Measured model limits: `nemotron-3-ultra-free` and `step-5-preview-free` 1000/day, `longcat-2.5-preview-free` about 120/day; `big-pickle`, `muse-spark-1.3-contributor-free`, and `space-bunny-free` share about 500/day | No published defaults | Owner configured |
+| OpenCode Go | Unknown | Reported percentages. Enter `go` only for the base plan's $12/5h, $30/week, $60/month reference. Unknown plans, including Go Plus, keep dollar budgets unset | Owner configured |
+| Claude/Codex | Unknown | Existing reported five-hour and weekly percentages and resets | Owner configured |
+| Antigravity/Gemini | Plan dependent | Reported plan quotas where available; owner tier override otherwise | Owner configured |
+
+Gateway concurrency numbers describe model requests; Kandev's configurable
+concurrency limit counts admitted task turns. These are different quantities.
+Request counts combine recorded usage events and distinct assistant/response
+boundaries from the existing agent stream. Summary-only transports, missing
+events, and CLI tool loops make these estimates; they can undercount or
+overcount actual HTTP requests. Recorded token and cost totals omit usage
+outside Kandev. The OpenRouter daily key counter and reported subscription
+percentages are provider measurements.
+
+On a classified limit error, Kandev records requests, turns, tokens, and cost in
+the account's five-hour, daily, weekly, and monthly windows. Unknown allowances
+learn from these observations, with a 5% admission reserve on learned values.
+Owner overrides and published limits retain their own values. If a subscription
+notice does not identify its exhausted window, Kandev marks a provisional
+five-hour token budget as an estimate; it does not infer a weekly or monthly
+allowance, and the existing unknown-window retry ladder still applies.
+
+Limits change candidate availability during admission. They preserve the saved
+candidate order and selection mode, defer when every candidate lacks capacity,
+and let running turns continue. They do not throttle individual HTTP calls
+inside a running agent. OpenRouter free rate errors refresh the key counter:
+remaining daily requests mean a short minute block, while zero means the daily
+reset. An unavailable counter preserves the ordinary retry ladder.
+
+### Monitor capability and subscription status
+
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
 
 <details>

@@ -169,7 +169,7 @@ func TestAccountBlockedHoldKeepsRouteManual(t *testing.T) {
 	if _, err := engine.ApplyFailure("session-a", profile, initial.Generation, "blocked", accountBlockedFailure()); err == nil {
 		t.Fatal("a fully held route selected a candidate")
 	}
-	if deadline, ok := engine.resourceWaitDeadline(profile, now); ok {
+	if deadline, ok := engine.resourceWaitDeadline(profile, now, nil); ok {
 		t.Fatalf("fully held route scheduled a resource wait until %s", deadline)
 	}
 }

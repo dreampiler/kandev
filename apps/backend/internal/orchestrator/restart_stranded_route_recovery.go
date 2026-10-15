@@ -292,7 +292,7 @@ func (s *Service) finishRouteActionContinuation(
 		return result, actionErr
 	}
 	if _, err := s.RecoverSessionWithOptions(
-		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{},
+		ctx, taskID, sessionID, recoveryActionContinueHistory, RecoverSessionOptions{Automatic: true},
 	); err != nil {
 		s.logger.Warn("route action continuation failed",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))

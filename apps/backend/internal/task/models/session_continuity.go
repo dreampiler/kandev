@@ -215,19 +215,25 @@ type ContinuationSnapshot struct {
 // SessionRecoveryBlock prevents automatic work admission while a session
 // needs operator settlement.
 type SessionRecoveryBlock struct {
-	ID                   string     `json:"id"`
-	SessionID            string     `json:"session_id"`
-	IncarnationID        string     `json:"incarnation_id"`
-	ExpectedGeneration   int64      `json:"expected_generation"`
-	Reason               string     `json:"reason"`
-	State                string     `json:"state"`
-	ConsumerReference    string     `json:"consumer_reference,omitempty"`
-	DeliverySubmissionID string     `json:"delivery_submission_id,omitempty"`
-	DeliveryStreamID     string     `json:"delivery_stream_id,omitempty"`
-	DeliverySequence     int64      `json:"delivery_sequence,omitempty"`
-	DeliveryTurnID       string     `json:"delivery_turn_id,omitempty"`
-	DeliveryOutcome      string     `json:"delivery_outcome,omitempty"`
-	AuthorizedAction     string     `json:"authorized_action,omitempty"`
+	ID                   string `json:"id"`
+	SessionID            string `json:"session_id"`
+	IncarnationID        string `json:"incarnation_id"`
+	ExpectedGeneration   int64  `json:"expected_generation"`
+	Reason               string `json:"reason"`
+	State                string `json:"state"`
+	ConsumerReference    string `json:"consumer_reference,omitempty"`
+	DeliverySubmissionID string `json:"delivery_submission_id,omitempty"`
+	DeliveryStreamID     string `json:"delivery_stream_id,omitempty"`
+	DeliverySequence     int64  `json:"delivery_sequence,omitempty"`
+	DeliveryTurnID       string `json:"delivery_turn_id,omitempty"`
+	DeliveryOutcome      string `json:"delivery_outcome,omitempty"`
+	AuthorizedAction     string `json:"authorized_action,omitempty"`
+	// AutoRecoveryAttempts is the durable count of automatic
+	// continue_from_history recoveries already spent on this open block. It is
+	// stored on the block so the bound survives a backend restart instead of
+	// resetting with in-memory state; only a resolved (settled) block or a
+	// confirmed different record reopens it.
+	AutoRecoveryAttempts int        `json:"auto_recovery_attempts,omitempty"`
 	CreatedAt            time.Time  `json:"created_at"`
 	UpdatedAt            time.Time  `json:"updated_at"`
 	ResolvedAt           *time.Time `json:"resolved_at,omitempty"`

@@ -647,9 +647,10 @@ func TestBuildWorkflowMovePreview_ConditionalSetRetainsUnnamedRuntimeOptions(t *
 	}
 
 	preview := buildWorkflowMovePreview(workflowMovePreviewInput{
-		TaskID:        "task-1",
-		SourceSession: current,
-		Sessions:      []*models.TaskSession{current},
+		TaskID:          "task-1",
+		SourceSession:   current,
+		OriginalSession: current,
+		Sessions:        []*models.TaskSession{current},
 		Destination: &wfmodels.WorkflowStep{
 			ID: "step-review",
 			Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{

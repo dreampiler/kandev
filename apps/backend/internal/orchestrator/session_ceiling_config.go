@@ -36,7 +36,8 @@ func newSessionCeilingForRepo(
 	}
 	controller := newSessionCeilingController(capacity.WorkerCeiling, lister, logger)
 	controller.controlCeiling = capacity.ControlCeiling
-	controller.controlProfiles = controlProfileSet(activeControlProfiles(capacity.ControlCeiling, capacity.ControlProfileIDs))
+	controller.controlProfileIDs = activeControlIDs(capacity.ControlCeiling, capacity.ControlProfileIDs)
+	controller.controlWorkflowIDs = activeControlIDs(capacity.ControlCeiling, capacity.ControlWorkflowIDs)
 	if guard.Enabled {
 		controller.memoryGate = guard
 		controller.memoryReader = hostmemory.NewReader()
@@ -44,16 +45,32 @@ func newSessionCeilingForRepo(
 	return controller
 }
 
-// activeControlProfiles is the single enforcement boundary for "the control lane
+// activeControlIDs is the single enforcement boundary for "the control lane
 // exists". Classifying a session as control removes it from the worker
-// population, so a profile list without a control ceiling would let those sessions
-// bypass worker capacity while still being refused by it. Both halves are
-// therefore required here, before any classification reads the set: with no
+// population, so a control id list without a control ceiling would let those
+// sessions bypass worker capacity while still being refused by it. Both halves
+// are therefore required here, before any classification reads the set: with no
 // control ceiling the set is dropped and every session is a worker, exactly as
-// before the lane existed.
-func activeControlProfiles(controlCeiling int, ids []string) []string {
-	if controlCeiling <= unlimitedSessionCeiling {
+// before the lane existed. It is shared by the profile set and the workflow set,
+// and drops blank and duplicate ids so one identity cannot occupy two slots.
+func activeControlIDs(controlCeiling int, ids []string) []string {
+	if controlCeiling <= unlimitedSessionCeiling || len(ids) == 0 {
 		return nil
 	}
-	return ids
+	seen := make(map[string]struct{}, len(ids))
+	active := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		active = append(active, id)
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return active
 }

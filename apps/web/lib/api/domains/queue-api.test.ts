@@ -555,12 +555,16 @@ describe("setQueueAutoRun", () => {
       false,
     );
 
-    expect(request).toHaveBeenCalledWith("message.queue.auto_run.set", {
-      session_id: SESSION_ID,
-      task_id: "task-1",
-      session_incarnation_id: INCARNATION_ID,
-      enabled: false,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.auto_run.set",
+      {
+        session_id: SESSION_ID,
+        task_id: "task-1",
+        session_incarnation_id: INCARNATION_ID,
+        enabled: false,
+      },
+      35_000,
+    );
   });
 });
 describe("setQueueAutoMerge", () => {

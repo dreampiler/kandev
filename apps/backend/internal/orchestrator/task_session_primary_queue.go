@@ -11,6 +11,10 @@ import (
 // any queue still bound to the previous primary onto it. Without this, a queue
 // left behind on a demoted primary is stranded when that session later ends.
 func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessionID string) error {
+	return s.setPrimarySessionTransferringQueue(ctx, sessionID, "")
+}
+
+func (s *Service) setPrimarySessionTransferringQueue(ctx context.Context, sessionID, recoverySourceID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
@@ -29,7 +33,7 @@ func (s *Service) SetPrimarySessionTransferringQueue(ctx context.Context, sessio
 			zap.Error(err))
 		previousPrimaryID = ""
 	}
-	if err := s.SetPrimarySession(ctx, sessionID); err != nil {
+	if err := s.setPrimarySession(ctx, sessionID, recoverySourceID); err != nil {
 		return err
 	}
 	if previousPrimaryID == "" || previousPrimaryID == sessionID {

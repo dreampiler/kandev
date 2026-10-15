@@ -39,33 +39,39 @@ type workflowStepTransitionReader interface {
 }
 
 type workflowSessionTargetResolution struct {
-	session   *models.TaskSession
-	profileID string
+	session        *models.TaskSession
+	profileID      string
+	initialBinding *models.WorkflowInitialRecipientBinding
 }
 
 func workflowSessionBindingTargetKey(stepID string) string {
 	return "step:" + stepID
 }
 
-// resolveInitialWorkflowSession returns the exact immutable initial session
-// and its original logical profile. A missing snapshot is resolved through
+// resolveInitialWorkflowSession selects the historical initial recipient or
+// its explicitly registered recovery successor. Missing provenance uses
 // originalTaskSession, which conservatively backfills older tasks only when
 // provenance is unambiguous.
 func (s *Service) resolveInitialWorkflowSession(ctx context.Context, taskID string) (*models.TaskSession, string, error) {
+	resolution, err := s.resolveInitialWorkflowTarget(ctx, taskID)
+	return resolution.session, resolution.profileID, err
+}
+
+func (s *Service) resolveInitialWorkflowTarget(ctx context.Context, taskID string) (workflowSessionTargetResolution, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
-		return nil, "", fmt.Errorf("load task for initial session target: %w", err)
+		return workflowSessionTargetResolution{}, fmt.Errorf("load task for initial session target: %w", err)
 	}
 	if task == nil {
-		return nil, "", fmt.Errorf("task %s not found for initial session target", taskID)
+		return workflowSessionTargetResolution{}, fmt.Errorf("task %s not found for initial session target", taskID)
 	}
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil {
-		return nil, "", fmt.Errorf("list sessions for initial session target: %w", err)
+		return workflowSessionTargetResolution{}, fmt.Errorf("list sessions for initial session target: %w", err)
 	}
 	initial, err := s.originalTaskSession(ctx, taskID)
 	if err != nil {
-		return nil, "", err
+		return workflowSessionTargetResolution{}, err
 	}
 	profileID := ""
 	if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata); ok {
@@ -77,10 +83,15 @@ func (s *Service) resolveInitialWorkflowSession(ctx context.Context, taskID stri
 	if profileID == "" && len(sessions) == 0 {
 		profileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
 	}
-	if profileID == "" {
-		return nil, "", fmt.Errorf("initial session provenance is unavailable for task %s", taskID)
+	session, profileID, err := s.applyInitialRecipientBinding(ctx, task, initial, profileID)
+	if err != nil {
+		return workflowSessionTargetResolution{}, err
 	}
-	return initial, profileID, nil
+	if profileID == "" {
+		return workflowSessionTargetResolution{}, fmt.Errorf("initial session provenance is unavailable for task %s", taskID)
+	}
+	binding, err := models.LoadWorkflowInitialRecipientBinding(task.Metadata)
+	return workflowSessionTargetResolution{session: session, profileID: profileID, initialBinding: binding}, err
 }
 
 // resolveWorkflowSessionTarget resolves the exact recipient owned by a step.
@@ -110,11 +121,7 @@ func (s *Service) resolveWorkflowSessionTargetWithTask(
 		return workflowSessionTargetResolution{}, err
 	}
 	if step.SessionTarget.Kind == wfmodels.WorkflowSessionTargetInitial {
-		session, profileID, err := s.resolveInitialWorkflowSession(ctx, taskID)
-		if err != nil {
-			return workflowSessionTargetResolution{}, err
-		}
-		return workflowSessionTargetResolution{session: session, profileID: profileID}, nil
+		return s.resolveInitialWorkflowTarget(ctx, taskID)
 	}
 
 	return s.resolveSourceWorkflowSessionTargetWithTask(ctx, taskID, step, effectiveTask)
@@ -211,6 +218,18 @@ func (s *Service) persistWorkflowSessionRoute(ctx context.Context, taskID string
 	defer release()
 	if err := s.workflowRouteMutationAllowed(ctx, taskID); err != nil {
 		return err
+	}
+	if route.TargetKind == string(wfmodels.WorkflowSessionTargetInitial) {
+		task, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			return err
+		}
+		if task == nil {
+			return fmt.Errorf("task not found for workflow route")
+		}
+		if err := models.ValidateInitialRecipientRoute(task.Metadata, &route); err != nil {
+			return err
+		}
 	}
 	setter, ok := s.repo.(taskMetadataKeySetter)
 	if !ok {
@@ -611,7 +630,11 @@ func (s *Service) prepareExplicitWorkflowSession(
 	sourceStep *wfmodels.WorkflowStep,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
-	resolution, err := s.resolveWorkflowSessionTarget(ctx, taskID, step)
+	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
+	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+	entryIdentity := s.workflowEntryIdentity(ctx, taskID, entryIDs...)
+	operationID := workflowSessionRouteID(taskID, step.ID, entryIdentity, step.SessionTarget, startPolicy)
+	resolution, err := s.resolveWorkflowEntryTarget(ctx, taskID, step, operationID)
 	if err != nil {
 		return nil, false, err
 	}
@@ -619,10 +642,6 @@ func (s *Service) prepareExplicitWorkflowSession(
 	if targetProfile == "" {
 		return nil, false, fmt.Errorf("workflow session target has no logical agent profile")
 	}
-	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
-	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	entryIdentity := s.workflowEntryIdentity(ctx, taskID, entryIDs...)
-	operationID := workflowSessionRouteID(taskID, step.ID, entryIdentity, step.SessionTarget, startPolicy)
 	recordedRoute, recordedSession, err := s.loadRecordedWorkflowSessionRoute(ctx, taskID, operationID, step, targetProfile)
 	if err != nil {
 		return nil, false, err
@@ -634,13 +653,14 @@ func (s *Service) prepareExplicitWorkflowSession(
 		}
 	}
 	baseRoute := models.WorkflowSessionRoute{
-		OperationID:       operationID,
-		DestinationStepID: step.ID,
-		EntryIdentity:     entryIdentity,
-		TargetKind:        string(step.SessionTarget.Kind),
-		TargetStepID:      step.SessionTarget.StepID,
-		AgentProfileID:    targetProfile,
-		SourceSessionID:   currentSession.ID,
+		OperationID:             operationID,
+		DestinationStepID:       step.ID,
+		EntryIdentity:           entryIdentity,
+		TargetKind:              string(step.SessionTarget.Kind),
+		TargetStepID:            step.SessionTarget.StepID,
+		AgentProfileID:          targetProfile,
+		SourceSessionID:         currentSession.ID,
+		InitialRecipientBinding: resolution.initialBinding,
 	}
 
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {

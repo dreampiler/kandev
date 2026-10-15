@@ -49,6 +49,31 @@ func ceilingLaunchOrigin(base launchOrigin, automatic bool) launchOrigin {
 	return base
 }
 
+// automaticLaunchContextKey carries the server-only marker that classifies an
+// agent/MCP-initiated prompt or resume as automatic for admission, so a launch
+// entry point that defaults to a manual origin cannot let an agent ride the
+// manual override past the session ceiling or the host-memory guard. Only
+// server-side handlers set it; no wire payload can reach this key.
+type automaticLaunchContextKey struct{}
+
+// WithAutomaticLaunch marks ctx as a server-driven agent/MCP-initiated prompt
+// or resume. Launch entry points that read it admit the work as automatic,
+// while human UI actions keep their manual origin.
+func WithAutomaticLaunch(ctx context.Context) context.Context {
+	return context.WithValue(ctx, automaticLaunchContextKey{}, true)
+}
+
+func automaticLaunchFromContext(ctx context.Context) bool {
+	marked, _ := ctx.Value(automaticLaunchContextKey{}).(bool)
+	return marked
+}
+
+// promptTaskOrigin is the admission origin for a prompt: automatic when the
+// caller marked the context as agent/MCP-initiated, manual otherwise.
+func promptTaskOrigin(ctx context.Context) launchOrigin {
+	return ceilingLaunchOrigin(launchOriginManual, automaticLaunchFromContext(ctx))
+}
+
 // seam1Reservation tracks the launch-scoped admission reservation seam 1 takes
 // before a session exists (AC-6a). Every return path releases it, by
 // deferring releaseIfNotConsumed at the point of admission, until the launch
@@ -170,6 +195,12 @@ func seam1StartPayload(
 	if origin == "" {
 		origin = originFromAutoStart(autoStart)
 	}
+	// The admission class (origin) can differ from the creation authority
+	// (creation_origin): an agent/MCP-initiated launch is admitted as automatic
+	// while its explicit/autoStart origin still decides manual-creation
+	// authority. Round-trip both so a replay keeps the ceiling class without
+	// promoting the creation authority.
+	baseOrigin := origin
 	origin = ceilingLaunchOrigin(origin, opts.Automatic)
 	payload := map[string]interface{}{
 		metaKeyAgentProfileID:    agentProfileID,
@@ -188,6 +219,7 @@ func seam1StartPayload(
 		"entry_options":          opts.EntryOptions,
 		"workflow_entry_id":      opts.WorkflowEntryID,
 		"origin":                 string(origin),
+		"creation_origin":        string(baseOrigin),
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{
@@ -224,6 +256,7 @@ func (s *Service) admitOrDeferSeam1(
 		origin:         origin,
 		seam:           "startTask",
 		agentProfileID: agentProfileID,
+		workflowID:     s.ceilingWorkflowIDForTask(ctx, taskID),
 	})
 	if decision.admitted {
 		return &seam1Reservation{

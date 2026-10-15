@@ -4,6 +4,7 @@ system: launcher
 requirements:
   - REQ-LAUNCHER-ISOLATED-SCRIPTS-001
   - REQ-LAUNCHER-ISOLATED-SCRIPTS-002
+  - REQ-LAUNCHER-ISOLATED-SCRIPTS-003
 ---
 
 # Isolated instance script system design
@@ -26,6 +27,7 @@ The helpers are Windows-only and PowerShell 5.1 compatible; they depend on
 | --- | --- |
 | `REQ-LAUNCHER-ISOLATED-SCRIPTS-001` | [Port selection](#port-selection), [Home isolation](#home-isolation), [Child environment](#child-environment), [Loopback binding](#loopback-binding), [Teardown](#teardown) |
 | `REQ-LAUNCHER-ISOLATED-SCRIPTS-002` | [Mock selection](#mock-selection) |
+| `REQ-LAUNCHER-ISOLATED-SCRIPTS-003` | [Development binary names](#development-binary-names) |
 
 ## Components and responsibilities
 
@@ -90,6 +92,35 @@ opts into `true` (real agents alongside the mock agent). This keeps the isolated
 dev/mock entrypoint from running vendor discovery probes that could install or
 reconfigure tooling in the host user environment. It changes only the isolated
 child's mock selection, never production discovery or host configuration.
+
+## Development binary names
+
+The isolated instance runs `kandev-dev` and `agentctl-dev` so that its process
+names never match an installed Kandev.
+
+- `apps/backend/Makefile` writes the backend as `$(BINARY_NAME)` and agentctl
+  as `$(AGENTCTL_NAME)`; the defaults stay `kandev` and `agentctl`.
+  `dev-isolated.ps1` runs `make -C apps/backend build BINARY_NAME=kandev-dev
+  AGENTCTL_NAME=agentctl-dev`, then checks, copies, and launches those names
+  and identifies the backend listener by the `kandev-dev.exe` process name.
+  `mock-agent` and the remote agentctl helpers keep their names.
+- The agentctl launcher derives the agentctl name from its own executable.
+  When the backend executable is `kandev-dev`, every search location (the
+  executable directory, PATH, and the development fallbacks) uses
+  `agentctl-dev`; otherwise it uses `agentctl`. A development backend
+  therefore cannot pick up an installed `agentctl` from PATH. The derivation
+  matches only that exact name, so the copied `make dev` launcher and test
+  binaries keep `agentctl`.
+- `kandev-kill.ps1` accepts only a `kandev-dev` backend. Before stopping, it
+  refuses any process in the termination set named `kandev` or `agentctl` or
+  running from an operational path, regardless of how the target was named.
+- `kandev-instances.ps1` lists listening backends named `kandev-dev` or
+  `kandev`.
+
+`scripts/verify-release.ps1 -InstanceKind isolated` builds with the same
+`BINARY_NAME=kandev-dev AGENTCTL_NAME=agentctl-dev` overrides and launches and
+tears down through these helpers, so release verification runs only the
+development names.
 
 ## Loopback binding
 The backend, its agentctl child, and the Vite dev server bind `127.0.0.1` by

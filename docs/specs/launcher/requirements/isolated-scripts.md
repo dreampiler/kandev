@@ -98,3 +98,26 @@ into host changes (user PATH or registry).
   wants real vendor CLIs in the isolated instance.
 - **AC-LAUNCHER-ISOLATED-SCRIPTS-002.3:** The helper shall not change the host
   user PATH, registry, file associations, or provider installation state.
+
+### REQ-LAUNCHER-ISOLATED-SCRIPTS-003: Development binary names
+
+**Intent:** An isolated instance must be distinguishable from an installed
+Kandev by executable name, so a helper that resolves, lists, or terminates
+processes cannot reach an installed backend or agentctl by mistake.
+
+#### Acceptance criteria
+
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-003.1:** The isolated helper shall build and
+  launch the backend as `kandev-dev` and agentctl as `agentctl-dev` (with
+  `.exe` on Windows). A default backend build shall keep the `kandev` and
+  `agentctl` names.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-003.2:** A backend whose executable is named
+  `kandev-dev` shall resolve its local agentctl only by the `agentctl-dev`
+  name, in every search location, so it never starts an `agentctl` found
+  through PATH. Any other backend name shall keep resolving `agentctl`.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-003.3:** Teardown shall accept only a backend
+  named `kandev-dev`. It shall refuse to stop any process named `kandev` or
+  `agentctl`, or under an operational path, even when a pidfile or port
+  names it.
+- **AC-LAUNCHER-ISOLATED-SCRIPTS-003.4:** Instance listing shall report
+  backends named `kandev-dev` as well as `kandev`.

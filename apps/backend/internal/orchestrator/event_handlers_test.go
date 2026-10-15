@@ -983,10 +983,22 @@ var orchestratorTestSQLiteTemplate = testutil.NewSQLiteTemplate(func(database *s
 })
 
 // setupTestRepo creates a separate disk-backed SQLite repository for testing.
+// It seeds the executor profiles fixtures name on retained sessions so a
+// fresh-destination session preparation resolves them through the same strict
+// lookup production uses. The local executor itself is seeded by the
+// initialized database.
 func setupTestRepo(t *testing.T) *sqliterepo.Repository {
 	t.Helper()
 	database, _ := orchestratorTestSQLiteTemplate.Open(t)
-	return sqliterepo.NewWithInitializedDB(database, database, nil)
+	repo := sqliterepo.NewWithInitializedDB(database, database, nil)
+	for _, id := range []string{"ep1", "executor-profile"} {
+		if err := repo.CreateExecutorProfile(context.Background(), &models.ExecutorProfile{
+			ID: id, ExecutorID: "exec-local", Name: id,
+		}); err != nil {
+			t.Fatalf("seed executor profile %q: %v", id, err)
+		}
+	}
+	return repo
 }
 
 // seedSession creates a task, workspace, workflow and session in the repo for testing.

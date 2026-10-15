@@ -76,7 +76,7 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 ) (*sessionKeyedCeilingReservation, bool, error) {
 	decision := s.admitCeilingLaunch(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
-		agentProfileID: agentProfileID,
+		agentProfileID: agentProfileID, workflowID: s.ceilingWorkflowIDForTask(ctx, taskID),
 	})
 	if decision.admitted {
 		return &sessionKeyedCeilingReservation{

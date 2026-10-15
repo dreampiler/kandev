@@ -126,7 +126,7 @@ func TestSessionCeilingMemoryControlLaneIsExempt(t *testing.T) {
 	lister.set("worker-1")
 	c := newMemoryController(t, 1, lister, &fakeMemoryReader{reading: pressuredReading()})
 	c.controlCeiling = 2
-	c.controlProfiles = controlProfileSet([]string{"ctrl"})
+	c.controlProfileIDs = []string{"ctrl"}
 
 	req := workerRequest("ctrl-new", launchOriginAutomatic)
 	req.agentProfileID = "ctrl"
@@ -219,7 +219,7 @@ func TestSessionCeilingMemorySweepArmReportsNoWorkerCapacity(t *testing.T) {
 	lister := &fakeAdmittedLister{}
 	c := newMemoryController(t, 10, lister, &fakeMemoryReader{reading: pressuredReading()})
 	c.controlCeiling = 2
-	c.controlProfiles = controlProfileSet([]string{"ctrl"})
+	c.controlProfileIDs = []string{"ctrl"}
 
 	workerFree, controlFree, err := c.freeCapacityByLane(context.Background())
 	if err != nil {

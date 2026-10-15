@@ -21,6 +21,7 @@ import (
 type FailureCause string
 
 const (
+	CauseAccountMinuteLimit FailureCause = "account_minute_limit"
 	// CauseAccountQuota is an exhausted subscription or prepaid plan: every
 	// model the account reaches through this path stops until the stated reset.
 	CauseAccountQuota FailureCause = "account_quota"
@@ -95,6 +96,8 @@ type causeRule struct {
 // 2026-10-12 failover error catalogue (signature, path, recovery and
 // cross-path behaviour).
 var failureCauseRules = []causeRule{
+	{rule: "account_limit.minute", cause: CauseAccountMinuteLimit},
+	{rule: "account_limit.daily", cause: CauseFreeAccountDailyLimit},
 	// Account allowances with a stated reset or renewal.
 	{rule: routingerr.RuleOpenCodeCredit, cause: CauseAccountQuota},
 	{rule: routingerr.RuleOpenCodeUsageLimit, cause: CauseAccountQuota},
@@ -217,6 +220,7 @@ const modelHostWindow = 15 * time.Minute
 const upstreamHostDailyAfterStrikes = 8
 
 var failureCausePolicies = map[FailureCause]causePolicy{
+	CauseAccountMinuteLimit:    {scope: BlockAccountTier, ladder: []time.Duration{time.Minute}},
 	CauseAccountQuota:          {scope: BlockAccount, usageLimitDuration: true, holdUntilRenewal: true},
 	CauseGoUsageLimit:          {scope: BlockAccountTier, ladder: goUsageLadder},
 	CauseFreeDailyLimit:        {scope: BlockPathModel, untilNextUTCDay: true},
@@ -389,6 +393,10 @@ func (e *Engine) causeSuspensionUntil(
 	now time.Time,
 ) time.Time {
 	floor := now.Add(circuitBackoff)
+	if failure.ResetHint != nil && failure.ResetHint.After(now) &&
+		(failure.ClassifierRule == "account_limit.minute" || failure.ClassifierRule == "account_limit.daily") {
+		return *failure.ResetHint
+	}
 	if failure.ResetHint != nil && failure.ResetHint.After(floor) {
 		return *failure.ResetHint
 	}

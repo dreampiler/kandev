@@ -18,7 +18,7 @@ func TestSessionCapacityLiveChangePreservesReservations(t *testing.T) {
 	require.True(t, decision.admitted)
 	require.Equal(t, "capacity-session", decision.reservationKey)
 
-	svc.SetSessionCapacity(0, 0, nil)
+	svc.SetSessionCapacity(0, 0, nil, nil)
 
 	require.Equal(t, 0, svc.SessionCapacity())
 	svc.sessionCeiling.mu.Lock()
@@ -38,14 +38,14 @@ func TestSessionCapacityChangeSignalsSweepForRefresh(t *testing.T) {
 		ceilingSweeper: newCeilingSweeper(),
 	}
 
-	svc.SetSessionCapacity(1, 0, nil)
+	svc.SetSessionCapacity(1, 0, nil, nil)
 	select {
 	case <-svc.ceilingSweeper.signal:
 	default:
 		t.Fatal("lowering capacity must request a status refresh sweep")
 	}
 
-	svc.SetSessionCapacity(3, 0, nil)
+	svc.SetSessionCapacity(3, 0, nil, nil)
 	select {
 	case <-svc.ceilingSweeper.signal:
 	default:

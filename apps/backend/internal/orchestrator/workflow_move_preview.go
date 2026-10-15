@@ -397,6 +397,10 @@ func (s *Service) resolvePreviewInitialWorkflowSession(
 	if profileID == "" && len(sessions) == 0 {
 		profileID = models.StringFromAny(task.Metadata[models.MetaKeyAgentProfileID])
 	}
+	initial, profileID, err = s.applyInitialRecipientBinding(ctx, task, initial, profileID)
+	if err != nil {
+		return nil, "", err
+	}
 	if profileID == "" {
 		return nil, "", fmt.Errorf("initial session provenance is unavailable for task %s", taskID)
 	}
@@ -405,9 +409,13 @@ func (s *Service) resolvePreviewInitialWorkflowSession(
 
 func previewOriginalTaskSessionFromTask(task *models.Task, sessions []*models.TaskSession) *models.TaskSession {
 	if task != nil {
-		if snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata); ok {
+		initialID, err := models.RecordedWorkflowInitialSessionID(task.Metadata)
+		if err != nil {
+			return nil
+		}
+		if initialID != "" {
 			for _, candidate := range sessions {
-				if candidate != nil && candidate.ID == snapshot.SessionID {
+				if candidate != nil && candidate.ID == initialID {
 					return candidate
 				}
 			}

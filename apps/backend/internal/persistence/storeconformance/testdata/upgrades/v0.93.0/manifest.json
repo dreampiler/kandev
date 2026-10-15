@@ -507,11 +507,13 @@
       "agent_delivery_retention_state",
       "agent_delivery_submissions",
       "harness_session_generations",
+      "provider_account_limits",
       "session_continuation_snapshots",
       "session_recovery_blocks",
       "session_restore_attempts",
       "task_creation_authorizations",
       "task_environment_kubernetes",
+      "task_message_send_operations",
       "task_workflow_session_bindings"
     ]
   }
