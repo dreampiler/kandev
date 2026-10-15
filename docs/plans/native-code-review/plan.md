@@ -1,5 +1,9 @@
 ---
-spec: docs/specs/agents/requirements/native-code-review.md
+requirements:
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-001
+system_design:
+  - ../../specs/agents/system-design/native-code-review-recovery.md
+legacy_specs: []
 created: 2026-07-24
 status: building
 ---

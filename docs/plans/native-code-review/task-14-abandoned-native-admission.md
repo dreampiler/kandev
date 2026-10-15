@@ -5,7 +5,12 @@ status: building
 wave: 11
 depends_on: ["04-run-orchestration"]
 plan: "plan.md"
-spec: "../../specs/agents/requirements/native-code-review.md"
+requirements:
+  - REQ-AGENTS-NATIVE-CODE-REVIEW-001
+acceptance_criteria:
+  - AC-AGENTS-NATIVE-CODE-REVIEW-001.14
+system_design:
+  - ../../specs/agents/system-design/native-code-review-recovery.md
 ---
 
 # Task 14: Abandoned native review admission
