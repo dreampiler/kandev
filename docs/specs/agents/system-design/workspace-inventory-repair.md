@@ -66,8 +66,10 @@ recovery validates all of these facts:
   An interrupted process leaves the durable claim in place and fails closed.
 
 Inspection disables Git fsmonitor and optional index writes for every Git
-command. Status does not recurse into submodules, and configured external
-clean/process filters are rejected before status can execute them. Repositories
+command. Status does not recurse into submodules, and external clean/process
+drivers selected by tracked paths are rejected before status can execute them.
+Unused driver definitions do not require those filters. Attribute lookup uses
+the working tree so uncommitted attribute changes remain covered. Repositories
 requiring those filters need manual recovery; changing conversion semantics
 would invalidate the status proof.
 

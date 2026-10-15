@@ -159,11 +159,16 @@ func gitText(ctx context.Context, directory string, args ...string) (string, err
 }
 
 func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
+	return gitBytesWithInput(ctx, directory, nil, args...)
+}
+
+func gitBytesWithInput(ctx context.Context, directory string, input []byte, args ...string) ([]byte, error) {
 	// Inspection must not refresh the index or invoke repository callbacks.
 	cmd := newGitCommand(ctx, append([]string{
 		"--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false",
 		"-C", directory,
 	}, args...)...)
+	cmd.Stdin = bytes.NewReader(input)
 	output, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%w: git inspection failed", ErrPreservedCheckoutUnproven)
@@ -171,22 +176,44 @@ func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, er
 	return output, nil
 }
 
-// Clean/process filters can execute while status compares tracked content.
-// Reject them rather than changing conversion semantics and attesting a
-// different status from the repository's own configuration.
+// Clean/process drivers selected by tracked paths can execute during status.
+// Reject those drivers without changing the checkout's conversion semantics.
 func rejectPreservationFilters(ctx context.Context, directory string) error {
 	config, err := gitBytes(ctx, directory, "config", "--null", "--list")
 	if err != nil {
 		return err
 	}
-	for _, entry := range bytes.Split(config, []byte{0}) {
-		key, value, _ := strings.Cut(string(entry), "\n")
-		if strings.HasPrefix(key, "filter.") && value != "" &&
-			(strings.HasSuffix(key, ".clean") || strings.HasSuffix(key, ".process")) {
+	filters := preservationFilterDrivers(config)
+	if len(filters) == 0 {
+		return nil
+	}
+	paths, err := gitBytes(ctx, directory, "ls-files", "-z")
+	if err != nil || len(paths) == 0 {
+		return err
+	}
+	attributes, err := gitBytesWithInput(ctx, directory, paths, "check-attr", "--all", "-z", "--stdin")
+	if err != nil {
+		return err
+	}
+	fields := bytes.Split(attributes, []byte{0})
+	for i := 0; i+2 < len(fields); i += 3 {
+		if string(fields[i+1]) == "filter" && filters[string(fields[i+2])] {
 			return fmt.Errorf("%w: external content filters", ErrPreservedCheckoutUnproven)
 		}
 	}
 	return nil
+}
+
+func preservationFilterDrivers(config []byte) map[string]bool {
+	filters := make(map[string]bool)
+	for _, entry := range bytes.Split(config, []byte{0}) {
+		key, value, _ := strings.Cut(string(entry), "\n")
+		if strings.HasPrefix(key, "filter.") && value != "" &&
+			(strings.HasSuffix(key, ".clean") || strings.HasSuffix(key, ".process")) {
+			filters[strings.TrimPrefix(key[:strings.LastIndex(key, ".")], "filter.")] = true
+		}
+	}
+	return filters
 }
 
 func worktreeRegistrationMatches(ctx context.Context, repositoryPath, worktreePath, refName, headOID string) bool {
