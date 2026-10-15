@@ -105,6 +105,14 @@ func (s *Service) resumeQueuedSessionOnStartup(ctx context.Context, sessionID st
 		if block.Reason != unknownQueueDispatchRecoveryReason && status.Count == 0 {
 			return false
 		}
+		// The automatic continuation this block would start must clear the same
+		// eligibility a queued resume does: a parked dynamic route, a launch
+		// already queued for this session, or a coordinator message-only task
+		// must not be woken from history. The block path used to bypass this
+		// gate and start the continuation regardless.
+		if allowed, _ := s.autoResumeEligibility(ctx, task, session); !allowed {
+			return false
+		}
 		return s.AutoRecoverBlockedPrompt(ctx, taskID, sessionID, nil)
 	}
 	if status.Count == 0 || session.State == models.TaskSessionStateFailed {

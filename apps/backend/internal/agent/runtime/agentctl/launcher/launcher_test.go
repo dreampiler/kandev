@@ -25,6 +25,28 @@ func TestLauncherConfigSupportsUnexpectedExitCallback(t *testing.T) {
 	}
 }
 
+func TestAgentctlBinaryNameFor(t *testing.T) {
+	tests := []struct {
+		backendExe string
+		goos       string
+		want       string
+	}{
+		{backendExe: "kandev-dev.exe", goos: "windows", want: "agentctl-dev.exe"},
+		{backendExe: "KANDEV-DEV.EXE", goos: "windows", want: "agentctl-dev.exe"},
+		{backendExe: "kandev-dev", goos: "linux", want: "agentctl-dev"},
+		{backendExe: "kandev.exe", goos: "windows", want: "agentctl.exe"},
+		{backendExe: "kandev", goos: "darwin", want: "agentctl"},
+		{backendExe: "kandev-launcher.exe", goos: "windows", want: "agentctl.exe"},
+		{backendExe: "launcher.test.exe", goos: "windows", want: "agentctl.exe"},
+		{backendExe: "", goos: "linux", want: "agentctl"},
+	}
+	for _, tt := range tests {
+		if got := agentctlBinaryNameFor(tt.backendExe, tt.goos); got != tt.want {
+			t.Errorf("agentctlBinaryNameFor(%q, %q) = %q, want %q", tt.backendExe, tt.goos, got, tt.want)
+		}
+	}
+}
+
 func TestEnvironmentWithOverridesRemovesInheritedValues(t *testing.T) {
 	got := environmentWithOverrides(
 		[]string{"KANDEV_ACP_IDLE_TIMEOUT=host", "PATH=/bin", "DUP=old"},

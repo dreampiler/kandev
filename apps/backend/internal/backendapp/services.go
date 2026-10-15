@@ -232,6 +232,13 @@ func initCoreTaskServices(
 		return nil, err
 	}
 	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
+	if usageAdapter.tierLimits != nil && eventBus != nil {
+		subscription, err := usageAdapter.tierLimits.Subscribe(eventBus)
+		if err != nil {
+			return nil, fmt.Errorf("subscribe account usage limits: %w", err)
+		}
+		go func() { <-ctx.Done(); _ = subscription.Unsubscribe() }()
+	}
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(ctx)
 	if err != nil {
@@ -360,6 +367,9 @@ func initDynamicRuntimeResolver(
 		return nil, nil, fmt.Errorf("restore dynamic routing health: %w", err)
 	}
 	accounts := newAccountUsageReader(usageAdapter, repos.Task)
+	usageAdapter.tierLimits = newProviderTierLimitService(usageAdapter, repos.Task)
+	priceCatalog := newProviderPriceCatalog(cfg.ResolvedHomeDir(), log)
+	usageAdapter.tierLimits.freeModels = priceCatalog
 	dynamicEngine := dynamicruntime.NewEngine(
 		dynamicruntime.WithPersistence(repos.Task),
 		dynamicruntime.WithStateLoader(repos.Task),
@@ -385,7 +395,7 @@ func initDynamicRuntimeResolver(
 	// A free model suspends on its own ladder instead of the paid account's, so a
 	// candidate whose route declares no cost class is classified from the price
 	// list its own provider publishes.
-	dynamicResolver.SetFreeModelReader(newProviderPriceCatalog(cfg.ResolvedHomeDir(), log))
+	dynamicResolver.SetFreeModelReader(priceCatalog)
 	// The executor lives on the task session, so this is what lets a selection
 	// tell a host execution from a container, SSH or Kubernetes one. Without it
 	// every candidate would read the backend host's provider account, which is a

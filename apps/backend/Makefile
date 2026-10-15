@@ -2,6 +2,7 @@
 
 # Variables
 BINARY_NAME := kandev
+AGENTCTL_NAME := agentctl
 BUILD_DIR := bin
 GO := go
 GOFLAGS := -v
@@ -280,9 +281,9 @@ build-all: build build-agentctl
 ## $(CGO_LOCALE) because agentctl imports cgo (unlike mock-agent/acpdbg/winjob),
 ## so its native `go build` invokes gcc; see the CGO_LOCALE note above.
 build-agentctl:
-	@echo "Building agentctl..."
+	@echo "Building $(AGENTCTL_NAME)..."
 	@$(call MKDIR,$(BUILD_DIR))
-	$(CGO_LOCALE) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/agentctl$(EXE) ./cmd/agentctl
+	$(CGO_LOCALE) $(GO) build -trimpath $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(AGENTCTL_NAME)$(EXE) ./cmd/agentctl
 
 ## Build only the agentctl helpers needed by the development profile.
 build-agentctl-dev: $(DEV_AGENTCTL_TARGETS)

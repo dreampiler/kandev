@@ -125,11 +125,12 @@ func (w UtilizationWindow) UsableFor(modelID string) bool {
 
 // ProviderUsage is the full utilization response for one provider credential.
 type ProviderUsage struct {
-	Provider  string              `json:"provider"`       // "anthropic", "openai", "google"
-	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
-	Windows   []UtilizationWindow `json:"windows"`
-	FetchedAt time.Time           `json:"fetched_at"`
-	Stale     bool                `json:"stale,omitempty"`
+	FreeModelDailyRequests *FreeModelCounter   `json:"free_model_daily_requests,omitempty"`
+	Provider               string              `json:"provider"`       // "anthropic", "openai", "google"
+	Plan                   string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
+	Windows                []UtilizationWindow `json:"windows"`
+	FetchedAt              time.Time           `json:"fetched_at"`
+	Stale                  bool                `json:"stale,omitempty"`
 
 	// Observed marks a window that came from a running agent reporting its own
 	// utilization rather than from the provider's usage API. It names where the
@@ -139,6 +140,12 @@ type ProviderUsage struct {
 	// ObservedSource indicates whether the observation came from an active agent stream
 	// ("agent_stream") or a minimal measured probe call ("measured_call").
 	ObservedSource string `json:"observed_source,omitempty"`
+}
+
+type FreeModelCounter struct {
+	Used      float64 `json:"used"`
+	Limit     float64 `json:"limit"`
+	Remaining float64 `json:"remaining"`
 }
 
 // ProviderUsageClient fetches live utilization from a provider API.

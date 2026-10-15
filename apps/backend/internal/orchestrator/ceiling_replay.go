@@ -823,6 +823,15 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	env = remintedEnv
 	automationRun := automationRunFromCeilingPayload(payload)
 
+	// The record carries the admission class in "origin" and, for records
+	// written with the two-origin round-trip, the creation authority in
+	// "creation_origin". Restore the authority from creation_origin so a replay
+	// does not promote a manual-creation launch to automatic; legacy records
+	// keep their single-origin meaning.
+	creationOrigin := stringField(payload, "creation_origin")
+	if creationOrigin == "" {
+		creationOrigin = stringField(payload, "origin")
+	}
 	opts := startTaskOptions{
 		ProfileExplicit:      boolField(payload, "profile_explicit"),
 		Env:                  env,
@@ -835,9 +844,12 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		// an explicit automatic Origin override, and re-deriving from
 		// auto_start alone would replay it as a manual override that bypasses
 		// the ceiling.
-		Origin:              launchOrigin(stringField(payload, "origin")),
+		Origin:              launchOrigin(creationOrigin),
 		AutomationRun:       automationRun,
 		ceilingEntryBinding: entryBinding,
+	}
+	if stringField(payload, "creation_origin") != "" {
+		opts.Automatic = stringField(payload, "origin") == string(launchOriginAutomatic)
 	}
 	if spawnRaw, ok := payload["spawn_origin"].(map[string]interface{}); ok {
 		opts.SpawnOrigin = &SpawnOrigin{
@@ -896,6 +908,10 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
 		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
 		ceilingEntryBinding:         entryBinding,
+		// The refusal recorded the launch's effective admission class in the
+		// payload origin, so a replay restores it instead of re-deriving it
+		// from auto_start (which is false for an agent/MCP-initiated start).
+		automatic: stringField(payload, "origin") == string(launchOriginAutomatic),
 	}
 
 	execution, err := s.startCreatedSession(

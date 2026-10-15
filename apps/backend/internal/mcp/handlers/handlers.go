@@ -2001,6 +2001,10 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 			ExecutorProfileID: config.ExecutorProfileID,
 			WorkflowStepID:    task.WorkflowStepID,
 			Prompt:            task.Description,
+			// An MCP-created task's auto-start is agent-initiated: admit it as
+			// automatic so it is subject to the session ceiling instead of
+			// riding the manual override.
+			Automatic: true,
 		}
 		if config.InitialCreatePrompt {
 			prepResp, prepErr := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
@@ -2033,6 +2037,7 @@ func (h *Handlers) launchAutoStartTask(ctx context.Context, task *models.Task, c
 				WorkflowStepID:      task.WorkflowStepID,
 				Prompt:              task.Description,
 				InitialCreatePrompt: true,
+				Automatic:           true,
 			}
 		}
 
@@ -4018,6 +4023,10 @@ func (h *Handlers) resumeCompletedTaskMessageSession(ctx context.Context, taskID
 		SessionID:                   sessionID,
 		Intent:                      orchestrator.IntentResume,
 		AllowCompletedSessionResume: true,
+		// An MCP-issued follow-up is agent-initiated: admit it as automatic so
+		// it is subject to the session ceiling instead of riding the manual
+		// override.
+		Automatic: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to resume completed session: %w", err)
@@ -4929,6 +4938,10 @@ func (h *Handlers) deleteRecordedUserMessageWithoutTurnRollback(ctx context.Cont
 // Uses dispatch-only mode so the MCP tool returns once the prompt is accepted
 // rather than blocking for the entire target turn.
 func (h *Handlers) promptWithAutoResume(ctx context.Context, taskID, sessionID, prompt string) (string, error) {
+	// An MCP-issued message is agent-initiated: mark the context so a prompt
+	// that has to wake the session is admitted as automatic instead of riding
+	// the manual override past the session ceiling.
+	ctx = orchestrator.WithAutomaticLaunch(ctx)
 	_, err := h.sessionLauncher.PromptTask(ctx, taskID, sessionID, prompt, "", false, nil, true)
 	if err == nil {
 		return taskMessageStatusSent, nil

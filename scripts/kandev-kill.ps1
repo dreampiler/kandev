@@ -13,8 +13,11 @@
 
   Safety:
     - Refuses to act unless you explicitly pass a port or a -Pidfile.
+    - Stops only a development backend named kandev-dev.exe. A process named
+      kandev.exe or agentctl.exe, or running from an operational path, is
+      never stopped, even with -Force.
     - GUARDED PORTS (the well-known production ports: 38429 backend, 37429 web,
-      39429 agentctl) are protected: killing one
+      39429 agentctl) are protected: killing a development process on one
       requires an explicit -Force. The guard is applied to the RESOLVED backend
       ports, so it holds no matter HOW you reached it - by <port> OR via a
       -Pidfile whose process happens to listen on a guarded port.
@@ -36,7 +39,8 @@
   Skip the confirmation prompt (for scripted teardown).
 
 .PARAMETER Force
-  Allow terminating a guarded production port. Use with care.
+  Allow terminating a development process on a guarded production port. It
+  never allows stopping kandev.exe, agentctl.exe, or an operational path.
 
 .EXAMPLE
   scripts\kandev-kill.ps1 48429 -Yes
@@ -121,12 +125,19 @@ function Test-OperationalProcessPath {
   return $false
 }
 
+# Installed Kandev runs as kandev.exe and agentctl.exe; isolated instances run
+# as kandev-dev.exe and agentctl-dev.exe, so these names are never stopped.
+function Test-InstalledProcessName {
+  param($ProcessInfo)
+  if ($null -eq $ProcessInfo) { return $false }
+  return (@('kandev.exe', 'kandev', 'agentctl.exe', 'agentctl') -contains $ProcessInfo.Name.ToLowerInvariant())
+}
+
 function Test-KandevBackend {
   param([int]$TargetPid)
   $info = Get-ProcessInfo -TargetPid $TargetPid
   if ($null -eq $info) { return $false }
-  if ($info.Name -ieq 'kandev.exe' -or $info.Name -ieq 'kandev') { return $true }
-  if ($info.ExecutablePath -and ($info.ExecutablePath -match '(\\|/)kandev(\.exe)?$')) { return $true }
+  if ($info.Name -ieq 'kandev-dev.exe' -or $info.Name -ieq 'kandev-dev') { return $true }
   return $false
 }
 
@@ -250,8 +261,12 @@ if ($backendInfo) {
     Write-Fail "kandev-kill: PID $backendPid is an operational process ($($backendInfo.ExecutablePath)). Refusing to stop it."
     exit 4
   }
+  if (Test-InstalledProcessName -ProcessInfo $backendInfo) {
+    Write-Fail "kandev-kill: PID $backendPid is an installed Kandev process ($($backendInfo.Name)). Refusing to stop it."
+    exit 4
+  }
   if (-not (Test-KandevBackend -TargetPid $backendPid)) {
-    Write-Fail "kandev-kill: PID $backendPid is not a kandev backend. Refusing to stop it."
+    Write-Fail "kandev-kill: PID $backendPid is not a development kandev backend (kandev-dev.exe). Refusing to stop it."
     exit 4
   }
   if ($backendStartedFile -and (Test-Path -LiteralPath $backendStartedFile)) {
@@ -318,6 +333,10 @@ foreach ($record in $killSet) {
   $recordInfo = Get-ProcessInfo -TargetPid $record.Pid
   if (Test-OperationalProcessPath -ProcessInfo $recordInfo) {
     Write-Fail "kandev-kill: PID $($record.Pid) is an operational process ($($recordInfo.ExecutablePath)). Refusing to stop it."
+    exit 4
+  }
+  if (Test-InstalledProcessName -ProcessInfo $recordInfo) {
+    Write-Fail "kandev-kill: PID $($record.Pid) is an installed Kandev process ($($recordInfo.Name)). Refusing to stop it."
     exit 4
   }
 }

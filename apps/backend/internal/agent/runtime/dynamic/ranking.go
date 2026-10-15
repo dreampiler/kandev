@@ -37,11 +37,14 @@ func (w WindowObservation) partial() bool { return w.Partial && !w.ExplicitNoWin
 
 // PaceScore is the result of ranking one candidate's windows.
 type PaceScore struct {
-	Known           bool
-	Pace            float64
-	Controlling     string
-	UsageFraction   float64
-	ElapsedFraction float64
+	// AdmissionReason changes availability without changing the ranking inputs.
+	AdmissionReason  string
+	AdmissionRetryAt time.Time
+	Known            bool
+	Pace             float64
+	Controlling      string
+	UsageFraction    float64
+	ElapsedFraction  float64
 	// HasRecord distinguishes a genuinely unobserved candidate from one whose
 	// recorded usage fraction is zero. Without it a missing read and a real zero
 	// would be indistinguishable, which is exactly the confusion the unknown
@@ -259,6 +262,11 @@ func RankTier(tier Tier, options RankOptions) []RankCandidate {
 		score, known := options.Scores[candidate.ID]
 		if !known {
 			score = PaceScore{}
+		}
+		if score.AdmissionReason != "" {
+			ranked = append(ranked, RankCandidate{Candidate: candidate, TierIndex: tier.Index,
+				Score: score, Eligible: false, IneligibleReason: score.AdmissionReason})
+			continue
 		}
 		if reason, ok := options.Eligible[candidate.ID]; ok && reason != "" {
 			ranked = append(ranked, RankCandidate{
