@@ -16,6 +16,9 @@ function deferred() {
   return { promise, resolve };
 }
 
+const PAUSED_BANNER = "office-workspace-paused-banner";
+const UNAVAILABLE_BANNER = "office-workspace-pause-unavailable";
+
 const requests: (ReturnType<typeof deferred> & { url: string; method: string })[] = [];
 const actions: Promise<unknown>[] = [];
 
@@ -118,12 +121,9 @@ async function fail(index: number) {
 function start(view: View, kind: "read" | "pause" | "resume") {
   let pending!: Promise<unknown>;
   act(() => {
-    pending =
-      kind === "read"
-        ? view.current.value.refresh()
-        : kind === "pause"
-          ? view.current.value.pause("incident")
-          : view.current.value.resume();
+    if (kind === "read") pending = view.current.value.refresh();
+    else if (kind === "pause") pending = view.current.value.pause("incident");
+    else pending = view.current.value.resume();
     actions.push(pending);
   });
   return pending;
@@ -133,7 +133,7 @@ function expectLoading() {
   expect(screen.getByTestId("office-workspace-pause-loading").textContent).toBe(
     t("office:pauseStateLoading"),
   );
-  expect(screen.queryByTestId("office-workspace-pause-unavailable")).toBeNull();
+  expect(screen.queryByTestId(UNAVAILABLE_BANNER)).toBeNull();
 }
 
 describe("workspace pause real store, hook and banner lifecycle", () => {
@@ -144,8 +144,8 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await succeed(0, true);
     view.remount();
     expect(requests).toHaveLength(2);
-    expect(screen.getByTestId("office-workspace-paused-banner").textContent).toContain("incident");
-    expect(screen.queryByTestId("office-workspace-pause-unavailable")).toBeNull();
+    expect(screen.getByTestId(PAUSED_BANNER).textContent).toContain("incident");
+    expect(screen.queryByTestId(UNAVAILABLE_BANNER)).toBeNull();
     expect(view.current.store.getState().office.pause.workspaceId).toBe("ws-1");
     await succeed(1, true);
   });
@@ -155,7 +155,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await succeed(0, true);
     act(() => view.current.store.getState().setActiveWorkspace("ws-2"));
     expect(requests[1].url).toContain("/workspaces/ws-2/pause");
-    expect(screen.queryByTestId("office-workspace-paused-banner")).toBeNull();
+    expect(screen.queryByTestId(PAUSED_BANNER)).toBeNull();
     expectLoading();
     await succeed(1, false, "ws-2");
     expect(view.current.value.isPaused).toBe(false);
@@ -172,7 +172,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     expect(requests[2].url).toContain("/workspaces/ws-1/resume");
     await succeed(2);
     await succeed(1, true);
-    expect(screen.queryByTestId("office-workspace-paused-banner")).toBeNull();
+    expect(screen.queryByTestId(PAUSED_BANNER)).toBeNull();
   });
 
   it("shows the localized warning only after a genuine cold-read failure", async () => {
@@ -180,7 +180,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     expectLoading();
     await fail(0);
     expect(screen.queryByTestId("office-workspace-pause-loading")).toBeNull();
-    expect(screen.getByTestId("office-workspace-pause-unavailable").textContent).toBe(
+    expect(screen.getByTestId(UNAVAILABLE_BANNER).textContent).toBe(
       t("office:pauseStateUnavailable"),
     );
   });
@@ -190,19 +190,19 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await succeed(0, true);
     view.remount();
     await fail(1);
-    expect(screen.getByTestId("office-workspace-paused-banner").textContent).toContain(
-      t("office:pauseStateStale"),
-    );
+    expect(screen.getByTestId(PAUSED_BANNER).textContent).toContain(t("office:pauseStateStale"));
     expect(view.current.value.record?.reason).toBe("incident");
   });
+});
 
+describe("workspace pause real request ordering", () => {
   it("ignores an obsolete GET failure while a newer read remains pending", async () => {
     const view = mount();
     start(view, "read");
     await fail(0);
     expectLoading();
     await succeed(1, true);
-    expect(screen.getByTestId("office-workspace-paused-banner")).toBeTruthy();
+    expect(screen.getByTestId(PAUSED_BANNER)).toBeTruthy();
   });
 
   it.each(["read-first", "mutation-first"])(
@@ -222,7 +222,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
       }
       expect(await pending).toMatchObject({ ok: false });
       expect(view.current.value.isMutating).toBe(false);
-      expect(screen.getByTestId("office-workspace-pause-unavailable")).toBeTruthy();
+      expect(screen.getByTestId(UNAVAILABLE_BANNER)).toBeTruthy();
     },
   );
 
@@ -232,7 +232,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await fail(1);
     await succeed(0, true);
     expect(await pending).toMatchObject({ ok: false });
-    expect(screen.getByTestId("office-workspace-paused-banner")).toBeTruthy();
+    expect(screen.getByTestId(PAUSED_BANNER)).toBeTruthy();
   });
 
   it("preserves a successful mutation when an older GET later fails", async () => {
@@ -242,7 +242,7 @@ describe("workspace pause real store, hook and banner lifecycle", () => {
     await fail(0);
     expect(await pending).toMatchObject({ ok: true });
     expect(view.current.value.status).toBe("known");
-    expect(screen.getByTestId("office-workspace-paused-banner").textContent).not.toContain(
+    expect(screen.getByTestId(PAUSED_BANNER).textContent).not.toContain(
       t("office:pauseStateStale"),
     );
   });
