@@ -20,7 +20,7 @@ system_design:
 
 ## Outcome
 
-Implement the six-path production slice for
+Implement bounded queue acquisition and its existing recovery-owner integration for
 `REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001`, criteria .1-.4, following the
 [system design](../../specs/tasks/system-design/bounded-session-queue-admission.md).
 
@@ -47,7 +47,9 @@ publication is part of this work order's implementation handoff.
 
 `orchestrator/messagequeue/service.go`, `messagequeue/session_admission_gate.go`,
 `orchestrator/event_handlers_agent.go`, `handlers/queue_operations_handlers.go`,
-`handlers/queue_handlers.go`, and web `lib/api/domains/queue-api.ts`.
+`handlers/queue_handlers.go`, `orchestrator/queued_dispatch.go`, and web
+`lib/api/domains/queue-api.ts`. Update only the existing web request assertion
+when its timeout argument changes.
 
 ## Verification
 
@@ -66,11 +68,12 @@ full suites. Record actual commands, exit codes, limitations, and cleanup here.
 
 ## Results
 
-Source implementation is complete on base
-`15ed289c050f8bd2bd675c4542ffb796525bf991`. The production slice is six files;
-the requirements, design, manifest and this work order form one delivery
-package. No standing test file or case was added or changed. Git publication and
-existing task/runtime recovery remain separate integration responsibilities.
+The initial six-path slice was published at
+`7fb36ac129344d73b4a996f782a6c7e678e386d8` on base
+`15ed289c050f8bd2bd675c4542ffb796525bf991`. The follow-up below adds the existing
+queued-dispatch ownership seam and corrects one existing web assertion. No
+standing test case was added. The requirements, design, manifest and this work
+order form the same delivery package; operating recovery remains separate.
 
 Compared with the historical patch, deadline conversion now occurs only on
 failed lock acquisition. A callback's `context.DeadlineExceeded` is returned
@@ -133,3 +136,47 @@ existing required frontmatter to this work order and its plan, retaining the
 same requirements and criteria. The existing `pr-docs.cjs` coverage evaluator
 returned exit 0, `status: covered`, and no errors for all eleven changed paths.
 Production and test sources did not change.
+
+## Publication follow-up
+
+At published head `7fb36ac129344d73b4a996f782a6c7e678e386d8`, source review
+confirmed that the browser's five-second default could discard Auto-run and
+Remove responses before the 30-second admission result. Both requests now use
+the existing 35-second transport allowance. The existing Auto-run assertion was
+updated; no new permanent test case was added.
+
+An active edit lease also consumed the cleanup budget without a cleanup attempt.
+The loop now counts actual cleanup/acknowledgement attempts and excludes the
+post-admission lease refusal. The existing wake, stop and durable recovery paths
+remain. One collector-excluded temporary check held an ordinary edit beyond a
+one-attempt budget, confirmed retained pending ownership and zero cleanup calls,
+then ended the lease and completed cleanup once. Its source/overlay were removed.
+
+Existing web tests: one file, 30 tests, exit 0. Final temporary plus six existing
+handler checks: exit 0, package result `ok 0.650s`. Scoped web ESLint: exit 0.
+The first Go-lint attempt was rejected because the normal P46 commit was already
+running golangci-lint; this is not a source finding or a pass. A sequential
+changed-handler lint was started after that owner's Go lint completed.
+
+Failed requeue/restore now waits for compensation settlement before the existing
+queued worker can clear its reservation. Only acquisition timeouts are retried,
+using the existing reserved-prompt callback owner's cancellation and Stop join.
+The reservation phases, durable claims, original queue identity/FIFO, caller
+context and terminal-error handling remain. Stop also suppresses pending drain.
+
+Source review of the two recovery paths found no mandatory defect. Temporary
+native-worker checks reproduced the original failure at virtual 61 seconds,
+after two 30-second admission waits. With the correction, ordinary taken work
+and a valid retained lifecycle reservation kept their markers until contention
+cleared, then restored visible FIFO work and metadata. Actual Service.Stop
+cancelled/joined compensation and retained durable claim data; its disposable
+fixture had no running scheduler, so full shutdown success is not claimed.
+Caller and terminal errors were not retried. The ordinary/Stop/error cases passed inside
+a mixed command whose unsupported retained-ordinary fixture failed; those valid
+results are reused, not labelled an aggregate command pass. The corrected native
+retained-lifecycle case passed separately (exit 0, package `ok 0.902s`). Fixture
+compile/lifetime errors and the unsupported reservation combination are recorded
+separately from product failures. Final changed-handler and changed-orchestrator
+lint each exited 0 with zero issues; scoped orchestrator vet also exited 0.
+All four recovery-source/overlay temporary files were removed, with leftovers
+`[]`. No operating provider or new standing case is used.

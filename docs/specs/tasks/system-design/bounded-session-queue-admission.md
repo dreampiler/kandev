@@ -47,15 +47,30 @@ Preserve all other accepted-work and primary-ownership predicates; the separate
 restart-recovery proposal owns those changes. Do not reinterpret uncertain
 provider delivery as a safe acquisition failure.
 
+Keep the existing queued worker's reservation until its requeue or restore
+mutation returns. Retry only acquisition-budget timeouts through the existing
+reserved-prompt callback owner's cancellable lifetime; do not start another
+provider prompt or retry identity, storage, caller-cancellation, or uncertain
+delivery errors. The caller waits, so a borrowed admission token stays within
+its owner's lock lifetime. Stop cancels and joins compensation and suppresses
+the subsequent pending drain. Each acquisition keeps its own 30-second budget;
+the same live compensation can wait for contention to clear without dropping
+the known-undelivered message.
+
 Auto-run and both removal contracts map this sentinel to the existing retryable
 `UNAVAILABLE` response. Their web wrappers select the existing admission error
 mapping, including translated queue-unavailable feedback. Identity and
 entry-not-found errors retain their precedence.
+The two web requests wait 35 seconds, so the server's acquisition result can
+arrive within its 30-second budget plus the ordinary transport allowance.
 
 Bound the attachment-cleanup loop at 60 attempts. Exhaustion releases only its
 in-memory retry obligation; the persisted cleanup row remains available for
 handler restart recovery. Successful cleanup, captured authorization, edit-lease
 coordination, and attachment-transfer handling retain their current behavior.
+Waiting for an active edit lease, including a lease discovered after admission,
+does not spend a cleanup attempt. Keep the existing wake path until actual
+cleanup or acknowledgement can run.
 
 ## Scope and verification
 

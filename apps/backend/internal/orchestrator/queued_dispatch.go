@@ -4,11 +4,64 @@ import (
 	"context"
 	"errors"
 	"sync/atomic"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 )
 
 var errQueuedDispatchSupersededBySendNow = errors.New("queued dispatch superseded by send now")
+
+// retryQueuedRecoveryMutation keeps the caller's reservation alive until its
+// compensation settles. The caller waits, so borrowed admission context never
+// outlives the lock that supplied it. Stop owns cancellation and joins the work.
+func (s *Service) retryQueuedRecoveryMutation(ctx context.Context, mutate func(context.Context) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	if owner == nil {
+		owner = newReservedPromptCallbackOwner()
+		s.reservedPromptCallbacks = owner
+	}
+	s.reservedPromptCallbacksMu.Unlock()
+	result := make(chan error, 1)
+	if !owner.launch(func(ownerCtx context.Context) {
+		recoveryCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(ownerCtx, cancel)
+		defer stop()
+		defer cancel()
+		if ownerCtx.Err() != nil {
+			cancel()
+		}
+		result <- retryQueuedAdmissionMutation(recoveryCtx, mutate)
+	}) {
+		return context.Canceled
+	}
+	err := <-result
+	if errors.Is(err, context.Canceled) && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+func retryQueuedAdmissionMutation(ctx context.Context, mutate func(context.Context) error) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := mutate(ctx); !errors.Is(err, messagequeue.ErrSessionAdmissionTimeout) {
+			return err
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
 
 type queuedDispatchPhase uint32
 
@@ -386,6 +439,12 @@ func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
 
 func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
 	if sessionID == "" {
+		return
+	}
+	s.reservedPromptCallbacksMu.Lock()
+	owner := s.reservedPromptCallbacks
+	s.reservedPromptCallbacksMu.Unlock()
+	if owner != nil && owner.ctx.Err() != nil {
 		return
 	}
 	if _, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID); !pending {

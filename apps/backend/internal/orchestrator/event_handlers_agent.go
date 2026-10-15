@@ -309,7 +309,9 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	if err := s.messageQueue.RequeueAtHead(ctx, queuedMsg); err != nil {
+	if err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.RequeueAtHead(recoveryCtx, queuedMsg)
+	}); err != nil {
 		s.logger.Error("failed to requeue message at head",
 			zap.String("session_id", queuedMsg.SessionID),
 			zap.String("task_id", queuedMsg.TaskID),
@@ -335,7 +337,9 @@ func (s *Service) requeueMessageForSession(
 	if queuedMsg.QueuedBy != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
-	if err := s.messageQueue.RequeueAtHeadForSession(ctx, identity, queuedMsg); err != nil {
+	if err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		return s.messageQueue.RequeueAtHeadForSession(recoveryCtx, identity, queuedMsg)
+	}); err != nil {
 		s.logPostClaimQueueMutationFailure("requeue message at head", identity, queuedMsg, err)
 		return err
 	}
@@ -370,10 +374,16 @@ func (s *Service) requeueLifecycleMessageForSession(
 	queuedMsg *messagequeue.QueuedMessage,
 	queuedBy, coalesceKey string,
 ) (bool, error) {
-	requeuedMsg, replaced, accepted, err := s.messageQueue.RequeueLifecycleMessageWithCoalesceKeyForSession(
-		ctx, identity, queuedMsg.Content, queuedMsg.Model, queuedBy, queuedMsg.PlanMode,
-		queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
-	)
+	var requeuedMsg *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		requeuedMsg, replaced, accepted, mutationErr = s.messageQueue.RequeueLifecycleMessageWithCoalesceKeyForSession(
+			recoveryCtx, identity, queuedMsg.Content, queuedMsg.Model, queuedBy, queuedMsg.PlanMode,
+			queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
+		)
+		return mutationErr
+	})
 	if err != nil {
 		s.logPostClaimQueueMutationFailure("requeue lifecycle message", identity, queuedMsg, err)
 		return false, err
@@ -420,10 +430,16 @@ func (s *Service) requeueLifecycleMessage(
 	queuedMsg *messagequeue.QueuedMessage,
 	queuedBy, coalesceKey string,
 ) bool {
-	requeuedMsg, replaced, accepted, err := s.messageQueue.RequeueLifecycleMessageWithCoalesceKey(
-		ctx, queuedMsg.SessionID, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.Model,
-		queuedBy, queuedMsg.PlanMode, queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
-	)
+	var requeuedMsg *messagequeue.QueuedMessage
+	var replaced, accepted bool
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		requeuedMsg, replaced, accepted, mutationErr = s.messageQueue.RequeueLifecycleMessageWithCoalesceKey(
+			recoveryCtx, queuedMsg.SessionID, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.Model,
+			queuedBy, queuedMsg.PlanMode, queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
+		)
+		return mutationErr
+	})
 	if err != nil {
 		s.logger.Error("failed to requeue lifecycle message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -2486,7 +2502,12 @@ func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequ
 	// Restoration follows a completed take and must survive cancellation of
 	// the request that initiated the dispatch.
 	restoreCtx := context.WithoutCancel(ctx)
-	restored, err := s.messageQueue.RestoreMessage(restoreCtx, queuedMsg)
+	var restored *messagequeue.QueuedMessage
+	err := s.retryQueuedRecoveryMutation(restoreCtx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		restored, mutationErr = s.messageQueue.RestoreMessage(recoveryCtx, queuedMsg)
+		return mutationErr
+	})
 	if err != nil {
 		s.logger.Error("failed to restore queued message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -2508,7 +2529,12 @@ func (s *Service) restoreQueuedMessageForSession(
 	identity messagequeue.QueueSessionIdentity,
 	queuedMsg *messagequeue.QueuedMessage,
 ) {
-	restored, err := s.messageQueue.RestoreMessageForSession(ctx, identity, queuedMsg)
+	var restored *messagequeue.QueuedMessage
+	err := s.retryQueuedRecoveryMutation(ctx, func(recoveryCtx context.Context) error {
+		var mutationErr error
+		restored, mutationErr = s.messageQueue.RestoreMessageForSession(recoveryCtx, identity, queuedMsg)
+		return mutationErr
+	})
 	if err != nil {
 		s.logPostClaimQueueMutationFailure("restore message", identity, queuedMsg, err)
 		return
