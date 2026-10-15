@@ -2,9 +2,9 @@
 id: task-04
 title: Adopt the overlay in main
 status: pending
-wave: 5
+wave: 4
 depends_on:
-  - task-06
+  - task-03
 plan: plan.md
 requirements:
   - REQ-RELEASE-FORK-OVERLAY-PATCH-SET-004
@@ -25,7 +25,8 @@ existing commit.
 
 Requires explicit owner approval for the `main` merge. The merge lands only
 through the authorized gate or broker landing path with a merge-commit
-method. Do not start without that approval.
+method. The fork repository allows merge commits. Do not start without that
+approval.
 
 ## In scope
 

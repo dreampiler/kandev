@@ -52,14 +52,14 @@ does not contain `patches/`.
 
 ## Results
 
-One run on 2026-10-14T16:30:04Z UTC: all six patches applied with
-`git am` exit 0 on a fresh local `kd/overlay`, head `cfd4f55500da`.
+The initial run on 2026-10-14T16:30:04Z UTC applied all six patches with
+`git am` exit 0 on a fresh local `kd/overlay`, head `cfd4f55500da`, and
 `git diff --quiet 3368a2084825 kd/overlay -- . ':(exclude)patches'` exited 0.
-The full log is in
+
+The final run on the approved fixed snapshot `51af93dcd86b` is recorded in
 [the index reproduction record](../../../patches/INDEX.md#reproduction-record).
 
-This proves the cut at its merge base, an intermediate check under
-AC-RELEASE-FORK-OVERLAY-PATCH-SET-001.4. A second run on the observed
-`upstream/main` `73c5ddb8c955` applied bundle 20 and stopped at bundle 21 with
-five conflicts from upstream #4448; it was aborted. Applying on the observed
-`upstream/main` moves to task 06.
+Applying on the cut's merge base, which is the approved fixed snapshot, is the
+stage completion check under AC-RELEASE-FORK-OVERLAY-PATCH-SET-001.4. A newer
+upstream `main` is adopted by a later approved sync (task 06), not before
+stage completion.

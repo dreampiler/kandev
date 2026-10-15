@@ -70,24 +70,16 @@ The per-patch `diff --git` counts must sum to the fork-delta file count.
 
 ## Results
 
-Cut on 2026-10-14 UTC from source `3368a2084825` (task 01 and the design
-package on fork `main` `9f005901b35a`) at upstream base `51af93dcd86b`, and
-committed in `3349e6c586`.
+The initial cut on 2026-10-14 UTC was from source `3368a2084825` (task 01 and
+the design package on fork `main` `9f005901b35a`) at upstream base
+`51af93dcd86b`, committed in `3349e6c586`, with 1,634 files and 147,525 changed
+lines.
 
-| Patch | Files | Lines |
-| --- | ---: | ---: |
-| `20-dynamic-tier.patch` | 82 | 11,827 |
-| `21-provider-limits.patch` | 76 | 7,531 |
-| `22-control-capacity.patch` | 29 | 1,717 |
-| `23-peer-batch.patch` | 20 | 1,826 |
-| `30-office-overview.patch` | 69 | 7,803 |
-| `90-fork-remainder.patch` | 1,358 | 116,821 |
-| **Total** | **1,634** | **147,525** |
-
-The `diff --git` counts sum to 1,634, equal to the fork-delta file count from
-`git diff --no-renames --numstat`, and the line totals match its +141,416 and
--6,109. Before formatting, the last bundle commit's tree equaled the source
-tree. 180 files touched by a named bundle and another commit stay in the
-remainder (for example, 42 D01 files and 29 D02 files shared with
-unattributed commits). `patches/.gitattributes` marks the patches as generated
-and hides their text diff.
+The final cut is taken from the merged source (fork `main` `1cabfe1d` merged
+into the overlay branch, plus the completion-basis document corrections), after
+the fork sync stopped being a prerequisite. Its per-bundle file and line counts
+and its `diff --git` totals are recorded in
+[the index](../../../patches/INDEX.md#bundles). Before formatting, the last
+bundle commit's tree equals the source tree. Files touched by a named bundle
+and another commit stay in the remainder. `patches/.gitattributes` marks the
+patches as generated and hides their text diff.

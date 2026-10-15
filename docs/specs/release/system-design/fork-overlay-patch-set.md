@@ -56,12 +56,11 @@ A cut uses `git merge-base <source> upstream/main`: the newest upstream commit
 already merged into the source revision. Cutting at that base makes the
 overlay tree equal the source tree, which proves the cut lost nothing.
 
-The overlay contract is relative to the `upstream/main` observed at fetch.
-When the source has not merged that commit, a reproduction at the older
-merge base is only an intermediate check. The overlay is complete when the
-patches apply on the observed `upstream/main`, either because the fork synced
-to it before the cut (the base and `upstream/main` are then the same commit)
-or because conflicting bundles were ported by hand.
+The overlay contract is relative to the approved fixed upstream snapshot that
+fork `main` has merged; for migration stage M1 that is `51af93dcd86b`, merged
+by #296. A cut at that merge base is the completion check. A newer upstream
+`main` is adopted by a later approved sync, which merges it into fork `main`
+first and then cuts again; conflicting bundles are ported by hand there.
 
 ### Bundle attribution
 
