@@ -1856,9 +1856,13 @@ var pendingAttachmentCleanupMaxAttempts = 60
 func (h *QueueHandlers) retryPendingAttachmentCleanup(pending *pendingQueueAttachmentCleanup) {
 	defer h.attachmentCleanupWG.Done()
 	delay := 10 * time.Millisecond
-	for attempt := 0; attempt < pendingAttachmentCleanupMaxAttempts; attempt++ {
+	for attempt := 0; attempt < pendingAttachmentCleanupMaxAttempts; {
 		if !h.editLeaseActive(pending) {
-			if err := h.runPendingAttachmentCleanup(pending); err == nil {
+			cleanupErr := h.runPendingAttachmentCleanup(pending)
+			if !errors.Is(cleanupErr, errAttachmentCleanupLeaseActive) {
+				attempt++
+			}
+			if cleanupErr == nil {
 				if err := h.deletePendingAttachmentCleanup(pending); err != nil {
 					h.logger.Warn("failed to acknowledge queue attachment cleanup", zap.Error(err))
 				} else {
