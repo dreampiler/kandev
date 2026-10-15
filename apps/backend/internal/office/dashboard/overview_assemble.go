@@ -453,7 +453,7 @@ func assembleSessionCapacity(snap *overviewSnapshot, sys *OverviewSystem, capaci
 		general, control := capacity.GeneralUsed, capacity.ControlUsed
 		lanes.GeneralRunningSessions = &general
 		lanes.ControlRunningSessions = &control
-		generalWaiting, controlWaiting := laneWaitingInput(snap, capacity.ControlProfileIDs)
+		generalWaiting, controlWaiting := laneWaitingInput(snap, capacity.ControlProfileIDs, capacity.ControlWorkflowIDs)
 		lanes.GeneralWaitingInputSessions = &generalWaiting
 		lanes.ControlWaitingInputSessions = &controlWaiting
 	}

@@ -71,7 +71,7 @@ func (s *Service) ceilingDeferredLaunchPrecedes(ctx context.Context, req admissi
 			return deferredPrecedence{}
 		}
 		if !s.ceilingAdmissionCandidateEligible(ctx, task, deferral) ||
-			s.sessionCeiling.classOfLocked(s.ceilingDeferredProfile(ctx, deferral)) != class {
+			s.sessionCeiling.classOfLocked(s.ceilingDeferredProfile(ctx, deferral), ceilingDeferredWorkflow(task, deferral)) != class {
 			continue
 		}
 		destination := models.CeilingDeferralSessionID(task, deferral)
@@ -173,4 +173,19 @@ func (s *Service) ceilingDeferredProfile(ctx context.Context, deferral models.Ce
 		return ""
 	}
 	return stringField(deferral.Payload, metaKeyAgentProfileID)
+}
+
+// ceilingDeferredWorkflow resolves the workflow a deferred record belongs to,
+// preferring the immutable workflow-entry binding carried in the payload and
+// falling back to the task's current workflow. It is a pure read so the
+// precedence scan and the retry sweep classify the same record with the same
+// identity.
+func ceilingDeferredWorkflow(task *models.Task, deferral models.CeilingDeferral) string {
+	if binding, present, err := models.ReadCeilingWorkflowEntryBinding(deferral.Payload); err == nil && present && binding.WorkflowID != "" {
+		return binding.WorkflowID
+	}
+	if task != nil {
+		return task.WorkflowID
+	}
+	return ""
 }

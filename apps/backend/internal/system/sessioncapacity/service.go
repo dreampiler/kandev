@@ -10,12 +10,12 @@ import (
 )
 
 // Target is the live admission controller. The control lane's ceiling and its
-// profile set travel with the worker ceiling so one call applies both, and a
-// partially applied capacity is not a state the controller may rest in. The
-// parameters stay primitives so this package keeps no dependency on the
+// profile and workflow sets travel with the worker ceiling so one call applies
+// both, and a partially applied capacity is not a state the controller may rest
+// in. The parameters stay primitives so this package keeps no dependency on the
 // controller's own types.
 type Target interface {
-	SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs []string)
+	SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs, controlWorkflowIDs []string)
 }
 
 type Service struct {
@@ -108,6 +108,7 @@ func (s *Service) Update(ctx context.Context, patch SettingsPatch) (Response, er
 		resolution.Effective.MaxSessions,
 		resolution.Effective.ControlMaxSessions,
 		resolution.Effective.ControlProfileIDs,
+		resolution.Effective.ControlWorkflowIDs,
 	)
 	return resolution.Response, nil
 }

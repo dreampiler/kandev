@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/system/hostmemory"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -172,9 +173,11 @@ type admissionRequest struct {
 	sessionID string
 	origin    launchOrigin
 	seam      string
-	// agentProfileID is the profile this launch resolved for itself. It is the
-	// only classification input; an empty value is read as worker.
+	// agentProfileID and workflowID are the identities this launch resolved for
+	// itself. Either may name a configured control profile or control workflow;
+	// an absent identity is read as worker.
 	agentProfileID  string
+	workflowID      string
 	yieldToDeferred func(context.Context, ceilingClass) deferredPrecedence
 	// replacesFailedAttempt marks the automatic successor launched for the
 	// same session's own failed dynamic attempt. It is set only by that seam.
@@ -223,38 +226,41 @@ type SessionCeilingObservation struct {
 	// ControlConfigured reports whether a control lane exists at all, so an
 	// install with no control profiles does not display a meaningless zero cap.
 	ControlConfigured bool
-	// ControlProfileIDs is the same control profile set this observation's
-	// populations were classified with, read under the same lock. A reader that
-	// has to classify sessions itself would otherwise need a second reading of
-	// the same rule, and two readings can disagree.
-	ControlProfileIDs []string
+	// ControlProfileIDs and ControlWorkflowIDs are the same control sets this
+	// observation's populations were classified with, read under the same lock.
+	// A reader that has to classify sessions itself would otherwise need a
+	// second reading of the same rule, and two readings can disagree.
+	ControlProfileIDs  []string
+	ControlWorkflowIDs []string
 }
 
 // SessionCeilingCapacity is the live capacity pair the controller enforces.
 type SessionCeilingCapacity struct {
 	WorkerCeiling int
 	// ControlCeiling bounds the control lane. Zero means no control lane, in
-	// which case ControlProfileIDs is empty too and every session is a worker.
-	ControlCeiling    int
-	ControlProfileIDs []string
+	// which case the control sets are empty too and every session is a worker.
+	ControlCeiling     int
+	ControlProfileIDs  []string
+	ControlWorkflowIDs []string
 }
 
 // sessionCeilingController is the single admission controller. Every mutation of
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
-	mu               sync.Mutex
-	memoryGate       hostmemory.Gate
-	memoryReader     memoryPressureReader
-	memoryReadFailed bool
-	ceiling          int
-	controlCeiling   int
-	controlProfiles  map[string]struct{}
-	reservations     map[string]*ceilingReservation
-	lister           admittedSessionLister
-	logger           *zap.Logger
-	now              func() time.Time
-	newKey           func() string
+	mu                 sync.Mutex
+	memoryGate         hostmemory.Gate
+	memoryReader       memoryPressureReader
+	memoryReadFailed   bool
+	ceiling            int
+	controlCeiling     int
+	controlProfileIDs  []string
+	controlWorkflowIDs []string
+	reservations       map[string]*ceilingReservation
+	lister             admittedSessionLister
+	logger             *zap.Logger
+	now                func() time.Time
+	newKey             func() string
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -284,54 +290,35 @@ func (c *sessionCeilingController) setCapacity(capacity SessionCeilingCapacity) 
 	previousControl := c.controlCeiling
 	c.ceiling = capacity.WorkerCeiling
 	c.controlCeiling = capacity.ControlCeiling
-	c.controlProfiles = controlProfileSet(activeControlProfiles(capacity.ControlCeiling, capacity.ControlProfileIDs))
+	c.controlProfileIDs = activeControlIDs(capacity.ControlCeiling, capacity.ControlProfileIDs)
+	c.controlWorkflowIDs = activeControlIDs(capacity.ControlCeiling, capacity.ControlWorkflowIDs)
 	c.mu.Unlock()
 	return previous != capacity.WorkerCeiling || previousControl != capacity.ControlCeiling
 }
 
 // classOfLocked is the single classification rule: a session is control exactly
-// when its resolved agent profile is one of the configured control profiles.
-// Everything else, including an absent profile, is worker.
-func (c *sessionCeilingController) classOfLocked(agentProfileID string) ceilingClass {
-	if agentProfileID == "" || len(c.controlProfiles) == 0 {
-		return ceilingClassWorker
-	}
-	if _, isControl := c.controlProfiles[agentProfileID]; isControl {
+// when sessioncapacity.IsControlSession reports it so, i.e. its resolved agent
+// profile is one of the configured control profiles OR its workflow is one of
+// the configured control workflows. Everything else, including an absent
+// identity, is worker.
+func (c *sessionCeilingController) classOfLocked(agentProfileID, workflowID string) ceilingClass {
+	if sessioncapacity.IsControlSession(agentProfileID, workflowID, c.controlProfileIDs, c.controlWorkflowIDs) {
 		return ceilingClassControl
 	}
 	return ceilingClassWorker
 }
 
-// controlProfileIDsLocked renders the live control set for a reader outside this
-// package, so the classification rule stays the one in classOfLocked instead of
-// being restated as a second rule somewhere else. The caller reads it while
-// holding the controller lock, next to the populations it classifies.
-func controlProfileIDsLocked(set map[string]struct{}) []string {
-	if len(set) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(set))
-	for id := range set {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	return ids
-}
-
-func controlProfileSet(ids []string) map[string]struct{} {
+// sortedIDs renders a control id set for a reader outside this package, so the
+// classification rule stays the one in classOfLocked instead of being restated
+// as a second rule somewhere else. The caller reads it while holding the
+// controller lock, next to the populations it classifies.
+func sortedIDs(ids []string) []string {
 	if len(ids) == 0 {
 		return nil
 	}
-	set := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		if id != "" {
-			set[id] = struct{}{}
-		}
-	}
-	if len(set) == 0 {
-		return nil
-	}
-	return set
+	out := append([]string(nil), ids...)
+	sort.Strings(out)
+	return out
 }
 
 // classCeilingLocked returns the ceiling the given lane is admitted against.
@@ -343,16 +330,16 @@ func (c *sessionCeilingController) classCeilingLocked(class ceilingClass) int {
 	return c.ceiling
 }
 
-// classOf classifies one launch's resolved agent profile under the controller's
-// mutex. The periodic sweep calls it outside the admission path, so it cannot
-// take classOfLocked directly.
-func (c *sessionCeilingController) classOf(agentProfileID string) ceilingClass {
+// classOf classifies one launch's resolved agent profile and workflow under the
+// controller's mutex. The periodic sweep calls it outside the admission path, so
+// it cannot take classOfLocked directly.
+func (c *sessionCeilingController) classOf(agentProfileID, workflowID string) ceilingClass {
 	if c == nil {
 		return ceilingClassWorker
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.classOfLocked(agentProfileID)
+	return c.classOfLocked(agentProfileID, workflowID)
 }
 
 // freeCapacityByLane reports, per lane, whether at least one unit is available
@@ -382,7 +369,7 @@ func (c *sessionCeilingController) freeCapacityByLane(ctx context.Context) (work
 	if workerFree && c.memoryPressuredLocked(ctx, ceilingClassWorker) {
 		workerFree = false
 	}
-	if len(c.controlProfiles) > 0 {
+	if len(c.controlProfileIDs) > 0 || len(c.controlWorkflowIDs) > 0 {
 		controlFree = c.classPopulationLocked(counted, ceilingClassControl) < c.controlCeiling
 	}
 	return workerFree, controlFree, nil
@@ -411,12 +398,13 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 		observedAt = c.now().UTC()
 	}
 	observation := SessionCeilingObservation{
-		Limit:             c.ceiling,
-		ObservedAt:        observedAt,
-		Known:             err == nil,
-		ControlLimit:      c.controlCeiling,
-		ControlConfigured: len(c.controlProfiles) > 0,
-		ControlProfileIDs: controlProfileIDsLocked(c.controlProfiles),
+		Limit:              c.ceiling,
+		ObservedAt:         observedAt,
+		Known:              err == nil,
+		ControlLimit:       c.controlCeiling,
+		ControlConfigured:  len(c.controlProfileIDs) > 0 || len(c.controlWorkflowIDs) > 0,
+		ControlProfileIDs:  sortedIDs(c.controlProfileIDs),
+		ControlWorkflowIDs: sortedIDs(c.controlWorkflowIDs),
 	}
 	if err != nil {
 		return observation, err
@@ -442,14 +430,15 @@ func (s *Service) CurrentSessionCeilingObservation(ctx context.Context) (Session
 // keeping the controller and its reservations alive for later re-enablement, and
 // a zero control ceiling removes the control lane without touching sessions it
 // already admitted.
-func (s *Service) SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs []string) {
+func (s *Service) SetSessionCapacity(workerCeiling, controlCeiling int, controlProfileIDs, controlWorkflowIDs []string) {
 	if s == nil || s.sessionCeiling == nil {
 		return
 	}
 	changed := s.sessionCeiling.setCapacity(SessionCeilingCapacity{
-		WorkerCeiling:     workerCeiling,
-		ControlCeiling:    controlCeiling,
-		ControlProfileIDs: controlProfileIDs,
+		WorkerCeiling:      workerCeiling,
+		ControlCeiling:     controlCeiling,
+		ControlProfileIDs:  controlProfileIDs,
+		ControlWorkflowIDs: controlWorkflowIDs,
 	})
 	if !changed {
 		return
@@ -459,12 +448,39 @@ func (s *Service) SetSessionCapacity(workerCeiling, controlCeiling int, controlP
 			zap.Int("ceiling", workerCeiling),
 			zap.Int(ceilingFieldClassCeiling, controlCeiling),
 			zap.Int("control_profiles", len(controlProfileIDs)),
+			zap.Int("control_workflows", len(controlWorkflowIDs)),
 			zap.Bool("enabled", workerCeiling != unlimitedSessionCeiling))
 	}
 	// A sweep both retries newly eligible work after an increase or disable and
 	// refreshes the task projection after any changed observation, including a
 	// decrease.
 	s.signalCeilingSweep()
+}
+
+// controlWorkflowsConfigured reports whether any control workflow is configured,
+// so a launch admission can skip the task read that resolves its workflow when
+// the workflow rule is inert.
+func (c *sessionCeilingController) controlWorkflowsConfigured() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.controlWorkflowIDs) > 0
+}
+
+// ceilingWorkflowIDForTask resolves a task's workflow for launch classification.
+// It returns empty (worker) when no control workflow is configured, so the
+// common profile-only install does no extra read.
+func (s *Service) ceilingWorkflowIDForTask(ctx context.Context, taskID string) string {
+	if s == nil || !s.sessionCeiling.controlWorkflowsConfigured() || s.repo == nil || taskID == "" {
+		return ""
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return ""
+	}
+	return task.WorkflowID
 }
 
 // SessionCapacity returns the current effective worker limit for the live
@@ -503,7 +519,7 @@ func (c *sessionCeilingController) countedRowsLocked(ctx context.Context) (map[s
 	}
 	counted := make(map[string]ceilingClass, len(refs))
 	for _, ref := range refs {
-		counted[ref.ID] = c.classOfLocked(ref.ProfileID)
+		counted[ref.ID] = c.classOfLocked(ref.ProfileID, ref.WorkflowID)
 	}
 	return counted, nil
 }
@@ -593,7 +609,7 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	class := c.classOfLocked(req.agentProfileID)
+	class := c.classOfLocked(req.agentProfileID, req.workflowID)
 	// The memory gate is consulted even when the lane ceiling is unlimited: it
 	// must hold worker launches regardless of the session count. Only a
 	// pressured worker lane needs the population read that recognizes an
@@ -941,7 +957,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	class := c.classOfLocked(req.agentProfileID)
+	class := c.classOfLocked(req.agentProfileID, req.workflowID)
 	pressured := c.memoryPressuredLocked(ctx, class)
 	if c.classCeilingLocked(class) == unlimitedSessionCeiling && !pressured {
 		return c.admitUnlimitedLocked(req, origin, class)
