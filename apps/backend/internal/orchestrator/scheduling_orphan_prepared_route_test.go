@@ -60,6 +60,14 @@ func TestSchedulingOrphanIdleSessionReceivesEntryInPlace(t *testing.T) {
 	const taskID, sessionID = "orphan-idle-real", "orphan-idle-real-session"
 	f.seedTask(t, taskID, orphanAutoStep, nil)
 	f.seedSession(t, taskID, sessionID, models.TaskSessionStateIdle)
+	// IDLE recovery retains runtime identity, just like WAITING_FOR_INPUT.
+	// A missing record means the existing launch owner has not registered yet.
+	now := time.Now().UTC()
+	require.NoError(t, f.repo.UpsertExecutorRunning(t.Context(), &models.ExecutorRunning{
+		ID: sessionID + "-execution", TaskID: taskID, SessionID: sessionID,
+		AgentExecutionID: "exec-before-restart", ResumeToken: "resume-idle",
+		Resumable: true, CreatedAt: now, UpdatedAt: now,
+	}))
 	f.agentMgr.isAgentReadyFn = func(context.Context, string) bool { return true }
 
 	f.runStartupSweep(t)
@@ -93,4 +101,16 @@ func TestSchedulingOrphanCommittedRecipientNeedsNoSourceTransition(t *testing.T)
 	entryID, source := f.svc.schedulingOrphanEntryContext(t.Context(), task, session)
 	require.Zero(t, entryID)
 	require.Nil(t, source)
+}
+
+func TestSchedulingOrphanIdleWithoutRuntimeRecordDoesNotInventExecution(t *testing.T) {
+	f := newOrphanInterruptionFixture(t)
+	const taskID, sessionID = "orphan-idle-awaiting", "orphan-idle-awaiting-session"
+	f.seedTask(t, taskID, orphanAutoStep, nil)
+	f.seedSession(t, taskID, sessionID, models.TaskSessionStateIdle)
+	f.runStartupSweep(t)
+	f.svc.orphanReentryWorkers.Wait()
+	require.Equal(t, 0, f.launches.count())
+	require.Equal(t, 0, orphanPromptCount(f))
+	require.Equal(t, 1, sessionCount(t, f.repo, taskID))
 }
