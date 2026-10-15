@@ -209,8 +209,10 @@ wait expires, the error reaches the classifier as
 error matched no retryable shape and the entry was dropped with a "message is
 lost" warning.
 
-The classifier treats `context.DeadlineExceeded` as retryable, beside
-`ErrSessionRuntimeUnavailable`. The entry takes the existing requeue branch, so
+`isEnsureSessionRunningTimeout` requires both `context.DeadlineExceeded` and
+the ensure-session classifier prefix. It joins the existing retryable cases
+beside `ErrSessionRuntimeUnavailable`; a foreign provider or RPC deadline keeps
+its previous disposition. The entry takes the existing requeue branch, so
 a reserved entry returns to the head of its own session incarnation and keeps
 its recorded-user-message marker. The next boot-ready or turn-ready trigger
 dispatches it. No timer or resume attempt is added (`002.2`). Other failures,

@@ -87,7 +87,9 @@ pending dependency launches. The task keeps showing Scheduling with no owner.
 tasks, oldest update first). It runs once, inside the existing background
 startup sweep and before `reconcileTaskLifecycleTokens`, so a task that a token
 still owns is skipped instead of being seen as orphaned between token clearing
-and session creation. `Service.Stop` already joins that sweep.
+and session creation. Shutdown cancels and waits for that sweep, then waits for
+tracked orphan re-entry workers. Each wait uses the existing 10-second
+`sendNowClaimRecoveryTimeout`; detached work can outlive a timed-out join.
 
 A candidate is skipped when it has a workflow queue destination, any
 deferred-launch record, a lifecycle token, a recorded launch error, an Office
@@ -97,19 +99,32 @@ For a remaining candidate:
 - With no active session, `autoStartTaskForStep` starts the step through the
   ordinary automatic path, which applies ceiling, WIP, prompt, and session
   serialization rules (`003.1`).
-- With a `WAITING_FOR_INPUT` or `IDLE` session and no user prompt history,
+- With a `WAITING_FOR_INPUT` or `IDLE` session and no turn accepted for the
+  current entry,
   `processOnEnter` runs the current step's entry on that session, like a
   same-step re-entry. `on_exit` does not run because the task never left the
   step. The entry-dispatch guard still rejects a stale route (`003.3`). The
   entry runs detached, like the launch above, so a slow resume does not hold
   the lifecycle-token pass behind it.
-- With prompt history, the entry was already delivered, and only the task state
+- With conversational evidence for the current entry, only the task state
   moves from `SCHEDULING` to `IN_PROGRESS` by compare-and-set (`003.3`).
 - A `CREATED`, `STARTING`, or `RUNNING` session means a launch is live and is
   not touched (`003.3`, `003.4`).
 
-This pass does not resume interrupted conversations. A session that already
-accepted a prompt is never prompted again, so `002.2` and `002.3` still hold.
+Turn creation records `workflow_step_transition_id_at_start` together with the
+step stamp after taking the task row lock. The ordinary writer and the
+conversation-receipt writer share that operation. Recovery compares the turn's
+entry ID with the newest ledger row; a stale entry snapshot or ledger read error
+fails closed. Older turns without that private recovery stamp use the ledger's
+entry time as a compatibility boundary. Lifecycle-only turns never count.
+
+An unfinished route recovers both the immutable transition ID and its source
+step. A prepared destination or a committed route for a different recipient or
+entry cannot suppress this context. `processOnEnter` retains the normal route,
+recipient, credential, session lifecycle, and admission guards. Office ownership
+read errors leave the task unchanged.
+
+This pass does not resume interrupted conversations. A session with accepted evidence for the current entry is not prompted again, so `002.2` and `002.3` still hold.
 
 ## UI and verification
 

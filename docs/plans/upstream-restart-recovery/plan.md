@@ -39,7 +39,8 @@ it.
 
 ### In scope
 
-- Treat `context.DeadlineExceeded` as a retryable queued-dispatch failure.
+- Requeue a deadline only when the ensure-session runtime-wait classifier
+  identifies it. Foreign deadlines keep their existing disposition.
 - One startup pass over orphaned `SCHEDULING` tasks, with the exclusions in
   REQ-TASKS-RESTART-ORPHAN-SESSIONS-003, and the repository list it needs.
 - Keep the full-row session update from promoting `is_primary` (the snapshot
@@ -63,7 +64,7 @@ it.
   trigger.
 - `restart-orphaned-session-terminalization` gains requirement 003. Requirement
   002.2 still holds. The new pass starts only an accepted step entry that never
-  delivered its prompt, and it never prompts a session with prompt history.
+  delivered its prompt, and it never replays a prompt already accepted for the current entry.
 - New `primary-session-ownership` requirement and design. Workflow recipient
   selection stays in `workflow-profile-session-lifecycle`. Promotion keeps
   using `SetPrimarySession`, so queued messages stay with their session.
@@ -75,8 +76,8 @@ at their size limit.
 
 ## Technical approach
 
-Work order 01 adds `errors.Is(err, context.DeadlineExceeded)` to the retryable
-set in `handleQueuedMessageExecutionError`. The entry uses the existing requeue
+Work order 01 recognizes the ensure-session classifier's wrapped deadline in
+`handleQueuedMessageExecutionError`. The entry uses the existing requeue
 branch.
 
 Work order 02 adds `ListSchedulingTasks` to the SQLite repository and
@@ -84,8 +85,9 @@ Work order 02 adds `ListSchedulingTasks` to the SQLite repository and
 lifecycle sweep calls it before `reconcileTaskLifecycleTokens`. The pass reaches
 the repository through a narrow interface assertion, reuses the existing token,
 deferred-launch, launch-error, Office, and dependency checks, and starts work
-through `autoStartTaskForStep` or `processOnEnter`. A session with prompt
-history only gets a compare-and-set state repair.
+through `autoStartTaskForStep` or `processOnEnter`. A session with accepted conversational evidence for the current entry only gets
+a compare-and-set state repair. Both turn writers stamp the immutable entry ID
+under the existing task lock; legacy turns use the ledger time boundary.
 
 Work order 03 keeps `updateTaskSessionWithSnapshotGuard` from promoting
 `is_primary`. The base's full-row update already carries a conditional release
@@ -166,3 +168,18 @@ resurrection it guards against is already fixed by the base's conditional
 - Work orders 02 to 04 change `service.go`, `task.go`, `session.go`,
   `task_operations.go`, and `event_handlers_workflow.go`, which other open pull
   requests also change. Whichever lands second is rebased onto the other.
+
+## Independent remediation verification
+
+Permanent interruption regressions cover prior visits to the same step,
+lifecycle-only turns, malformed deferred records, a prepared destination that
+differs from the selected session, actual IDLE recovery, and unreadable Office
+ownership. Current-entry controls assert state repair without another prompt.
+SQLite and environment-gated PostgreSQL cases cover both turn-stamp writers,
+concurrent primary promotion, and a superseded snapshot rollback.
+
+The contained exact-function decision proof reproduced the earlier-visit and
+Office-read-error findings with two passing positive controls. This is synthetic
+boundary evidence; real SQL, race, PostgreSQL 16/18, Windows, runtime, and browser
+acceptance remain hosted verification gates. Production hooks and dependency
+installation are prohibited on the shared host for this review.

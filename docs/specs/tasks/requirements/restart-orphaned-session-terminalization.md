@@ -66,11 +66,15 @@ never delivered its entry prompt, not an interrupted conversation.
 - **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.2:** A task that waits for workflow
   WIP admission, holds a deferred-launch record or a lifecycle token, records a
   launch error, belongs to Office, sits on a step without automatic start, or
-  has unresolved dependencies shall be left to its existing owner.
+  has unresolved dependencies shall be left to its existing owner. An Office
+  ownership read error shall not authorize recovery; any present deferred-launch
+  key, including an empty or malformed value, shall retain its owner.
 - **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.3:** When the current step already
   holds a `WAITING_FOR_INPUT` or `IDLE` session without an accepted user
-  prompt, the step entry shall run on that session. No second session shall be
-  created. When that session already accepted a prompt, only the stale
+  prompt for the current entry, the step entry shall run on that session. No second session shall be
+  created. Lifecycle-only turns and turns from an earlier visit to the same step shall
+  not prove delivery of the current entry. When that session already accepted
+  this entry's prompt, only the stale
   `SCHEDULING` state shall be repaired. A `CREATED`, `STARTING`, or `RUNNING`
   session shall be left alone.
 - **AC-TASKS-RESTART-ORPHAN-SESSIONS-003.4:** The pass shall run once per

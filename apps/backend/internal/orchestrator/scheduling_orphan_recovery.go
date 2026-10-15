@@ -47,7 +47,7 @@ type schedulingOrphanSessionLister interface {
 
 // reconcileSchedulingOrphansOnStartup restarts automatic step starts that a
 // backend restart interrupted before they produced a running session
-// (REQ-TASKS-RESTART-ORPHAN-SESSIONS-003). Such a task is in SCHEDULING with no
+// Such a task is in SCHEDULING with no
 // deferred_launch record, no queue destination, and no lifecycle token, so no
 // other startup pass lists it: the lifecycle sweep lists durable tokens, the
 // WIP queue reconciliation lists queued destinations, the ceiling sweep lists
@@ -102,7 +102,7 @@ func (s *Service) schedulingOrphanRecoverable(ctx context.Context, task *models.
 		return false
 	}
 	// Office tasks queue runs, not sessions; their scheduler recovers them.
-	if s.isOfficeTask(ctx, task.ID) {
+	if owned, err := s.lookupOfficeTask(ctx, task.ID); err != nil || owned {
 		return false
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
@@ -170,7 +170,7 @@ func (s *Service) recoverSchedulingOrphan(ctx context.Context, task *models.Task
 	if !schedulingOrphanResumableSession(session) {
 		return
 	}
-	hasTurnForStep, err := s.sessionHasTurnForStep(ctx, session.ID, task.WorkflowStepID)
+	hasTurnForStep, err := s.sessionHasTurnForStep(ctx, session.ID, task)
 	if err != nil {
 		s.logger.Warn(schedulingOrphanEvent+": failed to check session turns for step",
 			zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
@@ -215,30 +215,61 @@ func (s *Service) schedulingOrphanRecoverableSession(ctx context.Context, taskID
 	return nil, nil
 }
 
-// sessionHasTurnForStep checks if the session has a conversational turn for the
-// given step. This is used to determine if the step entry prompt was already
-// delivered. A lifecycle-only turn (a boot or todo status record) carries the
-// same step stamp but never reflects an accepted prompt, so it does not count.
-func (s *Service) sessionHasTurnForStep(ctx context.Context, sessionID, stepID string) (bool, error) {
+// sessionHasTurnForStep accepts conversational evidence only for the current
+// entry. Older turn rows without an entry stamp use the ledger's time boundary.
+func (s *Service) sessionHasTurnForStep(ctx context.Context, sessionID string, task *models.Task) (bool, error) {
 	checker, ok := s.repo.(schedulingOrphanTurnChecker)
 	if !ok {
 		return false, nil
+	}
+	entry, err := s.schedulingOrphanAcceptedEntry(ctx, task)
+	if err != nil {
+		return false, err
 	}
 	turns, err := checker.ListTurnsBySession(ctx, sessionID)
 	if err != nil {
 		return false, err
 	}
 	for _, turn := range turns {
-		if turn != nil && turn.Metadata != nil {
-			if lifecycleOnly, _ := turn.Metadata[models.TurnMetaKeyLifecycleOnly].(bool); lifecycleOnly {
-				continue
-			}
-			if stepAtStart, ok := turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart].(string); ok && stepAtStart == stepID {
+		if turn == nil || turn.Metadata == nil {
+			continue
+		}
+		if lifecycleOnly, _ := turn.Metadata[models.TurnMetaKeyLifecycleOnly].(bool); lifecycleOnly {
+			continue
+		}
+		if turn.Metadata[models.TurnMetaKeyWorkflowStepIDAtStart] != task.WorkflowStepID {
+			continue
+		}
+		if stampedEntry := int64Field(turn.Metadata, models.TurnMetaKeyWorkflowStepTransitionIDAtStart); stampedEntry > 0 {
+			if stampedEntry == entry.ID {
 				return true, nil
 			}
+			continue
+		}
+		if !turn.StartedAt.Before(entry.OccurredAt) {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (s *Service) schedulingOrphanAcceptedEntry(ctx context.Context, task *models.Task) (models.StepTransition, error) {
+	lister, ok := s.repo.(schedulingOrphanTransitionLister)
+	if !ok {
+		return models.StepTransition{}, errors.New("orphan recovery cannot read the accepted workflow entry")
+	}
+	rows, err := lister.ListTaskStepTransitions(ctx, task.ID, 0, 1)
+	if err != nil {
+		return models.StepTransition{}, err
+	}
+	if len(rows) == 0 && task.WorkflowStepTransitionID == 0 {
+		return models.StepTransition{OccurredAt: task.CreatedAt}, nil
+	}
+	if len(rows) == 0 || rows[0].ToWorkflowStepID == nil || *rows[0].ToWorkflowStepID != task.WorkflowStepID ||
+		(task.WorkflowStepTransitionID > 0 && rows[0].ID != task.WorkflowStepTransitionID) {
+		return models.StepTransition{}, errors.New("orphan recovery workflow entry changed")
+	}
+	return rows[0], nil
 }
 
 // schedulingOrphanResumableSession reports whether an existing session is a
@@ -262,7 +293,8 @@ func schedulingOrphanResumableSession(session *models.TaskSession) bool {
 // resumes the agent and waits for readiness, and doing that inline would hold
 // the rest of the startup sweep, including the bounded lifecycle-token pass,
 // for up to one launch timeout per task. The goroutine is tracked in
-// orphanReentryWorkers so that Service.Stop joins it before returning.
+// orphanReentryWorkers. Service.Stop waits for it for at most
+// sendNowClaimRecoveryTimeout (10 seconds); detached work may outlive that bound.
 func (s *Service) reenterSchedulingOrphanStep(ctx context.Context, task *models.Task, session *models.TaskSession) {
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil || step == nil {
@@ -300,7 +332,8 @@ func (s *Service) schedulingOrphanEntryContext(
 	if route, ok := models.LoadWorkflowSessionRoute(task.Metadata); ok &&
 		route.Phase == workflowSessionRouteCommitted &&
 		route.DestinationStepID == task.WorkflowStepID &&
-		route.DestinationID == session.ID {
+		route.DestinationID == session.ID &&
+		workflowEntryDispatchIdentityMatches(route, task.WorkflowStepTransitionID) {
 		return 0, nil
 	}
 	lister, ok := s.repo.(schedulingOrphanTransitionLister)

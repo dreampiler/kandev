@@ -275,7 +275,7 @@ func isManualRecoveryPromptError(err error) bool {
 // "failed to ensure session is running:" prefix, so an expired runtime wait is
 // distinguishable from any other context.DeadlineExceeded in the dispatch
 // chain (provider timeouts, downstream RPC deadlines) that must keep its
-// disposition instead of blocking the head of the queue (AC 002.3).
+// disposition instead of blocking the head of the queue.
 func isEnsureSessionRunningTimeout(err error) bool {
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
 		return false

@@ -30,7 +30,7 @@ primary session that stopped or was deleted.
 ### REQ-TASKS-PRIMARY-SESSION-OWNERSHIP-001: One primary session that the workflow can use
 
 **Intent:** The primary flag changes only through a promotion, and an automatic
-promotion does not pick a parked or finished session.
+promotion prefers a non-parked session and never picks a finished session.
 
 **User story:** As a workflow user, I want the task's primary conversation to
 stay the one the workflow selected, so that task prompts and status do not
@@ -39,7 +39,9 @@ return to an earlier conversation.
 #### Acceptance criteria
 
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.1:** When a session update does not
-  request a promotion, the system shall not change the session's primary flag.
+  request a promotion, an ordinary full-row write shall preserve the stored
+  primary flag. A snapshot-guarded rollback may release only its still-owned
+  selection.
   A session copy read before a promotion shall not make an earlier session
   primary again, and the task shall keep exactly one primary session.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.2:** When the primary session stops

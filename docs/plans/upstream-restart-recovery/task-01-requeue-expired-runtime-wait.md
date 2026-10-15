@@ -26,9 +26,8 @@ the head of its queue instead of being dropped.
 ## In scope
 
 - Write the failing orchestrator test first.
-- Add `errors.Is(err, context.DeadlineExceeded)` to the retryable condition in
-  `handleQueuedMessageExecutionError`, with a comment that names the expired
-  runtime wait.
+- Match the ensure-session classifier prefix and wrapped deadline in the
+  retryable condition in `handleQueuedMessageExecutionError`.
 
 ## Out of scope
 
@@ -37,7 +36,7 @@ the head of its queue instead of being dropped.
 
 ## Acceptance
 
-- A reserved entry that fails with a wrapped `context.DeadlineExceeded` is the
+- A reserved entry that fails with the classified runtime-wait deadline is the
   only, unreserved, original entry in its session queue afterwards.
 - A non-retryable error still takes the lost branch.
 

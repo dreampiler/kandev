@@ -48,7 +48,7 @@ session, or has only its stale state repaired.
   startup sweep.
 - Each excluded case in 003.2 launches nothing and keeps its state.
 - An idle session without prompt history receives the step entry without a
-  second session. A session with prompt history only moves the task to
+  second session. A session with a turn accepted for the current entry only moves the task to
   `IN_PROGRESS`. A `CREATED`, `STARTING`, or `RUNNING` session is not touched.
 
 ## Verification
@@ -80,3 +80,14 @@ From the repository root:
 - Change from the original design: the step entry for an idle session runs
   detached. Running it inline held the whole startup sweep while it waited for
   agent readiness; the test now checks that the sweep returns first.
+
+### Independent remediation
+
+Office ownership read errors now retain the task. Conversational evidence is
+matched to the accepted transition; lifecycle-only turns and previous visits to
+the same step cannot spend the current entry. Both production turn writers stamp
+entry identity under the task row lock. Prepared-route recovery retains the
+accepted transition and source step. The startup worker join remains bounded by
+the existing 10-second timeout and does not guarantee quiescence after expiry.
+Permanent SQL-backed regressions and hosted checks are required for acceptance;
+the independently reproduced RED was a contained synthetic decision proof.
