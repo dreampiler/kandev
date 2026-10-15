@@ -336,7 +336,7 @@ try {
     $key = 'HKCU:\Software\Microsoft\Command Processor'
     $keyExisted = Test-Path -LiteralPath $key
     if (-not $keyExisted) { New-Item -Path $key -Force | Out-Null }
-    $registry = Get-Item -LiteralPath $key
+    $registry = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Command Processor', $true)
     $hadValue = $registry.GetValueNames() -contains 'AutoRun'
     $previous = if ($hadValue) { $registry.GetValue('AutoRun', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { $null }
     $previousKind = if ($hadValue) { $registry.GetValueKind('AutoRun') } else { [Microsoft.Win32.RegistryValueKind]::String }
