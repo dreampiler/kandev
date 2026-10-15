@@ -10,7 +10,7 @@ import (
 
 // TestResidualTerminalSweepNoOp proves Task 02: a block_resolved terminal
 // settlement whose workflow receipt is missing gains a guarded no-op receipt
-// through the sweep, then promotes to completed on the next reconcile.
+// through the sweep and promotes to completed within the same reconcile.
 func TestResidualTerminalSweepNoOp(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -42,8 +42,8 @@ func TestResidualTerminalSweepNoOp(t *testing.T) {
 		t.Fatalf("settle residual terminal: %v", err)
 	}
 	terminal, err := repo.GetAgentDeliveryEffect(ctx, "agent_delivery.terminal:stream-residual-sweep:1")
-	if err != nil || terminal.State != models.DeliveryEffectBlockResolved {
-		t.Fatalf("residual terminal = %+v, %v; want block_resolved", terminal, err)
+	if err != nil || terminal.State != models.DeliveryEffectCompleted {
+		t.Fatalf("residual terminal = %+v, %v; want completed", terminal, err)
 	}
 
 	// The reconcile entry point already ran the residual pass, so the guarded
@@ -52,10 +52,6 @@ func TestResidualTerminalSweepNoOp(t *testing.T) {
 	swept, _, err := service.sweepResidualDeliveryNoOp(ctx, "")
 	if err != nil || swept != 0 {
 		t.Fatalf("explicit sweep after reconcile = %d, %v; want 0", swept, err)
-	}
-	// The next reconcile promotes the receipted terminal to fully settled.
-	if err := service.reconcileAgentDeliverySettlements(ctx, session.ID); err != nil {
-		t.Fatalf("reconcile after residual sweep: %v", err)
 	}
 	submission, err := repo.GetAgentDeliverySubmissionMetadata(ctx, "prompt:residual-sweep")
 	if err != nil || submission.FullySettledAt == nil {

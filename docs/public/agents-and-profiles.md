@@ -782,11 +782,27 @@ overrides restores derived limits without deleting observations. Existing
 provider-wide manual blocks, monthly-reset fallbacks, and owner-release controls
 remain available in the same settings section.
 
+The Free editor's daily requests are the account-wide allowance. Below it,
+**Model and group limits** lists daily request limits for one model or for a
+shared group of models with one combined allowance. Each limit shows today's
+count, its reset, its default, learned, and owner values, and whether the
+default is published, measured, approximate, or read from a provider counter.
+Select one of the account's free models to add a model limit, or several to add
+a shared group limit. A model with both a model limit and a group limit must fit
+both. When a provider reports a per-model daily limit, Kandev replaces that
+model's or group's learned value with the requests it counted in the scope so
+far, including a lower value after a provider reduction. Learning never raises a
+limit beyond what admission already allowed, so enter an owner value when a
+provider raises an allowance. When models without a configured limit hit their
+daily limit within the same minute, Kandev records a provisional shared group
+for them with their combined count. The card marks it provisional; enter 0 to
+disable it if the models were unrelated.
+
 | Provider | Free defaults | Subscription defaults | Paid defaults |
 | --- | --- | --- | --- |
 | OpenRouter | 20 requests/minute; key counter reports 50 or 1000/day; midnight UTC | No published defaults | Owner configured |
 | LLM Gateway | Zero credits: 5/10 minutes/model. Purchased credits: 20/minute/model | DevPass: 120/minute, 50 concurrent turns; reported usage windows | Tier 0: 600/minute, 100 concurrent turns, $25 UTC day, $250 UTC month |
-| OpenCode Zen | Midnight UTC; unknown daily allowance is learned | No published defaults | Owner configured |
+| OpenCode Zen | Midnight UTC. Measured model limits: `nemotron-3-ultra-free` and `step-5-preview-free` 1000/day, `longcat-2.5-preview-free` about 120/day; `big-pickle`, `muse-spark-1.3-contributor-free`, and `space-bunny-free` share about 500/day | No published defaults | Owner configured |
 | OpenCode Go | Unknown | Reported percentages. Enter `go` only for the base plan's $12/5h, $30/week, $60/month reference. Unknown plans, including Go Plus, keep dollar budgets unset | Owner configured |
 | Claude/Codex | Unknown | Existing reported five-hour and weekly percentages and resets | Owner configured |
 | Antigravity/Gemini | Plan dependent | Reported plan quotas where available; owner tier override otherwise | Owner configured |

@@ -3,6 +3,7 @@ status: current
 system: costs
 requirements:
   - REQ-COSTS-TIER-LIMITS-001
+  - REQ-COSTS-TIER-LIMITS-002
 ---
 
 # Provider account tier limits design
@@ -12,6 +13,7 @@ requirements:
 | Requirement | Design |
 | --- | --- |
 | REQ-COSTS-TIER-LIMITS-001 | Configuration, accounting, admission, learning, and settings below |
+| REQ-COSTS-TIER-LIMITS-002 | Account, model, and group scopes below |
 
 Costs owns limit facts and budgets. Reuse `usageProviderAdapter` account bindings, `dynamicUsageSnapshot`, `PaceScore`, the task usage ledger, and `usage_limit_observations`. Keep dynamic ranking and lane 8's unknown-wording suspension policy. Internal account keys stay inside the backend; settings uses existing safe account identities.
 
@@ -44,8 +46,20 @@ Existing clients remain measurement sources. The subscription layer imports appl
 
 OpenRouter refreshes the existing credential-bound key client after a free rate error. Daily remaining greater than zero produces a minute block or supplied future reset; zero produces UTC daily reset. Missing/malformed/unavailable evidence keeps lane 8's 5/15/30-minute ladder.
 
+## Account, model, and group scopes
+
+The account-wide scope is the existing tier `requests_per_day`; it keeps its OpenRouter key-counter and purchased-credit derivation. `TierLimits.scopes` adds model and group scopes, each with a stable `id`, `kind` (`model` or `group`), provider model IDs without the provider prefix, `requests_per_day`, `daily_reset`, `provenance`, and learned markers (`learned`, `provisional`, `learned_at`). A model may have its own scope and one group; admission checks both. `MergeTierLimits` merges scopes by `id` field by field, so owner, learned, and default columns keep the existing precedence. Nil inherits; an owner zero disables a default or provisional scope without deleting it.
+
+Default scopes come from an embedded limit catalog data file keyed by provider and tier, separate from routing code. Each entry records provenance: `published`, `measured`, or `approximate`. The initial entries are the measured OpenCode Zen model and group values; the OpenRouter high-balance 1000/day account value and existing LLM Gateway/DevPass rates keep their current derivation and gain provenance labels only. The catalog holds installation values (fork bundle D03); the scope seam itself is the upstream-portable part.
+
+Scope usage counts requests of account profiles whose model is in the scope since the scope's daily reset, with the existing ledger/in-flight maximum used for the account count. `LimitUsage.scopes` carries those counts for admission and settings. `Check` evaluates the scopes covering the candidate's model after the tier checks and returns the existing `limit_daily` reason with the scope reset, so route order, resource-wait recovery, and the admission mutex are unchanged.
+
+Learning splits the classified daily dimension. `CauseFreeAccountDailyLimit` keeps `daily` and the existing fill-unknown account learning. `CauseFreeDailyLimit` becomes `model_daily`: the observed model's group scope, else its model scope, else a new learned model scope, receives the counted scope requests. Unlike unknown tier values, a scope's learned value replaces an earlier learned value, because a lower provider limit must take effect. Owner values are untouched and default values remain visible. The existing 5% learned reserve applies. A count of zero learns nothing. Admission stops before a provider block, so learning cannot raise a value; the owner value covers increases.
+
+An observation's execution profile identifies the observed model, so no model column is added; profile model edits within one minute are negligible. A `model_daily` observation for a model without an owner- or catalog-defined scope looks for other `model_daily` observations on the same account within 60 seconds whose models also lack one. A configured model scope is evidence of an individual allowance, so those models never group. An owner value or reset entered on a learned scope counts as configured; its learned definition is kept so the owner entry keeps covering its models. A match creates a provisional learned group, or extends the provisional group one of them already belongs to under its existing ID. Models in two different provisional groups are ambiguous and change nothing. The group learns the members' combined counted requests and replaces their learned model scopes. Enrichment and insertion of an observation share the learning lock, so a near-simultaneous block sees the earlier one. Coincident independent blocks can form a false group; the provisional marker, the group's combined value, and the owner zero keep that visible and reversible. No probe or synthetic request establishes a group.
+
 ## Settings and validation
 
-Extend the existing provider-limit API/card. Desktop has three columns; phone uses canonical responsive breakpoints and one selected tier. Shared draft/save logic retains edits across tier/viewport changes; the page owns scrolling, with 44px touch and 28px desktop controls. Defaults, learned values, owner overrides, and provisional-window uncertainty remain visible. Existing provider-wide manual blocks and release controls remain available. Copy uses all locale catalogs.
+Extend the existing provider-limit API/card. Desktop has three columns; phone uses canonical responsive breakpoints and one selected tier. Shared draft/save logic retains edits across tier/viewport changes; the page owns scrolling, with 44px touch and 28px desktop controls. Defaults, learned values, owner overrides, and provisional-window uncertainty remain visible. Existing provider-wide manual blocks and release controls remain available. The tier editor labels the daily allowance as account-wide and lists model and group scopes beneath it with today's count, reset, source, provenance, and provisional marker. The owner edits a scope value or adds a model or group scope from the account's profile models through the same draft and save request. Copy uses all locale catalogs.
 
 Source-adjacent companion units and existing focused tests cover allowances, resets, learning, explicit provider counters, admission ordering, persistence, and partial save responses. Disposable component rendering uses synthetic data without a production instance or provider call. Current verification results and limitations belong in the linked plan/work order.

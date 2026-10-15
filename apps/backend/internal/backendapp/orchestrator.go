@@ -107,11 +107,13 @@ func provideOrchestrator(
 	serviceCfg.SessionCapacity = effectiveSessionCapacity(sessionCapacityResolution)
 	serviceCfg.ControlSessionCapacity = sessionCapacityResolution.Effective.ControlMaxSessions
 	serviceCfg.ControlAgentProfileIDs = sessionCapacityResolution.Effective.ControlProfileIDs
+	serviceCfg.ControlAgentWorkflowIDs = sessionCapacityResolution.Effective.ControlWorkflowIDs
 	serviceCfg.SessionMemoryGuard = hostmemory.ReadConfig()
 	log.Info("Session capacity initialized",
 		zap.Int("ceiling", serviceCfg.SessionCapacity),
 		zap.Int("control_ceiling", serviceCfg.ControlSessionCapacity),
 		zap.Int("control_profiles", len(serviceCfg.ControlAgentProfileIDs)),
+		zap.Int("control_workflows", len(serviceCfg.ControlAgentWorkflowIDs)),
 		zap.String("source", string(sessionCapacityResolution.Effective.Source)),
 		zap.Bool("enabled", sessionCapacityResolution.Effective.Enabled))
 	log.Info("Session memory guard initialized",

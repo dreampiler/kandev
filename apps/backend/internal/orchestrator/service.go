@@ -76,10 +76,11 @@ type ServiceConfig struct {
 	// addition to SessionCapacity rather than drawn from it. Zero means no
 	// control lane.
 	ControlSessionCapacity int
-	// ControlAgentProfileIDs names the agent profiles whose sessions belong to
-	// the control lane. Every other session, including one whose profile cannot
-	// be resolved, is a worker.
-	ControlAgentProfileIDs []string
+	// ControlAgentProfileIDs and ControlAgentWorkflowIDs name the agent profiles
+	// and workflows whose sessions belong to the control lane. Every other
+	// session, including one whose identities cannot be resolved, is a worker.
+	ControlAgentProfileIDs  []string
+	ControlAgentWorkflowIDs []string
 	// SessionMemoryGuard holds the host-memory pressure thresholds. When
 	// enabled, a new automatic worker launch is deferred while the host is
 	// under pressure; the control lane and Office coordinator are not.
@@ -1936,9 +1937,10 @@ func NewService(
 		deferredRetrySchedule:        newDeferredRetrySchedule(),
 		ceilingReplayTaskTimeout:     ceilingReplayTaskTimeout,
 		sessionCeiling: newSessionCeilingForRepo(repo, SessionCeilingCapacity{
-			WorkerCeiling:     cfg.SessionCapacity,
-			ControlCeiling:    cfg.ControlSessionCapacity,
-			ControlProfileIDs: cfg.ControlAgentProfileIDs,
+			WorkerCeiling:      cfg.SessionCapacity,
+			ControlCeiling:     cfg.ControlSessionCapacity,
+			ControlProfileIDs:  cfg.ControlAgentProfileIDs,
+			ControlWorkflowIDs: cfg.ControlAgentWorkflowIDs,
 		}, cfg.SessionMemoryGuard, svcLogger.Zap()),
 		backgroundProbeConfig: LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:          make(map[string]*parkedSessionState),

@@ -873,6 +873,14 @@ func (s *Service) startCreatedSession(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
 			return nil, err
 		}
+		// A changed logical profile on a session whose durable dynamic route is
+		// already materialized for another logical family is an explicit
+		// workflow profile switch / session handoff, not a resume. Refuse it
+		// before persisting any partial session label so the existing session
+		// and its authoritative route stay intact.
+		if err := s.refuseMaterializedRouteProfileChange(ctx, session, effectiveProfileID); err != nil {
+			return nil, err
+		}
 	}
 
 	// If the workflow step overrode the profile, update the session record in DB

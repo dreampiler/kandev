@@ -34,7 +34,7 @@ const (
 // for turns that never reached on_turn_complete evaluation (for example a
 // session that ended before its turn completed): it records the guarded
 // no-op through the same Task 04 writer the live path uses
-// (recordDeliveryWorkflowNoOp), so the next reconcile promotes the terminal
+// (recordDeliveryWorkflowNoOp), so reconciliation can promote the terminal
 // through the unchanged CompleteAgentDeliveryTerminalSettlement path.
 //
 // The sweep is idempotent: a recorded receipt is never rewritten, and a
@@ -277,16 +277,19 @@ func (s *Service) settleDeadOwnerDeliverySubmissions(ctx context.Context, sessio
 // startup, reconcile, and session-terminal entry points. Both passes are
 // bounded, idempotent, and reuse the existing settlement paths; a failure is
 // logged and never propagated, so it can not break the transition that
-// triggered it.
-func (s *Service) reconcileResidualDeliverySettlements(ctx context.Context, sessionID string) {
-	if _, err := s.settleDeadOwnerDeliverySubmissions(ctx, sessionID); err != nil {
+// triggered it. It reports whether either pass committed new evidence.
+func (s *Service) reconcileResidualDeliverySettlements(ctx context.Context, sessionID string) bool {
+	settled, err := s.settleDeadOwnerDeliverySubmissions(ctx, sessionID)
+	if err != nil {
 		s.logger.Warn("failed to settle dead-owner delivery submissions",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	if _, _, err := s.sweepResidualDeliveryNoOp(ctx, sessionID); err != nil {
+	swept, _, err := s.sweepResidualDeliveryNoOp(ctx, sessionID)
+	if err != nil {
 		s.logger.Warn("failed to sweep residual delivery workflow no-ops",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	return settled > 0 || swept > 0
 }

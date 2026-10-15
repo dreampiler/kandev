@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 
@@ -9,6 +10,54 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// ErrMaterializedRouteProfileChange refuses a start that would persist a
+// different logical agent profile on a session whose durable dynamic route is
+// already materialized for another logical family. Selecting a different
+// dynamic profile is an explicit workflow profile switch / session handoff
+// (docs/specs/agents/system-design/dynamic-agent-routing-01.md), not an
+// in-place relabel: persisting the new label first would leave the session
+// label and the authoritative route disagreeing and silently resume the
+// previous family's concrete candidate.
+var ErrMaterializedRouteProfileChange = errors.New(
+	"agent profile change is not supported on a session with a materialized dynamic route; start a new session instead")
+
+// refuseMaterializedRouteProfileChange rejects a start that would persist a
+// changed logical agent profile while the session already has a materialized
+// durable dynamic route under a different logical family. It runs before any
+// partial session write so the existing session and its authoritative route
+// stay intact. A session with no materialized route keeps its legitimate
+// first-profile selection, and a route already matching the requested profile
+// resumes normally.
+func (s *Service) refuseMaterializedRouteProfileChange(
+	ctx context.Context,
+	session *models.TaskSession,
+	effectiveProfileID string,
+) error {
+	if effectiveProfileID == "" || effectiveProfileID == session.AgentProfileID {
+		return nil
+	}
+	loader, ok := s.repo.(dynamicRouteStateLoader)
+	if !ok {
+		return nil
+	}
+	state, err := loader.LoadRouteState(ctx, session.ID)
+	if err != nil {
+		return fmt.Errorf("load durable dynamic route state: %w", err)
+	}
+	if state == nil || state.Generation <= 0 || state.LogicalProfileID == "" ||
+		state.LogicalProfileID == effectiveProfileID {
+		return nil
+	}
+	s.logger.Warn("refusing agent profile change on a session with a materialized dynamic route",
+		zap.String("session_id", session.ID),
+		zap.String("current_profile", session.AgentProfileID),
+		zap.String("requested_profile", effectiveProfileID),
+		zap.String("route_logical_profile", state.LogicalProfileID),
+		zap.Int64("route_generation", state.Generation))
+	return fmt.Errorf("%w: session %s route %s requested %s",
+		ErrMaterializedRouteProfileChange, session.ID, state.LogicalProfileID, effectiveProfileID)
+}
 
 // workflowStepProfileOverrideMetadataKeys are the provider-owned session
 // metadata keys that belong to one concrete agent profile. They are cleared

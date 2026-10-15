@@ -25,6 +25,7 @@ import (
 type OverviewTaskRow struct {
 	ID                 string `db:"id"`
 	WorkspaceID        string `db:"workspace_id"`
+	WorkflowID         string `db:"workflow_id"`
 	Title              string `db:"title"`
 	State              string `db:"state"`
 	ParentID           string `db:"parent_id"`
@@ -168,6 +169,7 @@ func (r *Repository) ListOverviewOpenTasks(ctx context.Context, workspaceIDs []s
 		var rows []*OverviewTaskRow
 		query := `
 			SELECT t.id, t.workspace_id, COALESCE(t.title, '') AS title, COALESCE(t.state, '') AS state,
+			       COALESCE(t.workflow_id, '') AS workflow_id,
 			       COALESCE(t.parent_id, '') AS parent_id, COALESCE(ws.name, '') AS step_name,
 			       COALESCE(ws.id, '') AS step_id,
 			       COALESCE(ws.stage_type, '') AS step_stage_type,

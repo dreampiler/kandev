@@ -123,13 +123,14 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 
 func (s *Service) reserveSilentRestoreCapacity(
 	ctx context.Context,
-	taskID, sessionID string,
+	taskID, sessionID, agentProfileID, workflowID string,
 ) (*sessionKeyedCeilingReservation, bool) {
 	if s.sessionCeiling == nil {
 		return nil, false
 	}
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic, seam: "resumeTaskSession",
+		agentProfileID: agentProfileID, workflowID: workflowID,
 	})
 	if !decision.admitted {
 		return nil, false
@@ -243,7 +244,11 @@ func (s *Service) startSilentRestoreCandidate(
 		return err
 	}
 	inputs.ownerCtx = ownerCtx
-	reservation, admitted := s.reserveSilentRestoreCapacity(ownerCtx, inputs.task.ID, inputs.session.ID)
+	// The silent restore is classified by the same identities every other resume
+	// seam resolves: the session's logical profile and the task's workflow. Both
+	// are already loaded, so the admission needs no extra repo read.
+	reservation, admitted := s.reserveSilentRestoreCapacity(ownerCtx, inputs.task.ID, inputs.session.ID,
+		inputs.session.AgentProfileID, inputs.task.WorkflowID)
 	if !admitted {
 		return nil
 	}

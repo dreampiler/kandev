@@ -344,8 +344,7 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 		}
 		waitCtx, cancel, ownBudget := admissionWaitBudget(ctx)
 		defer cancel()
-		err := s.withSessionAdmissionLock(waitCtx, ctx, sessionID, token.afterLifecycleUnlock, fn)
-		return admissionWaitError(err, ownBudget)
+		return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, token.afterLifecycleUnlock, ownBudget, fn)
 	}
 
 	var afterLifecycleUnlock []func()
@@ -360,8 +359,7 @@ func (s *Service) WithSessionAdmission(ctx context.Context, sessionID string, fn
 			callback()
 		}
 	}()
-	err := s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, fn)
-	return admissionWaitError(err, ownBudget)
+	return s.withSessionAdmissionLock(waitCtx, ctx, sessionID, &afterLifecycleUnlock, ownBudget, fn)
 }
 
 // withSessionAdmissionLock acquires waitCtx's session gate and runs fn with
@@ -372,6 +370,7 @@ func (s *Service) withSessionAdmissionLock(
 	callbackCtx context.Context,
 	sessionID string,
 	afterLifecycleUnlock *[]func(),
+	ownBudget bool,
 	fn func(context.Context) error,
 ) error {
 	s.admissionMu.Lock()
@@ -390,7 +389,7 @@ func (s *Service) withSessionAdmissionLock(
 			delete(s.admissions, sessionID)
 		}
 		s.admissionMu.Unlock()
-		return err
+		return admissionWaitError(err, ownBudget)
 	}
 	defer func() {
 		entry.gate.unlock()

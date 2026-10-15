@@ -104,9 +104,6 @@ func TestResidualWorkflowReplacedTurnRecordsNotRequired(t *testing.T) {
 	}
 	fixture.assertReceiptOutcome(t, "replaced", agentDeliveryOutcomeNotRequired)
 
-	if err := fixture.service.reconcileAgentDeliverySettlements(fixture.ctx, fixture.session.ID); err != nil {
-		t.Fatalf("reconcile after replaced-turn receipt: %v", err)
-	}
 	submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.submissionID("replaced"))
 	if err != nil || submission.FullySettledAt == nil {
 		t.Fatalf("replaced-turn submission = %+v, %v; want fully settled", submission, err)
@@ -125,9 +122,6 @@ func TestResidualWorkflowCurrentTurnWithoutAutomaticRecordsNoAutomaticTransition
 	}
 	fixture.assertReceiptOutcome(t, "noauto", agentDeliveryOutcomeNoAutomatic)
 
-	if err := fixture.service.reconcileAgentDeliverySettlements(fixture.ctx, fixture.session.ID); err != nil {
-		t.Fatalf("reconcile after no-automatic receipt: %v", err)
-	}
 	submission, err := fixture.repo.GetAgentDeliverySubmissionMetadata(fixture.ctx, fixture.submissionID("noauto"))
 	if err != nil || submission.FullySettledAt == nil {
 		t.Fatalf("no-automatic submission = %+v, %v; want fully settled", submission, err)

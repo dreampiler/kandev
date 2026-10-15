@@ -437,6 +437,7 @@ export async function setQueueAutoRun(
     return await client.request<{ session_id: string; auto_run: boolean; dispatched: boolean }>(
       "message.queue.auto_run.set",
       { ...identity, enabled },
+      35_000,
     );
   } catch (err) {
     rethrowQueueError(err, "admission");
@@ -589,7 +590,7 @@ export async function removeQueuedEntry(
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   try {
-    return await client.request<{ entry_id: string }>("message.queue.remove", params);
+    return await client.request<{ entry_id: string }>("message.queue.remove", params, 35_000);
   } catch (err) {
     rethrowQueueError(err, "admission");
   }
