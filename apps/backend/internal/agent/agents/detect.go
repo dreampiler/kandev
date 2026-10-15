@@ -3,13 +3,17 @@ package agents
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 const commandCheckTimeout = 5 * time.Second
+const osWindows = "windows"
 
 // DetectOption is a detection strategy. Returns (found, matchedPath, err).
 type DetectOption func(ctx context.Context) (bool, string, error)
@@ -62,13 +66,38 @@ func commandCheckCommand(ctx context.Context, path string, args []string) *exec.
 func runCommandCheck(ctx context.Context, path string, timeout time.Duration, args ...string) (found, timedOut bool, err error) {
 	checkCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if runErr := commandCheckCommand(checkCtx, path, args).Run(); runErr != nil {
+	cmd := commandCheckCommand(checkCtx, path, args)
+	var interrupted atomic.Bool
+	cmd.Cancel = func() error {
+		err := cmd.Process.Kill()
+		if err == nil {
+			interrupted.Store(true)
+		}
+		return err
+	}
+	if runErr := cmd.Run(); runErr != nil {
 		if ctx.Err() != nil {
 			return false, false, ctx.Err()
 		}
-		return false, errors.Is(checkCtx.Err(), context.DeadlineExceeded), nil
+		if cmd.Process == nil && errors.Is(runErr, context.DeadlineExceeded) {
+			return false, true, nil
+		}
+		found, timedOut = commandCheckOutcome(checkCtx, cmd.ProcessState, interrupted.Load())
+		return found, timedOut, nil
 	}
 	return true, false, nil
+}
+
+// Conclusive successes remain available; only an interrupted check can time out.
+// POSIX preserves a signalled termination; Windows reports killed processes as exited.
+func commandCheckOutcome(checkCtx context.Context, state *os.ProcessState, interrupted bool) (bool, bool) {
+	if state != nil && state.Success() {
+		return true, false
+	}
+	if !interrupted || !errors.Is(checkCtx.Err(), context.DeadlineExceeded) {
+		return false, false
+	}
+	return false, runtime.GOOS == osWindows || state == nil || !state.Exited()
 }
 
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever

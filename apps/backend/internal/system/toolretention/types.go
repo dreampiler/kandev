@@ -63,9 +63,9 @@ type record struct {
 	Receipt          string   `json:"receipt,omitempty"`
 	FirstMutation    bool     `json:"first_mutation"`
 	Progress         progress `json:"progress"`
-	// PreparationDetail records the last preparation failure cause for post-mortem
-	// diagnosis. It is persisted in the settings row but kept off Status so raw
-	// internal error strings are not exposed by the read endpoint.
+	// PreparationDetail keeps the last backup preparation failure cause for
+	// diagnosis. It sits outside the embedded Status, so the status endpoint
+	// never returns raw internal error text.
 	PreparationDetail string `json:"preparation_detail,omitempty"`
 }
 

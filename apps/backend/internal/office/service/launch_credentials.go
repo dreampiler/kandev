@@ -17,23 +17,26 @@ import (
 type launchOwnerClosedError struct {
 	runID  string
 	reason string
+	cause  error
 }
 
 func (e *launchOwnerClosedError) Error() string {
 	return fmt.Sprintf("launch credential re-mint: run %s %s", e.runID, e.reason)
 }
 
+func (e *launchOwnerClosedError) Unwrap() error { return e.cause }
+
 // LaunchOwnerClosed marks the error for the orchestrator's replay.
 func (e *launchOwnerClosedError) LaunchOwnerClosed() bool { return true }
 
 // launchOwnerClosedReason returns why run no longer waits for a launch into
-// sessionID, or "" while it still does: it is queued or claimed and not yet
-// bound to a different session.
+// sessionID. Queued runs await dispatch; a claimed run's existing session owns
+// its launch and cannot be replaced by a sessionless replay or another session.
 func launchOwnerClosedReason(run *runsmodels.Run, sessionID string) string {
 	if run.Status != RunStatusQueued && run.Status != RunStatusClaimed {
 		return "is " + string(run.Status)
 	}
-	if run.SessionID != "" && run.SessionID != sessionID {
+	if run.Status == RunStatusClaimed && run.SessionID != "" && run.SessionID != sessionID {
 		return "is already bound to another session"
 	}
 	return ""
@@ -59,7 +62,7 @@ func (si *SchedulerIntegration) RemintLaunchCredentials(
 	}
 	run, err := si.svc.repo.GetRun(ctx, runID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, &launchOwnerClosedError{runID: runID, reason: "no longer exists"}
+		return nil, &launchOwnerClosedError{runID: runID, reason: "no longer exists", cause: err}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("launch credential re-mint: load run %s: %w", runID, err)

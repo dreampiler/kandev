@@ -660,7 +660,7 @@ func (r *sqliteRepository) initSchema() error {
 		workflow_id      TEXT NOT NULL DEFAULT '',
 		workflow_step_id TEXT NOT NULL DEFAULT '',
 		from_step_id     TEXT NOT NULL DEFAULT '',
-		from_transition_id INTEGER NOT NULL DEFAULT 0,
+		from_transition_id BIGINT NOT NULL DEFAULT 0,
 		step_position    INTEGER NOT NULL DEFAULT 0,
 		queued_at        TIMESTAMP NOT NULL,
 		actor            TEXT NOT NULL DEFAULT '',
@@ -718,7 +718,7 @@ func (r *sqliteRepository) initSchema() error {
 	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_step_id TEXT NOT NULL DEFAULT ''`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
-	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_transition_id INTEGER NOT NULL DEFAULT 0`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
+	if _, alterErr := r.db.Exec(`ALTER TABLE pending_moves ADD COLUMN from_transition_id BIGINT NOT NULL DEFAULT 0`); alterErr != nil && !internaldb.IsDuplicateColumnError(alterErr) {
 		return alterErr
 	}
 	for _, migration := range []struct {

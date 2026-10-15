@@ -615,7 +615,7 @@ type PendingMove struct {
 	FromStepID string `json:"from_step_id,omitempty"`
 	// FromTransitionID is the task's latest step-transition ledger id when this
 	// move was armed. Replay compares it with the task's latest id: a later step
-	// change advances the id even when the card returns to FromStepID (A→B→A),
+	// change advances the id even when the card returns to FromStepID (A to B to A),
 	// so a move superseded by a later move is dropped instead of relocating the
 	// card. Legacy rows decode as 0 and skip the ordering guard.
 	FromTransitionID int64     `json:"from_transition_id,omitempty"`

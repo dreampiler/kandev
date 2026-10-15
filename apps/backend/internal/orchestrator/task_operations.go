@@ -1860,6 +1860,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	var sessionID string
 	var sessionCreated bool
 	failPreparedLaunch := func(err error) error {
+		s.releaseStartEnvironmentClaim(ctx, task.ID, sessionID, sessionCreated, err)
 		return s.handleQuickChatStartFailure(ctx, task, sessionID, sessionCreated, err)
 	}
 	if selectedExplicitSession != nil {
@@ -2071,13 +2072,8 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// re-drive this first turn — initial launches bypass PromptTask.
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
-	// The Office scheduler mints the runtime token before this session
-	// exists, so the captured token carries an empty session id and every
-	// session-scoped runtime action (handoff_task, decision recording)
-	// refuses it. Re-mint now that the session id is known; a non-Office env
-	// carries no run identity and round-trips unchanged. A failed re-mint must
-	// fail the launch rather than dispatch with the captured, sessionless (or
-	// redacted) token.
+	// Bind runtime credentials to this session before dispatch; a failed refresh
+	// settles the owned turn and session without launching the captured token.
 	remintedEnv, remintErr := s.remintLaunchCredentials(ctx, taskID, sessionID, env)
 	if remintErr != nil {
 		if initialTurnCreated {
@@ -2343,6 +2339,9 @@ func (s *Service) prepareSessionForStartWithWorkflowRoute(
 	agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID string,
 	workflowRoute *models.WorkflowSessionRoute,
 ) (string, bool, error) {
+	if err := s.admitInheritedEnvironment(ctx, task, executorID, executorProfileID); err != nil {
+		return "", false, err
+	}
 	sessionID, created, err := s.createStartSessionWithWorkflowRoute(ctx, task, agentProfileID, officeAgentProfileID, executorID, executorProfileID, workflowStepID, workflowRoute)
 	if err != nil {
 		return "", false, err
@@ -3638,7 +3637,9 @@ func (s *Service) resumeTaskSessionWithContinuationAndReservation(
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 	seam4Res.consume()
 	persistBranchRecovery()
-	s.activateResumedDynamicRoute(resumeCtx, readySession)
+	if err := s.activateResumedDynamicRoute(resumeCtx, readySession); err != nil {
+		return nil, decorateResumeFailure(fmt.Errorf("resumed dynamic route activation failed: %w", err))
+	}
 
 	// Owned initial submissions are written after provider acceptance so the
 	// transcript row can use the accepted turn identity. Ordinary resumes keep
@@ -3850,8 +3851,13 @@ func (s *Service) loadResumeSessionCandidate(
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
 	}
+	// A claim still "starting" behind a live, prompt-ready runtime is an
+	// unfinished activation write, so this admission attempt retries the durable
+	// completion for the current generation before the pending-route guard can
+	// reject it.
 	if session.RouteState != "" && session.RouteState != dynamicRouteStatusActive &&
-		!s.explicitRecoveryOwnsStrandedStartingRoute(ctx, session, options) {
+		!s.explicitRecoveryOwnsStrandedStartingRoute(ctx, session, options) &&
+		!s.completeReadyStrandedStartingRoute(ctx, session) {
 		return nil, &sessionOpenRecoveryBlockedError{reason: autoResumeBlockedDynamicRoute}
 	}
 	if err := s.validateClaimedCeilingBinding(ctx, taskID, entryBinding); err != nil {
@@ -5695,6 +5701,7 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	s.settleOpenBackgroundWork(ctx, sessionID)
 	return nil
 }
 
@@ -5765,10 +5772,18 @@ func (s *Service) StopSessionSynchronously(ctx context.Context, sessionID string
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForSession(sessionID)
 	}
+	stoppedExecutionID := ""
+	if s.agentManager != nil {
+		executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if err == nil {
+			stoppedExecutionID = executionID
+		}
+	}
 	if err := s.executor.StopSessionSynchronously(ctx, sessionID, reason, force); err != nil {
 		return err
 	}
 	s.clearDynamicUnclassifiedStreakForStop(ctx, sessionID)
+	s.settleBackgroundWork(ctx, sessionID, stoppedExecutionID)
 	return nil
 }
 

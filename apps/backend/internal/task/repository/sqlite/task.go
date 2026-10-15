@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -2123,11 +2124,11 @@ func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 		}
 		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
-	// A later move may have left and returned to the same source step (A→B→A):
-	// the step id still matches, but the transition ledger advanced. Compare
-	// the ledger id the deferred move captured at arm time so a move superseded
-	// by a later move is not applied against the returned-to source step. A
-	// legacy row (FromTransitionID 0) skips this guard and keeps its behavior.
+	// A later move may have left and returned to the same source step: the step
+	// id still matches, but the transition ledger advanced. Compare the ledger id
+	// the deferred move captured when it was requested, so a move superseded by a
+	// later move is not applied against the returned-to step. A legacy row
+	// (FromTransitionID 0) skips this guard and keeps its behavior.
 	if deferredMove != nil && deferredMove.Move.FromTransitionID != 0 {
 		latestTransitionID, ledgerErr := r.getLatestTaskStepTransitionIDTx(ctx, tx, task.ID)
 		if ledgerErr != nil {
@@ -3614,7 +3615,7 @@ func (r *Repository) pinSameStepPromotionEntry(ctx context.Context, tx *sql.Tx, 
 		return err
 	}
 	if entryID > 0 {
-		marker[models.QueuePromotionEntryTransitionIDKey] = entryID
+		marker[models.QueuePromotionEntryTransitionIDKey] = strconv.FormatInt(entryID, 10)
 	}
 	return nil
 }
@@ -4663,7 +4664,8 @@ func isWordByte(b byte) bool {
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
 func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
-	searchPattern := "%" + query + "%"
+	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	searchPattern := "%" + escaper.Replace(query) + "%"
 	like := dialect.Like(r.ro.DriverName())
 
 	// Reuse the same archive, ephemeral, and config predicates as the
@@ -4687,10 +4689,10 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		LEFT JOIN repositories r ON tr.repository_id = r.id
 		WHERE t.workspace_id = ?%s
 		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
+			t.title %s ? ESCAPE '\' OR
+			t.description %s ? ESCAPE '\' OR
+			r.name %s ? ESCAPE '\' OR
+			r.local_path %s ? ESCAPE '\'
 		)
 	`, tFilter, like, like, like, like)
 	countArgs := append(append([]interface{}{workspaceID}, extraArgs...), searchPattern, searchPattern, searchPattern, searchPattern)
@@ -4715,10 +4717,10 @@ func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
 			LEFT JOIN repositories r ON tr.repository_id = r.id
 			WHERE t.workspace_id = ?%s
 			AND (
-				t.title %s ? OR
-				t.description %s ? OR
-				r.name %s ? OR
-				r.local_path %s ?
+				t.title %s ? ESCAPE '\' OR
+				t.description %s ? ESCAPE '\' OR
+				r.name %s ? ESCAPE '\' OR
+				r.local_path %s ? ESCAPE '\'
 			)
 		) task_search
 		ORDER BY %s

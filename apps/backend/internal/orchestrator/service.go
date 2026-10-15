@@ -1630,12 +1630,9 @@ type Service struct {
 	// callback. Each entry retains the prompt and route identity that authorized
 	// the reset across prompt-evidence replacement.
 	pendingDynamicStreakResets sync.Map
-	// pendingDynamicEmptyTurn records, per logical session, the execution and
-	// prompt generation of a no-output turn that was counted as an unclassified
-	// failure. It is consumed at agent.completed so a process exit cannot reset
-	// the streak the empty turn just advanced. Keyed by execution+generation so a
-	// later turn cannot match a stale entry.
-	pendingDynamicEmptyTurn sync.Map
+	// countedEmptyTurns records, per session, the execution and prompt
+	// generation whose empty end_turn was counted as an unclassified failure.
+	countedEmptyTurns sync.Map
 
 	// resumeAttempts owns process-local startup identity. It is separate from
 	// dynamicAttemptEvidence because a provider execution may be reused by
@@ -3507,6 +3504,7 @@ func (s *Service) reconcileStartupState(ctx context.Context) error {
 	// snapshot of "starting" routes.
 	s.reconcileOrphanedDynamicStartingRoutes(ctx)
 	s.reconcileExecutorSessionsOnStartup(ctx)
+	s.settleOrphanedBackgroundWorkOnStartup(ctx)
 	// Executor reconciliation abandons turns left open by a pre-crash active
 	// session. Run the CI attempt sweep again after that transition so a
 	// running auto-fix reservation can become retryable on the same startup.

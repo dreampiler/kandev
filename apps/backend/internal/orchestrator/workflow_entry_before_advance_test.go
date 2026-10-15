@@ -2,151 +2,223 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-// TestValidateCeilingEntry_BoundPromptEnsureOnRunningDestinationIsUnavailable
-// covers KANDEV-W-086: a prompt_ensure (or workflow_step_ensure) deferral that
-// carries the workflow-entry binding for the task's current entry must not be
-// terminally dropped while its destination session is still starting or
-// running. A record waiting for capacity has no observable completion yet, so
-// discarding it as superseded would lose the step-entry prompt forever — the
-// step would then advance on a later signal without its own turn ever running.
-func TestValidateCeilingEntry_BoundPromptEnsureOnRunningDestinationIsUnavailable(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "w086-running", "w086-running-session", models.TaskSessionStateRunning)
-	task, err := repo.GetTask(ctx, "w086-running")
-	require.NoError(t, err)
-	require.NotNil(t, task)
+const entryGateStepID = "entry-gate-step"
 
-	stepGetter := newMockStepGetter()
-	stepGetter.steps["w086-step"] = &wfmodels.WorkflowStep{ID: "w086-step", WorkflowID: "wf1", Name: "Implementation"}
-	svc := createTestService(repo, stepGetter, newMockTaskRepo())
-	task.WorkflowID = "wf1"
-	task.WorkflowStepID = "w086-step"
-	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
-	task, err = repo.GetTask(ctx, task.ID)
-	require.NoError(t, err)
-
-	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
-	binding := models.CeilingWorkflowEntryBinding{
-		WorkflowID:           "wf1",
-		DestinationStepID:    "w086-step",
-		RouteOperationID:     workflowSessionRouteID(task.ID, "w086-step", entryIdentity, nil, models.WorkflowProfileSessionStartPolicyReuse),
-		EntryIdentity:        entryIdentity,
-		DestinationSessionID: "w086-running-session",
-	}
-
-	deferral := models.CeilingDeferral{
-		Kind: models.CeilingLaunchPromptEnsure,
-		Payload: map[string]interface{}{
-			metaKeySessionID:                    "w086-running-session",
-			metaKeyPrompt:                       "implementation entry prompt",
-			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
-		},
-	}
-
-	disposition, _, validationErr := svc.validateCeilingEntry(ctx, task, deferral)
-	require.NoError(t, validationErr)
-	require.Equal(t, ceilingEntryUnavailable, disposition,
-		"a bound entry prompt whose destination is still running must be kept for a later pass, not dropped as superseded")
+type entryPromptFixture struct {
+	ctx     context.Context
+	repo    *sqliterepo.Repository
+	svc     *Service
+	taskID  string
+	session string
 }
 
-// TestValidateCeilingEntry_UnboundPromptOnRunningDestinationKeepsLegacyDisposition
-// pins the unchanged legacy behavior: without a workflow-entry binding there is
-// no entry identity to compare, so a record whose destination is already
-// running keeps today's superseded disposition.
-func TestValidateCeilingEntry_UnboundPromptOnRunningDestinationKeepsLegacyDisposition(t *testing.T) {
+// newEntryPromptFixture seeds a task on a signal-gated step whose session is
+// in sessionState and has already recorded a completion signal for that step.
+func newEntryPromptFixture(t *testing.T, taskID, sessionID string, sessionState models.TaskSessionState) *entryPromptFixture {
+	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "w086-legacy", "w086-legacy-session", models.TaskSessionStateRunning)
-	task, err := repo.GetTask(ctx, "w086-legacy")
-	require.NoError(t, err)
-	require.NotNil(t, task)
-
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	deferral := models.CeilingDeferral{
-		Kind: models.CeilingLaunchPromptEnsure,
-		Payload: map[string]interface{}{
-			metaKeySessionID: "w086-legacy-session",
-			metaKeyPrompt:    "legacy prompt",
-		},
-	}
-
-	disposition, _, validationErr := svc.validateCeilingEntry(ctx, task, deferral)
-	require.NoError(t, validationErr)
-	require.Equal(t, ceilingEntrySuperseded, disposition,
-		"an unbound record on a running destination keeps the legacy superseded disposition")
-}
-
-// TestPrepareEngineTurnCompletion_BlocksAdvanceWhileBoundEntryPromptPending
-// covers KANDEV-W-086's second half: a signal-gated step must not advance on
-// its completion signal while the workflow entry that brought the task here
-// still has a valid queued prompt. Losing the entry prompt and advancing on
-// the signal is exactly the "entered the step but the step's turn never ran"
-// skip this fix closes.
-func TestPrepareEngineTurnCompletion_BlocksAdvanceWhileBoundEntryPromptPending(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "w086-guard", "w086-guard-session", models.TaskSessionStateWaitingForInput)
-	require.NoError(t, repo.SetSessionMetadataKey(ctx, "w086-guard-session", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
-		StepID: "w086-guard-step",
-		Source: models.StepCompletionSourceAgent,
-	}))
-
+	seedTaskAndSession(t, repo, taskID, sessionID, sessionState)
 	stepGetter := newMockStepGetter()
-	stepGetter.steps["w086-guard-step"] = &wfmodels.WorkflowStep{
-		ID:                        "w086-guard-step",
-		WorkflowID:                "wf1",
-		Name:                      "Implementation",
-		AutoAdvanceRequiresSignal: true,
+	stepGetter.steps[entryGateStepID] = &wfmodels.WorkflowStep{
+		ID:                         entryGateStepID,
+		WorkflowID:                 "wf1",
+		Name:                       "Implementation",
+		AutoAdvanceRequiresSignal:  true,
+		CancelTriggersTurnComplete: true,
 		Events: wfmodels.StepEvents{
 			OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}},
 		},
 	}
+	stepGetter.steps["entry-other-step"] = &wfmodels.WorkflowStep{ID: "entry-other-step", WorkflowID: "wf1", Name: "Other"}
 	svc := createTestService(repo, stepGetter, newMockTaskRepo())
-	task, err := repo.GetTask(ctx, "w086-guard")
+
+	task, err := repo.GetTask(ctx, taskID)
 	require.NoError(t, err)
 	task.WorkflowID = "wf1"
-	task.WorkflowStepID = "w086-guard-step"
+	task.WorkflowStepID = entryGateStepID
 	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
-	task, err = repo.GetTask(ctx, "w086-guard")
+	entry, err := repo.GetTaskStepCompletionEntry(ctx, taskID)
 	require.NoError(t, err)
-	session, err := repo.GetTaskSession(ctx, "w086-guard-session")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
+		StepID:            entryGateStepID,
+		Source:            models.StepCompletionSourceAgent,
+		EntryTransitionID: entry.TransitionID,
+		SignaledAt:        entry.OccurredAt,
+	}))
+	return &entryPromptFixture{ctx: ctx, repo: repo, svc: svc, taskID: taskID, session: sessionID}
+}
+
+func (f *entryPromptFixture) task(t *testing.T) *models.Task {
+	t.Helper()
+	task, err := f.repo.GetTask(f.ctx, f.taskID)
 	require.NoError(t, err)
+	return task
+}
 
-	_, eligible := svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn)
-	require.True(t, eligible,
-		"sanity: a signaled gate with no pending entry prompt must still advance")
-
-	entryIdentity := svc.workflowEntryIdentity(ctx, task.ID)
+// boundEntryPrompt builds the capacity-deferred entry prompt that the current
+// workflow entry queued for destinationSessionID.
+func (f *entryPromptFixture) boundEntryPrompt(t *testing.T, destinationSessionID string) models.CeilingDeferral {
+	t.Helper()
+	entryIdentity := f.svc.workflowEntryIdentity(f.ctx, f.taskID)
 	binding := models.CeilingWorkflowEntryBinding{
 		WorkflowID:           "wf1",
-		DestinationStepID:    "w086-guard-step",
-		RouteOperationID:     workflowSessionRouteID(task.ID, "w086-guard-step", entryIdentity, nil, models.WorkflowProfileSessionStartPolicyReuse),
+		DestinationStepID:    entryGateStepID,
+		RouteOperationID:     workflowSessionRouteID(f.taskID, entryGateStepID, entryIdentity, nil, models.WorkflowProfileSessionStartPolicyReuse),
 		EntryIdentity:        entryIdentity,
-		DestinationSessionID: "w086-guard-session",
+		DestinationSessionID: destinationSessionID,
 	}
-	deferral := models.CeilingDeferral{
+	return models.CeilingDeferral{
 		Kind: models.CeilingLaunchPromptEnsure,
 		Payload: map[string]interface{}{
-			metaKeySessionID:                    "w086-guard-session",
+			metaKeySessionID:                    destinationSessionID,
 			metaKeyPrompt:                       "implementation entry prompt",
 			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
 		},
 	}
-	require.NoError(t, repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)))
+}
 
-	_, eligible = svc.prepareEngineTurnCompletion(ctx, task.ID, task, session, turnCompletionCauseAgentTurn)
-	require.False(t, eligible,
-		"a valid queued entry prompt for this step must block the signal-gated advance until the prompt is delivered")
-	sessionAfter, err := repo.GetTaskSession(ctx, "w086-guard-session")
+func (f *entryPromptFixture) queue(t *testing.T, deferral models.CeilingDeferral) {
+	t.Helper()
+	require.NoError(t, f.repo.SetTaskMetadataKey(f.ctx, f.taskID, models.MetaKeyDeferredLaunch, models.CeilingRecordKeys(deferral)))
+}
+
+func (f *entryPromptFixture) advances(t *testing.T, cause turnCompletionCause) bool {
+	t.Helper()
+	session, err := f.repo.GetTaskSession(f.ctx, f.session)
 	require.NoError(t, err)
-	require.Equal(t, models.TaskSessionStateWaitingForInput, sessionAfter.State)
+	_, advances := f.svc.prepareEngineTurnCompletion(f.ctx, f.taskID, f.task(t), session, cause)
+	return advances
+}
+
+// AC-TASKS-WORKFLOW-STAGE-MOVES-003.1: a bound entry prompt waiting for
+// capacity has not run yet, so a running destination is a reason to retry,
+// not proof that the prompt was superseded.
+func TestValidateCeilingEntry_BoundEntryPromptOnRunningDestinationIsRetried(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-running", "entry-running-session", models.TaskSessionStateRunning)
+
+	disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), f.boundEntryPrompt(t, f.session))
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntryUnavailable, disposition,
+		"a bound entry prompt whose destination is running must be kept for a later pass")
+}
+
+// AC-TASKS-WORKFLOW-STAGE-MOVES-003.2
+func TestValidateCeilingEntry_UnboundPromptOnRunningDestinationKeepsSupersededDisposition(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-legacy", "entry-legacy-session", models.TaskSessionStateRunning)
+	deferral := models.CeilingDeferral{
+		Kind: models.CeilingLaunchPromptEnsure,
+		Payload: map[string]interface{}{
+			metaKeySessionID: f.session,
+			metaKeyPrompt:    "legacy prompt",
+		},
+	}
+
+	disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntrySuperseded, disposition)
+}
+
+// AC-TASKS-WORKFLOW-STAGE-MOVES-003.3, 003.4
+func TestPrepareEngineTurnCompletion_HoldsAdvanceWhileBoundEntryPromptPending(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-hold", "entry-hold-session", models.TaskSessionStateWaitingForInput)
+	require.True(t, f.advances(t, turnCompletionCauseAgentTurn),
+		"a signaled gate with no pending entry prompt advances")
+
+	f.queue(t, f.boundEntryPrompt(t, f.session))
+
+	require.False(t, f.advances(t, turnCompletionCauseAgentTurn),
+		"a valid queued entry prompt for this step holds the signal-gated advance")
+	session, err := f.repo.GetTaskSession(f.ctx, f.session)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.True(t, f.advances(t, turnCompletionCauseUserCancellation),
+		"a user-cancelled turn keeps its existing completion path")
+}
+
+// AC-TASKS-WORKFLOW-STAGE-MOVES-003.4: an entry prompt whose destination
+// session has ended is superseded, so it does not hold the advance.
+func TestPrepareEngineTurnCompletion_SupersededEntryPromptDoesNotHoldAdvance(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-ended", "entry-ended-session", models.TaskSessionStateWaitingForInput)
+	now := time.Now().UTC()
+	require.NoError(t, f.repo.CreateTaskSession(f.ctx, &models.TaskSession{
+		ID: "entry-ended-destination", TaskID: f.taskID, State: models.TaskSessionStateCompleted,
+		StartedAt: now, UpdatedAt: now,
+	}))
+	f.queue(t, f.boundEntryPrompt(t, "entry-ended-destination"))
+
+	require.True(t, f.advances(t, turnCompletionCauseAgentTurn))
+}
+
+// A deferred-launch read error leaves the entry-prompt state unknown, so the
+// signal-gated advance must stay held rather than release the hold.
+func TestWorkflowEntryPromptPendingForStep_HoldsAdvanceWhenDeferredLaunchReadFails(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-read-error", "entry-read-error-session", models.TaskSessionStateWaitingForInput)
+	f.queue(t, f.boundEntryPrompt(t, f.session))
+	f.svc.repo = entryPromptReadErrorRepo{sessionExecutorStore: f.repo, err: errors.New("deferred launch storage unavailable")}
+
+	require.True(t, f.svc.workflowEntryPromptPendingForStep(f.ctx, f.task(t), entryGateStepID),
+		"an unreadable deferred-launch record must hold the signal-gated advance")
+}
+
+// entryPromptReadErrorRepo fails deferred-launch reads while delegating the
+// rest of the store to the real repository.
+type entryPromptReadErrorRepo struct {
+	sessionExecutorStore
+	err error
+}
+
+func (r entryPromptReadErrorRepo) GetTaskDeferredLaunch(
+	context.Context, string,
+) (map[string]interface{}, interface{}, error) {
+	return nil, nil, r.err
+}
+
+// A held entry prompt is released by existing events rather than by an age
+// limit: the destination's turn ends, which makes the prompt deliverable on
+// the next ceiling sweep, or the task leaves the step, which supersedes it.
+func TestValidateCeilingEntry_HeldEntryPromptEndsWithTurnOrStepChange(t *testing.T) {
+	f := newEntryPromptFixture(t, "entry-release", "entry-release-session", models.TaskSessionStateRunning)
+	deferral := f.boundEntryPrompt(t, f.session)
+
+	require.NoError(t, f.repo.UpdateTaskSessionState(f.ctx, f.session, models.TaskSessionStateWaitingForInput, ""))
+	disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntryValid, disposition, "an idle destination can receive the held prompt")
+
+	task := f.task(t)
+	task.WorkflowStepID = "entry-other-step"
+	require.NoError(t, f.repo.UpdateTaskPreservingDeferredLaunch(f.ctx, task))
+	disposition, _, err = f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntrySuperseded, disposition, "leaving the step supersedes the held prompt")
+}
+
+func TestPrepareEngineTurnCompletion_HoldsAdvanceWhenEntryBindingUnreadable(t *testing.T) {
+	for _, binding := range []interface{}{
+		map[string]interface{}{"destination_step_id": entryGateStepID},
+		"unreadable binding",
+	} {
+		f := newEntryPromptFixture(t, "entry-binding-error", "entry-binding-error-session", models.TaskSessionStateWaitingForInput)
+		deferral := f.boundEntryPrompt(t, f.session)
+		deferral.Payload[models.CeilingLaunchEntryBindingKey] = binding
+		f.queue(t, deferral)
+		disposition, _, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+		require.NoError(t, err)
+		require.Equal(t, ceilingEntryPermanentlyUnavailable, disposition,
+			"a malformed durable binding is terminal for replay")
+		require.False(t, f.advances(t, turnCompletionCauseAgentTurn),
+			"an unreadable bound entry prompt must hold the signal-gated advance")
+	}
 }

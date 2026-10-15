@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -45,13 +46,16 @@ const (
 	// deterministic reason that a later pass cannot fix (a launch
 	// validation or wiring fault): the record is dropped so the sweep
 	// does not create a new session per retry.
-	ceilingReplayPermanentlyFailed
 	// ceilingReplaySuperseded is a terminal disposition for a claimed launch
 	// whose workflow entry or destination changed before dispatch.
 	ceilingReplaySuperseded
 	// ceilingReplayRunClosed is a terminal disposition for a claimed start
 	// whose automation run closed before dispatch: nothing was launched.
 	ceilingReplayRunClosed
+	// ceilingReplayPermanentlyFailed means the launch failed for a reason a
+	// later pass cannot fix (its built command failed validation): the record
+	// is dropped so the sweep does not leave a failed session per retry.
+	ceilingReplayPermanentlyFailed
 )
 
 // drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
@@ -81,8 +85,8 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	tasks, err := lister.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
-		return
 	}
+	s.refreshCeilingLaunchQueueSummaries(ctx, tasks)
 	s.sortCeilingReplayQueue(ctx, tasks)
 	paced := isPeriodicCeilingSweep(ctx)
 	allowDispatch := func(models.CeilingDeferral) bool { return true }
@@ -397,15 +401,14 @@ func (s *Service) settleCeilingReplay(
 		}
 		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
 			ceilingReasonDroppedTaskIneligible, detail)
+	case ceilingReplayPermanentlyFailed:
+		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
+			ceilingReasonDroppedLaunchInvalid, result.failureDetail())
 	case ceilingReplayFailed:
 		s.deferredRetrySchedule.recordFailure(task.ID, ceilingDeferralIdentityKey(deferral))
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)),
 			zap.String("detail", result.detail), zap.Error(result.err))
-	case ceilingReplayPermanentlyFailed:
-		s.deferredRetrySchedule.settle(task.ID)
-		s.dropCeilingDeferral(ctx, task, sessionIDFromCeilingPayload(deferral), deferral,
-			ceilingReasonDroppedLaunchInvalid, result.detail)
 	case ceilingReplayStillDeferred:
 		// Remove the in-flight claim after the replay gate has restored the
 		// durable deferral. The next sweep must be able to own it again.
@@ -477,7 +480,7 @@ func (s *Service) evaluateCeilingDropReasons(
 	} else if disposition == ceilingEntryPermanentlyUnavailable {
 		// The queued entry is structurally unable to start. Drop it with the
 		// same terminal disposition as a superseded entry so it stops
-		// consuming a sweep retry on every pass.
+		// consuming a replay attempt on every sweep.
 		return ceilingReasonSuperseded, detail, true
 	} else if disposition == ceilingEntryUnavailable {
 		// Read uncertainty is not a terminal disposition. Keep the durable
@@ -498,8 +501,17 @@ func (s *Service) evaluateCeilingStartDropReasons(
 	if run != nil && !s.automationRunAwaitsLaunch(ctx, run.RunID) {
 		return ceilingReasonDroppedTaskIneligible, ceilingDetailAutomationRunClosed, true
 	}
-	if run == nil && !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
-		return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
+	if run == nil && !task.IsFromOffice {
+		if s.workflowStepGetter == nil {
+			return "", "", false
+		}
+		step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if err != nil && !errors.Is(err, wfmodels.ErrWorkflowStepNotFound) {
+			return "", "", false
+		}
+		if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+			return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
+		}
 	}
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return ceilingReasonDroppedLaunchGateDeclined, "terminal PR auto-start gate declined the launch", true
@@ -738,21 +750,8 @@ func int64Field(payload map[string]interface{}, key string) int64 {
 	}
 }
 
-// remintLaunchCredentials refreshes the short-lived Office runtime
-// credentials redactedCeilingLaunchEnv stripped before persisting, using
-// whichever LaunchCredentialReminter was wired (nil for a non-Office
-// deployment, or when no reminter is registered — env round-trips unchanged
-// in that case). sessionID is the session this launch will use; a
-// ceiling-deferred replay has none yet, so it passes "" and the re-minter
-// falls back to the run's persisted session id.
-//
-// A re-mint failure is returned, never swallowed: the captured env is not a
-// safe fallback for an Office launch. On a first launch it carries the token
-// minted before this task session existed (empty session id, which every
-// session-scoped runtime action rejects), and on a ceiling replay the bearer
-// keys were redacted before persisting, so proceeding would dispatch with no
-// runtime credentials at all. Both recreate the handoff failure this re-mint
-// exists to prevent, so the caller must fail or retain the launch instead.
+// remintLaunchCredentials refreshes credentials for the concrete launch session.
+// A sessionless replay uses the persisted run session. Refresh errors fail closed.
 func (s *Service) remintLaunchCredentials(ctx context.Context, taskID, sessionID string, env map[string]string) (map[string]string, error) {
 	if s.launchCredentialReminter == nil || len(env) == 0 {
 		return env, nil
@@ -879,7 +878,7 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	// would otherwise never fire and a still-refused replay would be
 	// misclassified as ceilingReplayFailed (a non-ceiling failure), skipping
 	// the AC-49g card-surface retry and logging a misleading warning.
-	if errors.Is(err, ErrCeilingLaunchDeferred) || errors.Is(err, ErrCeilingLaunchConflict) {
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return ceilingReplayDeferredResult()
 	}
 	if errors.Is(err, errCeilingAutomationRunClosed) {
@@ -978,7 +977,7 @@ func (s *Service) replayCeilingLaunchPromptEnsure(ctx context.Context, task *mod
 		// launch did happen, so this is not a ceiling matter any longer.
 		return ceilingReplaySucceededResult()
 	}
-	return ceilingReplayFailedResult(err, "prompt ensure dispatch failed")
+	return ceilingReplayDispatchFailure(err, "prompt ensure dispatch failed")
 }
 
 // replayCeilingLaunchWorkflowStepEnsure replays an AC-42 "workflow_step_ensure"
@@ -998,7 +997,7 @@ func (s *Service) replayCeilingLaunchWorkflowStepEnsure(ctx context.Context, tas
 	case errors.Is(err, errSeam3WorkflowStepEnsureDeferred):
 		return ceilingReplayDeferredResult()
 	default:
-		return ceilingReplayFailedResult(err, "workflow step ensure dispatch failed")
+		return ceilingReplayDispatchFailure(err, "workflow step ensure dispatch failed")
 	}
 }
 
@@ -1014,7 +1013,7 @@ func (s *Service) replayCeilingLaunchQueueDrainEnsure(ctx context.Context, task 
 	}
 	if err != nil {
 		if _, ok := isSeam3Refusal(err); !ok {
-			return ceilingReplayFailedResult(err, "queue drain ensure dispatch failed")
+			return ceilingReplayDispatchFailure(err, "queue drain ensure dispatch failed")
 		}
 	}
 
@@ -1059,7 +1058,8 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 		AgentExecutionID: stringField(payload, "agent_execution_id"),
 		AgentProfileID:   stringField(payload, metaKeyAgentProfileID),
 	}
-	switch s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic, ceilingEntryBindingFromContext(ctx)) {
+	outcome, err := s.relaunchDynamicTaskAfterFailureOutcomeWithBinding(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic, ceilingEntryBindingFromContext(ctx))
+	switch outcome {
 	case dynamicRelaunchSucceeded:
 		return ceilingReplaySucceededResult()
 	case dynamicRelaunchDeferred:
@@ -1067,6 +1067,6 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 	case dynamicRelaunchSuperseded:
 		return ceilingReplaySupersededResult()
 	default:
-		return ceilingReplayFailedResult(nil, "dynamic relaunch failed")
+		return ceilingReplayDispatchFailure(err, "dynamic relaunch failed")
 	}
 }

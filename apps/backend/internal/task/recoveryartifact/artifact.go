@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -290,49 +289,19 @@ func validateRegistrationPaths(paths []string) error {
 }
 
 // FilesystemIdentity returns an opaque stable identity for a regular file or
-// directory without following symlinks. Platforms without device/inode data
-// fail open and return false, so workspace browsing can keep the path visible.
+// directory without following symlinks. An unavailable identity returns false,
+// so workspace browsing can keep the path visible.
 func FilesystemIdentity(path string) (string, bool) {
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || (!info.IsDir() && !info.Mode().IsRegular()) {
 		return "", false
 	}
-	value := reflect.ValueOf(info.Sys())
-	if !value.IsValid() {
+	identity, ok := filesystemObjectIdentity(path, info)
+	if !ok {
 		return "", false
 	}
-	if value.Kind() == reflect.Pointer {
-		if value.IsNil() {
-			return "", false
-		}
-		value = value.Elem()
-	}
-	device, deviceOK := reflectedUnsignedField(value, "Dev")
-	inode, inodeOK := reflectedUnsignedField(value, "Ino")
-	if !deviceOK || !inodeOK {
-		return "", false
-	}
-	identity := fmt.Sprintf("%d:%d:%d", device, inode, uint32(info.Mode().Type()))
 	digest := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(digest[:]), true
-}
-
-func reflectedUnsignedField(value reflect.Value, name string) (uint64, bool) {
-	field := value.FieldByName(name)
-	if !field.IsValid() {
-		return 0, false
-	}
-	switch field.Kind() {
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return field.Uint(), true
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if field.Int() < 0 {
-			return 0, false
-		}
-		return uint64(field.Int()), true
-	default:
-		return 0, false
-	}
 }
 
 func validateArtifactIdentities(paths []string, identities map[string]string) error {

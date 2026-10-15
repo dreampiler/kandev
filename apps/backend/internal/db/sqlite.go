@@ -18,20 +18,16 @@ import (
 const (
 	defaultBusyTimeout = 5 * time.Second
 
-	// sqliteWriterDriverName registers a writer-only driver whose every
-	// connection applies the writer pragmas that have no DSN parameter. It
-	// stays a separate driver name because sqlx is told the dialect name
-	// separately (sqlx.NewDb) while database/sql keys its driver registry by
-	// this name.
+	// sqliteWriterDriverName is a writer-only driver whose connections apply
+	// the writer pragmas that have no DSN parameter. Callers still pass
+	// "sqlite3" to sqlx.NewDb, which takes the dialect from that argument.
 	sqliteWriterDriverName = "sqlite3_kandev_writer"
 
-	// journalSizeLimitSQL caps the WAL file size that survives a WAL reset.
-	// A checkpoint alone rewrites the WAL in place without shrinking it, so
-	// without this bound the file stays at its high-water mark for the life of
-	// the database. The limit is a reset-time size bound, not a per-write
-	// budget: the WAL still grows freely up to it between resets. 67108864 bytes
-	// is 64 MiB, which leaves room for a write burst over the ~4 MiB default
-	// autocheckpoint while bounding a single file.
+	// journalSizeLimitSQL bounds the WAL file that remains after a WAL reset.
+	// A checkpoint rewrites the WAL in place without shrinking it, so without
+	// this bound the file keeps its high-water mark for the life of the
+	// database. It is a reset-time bound, not a per-write budget: 64 MiB leaves
+	// room for a burst well over the ~4 MiB default autocheckpoint.
 	journalSizeLimitSQL = "PRAGMA journal_size_limit = 67108864"
 
 	// defaultSQLiteReaderConns is the number of concurrent read connections.
@@ -48,12 +44,11 @@ const (
 	sqliteReaderConnsEnv = "KANDEV_SQLITE_READER_CONNS"
 )
 
-// applyWriterPragmas runs on every writer connection. journal_size_limit is
-// per-connection state and a pooled connection can be replaced at any time, so
-// it is set here rather than once per database handle. It goes through the
-// standard driver.ExecerContext interface so the same code compiles with and
-// without cgo: the non-cgo go-sqlite3 mock connection does not implement it
-// (and its driver cannot open SQLite), so the pragma is skipped there.
+// applyWriterPragmas runs on every new writer connection. journal_size_limit
+// is per-connection state and the pool can replace its connection at any time,
+// so it cannot be set once per handle. The standard driver.ExecerContext
+// interface keeps one code path for cgo and non-cgo builds: the non-cgo
+// go-sqlite3 stub does not implement it and cannot open a database anyway.
 func applyWriterPragmas(conn *sqlite3.SQLiteConn) error {
 	execer, ok := any(conn).(driver.ExecerContext)
 	if !ok {
@@ -142,6 +137,7 @@ func OpenSQLite(dbPath string) (*sql.DB, error) {
 	// - synchronous=FULL: committed delivery receipts must survive power loss before journal pruning.
 	// - cache=shared: allow multiple connections to share a page cache.
 	// - txlock=immediate: acquire the writer before transaction predicate reads.
+	// journal_size_limit has no DSN parameter; applyWriterPragmas sets it.
 	dsn := fmt.Sprintf(
 		"file:%s?_foreign_keys=on&_mode=rwc&_busy_timeout=%d&_journal_mode=WAL&_synchronous=FULL&_cache=shared&_txlock=immediate",
 		normalizedPath,

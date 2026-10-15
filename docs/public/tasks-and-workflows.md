@@ -49,8 +49,16 @@ The task carries the outcome through the workflow. The repository and session pr
 
 ## Manage forwarded ports
 
-Enable **Port forwarding** from the task's `+` menu on desktop or the active-task
-drawer on a phone, then open the network control in the task top bar.
+On a phone, open **Panels** in the session's bottom dock and choose **Port
+forwarding**. The port manager opens in a bottom drawer without changing your
+selected session panel. On desktop, enable **Port forwarding** from the task's
+`+` menu, then use the network control in the task header. Tablets retain the
+Port forwarding action in the task switcher.
+
+The phone drawer's **Show in task header** switch controls an optional network
+shortcut shared by everyone viewing that task. You can always reopen the port
+manager through **Panels**, with the shortcut on or off. Changing the shortcut
+does not start or stop tunnels.
 
 **Forwarded ports** appears first with the number of active tunnels. Each row
 shows **Forwarding**, its dedicated tunnel URL, and controls to open, copy, or
@@ -59,8 +67,13 @@ you can start forwarding. Each group sorts by target port number.
 
 A proxy URL is also available for each listed port. A proxy link alone does not
 mean a dedicated tunnel is active. Starting a tunnel moves the port to the top
-group; stopping it keeps the port available to restart during that dialog visit.
-Closing the dialog leaves active tunnels running.
+group; stopping it keeps the port available to restart during that session visit.
+Closing the port manager leaves active tunnels running.
+Reopening refreshes detected ports and current tunnel state while preserving
+your unfinished manual-port entry. Use **Refresh** to check for new listening
+ports while the manager stays open.
+If the current tunnel status cannot be read, the manager keeps the last known
+status until a later successful read.
 
 ## Keep your view when creating tasks
 
@@ -174,6 +187,9 @@ settings from the default workspace.
 ## Create a task
 
 Use **New Task** in the sidebar. In an open task, the **Task** split button also opens task creation.
+
+IME composition confirmation keeps your text in the creation dialog. When ready,
+use a separate `Cmd/Ctrl+Enter` shortcut or the visible submit action.
 
 <DocsVideo
   webm="./media/feature-guides/task-create.webm"
@@ -962,6 +978,11 @@ about 24 hours and removes it when it is clean. This task-lifecycle check runs
 even when scheduled storage cleanup is disabled. Git does not include ignored
 files in this check. Protect ignored work that must remain.
 
+After the last worktree is reclaimed and the task environment is no longer in
+use, Kandev also removes the enclosing task folder and everything inside it,
+including files or nested folders created beside the worktrees. A retained
+worktree keeps that task folder until reclamation can finish.
+
 | Executor      | Archive cleanup                                                                                                                                                                                                       |
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                                             |
@@ -1009,6 +1030,12 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
+
+Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
+session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+leaves other conversations and the agent's shared indexes and history databases in place.
+It uses the host's home and config-directory settings; overrides set only in an agent or
+executor profile are outside this cleanup.
 
 ## Troubleshooting
 

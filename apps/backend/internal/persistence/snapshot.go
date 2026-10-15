@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -17,16 +18,17 @@ import (
 	"github.com/kandev/kandev/internal/db"
 )
 
+var bootStagingSweepMu sync.Mutex
+
 const (
-	// bootStagingDirPrefix marks the private staging directories
-	// createPreMigrationBackup reserves before VACUUM INTO writes into them.
+	// bootStagingDirPrefix names the private directory createPreMigrationBackup
+	// reserves before the snapshot copy writes the staged backup into it.
 	bootStagingDirPrefix = ".kandev-backup-"
 
 	// staleBootStagingAge is how long a boot staging directory must show no
-	// sign of writing before it counts as crash debris. A boot backup is a
-	// single pre-migration step, so this only has to exceed the slowest
-	// plausible upgrade; the freshness check in SweepStaleBootStaging is what
-	// actually protects a running backup.
+	// modification before it counts as crash debris. The backups directory is
+	// shared by every database file in the same directory, so this window is
+	// what protects another process's backup that is still being written.
 	staleBootStagingAge = 6 * time.Hour
 )
 
@@ -95,19 +97,30 @@ func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (i
 	return info.Size(), nil
 }
 
-// SweepStaleBootStaging removes boot staging directories left behind by a
-// process that died between MkdirTemp and the deferred cleanup, which otherwise
-// keeps a whole database copy on disk.
+// SweepStaleBootStaging removes boot backup staging directories that a process
+// left behind when it exited between MkdirTemp and the deferred cleanup. Such a
+// directory otherwise keeps a whole database copy on disk.
 //
-// Liveness comes from the newest mtime among the directory and its direct
-// children rather than the directory alone: VACUUM INTO writes the staged file
-// in place, and a directory's own mtime does not advance while a file inside it
-// grows. A staging directory still being written therefore keeps a fresh mtime
-// and is never removed. Published snapshots carry no staging prefix and are
-// never matched.
+// Liveness is the newest modification time of the directory and its direct
+// entries, because a directory's own time does not change while the snapshot
+// copy grows a file inside it. Only names with the boot staging prefix are matched,
+// so published backups and other staging directories are never removed. A
+// failure is logged and never returned: reclaiming debris must not fail boot
+// or backup creation.
 func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
+	bootStagingSweepMu.Lock()
+	defer bootStagingSweepMu.Unlock()
 	entries, err := os.ReadDir(backupDir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, statErr := os.Stat(backupDir); errors.Is(statErr, os.ErrNotExist) {
+				return
+			}
+		}
+		if log != nil {
+			log.Warn("persistence: failed to list boot backup staging directories",
+				zap.String("path", backupDir), zap.Error(err))
+		}
 		return
 	}
 	for _, e := range entries {
@@ -115,8 +128,11 @@ func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 			continue
 		}
 		path := filepath.Join(backupDir, e.Name())
-		newest, err := newestModTime(path, e)
+		newest, err := newestModTime(path)
 		if err != nil {
+			// A directory, or an entry in it, that vanished while being
+			// inspected was removed by its owner or another sweep and needs
+			// nothing from this one.
 			if !errors.Is(err, os.ErrNotExist) && log != nil {
 				log.Warn("persistence: failed to inspect boot backup staging directory",
 					zap.String("path", path), zap.Error(err))
@@ -127,16 +143,16 @@ func SweepStaleBootStaging(backupDir string, log *logger.Logger) {
 			continue
 		}
 		if err := os.RemoveAll(path); err != nil && log != nil {
-			log.Warn("persistence: failed to remove stale boot backup staging directory",
+			log.Warn("persistence: failed to reclaim stale boot backup staging directory",
 				zap.String("path", path), zap.Error(err))
 		}
 	}
 }
 
-// newestModTime returns the most recent modification time among dir itself and
-// its direct children. Inspection errors leave the directory untouched.
-func newestModTime(dir string, entry os.DirEntry) (time.Time, error) {
-	info, err := entry.Info()
+// newestModTime returns the latest modification time among dir and its direct
+// entries. It stats each path rather than trusting directory-listing metadata.
+func newestModTime(dir string) (time.Time, error) {
+	info, err := os.Lstat(dir)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -146,7 +162,7 @@ func newestModTime(dir string, entry os.DirEntry) (time.Time, error) {
 		return time.Time{}, err
 	}
 	for _, child := range children {
-		childInfo, err := child.Info()
+		childInfo, err := os.Lstat(filepath.Join(dir, child.Name()))
 		if err != nil {
 			return time.Time{}, err
 		}

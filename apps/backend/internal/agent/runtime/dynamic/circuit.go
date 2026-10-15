@@ -50,6 +50,9 @@ type circuit struct {
 
 // held reports whether the circuit stays open until an owner release: it has
 // no expiry, admits no probe, and output from another attempt does not close it.
+
+// held reports whether the circuit stays open until an owner release: it has
+// no expiry and admits no probe.
 func (c circuit) held() bool {
 	return c.state == CircuitOpen && routingerr.HoldsUntilRelease(c.code)
 }
@@ -188,36 +191,12 @@ func (r *CircuitRegistry) open(key string, until time.Time, code routingerr.Code
 
 // Hold opens a circuit that has no expiry and admits no probe. Only
 // an owner release closes it. Holding an already held circuit is the same incident.
-func (r *CircuitRegistry) Hold(key string, code routingerr.Code) {
-	if key == "" || !routingerr.HoldsUntilRelease(code) {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.flushPendingLocked(key)
-	previous := r.circuits[key]
-	if previous.held() {
-		if _, pending := r.pending[key]; pending {
-			_ = r.persistSnapshotLocked(key)
-		}
-		return
-	}
-	r.circuits[key] = circuit{state: CircuitOpen, code: code, strikes: previous.strikes + 1}
-	_ = r.persistSnapshotLocked(key)
-	r.logger.Info("dynamic resource held until owner release",
-		zap.String("key", key),
-		zap.String("code", string(code)),
-	)
-}
 
 // ReleaseHold closes a held circuit and reports whether one was held. Any
 // other circuit is left unchanged, so a repeated release is a no-op. The
 // release is durable: when the closed snapshot cannot be saved the hold stays
 // in place and the error is returned, so a restart cannot resurrect a hold the
 // caller was told is gone.
-func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
-	return r.release(key, true)
-}
 
 // Release closes exactly one owner's selected circuit, including a probe.
 func (r *CircuitRegistry) Release(key string) (bool, error) {
@@ -356,6 +335,63 @@ func (r *CircuitRegistry) Inspect(key string, now time.Time) ResourceStatus {
 		status.State, status.Until = ResourceExpired, entry.until
 	}
 	return status
+}
+
+// Hold opens a circuit that has no expiry and admits no probe. Only
+// ReleaseHold closes it. The hold applies in memory even when its save fails;
+// the error is returned and the save stays pending, so holding the key again
+// retries it until the hold is durable. The boolean reports whether this call
+// established the hold: it is false for an empty key, a code that does not
+// hold until release, a circuit that is already held, and a repeated hold that
+// only retries a pending save. Callers report the transition from this result
+// so concurrent holders of one key produce exactly one transition report.
+func (r *CircuitRegistry) Hold(key string, code routingerr.Code) (bool, error) {
+	if key == "" || !routingerr.HoldsUntilRelease(code) {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.flushPendingLocked(key)
+	established := false
+	if r.circuits[key].held() {
+		if _, unsaved := r.pending[key]; !unsaved {
+			return false, nil
+		}
+	} else {
+		r.circuits[key] = circuit{state: CircuitOpen, code: code}
+		established = true
+	}
+	return established, r.persistSnapshotLocked(key)
+}
+
+// ReleaseHold closes a held circuit and reports whether one was held. Any
+// other circuit is left unchanged. The release is durable: when the closed
+// snapshot cannot be saved the hold stays in place and the error is returned,
+// so a restart cannot resurrect a hold the caller was told is gone.
+func (r *CircuitRegistry) ReleaseHold(key string) (bool, error) {
+	if key == "" {
+		return false, nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || !entry.held() {
+		return false, nil
+	}
+	r.flushPendingLocked(key)
+	r.circuits[key] = circuit{state: CircuitClosed}
+	if err := r.persistSnapshotLocked(key); err != nil {
+		r.circuits[key] = entry
+		return false, err
+	}
+	return true, nil
+}
+
+// IsHeld reports whether key is held until an owner release.
+func (r *CircuitRegistry) IsHeld(key string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.circuits[key].held()
 }
 
 func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {

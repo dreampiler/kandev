@@ -517,6 +517,10 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 }
 
 func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath string, wt *Worktree, repositoryPath string) (storageworkspaces.DirectoryHandle, bool, error) {
+	adopted, err := m.validateWorkspaceAdoptionBinding(ctx, wt)
+	if err != nil {
+		return nil, false, err
+	}
 	handle, err := m.validateWorktreePathSafe(worktreePath)
 	if err != nil {
 		return nil, false, err
@@ -541,10 +545,9 @@ func (m *Manager) openReusableWorktreePath(ctx context.Context, worktreePath str
 		}
 		return nil, false, nil
 	}
-	// A structurally healthy checkout is not reusable unless it belongs to the
-	// selected repository. Without this check a worktree that was replaced by
-	// an unrelated (or moved/recloned) checkout would be attached silently.
-	if !checkoutMatchesRepositoryIdentity(worktreePath, repositoryPath) {
+	// An explicitly adopted checkout has independently validated provenance.
+	// Other checkouts must still belong to the selected repository.
+	if !adopted && !checkoutMatchesRepositoryIdentity(worktreePath, repositoryPath) {
 		_ = handle.Close()
 		return nil, false, nil
 	}

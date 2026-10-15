@@ -118,11 +118,16 @@ func (s *Service) reconcileOrphanedDynamicStartingRoute(
 // action_required like any other orphaned starting route. A read error is
 // treated as "not stranded" so an unreadable row never demotes a session that
 // may still have a live launch.
+
+// dynamicStartingRouteIsStranded reports true only for a WAITING_FOR_INPUT
+// session with no executors_running row. A live row or a read error reports
+// false, so the session keeps its route.
 func (s *Service) dynamicStartingRouteIsStranded(ctx context.Context, session *models.TaskSession) bool {
 	if session == nil || session.State != models.TaskSessionStateWaitingForInput {
 		return false
 	}
-	return s.dynamicStartingRouteHasNoLiveExecutor(ctx, session)
+	_, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	return errors.Is(err, models.ErrExecutorRunningNotFound)
 }
 
 // isOrphanableDynamicSessionState reports whether a session's current state
@@ -360,6 +365,14 @@ func (s *Service) handleDynamicPolicyResumeError(
 ) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, dynamicruntime.ErrExecutionProfileHeld) {
+		// The engine returned the route to manual recovery; show it on the
+		// session so the operator can skip or release the held profile.
+		if session, loadErr := s.repo.GetTaskSession(ctx, sessionID); loadErr == nil {
+			s.mirrorDynamicRouteProjection(ctx, session, generation, dynamicRouteStatusActionRequired, "execution_profile_held")
+		}
+		return true
 	}
 	if errors.Is(err, dynamicruntime.ErrRecoveryNotDue) {
 		if refreshed, loadErr := loader.LoadRouteState(ctx, sessionID); loadErr == nil && refreshed != nil {

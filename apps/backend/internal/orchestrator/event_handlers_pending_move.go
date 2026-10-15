@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"errors"
 
 	"go.uber.org/zap"
 
@@ -13,39 +12,6 @@ import (
 // the task's current step. There is no transition to run, but the row and its
 // hand-off prompt must still be consumed and the session drained exactly as a
 // landed move would.
-func (s *Service) consumePendingMoveAtCurrentStep(
-	ctx context.Context,
-	taskID, sessionID string,
-	move *messagequeue.PendingMove,
-	record messagequeue.PendingMoveRecord,
-	currentStepID string,
-) {
-	var applyErr error
-	if s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		applyErr = s.workflowStore.MarkDeferredMoveApplied(ctx, taskID, move.MoveID, record)
-	} else {
-		applyErr = s.workflowStore.markDeferredMoveAppliedUnfenced(ctx, taskID, move.MoveID)
-	}
-	if errors.Is(applyErr, errDeferredMoveAlreadyApplied) {
-		s.logger.Info("dropping already-applied pending move at current target",
-			zap.String("task_id", taskID), zap.String("move_id", move.MoveID))
-	} else if applyErr != nil {
-		s.logger.Error("failed to record pending move at current target",
-			zap.String("task_id", taskID), zap.String("move_id", move.MoveID), zap.Error(applyErr))
-		return
-	}
-	s.logger.Info("pending move target equals current step; skipping transition",
-		zap.String("task_id", taskID),
-		zap.String("step_id", currentStepID))
-	identity := messagequeue.QueueSessionIdentity{
-		TaskID: taskID, SessionID: sessionID, SessionIncarnationID: move.SessionIncarnationID,
-	}
-	s.removePendingMoveHandoffPromptForSession(ctx, identity, move.MoveID)
-	_, _ = s.drainQueuedMessageForPromptableSessionForIdentity(ctx, identity)
-	if !s.messageQueue.SupportsAtomicDeferredMoveTransition() {
-		s.consumeUnfencedPendingMove(ctx, taskID, sessionID, record)
-	}
-}
 
 // pendingMoveSupersededByLaterTransition reports whether the task has taken a
 // workflow-step transition since the move was armed, which makes the recorded

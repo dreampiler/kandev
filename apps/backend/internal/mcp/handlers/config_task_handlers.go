@@ -75,11 +75,8 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	if response, handled, err := h.completeSameStepMove(ctx, msg, req); handled || err != nil {
 		return response, err
 	}
-	// A step change that carries entry options must target a step that starts an
-	// agent to receive them. Agent-less steps (Waiting, Blocked, Hold, Done) park
-	// or complete the task, so one-shot instructions would be silently dropped.
-	// Rejecting before the deferred/immediate split keeps the deferred path from
-	// accepting an undeliverable hand-off it would later discard.
+	// Agent entry options require work on entry, independently of existing
+	// sessions. HTTP and WebSocket moves retain their service validation.
 	if req.EntryOptions != nil {
 		if err := h.validateEntryTargetStep(ctx, req.WorkflowStepID); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
@@ -244,10 +241,10 @@ func (h *Handlers) deferMoveTask(
 	// the task orphaned on the board.
 	//
 	// sourceStepID records the step the task occupies now, and
-	// sourceTransitionID its latest step-transition ledger id. The deferred move
-	// remembers both so a later explicit move (which relocates the card while
-	// this move sits armed) can supersede it instead of being overwritten at
-	// replay — including when the card returns to the same source step (A→B→A).
+	// sourceTransitionID its latest step-transition ledger id. The recorded
+	// source governs replay: a later explicit move supersedes this one instead
+	// of being overwritten at replay — including when the card returns to the
+	// same source step (A to B to A).
 	sourceStepID := ""
 	var sourceTransitionID int64
 	if h.workflowCtrl != nil {
@@ -427,7 +424,9 @@ func classifyMoveTaskError(err error) string {
 	if err == nil {
 		return ws.ErrorCodeInternalError
 	}
-	if errors.Is(err, workflowmove.ErrMoveConflict) {
+	if errors.Is(err, workflowmove.ErrMoveConflict) ||
+		errors.Is(err, workflowmove.ErrPendingMoveActiveSession) ||
+		errors.Is(err, workflowmove.ErrPermanentPendingMoveMismatch) {
 		return ws.ErrorCodeConflict
 	}
 	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
@@ -453,31 +452,40 @@ func classifyMoveTaskError(err error) string {
 	}
 }
 
-// moveTaskErrorMessage returns the agent-facing text for a failed move. It
-// keeps the real reason so a caller can correct the call in one step. A known
-// service error that embeds an internal identifier (for example a WIP-limit
-// step ID) is mapped to a plain phrase; any other classified error passes its
-// own message through unchanged.
+// moveTaskErrorMessage returns the agent-facing text for a failed move. A
+// recognized reason is included so the caller can correct the call in one
+// step. Service errors that embed internal identifiers (for example a
+// WIP-limit step ID) map to fixed phrases, and any unrecognized error keeps the
+// generic text so raw service messages never reach the agent.
 func moveTaskErrorMessage(err error) string {
+	reason, known := moveTaskErrorReason(err)
 	switch classifyMoveTaskError(err) {
 	case ws.ErrorCodeConflict:
-		return "Move task conflicts with the current task or workflow state: " + moveTaskErrorReason(err)
+		if known {
+			return "Move task conflicts with the current task or workflow state: " + reason
+		}
+		return "Move task conflicts with the current task or workflow state"
 	case ws.ErrorCodeValidation:
-		return moveTaskErrorReason(err)
+		if known {
+			return reason
+		}
+		return "Invalid move_task request"
 	default:
 		return "Failed to move task"
 	}
 }
 
-// moveTaskErrorReason returns a stable, non-sensitive reason for a classified
-// move error. Known sentinels use their own message; service errors that embed
-// internal identifiers (for example a WIP-limit step ID) map to a plain phrase.
-func moveTaskErrorReason(err error) string {
+// moveTaskErrorReason returns a stable, non-sensitive reason for a recognized
+// move error: a workflow move sentinel's own message, or a fixed phrase for a
+// known service error. known is false for anything else.
+func moveTaskErrorReason(err error) (reason string, known bool) {
 	if err == nil {
-		return "the request is not valid"
+		return "", false
 	}
 	for _, sentinel := range []error{
 		workflowmove.ErrMoveConflict,
+		workflowmove.ErrPendingMoveActiveSession,
+		workflowmove.ErrPermanentPendingMoveMismatch,
 		workflowmove.ErrConflictingInstructions,
 		workflowmove.ErrEntryOptionsRequireStepChange,
 		workflowmove.ErrEntryOptionsUnsupported,
@@ -485,23 +493,23 @@ func moveTaskErrorReason(err error) string {
 		workflowmove.ErrEntryTargetIsManual,
 	} {
 		if errors.Is(err, sentinel) {
-			return sentinel.Error()
+			return sentinel.Error(), true
 		}
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "wip limit exceeded"):
-		return "the target workflow step's WIP limit is exceeded"
+		return "the target workflow step's WIP limit is exceeded", true
 	case strings.Contains(msg, "active session"):
-		return "the task has an active session"
+		return "the task has an active session", true
 	case strings.Contains(msg, "archived tasks cannot be moved"):
-		return "archived tasks cannot be moved"
+		return "archived tasks cannot be moved", true
 	case strings.Contains(msg, "different workspace"):
-		return "the target workflow is in a different workspace"
+		return "the target workflow is in a different workspace", true
 	case strings.Contains(msg, "does not belong to target workflow"):
-		return "the target workflow_step_id does not belong to the requested workflow_id"
+		return "the target workflow_step_id does not belong to the requested workflow_id", true
 	default:
-		return err.Error()
+		return "", false
 	}
 }
 
