@@ -267,7 +267,11 @@ test.describe("Integration navigation hotkeys", () => {
     test.describe.configure({ retries: 0 });
 
     for (const [slug, destination] of destinations) {
-      test(`records, saves, reloads, opens and resets ${slug}`, async ({ testPage, apiClient }) => {
+      test(`records, saves, reloads, opens and resets ${slug}`, async ({
+        testPage,
+        apiClient,
+        seedData,
+      }) => {
         await testPage.goto(KEYBOARD_SETTINGS_PATH);
         for (const [candidateSlug] of destinations) {
           await expect(
@@ -284,7 +288,11 @@ test.describe("Integration navigation hotkeys", () => {
         await expect(testPage).toHaveURL(new RegExp(`${KEYBOARD_SETTINGS_PATH}$`));
         await navigateHomeWithinApp(testPage);
         await testPage.keyboard.press(INTEGRATION_CHORD);
-        await expect(testPage).toHaveURL(new RegExp(`${destination}$`));
+        const expectedDestination =
+          slug === "sentry"
+            ? `/settings/workspaces/${seedData.workspaceId}/integrations/sentry`
+            : destination;
+        await expect(testPage).toHaveURL(new RegExp(`${expectedDestination}$`));
         await testPage.goto(KEYBOARD_SETTINGS_PATH);
         await recorder
           .locator("..")
