@@ -132,6 +132,82 @@ function mountRefreshingDetail() {
   return { ...rendered, resolve, initialTask, otherTask };
 }
 
+const LIVE_TIMESTAMPS = [
+  { name: "equal timestamp", value: "2026-10-15T10:00:00Z" },
+  { name: "later nanosecond", value: "2026-10-15T10:00:00.000000001Z" },
+];
+
+function moveLiveTaskToDone(view: ReturnType<typeof mountRefreshingDetail>, updatedAt: string) {
+  view.result.current.store.setState((state) =>
+    applyTaskOverviewEvent(state, {
+      ...view.initialTask,
+      workflow_step_id: "done",
+      updated_at: updatedAt,
+    }),
+  );
+}
+
+function expectSettledLivePlacement(view: ReturnType<typeof mountRefreshingDetail>) {
+  const state = view.result.current.store.getState();
+  expect(state.taskOverview.byId[TASK_A].workflowStepId).toBe("done");
+  expect(view.result.current.workflow.proceedStepName).toBeNull();
+  expect(state.taskOverview.reads).toEqual({});
+  const taskReads = vi
+    .mocked(fetch)
+    .mock.calls.filter(([url]) => String(url).endsWith(`/tasks/${TASK_A}`));
+  expect(taskReads).toHaveLength(1);
+}
+
+it.each(LIVE_TIMESTAMPS)(
+  "keeps a live move when a second refresh joins an older HTTP read ($name)",
+  async ({ value }) => {
+    const view = mountRefreshingDetail();
+    await act(async () => {
+      const first = view.result.current.details.refreshTask();
+      moveLiveTaskToDone(view, value);
+      const second = view.result.current.details.refreshTask();
+      view.resolve(Response.json({ ...view.initialTask, workflow_step_id: "review" }));
+      await Promise.all([first, second]);
+    });
+    expectSettledLivePlacement(view);
+  },
+);
+
+it.each(LIVE_TIMESTAMPS)(
+  "keeps a live move when a detail read reuses a cached identity ($name)",
+  async ({ value }) => {
+    const view = mountRefreshingDetail();
+    await act(async () => {
+      const pending = view.result.current.details.refreshTask();
+      view.resolve(Response.json({ ...view.initialTask, workflow_step_id: "review" }));
+      await pending;
+    });
+    await act(async () => {
+      moveLiveTaskToDone(view, value);
+      await view.result.current.details.refreshTask(false);
+    });
+    expectSettledLivePlacement(view);
+  },
+);
+
+it.each(LIVE_TIMESTAMPS)(
+  "keeps a live move when a foreground recovery episode reuses its result ($name)",
+  async ({ value }) => {
+    const view = mountRefreshingDetail();
+    const episode = {};
+    await act(async () => {
+      const pending = view.result.current.details.refreshTask(true, TASK_A, false, false, episode);
+      view.resolve(Response.json({ ...view.initialTask, workflow_step_id: "review" }));
+      await pending;
+    });
+    await act(async () => {
+      moveLiveTaskToDone(view, value);
+      await view.result.current.details.refreshTask(true, TASK_A, false, false, episode);
+    });
+    expectSettledLivePlacement(view);
+  },
+);
+
 it("publishes a refreshed detail placement to the canonical workflow action", async () => {
   const view = mountRefreshingDetail();
   expect(view.result.current.workflow.proceedStepName).toBeNull();
