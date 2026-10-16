@@ -31,6 +31,7 @@ type orderedSelection struct {
 
 type orderedTier struct {
 	head      string
+	mode      string
 	direction string
 	rows      []Candidate
 }
@@ -67,34 +68,34 @@ func deriveOrderedTiers(candidates []Candidate) ([]orderedTier, error) {
 				direction = selection.Tier.OnFailure
 			}
 		}
-		if mode != orderedTierMode || (direction != orderedSameTier && direction != orderedNextTier) {
+		if !supportedTierMode(mode) || (direction != orderedSameTier && direction != orderedNextTier) {
 			return nil, fmt.Errorf("dynamic tier selection mode or direction is not supported by this increment")
 		}
-		tiers = append(tiers, orderedTier{head: candidate.ID, direction: direction, rows: []Candidate{candidate}})
+		tiers = append(tiers, orderedTier{head: candidate.ID, mode: mode, direction: direction, rows: []Candidate{candidate}})
 	}
 	return tiers, nil
 }
 
 type orderedPlan struct {
-	rows  []Candidate
+	rows  func(func(Candidate, error) bool)
 	chain SelectionChain
 }
 
-func (e *Engine) prepareOrderedPlan(state RouteState, profile Profile, generation int64, excluded, preferred, reason string) (orderedPlan, error) {
+func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profile Profile, generation int64, excluded, preferred, reason string) (orderedPlan, error) {
 	if !e.orderedTiers {
-		return orderedPlan{rows: profile.Candidates}, nil
+		return orderedPlan{rows: func(yield func(Candidate, error) bool) {
+			for _, candidate := range profile.Candidates {
+				if !yield(candidate, nil) {
+					return
+				}
+			}
+		}}, nil
 	}
 	tiers, err := deriveOrderedTiers(profile.Candidates)
 	if err != nil {
 		return orderedPlan{}, err
 	}
-	chain := SelectionChain{Version: 1, LogicalProfileID: profile.ID, StartGeneration: generation}
-	previous := decodePolicyState(state.PolicyStateJSON).SelectionChain
-	continuing := previous != nil && previous.Version == 1 && previous.LogicalProfileID == profile.ID
-	if continuing {
-		chain = *previous
-		chain.TriedCandidateIDs = append([]string(nil), previous.TriedCandidateIDs...)
-	}
+	chain, continuing := retainedSelectionChain(state, profile.ID, generation)
 	current := state.ExecutionProfileID
 	if current == "" {
 		current = chain.LastCandidateID
@@ -107,24 +108,50 @@ func (e *Engine) prepareOrderedPlan(state RouteState, profile Profile, generatio
 	if continuing || fallback {
 		start = orderedStartIndex(tiers, current, excluded != "")
 	}
-	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred)}, nil
+	unavailable := e.tierAvailability(profile, e.now())
+	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred, unavailable, func() (map[string]int64, error) {
+		return e.tierSelectionHistory(ctx, profile.ID, tiers[start:])
+	})}, nil
 }
 
-func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string) []Candidate {
-	tried := make(map[string]bool, len(triedIDs))
-	for _, id := range triedIDs {
-		tried[id] = true
+func retainedSelectionChain(state RouteState, profileID string, generation int64) (SelectionChain, bool) {
+	chain := SelectionChain{Version: 1, LogicalProfileID: profileID, StartGeneration: generation}
+	previous := decodePolicyState(state.PolicyStateJSON).SelectionChain
+	if previous == nil || previous.Version != 1 || previous.LogicalProfileID != profileID {
+		return chain, false
 	}
-	var rows []Candidate
-	for _, tier := range tiers {
-		for _, candidate := range tier.rows {
-			if tried[candidate.ID] && candidate.ID != preferred {
-				continue
+	chain = *previous
+	chain.TriedCandidateIDs = append([]string(nil), previous.TriedCandidateIDs...)
+	return chain, true
+}
+
+// Traverse lazily so an unreached round-robin tier cannot block an earlier
+// eligible tier. One reached traversal shares a single history observation.
+func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, readHistory func() (map[string]int64, error)) func(func(Candidate, error) bool) {
+	return func(yield func(Candidate, error) bool) {
+		tried := make(map[string]bool, len(triedIDs))
+		for _, id := range triedIDs {
+			tried[id] = true
+		}
+		var history map[string]int64
+		var historyLoaded bool
+		for index, tier := range tiers {
+			if tier.mode == tierModeRoundRobin && !historyLoaded && tierHasEligibleRows(tier, tried, preferred, unavailable) {
+				var err error
+				history, err = readHistory()
+				if err != nil {
+					yield(Candidate{}, err)
+					return
+				}
+				historyLoaded = true
 			}
-			rows = append(rows, candidate)
+			for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, history) {
+				if row.entry.Eligible && !yield(row.candidate, nil) {
+					return
+				}
+			}
 		}
 	}
-	return rows
 }
 
 func orderedStartIndex(tiers []orderedTier, current string, skipping bool) int {

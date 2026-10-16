@@ -64,9 +64,9 @@ var registrations = []runtimeFlagRegistration{
 		definition: RuntimeFlagDefinition{
 			Key: "features.dynamicProfileTiers", EnvVar: "KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS",
 			Kind: KindFeature, Label: "Dynamic profile tiers",
-			Description: "Enables adjacent ordered candidate tiers and durable no-revisit fallback chains.",
+			Description: "Enables adjacent ordered and round-robin candidate tiers, read-only preview and durable no-revisit fallback chains.",
 			Stability:   StabilityExperimental, RiskLevel: RiskMedium,
-			RiskDescription: "Changes candidate traversal when enabled. This increment supports ordered tiers; other saved selection modes remain preserved.",
+			RiskDescription: "Changes candidate traversal when enabled. Round-robin uses committed task/session selections within one backend; transient utility routes have no durable RR progress in this increment. Other saved modes remain preserved.",
 			RestartRequired: true, Mutable: true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.DynamicProfileTiers },
