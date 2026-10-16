@@ -1,4 +1,6 @@
 {
+  "orderedTierNumber": "层级 {{tier}}",
+  "orderedTierJoin": "合并到上一层级",
   "actionCannotBeUndone": "此操作无法撤销。",
   "activeRuntimeVersion": "活动版本：{{version}}",
   "activeRuntimeVersionMarker": "活动",

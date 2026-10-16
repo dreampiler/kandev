@@ -1,4 +1,6 @@
 {
+  "orderedTierNumber": "Tier {{tier}}",
+  "orderedTierJoin": "Join the previous tier",
   "actionCannotBeUndone": "This action cannot be undone.",
   "add": "Add",
   "addProfile": "Add profile",

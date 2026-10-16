@@ -1,4 +1,6 @@
 {
+  "orderedTierNumber": "Nível {{tier}}",
+  "orderedTierJoin": "Juntar ao nível anterior",
   "actionCannotBeUndone": "Esta ação não pode ser anulada.",
   "add": "Adicionar",
   "addProfile": "Adicionar perfil",
