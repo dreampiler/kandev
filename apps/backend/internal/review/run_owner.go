@@ -59,6 +59,10 @@ func (r *Runner) bindRunReviewer(ctx context.Context, run *models.TaskReviewRun,
 			}
 		}
 	}
+	var wait nativeAdmissionWaiter
+	if errors.As(err, &wait) {
+		return run, identity, err
+	}
 	return nil, ReviewerIdentity{}, r.failRunPreparation(ctx, runID, err)
 }
 

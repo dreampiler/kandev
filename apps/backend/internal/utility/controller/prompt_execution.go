@@ -20,3 +20,9 @@ func (c *Controller) ExecuteProfilePrompt(ctx context.Context, route *service.Pr
 func (c *Controller) SetCallExecutionAttribution(ctx context.Context, callID, profileID, model string) error {
 	return c.svc.SetCallExecutionAttribution(ctx, callID, profileID, model)
 }
+
+func (c *Controller) ReleasePromptCapacity(route *service.PromptRequest) {
+	if route != nil {
+		c.svc.ReleaseNativeRoute(route.RouteSessionID)
+	}
+}

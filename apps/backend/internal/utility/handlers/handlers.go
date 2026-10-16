@@ -221,6 +221,8 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		return
 	}
 
+	defer h.controller.ReleasePromptCapacity(prepared)
+
 	// Validate inference agent is resolved before persisting a call record —
 	// missing agent_id is a client error, not an execution failure.
 	if prepared.AgentCLI == "" {

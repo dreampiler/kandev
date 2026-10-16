@@ -38,6 +38,7 @@ func (s *Service) prepareProfilePrompt(ctx context.Context, utilityID, prompt st
 	}
 	defer func() {
 		if err != nil && call != nil {
+			s.ReleaseNativeRoute("native:utility-call:" + call.ID)
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
 			err = errors.Join(err, s.FailCall(cleanupCtx, call.ID, err.Error(), 0))

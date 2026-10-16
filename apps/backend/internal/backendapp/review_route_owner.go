@@ -25,3 +25,9 @@ func (l reviewProfileLookup) resolveReviewerExecution(ctx context.Context, profi
 	}
 	return l.execution.ResolveExecutionDetails(ctx, "", profileID)
 }
+
+func (l reviewProfileLookup) ReleaseReviewRun(runID string) {
+	if release, ok := l.execution.(interface{ ReleaseNativeRoute(string) }); ok {
+		release.ReleaseNativeRoute("native:review-run:" + runID)
+	}
+}

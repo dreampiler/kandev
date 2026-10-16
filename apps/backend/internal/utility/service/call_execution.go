@@ -47,3 +47,10 @@ func (s *Service) ResumePendingRoute(ctx context.Context, routeID string, genera
 	}
 	return resumer.ResumePendingRoute(ctx, routeID, generation)
 }
+
+// ReleaseNativeRoute removes only an unused early capacity alias.
+func (s *Service) ReleaseNativeRoute(id string) {
+	if release, ok := s.executionResolver.(interface{ ReleaseNativeRoute(string) }); ok {
+		release.ReleaseNativeRoute(id)
+	}
+}

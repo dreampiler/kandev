@@ -12,11 +12,12 @@ type sharedInferenceEndpoint interface {
 	SetInferenceConsumer(agentruntime.InferenceConsumer)
 }
 
-func wireSharedInferenceCapacity(capacity *orchestrator.Service, settings *systemsettings.Store, endpoints ...sharedInferenceEndpoint) {
+func wireSharedInferenceCapacity(capacity *orchestrator.Service, settings *systemsettings.Store, endpoints ...sharedInferenceEndpoint) *sharedInferenceConsumer {
 	consumer := &sharedInferenceConsumer{capacity: capacity}
 	for _, endpoint := range endpoints {
 		consumer.sources = append(consumer.sources, endpoint)
 		endpoint.SetInferenceConsumer(consumer)
 	}
 	capacity.SetInferenceCapacityOwner(sessioncapacity.NewStore(settings), consumer.Refresh)
+	return consumer
 }

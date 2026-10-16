@@ -135,7 +135,7 @@ func (r *Resolver) resolveProfile(ctx context.Context, profileID string, require
 	}
 	profile, found, err := r.Profiles.ReviewerProfile(ctx, profileID)
 	if err != nil {
-		return ReviewerIdentity{}, fmt.Errorf("%w: load agent profile %s: %v", ErrAgentUnavailable, profileID, err)
+		return ReviewerIdentity{}, fmt.Errorf("%w: load agent profile %s: %w", ErrAgentUnavailable, profileID, err)
 	}
 	if !found {
 		return ReviewerIdentity{}, fmt.Errorf("%w: agent profile %s no longer exists", ErrAgentUnavailable, profileID)

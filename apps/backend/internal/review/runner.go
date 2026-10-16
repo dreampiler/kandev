@@ -285,7 +285,8 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		return nil, nil, err
 	}
 
-	run, identity, err = r.bindRunReviewer(ctx, run, identity)
+	var admissionWait nativeAdmissionWaiter
+	run, identity, admissionWait, err = r.prepareRunReviewer(ctx, run, identity)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -299,7 +300,7 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		defer r.wg.Done()
 		defer r.release(req.TaskID)
 		defer cancel()
-		if err := r.execute(runCtx, req, run.ID, identity, files); err != nil {
+		if err := r.executePreparedRun(runCtx, req, run, identity, admissionWait, files); err != nil {
 			r.logger.Warn("review run failed",
 				zap.String("task_id", req.TaskID), zap.String("run_id", run.ID), zap.Error(err))
 		}

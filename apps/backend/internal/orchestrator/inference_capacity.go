@@ -77,6 +77,12 @@ func (s *Service) ReserveInferenceCapacity(ctx context.Context, binding sessionc
 		}
 		return true, "", nil
 	}
+	if retainedNativeChild(binding, active) {
+		return false, ceilingReasonUnknownPopulation, fmt.Errorf("retained native inference owner is still active")
+	}
+	if handled, admitted, reason, err := c.transferNativeRouteLocked(ctx, binding); handled {
+		return admitted, reason, err
+	}
 	if c.policy == sessioncapacity.PolicyAll {
 		req := admissionRequest{grade: binding.Grade, gradeKnown: binding.GradeKnown}
 		decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
