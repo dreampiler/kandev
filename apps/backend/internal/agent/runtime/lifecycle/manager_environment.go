@@ -120,5 +120,5 @@ func (m *Manager) DestroySandbox(ctx context.Context, sandboxID, executionID str
 		Metadata:   map[string]interface{}{MetadataKeySpriteName: sandboxID},
 		StopReason: StopReasonTaskDeleted,
 	}
-	return spritesExec.StopInstance(ctx, instance, true)
+	return m.stopOwnedInstance(ctx, spritesExec, instance, true)
 }
