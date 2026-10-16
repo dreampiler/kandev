@@ -42,6 +42,8 @@ const (
 
 // Manager manages agent instance lifecycles
 type Manager struct {
+	// Installed before launch consumers start.
+	inferenceConsumer     agentctl.InferenceConsumer
 	registry              *registry.Registry
 	eventBus              bus.EventBus
 	credsMgr              CredentialsManager
