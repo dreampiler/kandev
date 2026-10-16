@@ -138,6 +138,10 @@ type Manager struct {
 	deliveryPromptMu            sync.Mutex
 	deliveryPromptByGeneration  map[uint64]string
 
+	inferenceSnapshotMu    sync.RWMutex
+	inferenceSnapshotter   func() utility.AttemptSnapshot
+	finalInferenceSnapshot *utility.AttemptSnapshot
+
 	// Process state
 	cmd                *exec.Cmd
 	processLifecycle   processLifecycleHandle
@@ -2779,6 +2783,9 @@ func (m *Manager) StopForTeardown(ctx context.Context) error {
 		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err), m.closeDeliveryJournal())
 	}
 	stopErr := m.stop(ctx)
+	if passthroughErr == nil && previewErr == nil && stopErr == nil {
+		m.captureFinalInferenceSnapshot()
+	}
 	return errors.Join(passthroughErr, previewErr, stopErr, m.closeDeliveryJournal())
 }
 
