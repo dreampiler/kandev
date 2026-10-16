@@ -728,6 +728,7 @@ func (r *Repository) initTaskSchema() error {
 		description TEXT DEFAULT '',
 		state TEXT DEFAULT 'TODO',
 		priority INTEGER DEFAULT 0,
+		execution_grade TEXT NOT NULL DEFAULT '',
 		position INTEGER DEFAULT 0,
 		wip_admitted INTEGER NOT NULL DEFAULT 1,
 		queued_for_step_id TEXT NOT NULL DEFAULT '',

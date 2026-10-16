@@ -194,6 +194,7 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
+	ExecutionGrade              string                         `json:"execution_grade"`
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
 	WorkflowID                  string                         `json:"workflow_id"`
@@ -1156,6 +1157,7 @@ func FromTaskWithSessionInfo(
 		Description:                 task.Description,
 		State:                       task.State,
 		Priority:                    task.Priority,
+		ExecutionGrade:              task.ExecutionGrade,
 		WIPAdmitted:                 task.WIPAdmitted,
 		QueuedForStepID:             task.QueuedForStepID,
 		QueuedAt:                    task.QueuedAt,

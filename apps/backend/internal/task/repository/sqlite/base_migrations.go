@@ -80,6 +80,7 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 //nolint:cyclop,funlen,maintidx // Legacy flat list of ~60 independent idempotent migration steps predating startup-step instrumentation; splitting it is out of scope here.
 func (r *Repository) runMigrations(ctx context.Context) error {
 	for _, migration := range []struct{ name, query string }{
+		{"tasks.execution_grade", `ALTER TABLE tasks ADD COLUMN execution_grade TEXT NOT NULL DEFAULT ''`},
 		{"control_server_records.process_id", `ALTER TABLE control_server_records ADD COLUMN process_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_group_id", `ALTER TABLE control_server_records ADD COLUMN process_group_id INTEGER NOT NULL DEFAULT 0`},
 		{"control_server_records.process_session_id", `ALTER TABLE control_server_records ADD COLUMN process_session_id INTEGER NOT NULL DEFAULT 0`},
@@ -1081,6 +1082,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			description TEXT DEFAULT '',
 			state TEXT DEFAULT 'TODO',
 			priority INTEGER DEFAULT 0,
+			execution_grade TEXT NOT NULL DEFAULT '',
 			position INTEGER DEFAULT 0,
 			wip_admitted INTEGER NOT NULL DEFAULT 1,
 			queued_for_step_id TEXT NOT NULL DEFAULT '',
@@ -1095,7 +1097,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		)`,
 		`INSERT INTO tasks_new SELECT
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
+			state, priority, execution_grade, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_new RENAME TO tasks`,

@@ -1532,6 +1532,7 @@ func IsAutomationTaskOrigin(origin string) bool {
 
 // Task represents a task in the database
 type Task struct {
+	ExecutionGrade string `json:"execution_grade"`
 	ID             string `json:"id"`
 	WorkspaceID    string `json:"workspace_id"`
 	WorkflowID     string `json:"workflow_id"`
@@ -3633,6 +3634,7 @@ func (t *Task) ToAPI() *v1.Task {
 		Description:       t.Description,
 		State:             t.State,
 		Priority:          t.Priority,
+		ExecutionGrade:    t.ExecutionGrade,
 		Repositories:      repositories,
 		CreatedAt:         t.CreatedAt,
 		UpdatedAt:         t.UpdatedAt,
