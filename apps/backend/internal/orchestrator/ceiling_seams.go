@@ -200,10 +200,12 @@ func seam1StartPayload(
 func (s *Service) admitOrDeferSeam1(
 	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
 ) (reservation *seam1Reservation, deferred bool, err error) {
+	profileID, _ := startPayload[metaKeyAgentProfileID].(string)
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID: taskID,
-		origin: origin,
-		seam:   "startTask",
+		taskID:    taskID,
+		profileID: profileID,
+		origin:    origin,
+		seam:      "startTask",
 	})
 	if decision.admitted {
 		return &seam1Reservation{

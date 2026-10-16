@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -62,6 +63,9 @@ func (s *Service) actualExecutionGrade(ctx context.Context, req admissionRequest
 			return task.ExecutionGrade, nil
 		}
 	}
+	if req.profileID == "" {
+		return "", nil
+	}
 	return resolver.LogicalExecutionGrade(ctx, req.profileID)
 }
 
@@ -118,6 +122,14 @@ func (c *sessionCeilingController) bindAdmissionGradeLocked(ctx context.Context,
 	}
 	grade, err := c.resolveGrade(ctx, admissionRequest{sessionID: sessionID})
 	known := err == nil
+	if c.policy == sessioncapacity.PolicyAll {
+		if err != nil {
+			return err
+		}
+		if !reservation.gradeKnown || reservation.grade != grade {
+			return errors.New("admitted execution grade changed before session binding")
+		}
+	}
 	if !known {
 		reservation.grade, reservation.gradeKnown = "", false
 		return nil

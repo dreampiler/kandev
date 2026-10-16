@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
 // reservationExpiryAllowance is the slice of the backstop that follows the session's
@@ -118,6 +119,8 @@ type SessionCeilingObservation struct {
 // the reservation set happens under its one mutex, together with the population
 // read it is compared against.
 type sessionCeilingController struct {
+	policy       string
+	gradeLimits  map[string]int
 	resolveGrade func(context.Context, admissionRequest) (string, error)
 	persistGrade func(context.Context, string, string) error
 	mu           sync.Mutex
@@ -310,6 +313,9 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req = c.resolveAdmissionGradeLocked(ctx, req)
+	if c.policy == sessioncapacity.PolicyAll {
+		return c.admitAllLocked(ctx, req, false)
+	}
 	if c.ceiling == unlimitedSessionCeiling {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
@@ -543,6 +549,9 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req = c.resolveAdmissionGradeLocked(ctx, req)
+	if c.policy == sessioncapacity.PolicyAll {
+		return c.admitAllLocked(ctx, req, true)
+	}
 	if c.ceiling == unlimitedSessionCeiling {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}

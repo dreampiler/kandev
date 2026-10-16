@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -15,6 +16,8 @@ const (
 	EnvironmentVariable = "KANDEV_MAX_CONCURRENT_SESSIONS"
 	DefaultMaxSessions  = 5
 	maxSessionsLimit    = 2147483647
+	PolicyAutomatic     = "automatic"
+	PolicyAll           = "all"
 )
 
 type Source string
@@ -33,15 +36,19 @@ var (
 )
 
 type Settings struct {
-	Enabled     bool `json:"enabled"`
-	MaxSessions int  `json:"max_sessions"`
+	Enabled     bool           `json:"enabled"`
+	MaxSessions int            `json:"max_sessions"`
+	Policy      string         `json:"policy"`
+	GradeLimits map[string]int `json:"grade_limits"`
 }
 
 // SettingsPatch is a partial update. A nil field means that the field was
 // omitted from the request and must retain its saved value.
 type SettingsPatch struct {
-	Enabled     *bool `json:"enabled"`
-	MaxSessions *int  `json:"max_sessions"`
+	Enabled     *bool           `json:"enabled"`
+	MaxSessions *int            `json:"max_sessions"`
+	Policy      *string         `json:"policy"`
+	GradeLimits *map[string]int `json:"grade_limits"`
 }
 
 // UnmarshalJSON rejects null values because null cannot represent an omitted
@@ -76,6 +83,21 @@ func (p *SettingsPatch) UnmarshalJSON(data []byte) error {
 				return fmt.Errorf("max_sessions must be an integer: %w", err)
 			}
 			decoded.MaxSessions = &value
+		case "policy":
+			var value string
+			if isJSONNull(raw) {
+				return errors.New("policy must be a string")
+			}
+			if err := json.Unmarshal(raw, &value); err != nil {
+				return fmt.Errorf("policy must be a string: %w", err)
+			}
+			decoded.Policy = &value
+		case "grade_limits":
+			value, err := decodeGradeLimits(raw)
+			if err != nil {
+				return err
+			}
+			decoded.GradeLimits = &value
 		default:
 			return fmt.Errorf("unknown session capacity setting %q", field)
 		}
@@ -96,6 +118,12 @@ func (p SettingsPatch) Apply(base Settings) Settings {
 	if p.MaxSessions != nil {
 		base.MaxSessions = *p.MaxSessions
 	}
+	if p.Policy != nil {
+		base.Policy = *p.Policy
+	}
+	if p.GradeLimits != nil {
+		base.GradeLimits = maps.Clone(*p.GradeLimits)
+	}
 	return base
 }
 
@@ -105,10 +133,12 @@ type Response struct {
 }
 
 type Effective struct {
-	Enabled     bool   `json:"enabled"`
-	MaxSessions int    `json:"max_sessions"`
-	Source      Source `json:"source"`
-	Locked      bool   `json:"locked"`
+	Enabled     bool           `json:"enabled"`
+	MaxSessions int            `json:"max_sessions"`
+	Source      Source         `json:"source"`
+	Locked      bool           `json:"locked"`
+	Policy      string         `json:"policy"`
+	GradeLimits map[string]int `json:"grade_limits"`
 }
 
 type Environment struct {
@@ -124,7 +154,7 @@ type Resolution struct {
 // DefaultSettings returns the disabled setting with its editable default
 // maximum retained for a later opt-in.
 func DefaultSettings() Settings {
-	return Settings{Enabled: false, MaxSessions: DefaultMaxSessions}
+	return Settings{Enabled: false, MaxSessions: DefaultMaxSessions, Policy: PolicyAutomatic, GradeLimits: map[string]int{}}
 }
 
 func Validate(settings Settings) error {
@@ -134,6 +164,17 @@ func Validate(settings Settings) error {
 			ErrValidation,
 			maxSessionsLimit,
 		)
+	}
+	if settings.Policy != "" && settings.Policy != PolicyAutomatic && settings.Policy != PolicyAll {
+		return fmt.Errorf("%w: unknown execution capacity policy", ErrValidation)
+	}
+	if len(settings.GradeLimits) > 0 && settings.Policy != PolicyAll {
+		return fmt.Errorf("%w: grade limits require all-execution policy", ErrValidation)
+	}
+	for grade, maximum := range settings.GradeLimits {
+		if grade == "" || ValidateGrade(grade) != nil || maximum < 0 || maximum > maxSessionsLimit {
+			return fmt.Errorf("%w: invalid grade limit", ErrValidation)
+		}
 	}
 	return nil
 }

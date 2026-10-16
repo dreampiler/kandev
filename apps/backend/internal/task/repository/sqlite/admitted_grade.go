@@ -26,3 +26,10 @@ func (r *Repository) SetAdmittedExecutionGrade(ctx context.Context, sessionID, g
 	}
 	return nil
 }
+
+// ListAdmittedExecutions reads owner, grade and known state in one SQL snapshot.
+func (r *Repository) ListAdmittedExecutions(ctx context.Context) ([]models.AdmittedExecution, error) {
+	var rows []models.AdmittedExecution
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`SELECT id, admitted_execution_grade, admitted_execution_grade_known FROM task_sessions WHERE state IN (?, ?) ORDER BY id`), models.TaskSessionStateStarting, models.TaskSessionStateRunning)
+	return rows, err
+}
