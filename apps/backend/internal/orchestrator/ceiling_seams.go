@@ -66,14 +66,23 @@ type seam1Reservation struct {
 // operation rather than a release followed by an acquire (AC-6a). The local
 // key is updated to match, so a later release (if the launch never reaches
 // consume) still targets the reservation the controller is actually holding.
-func (r *seam1Reservation) rebindToSession(sessionID string) {
+func (r *seam1Reservation) rebindToSession(sessionID string, contexts ...context.Context) error {
 	if r == nil || r.controller == nil || r.rebound || sessionID == "" {
-		return
+		return nil
 	}
-	if r.controller.rebind(r.key, sessionID) {
+	ctx := context.Background()
+	if len(contexts) > 0 {
+		ctx = contexts[0]
+	}
+	rebound, err := r.controller.rebindAdmission(ctx, r.key, sessionID)
+	if err != nil {
+		return err
+	}
+	if rebound {
 		r.rebound = true
 		r.key = sessionID
 	}
+	return nil
 }
 
 // consume marks the reservation as belonging to a launch that actually

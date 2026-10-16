@@ -1388,6 +1388,8 @@ const sessionWorktreeSchemaDDL = `
 		container_id TEXT NOT NULL DEFAULT '',
 		agent_profile_id TEXT,
 		execution_profile_id TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade TEXT NOT NULL DEFAULT '',
+		admitted_execution_grade_known INTEGER NOT NULL DEFAULT 0,
 		route_generation INTEGER NOT NULL DEFAULT 0,
 		route_state TEXT NOT NULL DEFAULT '',
 		route_reason TEXT NOT NULL DEFAULT '',

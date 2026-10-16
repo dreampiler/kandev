@@ -953,7 +953,9 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
-		seam2Res.rekeyToSession(ctx, activeSession.ID)
+		if err := seam2Res.rekeyToSession(ctx, activeSession.ID); err != nil {
+			return nil, err
+		}
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
@@ -1887,7 +1889,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, failPreparedLaunch(fmt.Errorf("explicit workflow start session became terminal before promotion"))
 		}
 	}
-	seam1Res.rebindToSession(sessionID)
+	if err := seam1Res.rebindToSession(sessionID, ctx); err != nil {
+		return nil, failPreparedLaunch(err)
+	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
 	// Session preparation can reuse an Office session that was parked after a
