@@ -52,16 +52,37 @@ func (s *Service) actualExecutionGrade(ctx context.Context, req admissionRequest
 		}
 	}
 	if req.taskID != "" {
-		task, err := s.repo.GetTask(ctx, req.taskID)
-		if err != nil {
+		return s.startTaskExecutionGrade(ctx, req, resolver)
+	}
+	if req.profileID == "" {
+		return "", nil
+	}
+	return resolver.LogicalExecutionGrade(ctx, req.profileID)
+}
+
+func (s *Service) startTaskExecutionGrade(ctx context.Context, req admissionRequest, resolver *agentruntime.ProfileExecutionResolver) (string, error) {
+	task, err := s.repo.GetTask(ctx, req.taskID)
+	if err != nil {
+		return "", err
+	}
+	if task == nil {
+		return "", errors.New("execution grade task unavailable")
+	}
+	if req.startSelection != nil && !req.profileExplicit {
+		if err := s.captureExecutionGradeStartSelection(ctx, task, req); err != nil {
 			return "", err
 		}
-		if task == nil {
-			return "", errors.New("execution grade task unavailable")
+		req.profileID = req.startSelection.profileID
+		selected := req.startSelection.session
+		if selected != nil && models.IsAdmittedSessionState(selected.State) {
+			if !selected.AdmittedExecutionGradeKnown {
+				return "", errors.New("active execution grade is unknown")
+			}
+			return selected.AdmittedExecutionGrade, nil
 		}
-		if task.ExecutionGrade != "" {
-			return task.ExecutionGrade, nil
-		}
+	}
+	if task.ExecutionGrade != "" {
+		return task.ExecutionGrade, nil
 	}
 	if req.profileID == "" {
 		return "", nil
@@ -84,6 +105,9 @@ func (s *Service) sessionForExecutionGrade(ctx context.Context, req admissionReq
 }
 
 func (c *sessionCeilingController) resolveAdmissionGradeLocked(ctx context.Context, req admissionRequest) admissionRequest {
+	if c.policy != sessioncapacity.PolicyAll {
+		req.startSelection = nil
+	}
 	if held := c.reservations[req.sessionID]; req.sessionID != "" && held != nil {
 		req.grade, req.gradeKnown, req.gradeHeld = held.grade, held.gradeKnown, true
 		return req

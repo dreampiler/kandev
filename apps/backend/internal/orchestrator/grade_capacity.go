@@ -80,8 +80,8 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 
 func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
 	d := admissionDecision{ceiling: c.ceiling}
-	maximum, configured := c.gradeLimits[req.grade]
-	if c.ceiling < 1 || (req.gradeKnown && (req.grade == "" || !configured)) {
+	maximum, configured := c.requestedGradeLimitLocked(req)
+	if !configured {
 		d.reasonCode = ceilingReasonNeedsConfiguration
 		return d
 	}
@@ -99,6 +99,9 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 	if !d.populationKnown {
 		d.reasonCode = ceilingReasonUnknownPopulation
 		return d
+	}
+	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
+		return selected
 	}
 	if existing, owned := c.existingGradedAdmissionLocked(req, p, handoff); owned {
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
@@ -126,4 +129,9 @@ func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRe
 		decision.handedOff = true
 	}
 	return decision, owned
+}
+
+func (c *sessionCeilingController) requestedGradeLimitLocked(req admissionRequest) (int, bool) {
+	maximum, configured := c.gradeLimits[req.grade]
+	return maximum, c.ceiling >= 1 && (!req.gradeKnown || (req.grade != "" && configured))
 }

@@ -83,14 +83,17 @@ type ceilingReservation struct {
 
 // admissionRequest is one launch asking for capacity.
 type admissionRequest struct {
-	profileID  string
-	grade      string
-	gradeKnown bool
-	gradeHeld  bool
-	taskID     string
-	sessionID  string
-	origin     launchOrigin
-	seam       string
+	profileExplicit bool
+	workflowStepID  string
+	startSelection  *explicitWorkflowStartSelection
+	profileID       string
+	grade           string
+	gradeKnown      bool
+	gradeHeld       bool
+	taskID          string
+	sessionID       string
+	origin          launchOrigin
+	seam            string
 }
 
 // admissionDecision is the controller's answer.
@@ -312,6 +315,11 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.admitLocked(ctx, req, origin)
+}
+
+func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) admissionDecision {
+	req.origin = origin
 	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, false)

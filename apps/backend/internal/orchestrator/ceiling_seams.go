@@ -47,6 +47,7 @@ func originFromAutoStart(autoStart bool) launchOrigin {
 // session exists but before it ever reaches STARTING must still free the
 // slot, so release is gated on consumed, not on rebound.
 type seam1Reservation struct {
+	selection  *explicitWorkflowStartSelection
 	controller *sessionCeilingController
 	key        string
 	rebound    bool
@@ -198,17 +199,28 @@ func seam1StartPayload(
 // calling reservation.rebindToSession once the session exists, and calling
 // reservation.consume once the launch actually succeeds.
 func (s *Service) admitOrDeferSeam1(
-	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
+	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{}, logicalProfiles ...string,
 ) (reservation *seam1Reservation, deferred bool, err error) {
 	profileID, _ := startPayload[metaKeyAgentProfileID].(string)
+	if len(logicalProfiles) > 0 {
+		profileID = logicalProfiles[0]
+	}
+	profileExplicit, _ := startPayload["profile_explicit"].(bool)
+	selection := &explicitWorkflowStartSelection{entryID: int64Field(startPayload, "workflow_entry_id")}
+	stepID, _ := startPayload[metaKeyWorkflowStepID].(string)
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID:    taskID,
-		profileID: profileID,
-		origin:    origin,
-		seam:      "startTask",
+		taskID:          taskID,
+		profileID:       profileID,
+		profileExplicit: profileExplicit, workflowStepID: stepID, startSelection: selection,
+		origin: origin,
+		seam:   "startTask",
 	})
+	return s.completeSeam1Admission(ctx, taskID, startPayload, decision, selection)
+}
+
+func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, startPayload map[string]interface{}, decision admissionDecision, selection *explicitWorkflowStartSelection) (*seam1Reservation, bool, error) {
 	if decision.admitted {
-		return &seam1Reservation{
+		return &seam1Reservation{selection: selection,
 			controller: s.sessionCeiling, key: decision.reservationKey,
 			manualOverride: decision.manualOverride, population: decision.population,
 			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
