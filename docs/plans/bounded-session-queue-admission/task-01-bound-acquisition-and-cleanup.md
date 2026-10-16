@@ -180,3 +180,30 @@ separately from product failures. Final changed-handler and changed-orchestrator
 lint each exited 0 with zero issues; scoped orchestrator vet also exited 0.
 All four recovery-source/overlay temporary files were removed, with leftovers
 `[]`. No operating provider or new standing case is used.
+
+## Upstream conflict refresh
+
+The existing PR head `ad57ce7416b111b40702168ca7db2fc70c58934a` was merged
+with current upstream `e9b836454c75e70a4be6660a8f8c82182312d356` locally.
+The only conflict was the queued-error retry condition. The resolution keeps
+both `ErrSessionAdmissionTimeout` and the upstream classified runtime-wait
+timeout; neither a foreign provider deadline nor a permanent failure becomes
+retryable. The other twelve PR files retained their published source before
+this verification note was added.
+
+Focused `go test -trimpath -p 2 -race -overlay <temporary-overlay.json>
+./internal/orchestrator -run <five-named-tests> -count=1 -v -timeout=90s`
+returned exit 0 (`ok 1.139s`). Four existing tests cover runtime-wait requeue,
+permanent failure, foreign deadline and classified provider deadline. One
+collector-excluded temporary test covers direct and wrapped admission timeouts
+through the actual queued-error handler, retaining the original message ID,
+target, content and FIFO timestamp without an in-flight reservation. Both
+temporary cases passed; the backing source and overlay were removed. The
+unchanged queue/cleanup/web scopes reuse their recorded checks above. This is
+a local conflict-refresh candidate, not a publication, merge or operating change.
+
+The first normal merge-commit hook ended with Go-lint exit 4: it printed
+`0 issues` and then `Timeout exceeded`. This is a failed hook, not a lint pass
+or a demonstrated source defect. The staged resolution was retained, no commit
+was created, and the same normal hook is retried without changing its limits,
+configuration or bypass flags. Exact hook receipts accompany the candidate.
