@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -131,6 +134,14 @@ func Validate(settings Settings) error {
 			ErrValidation,
 			maxSessionsLimit,
 		)
+	}
+	return nil
+}
+
+// ValidateGrade accepts an explicit classification; empty means unconfigured.
+func ValidateGrade(grade string) error {
+	if strings.TrimSpace(grade) != grade || utf8.RuneCountInString(grade) > 64 || strings.IndexFunc(grade, unicode.IsControl) >= 0 {
+		return fmt.Errorf("%w: execution grade must be a trimmed name of at most 64 characters without control characters", ErrValidation)
 	}
 	return nil
 }
