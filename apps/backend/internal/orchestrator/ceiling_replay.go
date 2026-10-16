@@ -53,11 +53,10 @@ const (
 	ceilingReplayPermanentlyFailed
 )
 
-// drainDeferredCeilingLaunches is AC-15c's pass driver: one sweep tick walks
-// every ceiling-deferred task once, in id-ascending order (AC-50c), retrying
-// each in turn. A candidate that fails for a non-ceiling reason is skipped
-// for the rest of this pass (AC-15d) rather than retried immediately or
-// stopping the pass.
+// drainDeferredCeilingLaunches walks each existing deferred intent once. The
+// all-execution policy uses recorded arrival order; automatic policy retains
+// the repository's legacy ID order. A refused grade or transient failure does
+// not stop the pass, so another eligible grade can claim the available slot.
 func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 	lister, ok := s.repo.(ceilingDeferredTaskLister)
 	if !ok {
@@ -68,7 +67,7 @@ func (s *Service) drainDeferredCeilingLaunches(ctx context.Context) {
 		s.logger.Zap().Warn("could not list ceiling-deferred tasks for the retry sweep", zap.Error(err))
 	}
 	s.refreshCeilingLaunchQueueSummaries(ctx, tasks)
-	for _, task := range tasks {
+	for _, task := range s.orderCeilingDeferredTasks(tasks) {
 		s.retryOneDeferredCeilingLaunch(ctx, task)
 	}
 }
