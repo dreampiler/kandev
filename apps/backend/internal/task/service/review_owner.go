@@ -54,3 +54,30 @@ func (s *ReviewService) StartOwnedRun(ctx context.Context, runID string) (bool, 
 	s.publishRun(ctx, run)
 	return run.Status == models.ReviewRunRunning, nil
 }
+
+// SetRunningRunReviewer keeps the same native run attributable across fallback.
+// A cancellation or failed write prevents the new candidate from executing.
+func (s *ReviewService) SetRunningRunReviewer(ctx context.Context, runID, agentID, model string) error {
+	writer, ok := s.repo.(interface {
+		SetTaskReviewRunRunningReviewer(context.Context, string, string, string) (bool, error)
+	})
+	if !ok {
+		return fmt.Errorf("running review attribution is unavailable")
+	}
+	changed, err := writer.SetTaskReviewRunRunningReviewer(ctx, runID, agentID, model)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return fmt.Errorf("review run %s is no longer running", runID)
+	}
+	run, err := s.repo.GetTaskReviewRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Status != models.ReviewRunRunning {
+		return fmt.Errorf("review run %s is no longer running", runID)
+	}
+	s.publishRun(ctx, run)
+	return nil
+}

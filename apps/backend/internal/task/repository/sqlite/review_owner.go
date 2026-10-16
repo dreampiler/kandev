@@ -21,3 +21,14 @@ func (r *Repository) StartTaskReviewRunIfPending(ctx context.Context, runID stri
 	rows, err := result.RowsAffected()
 	return rows == 1, err
 }
+
+// SetTaskReviewRunRunningReviewer records a changed candidate before inference.
+// Only the live running row can change; terminal history stays immutable.
+func (r *Repository) SetTaskReviewRunRunningReviewer(ctx context.Context, runID, agentID, model string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE task_review_runs SET agent_id = ?, model = ? WHERE id = ? AND status = 'running'`), agentID, model, runID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}

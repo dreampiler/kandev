@@ -56,7 +56,7 @@ func buildReviewComponents(p routeParams) reviewComponents {
 		Store:            service,
 		Resolver:         resolver,
 		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo}),
-		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution},
+		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
 		TaskContext:      reviewTaskContext{tasks: p.taskSvc},
@@ -262,6 +262,7 @@ type reviewInference struct {
 	session  sessionInferenceRunner
 	host     *hostutility.Manager
 	profiles reviewExecutionResolver
+	runs     reviewCandidateWriter
 }
 
 type sessionInferenceRunner interface {
@@ -274,7 +275,14 @@ type sessionProfileInferenceRunner interface {
 
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
 	prepared := reviewPromptRoute(identity)
+	recordedProfileID := prepared.ExecutionProfileID
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if id != recordedProfileID {
+			if err := r.recordNativeReviewCandidate(attempt, prepared); err != nil {
+				return nil, err
+			}
+			recordedProfileID = id
+		}
 		concrete := identity
 		concrete.ProfileID = id
 		return r.runConcrete(attempt, concrete, sessionID, prompt)
