@@ -53,3 +53,27 @@ func TestInferenceStopLifecycleActualBackendDeleteForwardsOwner(t *testing.T) {
 		t.Fatalf("actual lifecycle backend dropped owner: calls=%d", consumer.calls)
 	}
 }
+
+func TestInferenceStopStandaloneBackgroundRetryRetainsInstalledOwner(t *testing.T) {
+	manager := newTestManager(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"inference_attempts": utility.AttemptSnapshot{InstanceID: "instance", Known: true, Attempts: []utility.AttemptStatus{}}})
+	}))
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	port, _ := strconv.Atoi(u.Port())
+	control := agentctl.NewControlClient(u.Hostname(), port, newTestLogger())
+	defer control.Close()
+	backend := &StandaloneExecutor{ctl: control, logger: newTestLogger()}
+	registry := NewExecutorRegistry(newTestLogger())
+	registry.Register(backend)
+	manager.executorRegistry = registry
+	consumer := &lifecycleStopProofConsumer{}
+	manager.SetInferenceConsumer(consumer)
+	if err := backend.stopWithRetryClient(context.Background(), control, "instance"); err != nil {
+		t.Fatal(err)
+	}
+	if consumer.calls != 1 {
+		t.Fatalf("startup background stop lost installed owner: calls=%d", consumer.calls)
+	}
+}
