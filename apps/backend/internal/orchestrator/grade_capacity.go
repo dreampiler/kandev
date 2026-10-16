@@ -36,12 +36,16 @@ func (s *Service) SetExecutionCapacity(effective sessioncapacity.Effective) {
 
 type gradedPopulation struct {
 	counted          map[string]struct{}
+	grades           map[string]int
 	total, grade     int
 	unknown, missing bool
 }
 
 func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Context, grade string) (gradedPopulation, error) {
-	population := gradedPopulation{counted: map[string]struct{}{}}
+	population := gradedPopulation{counted: map[string]struct{}{}, grades: map[string]int{}}
+	for configured := range c.gradeLimits {
+		population.grades[configured] = 0
+	}
 	lister, ok := c.lister.(admittedExecutionLister)
 	if !ok {
 		return population, errors.New("admitted execution grades unavailable")
@@ -71,6 +75,9 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 	if !known {
 		population.unknown = true
 		return
+	}
+	if value != "" {
+		population.grades[value]++
 	}
 	_, configured := c.gradeLimits[value]
 	if value == "" || !configured {

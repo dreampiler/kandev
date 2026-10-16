@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -113,10 +114,14 @@ type admissionDecision struct {
 // controller. It is deliberately separate from a launch deferral so callers
 // can refresh displayed capacity without changing queue ownership or time.
 type SessionCeilingObservation struct {
-	InUse      int
-	Limit      int
-	ObservedAt time.Time
-	Known      bool
+	Policy             string
+	GradeInUse         map[string]int
+	GradeLimits        map[string]int
+	NeedsConfiguration bool
+	InUse              int
+	Limit              int
+	ObservedAt         time.Time
+	Known              bool
 }
 
 // sessionCeilingController is the single admission controller. Every mutation of
@@ -187,21 +192,40 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	counted, err := c.countedRowsLocked(ctx)
-	observedAt := time.Now().UTC()
+	observation, err := c.capacityObservationLocked(ctx)
+	observation.ObservedAt = time.Now().UTC()
 	if c.now != nil {
-		observedAt = c.now().UTC()
+		observation.ObservedAt = c.now().UTC()
 	}
-	observation := SessionCeilingObservation{
-		Limit:      c.ceiling,
-		ObservedAt: observedAt,
-		Known:      err == nil,
+	return observation, err
+}
+
+// capacityObservationLocked projects the exact population used for admission.
+// Counts are unavailable together when the shared inventory cannot be proved.
+func (c *sessionCeilingController) capacityObservationLocked(ctx context.Context) (SessionCeilingObservation, error) {
+	observation := SessionCeilingObservation{Limit: c.ceiling, Policy: c.policy}
+	if observation.Policy == "" {
+		observation.Policy = sessioncapacity.PolicyAutomatic
 	}
-	if err != nil {
+	if c.policy == sessioncapacity.PolicyAll {
+		observation.GradeLimits = maps.Clone(c.gradeLimits)
+		population, err := c.readGradedPopulationLocked(ctx, "")
+		observation.NeedsConfiguration = population.missing
+		if err == nil && population.unknown {
+			err = fmt.Errorf("execution grade population is unknown")
+		}
+		observation.Known = err == nil
+		if err == nil {
+			observation.InUse, observation.GradeInUse = population.total, population.grades
+		}
 		return observation, err
 	}
-	observation.InUse = c.populationLocked(counted)
-	return observation, nil
+	counted, err := c.countedRowsLocked(ctx)
+	observation.Known = err == nil
+	if err == nil {
+		observation.InUse = c.populationLocked(counted)
+	}
+	return observation, err
 }
 
 // CurrentSessionCeilingObservation exposes the controller's current bounded
