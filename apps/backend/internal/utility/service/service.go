@@ -434,6 +434,8 @@ type PromptRequest struct {
 	ExecutionProfileID string
 	RouteSessionID     string
 	RouteGeneration    int64
+	// DeferSelectionCompletion lets a caller validate structured output first.
+	DeferSelectionCompletion bool
 }
 
 // CreateCall creates a new call record (for tracking history).

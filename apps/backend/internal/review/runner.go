@@ -95,14 +95,15 @@ type RunRequest struct {
 // rules in apps/backend/AGENTS.md. A pass detached by Launch is therefore always
 // joined at shutdown rather than leaked.
 type Runner struct {
-	store       Store
-	resolver    *Resolver
-	changes     ChangeSource
-	inference   Inference
-	prompts     PromptBuilder
-	taskContext TaskContextLookup
-	sessions    SessionLookup
-	logger      *logger.Logger
+	store            Store
+	resolver         *Resolver
+	changes          ChangeSource
+	inference        Inference
+	inferenceContext func(context.Context, RunRequest, string, ReviewerIdentity) (context.Context, error)
+	prompts          PromptBuilder
+	taskContext      TaskContextLookup
+	sessions         SessionLookup
+	logger           *logger.Logger
 
 	// budgetBytes overrides PromptBudgetBytes; tests set it to force batching.
 	budgetBytes int
@@ -129,30 +130,32 @@ type inFlightRun struct {
 
 // RunnerDeps groups the runner's collaborators.
 type RunnerDeps struct {
-	Store       Store
-	Resolver    *Resolver
-	Changes     ChangeSource
-	Inference   Inference
-	Prompts     PromptBuilder
-	TaskContext TaskContextLookup
-	Sessions    SessionLookup
-	Logger      *logger.Logger
-	BudgetBytes int
+	Store            Store
+	Resolver         *Resolver
+	Changes          ChangeSource
+	Inference        Inference
+	InferenceContext func(context.Context, RunRequest, string, ReviewerIdentity) (context.Context, error)
+	Prompts          PromptBuilder
+	TaskContext      TaskContextLookup
+	Sessions         SessionLookup
+	Logger           *logger.Logger
+	BudgetBytes      int
 }
 
 // NewRunner builds a Runner.
 func NewRunner(deps RunnerDeps) *Runner {
 	return &Runner{
-		store:       deps.Store,
-		resolver:    deps.Resolver,
-		changes:     deps.Changes,
-		inference:   deps.Inference,
-		prompts:     deps.Prompts,
-		taskContext: deps.TaskContext,
-		sessions:    deps.Sessions,
-		logger:      deps.Logger.WithFields(zap.String("component", "review-runner")),
-		budgetBytes: deps.BudgetBytes,
-		inFlight:    make(map[string]*inFlightRun),
+		store:            deps.Store,
+		resolver:         deps.Resolver,
+		changes:          deps.Changes,
+		inference:        deps.Inference,
+		inferenceContext: deps.InferenceContext,
+		prompts:          deps.Prompts,
+		taskContext:      deps.TaskContext,
+		sessions:         deps.Sessions,
+		logger:           deps.Logger.WithFields(zap.String("component", "review-runner")),
+		budgetBytes:      deps.BudgetBytes,
+		inFlight:         make(map[string]*inFlightRun),
 	}
 }
 
@@ -278,6 +281,11 @@ func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		Model:          identity.Model,
 		EntryID:        req.EntryID,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	run, identity, err = r.bindRunReviewer(ctx, run, identity)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -414,8 +422,19 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) (*models.TaskReviewRun
 // run row before returning, so the UI always has a reason to show.
 func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, identity ReviewerIdentity, files []ChangedFile) error {
 	started := time.Now()
-	if _, err := r.store.MarkRunRunning(ctx, runID); err != nil {
+	claimed, err := r.startInferenceRun(ctx, runID, identity)
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return nil
+	}
+	if r.inferenceContext != nil {
+		verified, err := r.inferenceContext(ctx, req, runID, identity)
+		if err != nil {
+			return r.fail(ctx, runID, err, started)
+		}
+		ctx = verified
 	}
 
 	promptCtx, err := r.promptContext(ctx, req)
@@ -455,7 +474,7 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		}
 	}
 
-	_, err = r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
+	completed, err := r.store.CompleteRun(ctx, taskservice.CompleteRunRequest{
 		RunID:           runID,
 		Summary:         summary,
 		FindingCount:    len(inputs),
@@ -465,6 +484,9 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 		ResponseTokens:  accumulated.responseTokens,
 		DurationMs:      int(time.Since(started).Milliseconds()),
 	})
+	if err == nil {
+		r.completeVerifiedSelection(ctx, completed, identity)
+	}
 	return err
 }
 
@@ -554,6 +576,7 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 	defer cancel()
 	if _, err := r.store.FailRun(failCtx, runID, code, cause.Error(), int(time.Since(started).Milliseconds())); err != nil {
 		r.logger.Error("record review run failure", zap.String("run_id", runID), zap.Error(err))
+		return errors.Join(cause, fmt.Errorf("record review run failure: %w", err))
 	}
 	return cause
 }
