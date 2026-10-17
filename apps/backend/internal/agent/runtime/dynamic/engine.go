@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"sync"
 	"time"
 
@@ -182,6 +183,7 @@ func (e *Engine) selectContext(
 			continue
 		}
 		decision := RouteDecision{
+			UsagePolicy:        usage.CloneExecutionUsagePolicy(candidate.UsagePolicy),
 			SessionID:          sessionID,
 			LogicalProfileID:   profile.ID,
 			ExecutionProfileID: candidate.ID,
@@ -191,6 +193,7 @@ func (e *Engine) selectContext(
 			Status:             routeStatusStarting,
 		}
 		nextState := RouteState{
+			UsagePolicy:        usage.CloneExecutionUsagePolicy(candidate.UsagePolicy),
 			SessionID:          sessionID,
 			LogicalProfileID:   profile.ID,
 			ExecutionProfileID: candidate.ID,

@@ -1799,7 +1799,10 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 	// One-shot adapters manage their own subprocess per prompt.
 	// Skip process creation — the adapter spawns processes in Prompt().
 	if oneShotAdapter, ok := m.adapter.(adapter.OneShotAdapter); ok && oneShotAdapter.IsOneShot() {
-		m.bindExecutionUsage(ctx)
+		if err := m.bindExecutionUsage(ctx); err != nil {
+			m.status.Store(StatusError)
+			return 0, err
+		}
 		if err := m.startOneShot(); err != nil {
 			return 0, err
 		}
@@ -1811,7 +1814,10 @@ func (m *Manager) StartWithGeneration(ctx context.Context) (uint64, error) {
 		m.status.Store(StatusError)
 		return 0, err
 	}
-	m.bindExecutionUsage(ctx, m.cmd.Args)
+	if err := m.bindExecutionUsage(ctx, m.cmd.Args); err != nil {
+		m.status.Store(StatusError)
+		return 0, err
+	}
 	return m.startManagedProcess()
 }
 

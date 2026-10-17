@@ -11,6 +11,11 @@ import (
 // CandidateExecutionUsageReader must use the original session's actual actor,
 // never the backend account or another profile's representative host cache.
 type CandidateExecutionUsageReader func(context.Context, string, *models.AgentProfile) *usage.ExecutionUsageReport
+type NativeCandidateExecutionUsageReader func(context.Context, string, string, *models.AgentProfile) *usage.ExecutionUsageReport
+
+func (r *ProfileExecutionResolver) SetNativeCandidateExecutionUsageReader(reader NativeCandidateExecutionUsageReader) {
+	r.nativeCandidateUsageReader = reader
+}
 
 // Installed before service start. Nil preserves the disabled legacy path.
 func (r *ProfileExecutionResolver) SetCandidateExecutionUsageReader(reader CandidateExecutionUsageReader) {
@@ -38,9 +43,14 @@ func (r *ProfileExecutionResolver) loadSelectionProfile(ctx context.Context, pro
 			continue
 		}
 		report, scoped := usage.ReadCandidateUsage(ctx, concrete.ID, concrete.Model)
-		if !scoped && r.candidateUsageReader != nil {
-			report = r.candidateUsageReader(ctx, sessionID, concrete)
+		if !scoped {
+			if nativeInferenceRoute(sessionID) && r.nativeCandidateUsageReader != nil {
+				report = r.nativeCandidateUsageReader(ctx, sessionID, profileID, concrete)
+			} else if r.candidateUsageReader != nil {
+				report = r.candidateUsageReader(ctx, sessionID, concrete)
+			}
 		}
+		candidate.UsagePolicy = usage.SelectionPolicyForReport(concrete.ID, concrete.Model, report)
 		candidate.Usage = dynamic.CandidateUsageFromReport(report, concrete.Model, time.Now())
 	}
 	return profile, nil

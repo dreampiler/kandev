@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
 	"time"
 
@@ -425,6 +426,7 @@ func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tm
 
 // PromptRequest contains the prepared request for executing a utility prompt.
 type PromptRequest struct {
+	UsagePolicy        *usage.ExecutionUsagePolicy `json:"-"`
 	CallID             string
 	UtilityID          string
 	ResolvedPrompt     string

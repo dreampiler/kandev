@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"net/http"
 )
 
@@ -13,4 +15,11 @@ func (s *Server) handleExecutionUsage(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, s.procMgr.ReadExecutionUsage(c.Request.Context(), c.Query("model")))
+}
+
+func (s *Server) promptWithUsageSelection(ctx context.Context, agentAdapter adapter.AgentAdapter, request PromptRequest) error {
+	if err := s.procMgr.ConsumeUsageSelectionModel(); err != nil {
+		return err
+	}
+	return promptOrSteer(ctx, agentAdapter, request)
 }
