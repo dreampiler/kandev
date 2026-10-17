@@ -101,6 +101,7 @@ func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context,
 		return false, decision.reasonCode, nil
 	}
 	if held != nil {
+		held.nativeQueued = false
 		return true, "", nil
 	}
 	if reason := c.allCapacityLimitReason(p, maximum); reason != "" {

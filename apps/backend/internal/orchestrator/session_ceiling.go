@@ -77,12 +77,13 @@ type admittedSessionLister interface {
 // keyed by a launch-scoped identifier, which is the window between admission at
 // seam 1 and the session's creation.
 type ceilingReservation struct {
-	grade       string
-	gradeKnown  bool
-	sessionID   string
-	takenAt     time.Time
-	nativeOwner *NativeInferenceRoute
-	queuedTask  *queuedTaskCapacityOwner
+	grade        string
+	gradeKnown   bool
+	sessionID    string
+	takenAt      time.Time
+	nativeOwner  *NativeInferenceRoute
+	nativeQueued bool
+	queuedTask   *queuedTaskCapacityOwner
 }
 
 // admissionRequest is one launch asking for capacity.
@@ -138,19 +139,20 @@ type sessionCeilingController struct {
 	inferenceWakeMu  sync.Mutex
 	inferenceWake    chan struct{}
 
-	policy       string
-	gradeLimits  map[string]int
-	resolveGrade func(context.Context, admissionRequest) (string, error)
-	persistGrade func(context.Context, string, string) error
-	mu           sync.Mutex
-	ceiling      int
-	reservations map[string]*ceilingReservation
-	lister       admittedSessionLister
-	logger       *zap.Logger
-	now          func() time.Time
-	newKey       func() string
-	queuedTasks  func(context.Context) ([]queuedTaskCapacityCandidate, error)
-	queuedWake   func()
+	policy        string
+	gradeLimits   map[string]int
+	resolveGrade  func(context.Context, admissionRequest) (string, error)
+	persistGrade  func(context.Context, string, string) error
+	mu            sync.Mutex
+	ceiling       int
+	reservations  map[string]*ceilingReservation
+	lister        admittedSessionLister
+	logger        *zap.Logger
+	now           func() time.Time
+	newKey        func() string
+	queuedTasks   func(context.Context) ([]queuedTaskCapacityCandidate, error)
+	nativeWaiters func(context.Context) ([]NativeCapacityWaiter, error)
+	queuedWake    func()
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
