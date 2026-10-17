@@ -77,6 +77,11 @@ func TestIdleActivityDurableReplayUsesJournalTimeWithoutChangingPayload(t *testi
 	e.DeliveryMode, e.DeliveryStreamID, e.DeliveryIncarnationID, e.DeliveryHarnessGeneration = DurableDeliveryV1, "stream", "incarnation", 2
 	e.DeliveryDescriptor, e.agentctl = &agentctl.DeliveryStatus{Stream: &stream}, client
 	require.NoError(t, mgr.executionStore.Add(e))
+	mgr.SetExecutorRunningWriter(repository)
+	require.NoError(t, mgr.persistExecutorRunningResult(ctx, e))
+	owner, err := repository.GetExecutorRunningBySessionID(ctx, "session")
+	require.NoError(t, err)
+	require.Equal(t, e.ID, owner.AgentExecutionID, "positive control: real persistence installed the live delivery owner")
 	original := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream", DeliverySequence: 1,
 		DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 2}
 	expectedPayload := durableAgentEvent(e, original).Payload

@@ -21,7 +21,7 @@ system_design:
 
 ## Outcome and scope
 
-Preserve trustworthy lifecycle activity across same-session backend recovery. Passive runtime, session, workspace, and transcript timestamps must not restart the idle interval. Unknown recovery history receives one full interval after settled observation. Explicit focus remains an execution-bound interval floor across restart.
+Preserve trustworthy lifecycle activity across same-session backend recovery. Passive runtime, session, and transcript timestamps must not restart the activity interval. The workspace revision retains its existing role as the conservative policy-generation fence and interval floor. Unknown recovery history receives one full interval after settled observation. Explicit focus remains an execution-bound interval floor across restart.
 
 ## Responsibilities
 
@@ -49,6 +49,7 @@ Run on hosted execution only for this review. From `apps/backend`:
 - `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/agent/runtime/lifecycle -run '^(TestIdleActivity|TestApplyRecoveredTurnOutcome|TestGetPromptActivityForSession|TestExecutionStore_ClaimPromptActivity|TestSuspendIdle)'`
 - `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/orchestrator -run '^(TestIdleParking|TestPromptAfterIdleReclaimLaunchesPreparedSession)'`
 - `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/agentctl/server/instance -run '^(TestRetainedOutcomeActivity|TestTurnOutcome)'`
+- `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/orchestrator/executor -run '^TestIdleActivityMetadata'`
 - Full final-source backend, frontend, and E2E workflows, including their selected Windows, PostgreSQL, containers/Kubernetes, desktop/native, and artifact contracts.
 - Existing specification metadata/lint and public-documentation checks on the final source.
 
