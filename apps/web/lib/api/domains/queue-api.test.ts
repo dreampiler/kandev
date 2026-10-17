@@ -48,6 +48,35 @@ beforeEach(() => {
   getWebSocketClientMock.mockReset();
 });
 
+describe("bounded queue mutation admission", () => {
+  const identity = {
+    task_id: "task-1",
+    session_id: SESSION_ID,
+    session_incarnation_id: INCARNATION_ID,
+  };
+  const operations = [
+    { action: "message.queue.cancel", invoke: () => queueApi.clearQueue(identity) },
+    { action: "message.queue.auto_run.set", invoke: () => queueApi.setQueueAutoRun(identity, false) },
+    { action: "message.queue.auto_merge.set", invoke: () => queueApi.setQueueAutoMerge(identity, false) },
+    { action: "message.queue.remove", invoke: () => queueApi.removeQueuedEntry({ ...identity, entry_id: "entry" }) },
+    { action: "message.queue.merge", invoke: () => mergeQueuedEntry({ ...identity, entry_id: "entry" }) },
+    { action: "message.queue.reorder", invoke: () => reorderQueuedEntries({ ...identity, ordered_ids: ["entry"] }) },
+  ];
+
+  it.each(operations)("$action preserves the retryable wire error", async ({ invoke }) => {
+    const request = vi.fn().mockRejectedValue(new WebSocketRequestError("busy", "UNAVAILABLE"));
+    getWebSocketClientMock.mockReturnValue({ request });
+    await expect(invoke()).rejects.toMatchObject({ name: "QueueAdmissionError", code: "unavailable" });
+  });
+
+  it.each(operations)("$action waits for the server admission budget", async ({ action, invoke }) => {
+    const request = vi.fn().mockResolvedValue({});
+    getWebSocketClientMock.mockReturnValue({ request });
+    await invoke();
+    expect(request).toHaveBeenCalledWith(action, expect.objectContaining(identity), 35_000);
+  });
+});
+
 describe("rethrowQueueError", () => {
   it("maps queue_full errors to QueueFullError carrying the cap metadata", () => {
     expect(() =>
