@@ -155,11 +155,15 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
+function queueFullError(wsErr: WSError): QueueFullError {
+  const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
+  const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
+  return new QueueFullError(size, max);
+}
+
 function knownQueueError(wsErr: WSError, context: QueueErrorContext): Error | undefined {
   if (wsErr.code === "queue_full") {
-    const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
-    const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
-    return new QueueFullError(size, max);
+    return queueFullError(wsErr);
   }
   const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
   if (admissionCode && (context === "admission" || admissionCode === "unavailable")) {
