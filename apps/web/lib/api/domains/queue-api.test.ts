@@ -17,7 +17,6 @@ import {
   MergeReferenceOverflowError,
   QueueSendNowError,
   QueueEntryNotFoundError,
-  QueueEditConflictError,
   QueueReorderError,
   beginQueuedMessageEdit,
   endQueuedMessageEdit,
@@ -25,6 +24,7 @@ import {
   queueMessage,
   renewQueuedMessageEdit,
   reorderQueuedEntries,
+  rethrowQueueError,
   sendQueuedNow,
   updateQueuedMessage,
 } from "./queue-api";
