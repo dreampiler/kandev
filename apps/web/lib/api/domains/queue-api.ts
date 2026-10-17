@@ -161,9 +161,9 @@ function knownQueueError(wsErr: WSError, context: QueueErrorContext): Error | un
     const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
     return new QueueFullError(size, max);
   }
-  if (context === "admission") {
-    const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
-    if (admissionCode) return new QueueAdmissionError(admissionCode);
+  const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
+  if (admissionCode && (context === "admission" || admissionCode === "unavailable")) {
+    return new QueueAdmissionError(admissionCode);
   }
   if (wsErr.code === "entry_not_found") return new QueueEntryNotFoundError();
   if (wsErr.code === "edit_conflict" || wsErr.code === "queue_conflict") {
@@ -387,7 +387,7 @@ export async function clearQueue(identity: QueueSessionIdentity): Promise<{ remo
   try {
     return await client.request<{ removed: number }>("message.queue.cancel", identity, 35_000);
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -402,7 +402,7 @@ export async function drainQueuedMessage(
   try {
     return await client.request<{ drained: boolean }>("message.queue.drain", identity, 35_000);
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -428,7 +428,7 @@ export async function sendQueuedNow(
       sent_count: number;
     }>("message.queue.send_now", params, 35_000);
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -476,7 +476,7 @@ export async function setQueueAutoMerge(
       35_000,
     );
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -509,7 +509,7 @@ export async function appendToQueue(
       35_000,
     );
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 export type QueueEditLease = {
@@ -537,7 +537,7 @@ export async function beginQueuedMessageEdit(
       35_000,
     );
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -549,7 +549,7 @@ export async function renewQueuedMessageEdit(
   try {
     return await client.request<QueueEditLease>("message.queue.edit.renew", lease, 35_000);
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -569,7 +569,7 @@ export async function endQueuedMessageEdit(
       35_000,
     );
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -606,7 +606,7 @@ export async function updateQueuedMessage(
       35_000,
     );
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -636,7 +636,7 @@ export async function mergeQueuedEntry(
   try {
     return await client.request<{ entry_id: string }>("message.queue.merge", params, 35_000);
   } catch (err) {
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
 
@@ -662,6 +662,6 @@ export async function reorderQueuedEntries(
     if (asWSError(err)?.code === "queue_changed") {
       throw new QueueReorderError();
     }
-    rethrowQueueError(err, "admission");
+    rethrowQueueError(err);
   }
 }
