@@ -5,6 +5,8 @@ import (
 	"sync"
 )
 
+// CandidateUsageReader must report the actual prepared model, including any
+// session runtime override; a profile default is not an execution observation.
 type CandidateUsageReader func(context.Context, string) *ExecutionUsageReport
 type candidateUsageContextKey struct{}
 type candidateUsageContext struct {
@@ -28,7 +30,7 @@ func ReadCandidateUsage(ctx context.Context, profileID, model string) (*Executio
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	delete(state.selected, profileID)
-	if report != nil && report.SourceKnown && !report.BindingChanged && report.Current != nil && report.Model != "" && report.Model == model {
+	if report != nil && report.SourceKnown && !report.BindingChanged && report.Current != nil && report.Model != "" {
 		sample := report.Current
 		state.selected[profileID] = ExecutionUsagePolicy{ExpectedProvider: sample.Provider, ExpectedAccountRef: sample.AccountRef, ExpectedOrganizationRef: sample.OrganizationRef, ExpectedModel: report.Model}
 	}

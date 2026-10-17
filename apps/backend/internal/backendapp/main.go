@@ -1199,6 +1199,7 @@ func startGatewayAndServe(
 		services.DynamicProfileResolver.SetCandidateExecutionUsageReader(lifecycleMgr.PeekCandidateExecutionUsage)
 	}
 	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
+	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, lifecycleMgr, hostUtilityMgr)
 	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {

@@ -50,8 +50,14 @@ func (r *ProfileExecutionResolver) loadSelectionProfile(ctx context.Context, pro
 				report = r.candidateUsageReader(ctx, sessionID, concrete)
 			}
 		}
-		candidate.UsagePolicy = usage.SelectionPolicyForReport(concrete.ID, concrete.Model, report)
-		candidate.Usage = dynamic.CandidateUsageFromReport(report, concrete.Model, time.Now())
+		model := concrete.Model
+		// A request-scoped producer has composed the real launch model. Persisted
+		// session overrides can legitimately differ from the candidate default.
+		if scoped && report != nil && report.Model != "" {
+			model = report.Model
+		}
+		candidate.UsagePolicy = usage.SelectionPolicyForReport(concrete.ID, model, report)
+		candidate.Usage = dynamic.CandidateUsageFromReport(report, model, time.Now())
 	}
 	return profile, nil
 }

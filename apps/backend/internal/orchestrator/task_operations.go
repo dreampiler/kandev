@@ -1946,7 +1946,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 
 	if route == nil {
-		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false); err != nil {
+		if agentProfileID, err = s.resolveDynamicLaunchExecution(ctx, launchSession, agentProfileID, false, executor.LaunchOptions{ExecutorID: executorID, Env: opts.Env}); err != nil {
 			return nil, failPreparedLaunch(err)
 		}
 	}
@@ -2435,6 +2435,7 @@ func (s *Service) resolveDynamicLaunchExecution(
 	session *models.TaskSession,
 	profileID string,
 	validate bool,
+	prepared ...executor.LaunchOptions,
 ) (string, error) {
 	if s.profileExecutionResolver == nil {
 		return profileID, nil
@@ -2443,6 +2444,13 @@ func (s *Service) resolveDynamicLaunchExecution(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, session.AgentProfileID); err != nil {
 			return "", err
 		}
+	}
+	if s.executor != nil {
+		var options executor.LaunchOptions
+		if len(prepared) != 0 {
+			options = prepared[0]
+		}
+		ctx = s.executor.WithCandidateExecutionUsage(ctx, session, options)
 	}
 	resolved, routeClaimed, err := s.resolveExecutionForLaunchSession(ctx, session)
 	if err != nil {
