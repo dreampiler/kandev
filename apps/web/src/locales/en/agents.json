@@ -449,5 +449,19 @@
   "orderedTierFailure": "After a candidate in this tier is skipped",
   "orderedTierFailureSame": "Try the next candidate in this tier",
   "orderedTierFailureNext": "Go to the next tier",
-  "orderedTierUnknown": "When usage is unknown or equal, saved order is used."
+  "orderedTierUnknown": "When usage is unknown or equal, saved order is used.",
+  "nativeUsage": {
+    "title": "Provider usage",
+    "refresh": "Refresh usage",
+    "description": "Usage is tied to the account and environment of an existing execution. Unknown values are not zero.",
+    "unknown": "Unknown",
+    "failed": "Usage could not be read.",
+    "account": "Account",
+    "organization": "Organization",
+    "model": "Selected model",
+    "observedAt": "Observed at",
+    "limited": "Measured allowance exhausted",
+    "reset": "Reset",
+    "bindingChanged": "The execution account changed. Start with the intended account before continuing."
+  }
 }

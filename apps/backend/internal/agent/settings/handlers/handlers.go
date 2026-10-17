@@ -96,6 +96,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.DELETE("/agent-profiles/:id", cfg, h.interlock, h.httpDeleteProfile)
 	api.POST("/agent-profiles/:id/duplicate", cfg, h.interlock, h.httpDuplicateProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
+	api.GET("/agent-profiles/:id/usage", cfg, h.httpReadNativeProfileUsage)
 	api.POST("/agent-profiles/:id/mcp-config", cfg, h.interlock, h.httpUpdateProfileMcpConfig)
 	// The owner release is the only way to lift a provider account-block hold;
 	// profile edits and enablement never release it.

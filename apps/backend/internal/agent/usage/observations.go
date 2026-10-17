@@ -59,7 +59,7 @@ func WindowMetricsForLabel(current, previous *ProviderUsage, label string, now t
 	}
 	interval := current.FetchedAt.Sub(previous.FetchedAt)
 	prior, ok := observedWindow(previous, label, now)
-	if !ok || interval > 2*cacheTTL || !prior.ResetAt.Equal(window.ResetAt) || prior.UtilizationPct > window.UtilizationPct {
+	if !ok || interval > 2*cacheTTL || !prior.ResetAt.Equal(window.ResetAt) || prior.Model != window.Model || prior.UtilizationPct > window.UtilizationPct {
 		return result
 	}
 	result.ConsumptionRateKnown = true
@@ -87,5 +87,5 @@ func freshAccountSample(sample *ProviderUsage, now time.Time) bool {
 }
 
 func comparableAccountSamples(current, previous *ProviderUsage) bool {
-	return previous != nil && previous.Provider == current.Provider && previous.AccountRef == current.AccountRef && !previous.FetchedAt.IsZero() && previous.FetchedAt.Before(current.FetchedAt)
+	return previous != nil && previous.Provider == current.Provider && previous.AccountRef == current.AccountRef && previous.OrganizationRef == current.OrganizationRef && !previous.FetchedAt.IsZero() && previous.FetchedAt.Before(current.FetchedAt)
 }

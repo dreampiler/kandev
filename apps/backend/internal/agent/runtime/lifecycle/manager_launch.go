@@ -3056,7 +3056,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 
 	// Starting with stale agent configuration could expose an old credential
 	// set, so the subprocess must not start when configuration delivery fails.
-	if err := client.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, configureEnv, execution.ContinueCommand, execution.ContinueArgs); err != nil {
+	if err := m.configureAgentUsage(ctx, client, execution, configureEnv); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

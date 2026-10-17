@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -124,6 +125,7 @@ func (s *Server) setupRoutes() {
 
 		// Process control
 		api.POST("/agent/configure", s.handleAgentConfigure)
+		api.GET("/agent/usage", s.handleExecutionUsage)
 		api.POST("/agent/managed-runtime/cache-repair", s.handleManagedRuntimeCacheRepair)
 		api.POST("/agent/background-work/action", s.handleBackgroundWorkAction)
 		api.POST("/start", s.handleStart)
@@ -474,12 +476,13 @@ func (s *Server) handleStart(c *gin.Context) {
 
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
-	Command         string            `json:"command"`
-	AgentArgs       optionalArgs      `json:"agent_args"`
-	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
-	ContinueArgs    optionalArgs      `json:"continue_args"`
-	Env             map[string]string `json:"env,omitempty"`
-	ReplaceEnv      bool              `json:"replace_env,omitempty"`
+	UsagePolicy     *usage.ExecutionUsagePolicy `json:"usage_policy,omitempty"`
+	Command         string                      `json:"command"`
+	AgentArgs       optionalArgs                `json:"agent_args"`
+	ContinueCommand string                      `json:"continue_command,omitempty"` // For one-shot agents: command for follow-up prompts
+	ContinueArgs    optionalArgs                `json:"continue_args"`
+	Env             map[string]string           `json:"env,omitempty"`
+	ReplaceEnv      bool                        `json:"replace_env,omitempty"`
 	// ApprovalPolicy is accepted and ignored. It was never consulted by any
 	// code path; the field remains so an older backend configuring a newer
 	// agentctl still succeeds. Permission auto-approval travels on
@@ -526,6 +529,9 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		configureErr = s.procMgr.ConfigureWithEnvironment(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
 	} else {
 		configureErr = s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present)
+	}
+	if configureErr == nil {
+		configureErr = s.procMgr.ConfigureExecutionUsage(req.UsagePolicy)
 	}
 	if configureErr != nil {
 		s.logger.Error("failed to configure agent", zap.Error(configureErr), zap.String("command", req.Command))

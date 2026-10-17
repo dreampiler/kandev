@@ -41,6 +41,7 @@ import {
 } from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { ProviderUsageCard } from "@/components/settings/provider-usage-card";
 import { ProviderSection } from "@/components/settings/profile-edit/provider-section";
 import { settingsActionClassName } from "@/components/settings/settings-control";
 import { providerConfigInvalidReasonKey } from "@/lib/settings/provider-config-validation";
@@ -456,6 +457,7 @@ function ProfileEditor({
         unavailable={nativeCodexUnavailable}
       />
 
+      <ProviderUsageCard profileId={savedProfile.id} />
       <Separator />
 
       <fieldset disabled={nativeCodexUnavailable} className="min-w-0 space-y-8">

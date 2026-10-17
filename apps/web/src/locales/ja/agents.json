@@ -449,5 +449,19 @@
   "orderedTierFailure": "この階層の候補をスキップした後",
   "orderedTierFailureSame": "同じ階層の次の候補を試す",
   "orderedTierFailureNext": "次の階層へ移動",
-  "orderedTierUnknown": "使用量が不明または同じ場合は、保存された順序を使用します。"
+  "orderedTierUnknown": "使用量が不明または同じ場合は、保存された順序を使用します。",
+  "nativeUsage": {
+    "title": "プロバイダー使用量",
+    "refresh": "使用量を更新",
+    "description": "既存の実行のアカウントと環境に対応する使用量です。不明な値はゼロではありません。",
+    "unknown": "不明",
+    "failed": "使用量を読み取れませんでした。",
+    "account": "アカウント",
+    "organization": "組織",
+    "model": "選択したモデル",
+    "observedAt": "観測時刻",
+    "limited": "観測された利用枠を使い切りました",
+    "reset": "リセット",
+    "bindingChanged": "実行アカウントが変わりました。続行する前に対象のアカウントで開始してください。"
+  }
 }

@@ -449,5 +449,19 @@
   "orderedTierFailure": "跳过此层级的候选后",
   "orderedTierFailureSame": "尝试此层级的下一候选",
   "orderedTierFailureNext": "转到下一层级",
-  "orderedTierUnknown": "使用量未知或相同时，使用已保存顺序。"
+  "orderedTierUnknown": "使用量未知或相同时，使用已保存顺序。",
+  "nativeUsage": {
+    "title": "提供商用量",
+    "refresh": "刷新用量",
+    "description": "用量关联现有执行的账户和环境。未知值不等于零。",
+    "unknown": "未知",
+    "failed": "无法读取用量。",
+    "account": "账户",
+    "organization": "组织",
+    "model": "所选模型",
+    "observedAt": "观测时间",
+    "limited": "观测到的额度已用尽",
+    "reset": "重置",
+    "bindingChanged": "执行账户已更改。请使用预期账户启动后再继续。"
+  }
 }

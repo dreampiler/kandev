@@ -449,5 +449,19 @@
   "orderedTierFailure": "Após ignorar um candidato deste nível",
   "orderedTierFailureSame": "Tentar o candidato seguinte neste nível",
   "orderedTierFailureNext": "Avançar para o nível seguinte",
-  "orderedTierUnknown": "Se a utilização for desconhecida ou igual, é usada a ordem guardada."
+  "orderedTierUnknown": "Se a utilização for desconhecida ou igual, é usada a ordem guardada.",
+  "nativeUsage": {
+    "title": "Utilização do fornecedor",
+    "refresh": "Atualizar utilização",
+    "description": "A utilização corresponde à conta e ao ambiente de uma execução existente. Valores desconhecidos não são zero.",
+    "unknown": "Desconhecido",
+    "failed": "Não foi possível ler a utilização.",
+    "account": "Conta",
+    "organization": "Organização",
+    "model": "Modelo selecionado",
+    "observedAt": "Observado em",
+    "limited": "Quota observada esgotada",
+    "reset": "Reposição",
+    "bindingChanged": "A conta da execução mudou. Inicie com a conta pretendida antes de continuar."
+  }
 }
