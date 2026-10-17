@@ -1,5 +1,5 @@
 ---
-status: done
+status: in_progress
 requirements:
   - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
 system_design:
@@ -23,17 +23,19 @@ task or a changed recovery policy.
 
 ## Dependencies and exclusions
 
-The accepted-work and primary-ownership proposal #4479, observed at
-`cb7532ad868c93a9beffc1b368269083e4fb2458`, owns its existing
-`ensureSessionRunningTimeout` predicate and recovery behavior. This package adds
-only its admission-timeout predicate to the implementation base and does not
-copy that proposal. Reconcile that small shared error branch at integration.
+Main already contains #4479's classified private readiness-expiry recovery and
+#4501's sanitization changes. Preserve those contracts while adding the
+admission-timeout predicate. Do not classify unrelated provider deadlines as
+readiness expiry or safe acquisition failure.
 
 ## Risk and verification
 
 The acquisition budget must never be propagated to admitted callbacks, and a
 callback deadline must not be relabeled as an acquisition timeout. Preserve
 session references when cancelled waiters leave and preserve durable cleanup
-after budget exhaustion. Use the work order's focused existing cases plus an
-explicit temporary overlay outside automatic collectors. No standing case,
-E2E, audit framework, model call, or operating-data change is authorized.
+after budget exhaustion. Retain deterministic FIFO, cancellation, SQLite,
+compensation/shutdown, cleanup/restart, API, and desktop/phone regression tests.
+Run contributor code only on hosted runners. Focused proof runs establish
+regressions; full actual current-head backend, frontend, and E2E suites qualify
+the final change. Exact commits, commands, attempts, and raw results are retained
+in the PR review evidence, separate from this durable plan.

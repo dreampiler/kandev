@@ -500,9 +500,10 @@ func (s *Service) executeSendNowClaimWithContext(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(sessionID, claim.Dispatch.ID)
 	}
+	ctx = s.queuedRecoveryContext(ctx, reservation)
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(sessionID, reservation)
-		s.drainQueuedDispatchIfPending(sessionID)
+		s.drainQueuedDispatchIfPending(ctx, sessionID)
 	}()
 
 	restore := func() {

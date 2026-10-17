@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -178,19 +179,36 @@ func TestSessionAdmissionSQLiteTimeoutDoesNotMutateOrLeakReferences(t *testing.T
 }
 
 func TestSessionAdmissionCallbackKeepsCallerContextAndDeadlineError(t *testing.T) {
-	svc := NewServiceMemory(logger.Default())
-	err := svc.WithSessionAdmission(context.Background(), "session", func(ctx context.Context) error {
-		_, deadline := ctx.Deadline()
-		require.False(t, deadline)
-		require.NoError(t, ctx.Err())
-		return svc.WithSessionAdmission(ctx, "session", func(nested context.Context) error {
-			require.Equal(t, ctx, nested)
-			return context.DeadlineExceeded
+	synctest.Test(t, func(t *testing.T) {
+		svc := NewServiceMemory(logger.Default())
+		err := svc.WithSessionAdmission(context.Background(), "session", func(ctx context.Context) error {
+			<-time.After(31 * time.Second)
+			_, deadline := ctx.Deadline()
+			require.False(t, deadline)
+			require.NoError(t, ctx.Err(), "acquisition budget cancelled an admitted callback")
+			return svc.WithSessionAdmission(ctx, "session", func(nested context.Context) error {
+				require.Equal(t, ctx, nested)
+				return context.DeadlineExceeded
+			})
 		})
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.NotErrorIs(t, err, ErrSessionAdmissionTimeout)
+		require.Empty(t, svc.admissions)
 	})
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.NotErrorIs(t, err, ErrSessionAdmissionTimeout)
-	require.Empty(t, svc.admissions)
+}
+
+func TestSessionAdmissionLifecycleBudgetOwnsOnlyAcquisitionTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc := NewServiceMemory(logger.Default())
+		svc.lifecycleMu.Lock()
+		defer svc.lifecycleMu.Unlock()
+		callback := func(context.Context) error { t.Error("callback ran under lifecycle writer"); return nil }
+		require.ErrorIs(t, svc.WithSessionAdmission(context.Background(), "session", callback), ErrSessionAdmissionTimeout)
+		caller, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.ErrorIs(t, svc.WithSessionAdmission(caller, "session", callback), context.DeadlineExceeded)
+		require.Empty(t, svc.admissions)
+	})
 }
 
 func TestSessionAdmissionLifecycleBarrierHonorsCancellation(t *testing.T) {

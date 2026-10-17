@@ -2,13 +2,14 @@ import { expect, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { injectLatency } from "../../helpers/causal-waits";
-import { seedFullQueueTask } from "./message-queue-scroll-helpers";
+import { SessionPage } from "../../pages/session-page";
 
 export async function expectQueueBusyRetry(
   page: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   mobile: boolean,
+  captureBusy?: () => Promise<void>,
 ): Promise<void> {
   let refused = false;
   await page.routeWebSocket(/\/ws$/, (socket) => {
@@ -40,12 +41,24 @@ export async function expectQueueBusyRetry(
     });
     server.onMessage((message) => socket.send(message));
   });
-  const { session, taskId, sessionId } = await seedFullQueueTask(
-    page,
-    apiClient,
-    seedData,
-    "Queue busy retry",
-  );
+  const task = await apiClient.createTask(seedData.workspaceId, "Queue busy retry", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    agent_profile_id: seedData.agentProfileId,
+    repository_ids: [seedData.repositoryId],
+  });
+  const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+    state: "IDLE",
+    agentProfileId: seedData.agentProfileId,
+  });
+  const identity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
+  await apiClient.setQueueAutoRun(identity, false);
+  for (let index = 0; index < 10; index++) {
+    await apiClient.queueMessage(identity, `Preserved queue entry ${index + 1}`);
+  }
+  await page.goto(`/t/${task.id}`);
+  const session = new SessionPage(page);
+  await session.waitForLoad();
   const chat = session.activeChat();
   await chat.getByTestId("queue-chip").click();
   const clear = chat.getByTestId("queue-clear-all");
@@ -55,8 +68,8 @@ export async function expectQueueBusyRetry(
   await expect(
     page.getByText("The message queue is temporarily unavailable. Try again.", { exact: true }),
   ).toBeVisible({ timeout: 15_000 });
+  await captureBusy?.();
   await expect(chat.getByTestId("queue-entry")).toHaveCount(10);
-  const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
   expect((await apiClient.getQueueStatus(identity)).count).toBe(10);
   await expect(clear).toBeEnabled();
   if (mobile) await clear.tap();

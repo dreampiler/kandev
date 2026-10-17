@@ -1,7 +1,7 @@
 ---
 id: P37-01
 title: Bound Queue Acquisition and Cleanup
-status: done
+status: in_progress
 wave: 1
 depends_on: []
 plan: plan.md
@@ -28,11 +28,11 @@ Implement bounded queue acquisition and its existing recovery-owner integration 
 
 Update messagequeue service acquisition and add its FIFO gate; add the timeout
 requeue predicate, handler `UNAVAILABLE` mapping, cleanup attempt budget, and
-the two existing web API error wrappers. Preserve existing user input, provider
+all affected web API mutation wrappers. Preserve existing user input, provider
 order, queue identity/replay, callback context, and cleanup authorization.
-Do not port the original standing test files/cases or #4479's independent
-accepted-work and primary-ownership implementation. No deployment or Git
-publication is part of this work order's implementation handoff.
+Retain permanent production-path regression coverage. Preserve the already
+merged #4479 private readiness-expiry classification and #4501 sanitization.
+PR remediation and hosted verification are authorized within this delivery.
 
 ## Acceptance
 
@@ -48,25 +48,49 @@ publication is part of this work order's implementation handoff.
 `orchestrator/messagequeue/service.go`, `messagequeue/session_admission_gate.go`,
 `orchestrator/event_handlers_agent.go`, `handlers/queue_operations_handlers.go`,
 `handlers/queue_handlers.go`, `orchestrator/queued_dispatch.go`, and web
-`lib/api/domains/queue-api.ts`. Update only the existing web request assertion
-when its timeout argument changes.
+`lib/api/domains/queue-api.ts`. Retain permanent production-path tests and update the complete affected web
+request assertion cohort when timeout arguments change.
 
 ## Verification
 
-From `apps/backend`:
+Hosted focused Go race coverage:
 
 ```text
-go test -trimpath ./internal/orchestrator/messagequeue -run 'TestServiceQueueOperationsWaitForAdmission|TestRestoreSendNowClaimUsesSourceSessionAdmission|TestSendNowClaimIdentityValidationRejectsBeforeRepository' -count=1
-go test -trimpath ./internal/orchestrator/handlers -run 'TestWsQueueMessageMapsDeniedIdentifiedSessionToAdmissionUnavailable|TestWsQueueMessageReplaysOrdinaryAdmissionWithoutDuplicatingContent|TestWsRemoveEntryRetriesFailedAttachmentRelease|TestPendingAttachmentCleanupResumesAfterHandlerRestart|TestWsUpdateMessageCleanupRetryPreservesAuthAndPublishesStatus|TestPublishStatusDetachesCancelledRequest' -count=1
+go test -race -p 2 -count=1 -v ./internal/orchestrator/messagequeue ./internal/orchestrator/handlers ./internal/orchestrator -run 'TestSessionAdmission|TestQueueMutationsReturnRetryableAdmissionTimeout|TestQueueAdmissionTimeoutThroughSQLiteHandlers|TestAttachmentCleanup(Budget|Acknowledgements|EditLease)|TestQueuedAdmissionRecovery' -timeout=5m
 ```
 
-Invoke temporary Go contention/requeue/cleanup checks through an explicit
-overlay whose backing files are outside repository collectors, then remove
-them. Use the existing web `lib/api/domains/queue-api.test.ts` file after the
-wrapper changes. Apply existing changed-file lint; do not repeat unrelated
-full suites. Record actual commands, exit codes, limitations, and cleanup here.
+Hosted web coverage:
 
-## Results
+```text
+pnpm exec vitest run lib/api/domains/queue-api.test.ts lib/queue-mutation-error.test.ts
+pnpm e2e:run --host --project chromium -- tests/chat/queue-admission-busy.spec.ts --retries=0
+pnpm e2e:run --host --no-build --project mobile-chrome -- tests/chat/mobile-queue-admission-busy.spec.ts --retries=0
+```
+
+Run the final actual full backend, frontend, and E2E families on the exact
+published head. Their normal static checks validate lint, types, docs, and
+specification metadata. No local contributor compiler, test, dependency install,
+or hook execution is permitted in this review environment.
+
+## Review remediation
+
+Retain the regression cohort and correct retryable feedback across queue
+mutations and their callers. Preserve the original grant/reference and callback
+lifetime contract, compensation ownership, and durable cleanup recovery. Include
+the final cleanup/acknowledgement error in exhaustion diagnostics. Capture the
+callback owner with each reservation so an old worker cannot use a new Start
+generation for compensation or deferred queue drains.
+
+Focused hosted proof and final exact-head qualification are pending. Their raw
+attempt evidence and final merge receipt are retained by the review task.
+
+## Historical author results (superseded as qualification)
+
+The following records describe the author's original port. Temporary overlays
+were removed and cannot substitute for the permanent tests and hosted final
+qualification required above. Historical scope restrictions below do not
+constrain the authorized PR remediation.
+
 
 The initial six-path slice was published at
 `7fb36ac129344d73b4a996f782a6c7e678e386d8` on base

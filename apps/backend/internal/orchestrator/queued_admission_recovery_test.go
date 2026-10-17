@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync/atomic"
 	"testing"
 
@@ -27,6 +28,22 @@ type admissionRecoveryBarrierRepository struct {
 func (r *admissionRecoveryBarrierRepository) RequeuePreservingFIFOForSession(
 	ctx context.Context, identity messagequeue.QueueSessionIdentity, msg *messagequeue.QueuedMessage,
 ) error {
+	if err := r.beforeCompensation(ctx); err != nil {
+		return err
+	}
+	return r.Repository.RequeuePreservingFIFOForSession(ctx, identity, msg)
+}
+
+func (r *admissionRecoveryBarrierRepository) RestoreForSession(
+	ctx context.Context, identity messagequeue.QueueSessionIdentity, msg *messagequeue.QueuedMessage, max int,
+) error {
+	if err := r.beforeCompensation(ctx); err != nil {
+		return err
+	}
+	return r.Repository.RestoreForSession(ctx, identity, msg, max)
+}
+
+func (r *admissionRecoveryBarrierRepository) beforeCompensation(ctx context.Context) error {
 	if r.attempts.Add(1) == 1 {
 		return messagequeue.ErrSessionAdmissionTimeout
 	}
@@ -35,18 +52,28 @@ func (r *admissionRecoveryBarrierRepository) RequeuePreservingFIFOForSession(
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-r.release:
-		return r.Repository.RequeuePreservingFIFOForSession(ctx, identity, msg)
+		return nil
 	}
 }
 
 func TestQueuedAdmissionRecoveryRetainsSQLiteReservationUntilCompensation(t *testing.T) {
-	for _, stop := range []bool{false, true} {
-		t.Run(map[bool]string{false: "requeue", true: "service-stop"}[stop], func(t *testing.T) {
+	for _, mode := range []struct {
+		name          string
+		stop, restore bool
+	}{
+		{name: "requeue"}, {name: "requeue-service-stop", stop: true},
+		{name: "restore", restore: true}, {name: "restore-service-stop", stop: true, restore: true},
+	} {
+		t.Run(mode.name, func(t *testing.T) {
+			stop := mode.stop
 			ctx := context.Background()
 			repo := setupTestRepo(t)
 			seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
 			seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
 			manager := &mockAgentManager{isAgentRunning: true, promptErr: messagequeue.ErrSessionAdmissionTimeout, repoForExecutionLookup: repo}
+			if mode.restore {
+				manager.promptErr = errors.New("UsageLimitExceeded")
+			}
 			paused, resume := make(chan struct{}), make(chan struct{})
 			core, _ := observer.New(zapcore.ErrorLevel)
 			log, err := logger.NewFromZap(zap.New(core, zap.Hooks(func(entry zapcore.Entry) error {
@@ -104,6 +131,13 @@ func TestQueuedAdmissionRecoveryRetainsSQLiteReservationUntilCompensation(t *tes
 				// Install the fresh callback owner exactly as Start does, while
 				// the old caller is paused after compensation cancellation.
 				svc.resetReservedPromptCallbacks()
+				called := false
+				err := svc.retryQueuedRecoveryMutation(svc.queuedRecoveryContext(ctx, reservation), func(context.Context) error {
+					called = true
+					return nil
+				})
+				require.ErrorIs(t, err, context.Canceled)
+				require.False(t, called, "old reservation borrowed the new recovery owner")
 				svc.markQueuedDispatchDrainPending("s1")
 				close(resume)
 			} else {

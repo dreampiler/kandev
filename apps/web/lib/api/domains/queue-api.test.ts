@@ -317,13 +317,17 @@ describe("queue reference payloads", () => {
       entity_references: [reference],
     });
 
-    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      task_id: "task-1",
-      content: "queued reference",
-      entity_references: [reference],
-    });
+    expect(request).toHaveBeenCalledWith(
+      QUEUE_ADD_ACTION,
+      {
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        task_id: "task-1",
+        content: "queued reference",
+        entity_references: [reference],
+      },
+      35_000,
+    );
   });
 
   it("forwards context file metadata through message.queue.add", async () => {
@@ -338,13 +342,17 @@ describe("queue reference payloads", () => {
       context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
 
-    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      task_id: "task-1",
-      content: "queued context",
-      context_files: [{ path: "src/components", name: "components", is_directory: true }],
-    });
+    expect(request).toHaveBeenCalledWith(
+      QUEUE_ADD_ACTION,
+      {
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        task_id: "task-1",
+        content: "queued context",
+        context_files: [{ path: "src/components", name: "components", is_directory: true }],
+      },
+      35_000,
+    );
   });
 });
 
@@ -361,14 +369,18 @@ describe("queued message reference updates", () => {
       content: "reference removed",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      content: "reference removed",
-      entity_references: [],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        content: "reference removed",
+        entity_references: [],
+      },
+      35_000,
+    );
   });
 
   it("forwards surviving references through message.queue.update", async () => {
@@ -384,14 +396,18 @@ describe("queued message reference updates", () => {
       entity_references: [reference],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      content: "reference kept",
-      entity_references: [reference],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        content: "reference kept",
+        entity_references: [reference],
+      },
+      35_000,
+    );
   });
 });
 
@@ -429,10 +445,14 @@ describe("queued message edit leases", () => {
 
     await endQueuedMessageEdit(lease, true);
 
-    expect(request).toHaveBeenCalledWith("message.queue.edit.end", {
-      ...lease,
-      dispatch_if_auto_run: true,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.edit.end",
+      {
+        ...lease,
+        dispatch_if_auto_run: true,
+      },
+      35_000,
+    );
   });
 
   it("forwards operation and target revision fences when replacing content", async () => {
@@ -453,17 +473,21 @@ describe("queued message edit leases", () => {
       entity_references: [],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.update", {
-      task_id: "task-1",
-      session_id: "session-1",
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-1",
-      lease_id: "lease-1",
-      operation_id: "op-1",
-      expected_target_revision: 3,
-      content: "edited",
-      entity_references: [],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.update",
+      {
+        task_id: "task-1",
+        session_id: "session-1",
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-1",
+        lease_id: "lease-1",
+        operation_id: "op-1",
+        expected_target_revision: 3,
+        content: "edited",
+        entity_references: [],
+      },
+      35_000,
+    );
   });
 });
 
@@ -480,13 +504,17 @@ describe("mergeQueuedEntry", () => {
       user_id: "user-1",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.merge", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-b",
-      user_id: "user-1",
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.merge",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-b",
+        user_id: "user-1",
+      },
+      35_000,
+    );
   });
 
   it("omits user_id when the caller identity is unknown", async () => {
@@ -500,12 +528,16 @@ describe("mergeQueuedEntry", () => {
       entry_id: "q-b",
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.merge", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      entry_id: "q-b",
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.merge",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        entry_id: "q-b",
+      },
+      35_000,
+    );
   });
 
   it("maps a drained-source rejection to QueueEntryNotFoundError", async () => {
@@ -683,12 +715,16 @@ describe("setQueueAutoMerge", () => {
       false,
     );
 
-    expect(request).toHaveBeenCalledWith("message.queue.auto_merge.set", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      enabled: false,
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.auto_merge.set",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        enabled: false,
+      },
+      35_000,
+    );
   });
 });
 
@@ -704,12 +740,16 @@ describe("reorderQueuedEntries", () => {
       ordered_ids: ["q-c", "q-a", "q-b"],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.reorder", {
-      task_id: "task-1",
-      session_id: SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      ordered_ids: ["q-c", "q-a", "q-b"],
-    });
+    expect(request).toHaveBeenCalledWith(
+      "message.queue.reorder",
+      {
+        task_id: "task-1",
+        session_id: SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        ordered_ids: ["q-c", "q-a", "q-b"],
+      },
+      35_000,
+    );
   });
 
   it("maps a queue_changed rejection to QueueReorderError", async () => {

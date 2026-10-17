@@ -8,6 +8,8 @@ test("queue busy feedback preserves entries and permits retry", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
-  await expectQueueBusyRetry(testPage, apiClient, seedData, false);
+}, testInfo) => {
+  await expectQueueBusyRetry(testPage, apiClient, seedData, false, async () => {
+    await testPage.screenshot({ path: testInfo.outputPath("queue-busy.png") });
+  });
 });

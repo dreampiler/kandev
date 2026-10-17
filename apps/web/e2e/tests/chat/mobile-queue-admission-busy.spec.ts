@@ -8,6 +8,8 @@ test("mobile queue busy feedback preserves entries and permits retry", async ({
   testPage,
   apiClient,
   seedData,
-}) => {
-  await expectQueueBusyRetry(testPage, apiClient, seedData, true);
+}, testInfo) => {
+  await expectQueueBusyRetry(testPage, apiClient, seedData, true, async () => {
+    await testPage.screenshot({ path: testInfo.outputPath("queue-busy.png") });
+  });
 });

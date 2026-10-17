@@ -11,6 +11,28 @@ import (
 
 var errQueuedDispatchSupersededBySendNow = errors.New("queued dispatch superseded by send now")
 
+type queuedRecoveryOwnerContextKey struct{}
+
+func (s *Service) queuedRecoveryOwner(ctx context.Context) *reservedPromptCallbackOwner {
+	if owner, ok := ctx.Value(queuedRecoveryOwnerContextKey{}).(*reservedPromptCallbackOwner); ok {
+		return owner
+	}
+	s.reservedPromptCallbacksMu.Lock()
+	defer s.reservedPromptCallbacksMu.Unlock()
+	if s.reservedPromptCallbacks == nil {
+		s.reservedPromptCallbacks = newReservedPromptCallbackOwner()
+	}
+	return s.reservedPromptCallbacks
+}
+
+func (s *Service) queuedRecoveryContext(ctx context.Context, reservation *queuedDispatchReservation) context.Context {
+	owner := s.queuedRecoveryOwner(ctx)
+	if reservation != nil && reservation.recoveryOwner != nil {
+		owner = reservation.recoveryOwner
+	}
+	return context.WithValue(ctx, queuedRecoveryOwnerContextKey{}, owner)
+}
+
 // retryQueuedRecoveryMutation keeps the caller's reservation alive until its
 // compensation settles. The caller waits, so borrowed admission context never
 // outlives the lock that supplied it. Stop owns cancellation and joins the work.
@@ -18,13 +40,7 @@ func (s *Service) retryQueuedRecoveryMutation(ctx context.Context, mutate func(c
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	s.reservedPromptCallbacksMu.Lock()
-	owner := s.reservedPromptCallbacks
-	if owner == nil {
-		owner = newReservedPromptCallbackOwner()
-		s.reservedPromptCallbacks = owner
-	}
-	s.reservedPromptCallbacksMu.Unlock()
+	owner := s.queuedRecoveryOwner(ctx)
 	result := make(chan error, 1)
 	if !owner.launch(func(ownerCtx context.Context) {
 		recoveryCtx, cancel := context.WithCancel(ctx)
@@ -80,6 +96,8 @@ type queuedDispatchReservation struct {
 	identity  messagequeue.QueueSessionIdentity
 	source    *messagequeue.QueuedMessage
 	phase     atomic.Uint32
+	// Recovery and deferred drains remain owned by the generation that took the row.
+	recoveryOwner *reservedPromptCallbackOwner
 	// successorTurn is the replacement turn this dispatch opened. A late
 	// complete of the cancelled predecessor must not close that turn or
 	// drop this reservation; only the successor's own ready-path settlement
@@ -87,16 +105,17 @@ type queuedDispatchReservation struct {
 	successorTurn atomic.Value
 }
 
-func newQueuedDispatchReservation(
+func (s *Service) newQueuedDispatchReservation(
 	sessionID, entryID string,
 	identity messagequeue.QueueSessionIdentity,
 	source *messagequeue.QueuedMessage,
 ) *queuedDispatchReservation {
 	reservation := &queuedDispatchReservation{
-		sessionID: sessionID,
-		entryID:   entryID,
-		identity:  identity,
-		source:    source,
+		sessionID:     sessionID,
+		entryID:       entryID,
+		identity:      identity,
+		source:        source,
+		recoveryOwner: s.queuedRecoveryOwner(context.Background()),
 	}
 	reservation.phase.Store(uint32(queuedDispatchPending))
 	return reservation
@@ -140,7 +159,7 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 	if sessionID == "" || entryID == "" {
 		return nil
 	}
-	reservation := newQueuedDispatchReservation(sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
+	reservation := s.newQueuedDispatchReservation(sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
 	if previous, ok := s.dispatchingQueued.Load(sessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -164,7 +183,7 @@ func (s *Service) markQueuedDispatchInFlightWithIdentityLocked(
 		identity.SessionIncarnationID == "" || entryID == "" {
 		return nil
 	}
-	reservation := newQueuedDispatchReservation(identity.SessionID, entryID, identity, source)
+	reservation := s.newQueuedDispatchReservation(identity.SessionID, entryID, identity, source)
 	if previous, ok := s.dispatchingQueued.Load(identity.SessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -437,17 +456,19 @@ func (s *Service) markQueuedDispatchDrainPending(sessionID string) {
 	}
 }
 
-func (s *Service) drainQueuedDispatchIfPending(sessionID string) {
+func (s *Service) drainQueuedDispatchIfPending(ctx context.Context, sessionID string) {
 	if sessionID == "" {
 		return
 	}
+	owner := s.queuedRecoveryOwner(ctx)
 	s.reservedPromptCallbacksMu.Lock()
-	owner := s.reservedPromptCallbacks
-	s.reservedPromptCallbacksMu.Unlock()
-	if owner != nil && owner.ctx.Err() != nil {
+	if owner != s.reservedPromptCallbacks || owner.ctx.Err() != nil {
+		s.reservedPromptCallbacksMu.Unlock()
 		return
 	}
-	if _, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID); !pending {
+	_, pending := s.queuedDispatchDrainPending.LoadAndDelete(sessionID)
+	s.reservedPromptCallbacksMu.Unlock()
+	if !pending {
 		return
 	}
 	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)

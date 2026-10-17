@@ -346,7 +346,7 @@ function requestQueueAdmission(
   params: QueueMessageParams,
 ) {
   if (!params.client_queue_id) {
-    return client.request<QueuedMessage>("message.queue.add", params);
+    return client.request<QueuedMessage>("message.queue.add", params, 35_000);
   }
   const timeout = params.attachments?.length ? 30000 : 10000;
   return client.request<QueuedMessage>("message.queue.add", params, timeout);
@@ -384,7 +384,11 @@ export async function clearQueue(identity: QueueSessionIdentity): Promise<{ remo
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<{ removed: number }>("message.queue.cancel", identity);
+  try {
+    return await client.request<{ removed: number }>("message.queue.cancel", identity, 35_000);
+  } catch (err) {
+    rethrowQueueError(err, "admission");
+  }
 }
 
 /** Dispatch one queued entry now when the session is ready for input. */
@@ -395,7 +399,11 @@ export async function drainQueuedMessage(
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<{ drained: boolean }>("message.queue.drain", identity);
+  try {
+    return await client.request<{ drained: boolean }>("message.queue.drain", identity, 35_000);
+  } catch (err) {
+    rethrowQueueError(err, "admission");
+  }
 }
 
 export type SendQueuedNowParams = QueueSessionIdentity & {
@@ -420,7 +428,7 @@ export async function sendQueuedNow(
       sent_count: number;
     }>("message.queue.send_now", params, 35_000);
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -458,10 +466,18 @@ export async function setQueueAutoMerge(
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
-  return client.request<QueueAutoMergePolicyResponse>("message.queue.auto_merge.set", {
-    ...identity,
-    enabled,
-  });
+  try {
+    return await client.request<QueueAutoMergePolicyResponse>(
+      "message.queue.auto_merge.set",
+      {
+        ...identity,
+        enabled,
+      },
+      35_000,
+    );
+  } catch (err) {
+    rethrowQueueError(err, "admission");
+  }
 }
 
 /** Fetch the full queue snapshot for one immutable session identity. */
@@ -490,9 +506,10 @@ export async function appendToQueue(
     return await client.request<{ entry_id: string; was_append: boolean }>(
       "message.queue.append",
       params,
+      35_000,
     );
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 export type QueueEditLease = {
@@ -511,12 +528,16 @@ export async function beginQueuedMessageEdit(
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    return await client.request<QueueEditLease>("message.queue.edit.begin", {
-      session_id: sessionId,
-      entry_id: entryId,
-    });
+    return await client.request<QueueEditLease>(
+      "message.queue.edit.begin",
+      {
+        session_id: sessionId,
+        entry_id: entryId,
+      },
+      35_000,
+    );
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -526,9 +547,9 @@ export async function renewQueuedMessageEdit(
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    return await client.request<QueueEditLease>("message.queue.edit.renew", lease);
+    return await client.request<QueueEditLease>("message.queue.edit.renew", lease, 35_000);
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -539,12 +560,16 @@ export async function endQueuedMessageEdit(
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    await client.request("message.queue.edit.end", {
-      ...lease,
-      ...(dispatchIfAutoRun ? { dispatch_if_auto_run: true } : {}),
-    });
+    await client.request(
+      "message.queue.edit.end",
+      {
+        ...lease,
+        ...(dispatchIfAutoRun ? { dispatch_if_auto_run: true } : {}),
+      },
+      35_000,
+    );
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -572,12 +597,16 @@ export async function updateQueuedMessage(
   const client = getWebSocketClient();
   if (!client) throw new Error(WS_CLIENT_UNAVAILABLE);
   try {
-    return await client.request("message.queue.update", {
-      ...params,
-      entity_references: params.entity_references ?? [],
-    });
+    return await client.request(
+      "message.queue.update",
+      {
+        ...params,
+        entity_references: params.entity_references ?? [],
+      },
+      35_000,
+    );
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -605,9 +634,9 @@ export async function mergeQueuedEntry(
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
   try {
-    return await client.request<{ entry_id: string }>("message.queue.merge", params);
+    return await client.request<{ entry_id: string }>("message.queue.merge", params, 35_000);
   } catch (err) {
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
@@ -625,6 +654,7 @@ export async function reorderQueuedEntries(
     return await client.request<{ session_id: string; reordered: number }>(
       "message.queue.reorder",
       params,
+      35_000,
     );
   } catch (err) {
     // The shared queue_changed mapping targets Send Now; reorder drift needs
@@ -632,6 +662,6 @@ export async function reorderQueuedEntries(
     if (asWSError(err)?.code === "queue_changed") {
       throw new QueueReorderError();
     }
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }

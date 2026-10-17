@@ -102,9 +102,44 @@ func (*timeoutMutationQueue) SetSessionAutoMerge(context.Context, messagequeue.Q
 	return messagequeue.AutoMergePolicy{}, messagequeue.ErrSessionAdmissionTimeout
 }
 
+func (*timeoutMutationQueue) RemoveEntryWithEntry(context.Context, string, string) (*messagequeue.QueuedMessage, error) {
+	return nil, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) RemoveEntryForSession(context.Context, messagequeue.QueueSessionIdentity, string) (*messagequeue.QueueRemovalResult, error) {
+	return nil, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) DrainQueuedMessage(context.Context, string) (bool, error) {
+	return false, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) DrainQueuedMessageForSession(context.Context, messagequeue.QueueSessionIdentity) (bool, error) {
+	return false, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) SetQueueAutoRun(context.Context, string, bool) (bool, bool, error) {
+	return false, false, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) SetQueueAutoRunForSession(context.Context, messagequeue.QueueSessionIdentity, bool) (bool, bool, error) {
+	return false, false, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) SendQueuedNow(context.Context, string, string, string) (int, error) {
+	return 0, messagequeue.ErrSessionAdmissionTimeout
+}
+
+func (*timeoutMutationQueue) SendQueuedNowForSession(context.Context, messagequeue.QueueSessionIdentity, string, string) (int, error) {
+	return 0, messagequeue.ErrSessionAdmissionTimeout
+}
+
 func TestQueueMutationsReturnRetryableAdmissionTimeout(t *testing.T) {
 	for _, identified := range []bool{false, true} {
-		for _, action := range []string{ws.ActionMessageQueueCancel, ws.ActionMessageQueueMerge, ws.ActionMessageQueueReorder, ws.ActionMessageQueueAutoMergeSet} {
+		for _, action := range []string{
+			ws.ActionMessageQueueCancel, ws.ActionMessageQueueMerge, ws.ActionMessageQueueReorder, ws.ActionMessageQueueAutoMergeSet,
+			ws.ActionMessageQueueRemove, ws.ActionMessageQueueAutoRunSet, ws.ActionMessageQueueDrain, ws.ActionMessageQueueSendNow,
+		} {
 			t.Run(action+map[bool]string{false: "/legacy", true: "/identified"}[identified], func(t *testing.T) {
 				queue := messagequeue.NewServiceMemory(logger.Default())
 				queue.SetAutoMergeEnabled(false)
@@ -114,10 +149,12 @@ func TestQueueMutationsReturnRetryableAdmissionTimeout(t *testing.T) {
 				if identified {
 					access = allowQueueIdentityAccess{}
 				}
-				h := NewQueueHandlers(&timeoutMutationQueue{Service: queue}, &mockEventBus{}, logger.Default(), nil, access, nil)
+				timeoutQueue := &timeoutMutationQueue{Service: queue}
+				h := NewQueueHandlers(timeoutQueue, &mockEventBus{}, logger.Default(), timeoutQueue, access, nil)
 				msg := createTestMessage(t, action, map[string]interface{}{
 					"task_id": "task", "session_id": "session", "session_incarnation_id": "memory:session",
 					"entry_id": entry.ID, "ordered_ids": []string{entry.ID}, "enabled": false,
+					"scope": "entry",
 				})
 				var response *ws.Message
 				switch action {
@@ -129,6 +166,14 @@ func TestQueueMutationsReturnRetryableAdmissionTimeout(t *testing.T) {
 					response, err = h.wsReorder(context.Background(), msg)
 				case ws.ActionMessageQueueAutoMergeSet:
 					response, err = h.wsSetAutoMerge(context.Background(), msg)
+				case ws.ActionMessageQueueRemove:
+					response, err = h.wsRemoveEntry(context.Background(), msg)
+				case ws.ActionMessageQueueAutoRunSet:
+					response, err = h.wsSetAutoRun(context.Background(), msg)
+				case ws.ActionMessageQueueDrain:
+					response, err = h.wsDrainQueue(context.Background(), msg)
+				case ws.ActionMessageQueueSendNow:
+					response, err = h.wsSendNow(context.Background(), msg)
 				}
 				require.NoError(t, err)
 				require.Equal(t, ws.MessageTypeError, response.Type)

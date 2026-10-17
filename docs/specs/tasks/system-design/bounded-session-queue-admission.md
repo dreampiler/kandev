@@ -44,7 +44,7 @@ callbacks. Convert only an internally budgeted acquisition deadline into
 
 Add the new timeout sentinel to the existing queued-dispatch requeue branch.
 Preserve all other accepted-work and primary-ownership predicates; the separate
-restart-recovery proposal owns those changes. Do not reinterpret uncertain
+merged readiness-recovery contract owns those changes. Do not reinterpret uncertain
 provider delivery as a safe acquisition failure.
 
 Keep the existing queued worker's reservation until its requeue or restore
@@ -53,16 +53,20 @@ reserved-prompt callback owner's cancellable lifetime; do not start another
 provider prompt or retry identity, storage, caller-cancellation, or uncertain
 delivery errors. The caller waits, so a borrowed admission token stays within
 its owner's lock lifetime. Stop cancels and joins compensation and suppresses
-the subsequent pending drain. Each acquisition keeps its own 30-second budget;
+the subsequent pending drain. Reservations capture their callback owner at take
+time, and the worker carries that immutable owner through compensation and
+deferred draining. A later Start cannot lend its new owner to an old worker or
+let that worker consume the new generation's pending drain. Each acquisition keeps its own 30-second budget;
 the same live compensation can wait for contention to clear without dropping
 the known-undelivered message.
 
-Auto-run and both removal contracts map this sentinel to the existing retryable
-`UNAVAILABLE` response. Their web wrappers select the existing admission error
-mapping, including translated queue-unavailable feedback. Identity and
-entry-not-found errors retain their precedence.
-The two web requests wait 35 seconds, so the server's acquisition result can
-arrive within its 30-second budget plus the ordinary transport allowance.
+All queue mutation handlers map this sentinel to the existing retryable
+`UNAVAILABLE` response. Operator mutation wrappers wait 35 seconds and preserve
+the structured admission error. Queue controls use the existing translated
+queue-unavailable feedback. Identity, entry-not-found, merge limits, and reorder
+drift retain their precedence. Identified queue admission keeps its existing
+shorter uncertain-delivery reconciliation policy; its durable client ID makes
+that retry idempotent.
 
 Bound the attachment-cleanup loop at 60 attempts. Exhaustion releases only its
 in-memory retry obligation; the persisted cleanup row remains available for
@@ -74,9 +78,17 @@ cleanup or acknowledgement can run.
 
 ## Scope and verification
 
-This ports the bounded-acquisition production slice of fork commit
-`0797bea018f8802210e913dc30008cefb34f521e` onto upstream base
-`15ed289c050f8bd2bd675c4542ffb796525bf991`. It excludes the original new standing
-tests and unrelated damaged comment. Reuse existing focused tests and explicitly
-invoked temporary overlays for the new contention cases, then remove those
-temporary inputs. No core schema, grant, runtime policy, or deployment changes.
+Permanent tests cover FIFO cancellation and grant handoff, reference release,
+SQLite mutations under admission contention, caller/callback context ownership,
+actual queued-worker compensation and successful service shutdown, cleanup
+attempt and acknowledgement budgets, active edit leases, and durable restart
+recovery. API tests cover structured retryable errors and request budgets.
+Desktop and phone browser tests refuse a Clear all request after the ordinary
+transport timeout, retain the entries, display translated retry guidance, and
+complete a real subsequent Clear all request with retries disabled.
+
+The existing queue panel remains the desktop and phone entry point, with its
+existing responsive controls and scroll owner. Only error feedback changes;
+there is no new surface or viewport-specific state.
+
+No schema, grant, runtime policy, provider retry, or deployment changes.

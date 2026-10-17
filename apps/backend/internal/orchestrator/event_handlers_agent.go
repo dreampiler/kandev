@@ -1604,7 +1604,7 @@ func (s *Service) executeQueuedPassthroughMessageWithReservation(
 	queuedMsg *messagequeue.QueuedMessage,
 	reservation *queuedDispatchReservation,
 ) {
-	ctx := context.Background()
+	ctx := s.queuedRecoveryContext(context.Background(), reservation)
 	state := queuedPassthroughExecutionState{}
 	state.userMessageRecorded, _ = queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	defer s.finishQueuedPassthroughExecution(ctx, identity, queuedMsg, reservation, &state)
@@ -1660,7 +1660,7 @@ func (s *Service) finishQueuedPassthroughExecution(
 		state.userMessageRecorded, state.deliveryAttempted, state.dispatchErr,
 	)
 	s.clearQueuedDispatchInFlightIfCurrent(identity.SessionID, reservation)
-	s.drainQueuedDispatchIfPending(identity.SessionID)
+	s.drainQueuedDispatchIfPending(ctx, identity.SessionID)
 	s.finishPassthroughRunningIfCurrent(ctx, identity, state.finishRunning)
 	if s.onQueuedMessageExecutionComplete != nil {
 		s.onQueuedMessageExecutionComplete()
@@ -1786,10 +1786,11 @@ func (s *Service) executeQueuedMessageWithReservation(
 	if reservation == nil {
 		reservation = s.queuedDispatchReservationForEntry(reservedSessionID, queuedMsg.ID)
 	}
+	promptCtx = s.queuedRecoveryContext(promptCtx, reservation)
 	defer func() {
 		s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, reservation)
 		if allowFollowupDrain {
-			s.drainQueuedDispatchIfPending(reservedSessionID)
+			s.drainQueuedDispatchIfPending(promptCtx, reservedSessionID)
 		}
 		if s.onQueuedMessageExecutionComplete != nil {
 			s.onQueuedMessageExecutionComplete()

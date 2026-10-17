@@ -17,6 +17,17 @@ type failedCleanupAcknowledgementQueue struct {
 	acknowledgements atomic.Int32
 }
 
+func awaitCleanupBudgetWorker(t *testing.T, h *QueueHandlers) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { h.attachmentCleanupWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup retry worker did not settle its attempt budget")
+	}
+}
+
 type observedCleanupLeaseQueue struct {
 	*messagequeue.Service
 	checked chan struct{}
@@ -56,12 +67,14 @@ func TestAttachmentCleanupBudgetRetainsDurableObligationAndRecovers(t *testing.T
 	t.Cleanup(func() { pendingAttachmentCleanupMaxAttempts = old })
 	path := filepath.Join(t.TempDir(), "queue.db")
 	h, queue, db := newPersistentCleanupQueue(t, path)
+	t.Cleanup(func() { _ = db.Close() })
 	seedCleanupBudgetObligation(t, queue)
 	claimer := &controlledCleanupClaimer{}
 	claimer.failures.Store(10)
 	h.SetAttachmentClaimer(claimer)
 	h.Start(context.Background())
-	h.attachmentCleanupWG.Wait()
+	t.Cleanup(h.Stop)
+	awaitCleanupBudgetWorker(t, h)
 	require.Equal(t, int32(2), claimer.attempts.Load())
 	require.Empty(t, h.pendingAttachmentCleanup)
 	rows, err := queue.ListAttachmentCleanups(context.Background())
@@ -76,7 +89,7 @@ func TestAttachmentCleanupBudgetRetainsDurableObligationAndRecovers(t *testing.T
 	restarted.SetAttachmentClaimer(recovered)
 	restarted.Start(context.Background())
 	t.Cleanup(restarted.Stop)
-	restarted.attachmentCleanupWG.Wait()
+	awaitCleanupBudgetWorker(t, restarted)
 	require.Equal(t, int32(1), recovered.released.Load())
 	require.Equal(t, "cleanup-owner", recovered.lastUser.Load())
 	rows, err = recoveredQueue.ListAttachmentCleanups(context.Background())
@@ -97,7 +110,7 @@ func TestAttachmentCleanupAcknowledgementsConsumeBudget(t *testing.T) {
 	h.SetAttachmentClaimer(claimer)
 	h.Start(context.Background())
 	t.Cleanup(h.Stop)
-	h.attachmentCleanupWG.Wait()
+	awaitCleanupBudgetWorker(t, h)
 	require.Equal(t, int32(2), failed.acknowledgements.Load())
 	require.Empty(t, h.pendingAttachmentCleanup)
 	rows, err := queue.ListAttachmentCleanups(context.Background())
@@ -132,7 +145,7 @@ func TestAttachmentCleanupEditLeaseDoesNotConsumeBudget(t *testing.T) {
 	h.attachmentCleanupMu.Unlock()
 	require.NoError(t, queue.EndEdit(context.Background(), entry.SessionID, entry.ID, lease.LeaseID, "editing-connection"))
 	h.signalPendingAttachmentCleanup(context.Background(), entry.SessionID, entry.ID)
-	h.attachmentCleanupWG.Wait()
+	awaitCleanupBudgetWorker(t, h)
 	require.Equal(t, int32(1), claimer.released.Load())
 	rows, err := queue.ListAttachmentCleanups(context.Background())
 	require.NoError(t, err)

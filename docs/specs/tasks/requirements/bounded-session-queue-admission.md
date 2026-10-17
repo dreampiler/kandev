@@ -29,8 +29,10 @@ cancel a callback that already acquired admission.
   the acquisition budget shall not cancel admitted publication or other work.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.3:** When a queued dispatch cannot acquire
   admission, its taken message shall be requeued without losing its recorded
-  user-message or attachment ownership. Auto-run and removal operations shall
-  report a retryable `UNAVAILABLE` result through existing queue feedback.
+  user-message or attachment ownership. Queue mutations, including Clear all,
+  Merge with above, Reorder, edit leases, Auto-run, and Auto-merge, shall report
+  a retryable `UNAVAILABLE` result through existing queue feedback. Desktop
+  and phone controls shall retain pending entries and allow an explicit retry.
 - **AC-TASKS-BOUNDED-QUEUE-ADMISSION-001.4:** A persistently failing attachment
   cleanup shall stop its current retry loop after 60 attempts while retaining
   the durable obligation for the existing recovery pass.
