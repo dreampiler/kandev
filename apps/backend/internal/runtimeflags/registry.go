@@ -62,6 +62,36 @@ var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
+			Key: "features.providerUsageLimits", EnvVar: "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS", Kind: KindFeature,
+			Label: "Provider usage limits", Description: "Enables account-bound usage observations, block and reset controls, and usage-aware candidate eligibility.",
+			Stability: StabilityExperimental, RiskLevel: RiskMedium,
+			RiskDescription: "Unavailable observations remain unknown. Only proved execution bindings may affect configured admission; disabling retains stored observations.", RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key: "features.workspaceCollaboration", EnvVar: "KANDEV_FEATURES_WORKSPACE_COLLABORATION", Kind: KindFeature,
+			Label: "Workspace collaboration", Description: "Enables explicit conversation grants for workspace read, report, prompt and control actions.",
+			Stability: StabilityExperimental, RiskLevel: RiskMedium,
+			RiskDescription: "Cross-workspace calls require native rights and a matching conversation grant. This does not add inherited or taskless authority.", RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.WorkspaceCollaboration },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.WorkspaceCollaboration = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key: "features.integratedControl", EnvVar: "KANDEV_FEATURES_INTEGRATED_CONTROL", Kind: KindFeature,
+			Label: "Integrated control", Description: "Enables a separate control view for permitted dashboards, coordinators and individual conversations.",
+			Stability: StabilityExperimental, RiskLevel: RiskMedium,
+			RiskDescription: "Data visibility and actions retain their native permission checks. Disabling the view preserves conversations and history.", RestartRequired: true, Mutable: true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.IntegratedControl },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.IntegratedControl = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key: "features.dynamicProfileTiers", EnvVar: "KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS",
 			Kind: KindFeature, Label: "Dynamic profile tiers",
 			Description: "Enables adjacent ordered and round-robin candidate tiers, read-only preview and durable no-revisit fallback chains.",
