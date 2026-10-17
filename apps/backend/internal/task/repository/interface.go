@@ -961,6 +961,7 @@ type ExecutorRepository interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	UpdateExecutor(ctx context.Context, executor *models.Executor) error
 	DeleteExecutor(ctx context.Context, id string) error
+	DeleteExecutorIfOwnershipUnmodified(ctx context.Context, id, owner string) error
 	ListExecutors(ctx context.Context) ([]*models.Executor, error)
 	CreateExecutorProfile(ctx context.Context, profile *models.ExecutorProfile) error
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
@@ -970,6 +971,7 @@ type ExecutorRepository interface {
 	UpdateExecutorProfileWithScriptIntent(ctx context.Context, profile *models.ExecutorProfile, intent models.ExecutorProfileScriptIntent) error
 	UpdateExecutorProfileIfUnmodified(ctx context.Context, profile *models.ExecutorProfile, expectedUpdatedAt time.Time) error
 	DeleteExecutorProfile(ctx context.Context, id string) error
+	DeleteExecutorProfileIfOwnershipUnmodified(ctx context.Context, profile *models.ExecutorProfile, parentOwner *string) error
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
@@ -1193,10 +1195,12 @@ type UsageSpendReader interface {
 
 // BackgroundWorkRepository stores the background workload and run inspection projection.
 type BackgroundWorkRepository interface {
+	SettleBackgroundWorkloads(ctx context.Context, sessionID string, finishedAt time.Time) ([]*models.BackgroundWorkload, error)
 	UpsertBackgroundWorkload(ctx context.Context, workload *models.BackgroundWorkload) error
 	GetBackgroundWorkload(ctx context.Context, sessionID, id string) (*models.BackgroundWorkload, error)
 	ListBackgroundWorkloadsBySession(ctx context.Context, sessionID string) ([]*models.BackgroundWorkload, error)
 	DeleteBackgroundWorkloadsBySession(ctx context.Context, sessionID string) error
+	ListSessionIDsWithOpenBackgroundWork(ctx context.Context) ([]string, error)
 	UpsertBackgroundRun(ctx context.Context, run *models.BackgroundRun) error
 	GetBackgroundRun(ctx context.Context, sessionID, id string) (*models.BackgroundRun, error)
 	ListBackgroundRunsByWorkload(ctx context.Context, sessionID, workloadID string) ([]*models.BackgroundRun, error)

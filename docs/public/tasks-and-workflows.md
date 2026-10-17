@@ -566,6 +566,13 @@ session only after it verifies the saved owner and native conversation. If the
 owner, conversation, or delivery evidence is missing or changed, that session
 stays blocked with its available recovery controls. See [Manage session state](sessions-and-review.md#manage-session-state) for those controls and recovery details.
 
+Restart recovery also checks automatic workflow starts that were accepted but
+never delivered their step prompt. It resumes that entry through normal capacity
+and dependency admission. A hold step, deferred start, workflow queue, or Office
+owner keeps its existing control of the task. An earlier visit to the same step
+does not consume a newly accepted entry, and a prompt already accepted for the
+current entry is not replayed.
+
 The preference only gates opening a task. Choosing **Start agent** (or a
 workflow step transition) always starts the agent as usual, and a failed or
 interrupted session still shows its recovery actions.
@@ -1025,6 +1032,12 @@ Unarchiving a task cancels a pending worktree recheck. If the recheck is already
 - Delete is permanent. If **Also delete _N_ subtasks** is off, direct children become root tasks. If it is on, Kandev deletes the descendants. If a new child arrives before deletion finishes, Kandev keeps the parent and reports a conflict. Refresh the deletion preview before retrying. Ephemeral and automation-created children may be excluded from the cascade preview, so refreshing alone may return the same conflict while one retains its parent relationship.
 - Executor cleanup follows the same asynchronous retry and restart-reconciliation rules as archive.
 - When a task has a `RUNNING` agent, the dialog warns that deletion discards in-progress work. Delete always shows this warning. Archive shows it only when confirmation is on.
+
+Deleting or expiring an ordinary Quick Chat also attempts to remove its Claude Code or Codex
+session files for agents that ran on the Kandev host. Archiving keeps those files. Cleanup
+leaves other conversations and the agent's shared indexes and history databases in place.
+It uses the host's home and config-directory settings; overrides set only in an agent or
+executor profile are outside this cleanup.
 
 ## Troubleshooting
 

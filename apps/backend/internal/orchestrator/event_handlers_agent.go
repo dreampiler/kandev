@@ -2270,13 +2270,15 @@ func (s *Service) handleQueuedMessageExecutionError(
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	uncertainDelivery := errors.Is(err, lifecycle.ErrUncertainPromptDelivery)
+	ensureSessionRunningTimeout := isEnsureSessionRunningTimeout(err)
 	if passthroughAttachmentRecovery ||
 		(!uncertainDelivery && (lifecyclePrompt || queuedMsg.IsDurablePlanComment())) ||
 		errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
 		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
-		errors.Is(err, ErrSessionRuntimeUnavailable) {
+		errors.Is(err, ErrSessionRuntimeUnavailable) ||
+		ensureSessionRunningTimeout {
 		if userMessageRecorded {
 			markQueuedUserMessageRecorded(queuedMsg)
 		}
@@ -4647,5 +4649,8 @@ func (s *Service) handleAgentStoppedLocked(ctx context.Context, data watcher.Age
 // terminal state unless an active LSP lease still owns that execution. This
 // runs in a goroutine so it doesn't block the event handler.
 func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
-	s.cleanupAgentExecutionWithReason(context.Background(), executionID, taskID, sessionID, "agent completed")
+	ctx := context.Background()
+	if executionID != "" && s.cleanupAgentExecutionWithReason(ctx, executionID, taskID, sessionID, completedExecutionCleanupReason) {
+		s.settleBackgroundWorkAfterTeardown(ctx, sessionID, executionID)
+	}
 }

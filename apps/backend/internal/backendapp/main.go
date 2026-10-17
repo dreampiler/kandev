@@ -738,6 +738,28 @@ func startAgentInfrastructure(
 	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
+	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
+	if services.GitHub != nil {
+		services.GitHub.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.GitLab != nil {
+		services.GitLab.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Jira != nil {
+		services.Jira.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Linear != nil {
+		services.Linear.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Sentry != nil {
+		services.Sentry.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.AzureDevOps != nil {
+		services.AzureDevOps.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Automation != nil {
+		services.Automation.Service.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
 	// once a real consumer (workflow-engine / cron-driven trigger handlers) exists.
@@ -2106,10 +2128,9 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
-	// A ceiling-deferred Office launch is replayed by the orchestrator's own
-	// sweep, independent of this scheduler; it needs a fresh runtime JWT
-	// rather than the one captured (and redacted) at defer time.
-	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
+	// Bind Office credentials to the concrete launch session before dispatch.
+	// Deferred starts refresh credentials after their persisted-token redaction.
+	orchestratorSvc.SetLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
