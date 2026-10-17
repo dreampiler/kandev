@@ -438,5 +438,16 @@
   "profileDragStart": "Ƥŕōƒĩĺē {{name}} ƥĩćķēď ũƥ. Ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragOver": "Ƥŕōƒĩĺē {{name}} ḿōvēď ţō ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
   "profileDragEnd": "Ƥŕōƒĩĺē {{name}} ďŕōƥƥēď àţ ƥōśĩţĩōń {{position}} ōƒ {{total}}.",
-  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď."
+  "profileDragCancel": "Ŕēōŕďēŕĩńĝ ƥŕōƒĩĺē {{name}} ćàńćēĺĺēď.",
+  "orderedTierPolicy": "［Candidate selection］",
+  "orderedTierModeOrder": "［Saved order］",
+  "orderedTierModeHeadroom": "［Most remaining allowance］",
+  "orderedTierModeRate": "［Lowest recent consumption］",
+  "orderedTierModeRoundRobin": "［Round robin］",
+  "orderedTierModePace": "［Remaining allowance (legacy pace)］",
+  "orderedTierModePreserved": "［Preserved mode: {{mode}}］",
+  "orderedTierFailure": "［After a candidate in this tier is skipped］",
+  "orderedTierFailureSame": "［Try the next candidate in this tier］",
+  "orderedTierFailureNext": "［Go to the next tier］",
+  "orderedTierUnknown": "［When usage is unknown or equal, saved order is used.］"
 }

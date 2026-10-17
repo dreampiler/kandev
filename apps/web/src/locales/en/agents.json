@@ -438,5 +438,16 @@
   "profileDragStart": "Profile {{name}} picked up. Position {{position}} of {{total}}.",
   "profileDragOver": "Profile {{name}} moved to position {{position}} of {{total}}.",
   "profileDragEnd": "Profile {{name}} dropped at position {{position}} of {{total}}.",
-  "profileDragCancel": "Reordering profile {{name}} cancelled."
+  "profileDragCancel": "Reordering profile {{name}} cancelled.",
+  "orderedTierPolicy": "Candidate selection",
+  "orderedTierModeOrder": "Saved order",
+  "orderedTierModeHeadroom": "Most remaining allowance",
+  "orderedTierModeRate": "Lowest recent consumption",
+  "orderedTierModeRoundRobin": "Round robin",
+  "orderedTierModePace": "Remaining allowance (legacy pace)",
+  "orderedTierModePreserved": "Preserved mode: {{mode}}",
+  "orderedTierFailure": "After a candidate in this tier is skipped",
+  "orderedTierFailureSame": "Try the next candidate in this tier",
+  "orderedTierFailureNext": "Go to the next tier",
+  "orderedTierUnknown": "When usage is unknown or equal, saved order is used."
 }

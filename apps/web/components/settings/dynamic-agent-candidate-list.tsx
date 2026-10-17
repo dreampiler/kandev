@@ -2,7 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
-import { joinsPrevious, tierNumbers } from "./ordered-dynamic-tiers";
+import { joinsPrevious, tierNumbers, patchTierPolicy } from "./ordered-dynamic-tiers";
+import { DynamicTierPolicyEditor } from "./dynamic-tier-policy-editor";
 import { IconArrowDown, IconArrowUp, IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -159,6 +160,14 @@ export function DynamicAgentCandidateList({
                   </Button>
                 </div>
               </div>
+              {tiersEnabled && (index === 0 || !joinsPrevious(candidate)) && (
+                <DynamicTierPolicyEditor
+                  tier={candidate.policies.selection?.tier}
+                  onChange={(patch) =>
+                    updateCandidate(index, { policies: patchTierPolicy(candidate, patch) })
+                  }
+                />
+              )}
               <div className="grid min-w-0 gap-4 md:grid-cols-2">
                 <DynamicPolicyEditor
                   errorClass="transient"

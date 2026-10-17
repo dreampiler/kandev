@@ -94,3 +94,14 @@ export function toggleTierJoin(
     );
   });
 }
+
+export function patchTierPolicy(
+  row: DynamicAgentCandidate,
+  patch: Partial<TierPolicy>,
+): DynamicAgentCandidate["policies"] {
+  const selection = row.policies.selection;
+  return {
+    ...row.policies,
+    selection: { ...selection, tier: { ...selection?.tier, ...patch } },
+  };
+}

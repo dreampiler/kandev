@@ -438,5 +438,16 @@
   "profileDragStart": "Perfil {{name}} selecionado. Posição {{position}} de {{total}}.",
   "profileDragOver": "Perfil {{name}} movido para a posição {{position}} de {{total}}.",
   "profileDragEnd": "Perfil {{name}} colocado na posição {{position}} de {{total}}.",
-  "profileDragCancel": "Reordenação do perfil {{name}} cancelada."
+  "profileDragCancel": "Reordenação do perfil {{name}} cancelada.",
+  "orderedTierPolicy": "Seleção de candidatos",
+  "orderedTierModeOrder": "Ordem guardada",
+  "orderedTierModeHeadroom": "Maior quota restante",
+  "orderedTierModeRate": "Menor consumo recente",
+  "orderedTierModeRoundRobin": "Rotação sequencial",
+  "orderedTierModePace": "Quota restante (pace antigo)",
+  "orderedTierModePreserved": "Modo preservado: {{mode}}",
+  "orderedTierFailure": "Após ignorar um candidato deste nível",
+  "orderedTierFailureSame": "Tentar o candidato seguinte neste nível",
+  "orderedTierFailureNext": "Avançar para o nível seguinte",
+  "orderedTierUnknown": "Se a utilização for desconhecida ou igual, é usada a ordem guardada."
 }

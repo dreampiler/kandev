@@ -438,5 +438,16 @@
   "profileDragStart": "已选取配置档 {{name}}。第 {{position}} 个，共 {{total}} 个。",
   "profileDragOver": "配置档 {{name}} 已移动到第 {{position}} 个位置，共 {{total}} 个。",
   "profileDragEnd": "配置档 {{name}} 已放到第 {{position}} 个位置，共 {{total}} 个。",
-  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。"
+  "profileDragCancel": "已取消配置档 {{name}} 的重新排序。",
+  "orderedTierPolicy": "候选选择",
+  "orderedTierModeOrder": "已保存顺序",
+  "orderedTierModeHeadroom": "剩余额度最多优先",
+  "orderedTierModeRate": "近期消耗速度最低优先",
+  "orderedTierModeRoundRobin": "轮询",
+  "orderedTierModePace": "剩余额度（旧版 pace）",
+  "orderedTierModePreserved": "保留的模式：{{mode}}",
+  "orderedTierFailure": "跳过此层级的候选后",
+  "orderedTierFailureSame": "尝试此层级的下一候选",
+  "orderedTierFailureNext": "转到下一层级",
+  "orderedTierUnknown": "使用量未知或相同时，使用已保存顺序。"
 }

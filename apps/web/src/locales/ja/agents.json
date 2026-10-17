@@ -438,5 +438,16 @@
   "profileDragStart": "プロフィール {{name}} を選びました。{{total}} 件中 {{position}} 番目です。",
   "profileDragOver": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に移動しました。",
   "profileDragEnd": "プロフィール {{name}} を {{total}} 件中 {{position}} 番目に配置しました。",
-  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。"
+  "profileDragCancel": "プロフィール {{name}} の並べ替えをキャンセルしました。",
+  "orderedTierPolicy": "候補の選択",
+  "orderedTierModeOrder": "保存された順序",
+  "orderedTierModeHeadroom": "残りの使用枠が多い順",
+  "orderedTierModeRate": "最近の消費速度が低い順",
+  "orderedTierModeRoundRobin": "ラウンドロビン",
+  "orderedTierModePace": "残りの使用枠（従来の pace）",
+  "orderedTierModePreserved": "保持された方式: {{mode}}",
+  "orderedTierFailure": "この階層の候補をスキップした後",
+  "orderedTierFailureSame": "同じ階層の次の候補を試す",
+  "orderedTierFailureNext": "次の階層へ移動",
+  "orderedTierUnknown": "使用量が不明または同じ場合は、保存された順序を使用します。"
 }
