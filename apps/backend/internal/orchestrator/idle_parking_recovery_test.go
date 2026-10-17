@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
@@ -86,7 +85,6 @@ func TestIdleParkingExplicitFocusFloorSurvivesRecovery(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
-	svc.executor = executor.NewExecutor(agent, svc.repo, testLogger(), executor.ExecutorConfig{})
 	svc.refreshFocusedLiveSession(ctx, row.TaskID, row.SessionID)
 	require.False(t, svc.idleParkingFocusAt[row.SessionID].IsZero(), "positive control: the real explicit-focus path was reached")
 	svc.suspendWorkspaceIdleSessionsOnce(ctx)
@@ -118,7 +116,6 @@ func TestIdleParkingFocusFloorCannotTransferToAnotherExecution(t *testing.T) {
 	ctx := context.Background()
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
-	svc.executor = executor.NewExecutor(agent, svc.repo, testLogger(), executor.ExecutorConfig{})
 	svc.refreshFocusedLiveSession(ctx, row.TaskID, row.SessionID)
 	svc.idleParkingFocusAt, svc.idleParkingCandidates = nil, nil
 	row.AgentExecutionID = "replacement"

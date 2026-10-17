@@ -106,10 +106,8 @@ func (m *Manager) applyRecoveredTurnOutcome(
 	})
 	execution.markRecoveryTurnOutcomeApplied(outcome.TurnID)
 
-	// This terminal event is being re-applied from the retained outcome, not
-	// delivered live: mark it so the completion handler preserves the session's
-	// pre-restart activity instead of stamping now (which would reset the idle
-	// interval on every backend restart).
+	// Retained completion uses its original observation time. Recovery context
+	// never enters the wire payload.
 	outcome.Event.Recovered = true
 	outcome.Event.RecoveredActivityAt = outcome.Event.ActivityAt
 	m.handleAgentEvent(execution, outcome.Event)
