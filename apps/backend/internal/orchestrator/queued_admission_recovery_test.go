@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -162,6 +164,108 @@ func TestQueuedAdmissionRecoveryRetainsSQLiteReservationUntilCompensation(t *tes
 				require.False(t, rows[0].IsReservedInFlight())
 			}
 			require.Equal(t, int32(2), barrier.attempts.Load())
+		})
+	}
+}
+
+type admissionDrainRecordingRepository struct {
+	messagequeue.Repository
+	reserved chan string
+}
+
+func (r *admissionDrainRecordingRepository) ReserveHeadIfAutoRunForSession(
+	ctx context.Context, identity messagequeue.QueueSessionIdentity,
+) (*messagequeue.QueuedMessage, bool, error) {
+	msg, enabled, err := r.Repository.ReserveHeadIfAutoRunForSession(ctx, identity)
+	if msg != nil {
+		r.reserved <- msg.ID
+	}
+	return msg, enabled, err
+}
+
+func TestQueuedAdmissionRecoveryDrainCannotCrossStopWhileWaitingForCancelGuard(t *testing.T) {
+	for _, stop := range []bool{false, true} {
+		t.Run(map[bool]string{false: "live-positive-control", true: "stopped-generation"}[stop], func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+			seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+			manager := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+			log := logger.Default()
+			bus := eventbus.NewMemoryEventBus(log)
+			t.Cleanup(bus.Close)
+			svc := NewService(DefaultServiceConfig(), bus, manager, newMockTaskRepo(), repo, nil, nil, nil, log)
+			svc.SetTurnService(&repoTurnService{repo: repo})
+			db := sqlx.NewDb(repo.DB(), "sqlite3")
+			sqlQueue, err := messagequeue.NewSQLiteRepository(db, db)
+			require.NoError(t, err)
+			recording := &admissionDrainRecordingRepository{Repository: sqlQueue, reserved: make(chan string, 2)}
+			svc.messageQueue = messagequeue.NewService(recording, messagequeue.DefaultMaxPerSession, log)
+			svc.messageQueue.SetAutoMergeEnabled(false)
+			require.NoError(t, svc.Start(ctx))
+			t.Cleanup(func() {
+				if svc.running {
+					require.NoError(t, svc.Stop())
+				}
+				svc.stopReservedPromptCallbacks()
+			})
+			workerDone := make(chan struct{}, 1)
+			svc.onQueuedMessageExecutionComplete = func() { workerDone <- struct{}{} }
+			guard, release := svc.acquireCancelInFlightGuard("s1")
+			guard.Lock()
+			locked := true
+			defer func() {
+				if locked {
+					guard.Unlock()
+				}
+				release()
+			}()
+			oldCtx := svc.queuedRecoveryContext(ctx, nil)
+			svc.markQueuedDispatchDrainPending("s1")
+			drained := make(chan struct{})
+			go func() { svc.drainQueuedDispatchIfPending(oldCtx, "s1"); close(drained) }()
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				svc.cancelInFlightMu.Lock()
+				refs := svc.cancelInFlight["s1"].refs
+				svc.cancelInFlightMu.Unlock()
+				if refs == 2 {
+					break
+				}
+				require.True(t, time.Now().Before(deadline), "drain did not reach the real cancel guard")
+				runtime.Gosched()
+			}
+			if stop {
+				require.NoError(t, svc.Stop())
+				svc.resetReservedPromptCallbacks()
+			}
+			identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
+			require.NoError(t, err)
+			fresh, err := svc.messageQueue.QueueMessageWithMetadataForSession(ctx, identity, "fresh generation payload", "", messagequeue.QueuedByUser, false, nil, nil)
+			require.NoError(t, err)
+			guard.Unlock()
+			locked = false
+			select {
+			case <-drained:
+			case <-time.After(5 * time.Second):
+				t.Fatal("drain did not settle after the guard was released")
+			}
+			select {
+			case id := <-recording.reserved:
+				select {
+				case <-workerDone:
+				case <-time.After(5 * time.Second):
+					t.Fatal("dispatched worker did not settle")
+				}
+				require.Equal(t, fresh.ID, id)
+				require.False(t, stop, "old drain reserved fresh SQL work after Stop while waiting for the cancel guard")
+			default:
+				require.True(t, stop, "live positive control did not reserve the SQL queue head")
+				rows, err := sqlQueue.ListBySession(ctx, "s1")
+				require.NoError(t, err)
+				require.Len(t, rows, 1)
+				require.Equal(t, fresh.ID, rows[0].ID)
+			}
 		})
 	}
 }
