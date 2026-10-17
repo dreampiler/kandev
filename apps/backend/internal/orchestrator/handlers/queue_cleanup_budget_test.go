@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -147,6 +148,72 @@ func TestAttachmentCleanupEditLeaseDoesNotConsumeBudget(t *testing.T) {
 	h.signalPendingAttachmentCleanup(context.Background(), entry.SessionID, entry.ID)
 	awaitCleanupBudgetWorker(t, h)
 	require.Equal(t, int32(1), claimer.released.Load())
+	rows, err := queue.ListAttachmentCleanups(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, rows)
+}
+
+type racingCleanupLeaseQueue struct {
+	*messagequeue.Service
+	reads        atomic.Int32
+	firstRead    chan error
+	releaseFirst chan struct{}
+	innerLease   chan *messagequeue.QueueEditLease
+}
+
+func (q *racingCleanupLeaseQueue) GetEditLease(ctx context.Context, sessionID, entryID string) (*messagequeue.QueueEditLease, error) {
+	lease, err := q.Service.GetEditLease(ctx, sessionID, entryID)
+	if q.reads.Add(1) == 1 {
+		q.firstRead <- err
+		<-q.releaseFirst
+	} else if lease != nil {
+		select {
+		case q.innerLease <- lease:
+		default:
+		}
+	}
+	return lease, err
+}
+
+func TestAttachmentCleanupEditLeaseAcquiredAfterPrecheckDoesNotConsumeBudget(t *testing.T) {
+	old := pendingAttachmentCleanupMaxAttempts
+	pendingAttachmentCleanupMaxAttempts = 1
+	t.Cleanup(func() { pendingAttachmentCleanupMaxAttempts = old })
+	h, queue, db := newPersistentCleanupQueue(t, filepath.Join(t.TempDir(), "queue.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	entry := seedCleanupBudgetObligation(t, queue)
+	claimer := &controlledCleanupClaimer{}
+	h.SetAttachmentClaimer(claimer)
+	observed := &racingCleanupLeaseQueue{
+		Service: queue, firstRead: make(chan error, 1), releaseFirst: make(chan struct{}),
+		innerLease: make(chan *messagequeue.QueueEditLease, 1),
+	}
+	var release sync.Once
+	defer release.Do(func() { close(observed.releaseFirst) })
+	h.queueService = observed
+	h.Start(context.Background())
+	t.Cleanup(h.Stop)
+	select {
+	case err := <-observed.firstRead:
+		require.ErrorIs(t, err, messagequeue.ErrEditLeaseNotFound)
+	case <-time.After(5 * time.Second):
+		t.Fatal("cleanup did not perform its initial lease precheck")
+	}
+	lease, err := queue.BeginEdit(context.Background(), entry.SessionID, entry.ID, "racing-editor")
+	require.NoError(t, err)
+	release.Do(func() { close(observed.releaseFirst) })
+	select {
+	case inner := <-observed.innerLease:
+		require.Equal(t, lease.LeaseID, inner.LeaseID)
+	case <-time.After(5 * time.Second):
+		t.Fatal("admitted cleanup did not observe the newly acquired lease")
+	}
+	require.Zero(t, claimer.attempts.Load())
+	require.NoError(t, queue.EndEdit(context.Background(), entry.SessionID, entry.ID, lease.LeaseID, "racing-editor"))
+	h.signalPendingAttachmentCleanup(context.Background(), entry.SessionID, entry.ID)
+	awaitCleanupBudgetWorker(t, h)
+	require.Equal(t, int32(1), claimer.released.Load())
+	require.Equal(t, "cleanup-owner", claimer.lastUser.Load())
 	rows, err := queue.ListAttachmentCleanups(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, rows)
