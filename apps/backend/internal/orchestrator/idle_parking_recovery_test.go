@@ -76,3 +76,38 @@ func TestIdleParkingRoutineSkipSummaryUsesDebug(t *testing.T) {
 	svc.logWorkspaceIdleScan(idleParkingScanSummary{suspended: 1})
 	require.Equal(t, 1, logs.FilterLevelExact(zap.InfoLevel).Len(), "real suspension outcomes stay visible")
 }
+
+// @covers AC-EXECUTORS-IDLE-PARKING-001.6
+// @covers AC-EXECUTORS-IDLE-PARKING-001.11
+func TestIdleParkingExplicitFocusFloorSurvivesRecovery(t *testing.T) {
+	ctx := context.Background()
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
+	svc.refreshFocusedLiveSession(ctx, row.TaskID, row.SessionID)
+	session, err := svc.repo.GetTaskSession(ctx, row.SessionID)
+	require.NoError(t, err)
+	require.Contains(t, session.Metadata, "idle_parking_focus", "explicit focus must have a durable positive control")
+	// Startup recreates these maps; the tracked activity still describes the
+	// old settled turn, as it does after lifecycle restores its saved clock.
+	svc.idleParkingFocusAt, svc.idleParkingCandidates = nil, nil
+	svc.suspendWorkspaceIdleSessionsOnce(ctx)
+	require.Empty(t, agent.suspensionCalls(), "restart must not discard the fresh explicit-focus interval")
+	now := time.Now().UTC()
+	candidate, _, ok := svc.workspaceIdleCandidate(ctx, row, now)
+	require.True(t, ok)
+	require.False(t, svc.idleParkingCandidateDue(candidate.key, now.Add(59*time.Second), time.Minute))
+	require.True(t, svc.idleParkingCandidateDue(candidate.key, now.Add(time.Minute), time.Minute))
+}
+
+func TestIdleParkingFocusFloorCannotTransferToAnotherExecution(t *testing.T) {
+	ctx := context.Background()
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
+	svc.refreshFocusedLiveSession(ctx, row.TaskID, row.SessionID)
+	svc.idleParkingFocusAt, svc.idleParkingCandidates = nil, nil
+	row.AgentExecutionID = "replacement"
+	agent.currentPromptExecutionID = row.AgentExecutionID
+	require.NoError(t, svc.repo.UpsertExecutorRunning(ctx, row))
+	svc.suspendWorkspaceIdleSessionsOnce(ctx)
+	require.Len(t, agent.suspensionCalls(), 1, "a predecessor focus must not change a successor's idle interval")
+}

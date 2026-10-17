@@ -9,6 +9,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,13 +32,7 @@ func TestIdleActivityNormalPersistenceToManagerStart(t *testing.T) {
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, row))
 	control := newStandaloneControlServer(t, true)
 	control.listInstances = []*agentctl.InstanceInfo{{ID: e.ID, SessionID: e.SessionID, Port: 4001}}
-	registry := NewExecutorRegistry(newTestLogger())
-	registry.Register(control.executor(t))
-	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
-		ExecutorFallbackWarn, "", newTestLogger())
-	registerRecoveryTestAgentProfile(t, mgr)
-	mgr.SetExecutorRunningWriter(repo)
-	mgr.SetAgentSurvivalEnabled(true)
+	mgr := newIdleActivityStartupManager(t, repo, control)
 	t.Cleanup(func() { require.NoError(t, mgr.Stop()) })
 	require.NoError(t, mgr.Start(ctx))
 	recovered, ok := mgr.GetExecutionBySessionID(e.SessionID)
@@ -49,19 +44,26 @@ func TestIdleActivityNormalPersistenceToManagerStart(t *testing.T) {
 	cleared, err := repo.GetExecutorRunningBySessionID(ctx, e.SessionID)
 	require.NoError(t, err)
 	require.NotContains(t, cleared.Metadata, idleActivityMetadataKey)
-	control.mu.Lock()
-	control.listInstances = []*agentctl.InstanceInfo{{ID: e.ID, SessionID: e.SessionID, Port: 4001}}
-	control.mu.Unlock()
-	// Reconstruct once more through the production constructor, using the
-	// normal persisted row rather than manually preparing its metadata.
-	instances := control.executor(t).buildRecoveredInstances(ctx,
-		map[string]*agentctl.InstanceInfo{e.SessionID: {ID: e.ID, SessionID: e.SessionID, Port: 4001}},
-		map[string]*models.ExecutorRunning{e.SessionID: cleared})
-	require.Len(t, instances, 1)
-	next := &AgentExecution{ID: e.ID}
-	next.restoreIdleActivity(instances[0].Metadata)
+	mgr.executionStore.Remove(e.ID)
+	require.NoError(t, mgr.Stop())
+	mgr = newIdleActivityStartupManager(t, repo, control)
+	require.NoError(t, mgr.Start(ctx))
+	next, ok := mgr.GetExecutionBySessionID(e.SessionID)
+	require.True(t, ok, "a second Manager.Start must adopt the cleared persisted row")
 	at, _, _ = next.promptActivitySnapshot()
 	require.True(t, at.IsZero(), "prior metadata must not resurrect a removed clock")
+}
+
+func newIdleActivityStartupManager(t *testing.T, repo *tasksqlite.Repository, control *standaloneControlServer) *Manager {
+	t.Helper()
+	registry := NewExecutorRegistry(newTestLogger())
+	registry.Register(control.executor(t))
+	mgr := NewManager(newTestRegistry(), &MockEventBus{}, registry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", newTestLogger())
+	registerRecoveryTestAgentProfile(t, mgr)
+	mgr.SetExecutorRunningWriter(repo)
+	mgr.SetAgentSurvivalEnabled(true)
+	return mgr
 }
 
 // @covers AC-EXECUTORS-IDLE-PARKING-001.11

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -59,21 +60,73 @@ func TestIdleActivityDurableReplayUsesJournalTimeWithoutChangingPayload(t *testi
 	old := time.Now().UTC().Add(-time.Hour)
 	payload, err := json.Marshal(agentctl.AgentEvent{Type: "complete"})
 	require.NoError(t, err)
-	committed := journal.Event{SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2,
-		StreamID: "stream", Sequence: 1, Type: "complete", Payload: payload, CreatedAt: old}
-	stream := journal.Stream{SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2,
-		StreamID: "stream", HighWater: 1, FirstRetained: 1}
-	repository := &immutableDeliveryRepository{recordingAgentDeliveryRepository: recordingAgentDeliveryRepository{
-		cursor: &models.AgentDeliveryCursor{StreamID: "stream"},
-	}}
+	client, committed, stream, acknowledged := newIdleActivityJournalPeer(t, journal.Event{
+		SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2,
+		StreamID: "stream", Type: "complete", Payload: payload, CreatedAt: old, Terminal: true,
+	})
+	repository, database := runOwnerTestRepository(t)
+	require.NoError(t, repository.CreateTask(ctx, &models.Task{ID: "task", Title: "Idle replay"}))
+	require.NoError(t, repository.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session", TaskID: "task", QueueIncarnationID: "incarnation",
+	}))
+	require.NoError(t, repository.CreateHarnessSessionGeneration(ctx, &models.HarnessSessionGeneration{
+		SessionID: "session", IncarnationID: "incarnation", Generation: 2, NativeSessionID: "native", CreationReason: "initial",
+	}))
+	mgr := newTestManager(t)
+	e := createTestExecution("execution", "task", "session")
+	e.DeliveryMode, e.DeliveryStreamID, e.DeliveryIncarnationID, e.DeliveryHarnessGeneration = DurableDeliveryV1, "stream", "incarnation", 2
+	e.DeliveryDescriptor, e.agentctl = &agentctl.DeliveryStatus{Stream: &stream}, client
+	require.NoError(t, mgr.executionStore.Add(e))
+	original := agentctl.AgentEvent{Type: "complete", DeliveryStreamID: "stream", DeliverySequence: 1,
+		DeliveryIncarnationID: "incarnation", DeliveryHarnessGeneration: 2}
+	expectedPayload := durableAgentEvent(e, original).Payload
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{OnAgentEvent: mgr.handleAgentEvent}, nil, nil)
+	t.Cleanup(sm.Wait)
+	sm.setAgentDeliveryRepository(repository)
+	require.NoError(t, sm.ReplayRecoveredDelivery(ctx, e))
+	at, _, _ := e.promptActivitySnapshot()
+	require.True(t, at.Equal(old), "terminal lifecycle must use journal CreatedAt, never replay time")
+	require.Equal(t, uint64(1), e.DeliveryReplayCursor)
+	cursor, err := repository.GetAgentDeliveryCursor(ctx, "stream")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cursor.ProjectedSequence)
+	var admitted []byte
+	require.NoError(t, database.QueryRowContext(ctx, `SELECT payload FROM agent_delivery_inbox WHERE stream_id = ? AND sequence = ?`, "stream", 1).Scan(&admitted))
+	require.Equal(t, expectedPayload, admitted, "recovery context must not alter admitted payload identity")
+	select {
+	case sequence := <-acknowledged:
+		require.Equal(t, uint64(1), sequence)
+	case <-time.After(5 * time.Second):
+		t.Fatal("projected terminal was not acknowledged")
+	}
+	require.NoError(t, sm.processRecoveredDeliveryEvent(ctx, e, client, repository, committed, 0, false))
+	replayed, _, _ := e.promptActivitySnapshot()
+	require.True(t, replayed.Equal(old))
+	var effects int
+	require.NoError(t, database.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_delivery_effects WHERE stream_id = ?`, "stream").Scan(&effects))
+	require.Equal(t, 1, effects, "duplicate terminal must not apply twice")
+}
+
+func newIdleActivityJournalPeer(t *testing.T, source journal.Event) (*agentctl.Client, journal.Event, journal.Stream, <-chan uint64) {
+	t.Helper()
+	retained := openRetentionLifecycleJournal(t, filepath.Join(t.TempDir(), "idle.bbolt"))
+	committed, err := retained.Append(t.Context(), source)
+	require.NoError(t, err)
+	stream, err := retained.GetStream(t.Context(), source.StreamID)
+	require.NoError(t, err)
 	acknowledged := make(chan uint64, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/agent/delivery/stream/ack" {
 			var ack struct {
+				StreamID string `json:"stream_id"`
 				Sequence uint64 `json:"sequence"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&ack); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if err := retained.Acknowledge(r.Context(), ack.StreamID, ack.Sequence); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
 			acknowledged <- ack.Sequence
@@ -84,43 +137,25 @@ func TestIdleActivityDurableReplayUsesJournalTimeWithoutChangingPayload(t *testi
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
+		after, err := strconv.ParseUint(r.URL.Query().Get("after"), 10, 64)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		page, state, err := retained.Replay(r.Context(), source.StreamID, after, 1000)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(struct {
 			Events []journal.Event `json:"events"`
 			Stream journal.Stream  `json:"stream"`
-		}{[]journal.Event{committed}, stream})
+		}{page, state})
 	}))
 	t.Cleanup(server.Close)
 	parsed, err := url.Parse(server.URL)
 	require.NoError(t, err)
 	port, err := strconv.Atoi(parsed.Port())
 	require.NoError(t, err)
-	client := agentctl.NewClient(parsed.Hostname(), port, newTestLogger())
-	mgr := newTestManager(t)
-	e := createTestExecution("execution", "task", "session")
-	e.DeliveryMode, e.DeliveryStreamID, e.DeliveryIncarnationID, e.DeliveryHarnessGeneration = DurableDeliveryV1, "stream", "incarnation", 2
-	e.DeliveryDescriptor, e.agentctl = &agentctl.DeliveryStatus{Stream: &stream}, client
-	require.NoError(t, mgr.executionStore.Add(e))
-	sm := NewStreamManager(newTestLogger(), StreamCallbacks{OnAgentEvent: mgr.handleAgentEvent}, nil, nil)
-	t.Cleanup(sm.Wait)
-	sm.setAgentDeliveryRepository(repository)
-	require.NoError(t, sm.ReplayRecoveredDelivery(ctx, e))
-	at, _, _ := e.promptActivitySnapshot()
-	require.True(t, at.Equal(old), "terminal lifecycle must use journal CreatedAt, never replay time")
-	require.Equal(t, uint64(1), e.DeliveryReplayCursor)
-	require.Len(t, repository.received, 1)
-	require.Len(t, repository.projected, 1)
-	var admitted agentctl.AgentEvent
-	require.NoError(t, json.Unmarshal(repository.received[0].Payload, &admitted))
-	require.False(t, admitted.Recovered)
-	require.Nil(t, admitted.RecoveredActivityAt, "replay context must stay outside durable identity")
-	select {
-	case sequence := <-acknowledged:
-		require.Equal(t, uint64(1), sequence)
-	case <-time.After(5 * time.Second):
-		t.Fatal("projected terminal was not acknowledged")
-	}
-	require.NoError(t, sm.processRecoveredDeliveryEvent(ctx, e, client, repository, committed, 0, false))
-	replayed, _, _ := e.promptActivitySnapshot()
-	require.True(t, replayed.Equal(old))
-	require.Len(t, repository.projected, 1, "duplicate terminal must not project twice")
+	return agentctl.NewClient(parsed.Hostname(), port, newTestLogger()), committed, stream, acknowledged
 }
