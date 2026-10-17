@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/agents"
-	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 )
 
@@ -122,25 +121,9 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
-	flags, err := cliflags.Resolve(profile.CLIFlags)
+	flags, prefix, env, err := utility.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
-		return nil, fmt.Errorf("resolve profile cli flags: %w", err)
-	}
-	var prefix []string
-	if profile.CommandPrefix != "" {
-		if err := cliflags.ValidateCommandPrefix(profile.CommandPrefix); err != nil {
-			return nil, err
-		}
-		prefix, err = cliflags.Tokenise(profile.CommandPrefix)
-		if err != nil {
-			return nil, err
-		}
-	}
-	env := make(map[string]string, len(profile.EnvVars))
-	for _, value := range profile.EnvVars {
-		if value.Key != "" && value.SecretID == "" {
-			env[value.Key] = value.Value
-		}
+		return nil, err
 	}
 	if providerKey != "" && providerKeyEnvVar != "" {
 		env[providerKeyEnvVar] = providerKey // profile-declared provider key wins

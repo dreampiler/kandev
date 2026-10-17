@@ -43,12 +43,13 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles        store.Repository
-	dynamic         store.DynamicProfileRepository
-	engine          *dynamic.Engine
-	bindingResolver *dynamic.CredentialBindingResolver
-	enabled         atomic.Bool
-	nativeAdmission *nativeRouteAdmission
+	profiles             store.Repository
+	dynamic              store.DynamicProfileRepository
+	engine               *dynamic.Engine
+	bindingResolver      *dynamic.CredentialBindingResolver
+	enabled              atomic.Bool
+	nativeAdmission      *nativeRouteAdmission
+	candidateUsageReader CandidateExecutionUsageReader
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -211,7 +212,7 @@ func (r *ProfileExecutionResolver) ResolveExecutionAfterFailure(
 	if sessionID == "" {
 		sessionID = "utility:" + uuid.NewString()
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}
@@ -683,7 +684,7 @@ func (r *ProfileExecutionResolver) resolve(
 	if r.dynamic == nil || r.engine == nil {
 		return ProfileExecution{}, errors.New("dynamic profile execution is not configured")
 	}
-	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
+	profileConfig, err := r.loadSelectionProfile(ctx, profileID, sessionID)
 	if err != nil {
 		return ProfileExecution{}, err
 	}

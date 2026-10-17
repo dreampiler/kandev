@@ -95,6 +95,10 @@ func (r *CircuitRegistry) selectionAvailability(candidate Candidate, now time.Ti
 func (e *Engine) tierAvailability(profile Profile, now time.Time) map[string]string {
 	result := make(map[string]string, len(profile.Candidates))
 	for _, candidate := range profile.Candidates {
+		if normalizedCandidateUsage(candidate.Usage, now).Limited {
+			result[candidate.ID] = "usage_limited"
+			continue
+		}
 		result[candidate.ID] = e.circuits.selectionAvailability(candidate, now)
 	}
 	return result

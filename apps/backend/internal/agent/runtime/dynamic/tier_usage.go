@@ -14,13 +14,14 @@ const (
 
 // UsageBucket contains existing, proved provider/account/window references.
 // Empty Model identifies a shared account window, not a per-model allowance.
-type UsageBucket struct{ Provider, AccountRef, Window, Model string }
+type UsageBucket struct{ Provider, OrganizationRef, AccountRef, Window, Model string }
 
 // CandidateUsage is an internal observation projection. Profile IDs, circuit
 // fingerprints and host cache keys cannot establish its account identity.
 type CandidateUsage struct {
 	Bucket                UsageBucket
 	FetchedAt             time.Time
+	Limited               bool
 	Known                 bool
 	RemainingPct          float64
 	ConsumptionRateKnown  bool

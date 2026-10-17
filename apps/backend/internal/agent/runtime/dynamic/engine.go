@@ -257,6 +257,9 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
 		return false
 	}
+	if e.orderedTiers && normalizedCandidateUsage(candidate.Usage, now).Limited {
+		return false
+	}
 	if preferredProfileID != "" && candidate.ID != preferredProfileID {
 		return false
 	}

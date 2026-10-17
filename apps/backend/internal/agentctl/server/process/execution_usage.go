@@ -70,6 +70,16 @@ func (m *Manager) bindExecutionUsage(ctx context.Context, commands ...[]string) 
 // ReadExecutionUsage never rebinds an existing process to a newly logged-in
 // account. It checks the native pin against that process's final source.
 func (m *Manager) ReadExecutionUsage(ctx context.Context, _ string) *usage.ExecutionUsageReport {
+	return m.readExecutionUsage(ctx, false)
+}
+
+// PeekExecutionUsage is safe for eligibility previews before a real run exists:
+// only this actor's native pin and existing observations are inspected.
+func (m *Manager) PeekExecutionUsage(ctx context.Context) *usage.ExecutionUsageReport {
+	return m.readExecutionUsage(ctx, true)
+}
+
+func (m *Manager) readExecutionUsage(ctx context.Context, cachedOnly bool) *usage.ExecutionUsageReport {
 	model := m.executionUsageModel()
 	m.executionUsage.mu.RLock()
 	input, reason, service := m.executionUsage.input, m.executionUsage.reason, m.executionUsage.service
@@ -83,6 +93,9 @@ func (m *Manager) ReadExecutionUsage(ctx context.Context, _ string) *usage.Execu
 	input.Model = model
 	if !usage.NativeProviderSelectionKnown(input) {
 		return &usage.ExecutionUsageReport{Reason: "binding_changed", Model: model, BindingChanged: true}
+	}
+	if cachedOnly {
+		return service.PeekExecutionUsage(ctx, input)
 	}
 	return usage.ReadExecutionUsageReport(ctx, service, input)
 }
