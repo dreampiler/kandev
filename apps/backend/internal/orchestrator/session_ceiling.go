@@ -83,6 +83,8 @@ type ceilingReservation struct {
 	takenAt      time.Time
 	nativeOwner  *NativeInferenceRoute
 	nativeQueued bool
+	queuedOffice *OfficeCapacityWaiter
+	officeRunID  string
 	queuedTask   *queuedTaskCapacityOwner
 }
 
@@ -96,6 +98,7 @@ type admissionRequest struct {
 	gradeKnown      bool
 	gradeHeld       bool
 	queuedGrantKey  string
+	officeRunID     string
 	taskID          string
 	sessionID       string
 	origin          launchOrigin
@@ -152,6 +155,7 @@ type sessionCeilingController struct {
 	newKey        func() string
 	queuedTasks   func(context.Context) ([]queuedTaskCapacityCandidate, error)
 	nativeWaiters func(context.Context) ([]NativeCapacityWaiter, error)
+	officeWaiters func(context.Context) ([]OfficeCapacityWaiter, error)
 	queuedWake    func()
 }
 

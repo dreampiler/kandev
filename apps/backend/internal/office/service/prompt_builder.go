@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -673,12 +673,7 @@ func taskRef(pc *PromptContext) string {
 
 // ParseRunPayload extracts common fields from a run payload JSON.
 func ParseRunPayload(payloadJSON string) map[string]string {
-	result := make(map[string]string)
-	if payloadJSON == "" || payloadJSON == "{}" {
-		return result
-	}
-	_ = json.Unmarshal([]byte(payloadJSON), &result)
-	return result
+	return runmodels.ParsePayload(payloadJSON)
 }
 
 // continuationSummaryPromptCap is the byte slice of the continuation
