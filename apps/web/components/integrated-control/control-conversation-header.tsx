@@ -1,3 +1,5 @@
+import { WorkspaceCollaborationAction } from "@/components/task/workspace-collaboration-action";
+import { TaskWorkspaceProvider } from "@/components/task/task-workspace-context";
 import { useTranslation } from "react-i18next";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
 import { useIntegratedControl } from "./integrated-control-provider";
@@ -12,12 +14,14 @@ export function ControlConversationHeader({
   title,
   sessionId,
   sessions,
+  archived = false,
 }: {
   workspace: ControlWorkspace;
   taskId: string;
   title: string;
   sessionId: string;
   sessions: TaskSession[];
+  archived?: boolean;
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
@@ -46,6 +50,11 @@ export function ControlConversationHeader({
         </select>
       </label>
       {providers && <ControlSessionExecution session={session} />}
+      {!archived && (
+        <TaskWorkspaceProvider taskId={taskId} workspaceId={workspace.id} sessionId={sessionId}>
+          <WorkspaceCollaborationAction taskId={taskId} title={title} workspace={workspace} />
+        </TaskWorkspaceProvider>
+      )}
     </div>
   );
 }

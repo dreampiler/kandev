@@ -98,6 +98,7 @@ function ExistingConversation({
         title={result.task.title}
         sessionId={session.id}
         sessions={result.sessions}
+        archived={archived}
       />
       <MessageTaskOriginProvider value={coordinator ? "coordinator" : undefined}>
         <TaskWorkspaceProvider taskId={taskId} workspaceId={workspace.id} sessionId={session.id}>
