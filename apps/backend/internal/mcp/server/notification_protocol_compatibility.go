@@ -15,10 +15,13 @@ import (
 func (s *Server) streamableHTTPHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		version := r.Header.Get(mcp.HeaderProtocolVersion)
+		method := r.Header.Get(mcp.HeaderMethod)
 		if r.Method == http.MethodPost && r.Body != nil &&
+			(method == "" || strings.HasPrefix(method, "notifications/")) &&
 			mcp.IsModernProtocol(version) && s.httpServer.SupportsProtocolVersion(version) {
 			// Read lazily so the SDK's transport checks run before the body is consumed.
 			r.Body = &notificationBody{original: r.Body, version: version}
+			// The supplemented body's length is unknown until the SDK reads it.
 			r.ContentLength = -1
 		}
 		s.httpServer.ServeHTTP(w, r)
@@ -51,13 +54,14 @@ func (b *notificationBody) Close() error {
 }
 
 func supplementNotificationProtocolVersion(body []byte, version string) []byte {
-	var message map[string]json.RawMessage
-	if json.Unmarshal(body, &message) != nil || message == nil || !isNotificationEnvelope(body, message) {
+	message, ok := uniqueNotificationObject(body)
+	if !ok || !isNotificationEnvelope(body, message) {
 		return body
 	}
 	params := make(map[string]json.RawMessage)
 	if raw, present := message["params"]; present {
-		if json.Unmarshal(raw, &params) != nil || params == nil {
+		params, ok = uniqueNotificationObject(raw)
+		if !ok {
 			return body
 		}
 	}
@@ -82,15 +86,45 @@ func supplementNotificationProtocolVersion(body []byte, version string) []byte {
 	return updated
 }
 
+// uniqueNotificationObject preserves SDK interpretation of duplicate members by
+// declining to rewrite objects that would lose a member during map decoding.
+func uniqueNotificationObject(body []byte) (map[string]json.RawMessage, bool) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('{') {
+		return nil, false
+	}
+	object := make(map[string]json.RawMessage)
+	for decoder.More() {
+		token, err = decoder.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, false
+		}
+		if _, duplicate := object[key]; duplicate {
+			return nil, false
+		}
+		var value json.RawMessage
+		if decoder.Decode(&value) != nil {
+			return nil, false
+		}
+		object[key] = value
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, false
+	}
+	if _, err = decoder.Token(); err != io.EOF {
+		return nil, false
+	}
+	return object, true
+}
+
 func isNotificationEnvelope(body []byte, message map[string]json.RawMessage) bool {
 	// The SDK's struct decoding also recognizes differently cased field names.
 	// Leave those messages untouched rather than creating competing fields.
 	for key := range message {
-		switch strings.ToLower(key) {
-		case "id":
-			return false
-		case "jsonrpc", "method", "params":
-			if key != strings.ToLower(key) {
+		for _, core := range []string{"id", "jsonrpc", "method", "params"} {
+			if strings.EqualFold(key, core) && (core == "id" || key != core) {
 				return false
 			}
 		}

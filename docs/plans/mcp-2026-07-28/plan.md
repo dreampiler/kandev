@@ -125,3 +125,7 @@ git diff --check
 - Updated the public MCP guide and feature-status boundary with protocol versions, routes, authentication, direct third-party delivery, and exclusions.
 - Integrated verification passed: `make -C apps/backend test` with the task-workspace bootstrap configuration unset and a temporary home directory, 363 MCP server race tests, 61 public-doc tests, 41 published-doc validation checks, 20 specification-lint tests, full specification lint, and `git diff --check`. An ambient run first failed because the task process forced `/root/.kandev/config.yaml` into config and launcher discovery; the clean rerun passed without code changes.
 - The implementation uses `github.com/mark3labs/mcp-go v1.0.0-beta.1`; the prerelease SDK remains the primary release risk.
+- Task 05 adds header-only notification handling with duplicate/case preservation,
+  lazy body reads after transport checks, and direct SDK handling for declared
+  ordinary requests. Its hosted race proof passed the complete 14-test
+  notification cohort, including both registered routes and external auth.

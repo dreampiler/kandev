@@ -151,6 +151,11 @@ An absent `params` object is created; an existing object retains its fields.
 The adapter supplies only `io.modelcontextprotocol/protocolVersion`, using the
 header value. It does not infer client identity or capabilities.
 
+When `Mcp-Method` declares an ordinary request method, the route passes the
+original body straight to the SDK without buffering it in the adapter. A missing
+method header still allows notification compatibility; the SDK continues to
+validate the headers required by ordinary requests.
+
 The adapter preserves all messages containing an `id` member, including
 `id: null`, and all explicitly supplied metadata, including malformed or
 conflicting values. Invalid JSON, batches, invalid parameter shapes, and
@@ -159,9 +164,14 @@ numeric precision, and unchanged messages retain their original body bytes.
 The adapter reads the body only when the SDK first reads it, so SDK transport
 checks such as DNS-rebinding protection run before the body is consumed.
 Body read errors are forwarded to the SDK as read errors.
+Closing the lazy body delegates to the original body and preserves its error.
 Differently cased core fields or metadata keys are left untouched because the
 SDK's struct decoder can recognize those spellings; supplementation must not
 introduce competing fields or change the SDK's validation result.
+This includes Unicode simple-fold equivalents recognized by Go's JSON decoder.
+Duplicate members in the envelope or `params` object also leave the entire body
+untouched. A later duplicate must not erase earlier explicit metadata or
+malformed values before the SDK validates them. Nested values remain raw JSON.
 
 Every message still reaches the SDK's transport checks and notification
 dispatcher. An accepted notification returns an empty 202 through the SDK;

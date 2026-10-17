@@ -68,6 +68,8 @@ without breaking agents that support only the current legacy protocol.
   the agent shall be able to use Kandev tools after that notification. Messages
   with an `id` member or explicitly supplied metadata retain their existing
   validation, including errors for malformed or conflicting modern metadata.
+  Ambiguous duplicate members and noncanonical field spellings retain SDK
+  validation without supplementation.
 
 ## Out of scope
 

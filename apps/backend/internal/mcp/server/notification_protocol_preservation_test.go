@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// @covers AC-AGENTS-MCP-PROTOCOL-001.9
 func TestSupplementNotificationProtocolVersion_PreservesAmbiguousMembers(t *testing.T) {
 	for name, body := range map[string]string{
 		"duplicate params with explicit metadata": `{"jsonrpc":"2.0","method":"m","params":{"_meta":null},"params":{}}`,
@@ -94,6 +97,52 @@ func TestNotificationBody_ForwardsReadAndCloseErrors(t *testing.T) {
 	require.ErrorIs(t, err, readErr)
 	require.ErrorIs(t, body.Close(), closeErr)
 	assert.True(t, original.closed)
+}
+
+func TestStreamableHTTPHandler_DoesNotWrapModernToolRequests(t *testing.T) {
+	s := newProtocolCompatibilityServer(t)
+	s.mcpServer.AddTool(mcp.NewTool(protocolEchoToolName),
+		func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return mcp.NewToolResultText("ordinary-tool-request"), nil
+		})
+	for _, method := range []string{"tools/list", "tools/call", "server/discover"} {
+		t.Run(method, func(t *testing.T) {
+			params := map[string]any{"_meta": modernRequestMeta(), "extra": strings.Repeat("x", 65536)}
+			if method == "tools/call" {
+				params["name"] = protocolEchoToolName
+			}
+			payload, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "id": 1, "method": method,
+				"params": params,
+			})
+			require.NoError(t, err)
+			originalBody := &struct{ io.ReadCloser }{io.NopCloser(bytes.NewReader(payload))}
+			request := httptest.NewRequest(http.MethodPost, "http://localhost/mcp", originalBody)
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Accept", "application/json, text/event-stream")
+			request.Header.Set(protocolVersionHeader, modernProtocolVersion)
+			request.Header.Set(methodHeader, method)
+			if method == "tools/call" {
+				request.Header.Set(nameHeader, protocolEchoToolName)
+			}
+			response := httptest.NewRecorder()
+			s.streamableHTTPHandler().ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, "body = %s", response.Body.String())
+			require.NotContains(t, decodeProtocolResponse(t, response), "error")
+			assert.Same(t, originalBody, request.Body, "ordinary requests must reach the SDK without a body wrapper")
+		})
+	}
+}
+
+func TestStreamableHTTPHandler_NotificationWithoutMethodHeader(t *testing.T) {
+	s := newProtocolCompatibilityServer(t)
+	headers := notificationHeaders()
+	delete(headers, methodHeader)
+	response := postMCPRequest(t, s.streamableHTTPHandler(), map[string]any{
+		"jsonrpc": "2.0", "method": rootsListChanged,
+	}, headers)
+	assert.Equal(t, http.StatusAccepted, response.Code, "body = %s", response.Body.String())
+	assert.Empty(t, response.Body.String())
 }
 
 type notificationErrorBody struct {
