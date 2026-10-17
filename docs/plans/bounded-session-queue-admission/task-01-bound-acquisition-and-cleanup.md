@@ -84,8 +84,9 @@ generation for compensation or deferred queue drains.
 Implementation and targeted regression coverage are complete:
 
 - The Go race/SQLite contract step in [run 39062354502](https://github.com/kdlbs/kandev/actions/runs/39062354502)
-  reported 77 test/subtest PASS entries, including both actual worker Stop/Start
-  orderings, restore/requeue compensation, FIFO/grant/reference handling,
+  reported 77 test/subtest PASS entries, including both old-worker/new-owner
+  orderings through actual Stop and the callback-owner reset used by Start,
+  restore/requeue compensation, FIFO/grant/reference handling,
   transport mapping, and cleanup recovery. That mixed job failed separate,
   subsequently corrected web timeout and collapsed-panel fixture assertions;
   it is not reported as an overall pass.
