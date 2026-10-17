@@ -109,7 +109,7 @@ func TestQueuedAdmissionRecoveryRetainsSQLiteReservationUntilCompensation(t *tes
 			taken, ok, _, err := svc.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
 			require.NoError(t, err)
 			require.True(t, ok)
-			reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(identity, taken.ID, taken)
+			reservation := svc.markQueuedDispatchInFlightWithIdentityLocked(context.Background(), identity, taken.ID, taken)
 			done := make(chan struct{})
 			go func() { svc.executeQueuedMessageWithReservation("s1", taken, reservation); close(done) }()
 			<-barrier.entered
@@ -133,6 +133,9 @@ func TestQueuedAdmissionRecoveryRetainsSQLiteReservationUntilCompensation(t *tes
 				// Install the fresh callback owner exactly as Start does, while
 				// the old caller is paused after compensation cancellation.
 				svc.resetReservedPromptCallbacks()
+				oldCtx := svc.queuedRecoveryContext(ctx, reservation)
+				lateReservation := svc.newQueuedDispatchReservation(oldCtx, "s1", taken.ID, identity, taken)
+				require.Same(t, reservation.recoveryOwner, lateReservation.recoveryOwner)
 				called := false
 				err := svc.retryQueuedRecoveryMutation(svc.queuedRecoveryContext(ctx, reservation), func(context.Context) error {
 					called = true
@@ -237,6 +240,11 @@ func TestQueuedAdmissionRecoveryDrainCannotCrossStopWhileWaitingForCancelGuard(t
 			}
 			if stop {
 				require.NoError(t, svc.Stop())
+				select {
+				case <-drained:
+				case <-time.After(5 * time.Second):
+					t.Fatal("stopped drain still waits for the held cancel guard")
+				}
 				svc.resetReservedPromptCallbacks()
 			}
 			identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")

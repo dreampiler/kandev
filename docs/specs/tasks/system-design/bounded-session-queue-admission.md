@@ -56,7 +56,11 @@ its owner's lock lifetime. Stop cancels and joins compensation and suppresses
 the subsequent pending drain. Reservations capture their callback owner at take
 time, and the worker carries that immutable owner through compensation and
 deferred draining. A later Start cannot lend its new owner to an old worker or
-let that worker consume the new generation's pending drain. Each acquisition keeps its own 30-second budget;
+let that worker consume the new generation's pending drain. The deferred drain
+is launched and joined under that same owner, including context-aware cancel
+guard admission and SQL work. Reservation construction preserves the originating
+owner through that admission. Lifecycle bookkeeping locks are released before I/O.
+Each acquisition keeps its own 30-second budget;
 the same live compensation can wait for contention to clear without dropping
 the known-undelivered message.
 

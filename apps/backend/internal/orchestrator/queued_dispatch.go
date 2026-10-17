@@ -26,9 +26,12 @@ func (s *Service) queuedRecoveryOwner(ctx context.Context) *reservedPromptCallba
 }
 
 func (s *Service) queuedRecoveryContext(ctx context.Context, reservation *queuedDispatchReservation) context.Context {
-	owner := s.queuedRecoveryOwner(ctx)
-	if reservation != nil && reservation.recoveryOwner != nil {
+	var owner *reservedPromptCallbackOwner
+	if reservation != nil {
 		owner = reservation.recoveryOwner
+	}
+	if owner == nil {
+		owner = s.queuedRecoveryOwner(ctx)
 	}
 	return context.WithValue(ctx, queuedRecoveryOwnerContextKey{}, owner)
 }
@@ -37,6 +40,14 @@ func (s *Service) queuedRecoveryContext(ctx context.Context, reservation *queued
 // compensation settles. The caller waits, so borrowed admission context never
 // outlives the lock that supplied it. Stop owns cancellation and joins the work.
 func (s *Service) retryQueuedRecoveryMutation(ctx context.Context, mutate func(context.Context) error) error {
+	return s.runQueuedRecovery(ctx, func(recoveryCtx context.Context) error {
+		return retryQueuedAdmissionMutation(recoveryCtx, mutate)
+	})
+}
+
+// runQueuedRecovery keeps compensation and deferred drain admission within the
+// captured service owner's cancellation and shutdown join.
+func (s *Service) runQueuedRecovery(ctx context.Context, run func(context.Context) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -50,7 +61,7 @@ func (s *Service) retryQueuedRecoveryMutation(ctx context.Context, mutate func(c
 		if ownerCtx.Err() != nil {
 			cancel()
 		}
-		result <- retryQueuedAdmissionMutation(recoveryCtx, mutate)
+		result <- run(recoveryCtx)
 	}) {
 		return context.Canceled
 	}
@@ -106,6 +117,7 @@ type queuedDispatchReservation struct {
 }
 
 func (s *Service) newQueuedDispatchReservation(
+	ctx context.Context,
 	sessionID, entryID string,
 	identity messagequeue.QueueSessionIdentity,
 	source *messagequeue.QueuedMessage,
@@ -115,7 +127,7 @@ func (s *Service) newQueuedDispatchReservation(
 		entryID:       entryID,
 		identity:      identity,
 		source:        source,
-		recoveryOwner: s.queuedRecoveryOwner(context.Background()),
+		recoveryOwner: s.queuedRecoveryOwner(ctx),
 	}
 	reservation.phase.Store(uint32(queuedDispatchPending))
 	return reservation
@@ -145,7 +157,7 @@ func (s *Service) markQueuedDispatchInFlightWithSource(
 	if sessionID == "" || entryID == "" {
 		return nil
 	}
-	return s.markQueuedDispatchInFlightWithSourceLocked(sessionID, entryID, source)
+	return s.markQueuedDispatchInFlightWithSourceLocked(context.Background(), sessionID, entryID, source)
 }
 
 // markQueuedDispatchInFlightWithSourceLocked records a dispatch while the
@@ -153,13 +165,14 @@ func (s *Service) markQueuedDispatchInFlightWithSource(
 // paths use this variant so a Send Now claim cannot interleave between the
 // reservation replacement and the worker launch.
 func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
+	ctx context.Context,
 	sessionID, entryID string,
 	source *messagequeue.QueuedMessage,
 ) *queuedDispatchReservation {
 	if sessionID == "" || entryID == "" {
 		return nil
 	}
-	reservation := s.newQueuedDispatchReservation(sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
+	reservation := s.newQueuedDispatchReservation(ctx, sessionID, entryID, messagequeue.QueueSessionIdentity{}, source)
 	if previous, ok := s.dispatchingQueued.Load(sessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -175,6 +188,7 @@ func (s *Service) markQueuedDispatchInFlightWithSourceLocked(
 }
 
 func (s *Service) markQueuedDispatchInFlightWithIdentityLocked(
+	ctx context.Context,
 	identity messagequeue.QueueSessionIdentity,
 	entryID string,
 	source *messagequeue.QueuedMessage,
@@ -183,7 +197,7 @@ func (s *Service) markQueuedDispatchInFlightWithIdentityLocked(
 		identity.SessionIncarnationID == "" || entryID == "" {
 		return nil
 	}
-	reservation := s.newQueuedDispatchReservation(identity.SessionID, entryID, identity, source)
+	reservation := s.newQueuedDispatchReservation(ctx, identity.SessionID, entryID, identity, source)
 	if previous, ok := s.dispatchingQueued.Load(identity.SessionID); ok {
 		if previousReservation, ok := previous.(*queuedDispatchReservation); ok {
 			previousReservation.phase.Store(uint32(queuedDispatchSupersededByNewDispatch))
@@ -471,7 +485,11 @@ func (s *Service) drainQueuedDispatchIfPending(ctx context.Context, sessionID st
 	if !pending {
 		return
 	}
-	s.drainQueuedMessageForPromptableSession(context.Background(), sessionID)
+	drainCtx := context.WithValue(ctx, queuedRecoveryOwnerContextKey{}, owner)
+	_ = s.runQueuedRecovery(drainCtx, func(recoveryCtx context.Context) error {
+		s.drainQueuedMessageForPromptableSession(recoveryCtx, sessionID)
+		return nil
+	})
 }
 
 // releaseQueuedDispatchPendingIfCurrent is used by the fast prompt-claim
