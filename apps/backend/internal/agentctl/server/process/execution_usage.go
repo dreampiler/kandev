@@ -113,3 +113,15 @@ func (m *Manager) executionUsageModel() string {
 	}
 	return state.CurrentModelID
 }
+
+// SetExecutionUsageService is composition-only, before this instance accepts
+// requests. Native pins stay per actor; only the existing measured sample cache
+// is shared within one native control process, never between runtime owners.
+func (m *Manager) SetExecutionUsageService(service *usage.UsageService) {
+	if service == nil {
+		return
+	}
+	m.executionUsage.mu.Lock()
+	defer m.executionUsage.mu.Unlock()
+	m.executionUsage.service = service
+}

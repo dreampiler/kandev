@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/server/api"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -204,6 +205,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 	acpJanitor.Start(context.Background())
 
 	// Create instance manager
+	nativeUsage := usage.NewUsageService()
 	instMgr := instance.NewManager(cfg, log)
 
 	// Declared here and assigned below, before any instance can actually be
@@ -233,7 +235,7 @@ func run(cfg *config.Config, log *logger.Logger) {
 		instLog.Info("MCP server enabled (channel-based)",
 			zap.String("session_id", instCfg.SessionID))
 
-		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog)
+		srv := api.NewServer(instCfg, procMgr, mcpSrv, mcpBackendClient, instLog, nativeUsage)
 		if cfg.AuthToken != "" {
 			srv.SetCredentialSource(controlServer.CredentialSource())
 		}
