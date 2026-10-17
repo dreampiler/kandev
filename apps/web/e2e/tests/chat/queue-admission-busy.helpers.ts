@@ -68,9 +68,14 @@ export async function expectQueueBusyRetry(
   await expect(
     page.getByText("The message queue is temporarily unavailable. Try again.", { exact: true }),
   ).toBeVisible({ timeout: 15_000 });
-  await captureBusy?.();
-  await expect(chat.getByTestId("queue-entry")).toHaveCount(10);
   expect((await apiClient.getQueueStatus(identity)).count).toBe(10);
+  // Clear all closes the panel optimistically; refusal restores its queue chip.
+  const restoredChip = chat.getByTestId("queue-chip");
+  await expect(restoredChip).toBeVisible();
+  if (mobile) await restoredChip.tap();
+  else await restoredChip.click();
+  await expect(chat.getByTestId("queue-entry")).toHaveCount(10);
+  await captureBusy?.();
   await expect(clear).toBeEnabled();
   if (mobile) await clear.tap();
   else await clear.click();
