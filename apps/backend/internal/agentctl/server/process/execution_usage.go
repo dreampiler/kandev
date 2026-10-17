@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/kandev/kandev/internal/agent/usage"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 )
 
 type nativeExecutionUsage struct {
@@ -68,7 +69,8 @@ func (m *Manager) bindExecutionUsage(ctx context.Context, commands ...[]string) 
 
 // ReadExecutionUsage never rebinds an existing process to a newly logged-in
 // account. It checks the native pin against that process's final source.
-func (m *Manager) ReadExecutionUsage(ctx context.Context, model string) *usage.ExecutionUsageReport {
+func (m *Manager) ReadExecutionUsage(ctx context.Context, _ string) *usage.ExecutionUsageReport {
+	model := m.executionUsageModel()
 	m.executionUsage.mu.RLock()
 	input, reason, service := m.executionUsage.input, m.executionUsage.reason, m.executionUsage.service
 	m.executionUsage.mu.RUnlock()
@@ -83,4 +85,18 @@ func (m *Manager) ReadExecutionUsage(ctx context.Context, model string) *usage.E
 		return &usage.ExecutionUsageReport{Reason: "binding_changed", Model: model, BindingChanged: true}
 	}
 	return usage.ReadExecutionUsageReport(ctx, service, input)
+}
+
+// The native adapter's actual model snapshot is authoritative. An eventual
+// backend cache or query argument cannot exclude a model-specific limit.
+func (m *Manager) executionUsageModel() string {
+	provider, ok := m.GetAdapter().(adapter.SessionModelStateProvider)
+	if !ok {
+		return ""
+	}
+	state := provider.GetSessionModelState()
+	if state == nil {
+		return ""
+	}
+	return state.CurrentModelID
 }

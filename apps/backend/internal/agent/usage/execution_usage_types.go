@@ -1,7 +1,6 @@
 package usage
 
 import (
-	"os"
 	"runtime"
 	"strings"
 )
@@ -26,27 +25,6 @@ type ExecutionUsage struct {
 type executionAccount struct{ account, organization string }
 
 type executionUsageSource struct{ provider, path, token string }
-
-// CaptureExecutionEnvironment retains credential-affecting effective values
-// only. Local execution inherits this process; remote execution cannot borrow it.
-func CaptureExecutionEnvironment(executor string, overrides map[string]string) map[string]string {
-	if !localUsageExecution(executor) || overrides == nil {
-		return nil
-	}
-	result := make(map[string]string)
-	for _, entry := range os.Environ() {
-		key, value, ok := strings.Cut(entry, "=")
-		if ok && usageEnvironmentKey(key) {
-			result[usageEnvironmentName(key)] = value
-		}
-	}
-	for key, value := range overrides {
-		if usageEnvironmentKey(key) {
-			result[usageEnvironmentName(key)] = value
-		}
-	}
-	return result
-}
 
 func localUsageExecution(executor string) bool {
 	switch executor {

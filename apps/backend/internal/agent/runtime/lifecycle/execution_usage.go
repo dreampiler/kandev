@@ -27,12 +27,27 @@ func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Clie
 // ReadProfileExecutionUsage observes existing native actors only. Session
 // access is checked before borrowing a client; reads never prepare/start one.
 func (m *Manager) ReadProfileExecutionUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
+	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool { return execution.AgentProfileID == profileID })
+}
+
+// Office keeps its stable identity while the running concrete profile changes.
+// This observes those original actors, never a profile's host-default account.
+func (m *Manager) ReadOfficeProfileExecutionUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
+	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool {
+		if execution.OfficeAgentProfileID != "" {
+			return execution.OfficeAgentProfileID == profileID
+		}
+		return execution.AgentProfileID == profileID
+	})
+}
+
+func (m *Manager) readExecutionUsage(ctx context.Context, match func(*AgentExecution) bool) ([]usage.ProfileExecutionUsage, error) {
 	result := make([]usage.ProfileExecutionUsage, 0)
 	if !m.providerUsageLimits {
 		return result, nil
 	}
 	for _, execution := range m.ListExecutions() {
-		if execution.AgentProfileID != profileID {
+		if !match(execution) {
 			continue
 		}
 		if m.sessionAccessCheck != nil && execution.SessionID != "" {

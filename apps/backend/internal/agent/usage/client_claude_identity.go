@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 )
@@ -100,7 +102,7 @@ func (c *claudeExecutionUsageClient) FetchUsage(ctx context.Context) (*ProviderU
 	if err != nil {
 		return nil, err
 	}
-	var raw claudeUsageResponse
+	var raw claudeExecutionUsageResponse
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, err
 	}
@@ -109,20 +111,56 @@ func (c *claudeExecutionUsageClient) FetchUsage(ctx context.Context) (*ProviderU
 		Provider: "anthropic", Plan: plan, Windows: claudeExecutionWindows(raw, now), FetchedAt: now}, nil
 }
 
-// Strict native readers retain observed utilization even without a reset.
-// The legacy client's parser and wire behavior remain unchanged.
-func claudeExecutionWindows(raw claudeUsageResponse, now time.Time) []UtilizationWindow {
-	if len(raw.Limits) == 0 {
-		return claudeWindows(raw, now)
-	}
+// Native-only compatibility fields are verified against the installed official
+// CLI schema. The legacy client's response and wire behavior are unchanged.
+type claudeExecutionUsageResponse struct {
+	claudeUsageResponse
+	SevenDayOpus   *claudeUsageWindow `json:"seven_day_opus"`
+	SevenDaySonnet *claudeUsageWindow `json:"seven_day_sonnet"`
+}
+
+// Retain each observed bucket even when its reset is absent. Rich rows take
+// precedence for the same label/scope; legacy rows fill missing buckets.
+func claudeExecutionWindows(raw claudeExecutionUsageResponse, _ time.Time) []UtilizationWindow {
 	windows := make([]UtilizationWindow, 0, len(raw.Limits))
 	for _, limit := range raw.Limits {
 		label := claudeLimitLabel(limit)
 		if label == "" {
 			continue
 		}
-		reset, err := time.Parse(time.RFC3339, limit.ResetsAt)
-		windows = append(windows, UtilizationWindow{Label: label, Model: claudeLimitModel(limit), UtilizationPct: legacyUtilization(limit.Percent), ResetAt: reset, Observation: &WindowObservation{UtilizationObserved: utilizationObserved(limit.Percent), ResetAtObserved: err == nil}})
+		windows = appendClaudeObservedWindow(windows, label, claudeLimitModel(limit), limit.Percent, limit.ResetsAt)
+	}
+	for _, legacy := range []struct {
+		label, model string
+		window       *claudeUsageWindow
+	}{
+		{claudeLabel5Hour, "", raw.FiveHour}, {claudeLabel7Day, "", raw.SevenDay},
+		{"7-day (Opus)", "Opus", raw.SevenDayOpus}, {"7-day (Sonnet)", "Sonnet", raw.SevenDaySonnet},
+	} {
+		if legacy.window == nil {
+			continue
+		}
+		windows = appendClaudeObservedWindow(windows, legacy.label, legacy.model, legacy.window.Utilization, legacy.window.ResetsAt)
 	}
 	return windows
+}
+
+func appendClaudeObservedWindow(windows []UtilizationWindow, label, model string, value *float64, resetText string) []UtilizationWindow {
+	reset, err := time.Parse(time.RFC3339, resetText)
+	item := UtilizationWindow{Label: label, Model: model, UtilizationPct: legacyUtilization(value), ResetAt: reset,
+		Observation: &WindowObservation{UtilizationObserved: nativeUtilizationObserved(value), ResetAtObserved: err == nil}}
+	for index, prior := range windows {
+		if prior.Label != label || !strings.EqualFold(prior.Model, model) {
+			continue
+		}
+		if prior.Observation == nil || !prior.Observation.UtilizationObserved {
+			windows[index] = item
+		}
+		return windows
+	}
+	return append(windows, item)
+}
+
+func nativeUtilizationObserved(value *float64) bool {
+	return value != nil && *value >= 0 && !math.IsNaN(*value) && !math.IsInf(*value, 0)
 }

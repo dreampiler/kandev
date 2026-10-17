@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/usage"
@@ -26,12 +27,15 @@ func (c *Client) ReadExecutionUsage(ctx context.Context, model string) (*usage.E
 		return nil, err
 	}
 	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("execution usage read failed: status %d", response.StatusCode)
-	}
 	body, err := readResponseBody(response)
 	if err != nil {
 		return nil, err
+	}
+	if response.StatusCode == http.StatusNotFound && strings.HasPrefix(response.Header.Get("Content-Type"), "text/plain") && strings.TrimSpace(string(body)) == "404 page not found" {
+		return &usage.ExecutionUsageReport{Reason: "native_usage_unsupported", Model: model}, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("execution usage read failed: status %d", response.StatusCode)
 	}
 	if err := json.Unmarshal(body, &report); err != nil {
 		return nil, fmt.Errorf("invalid execution usage report: %w", err)

@@ -29,7 +29,16 @@ func (c *codexExecutionUsageClient) accountIdentity(context.Context) (executionA
 }
 
 func (c *codexExecutionUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
-	return c.base.FetchUsage(ctx)
+	sample, err := c.base.FetchUsage(ctx)
+	if sample != nil {
+		for index := range sample.Windows {
+			window := &sample.Windows[index]
+			if window.Observation != nil && window.UtilizationPct > 100 && nativeUtilizationObserved(&window.UtilizationPct) {
+				window.Observation.UtilizationObserved = true
+			}
+		}
+	}
+	return sample, err
 }
 
 func newExecutionAccountClient(source executionUsageSource) executionAccountClient {

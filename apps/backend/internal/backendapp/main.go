@@ -1497,8 +1497,12 @@ func startGatewayAndServe(
 	// /agents/:id/utilization endpoint can fetch live utilization data.
 	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
 	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		if cfg.Features.ProviderUsageLimits {
+			services.OfficeSvcs.Agents.SetUsageProvider(&nativeUsageProviderAdapter{read: lifecycleMgr.ReadOfficeProfileExecutionUsage})
+		} else {
+			usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+		}
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)

@@ -115,7 +115,7 @@ func executionUsageLimit(sample *ProviderUsage, model string, now time.Time) *Ex
 }
 
 func observedHardUsageWindow(window UtilizationWindow, model string) bool {
-	return window.Observation != nil && window.Observation.UtilizationObserved && window.UtilizationPct == 100 && usageWindowMayApply(window, model)
+	return window.Observation != nil && window.Observation.UtilizationObserved && window.UtilizationPct >= 100 && nativeUtilizationObserved(&window.UtilizationPct) && usageWindowMayApply(window, model)
 }
 
 func blockingUsageReset(fetchedAt time.Time, window UtilizationWindow, now time.Time) (bool, *time.Time) {
