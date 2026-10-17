@@ -1,7 +1,7 @@
 ---
 id: P37-01
 title: Bound Queue Acquisition and Cleanup
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: plan.md
@@ -81,8 +81,39 @@ the final cleanup/acknowledgement error in exhaustion diagnostics. Capture the
 callback owner with each reservation so an old worker cannot use a new Start
 generation for compensation or deferred queue drains.
 
-Focused hosted proof and final exact-head qualification are pending. Their raw
-attempt evidence and final merge receipt are retained by the review task.
+Implementation and targeted regression coverage are complete:
+
+- The Go race/SQLite contract step in [run 39062354502](https://github.com/kdlbs/kandev/actions/runs/39062354502)
+  reported 77 test/subtest PASS entries, including both actual worker Stop/Start
+  orderings, restore/requeue compensation, FIFO/grant/reference handling,
+  transport mapping, and cleanup recovery. That mixed job failed separate,
+  subsequently corrected web timeout and collapsed-panel fixture assertions;
+  it is not reported as an overall pass.
+- [Run 39063127889](https://github.com/kdlbs/kandev/actions/runs/39063127889)
+  passed all four cleanup race/budget/acknowledgement cases. The inner lease
+  test acquires a real edit lease after the empty precheck and proves that
+  admitted cleanup still retains its one actual attempt and captured owner.
+- The frontend unit step in [run 39062945804](https://github.com/kdlbs/kandev/actions/runs/39062945804)
+  passed 195 tests across six files, including unchanged validation wire
+  details and the complete timeout assertion cohort. Its standalone typecheck
+  exhausted Node's default heap, so no typecheck or lint pass is claimed.
+  The normal full frontend workflow retains its existing 8 GiB heap setting.
+- [Run 39063277202](https://github.com/kdlbs/kandev/actions/runs/39063277202)
+  passed the desktop and Pixel 5 cases with retries set to zero. A delayed
+  unavailable response preserves ten backend rows; reopening the existing
+  queue chip shows all ten rows, and an actual backend retry clears them.
+  Documentation metadata checks also passed.
+
+The original busy-feedback, stopped-owner, after-check cancel-guard, and
+validation-wire failures were reproduced in hosted runs before their respective
+production fixes. Incorrect retained-row and panel-open fixture assumptions
+remain excluded from product RED evidence. Permanent tests replace deleted
+author overlays as standing coverage.
+
+Full exact-head backend, frontend, and E2E qualification remains mandatory before
+merge. Its actual attempts, raw logs, artifacts, source bindings, review
+dispositions, and ordinary merge receipt are retained by the review task and PR
+checks; targeted step results are not an aggregate full-suite pass.
 
 ## Historical author results (superseded as qualification)
 

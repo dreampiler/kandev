@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 requirements:
   - REQ-TASKS-BOUNDED-QUEUE-ADMISSION-001
 system_design:
@@ -39,3 +39,11 @@ Run contributor code only on hosted runners. Focused proof runs establish
 regressions; full actual current-head backend, frontend, and E2E suites qualify
 the final change. Exact commits, commands, attempts, and raw results are retained
 in the PR review evidence, separate from this durable plan.
+
+## Implementation verification
+
+Permanent production-path regression coverage is retained in the work order.
+Targeted hosted Go race/SQLite, cleanup lease-race, queue-client/UI, and
+retry-disabled desktop/phone checks passed. Full published-head qualification
+and the ordinary merge receipt belong to PR #4503's delivery evidence; the
+focused results do not substitute for those full suites.
