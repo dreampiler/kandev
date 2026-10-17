@@ -545,7 +545,7 @@ func deliveryEventIsStale(
 	current, err := deliveryHarnessGeneration(ctx, execution, reader, sessionID, event.IncarnationID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		if authenticated {
-			return false, ErrDurableAdoptionIdentityMismatch
+			return false, fmt.Errorf("%w: reason=sql_owner_missing session_id=%q incarnation_id=%q event_generation=%d event_stream_id=%q sql_row_present=false", ErrDurableAdoptionIdentityMismatch, sessionID, event.IncarnationID, event.HarnessGeneration, event.StreamID)
 		}
 		return false, nil
 	}
@@ -555,7 +555,7 @@ func deliveryEventIsStale(
 	if authenticated && (current == nil || current.Generation != event.HarnessGeneration || execution == nil ||
 		execution.DeliveryMode != DurableDeliveryV1 || execution.DeliveryStreamID != event.ExpectedStreamID ||
 		execution.DeliveryIncarnationID != event.IncarnationID || execution.DeliveryHarnessGeneration != uint64(event.HarnessGeneration)) {
-		return false, ErrDurableAdoptionIdentityMismatch
+		return false, fmt.Errorf("%w: %s", ErrDurableAdoptionIdentityMismatch, durableEventOwnerMismatchDetail(execution, event, current))
 	}
 	return current != nil && current.Generation > event.HarnessGeneration, nil
 }
@@ -727,4 +727,24 @@ func canonicalAgentMessageID(execution *AgentExecution, event agentctl.AgentEven
 	}
 	digest := sha256.Sum256([]byte(streamID + ":" + event.Type + ":" + scope))
 	return "agent-delivery-" + fmt.Sprintf("%x", digest[:16])
+}
+
+func durableEventOwnerMismatchDetail(execution *AgentExecution, event *models.AgentDeliveryEvent, current *models.HarnessSessionGeneration) string {
+	const reason = "execution_owner_mismatch"
+	switch {
+	case current == nil:
+		return deliveryMismatchDetail("sql_owner_missing", "sql_row_present", true, false)
+	case current.Generation != event.HarnessGeneration:
+		return deliveryMismatchDetail("sql_generation_mismatch", "sql_harness_generation", event.HarnessGeneration, current.Generation)
+	case execution == nil:
+		return deliveryMismatchDetail(reason, "execution_present", true, false)
+	case execution.DeliveryMode != DurableDeliveryV1:
+		return deliveryMismatchDetail(reason, "delivery_mode", DurableDeliveryV1, execution.DeliveryMode)
+	case execution.DeliveryStreamID != event.ExpectedStreamID:
+		return deliveryMismatchDetail(reason, "execution_stream_id", event.ExpectedStreamID, execution.DeliveryStreamID)
+	case execution.DeliveryIncarnationID != event.IncarnationID:
+		return deliveryMismatchDetail(reason, "execution_incarnation_id", event.IncarnationID, execution.DeliveryIncarnationID)
+	default:
+		return deliveryMismatchDetail(reason, "execution_harness_generation", event.HarnessGeneration, execution.DeliveryHarnessGeneration)
+	}
 }

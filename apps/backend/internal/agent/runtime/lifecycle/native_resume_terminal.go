@@ -29,7 +29,7 @@ func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status 
 			return nil, err
 		}
 		if !peerMatchesTerminalHistory(execution, status, submission, row) {
-			return nil, fmt.Errorf("%w: native resume terminal evidence disagrees", ErrDurableAdoptionBlocked)
+			return nil, fmt.Errorf("%w: native resume terminal evidence disagrees: submission_id=%q %s", ErrDurableAdoptionBlocked, submission.ID, nativeTerminalMismatchDetail(execution, status, submission, row))
 		}
 		cursor, err := repository.GetAgentDeliveryCursor(ctx, submission.StreamID)
 		if err != nil {
@@ -115,4 +115,73 @@ func nativeTerminalCursorMatches(cursor *models.AgentDeliveryCursor, peer journa
 	return cursor != nil && cursor.StreamID == peer.StreamID && cursor.SessionID == peer.SessionID &&
 		cursor.IncarnationID == peer.IncarnationID && cursor.HarnessGeneration == int64(peer.HarnessGeneration) &&
 		cursor.ReceivedSequence == cursor.ProjectedSequence && cursor.RetiredSequence >= 0 && cursor.RetiredSequence <= cursor.ProjectedSequence && cursor.ProjectedSequence >= sequence
+}
+
+// deliveryMismatchDetail contains only the first mismatched owner or terminal field.
+func deliveryMismatchDetail(reason, field string, expected, observed any) string {
+	return fmt.Sprintf("reason=%s field=%s expected=%v observed=%v", reason, field, expected, observed)
+}
+
+func terminalStateDetail(value string) string {
+	switch value {
+	case "":
+		return "empty_state"
+	case "completed", "failed", "cancelled", "interrupted_unknown", "accepted", "running":
+		return value
+	default:
+		return "other"
+	}
+}
+
+func nativeTerminalMismatchDetail(execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission) string {
+	const recordMismatch = "terminal_record_mismatch"
+	switch {
+	case row == nil:
+		return deliveryMismatchDetail("terminal_row_missing", "sql_row_present", true, false)
+	case !nativeResumeTerminalState(row.State):
+		return deliveryMismatchDetail(recordMismatch, "sql_state", "terminal", terminalStateDetail(string(row.State)))
+	case row.Outcome != string(row.State):
+		return deliveryMismatchDetail(recordMismatch, "sql_outcome", row.State, terminalStateDetail(row.Outcome))
+	case peer.State != journal.SubmissionInterruptedUnknown:
+		return deliveryMismatchDetail(recordMismatch, "peer_state", journal.SubmissionInterruptedUnknown, terminalStateDetail(string(peer.State)))
+	case !peer.TerminalEventRetained:
+		return deliveryMismatchDetail("terminal_event_not_retained", "peer_terminal_retained", true, false)
+	case peer.TerminalSequence == 0:
+		return deliveryMismatchDetail("terminal_event_not_retained", "peer_terminal_sequence", "positive", peer.TerminalSequence)
+	}
+	if !nativeTerminalOwnerMatches(execution, status, peer, row) {
+		return nativeTerminalOwnerMismatchDetail(execution, status, peer, row)
+	}
+	if row.TerminalStreamID != peer.StreamID {
+		return deliveryMismatchDetail("terminal_projection_mismatch", "sql_terminal_stream", peer.StreamID, row.TerminalStreamID)
+	}
+	if row.TerminalSequence <= 0 || uint64(row.TerminalSequence) != peer.TerminalSequence {
+		return deliveryMismatchDetail("terminal_projection_mismatch", "sql_terminal_sequence", peer.TerminalSequence, row.TerminalSequence)
+	}
+	// The existing guard already checked payload identity. Never render its values.
+	return "reason=terminal_payload_identity_mismatch field=payload_identity"
+}
+
+func nativeTerminalOwnerMismatchDetail(execution *AgentExecution, status *agentctl.DeliveryStatus, peer journal.Submission, row *models.AgentDeliverySubmission) string {
+	const reason = "terminal_owner_mismatch"
+	switch {
+	case peer.SessionID != execution.SessionID:
+		return deliveryMismatchDetail(reason, "peer_session_id", execution.SessionID, peer.SessionID)
+	case row.SessionID != peer.SessionID:
+		return deliveryMismatchDetail(reason, "sql_session_id", peer.SessionID, row.SessionID)
+	case peer.ID != row.ID:
+		return deliveryMismatchDetail(reason, "sql_submission_id", peer.ID, row.ID)
+	case peer.IncarnationID != status.IncarnationID:
+		return deliveryMismatchDetail(reason, "peer_incarnation_id", status.IncarnationID, peer.IncarnationID)
+	case row.IncarnationID != peer.IncarnationID:
+		return deliveryMismatchDetail(reason, "sql_incarnation_id", peer.IncarnationID, row.IncarnationID)
+	case peer.HarnessGeneration == 0 || peer.HarnessGeneration > status.HarnessGeneration:
+		return deliveryMismatchDetail(reason, "peer_harness_generation", fmt.Sprintf("1..%d", status.HarnessGeneration), peer.HarnessGeneration)
+	case row.HarnessGeneration != int64(peer.HarnessGeneration):
+		return deliveryMismatchDetail(reason, "sql_harness_generation", peer.HarnessGeneration, row.HarnessGeneration)
+	case peer.StreamID == "":
+		return deliveryMismatchDetail(reason, "peer_stream_id", true, false)
+	default:
+		return deliveryMismatchDetail(reason, "peer_stream_id", status.StreamID, peer.StreamID)
+	}
 }
