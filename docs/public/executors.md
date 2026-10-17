@@ -108,6 +108,39 @@ including a newer value saved concurrently. Supplying a script replaces it;
 supplying an empty string clears it. The profile editor submits both scripts,
 so a stale full editor draft can still replace newer script values.
 
+### Private executors and profiles
+
+With authentication enabled, use **Profile access** in the profile editor to
+choose **Shared** or **Only me**. Administrators can also choose another active
+user. A new profile is shared unless you choose an owner. Ownership changes use
+the page's Save/Discard controls; on phones the owner selector opens a drawer.
+
+A private profile is visible and usable only by its owner and configuration
+administrators. A non-system executor also has **Executor access**. A private
+executor restricts every profile beneath it, including profiles marked Shared.
+A profile's owner must match its private executor's owner. Built-in executor
+parents stay shared; their individual profiles can be private.
+
+Owners can return their resources to Shared. Administrators can reassign or
+clear ownership, including when an owner has left. Members cannot claim an
+existing shared resource or assign someone else. Existing administrator-only
+connection settings retain their restrictions.
+
+Sharing a workspace or task does not grant access to someone else's private
+compute. Task history remains readable according to workspace permissions, but
+starting, resuming, prompting, and shell access check executor eligibility.
+If a selected profile becomes unavailable, choose an accessible replacement
+before starting. Ownership changes apply to subsequent operations and do not
+terminate work already admitted.
+
+The HTTP and MCP profile APIs accept `owner_user_id`. Omit it on creation for a
+shared resource. On update, omission preserves ownership; `null` or an empty
+string clears it. Invalid users and conflicting parent/profile owners are
+rejected. Private configuration is filtered from catalogues, boot payloads, and
+live notifications. This is an application access boundary; Local and Worktree
+still use the server's OS account and its on-disk credentials. See
+[Authentication limitations](authentication.md#limitations).
+
 ### Repository environment secrets
 
 Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.
@@ -519,6 +552,37 @@ OpenCode credential copies merge top-level provider entries with the existing re
 These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 </details>
+
+### CLI passthrough
+
+Enable **CLI passthrough** on the selected agent profile to use its terminal UI
+on the SSH target. The CLI runs in the remote task workspace. Install and
+authenticate that CLI on the target before starting the session. A custom
+prepare script is not required. Environment variables follow the same SSH
+credential forwarding policy as ACP sessions.
+
+The agent terminal sends input, resize, and interrupt actions to the remote
+PTY. Closing a browser tab preserves the process. Reconnecting restores recent
+output and keeps the same process. Desktop and phone use their existing agent
+terminal controls.
+
+Kandev prepares MCP files on the target and uses the remote controller's
+loopback address. It preserves existing user configuration and files claimed
+by another session. It does not write global agent configuration.
+
+Cursor and Pi use workspace MCP files. If another session claims a different
+controller URL in that file, preparation fails. Stop that session before
+retrying, or use a separate task.
+
+When you reset an SSH agent, Kandev stops its CLI before applying changed MCP
+settings. If preparation then fails, the CLI stays stopped. Resolve the
+configuration conflict before you resume the session.
+
+After a backend interruption, **Resume** reconnects to a verified live remote
+CLI. If that process is absent, Resume uses the preserved workspace and the
+agent's conversation resume options. Missing authentication or uncertain
+ownership blocks replacement. If the retained helper lacks passthrough
+support, update Kandev and start a fresh session.
 
 ### Repository sources and cleanup
 
