@@ -252,9 +252,13 @@ type AgentExecution struct {
 	// passthroughLifecycleMu serializes process replacement paths. A workflow
 	// context reset and a delayed exit auto-restart must not both replace the
 	// same PTY, or the execution can point at the wrong process.
-	passthroughLifecycleMu sync.Mutex
-	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
-	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	remotePassthroughMu       sync.Mutex
+	remotePassthroughRecordMu sync.Mutex
+	remotePassthrough         remotePassthroughState
+	sshApprovedEnvKeys        []string
+	passthroughLifecycleMu    sync.Mutex
+	PassthroughProcessID      string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt      time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 	// passthroughInitialPromptProcessID identifies the fresh PTY process that
 	// still needs its initial task prompt through stdin.
 	passthroughInitialPromptProcessID string
@@ -1061,6 +1065,31 @@ func (e *AgentExecution) promptTurnIDSnapshot() string {
 	return e.promptTurnID
 }
 
+// promptTurnIDForEvent only inherits a dispatched turn while the event has
+// dispatch ownership or a prompt is pending. Native async activity has no such
+// owner; the orchestrator captures its active turn at the readiness boundary.
+func (e *AgentExecution) promptTurnIDForEvent(event agentctl.AgentEvent) string {
+	if event.TurnID != "" || e == nil {
+		return event.TurnID
+	}
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	if event.PromptGeneration != 0 {
+		if turnID := e.promptTurnIDs[event.PromptGeneration]; turnID != "" {
+			return turnID
+		}
+		// A surviving prompt keeps its restored turn while the first live
+		// completion adopts its generation. New dispatch clears this allowance.
+		if event.PromptGeneration != e.promptGeneration && !e.recoveredPromptGenerationPending.Load() {
+			return ""
+		}
+	}
+	if event.PromptGeneration != 0 || event.DeliverySubmissionID != "" || e.dispatchedPromptPending.Load() {
+		return e.promptTurnID
+	}
+	return ""
+}
+
 func (e *AgentExecution) promptTurnIDForGeneration(generation uint64) string {
 	if e == nil || generation == 0 {
 		return ""
@@ -1525,6 +1554,8 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	// ResumePassthrough preserves provider resume intent after runtime cleanup.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string

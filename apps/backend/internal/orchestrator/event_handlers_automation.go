@@ -542,6 +542,19 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		s.recordFailedRun(ctx, evt, "retry launch configuration unavailable")
 		return
 	}
+	// Retry snapshots carry launch configuration, while creator authority is
+	// always restored from the current durable source.
+	source, sourceErr := s.automationService.GetAutomation(ctx, a.ID)
+	if sourceErr != nil || source == nil {
+		s.recordFailedRun(ctx, evt, "automation creator unavailable")
+		return
+	}
+	var executorErr error
+	ctx, executorErr = s.autonomousExecutorActor(models.WithExecutorWorkspace(ctx, source.WorkspaceID), source.CreatedByUserID, a.ExecutorProfileID)
+	if executorErr != nil {
+		s.recordFailedRun(ctx, evt, executorErr.Error())
+		return
+	}
 	if evt.RetryAmbiguousRecovery {
 		s.recoverAmbiguousRetry(ctx, a, evt, retryOperation)
 		return
@@ -2597,5 +2610,7 @@ func (s *Service) stopAutomationAgent(
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
+		return
 	}
+	s.settleBackgroundWork(ctx, sessionID, executionID)
 }
