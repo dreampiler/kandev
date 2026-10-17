@@ -1,8 +1,24 @@
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 
+export const LAUNCH_QUEUE_CAPACITY_REASON_LABELS = {
+  ceiling_total_limit: "task:launchQueueRefusalTotal",
+  ceiling_grade_limit: "task:launchQueueRefusalGrade",
+  ceiling_both_limits: "task:launchQueueRefusalBoth",
+  ceiling_needs_configuration: "task:launchQueueRefusalConfiguration",
+  ceiling_unknown_population: "task:launchQueueRefusalUnknown",
+} as const;
+type CapacityReason = keyof typeof LAUNCH_QUEUE_CAPACITY_REASON_LABELS;
+
+function recordedCapacityReason(reason?: string): CapacityReason | null {
+  return reason && Object.hasOwn(LAUNCH_QUEUE_CAPACITY_REASON_LABELS, reason)
+    ? (reason as CapacityReason)
+    : null;
+}
+
 export type LaunchQueueCapacityFreshness = "current" | "stale" | "unavailable";
 
 export type LaunchQueueViewModel = {
+  capacityReason?: CapacityReason;
   destinationId: string | null;
   queuedAt: string;
   reason: TaskStatusSummaryLaunchQueue["reason"];
@@ -81,6 +97,7 @@ export function buildLaunchQueueViewModel(
 ): LaunchQueueViewModel | null {
   if (!queue || !queue.queued_at || !LAUNCH_QUEUE_REASONS.has(queue.reason)) return null;
   const capacity = validCapacity(queue.capacity);
+  const capacityReason = recordedCapacityReason(queue.capacity_reason);
   const now = options.now ?? Date.now();
   const isConnected = options.isConnected ?? true;
   let capacityFreshness: LaunchQueueCapacityFreshness = "unavailable";
@@ -95,6 +112,7 @@ export function buildLaunchQueueViewModel(
     // missing profile projection must fall back to the translated generic
     // label instead of exposing an opaque UUID.
     destinationId: queue.agent_profile_id?.trim() || null,
+    ...(capacityReason ? { capacityReason } : {}),
     queuedAt: queue.queued_at,
     reason: queue.reason,
     retrying: queue.retrying,

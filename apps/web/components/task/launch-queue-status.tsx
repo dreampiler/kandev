@@ -10,6 +10,7 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { TaskStatusSummaryLaunchQueue } from "@/lib/types/task-status-summary";
 import {
   buildLaunchQueueViewModel,
+  LAUNCH_QUEUE_CAPACITY_REASON_LABELS,
   type LaunchQueueViewModel,
 } from "@/lib/tasks/launch-queue-view-model";
 
@@ -18,7 +19,10 @@ function reasonLabel(
   retrying: boolean,
   t: (key: string) => string,
   all = false,
+  capacityReason?: LaunchQueueViewModel["capacityReason"],
 ): string {
+  if (reason === "session_capacity" && capacityReason)
+    return t(LAUNCH_QUEUE_CAPACITY_REASON_LABELS[capacityReason]);
   switch (reason) {
     case "session_capacity":
       return t(
@@ -140,7 +144,13 @@ function LaunchQueueStatusContent({
             {t("task:launchQueueDestination", { destination })}
           </p>
           <p className="min-w-0 break-words text-muted-foreground">
-            {reasonLabel(view.reason, view.retrying, t, view.capacity?.policy === "all")}
+            {reasonLabel(
+              view.reason,
+              view.retrying,
+              t,
+              view.capacity?.policy === "all",
+              view.capacityReason,
+            )}
           </p>
           {view.reason === "session_capacity" && (
             <>

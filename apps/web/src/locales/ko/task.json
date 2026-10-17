@@ -2784,5 +2784,10 @@
   "allPRsClosedNotice_one": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
   "allPRsClosedNotice_other": "PR {{count}}개가 모두 병합 없이 종료되었습니다. 이 작업을 보관할 수 있습니다.",
   "turnOffTranscriptAutoScroll": "대화 기록 자동 스크롤 끄기",
-  "turnOnTranscriptAutoScroll": "대화 기록 자동 스크롤 켜기"
+  "turnOnTranscriptAutoScroll": "대화 기록 자동 스크롤 켜기",
+  "launchQueueRefusalTotal": "최근 대기 사유: 전체 실행 한도에 도달했습니다.",
+  "launchQueueRefusalGrade": "최근 대기 사유: 실행 등급 한도에 도달했습니다.",
+  "launchQueueRefusalBoth": "최근 대기 사유: 전체 및 등급 한도에 도달했습니다.",
+  "launchQueueRefusalConfiguration": "최근 대기 사유: 실행 등급 설정이 필요합니다.",
+  "launchQueueRefusalUnknown": "최근 대기 사유: 실행 목록을 확인하지 못했습니다."
 }

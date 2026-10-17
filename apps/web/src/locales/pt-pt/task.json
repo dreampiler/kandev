@@ -2774,5 +2774,10 @@
   "allPRsClosedNotice_one": "O {{count}} PR foi fechado sem integração. Pode arquivar esta tarefa.",
   "allPRsClosedNotice_other": "Todos os {{count}} PRs foram fechados sem integração. Pode arquivar esta tarefa.",
   "turnOffTranscriptAutoScroll": "Desativar o deslocamento automático da transcrição",
-  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição"
+  "turnOnTranscriptAutoScroll": "Ativar o deslocamento automático da transcrição",
+  "launchQueueRefusalTotal": "Último motivo de espera: limite global de execuções.",
+  "launchQueueRefusalGrade": "Último motivo de espera: limite da categoria de execução.",
+  "launchQueueRefusalBoth": "Último motivo de espera: limites global e da categoria.",
+  "launchQueueRefusalConfiguration": "Último motivo de espera: é necessário configurar a categoria de execução.",
+  "launchQueueRefusalUnknown": "Último motivo de espera: não foi possível verificar o inventário de execuções."
 }

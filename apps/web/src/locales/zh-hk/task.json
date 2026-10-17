@@ -2774,5 +2774,10 @@
   "allPRsClosedNotice_one": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "allPRsClosedNotice_other": "全部 {{count}} 個 PR 已關閉但未合併。您可以歸檔此任務。",
   "turnOffTranscriptAutoScroll": "關閉對話記錄自動滾動",
-  "turnOnTranscriptAutoScroll": "開啓對話記錄自動滾動"
+  "turnOnTranscriptAutoScroll": "開啓對話記錄自動滾動",
+  "launchQueueRefusalTotal": "最近等候原因：執行總數已達上限。",
+  "launchQueueRefusalGrade": "最近等候原因：執行等級已達上限。",
+  "launchQueueRefusalBoth": "最近等候原因：執行總數和等級均已達上限。",
+  "launchQueueRefusalConfiguration": "最近等候原因：需要設定執行等級。",
+  "launchQueueRefusalUnknown": "最近等候原因：無法確認執行清單。"
 }

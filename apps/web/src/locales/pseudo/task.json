@@ -2774,5 +2774,10 @@
   "allPRsClosedNotice_one": "Àĺĺ {{count}} ƤŔ ŵàś ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "allPRsClosedNotice_other": "Àĺĺ {{count}} ƤŔś ŵēŕē ćĺōśēď ŵĩţĥōũţ ḿēŕĝĩńĝ. Ŷōũ ćàń àŕćĥĩvē ţĥĩś ţàśķ.",
   "turnOffTranscriptAutoScroll": "Ţũŕń ōƒƒ ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
-  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ"
+  "turnOnTranscriptAutoScroll": "Ţũŕń ōń ţŕàńśćŕĩƥţ àũţō-śćŕōĺĺ",
+  "launchQueueRefusalTotal": "[!! Ŀåšţ ŵåîţ: öṽéŕåļļ éxéçûţîöñ ļîɱîţ !!]",
+  "launchQueueRefusalGrade": "[!! Ŀåšţ ŵåîţ: éẋéçûţîöñ ĝŕåðé ļîɱîţ !!]",
+  "launchQueueRefusalBoth": "[!! Ŀåšţ ŵåîţ: öṽéŕåļļ åñð ĝŕåðé ļîɱîţš !!]",
+  "launchQueueRefusalConfiguration": "[!! Ŀåšţ ŵåîţ: ĝŕåðé çöñƒîĝûŕåţîöñ ŕéqûîŕéð !!]",
+  "launchQueueRefusalUnknown": "[!! Ŀåšţ ŵåîţ: îñṽéñţöŕý ûñṽéŕîƒîéð !!]"
 }
