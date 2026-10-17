@@ -21,12 +21,16 @@ type TierPreview struct {
 }
 
 type TierPreviewEntry struct {
-	CandidateID string `json:"candidate_id"`
-	Tier        int    `json:"tier"`
-	Mode        string `json:"mode"`
-	Eligible    bool   `json:"eligible"`
-	Reason      string `json:"reason,omitempty"`
-	Selected    bool   `json:"selected"`
+	CandidateID           string   `json:"candidate_id"`
+	Tier                  int      `json:"tier"`
+	Mode                  string   `json:"mode"`
+	Eligible              bool     `json:"eligible"`
+	Reason                string   `json:"reason,omitempty"`
+	Selected              bool     `json:"selected"`
+	UsageKnown            bool     `json:"usage_known"`
+	RemainingPct          *float64 `json:"remaining_pct,omitempty"`
+	ConsumptionRateKnown  bool     `json:"consumption_rate_known"`
+	ConsumptionPctPerHour *float64 `json:"consumption_pct_per_hour,omitempty"`
 }
 
 func tierEligibilityReason(candidate Candidate, excluded map[string]bool, preferred string, unavailable map[string]string) string {
@@ -51,16 +55,17 @@ func tierHasEligibleRows(tier orderedTier, excluded map[string]bool, preferred s
 	return false
 }
 
-func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, history map[string]int64) []rankedTierRow {
+func rankTierRows(tier orderedTier, number int, excluded map[string]bool, preferred string, unavailable map[string]string, history map[string]int64, now time.Time) []rankedTierRow {
 	rows := make([]rankedTierRow, 0, len(tier.rows))
 	for _, candidate := range tier.rows {
 		reason := tierEligibilityReason(candidate, excluded, preferred, unavailable)
 		rows = append(rows, rankedTierRow{candidate: candidate, entry: TierPreviewEntry{CandidateID: candidate.ID, Tier: number, Mode: tier.mode, Eligible: reason == "", Reason: reason}})
 	}
+	applyTierUsage(rows, now)
 	if tier.mode == tierModeRoundRobin {
 		return rotateRoundRobinRows(rows, history)
 	}
-	return rows
+	return rankUsageRows(rows, tier.mode)
 }
 
 // Observe an expired circuit's probe availability; only candidateSelectable
@@ -123,7 +128,7 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 			}
 			loaded = true
 		}
-		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, history), unreached)
+		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, history, preview.ObservedAt), unreached)
 	}
 	preview.State = "no_candidates"
 	if len(preview.Considered) > 0 {

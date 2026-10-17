@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 const (
@@ -108,10 +109,11 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 	if continuing || fallback {
 		start = orderedStartIndex(tiers, current, excluded != "")
 	}
-	unavailable := e.tierAvailability(profile, e.now())
+	now := e.now()
+	unavailable := e.tierAvailability(profile, now)
 	return orderedPlan{chain: chain, rows: orderedRemainingRows(tiers[start:], chain.TriedCandidateIDs, preferred, unavailable, func() (map[string]int64, error) {
 		return e.tierSelectionHistory(ctx, profile.ID, tiers[start:])
-	})}, nil
+	}, now)}, nil
 }
 
 func retainedSelectionChain(state RouteState, profileID string, generation int64) (SelectionChain, bool) {
@@ -127,7 +129,7 @@ func retainedSelectionChain(state RouteState, profileID string, generation int64
 
 // Traverse lazily so an unreached round-robin tier cannot block an earlier
 // eligible tier. One reached traversal shares a single history observation.
-func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, readHistory func() (map[string]int64, error)) func(func(Candidate, error) bool) {
+func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred string, unavailable map[string]string, readHistory func() (map[string]int64, error), now time.Time) func(func(Candidate, error) bool) {
 	return func(yield func(Candidate, error) bool) {
 		tried := make(map[string]bool, len(triedIDs))
 		for _, id := range triedIDs {
@@ -145,7 +147,7 @@ func orderedRemainingRows(tiers []orderedTier, triedIDs []string, preferred stri
 				}
 				historyLoaded = true
 			}
-			for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, history) {
+			for _, row := range rankTierRows(tier, index+1, tried, preferred, unavailable, history, now) {
 				if row.entry.Eligible && !yield(row.candidate, nil) {
 					return
 				}
