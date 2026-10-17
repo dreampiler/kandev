@@ -834,7 +834,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, originFromAutoStart(autoStart)), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -1635,6 +1635,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if origin == "" {
 		origin = originFromAutoStart(autoStart)
 	}
+	origin = ceilingClaimedReplayOrigin(ctx, taskID, origin)
 	manualTaskID := ""
 	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
@@ -1856,7 +1857,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 				decision := seam1Res.controller.readmitSelectedStart(ctx, seam1Res.key, admissionRequest{
 					taskID: taskID, profileID: explicitProfileID, profileExplicit: true, origin: origin, seam: "startTask",
 				})
-				seam1Res, deferred, err = s.completeSeam1Admission(ctx, taskID, seam1Payload, decision, nil)
+				seam1Res, deferred, err = s.completeSeam1Admission(ctx, taskID, seam1Payload, decision, nil, origin)
 				if err != nil {
 					return nil, err
 				}

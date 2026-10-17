@@ -215,10 +215,10 @@ func (s *Service) admitOrDeferSeam1(
 		origin: origin,
 		seam:   "startTask",
 	})
-	return s.completeSeam1Admission(ctx, taskID, startPayload, decision, selection)
+	return s.completeSeam1Admission(ctx, taskID, startPayload, decision, selection, origin)
 }
 
-func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, startPayload map[string]interface{}, decision admissionDecision, selection *explicitWorkflowStartSelection) (*seam1Reservation, bool, error) {
+func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, startPayload map[string]interface{}, decision admissionDecision, selection *explicitWorkflowStartSelection, origins ...launchOrigin) (*seam1Reservation, bool, error) {
 	if decision.admitted {
 		return &seam1Reservation{selection: selection,
 			controller: s.sessionCeiling, key: decision.reservationKey,
@@ -229,7 +229,7 @@ func (s *Service) completeSeam1Admission(ctx context.Context, taskID string, sta
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, "", startPayload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,
-		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		decision.population, decision.populationKnown, decision.ceiling, ceilingAdmissionOrigin(origins...)); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
 		return nil, false, err

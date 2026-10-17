@@ -92,7 +92,7 @@ func (s *Service) admitOrDeferSessionKeyedLaunch(
 	payload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, payload)
 
 	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, kind, payload, decision.reasonCode,
-		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		decision.population, decision.populationKnown, decision.ceiling, origin); err != nil {
 		if errors.Is(err, ErrCeilingLaunchConflict) && isSessionOpenRecoveryContext(ctx) {
 			s.logger.Zap().Debug("session-open recovery left the existing ceiling queue unchanged after capacity refusal",
 				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
