@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -13,6 +14,64 @@ import (
 
 type timeoutMutationQueue struct {
 	*messagequeue.Service
+}
+
+func TestQueueAdmissionTimeoutThroughSQLiteHandlers(t *testing.T) {
+	h, queue, db := newPersistentCleanupQueue(t, filepath.Join(t.TempDir(), "queue.db"))
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	entry, err := queue.QueueMessage(ctx, "session", "task", "retain me", "", "user", false, nil)
+	require.NoError(t, err)
+	lease, err := queue.BeginEdit(ctx, entry.SessionID, entry.ID, "connection")
+	require.NoError(t, err)
+	held, release, holderDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		holderDone <- queue.WithSessionAdmission(ctx, entry.SessionID, func(context.Context) error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	defer func() { close(release); require.NoError(t, <-holderDone) }()
+	cases := []struct {
+		action string
+		handle func(context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		{ws.ActionMessageQueueAdd, h.wsQueueMessage},
+		{ws.ActionMessageQueueAppend, h.wsAppendToQueue},
+		{ws.ActionMessageQueueUpdate, h.wsUpdateMessage},
+		{ws.ActionMessageQueueEditBegin, h.wsBeginEdit},
+		{ws.ActionMessageQueueEditRenew, h.wsRenewEdit},
+		{ws.ActionMessageQueueEditEnd, h.wsEndEdit},
+	}
+	type result struct {
+		action   string
+		response *ws.Message
+		err      error
+	}
+	results := make(chan result, len(cases))
+	for _, tc := range cases {
+		msg := createTestMessage(t, tc.action, map[string]interface{}{
+			"task_id": "task", "session_id": "session", "content": "must not change",
+			"entry_id": entry.ID, "lease_id": lease.LeaseID, "operation_id": "operation",
+			"expected_target_revision": lease.TargetRevision,
+		})
+		operationCtx := ctx
+		if tc.action != ws.ActionMessageQueueUpdate {
+			operationCtx = ws.WithConnectionID(ctx, "connection")
+		}
+		go func() { response, err := tc.handle(operationCtx, msg); results <- result{tc.action, response, err} }()
+	}
+	for range cases {
+		got := <-results
+		require.NoError(t, got.err, got.action)
+		var payload struct {
+			Code string `json:"code"`
+		}
+		require.NoError(t, json.Unmarshal(got.response.Payload, &payload))
+		require.Equal(t, ws.ErrorCodeUnavailable, payload.Code, got.action)
+	}
 }
 
 func (*timeoutMutationQueue) CancelAllWithEntries(context.Context, string) ([]messagequeue.QueuedMessage, error) {

@@ -17,6 +17,20 @@ type failedCleanupAcknowledgementQueue struct {
 	acknowledgements atomic.Int32
 }
 
+type observedCleanupLeaseQueue struct {
+	*messagequeue.Service
+	checked chan struct{}
+}
+
+func (q *observedCleanupLeaseQueue) GetEditLease(ctx context.Context, sessionID, entryID string) (*messagequeue.QueueEditLease, error) {
+	lease, err := q.Service.GetEditLease(ctx, sessionID, entryID)
+	select {
+	case q.checked <- struct{}{}:
+	default:
+	}
+	return lease, err
+}
+
 func (q *failedCleanupAcknowledgementQueue) DeleteAttachmentCleanup(context.Context, string, string, string) error {
 	q.acknowledgements.Add(1)
 	return errors.New("cleanup acknowledgement unavailable")
@@ -102,13 +116,15 @@ func TestAttachmentCleanupEditLeaseDoesNotConsumeBudget(t *testing.T) {
 	require.NoError(t, err)
 	claimer := &controlledCleanupClaimer{}
 	h.SetAttachmentClaimer(claimer)
+	observed := &observedCleanupLeaseQueue{Service: queue, checked: make(chan struct{}, 16)}
+	h.queueService = observed
 	h.Start(context.Background())
 	t.Cleanup(h.Stop)
-	// Wake repeatedly while the real lease blocks cleanup. Taking admission
-	// after each wake provides a state barrier without spending cleanup attempts.
+	<-observed.checked
+	// Observe each real lease read before waking the next retry iteration.
 	for range 3 {
 		h.signalPendingAttachmentCleanup(context.Background(), entry.SessionID, entry.ID)
-		require.NoError(t, queue.WithSessionAdmission(context.Background(), entry.SessionID, func(context.Context) error { return nil }))
+		<-observed.checked
 	}
 	require.Zero(t, claimer.attempts.Load())
 	h.attachmentCleanupMu.Lock()

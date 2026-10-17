@@ -55,26 +55,79 @@ describe("bounded queue mutation admission", () => {
     session_incarnation_id: INCARNATION_ID,
   };
   const operations = [
+    { action: "message.queue.add", invoke: () => queueMessage({ ...identity, content: "queued" }) },
+    {
+      action: "message.queue.append",
+      invoke: () => queueApi.appendToQueue({ ...identity, content: "appended" }),
+    },
+    {
+      action: "message.queue.update",
+      invoke: () => updateQueuedMessage({ ...identity, entry_id: "entry", content: "edited" }),
+    },
+    {
+      action: "message.queue.edit.begin",
+      invoke: () => beginQueuedMessageEdit(SESSION_ID, "entry"),
+    },
+    {
+      action: "message.queue.edit.renew",
+      invoke: () =>
+        renewQueuedMessageEdit({ session_id: SESSION_ID, entry_id: "entry", lease_id: "lease" }),
+    },
+    {
+      action: "message.queue.edit.end",
+      invoke: () =>
+        endQueuedMessageEdit({ session_id: SESSION_ID, entry_id: "entry", lease_id: "lease" }),
+    },
+    { action: "message.queue.drain", invoke: () => queueApi.drainQueuedMessage(identity) },
+    {
+      action: "message.queue.send_now",
+      invoke: () => sendQueuedNow({ ...identity, scope: "all" }),
+    },
     { action: "message.queue.cancel", invoke: () => queueApi.clearQueue(identity) },
-    { action: "message.queue.auto_run.set", invoke: () => queueApi.setQueueAutoRun(identity, false) },
-    { action: "message.queue.auto_merge.set", invoke: () => queueApi.setQueueAutoMerge(identity, false) },
-    { action: "message.queue.remove", invoke: () => queueApi.removeQueuedEntry({ ...identity, entry_id: "entry" }) },
-    { action: "message.queue.merge", invoke: () => mergeQueuedEntry({ ...identity, entry_id: "entry" }) },
-    { action: "message.queue.reorder", invoke: () => reorderQueuedEntries({ ...identity, ordered_ids: ["entry"] }) },
+    {
+      action: "message.queue.auto_run.set",
+      invoke: () => queueApi.setQueueAutoRun(identity, false),
+    },
+    {
+      action: "message.queue.auto_merge.set",
+      invoke: () => queueApi.setQueueAutoMerge(identity, false),
+    },
+    {
+      action: "message.queue.remove",
+      invoke: () => queueApi.removeQueuedEntry({ ...identity, entry_id: "entry" }),
+    },
+    {
+      action: "message.queue.merge",
+      invoke: () => mergeQueuedEntry({ ...identity, entry_id: "entry" }),
+    },
+    {
+      action: "message.queue.reorder",
+      invoke: () => reorderQueuedEntries({ ...identity, ordered_ids: ["entry"] }),
+    },
   ];
 
   it.each(operations)("$action preserves the retryable wire error", async ({ invoke }) => {
     const request = vi.fn().mockRejectedValue(new WebSocketRequestError("busy", "UNAVAILABLE"));
     getWebSocketClientMock.mockReturnValue({ request });
-    await expect(invoke()).rejects.toMatchObject({ name: "QueueAdmissionError", code: "unavailable" });
+    await expect(invoke()).rejects.toMatchObject({
+      name: "QueueAdmissionError",
+      code: "unavailable",
+    });
   });
 
-  it.each(operations)("$action waits for the server admission budget", async ({ action, invoke }) => {
-    const request = vi.fn().mockResolvedValue({});
-    getWebSocketClientMock.mockReturnValue({ request });
-    await invoke();
-    expect(request).toHaveBeenCalledWith(action, expect.objectContaining(identity), 35_000);
-  });
+  it.each(operations)(
+    "$action waits for the server admission budget",
+    async ({ action, invoke }) => {
+      const request = vi.fn().mockResolvedValue({});
+      getWebSocketClientMock.mockReturnValue({ request });
+      await invoke();
+      expect(request).toHaveBeenCalledWith(
+        action,
+        expect.objectContaining({ session_id: SESSION_ID }),
+        35_000,
+      );
+    },
+  );
 });
 
 describe("rethrowQueueError", () => {

@@ -134,8 +134,35 @@ func TestSessionAdmissionSQLiteTimeoutDoesNotMutateOrLeakReferences(t *testing.T
 		})
 	}()
 	<-held
-	_, err := svc.QueueMessage(context.Background(), "session", "task", "must not insert", "", QueuedByUser, false, nil)
-	require.ErrorIs(t, err, ErrSessionAdmissionTimeout)
+	ctx := context.Background()
+	operations := map[string]func() error{
+		"insert": func() error {
+			_, err := svc.QueueMessage(ctx, "session", "task", "must not insert", "", QueuedByUser, false, nil)
+			return err
+		},
+		"append": func() error {
+			_, _, err := svc.AppendContent(ctx, "session", "task", "must not append", "", QueuedByUser, false, nil)
+			return err
+		},
+		"update": func() error {
+			return svc.UpdateMessageWithMetadata(ctx, "session", "entry", "must not update", nil, nil, QueuedByUser)
+		},
+		"remove":   func() error { return svc.RemoveEntry(ctx, "session", "entry") },
+		"clear":    func() error { _, err := svc.CancelAll(ctx, "session"); return err },
+		"merge":    func() error { _, err := svc.MergeIntoAbove(ctx, "session", "entry", QueuedByUser); return err },
+		"reorder":  func() error { return svc.ReorderEntries(ctx, "session", []string{"entry"}) },
+		"auto run": func() error { return svc.SetAutoRun(ctx, "session", false) },
+		"auto merge": func() error {
+			_, err := svc.SetSessionAutoMerge(ctx, QueueSessionIdentity{TaskID: "task", SessionID: "session", SessionIncarnationID: "incarnation"}, false)
+			return err
+		},
+		"begin edit": func() error { _, err := svc.BeginEdit(ctx, "session", "entry", "connection"); return err },
+		"renew edit": func() error { _, err := svc.RenewEdit(ctx, "session", "entry", "lease", "connection"); return err },
+		"end edit":   func() error { return svc.EndEdit(ctx, "session", "entry", "lease", "connection") },
+	}
+	for name, operation := range operations {
+		t.Run(name, func(t *testing.T) { require.ErrorIs(t, operation(), ErrSessionAdmissionTimeout) })
+	}
 	rows, err := repo.ListBySession(context.Background(), "session")
 	require.NoError(t, err)
 	require.Empty(t, rows)
