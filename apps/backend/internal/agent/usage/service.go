@@ -53,6 +53,18 @@ func (s *UsageService) GetUsage(ctx context.Context, profileID string) (*Provide
 	return s.cache.GetOrFetch(ctx, reg.cacheKey, reg.client.FetchUsage)
 }
 
+// CachedUsageObservations reads the registered source's existing samples.
+// The registration is not proof of a particular execution's account binding.
+func (s *UsageService) CachedUsageObservations(profileID string) (current, previous *ProviderUsage) {
+	s.mu.RLock()
+	reg, ok := s.clients[profileID]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, nil
+	}
+	return s.cache.SnapshotPair(reg.cacheKey)
+}
+
 // IsPotentiallyRateLimited returns true when any utilization window is at or
 // above the configured threshold (default 90%). resetAt is the earliest reset
 // time among windows that breached the threshold; zero if not limited.

@@ -19,10 +19,11 @@ const failureCacheTTL = 15 * time.Second
 // a failed refresh never evicts a still-valid success: non-fresh callers keep
 // being served the stale value while fresh callers share the recent error.
 type cachedEntry struct {
-	usage     *ProviderUsage
-	successAt time.Time
-	err       error
-	errAt     time.Time
+	sample, previous *ProviderUsage
+	usage            *ProviderUsage
+	successAt        time.Time
+	err              error
+	errAt            time.Time
 }
 
 // UsageCache is a thread-safe in-memory cache for provider usage responses.
@@ -129,7 +130,16 @@ func (c *UsageCache) lookup(key string, maxAge time.Duration) (*ProviderUsage, b
 func (c *UsageCache) storeSuccess(key string, usage *ProviderUsage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = &cachedEntry{usage: usage, successAt: time.Now()}
+	entry := &cachedEntry{usage: usage, sample: cloneProviderUsage(usage), successAt: time.Now()}
+	if old := c.entries[key]; old != nil && old.sample != nil && usage != nil {
+		switch {
+		case usage.FetchedAt.After(old.sample.FetchedAt):
+			entry.previous = cloneProviderUsage(old.sample)
+		case usage.FetchedAt.Equal(old.sample.FetchedAt):
+			entry.previous = cloneProviderUsage(old.previous)
+		}
+	}
+	c.entries[key] = entry
 }
 
 // storeFailure records the error alongside — not instead of — any previous
