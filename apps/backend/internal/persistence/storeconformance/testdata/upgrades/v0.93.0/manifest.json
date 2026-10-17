@@ -530,7 +530,8 @@
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
-      "task_workflow_session_bindings"
+      "task_workflow_session_bindings",
+      "workspace_collaboration_grants"
     ]
   }
 }

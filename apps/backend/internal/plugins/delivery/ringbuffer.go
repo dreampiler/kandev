@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -11,6 +12,7 @@ import (
 type Delivery struct {
 	PluginID string
 	Event    *pluginsdk.Event
+	Origin   *bus.PluginEventOrigin
 }
 
 // bufferedDelivery pairs a Delivery with the time it was buffered, for TTL

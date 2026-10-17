@@ -105,6 +105,8 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	taskSvc, workflowSvc, promptSvc := core.taskSvc, core.workflowSvc, core.promptSvc
+	boundary := &workspaceCollaborationBoundary{enabled: cfg.Features.WorkspaceCollaboration, store: repos.Task}
+	taskSvc.SetWorkspaceCollaboration(boundary, repos.Task)
 
 	wireTaskWorkflowCrossReferences(taskSvc, workflowSvc, userSecretStore, repos, log)
 
@@ -119,6 +121,9 @@ func provideServices(ctx context.Context, cfg *config.Config, log *logger.Logger
 		return nil, nil, err
 	}
 	pluginsSvc := integrations.pluginsSvc
+	if pluginsSvc != nil {
+		pluginsSvc.SetHostCallContextPolicy(boundary.enabled, boundary.validatePluginCall)
+	}
 
 	services := assembleServices(managedRuntimeSelections, core, providers, integrations)
 	if services.Plugins != nil {
