@@ -707,6 +707,7 @@ func (si *SchedulerIntegration) launchAgent(
 	launch LaunchContext,
 ) bool {
 	runID := run.ID
+	ctx = si.taskCapacityContext(ctx, run, taskID)
 
 	if taskID == "" {
 		if handled, launched := si.tryRoutingDispatch(ctx, run, agent, taskID, launch); handled {
@@ -790,6 +791,10 @@ func (si *SchedulerIntegration) launchAgent(
 	default:
 		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil)
+	}
+	if errors.Is(err, ErrRunSessionAdmissionDeferred) {
+		si.releaseCheckoutIfNeeded(ctx, run)
+		return false
 	}
 	if errors.Is(err, ErrLaunchDeferredByCapacity) {
 		si.handleLaunchDeferred(ctx, run)

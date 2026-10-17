@@ -15,6 +15,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 )
 
 // TaskStarterWithSession optionally returns the id of the agent session
@@ -85,7 +86,7 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: list prior: %w", err)
 	}
-	if providerAttemptCount(run, prior) >= MaxAttemptsPerRun {
+	if providerAttemptCount(run, prior, runmodels.MatchesTaskCapacityRun(ctx, run)) >= MaxAttemptsPerRun {
 		if perr := ss.parkRunMaxAttempts(ctx, run, agent.WorkspaceID); perr != nil {
 			return false, false, perr
 		}
