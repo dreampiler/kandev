@@ -50,8 +50,8 @@ export function ControlCapacitySnapshot({
           <p className="text-xs text-muted-foreground">
             {t(
               observation.policy === "all"
-                ? "task:launchQueueExecutionScope"
-                : "task:launchQueueGlobalScope",
+                ? "system:sessionCapacityAllHelp"
+                : "system:sessionCapacityScope",
             )}
           </p>
           <p
@@ -80,7 +80,9 @@ export function ControlCapacitySnapshot({
           {observation.policy === "all" && (
             <CapacityGrades observation={observation} known={known} />
           )}
-          {observation.policy === "all" && <CapacityWaitCounts observation={observation} />}
+          {observation.policy === "all" && (
+            <CapacityWaitCounts observation={observation} validTime={validTime} />
+          )}
         </>
       )}
     </section>
@@ -130,11 +132,18 @@ function CapacityGrades({
   );
 }
 
-function CapacityWaitCounts({ observation }: { observation: SessionCapacityObservation }) {
+function CapacityWaitCounts({
+  observation,
+  validTime,
+}: {
+  observation: SessionCapacityObservation;
+  validTime: boolean;
+}) {
   const { t } = useTranslation();
   const unknown = t("common:unknown");
   const counts = observation.waiting?.counts;
   const known =
+    validTime &&
     observation.waiting?.known === true &&
     Object.keys(WAIT_LABELS).every((reason) => observedCount(counts?.[reason]));
   return (
