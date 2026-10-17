@@ -44,10 +44,10 @@ After backend recovery, continue the interval from lifecycle's recorded activity
 The current execution owns removal as well as replacement of its clock snapshot. A normal persistence merge must not restore a removed clock from the prior row.
 Both local startup and remote reconstruction use the same restoration helper. Remote reconstruction reads the clock from the lifecycle-owned runtime record, even when the adapter's separate metadata contains only its connection configuration.
 
-The retained terminal outcome records its observation time in the existing event payload. Durable recovery uses the existing journal event's `CreatedAt`. Replay advances the clock only to this recorded activity time, while retaining output evidence, activity epochs, apply-before-ACK ordering, and ControlTurnID deduplication. Normal live completion continues to mark new activity. No per-event database write, new table, journal, or endpoint is needed.
+The retained terminal outcome records its observation time in the existing event payload. Durable recovery uses the existing journal event's `CreatedAt`. Replay advances the clock only to this recorded activity time, while retaining output evidence, activity epochs, apply-before-ACK ordering, and ControlTurnID deduplication. Normal live completion continues to mark new activity. No database write for each agent event, new table, journal, or endpoint is needed.
 An older surviving control server may omit the retained observation time. Such an outcome cannot establish when the turn settled; use the full-interval fallback rather than substitute message or recovery timestamps.
 
-Without a trustworthy clock, represent the idle anchor as unknown and start a full interval on the first settled candidate observation. Keep the candidate stable on subsequent scans; preserve policy-change and explicit-focus floors. A snapshot from another execution cannot shorten this interval. A new prompt, live activity, or resumed settled execution still starts its normal new interval.
+Without a trustworthy clock, represent the idle anchor as unknown and start a full interval on the first settled candidate observation. Keep the candidate stable on subsequent scans; preserve policy-change and explicit-focus floors. A snapshot from another execution cannot shorten this interval. A new prompt, live activity, or resumed settled execution still starts its normal new interval. Unknown replay clears uncertain restored history without erasing activity observed live by the current backend.
 
 Use the existing orchestrator maintenance owner with a scan cadence at most 30 seconds.
 Inspect durable runtime inventory independently of coarse state, then evaluate each row's workspace policy and session eligibility.
@@ -83,6 +83,7 @@ Concurrent callers join the same resume; keep existing message identity/deduplic
 Extend the task/session activation path used by `use-session-resumption.ts` with an authenticated focus intent.
 Send focus only on explicit selection/open or browser visibility/window focus return for the selected task/session.
 Debounce duplicate events and check durable idle-suspension provenance on the backend.
+For an already-live settled session, persist the explicit-focus observation in existing session metadata, bound to the current execution. Reconstruct that floor during idle-candidate selection so a restart cannot discard a recent focus interval. Validate its identity and observation time independently of passive session metadata timestamps.
 Hidden mounted tabs, generic session reads, and list subscriptions cannot wake processes.
 The focus exception bypasses prevent-auto-start-on-open only for this idle-suspended session.
 Workflow ownership, archive checks, and authorization still apply. Focus must not wake every sibling session.

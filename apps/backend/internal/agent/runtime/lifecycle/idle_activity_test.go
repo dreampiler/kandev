@@ -60,7 +60,7 @@ func TestIdleActivityReplayPreservesNewerLiveObservation(t *testing.T) {
 		}{
 			{"agent", (*AgentExecution).markAgentActivity},
 			{"prompt", (*AgentExecution).armPromptActivity},
-			{"focus", (*AgentExecution).markLifecycleActivity},
+			{"lifecycle readiness", (*AgentExecution).markLifecycleActivity},
 			{"content", func(e *AgentExecution) {
 				newTestManager(t).recordActivity(e, agentctl.AgentEvent{Type: "message_chunk", Text: "live"})
 			}},
@@ -95,4 +95,17 @@ func TestIdleActivityReplayAdvancesRecordedClockAndClearsUnknownHistory(t *testi
 	e.markRecoveredAgentActivity(nil)
 	at, _, _ = e.promptActivitySnapshot()
 	require.True(t, at.IsZero(), "unknown recovery history must receive a full settled interval")
+}
+
+func TestIdleActivityContentReplayCannotEraseLiveContent(t *testing.T) {
+	mgr := newTestManager(t)
+	e := createTestExecution("execution", "task", "session")
+	mgr.recordActivity(e, agentctl.AgentEvent{Type: "message_chunk", Text: "live"})
+	before, _, epoch := e.promptActivitySnapshot()
+	require.False(t, before.IsZero())
+	mgr.recordActivity(e, agentctl.AgentEvent{Type: "message_chunk", Text: "replayed", Recovered: true})
+	after, output, nextEpoch := e.promptActivitySnapshot()
+	require.True(t, after.Equal(before))
+	require.True(t, output)
+	require.Greater(t, nextEpoch, epoch)
 }

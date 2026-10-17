@@ -198,7 +198,8 @@ continues its recorded idle interval across a backend restart. Replayed output,
 health checks, and saved-message metadata updates do not restart that interval.
 If the earlier activity time is unavailable or invalid, Kandev gives the session
 a full interval after observing it settled. Existing focus and policy changes
-still refresh the interval.
+still refresh the interval. An explicit focus interval also survives a backend
+restart for that same execution.
 
 The executor needs usable disk space to retain output during a long outage.
 Provider expiration and external process termination can still stop a remote

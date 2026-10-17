@@ -1,7 +1,7 @@
 ---
 id: "05-preserve-restart-idle-interval"
 title: "Preserve the idle interval across backend restart"
-status: done
+status: in_progress
 wave: 5
 depends_on: ["04-resume-safe-idle-reclaim"]
 plan: "plan.md"
@@ -21,49 +21,39 @@ system_design:
 
 ## Outcome and scope
 
-Carry the original P46 idle slice forward from candidate `3f46817f62307675d98b7bc2809bcafeb89819e3` (base `71688b0f178839052be1e19cfaf0afca23fc7e99`) onto base `4de689d338a496c8b5139ff3e308d43d318a0024`. The original fork slices are `52237290730452c6fec9501b879fd82829ad3acc` and the idle part of `d840571f2f`.
+Preserve trustworthy lifecycle activity across same-session backend recovery. Passive runtime, session, workspace, and transcript timestamps must not restart the idle interval. Unknown recovery history receives one full interval after settled observation. Explicit focus remains an execution-bound interval floor across restart.
 
-Preserve the idle interval from trustworthy activity, not passive row timestamps or replay time. Reuse the candidate's internal recovered-event distinction, clock guard changes, and bounded Info skip diagnostics. #4406 already supplies automatic focus origin; #4112 token protection remains. #4479 accepted-work and primary-ownership work is separate.
+## Responsibilities
 
-The candidate's transcript fallback is deliberately not carried forward. `GetLastMessageTimeBySessionIDs` measures `MAX(updated_at)` across all message types; metadata-only writes refresh it. Turn completion timestamps can also be rewritten on replay. Neither proves the last real idle activity. Instead, reuse lifecycle's existing activity clock and normal runtime-row persistence, the existing durable journal observation time, and the existing retained outcome slot.
+- Persist the execution-bound lifecycle clock through normal runtime inventory upserts. Restore it before local or remote replay using the authoritative lifecycle record.
+- Retained terminal outcomes carry their original observation time. Durable replay uses journal `CreatedAt`, while preserving payload identity, projection, acknowledgement, and deduplication.
+- Unknown replay may clear uncertain restored history, but must preserve activity observed live by the current backend, including prompt, steering, focus, and agent activity.
+- Persist the explicit-focus floor through existing session metadata, bound to the current execution. Passive metadata writes are not semantic activity. Sibling or replacement executions cannot inherit the floor.
+- Preserve policy/focus floors, active-prompt protection, accepted and known work, runtime ownership, resume tokens, task compute, and LSP lease fences. Routine scan skip summaries remain at Debug; suspension outcomes remain at Info.
+- Add permanent package regressions using normal SQLite persistence, actual startup and remote reconstruction, the retained-outcome completion path, and real bbolt/SQLite durable delivery.
+- No new table, journal, endpoint, provider allowlist, UI, runtime setting, or database write for each agent event.
 
-## Responsibilities and exclusions
+## Acceptance
 
-- Existing production paths: orchestrator `idle_session_reaper.go`; lifecycle `types.go`, `manager_events.go`, `manager_recovery_turn_outcome.go`; streams `agent.go`.
-- Necessary existing owner seams: lifecycle `persistence.go` saves the clock through its normal upsert; `manager_lifecycle.go` restores it before local replay; `remote_recovery.go` uses the same helper with the authoritative runtime record for remote reconstruction; `executor_backend.go` keeps it only within the same session; `durable_delivery_stream.go` carries journal observation time; instance `turn_outcome.go` records retained observation time. These six additions replace an untrustworthy fallback and preserve executor coverage without adding per-event database writes.
-- Preserve current-execution guards, active/known-work exclusions, resume tokens, provider coverage, policy/focus floors, activity evidence and epochs, apply-before-ACK, and ControlTurnID deduplication. Unknown or invalid history receives a full interval from observation.
-- No new table, journal, endpoint, shared message timestamp rewrite, metric framework, model invocation, runtime operation, or limit change. No UI changes.
-- Do not port the candidate's two added standing test files. Original #143 explicitly removed unauthorized standing idle tests; all existing upstream tests and fixtures remain. New verification cases exist only outside automatic collectors in an explicitly invoked Go overlay and are removed after their results are recorded.
+1. Normal lifecycle persistence followed by `Manager.Start` preserves real activity despite passive metadata updates; an explicitly removed clock stays absent on the next startup.
+2. Remote reconstruction uses the persisted lifecycle owner clock even when adapter metadata contains only connection configuration.
+3. Missing, malformed, wrong-execution, zero, and future snapshots do not become trustworthy history. Older replay cannot replace newer activity; unknown replay cannot erase current-backend live activity.
+4. Retained and durable terminal replay preserve observation time, output evidence, payload identity, projection-before-ACK, and duplicate suppression.
+5. Unknown-history candidates receive a stable full interval. Policy changes and explicit focus preserve their floors, including focus before a backend restart. Existing prompt, work, lease, ownership, and resume-safety guards remain effective.
+6. Permanent tests and final-source hosted verification must pass before delivery.
 
-## Implementation acceptance
+## Verification
 
-1. Normal lifecycle persistence and recovery reconstruct the same execution's real activity clock; unrelated row/message metadata updates cannot reset it, and another session/execution cannot inherit it.
-2. Retained and durable terminal recovery reach the existing completion path with their original observation time, preserving ACK/dedup and normal live-completion behavior.
-3. No-history candidates get a full, stable interval; existing policy/focus floors, known-work, and token protections continue to operate.
+Run on hosted execution only for this review. From `apps/backend`:
 
-## Verification commands
+- `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/agent/runtime/lifecycle -run '^(TestIdleActivity|TestApplyRecoveredTurnOutcome|TestGetPromptActivityForSession|TestExecutionStore_ClaimPromptActivity|TestSuspendIdle)'`
+- `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/orchestrator -run '^(TestIdleParking|TestPromptAfterIdleReclaimLaunchesPreparedSession)'`
+- `go test -trimpath -tags fts5 -race -p 2 -count=1 -timeout=10m -v ./internal/agentctl/server/instance -run '^(TestRetainedOutcomeActivity|TestTurnOutcome)'`
+- Full final-source backend, frontend, and E2E workflows, including their selected Windows, PostgreSQL, containers/Kubernetes, desktop/native, and artifact contracts.
+- Existing specification metadata/lint and public-documentation checks on the final source.
 
-Run from `apps/backend` unless indicated otherwise. Exact selected commands and outcomes are appended after execution; no whole suite or permanent new case is required.
+## Results and provenance
 
-- `go test -trimpath -p 2 ./internal/agent/runtime/lifecycle -run 'TestApplyRecoveredTurnOutcomeAppliesAndAcks|TestApplyRecoveredTurnOutcomeDedupesLiveRedelivery|TestGetPromptActivityForSessionReturnsTrackedSnapshot|TestExecutionStore_ClaimPromptActivityRequiresCurrentIdentity' -count=1`
-- `go test -trimpath -p 2 ./internal/orchestrator -run 'TestIdleParkingClockHonorsPolicyChangeAndFocus|TestIdleParkingKeepsDisabledAndKnownWorkSessionsRunning|TestIdleParkingSuspendsSettledSessionsAcrossACPProviders|TestPromptAfterIdleReclaimLaunchesPreparedSession' -count=1`
-- Explicit temporary overlay checks for normal upsert/recovery, metadata-only update independence, retained completion and durable replay, full-interval fallback, and same-session isolation. Use the existing repository/manager fixtures and clean the overlay sources afterward.
-- `go build -trimpath -p 2 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/agentctl/server/instance ./internal/agentctl/types/streams`
-- `go vet -trimpath -p 2 ./internal/orchestrator ./internal/agent/runtime/lifecycle ./internal/agentctl/server/instance ./internal/agentctl/types/streams`
-- Root: existing `scripts/lint-go-changed` scoped by changed package; existing specification metadata and `.github/scripts/pr-docs.cjs` coverage check for these changed documents.
+The original contribution reported temporary overlay checks and targeted local checks, then removed the overlays. Those historical author reports are not permanent regression coverage or final-head hosted proof. The original work order's instruction to exclude permanent tests has been superseded by current repository and review requirements.
 
-## Results
-
-Independent source review also identified that remote startup reconstruction bypassed the local restoration path. The remote constructor now uses the same helper on the lifecycle-owned record after identity validation. A temporary normal SQLite upsert/readback to the real remote constructor and back to persistence failed before the fix across SSH, Sprites, remote Docker, Kubernetes, and plugin-remote variants, then passed all five (`3.067s`), alongside the existing remote inventory and run-owner-boundary tests. Adapter metadata intentionally omitted the clock, proving the authoritative record is consumed. No remote ownership, attach guard, or provider exclusion changed.
-
-The eleven production paths are implemented on the stated base. Normal upsert to a fresh `Manager.Start` recovery retained the activity clock despite message-metadata and runtime-row updates. Retained completion, durable replay through completion, payload identity/cursor, no-history timing, producer readback, snapshot isolation, and persistence of an explicitly cleared clock were checked with nine temporary cases (including five remote runtime variants). Existing lifecycle four, idle/focus/known-work/token four, and instance-retention five checks passed. Narrow build and vet returned exit 0.
-
-The baseline overlay failed the intended persisted-clock, retained-replay-time, passive-row-reset, and zero-history-skip assertions. Two temporary fixtures initially lacked normal parent/turn rows or repository-normalized idle-state readback; only those affected cases were corrected and rerun. These fixture failures were not production defects and the mixed initial command was not reported as PASS. Actual tool stdout/exit receipts are retained in the internal handoff record; the temporary sources, overlays, and baseline blobs were removed.
-
-Lifecycle, agentctl, and orchestrator scoped lint returned `0 issues.` with exit 0. The first orchestrator check timed out during cold package loading and was not a lint PASS; the later check used the built cache and sequential package scopes. Specification metadata returned zero violations and the current PR-docs checker returned covered/errors empty for this work order.
-
-Final source inspection identified that the prior-row metadata merge could restore a clock intentionally removed by an unknown replay. The same persistence file now excludes that lifecycle-owned key from prior fallback, keeping absence authoritative. An additional temporary normal-upsert to next-`Manager.Start` case failed before the correction and passed afterward, together with existing revoked-MCP-claim and upsert-error tests (`0.754s`). This change has its own focused persistence lint/vet readback after the earlier checks; it changes no public or workflow behavior beyond preserving the original no-history rule.
-
-Compatibility: old runtime inventory without this snapshot and old retained outcomes without observation time receive a full interval from settled observation. This is the explicit no-history behavior, not inferred transcript activity. No operational process, task, profile, or settings were changed. No permanent test files were added or existing tests removed.
-
-Historical candidate author reports are not current-head PASS; review `702a5803-db48-444d-85c5-875a5bd44ed5` failed technically with file_count 0. Independent source review and normal Git integration remain with the current root; original issue-first publication remains with the existing upstream publisher. The original goal and guards remain; only the untrustworthy transcript fallback and unauthorized standing-test additions were excluded, with six necessary existing persistence/recovery owner seams added as explained above.
+Independent review identified missing permanent coverage, loss of newer live activity on unknown replay, and loss of the explicit-focus floor on backend restart. The scan-level Info advisory is addressed by retaining routine skip summaries at Debug. Current permanent regressions are committed; focused hosted proofs and full final-source gates are pending. No current validation PASS is claimed here until its actual hosted result is available.

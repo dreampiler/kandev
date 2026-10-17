@@ -1,6 +1,6 @@
 ---
 created: 2026-09-28
-status: complete
+status: in_progress
 requirements:
   - REQ-EXECUTORS-IDLE-PARKING-001
   - REQ-EXECUTORS-IDLE-PARKING-002
@@ -105,6 +105,7 @@ This preview maps to AC-EXECUTORS-IDLE-PARKING-001.1 and .9.
 | .4, .7 | Mobile E2E sends a message while suspended and verifies one user message and one content reply; existing resume-attempt serialization remains the shared concurrency owner |
 | .5, .7 | `TestFocusTaskSessionResumesIdleSuspensionWithNewLSPLease`, workflow/manual-stop exclusion tests, and session-resumption hook tests |
 | .5, .6 | Chromium E2E resumes on explicit focus without a prompt and observes another suspension after a fresh interval |
+| .6, .11 | Permanent idle-activity persistence, startup, remote-constructor, retained/journal replay, focus-floor, and unknown-history regressions in Task 05; hosted validation pending |
 
 `AC-EXECUTORS-IDLE-PARKING-002.1` through `.3` are covered by `TestClassifyIdleReclaimDisposition`, `TestReclaimIdleSessionRowOutcomeByResumeToken`, and `TestPromptAfterIdleReclaimLaunchesPreparedSession`. `TestDeleteExecutorRunningPrunesTokenlessNotRunningRow` pins the lifecycle row rule they rely on.
 
@@ -127,6 +128,7 @@ Sequential execution; no delegation is authorized.
 - [x] [Task 02: Workspace policy and automatic recovery](task-02-idle-policy.md) (done)
 - [x] [Task 03: Complete-cycle validation and documentation](task-03-resume-validation.md) (done)
 - [x] [Task 04: Resume-safe idle reclaim](task-04-resume-safe-idle-reclaim.md) (done)
+- [ ] [Task 05: Preserve the restart idle interval](task-05-preserve-restart-idle-interval.md) (in_progress)
 
 ## Verification results
 

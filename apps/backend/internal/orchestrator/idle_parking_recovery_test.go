@@ -31,8 +31,10 @@ func TestIdleParkingUnknownRecoveryReceivesOneStableFullInterval(t *testing.T) {
 	agent.currentPromptActivityEpoch.Store(0)
 	now := time.Now().UTC()
 	scan := func(at time.Time) {
+		current, err := svc.repo.GetExecutorRunningBySessionID(context.Background(), row.SessionID)
+		require.NoError(t, err)
 		summary := idleParkingScanSummary{observed: make(map[idleParkingCandidateKey]struct{}), skipped: make(map[idleParkingSkipReason]int)}
-		svc.processWorkspaceIdleRow(context.Background(), row, at, agent, &summary)
+		svc.processWorkspaceIdleRow(context.Background(), current, at, agent, &summary)
 		svc.pruneIdleParkingCandidates(summary.observed)
 	}
 	scan(now)
@@ -84,19 +86,25 @@ func TestIdleParkingExplicitFocusFloorSurvivesRecovery(t *testing.T) {
 	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
 	agent.isAgentReadyFn = func(context.Context, string) bool { return true }
 	svc.refreshFocusedLiveSession(ctx, row.TaskID, row.SessionID)
+	require.False(t, svc.idleParkingFocusAt[row.SessionID].IsZero(), "positive control: the real explicit-focus path was reached")
 	session, err := svc.repo.GetTaskSession(ctx, row.SessionID)
 	require.NoError(t, err)
 	require.Contains(t, session.Metadata, "idle_parking_focus", "explicit focus must have a durable positive control")
+	focus := session.Metadata["idle_parking_focus"].(map[string]interface{})
+	focusedAt, err := time.Parse(time.RFC3339Nano, focus["focused_at"].(string))
+	require.NoError(t, err)
 	// Startup recreates these maps; the tracked activity still describes the
 	// old settled turn, as it does after lifecycle restores its saved clock.
 	svc.idleParkingFocusAt, svc.idleParkingCandidates = nil, nil
 	svc.suspendWorkspaceIdleSessionsOnce(ctx)
 	require.Empty(t, agent.suspensionCalls(), "restart must not discard the fresh explicit-focus interval")
-	now := time.Now().UTC()
+	row, err = svc.repo.GetExecutorRunningBySessionID(ctx, row.SessionID)
+	require.NoError(t, err)
+	now := focusedAt.Add(10 * time.Second)
 	candidate, _, ok := svc.workspaceIdleCandidate(ctx, row, now)
 	require.True(t, ok)
-	require.False(t, svc.idleParkingCandidateDue(candidate.key, now.Add(59*time.Second), time.Minute))
-	require.True(t, svc.idleParkingCandidateDue(candidate.key, now.Add(time.Minute), time.Minute))
+	require.False(t, svc.idleParkingCandidateDue(candidate.key, focusedAt.Add(59*time.Second), time.Minute))
+	require.True(t, svc.idleParkingCandidateDue(candidate.key, focusedAt.Add(time.Minute), time.Minute))
 }
 
 func TestIdleParkingFocusFloorCannotTransferToAnotherExecution(t *testing.T) {
@@ -110,4 +118,54 @@ func TestIdleParkingFocusFloorCannotTransferToAnotherExecution(t *testing.T) {
 	require.NoError(t, svc.repo.UpsertExecutorRunning(ctx, row))
 	svc.suspendWorkspaceIdleSessionsOnce(ctx)
 	require.Len(t, agent.suspensionCalls(), 1, "a predecessor focus must not change a successor's idle interval")
+}
+
+func TestIdleParkingRecoveryKeepsActiveLSPLeaseFence(t *testing.T) {
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	lease := &activeLSPLeaseForTest{sessionID: row.SessionID}
+	svc.SetLSPLeaseLifecycle(lease)
+	svc.suspendWorkspaceIdleSessionsOnce(t.Context())
+	require.Empty(t, agent.suspensionCalls())
+	require.Greater(t, lease.checks, 0, "the lease owner must actually be consulted")
+	svc.lspLeases = nil
+	svc.suspendWorkspaceIdleSessionsOnce(t.Context())
+	require.Len(t, agent.suspensionCalls(), 1, "positive control: releasing the lease permits suspension")
+}
+
+func TestIdleParkingRecoveryRejectsUntrustedFocusFloors(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		value interface{}
+	}{
+		{"wrong execution", map[string]interface{}{"execution_id": "other", "focused_at": time.Now().UTC().Format(time.RFC3339Nano)}},
+		{"malformed snapshot", "invalid"},
+		{"malformed time", map[string]interface{}{"execution_id": "execution-idle-parking", "focused_at": "invalid"}},
+		{"future", map[string]interface{}{"execution_id": "execution-idle-parking", "focused_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+			require.NoError(t, svc.repo.SetSessionMetadataKey(t.Context(), row.SessionID, "idle_parking_focus", tc.value))
+			svc.suspendWorkspaceIdleSessionsOnce(t.Context())
+			require.Len(t, agent.suspensionCalls(), 1, "invalid focus history cannot replace an execution's idle interval")
+		})
+	}
+}
+
+func TestIdleParkingUnknownActivityKeepsFullIntervalWithOldFocusFloor(t *testing.T) {
+	svc, agent, row := newIdleParkingFixture(t, true, 1, "claude-acp")
+	agent.currentPromptLastActivityAt = time.Time{}
+	require.NoError(t, svc.repo.SetSessionMetadataKey(t.Context(), row.SessionID, "idle_parking_focus", map[string]interface{}{
+		"execution_id": row.AgentExecutionID, "focused_at": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano),
+	}))
+	now := time.Now().UTC()
+	current, err := svc.repo.GetExecutorRunningBySessionID(t.Context(), row.SessionID)
+	require.NoError(t, err)
+	for _, at := range []time.Time{now, now.Add(59 * time.Second)} {
+		summary := idleParkingScanSummary{observed: make(map[idleParkingCandidateKey]struct{}), skipped: make(map[idleParkingSkipReason]int)}
+		svc.processWorkspaceIdleRow(t.Context(), current, at, agent, &summary)
+		require.Empty(t, agent.suspensionCalls())
+	}
+	candidate, _, ok := svc.workspaceIdleCandidate(t.Context(), current, now.Add(time.Minute))
+	require.True(t, ok)
+	require.True(t, svc.idleParkingCandidateDue(candidate.key, now.Add(time.Minute), time.Minute))
 }

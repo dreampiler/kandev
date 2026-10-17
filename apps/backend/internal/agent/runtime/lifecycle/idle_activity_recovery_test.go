@@ -25,13 +25,14 @@ func TestIdleActivityNormalPersistenceToManagerStart(t *testing.T) {
 	old := time.Now().UTC().Add(-time.Hour)
 	e.lastActivityAt = old
 	require.NoError(t, writer.persistExecutorRunningResult(ctx, e))
+	updateIdleActivityPassiveMessage(t, repo, e.TaskID, e.SessionID, old)
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, e.SessionID, "passive", "updated"))
 	row, err := repo.GetExecutorRunningBySessionID(ctx, e.SessionID)
 	require.NoError(t, err)
 	row.Metadata["passive"] = "updated"
 	require.NoError(t, repo.UpsertExecutorRunning(ctx, row))
 	control := newStandaloneControlServer(t, true)
-	control.listInstances = []*agentctl.InstanceInfo{{ID: e.ID, SessionID: e.SessionID, Port: 4001}}
+	control.listInstances = []*agentctl.InstanceInfo{{ID: e.ID, SessionID: e.SessionID, Port: control.executor(t).port}}
 	mgr := newIdleActivityStartupManager(t, repo, control)
 	t.Cleanup(func() { require.NoError(t, mgr.Stop()) })
 	require.NoError(t, mgr.Start(ctx))
@@ -64,6 +65,21 @@ func newIdleActivityStartupManager(t *testing.T, repo *tasksqlite.Repository, co
 	mgr.SetExecutorRunningWriter(repo)
 	mgr.SetAgentSurvivalEnabled(true)
 	return mgr
+}
+
+func updateIdleActivityPassiveMessage(t *testing.T, repo *tasksqlite.Repository, taskID, sessionID string, old time.Time) {
+	t.Helper()
+	ctx := t.Context()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{ID: "turn-idle", TaskID: taskID, TaskSessionID: sessionID, StartedAt: old}))
+	message := &models.Message{ID: "message-idle", TaskID: taskID, TaskSessionID: sessionID, TurnID: "turn-idle",
+		Content: "settled output", CreatedAt: old, UpdatedAt: old}
+	require.NoError(t, repo.CreateMessage(ctx, message))
+	require.NoError(t, repo.CompleteTurn(ctx, message.TurnID))
+	message.Metadata = map[string]interface{}{"passive": "updated"}
+	require.NoError(t, repo.UpdateMessage(ctx, message))
+	times, err := repo.GetLastMessageTimeBySessionIDs(ctx, []string{sessionID})
+	require.NoError(t, err)
+	require.True(t, times[sessionID].After(old), "positive control: transcript metadata really refreshed MAX(updated_at)")
 }
 
 // @covers AC-EXECUTORS-IDLE-PARKING-001.11
