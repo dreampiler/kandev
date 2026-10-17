@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "통합 요약",
   "integratedControl.views.providers": "공급자 / 모델",
   "integratedControl.views.workspaces": "Workspace 현황",
-  "integratedControl.workspaces": "접근 가능한 workspace"
+  "integratedControl.workspaces": "접근 가능한 workspace",
+  "integratedControl.capacityTitle": "공용 실행 현황",
+  "integratedControl.capacityTotal": "실행 중 / 전체 한도",
+  "integratedControl.capacityWaitCounts": "공용 실행 한도 대기",
+  "integratedControl.capacityCurrent": "현재 실행 진입 현황",
+  "integratedControl.capacityStale": "실행 현황이 오래되었습니다",
+  "integratedControl.capacityUnavailable": "실행 현황을 확인할 수 없습니다",
+  "integratedControl.capacityDisabled": "실행 한도가 꺼져 있습니다",
+  "integratedControl.capacityWaitingTotal": "전체 한도",
+  "integratedControl.capacityWaitingGrade": "등급 한도",
+  "integratedControl.capacityWaitingBoth": "전체 및 등급 한도",
+  "integratedControl.capacityWaitingConfiguration": "설정 필요",
+  "integratedControl.capacityWaitingUnknown": "실행 목록 미확인"
 }

@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "整合摘要",
   "integratedControl.views.providers": "供應商 / 模型",
   "integratedControl.views.workspaces": "工作區",
-  "integratedControl.workspaces": "可存取的工作區"
+  "integratedControl.workspaces": "可存取的工作區",
+  "integratedControl.capacityTitle": "共用執行狀況",
+  "integratedControl.capacityTotal": "執行中 / 總數上限",
+  "integratedControl.capacityWaitCounts": "等待共用執行容量",
+  "integratedControl.capacityCurrent": "目前執行快照",
+  "integratedControl.capacityStale": "執行快照已過期",
+  "integratedControl.capacityUnavailable": "無法取得執行狀況",
+  "integratedControl.capacityDisabled": "執行限制已關閉",
+  "integratedControl.capacityWaitingTotal": "總數上限",
+  "integratedControl.capacityWaitingGrade": "等級上限",
+  "integratedControl.capacityWaitingBoth": "總數和等級上限",
+  "integratedControl.capacityWaitingConfiguration": "需要設定",
+  "integratedControl.capacityWaitingUnknown": "執行清單未知"
 }

@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "統合概要",
   "integratedControl.views.providers": "プロバイダー / モデル",
   "integratedControl.views.workspaces": "ワークスペース",
-  "integratedControl.workspaces": "アクセス可能なワークスペース"
+  "integratedControl.workspaces": "アクセス可能なワークスペース",
+  "integratedControl.capacityTitle": "共有実行状況",
+  "integratedControl.capacityTotal": "実行中 / 全体上限",
+  "integratedControl.capacityWaitCounts": "共有実行上限の待機",
+  "integratedControl.capacityCurrent": "現在の実行状況",
+  "integratedControl.capacityStale": "実行状況が古くなっています",
+  "integratedControl.capacityUnavailable": "実行状況を確認できません",
+  "integratedControl.capacityDisabled": "実行上限は無効です",
+  "integratedControl.capacityWaitingTotal": "全体上限",
+  "integratedControl.capacityWaitingGrade": "等級上限",
+  "integratedControl.capacityWaitingBoth": "全体と等級の上限",
+  "integratedControl.capacityWaitingConfiguration": "設定が必要",
+  "integratedControl.capacityWaitingUnknown": "実行一覧が不明"
 }

@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "Resumo",
   "integratedControl.views.providers": "Fornecedor / modelo",
   "integratedControl.views.workspaces": "Espaços de trabalho",
-  "integratedControl.workspaces": "Espaços de trabalho acessíveis"
+  "integratedControl.workspaces": "Espaços de trabalho acessíveis",
+  "integratedControl.capacityTitle": "Capacidade de execução partilhada",
+  "integratedControl.capacityTotal": "Execuções em uso / limite total",
+  "integratedControl.capacityWaitCounts": "À espera de capacidade partilhada",
+  "integratedControl.capacityCurrent": "Estado atual da admissão",
+  "integratedControl.capacityStale": "O estado da admissão está desatualizado",
+  "integratedControl.capacityUnavailable": "A observação da capacidade está indisponível",
+  "integratedControl.capacityDisabled": "Os limites de execução estão desativados",
+  "integratedControl.capacityWaitingTotal": "Limite total",
+  "integratedControl.capacityWaitingGrade": "Limite da categoria",
+  "integratedControl.capacityWaitingBoth": "Ambos os limites",
+  "integratedControl.capacityWaitingConfiguration": "Requer configuração",
+  "integratedControl.capacityWaitingUnknown": "Inventário desconhecido"
 }

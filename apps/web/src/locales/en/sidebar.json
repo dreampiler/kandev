@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "Overview",
   "integratedControl.views.providers": "Provider / model",
   "integratedControl.views.workspaces": "Workspaces",
-  "integratedControl.workspaces": "Available workspaces"
+  "integratedControl.workspaces": "Available workspaces",
+  "integratedControl.capacityTitle": "Shared execution capacity",
+  "integratedControl.capacityTotal": "Executions in use / total limit",
+  "integratedControl.capacityWaitCounts": "Waiting for shared capacity",
+  "integratedControl.capacityCurrent": "Current admission snapshot",
+  "integratedControl.capacityStale": "Admission snapshot is stale",
+  "integratedControl.capacityUnavailable": "Execution capacity observation is unavailable",
+  "integratedControl.capacityDisabled": "Execution limits are disabled",
+  "integratedControl.capacityWaitingTotal": "Total limit",
+  "integratedControl.capacityWaitingGrade": "Grade limit",
+  "integratedControl.capacityWaitingBoth": "Both limits",
+  "integratedControl.capacityWaitingConfiguration": "Needs configuration",
+  "integratedControl.capacityWaitingUnknown": "Inventory unknown"
 }

@@ -220,6 +220,11 @@ func (c *sessionCeilingController) observation(ctx context.Context) (SessionCeil
 // capacityObservationLocked projects the exact population used for admission.
 // Counts are unavailable together when the shared inventory cannot be proved.
 func (c *sessionCeilingController) capacityObservationLocked(ctx context.Context) (SessionCeilingObservation, error) {
+	observation, _, err := c.capacitySnapshotLocked(ctx)
+	return observation, err
+}
+
+func (c *sessionCeilingController) capacitySnapshotLocked(ctx context.Context) (SessionCeilingObservation, gradedPopulation, error) {
 	observation := SessionCeilingObservation{Limit: c.ceiling, Policy: c.policy}
 	if observation.Policy == "" {
 		observation.Policy = sessioncapacity.PolicyAutomatic
@@ -235,14 +240,14 @@ func (c *sessionCeilingController) capacityObservationLocked(ctx context.Context
 		if err == nil {
 			observation.InUse, observation.GradeInUse = population.total, population.grades
 		}
-		return observation, err
+		return observation, population, err
 	}
 	counted, err := c.countedRowsLocked(ctx)
 	observation.Known = err == nil
 	if err == nil {
 		observation.InUse = c.populationLocked(counted)
 	}
-	return observation, err
+	return observation, gradedPopulation{counted: counted}, err
 }
 
 // CurrentSessionCeilingObservation exposes the controller's current bounded

@@ -1,3 +1,4 @@
+import { ControlCapacitySnapshot } from "./control-capacity-snapshot";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 import Link from "@/components/routing/app-link";
@@ -112,16 +113,19 @@ function ControlOverview({
       : unknown;
   }
   return (
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
-      <Fact label={t("sidebar:integratedControl.unarchivedTasks")} value={taskTotal ?? unknown} />
-      <Fact
-        label={t("sidebar:integratedControl.independentConversations")}
-        value={independentCount ?? unknown}
-      />
-      <Fact label={t("sidebar:integratedControl.coordinators")} value={coordinatorCount} />
-      <Fact label={t("sidebar:integratedControl.currentConversations")} value={currentCount} />
-    </div>
+    <>
+      <ControlCapacitySnapshot observation={data.capacity} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
+        <Fact label={t("sidebar:integratedControl.unarchivedTasks")} value={taskTotal ?? unknown} />
+        <Fact
+          label={t("sidebar:integratedControl.independentConversations")}
+          value={independentCount ?? unknown}
+        />
+        <Fact label={t("sidebar:integratedControl.coordinators")} value={coordinatorCount} />
+        <Fact label={t("sidebar:integratedControl.currentConversations")} value={currentCount} />
+      </div>
+    </>
   );
 }
 

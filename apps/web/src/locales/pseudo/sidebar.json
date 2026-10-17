@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "[!! Overview !!]",
   "integratedControl.views.providers": "[!! Provider / model !!]",
   "integratedControl.views.workspaces": "[!! Workspaces !!]",
-  "integratedControl.workspaces": "[!! Available workspaces !!]"
+  "integratedControl.workspaces": "[!! Available workspaces !!]",
+  "integratedControl.capacityTitle": "[!! Shåréd éxécutîön cåpåcîty !!]",
+  "integratedControl.capacityTotal": "[!! Exécutîöns în usé / tötål lîmît !!]",
+  "integratedControl.capacityWaitCounts": "[!! Wåîtîng för shåréd cåpåcîty !!]",
+  "integratedControl.capacityCurrent": "[!! Currént ådmîssîön snåpshöt !!]",
+  "integratedControl.capacityStale": "[!! Admîssîön snåpshöt îs stålé !!]",
+  "integratedControl.capacityUnavailable": "[!! Exécutîön cåpåcîty öbsérvåtîön îs unåvåîlåblé !!]",
+  "integratedControl.capacityDisabled": "[!! Exécutîön lîmîts åré dîsåbléd !!]",
+  "integratedControl.capacityWaitingTotal": "[!! Tötål lîmît !!]",
+  "integratedControl.capacityWaitingGrade": "[!! Grådé lîmît !!]",
+  "integratedControl.capacityWaitingBoth": "[!! Böth lîmîts !!]",
+  "integratedControl.capacityWaitingConfiguration": "[!! Nééds cönfîguråtîön !!]",
+  "integratedControl.capacityWaitingUnknown": "[!! Invéntöry unknöwn !!]"
 }

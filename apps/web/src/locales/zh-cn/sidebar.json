@@ -176,5 +176,17 @@
   "integratedControl.views.overview": "综合概览",
   "integratedControl.views.providers": "提供商 / 模型",
   "integratedControl.views.workspaces": "工作区",
-  "integratedControl.workspaces": "可访问的工作区"
+  "integratedControl.workspaces": "可访问的工作区",
+  "integratedControl.capacityTitle": "共享执行状况",
+  "integratedControl.capacityTotal": "执行中 / 总数上限",
+  "integratedControl.capacityWaitCounts": "等待共享执行容量",
+  "integratedControl.capacityCurrent": "当前执行快照",
+  "integratedControl.capacityStale": "执行快照已过期",
+  "integratedControl.capacityUnavailable": "无法获取执行状况",
+  "integratedControl.capacityDisabled": "执行限制已关闭",
+  "integratedControl.capacityWaitingTotal": "总数上限",
+  "integratedControl.capacityWaitingGrade": "等级上限",
+  "integratedControl.capacityWaitingBoth": "总数和等级上限",
+  "integratedControl.capacityWaitingConfiguration": "需要配置",
+  "integratedControl.capacityWaitingUnknown": "执行清单未知"
 }

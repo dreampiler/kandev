@@ -35,10 +35,11 @@ func (s *Service) SetExecutionCapacity(effective sessioncapacity.Effective) {
 }
 
 type gradedPopulation struct {
-	counted          map[string]struct{}
-	grades           map[string]int
-	total, grade     int
-	unknown, missing bool
+	inferenceBindings map[string]sessioncapacity.InferenceBinding
+	counted           map[string]struct{}
+	grades            map[string]int
+	total, grade      int
+	unknown, missing  bool
 }
 
 func (c *sessionCeilingController) readGradedPopulationLocked(ctx context.Context, grade string) (gradedPopulation, error) {

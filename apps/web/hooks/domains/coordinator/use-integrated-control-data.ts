@@ -1,3 +1,5 @@
+import { fetchSessionCapacityObservation } from "@/lib/api/domains/session-capacity-api";
+import type { SessionCapacityObservation } from "@/lib/types/system";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkspaces } from "@/hooks/journey-metadata-resources";
@@ -16,6 +18,7 @@ import {
 export type ControlWorkspace = WorkspaceState["items"][number];
 export type ControlCoordinatorList = { items: Coordinator[]; error: boolean };
 type Snapshot = {
+  capacity?: SessionCapacityObservation;
   identity: string;
   owner: object;
   workspaces: ControlWorkspace[];
@@ -69,14 +72,8 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         .map(mapWorkspaceItem)
         .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
       store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
-      const [byWorkspace, conversationsByWorkspace] = await Promise.all([
-        coordinatorEnabled
-          ? readCoordinatorLists(workspaces, controller.signal)
-          : Promise.resolve({}),
-        readControlConversationLists(workspaces, controller.signal),
-      ]);
-      if (current())
-        setSnapshot({ identity, owner, workspaces, byWorkspace, conversationsByWorkspace });
+      const details = await readControlDetails(workspaces, coordinatorEnabled, controller.signal);
+      if (current()) setSnapshot({ identity, owner, workspaces, ...details });
     } catch {
       if (current()) {
         setSnapshot(undefined);
@@ -112,4 +109,17 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const data =
     enabled && snapshot?.identity === identity && snapshot.owner === owner ? snapshot : undefined;
   return { data, loading, error, refresh };
+}
+
+async function readControlDetails(
+  workspaces: ControlWorkspace[],
+  coordinatorEnabled: boolean,
+  signal: AbortSignal,
+) {
+  const [byWorkspace, conversationsByWorkspace, capacity] = await Promise.all([
+    coordinatorEnabled ? readCoordinatorLists(workspaces, signal) : Promise.resolve({}),
+    readControlConversationLists(workspaces, signal),
+    fetchSessionCapacityObservation({ init: { signal } }).catch(() => undefined),
+  ]);
+  return { byWorkspace, conversationsByWorkspace, capacity };
 }

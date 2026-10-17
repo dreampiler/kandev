@@ -50,6 +50,7 @@ func (c *sessionCeilingController) appendInferenceGradesLocked(ctx context.Conte
 	if err != nil {
 		return err
 	}
+	p.inferenceBindings = bindings
 	for key, binding := range bindings {
 		p.counted[key] = struct{}{}
 		c.observeGradeLocked(p, binding.Grade, binding.GradeKnown, grade)
