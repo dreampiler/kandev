@@ -1882,6 +1882,7 @@ func (sm *SessionManager) recordSteerActivity(execution *AgentExecution, prompt 
 	}
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	execution.lastLiveActivityAt = execution.lastActivityAt
 	execution.lastActivityAtMu.Unlock()
 }
 

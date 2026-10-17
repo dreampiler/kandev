@@ -866,6 +866,7 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 			execution.setRecoveredActivityAtLocked(event.RecoveredActivityAt)
 		} else {
 			execution.lastActivityAt = time.Now()
+			execution.lastLiveActivityAt = execution.lastActivityAt
 		}
 		if isProviderDiagnostic {
 			execution.providerDiagnosticCandidate = true

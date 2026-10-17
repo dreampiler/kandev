@@ -433,7 +433,7 @@ func (s *Service) logWorkspaceIdleScan(summary idleParkingScanSummary) {
 				fields = append(fields, zap.Int("skip_"+string(reason), count))
 			}
 		}
-		s.logger.Info("workspace ACP idle suspension scan skipped candidates", fields...)
+		s.logger.Debug("workspace ACP idle suspension scan skipped candidates", fields...)
 	}
 	if summary.suspended > 0 || summary.failed > 0 || summary.recovered > 0 {
 		s.logger.Info("workspace ACP idle suspension scan completed",

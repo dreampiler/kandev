@@ -382,6 +382,9 @@ type AgentExecution struct {
 	// so a never-started prompt cannot be kept alive by traffic that carries
 	// no evidence of a turn.
 	lastActivityAt time.Time
+	// lastLiveActivityAt belongs to this backend process. Unknown replay may
+	// discard restored history but cannot discard activity observed here.
+	lastLiveActivityAt time.Time
 	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
 	// true by the first genuine agent event (recordActivity/handleCompleteEvent)
 	// that follows. It lets the stall watchdog distinguish "the agent never
@@ -701,6 +704,7 @@ func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bo
 func (e *AgentExecution) armPromptActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = false
 	e.providerDiagnosticCandidate = false
 	e.providerDiagnosticText = ""
@@ -711,6 +715,7 @@ func (e *AgentExecution) armPromptActivity() {
 func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = true
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
@@ -743,11 +748,12 @@ func (e *AgentExecution) restoreIdleActivity(metadata map[string]interface{}) {
 	e.lastActivityAtMu.Unlock()
 }
 
-// Unknown replay time cannot establish when a turn settled. Start a full
-// interval at observation rather than trusting passive persistence timestamps.
+// Unknown replay time discards uncertain restored history while preserving
+// observations made by this backend. Without live activity, the idle owner
+// starts a full interval at the first settled observation.
 func (e *AgentExecution) setRecoveredActivityAtLocked(at *time.Time) {
 	if at == nil || at.IsZero() || at.After(time.Now()) {
-		e.lastActivityAt = time.Time{}
+		e.lastActivityAt = e.lastLiveActivityAt
 		return
 	}
 	if at.After(e.lastActivityAt) {
@@ -758,6 +764,7 @@ func (e *AgentExecution) setRecoveredActivityAtLocked(at *time.Time) {
 func (e *AgentExecution) markLifecycleActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
