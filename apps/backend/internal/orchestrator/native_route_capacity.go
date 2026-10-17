@@ -76,7 +76,7 @@ func (s *Service) ReserveNativeRouteCapacity(ctx context.Context, route NativeIn
 }
 
 func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context, route NativeInferenceRoute) (bool, string, error) {
-	req := admissionRequest{sessionID: route.ID, taskID: route.TaskID, profileID: route.LogicalProfileID, origin: launchOriginAutomatic}
+	req := admissionRequest{sessionID: route.ID, taskID: route.TaskID, profileID: route.LogicalProfileID, origin: launchOriginAutomatic, seam: "nativeRoute"}
 	held := c.reservations[route.ID]
 	if held != nil {
 		if held.nativeOwner == nil || *held.nativeOwner != route {
@@ -90,6 +90,11 @@ func (c *sessionCeilingController) reserveNativeRouteLocked(ctx context.Context,
 		if err != nil {
 			return false, ceilingReasonUnknownPopulation, err
 		}
+	}
+	var priorityErr error
+	req, priorityErr = c.prepareQueuedTaskCapacityLocked(ctx, req)
+	if priorityErr != nil {
+		return false, ceilingReasonUnknownPopulation, priorityErr
 	}
 	decision, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 	if decision.reasonCode != "" {

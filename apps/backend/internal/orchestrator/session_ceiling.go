@@ -82,6 +82,7 @@ type ceilingReservation struct {
 	sessionID   string
 	takenAt     time.Time
 	nativeOwner *NativeInferenceRoute
+	queuedTask  *queuedTaskCapacityOwner
 }
 
 // admissionRequest is one launch asking for capacity.
@@ -93,6 +94,7 @@ type admissionRequest struct {
 	grade           string
 	gradeKnown      bool
 	gradeHeld       bool
+	queuedGrantKey  string
 	taskID          string
 	sessionID       string
 	origin          launchOrigin
@@ -147,6 +149,8 @@ type sessionCeilingController struct {
 	logger       *zap.Logger
 	now          func() time.Time
 	newKey       func() string
+	queuedTasks  func(context.Context) ([]queuedTaskCapacityCandidate, error)
+	queuedWake   func()
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -363,10 +367,10 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 
 func (c *sessionCeilingController) admitLocked(ctx context.Context, req admissionRequest, origin launchOrigin) admissionDecision {
 	req.origin = origin
-	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, false)
 	}
+	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.ceiling == unlimitedSessionCeiling {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}
@@ -599,10 +603,10 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.policy == sessioncapacity.PolicyAll {
 		return c.admitAllLocked(ctx, req, true)
 	}
+	req = c.resolveAdmissionGradeLocked(ctx, req)
 	if c.ceiling == unlimitedSessionCeiling {
 		return c.persistAdmissionGradeLocked(ctx, req, c.admitUnlimitedLocked(req, origin))
 	}

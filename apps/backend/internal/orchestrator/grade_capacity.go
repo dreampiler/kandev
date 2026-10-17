@@ -92,9 +92,20 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 }
 
 func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
+	var err error
+	req, err = c.prepareQueuedTaskCapacityLocked(ctx, req)
+	if err != nil {
+		return admissionDecision{ceiling: c.ceiling, reasonCode: ceilingReasonUnknownPopulation}
+	}
+	if req.seam != officeRunCapacitySeam {
+		req = c.resolveAdmissionGradeLocked(ctx, req)
+	}
 	d, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
 	if d.reasonCode != "" {
 		return d
+	}
+	if queued, ok := c.consumeQueuedTaskCapacityLocked(ctx, req, p); ok {
+		return queued
 	}
 	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
 		return selected
