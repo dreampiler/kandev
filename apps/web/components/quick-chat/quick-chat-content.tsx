@@ -32,6 +32,8 @@ import type { QuickChatInitialPrompt } from "@/lib/state/slices/ui/types";
 
 type QuickChatContentProps = {
   sessionId: string;
+  loadSettings?: boolean;
+  readOnly?: boolean;
   minimalToolbar?: boolean;
   placeholderOverride?: string;
   initialPrompt?: QuickChatInitialPrompt;
@@ -90,10 +92,14 @@ function useQuickChatComposerPriming({
   useQuickChatInitialDraft({ draft: initialDraft, initialPrompt, chatInputRef });
 }
 
-function useQuickChatState(sessionId: string, transformOutgoing?: (message: string) => string) {
+function useQuickChatState(
+  sessionId: string,
+  transformOutgoing?: (message: string) => string,
+  loadSettings = true,
+) {
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
 
-  useSettingsData(true);
+  useSettingsData(loadSettings);
   const panelState = useChatPanelState({
     sessionId,
     onOpenFile: undefined,
@@ -120,6 +126,31 @@ function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContaine
   }, [chatInputRef]);
 }
 
+function QuickChatTranscript({
+  panelState,
+  items,
+}: {
+  panelState: ReturnType<typeof useChatPanelState>;
+  items: ReturnType<typeof useVisibleItems>;
+}) {
+  return (
+    <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
+      <MessageList
+        items={items}
+        messages={panelState.allMessages}
+        permissionsByToolCallId={panelState.permissionsByToolCallId}
+        childrenByParentToolCallId={panelState.childrenByParentToolCallId}
+        taskId={panelState.taskId ?? undefined}
+        sessionId={panelState.resolvedSessionId}
+        messagesLoading={panelState.messagesLoading}
+        isWorking={panelState.isWorking}
+        sessionState={panelState.session?.state}
+        worktreePath={getSessionWorkspacePath(panelState.session)}
+      />
+    </div>
+  );
+}
+
 export const QuickChatContent = memo(function QuickChatContent({
   sessionId,
   minimalToolbar,
@@ -130,10 +161,12 @@ export const QuickChatContent = memo(function QuickChatContent({
   transformOutgoing,
   hideStartupRows,
   activityDisplay = false,
+  loadSettings,
+  readOnly = false,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
-  const state = useQuickChatState(sessionId, transformOutgoing);
+  const state = useQuickChatState(sessionId, transformOutgoing, loadSettings);
   const { chatInputRef, panelState, isSending, handleSubmit, handleCancelTurn } = state;
   const { taskId, pendingClarification, pendingClarificationGroup } = panelState;
   const lateAnswer = useLateClarificationMessage(pendingClarificationGroup?.[0]);
@@ -148,6 +181,7 @@ export const QuickChatContent = memo(function QuickChatContent({
     initialPrompt,
     initialDraft,
     blocked:
+      readOnly ||
       !panelState.session ||
       panelState.inputMode === "unavailable" ||
       (panelState.inputMode === "queue" && (!panelState.isQueueReady || panelState.isLoading)) ||
@@ -162,6 +196,7 @@ export const QuickChatContent = memo(function QuickChatContent({
     (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
     [],
   );
+  if (readOnly) return <QuickChatTranscript panelState={panelState} items={items} />;
   return (
     <div
       ref={shortcutScopeRef}
@@ -177,21 +212,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         pendingClarification={pendingClarification}
         onCancel={handleCancelTurn}
       />
-      <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
-        <MessageList
-          items={items}
-          messages={panelState.allMessages}
-          permissionsByToolCallId={panelState.permissionsByToolCallId}
-          childrenByParentToolCallId={panelState.childrenByParentToolCallId}
-          taskId={taskId ?? undefined}
-          sessionId={panelState.resolvedSessionId}
-          messagesLoading={panelState.messagesLoading}
-          isWorking={panelState.isWorking}
-          sessionState={panelState.session?.state}
-          worktreePath={getSessionWorkspacePath(panelState.session)}
-          onOpenFile={undefined}
-        />
-      </div>
+      <QuickChatTranscript panelState={panelState} items={items} />
       <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}

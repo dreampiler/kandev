@@ -34,6 +34,10 @@ function useIsQuickChatPassthrough(sessionId: string) {
 
 type QuickChatSessionViewProps = {
   session: QuickChatSession;
+  /** Skip proactive settings/capability discovery for an existing-session read surface. */
+  loadSettings?: boolean;
+  /** Existing archived-history consumer only; ordinary task surfaces keep their actions. */
+  readOnly?: boolean;
   onInitialPromptAttempted?: () => void;
   /** Default `true`. `false` maps to `useSessionResumption`'s
    *  `skipAutomaticRecovery`, so the check-and-resume and remote-status
@@ -122,6 +126,8 @@ function ActiveQuickChatSessionView({
   session,
   onInitialPromptAttempted,
   automaticRecovery = true,
+  loadSettings,
+  readOnly = false,
   hideSessionSelectors,
   taskArchiveState: taskArchiveStateProp,
   initialDraft,
@@ -168,32 +174,35 @@ function ActiveQuickChatSessionView({
       }
     />
   );
-  const sessionContent = isPassthrough ? (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {recoveryFeedback}
-      <div className="min-h-0 flex-1">
-        <PassthroughTerminal key={session.sessionId} sessionId={session.sessionId} mode="agent" />
+  const sessionContent =
+    isPassthrough && !readOnly ? (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {recoveryFeedback}
+        <div className="min-h-0 flex-1">
+          <PassthroughTerminal key={session.sessionId} sessionId={session.sessionId} mode="agent" />
+        </div>
       </div>
-    </div>
-  ) : (
-    <div className="flex min-h-0 flex-1 flex-col">
+    ) : (
       <div className="flex min-h-0 flex-1 flex-col">
-        <QuickChatContent
-          sessionId={session.sessionId}
-          minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
-          placeholderOverride={
-            session.kind === "config" ? t("chat:configChatPlaceholder") : undefined
-          }
-          initialPrompt={session.initialPrompt}
-          onInitialPromptAttempted={onInitialPromptAttempted}
-          initialDraft={initialDraft}
-          transformOutgoing={transformOutgoing}
-          hideStartupRows={hideStartupRows}
-          activityDisplay={activityDisplay}
-        />
+        <div className="flex min-h-0 flex-1 flex-col">
+          <QuickChatContent
+            loadSettings={loadSettings}
+            readOnly={readOnly}
+            sessionId={session.sessionId}
+            minimalToolbar={resolveMinimalToolbar(hideSessionSelectors, session.kind)}
+            placeholderOverride={
+              session.kind === "config" ? t("chat:configChatPlaceholder") : undefined
+            }
+            initialPrompt={session.initialPrompt}
+            onInitialPromptAttempted={onInitialPromptAttempted}
+            initialDraft={initialDraft}
+            transformOutgoing={transformOutgoing}
+            hideStartupRows={hideStartupRows}
+            activityDisplay={activityDisplay}
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
 
   if (!taskId) return sessionContent;
   const launchErrorValue = {
@@ -205,7 +214,7 @@ function ActiveQuickChatSessionView({
   return (
     <TaskLaunchErrorProvider value={launchErrorValue}>
       <div className="flex min-h-0 flex-1 flex-col">
-        <TaskSharedError />
+        {!readOnly && <TaskSharedError />}
         {sessionContent}
       </div>
     </TaskLaunchErrorProvider>
