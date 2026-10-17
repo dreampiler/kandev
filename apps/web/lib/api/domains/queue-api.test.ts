@@ -115,6 +115,22 @@ describe("bounded queue mutation admission", () => {
     });
   });
 
+  const mutationOperations = operations.filter(
+    ({ action }) =>
+      !["message.queue.add", "message.queue.auto_run.set", "message.queue.remove"].includes(action),
+  );
+  it.each(mutationOperations)(
+    "$action retains non-admission wire error details",
+    async ({ invoke }) => {
+      const original = new WebSocketRequestError("Invalid mutation", "VALIDATION_ERROR", {
+        field: "content",
+      });
+      const request = vi.fn().mockRejectedValue(original);
+      getWebSocketClientMock.mockReturnValue({ request });
+      await expect(invoke()).rejects.toBe(original);
+    },
+  );
+
   it.each(operations)(
     "$action waits for the server admission budget",
     async ({ action, invoke }) => {
@@ -432,12 +448,17 @@ describe("queued message edit leases", () => {
       lease_generation: 2,
     });
     await expect(endQueuedMessageEdit(lease)).resolves.toBeUndefined();
-    expect(request).toHaveBeenNthCalledWith(1, "message.queue.edit.begin", {
-      session_id: "session-1",
-      entry_id: "q-1",
-    });
-    expect(request).toHaveBeenNthCalledWith(2, "message.queue.edit.renew", lease);
-    expect(request).toHaveBeenNthCalledWith(3, "message.queue.edit.end", lease);
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "message.queue.edit.begin",
+      {
+        session_id: "session-1",
+        entry_id: "q-1",
+      },
+      35_000,
+    );
+    expect(request).toHaveBeenNthCalledWith(2, "message.queue.edit.renew", lease, 35_000);
+    expect(request).toHaveBeenNthCalledWith(3, "message.queue.edit.end", lease, 35_000);
   });
   it("requests a policy-preserving drain after a successful save", async () => {
     const request = vi.fn().mockResolvedValue(undefined);
