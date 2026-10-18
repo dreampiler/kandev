@@ -330,6 +330,14 @@ binding removal and retained-token ACK retain their existing order. This changes
 no SQL schema and adds no background poller; backend and agentctl must be updated
 together for the new gated inventory path.
 
+Upgrade compatibility also covers the old `unproven` phase when historical
+continuity is false and the retained attempt map contains no entries. The
+exclusive journal, matching session/incarnation/generation and owner CAS remain
+required. This transfers no attempt or reservation and leaves historical
+continuity false. New process admission durably marks even legacy owners active;
+active predecessors, any retained attempt entry, unknown children, identity
+conflicts and storage failures do not qualify for this compatibility case.
+
 `deferred_launch` is updated with a read-compare-write retry loop. The ceiling
 keys share the task record with other launch intents and are removed as a group
 after replay or a terminal drop. A prompt edit preserves unrelated keys and
@@ -363,6 +371,45 @@ restart.
 Log applied capacity and its source on initialization and successful changes.
 Reuse existing observation and queue-status projection paths. Never log full
 environment dumps or launch payloads for a settings change.
+
+### Correlated execution boundaries
+
+The existing structured log sinks carry an `execution flow` envelope at actual
+boundaries. Request acceptance, asynchronous dispatch, executor preparation,
+process start, session restore, turn persistence, first message segment, tool
+start, durable delivery receipt, terminal settlement, and reservation release
+are distinct outcomes. A received request is not evidence of a model call or
+useful work. A completed turn is not evidence that its task is complete.
+
+The envelope joins request/correlation, task, session, attempt, turn, execution,
+message, submission, stream/sequence, profile, workflow/step/entry and reservation
+identities when those identities exist at that boundary. Route, harness and
+prompt generations have separate fields. The backend boot ID is the same one
+reported by system info; agentctl events join to that boot through execution ID.
+Paired operations record elapsed milliseconds. Admission records known/unknown
+population, overall and grade limits, and the concrete waiting reason.
+
+Success transitions are not sampled. A first message segment uses the existing
+append marker, not a new unbounded deduplication map. Token/reasoning appends and
+status polls do not produce flow events. Capacity wait logging occurs when its
+reason changes. Existing bounded asynchronous sinks and rotation remain in use;
+sink loss counters remain authoritative if storage cannot keep up.
+
+No prompt, response, command, path, environment, arbitrary metadata or raw error
+is part of the envelope. Identifier fields are bounded to 192 ASCII identifier
+characters. The agentctl relay accepts only the typed envelope on the fixed flow
+message, caps its encoded input at 8 KiB, and discards unknown properties. Other
+child log fields continue to be excluded. Startup refusal names the owner-claim,
+identity, revision, storage or activation-persistence boundary rather than using
+`generic_launch_failure` as a root cause.
+
+These logs prove native receipt and execution boundaries. They do not infer the
+semantic relevance of an agent's output or a separate desktop conversation's
+queue behavior; those require the corresponding official conversation records.
+Operational acceptance still requires a real same-session first tool, useful
+output, completion, settled/released capacity and a subsequent assignment after
+installation. Isolated fixtures do not establish installed recovery or sustained
+operation near the configured overall and grade limits.
 
 ## Related decisions
 

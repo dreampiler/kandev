@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -104,7 +105,10 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 	}
 }
 
-func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
+func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) (decision admissionDecision) {
+	var observed *gradedPopulation
+	var gradeLimit int
+	defer func() { c.logGradedAdmissionFlow(ctx, req, decision, observed, gradeLimit) }()
 	var err error
 	req, err = c.prepareQueuedTaskCapacityLocked(ctx, req)
 	if err != nil {
@@ -115,6 +119,7 @@ func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admis
 		req = c.resolveAdmissionGradeLocked(ctx, req)
 	}
 	d, p, maximum := c.inspectAllAdmissionLocked(ctx, req)
+	observed, gradeLimit = &p, maximum
 	if d.reasonCode != "" {
 		return d
 	}
@@ -192,4 +197,15 @@ func (c *sessionCeilingController) existingGradedAdmissionLocked(req admissionRe
 func (c *sessionCeilingController) requestedGradeLimitLocked(req admissionRequest) (int, bool) {
 	maximum, configured := c.gradeLimits[req.grade]
 	return maximum, c.ceiling >= 1 && (!req.gradeKnown || (req.grade != "" && configured))
+}
+
+func (c *sessionCeilingController) logGradedAdmissionFlow(ctx context.Context, req admissionRequest, d admissionDecision, p *gradedPopulation, maximum int) {
+	e := logger.ExecutionFlow{Stage: "admission", Outcome: "waiting", Reason: d.reasonCode, TaskID: req.taskID, SessionID: req.sessionID, ProfileID: req.profileID, StepID: req.workflowStepID, Grade: req.grade, ReservationID: d.reservationKey, Limit: &d.ceiling, PopulationKnown: &d.populationKnown}
+	if d.admitted {
+		e.Outcome = "admitted"
+	}
+	if p != nil && d.populationKnown {
+		e.Population, e.GradePopulation, e.GradeLimit = &p.total, &p.grade, &maximum
+	}
+	logger.EmitExecutionFlow(c.logger, ctx, e)
 }

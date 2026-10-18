@@ -1765,6 +1765,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	reservation *queuedDispatchReservation,
 ) {
 	promptCtx := context.Background() // Use a fresh context for async execution
+	s.logQueuedDispatchFlow(promptCtx, queuedMsg, queuedMsg.SessionID, "started")
 	reservedSessionID := queuedMsg.SessionID
 	allowFollowupDrain := true
 	if reservation == nil {
@@ -2129,6 +2130,11 @@ func (s *Service) finishQueuedMessageExecution(
 	lifecyclePrompt, userMessageRecorded, deliveryAttempted bool,
 	err error,
 ) {
+	outcome := "returned"
+	if err != nil {
+		outcome = agentEventFailed
+	}
+	s.logQueuedDispatchFlow(ctx, queuedMsg, reservedSessionID, outcome)
 	exactReservation := reservation != nil && reservation.identity.SessionIncarnationID != ""
 	if deliveryAttempted && err != nil {
 		if exactReservation {

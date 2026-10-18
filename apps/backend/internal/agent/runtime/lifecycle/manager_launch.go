@@ -1837,10 +1837,11 @@ func (m *Manager) publishExecutionPrepareCompleted(execution *AgentExecution, re
 //
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
-func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (launched *AgentExecution, launchResultErr error) {
 	if req == nil {
 		return nil, errors.New("launch request is required")
 	}
+	defer m.beginLaunchFlow(ctx, req, &launched, &launchResultErr)()
 	if err := m.validateManagedToolPolicyAdmission(ctx, req); err != nil {
 		return nil, err
 	}
@@ -1857,24 +1858,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 	}
 	if req.SessionID == "" {
-		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
-		if err != nil {
-			return nil, err
-		}
-		transferredActivity := false
-		defer func() {
-			if !transferredActivity {
-				activityLease.Release()
-			}
-		}()
-		activityLease.SetKind(activity.KindExecutionPreparing)
-		execution, launchErr := m.launchInternal(ctx, req)
-		if launchErr == nil && req.StartAgent {
-			m.markAgentStartPending(execution)
-			m.trackActivity(executionActivityKey(execution.ID), activityLease)
-			transferredActivity = true
-		}
-		return execution, launchErr
+		return m.launchWithoutSession(ctx, req)
 	}
 	value, err := m.coalesceSessionLaunch(ctx, req)
 	if err != nil {

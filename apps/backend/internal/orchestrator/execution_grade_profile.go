@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -81,6 +82,15 @@ func (s *Service) resolveExplicitWorkflowStartRoute(
 	} else if recordedSession != nil {
 		session, route = recordedSession, recordedRoute
 	}
+	flow := logger.ExecutionFlow{Stage: "workflow_selection", Outcome: "selected", TaskID: taskID, StepID: stepID, EntryID: entryIdentity, ProfileID: profileID}
+	if session != nil {
+		flow.SessionID = session.ID
+		flow.RouteGeneration = uint64(session.RouteGeneration)
+	}
+	if previewTask != nil {
+		flow.WorkflowID = previewTask.WorkflowID
+	}
+	s.logger.Flow(ctx, flow)
 	return session, profileID, route, nil
 }
 

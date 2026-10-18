@@ -386,7 +386,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
-	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessage)
+	dispatcher.RegisterFunc(ws.ActionMessageAdd, h.wsAddMessageWithFlow)
 	dispatcher.RegisterFunc(ws.ActionMessageDismissGitPushError, h.wsDismissGitPushErrorMessage)
 	dispatcher.RegisterFunc(ws.ActionMessageList, h.wsListMessages)
 	dispatcher.RegisterFunc(ws.ActionMessageSearch, h.wsSearchMessages)
@@ -688,6 +688,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// before checking the live session state or running turn-start hooks so a
 	// retry is a read, not a second prompt.
 	if response, handled := h.addMessageReplayResponse(ctx, msg, req, requestFingerprint); handled {
+		h.logger.Flow(ctx, logger.ExecutionFlow{Stage: "request", Outcome: "replayed", TaskID: req.TaskID, SessionID: req.TaskSessionID, MessageID: req.ClientMessageID})
 		return response, nil
 	}
 	admissionCtx := ctx
@@ -1664,6 +1665,7 @@ func (h *MessageHandlers) dispatchPromptAsync(
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
+		h.logger.Flow(promptCtx, logger.ExecutionFlow{Stage: "dispatch", Outcome: "submitted", TaskID: taskID, SessionID: sessionID, ProfileID: agentProfileID, MessageID: req.ClientMessageID, SubmissionID: req.deliverySubmissionID, Model: model})
 		if req.initialTaskBriefDispatchPending {
 			if coordinator, ok := h.orchestrator.(initialTaskBriefDispatchCoordinator); ok {
 				defer coordinator.CompleteInitialTaskBriefDispatch(promptCtx, taskID, sessionID)
