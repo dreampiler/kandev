@@ -16,13 +16,14 @@ vi.mock("@/lib/api/domains/gitlab-api", () => ({ mergeMR }));
 import { MRMergeButton } from "./mr-merge-button";
 
 const MERGE_BUTTON_TESTID = "mr-merge-button";
+const PROJECT_PATH = "group/project";
 
 function makeMR(overrides: Partial<TaskMR> = {}): TaskMR {
   return {
     id: "id",
     task_id: "task-1",
     host: "https://gitlab.com",
-    project_path: "group/project",
+    project_path: PROJECT_PATH,
     mr_iid: 7,
     mr_url: "",
     mr_title: "Test MR",
@@ -85,7 +86,7 @@ describe("MRMergeButton", () => {
     fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
     await vi.waitFor(() =>
       expect(mergeMR).toHaveBeenCalledWith(
-        expect.objectContaining({ workspaceId: "beta", project: "group/project", iid: 7 }),
+        expect.objectContaining({ workspaceId: "beta", project: PROJECT_PATH, iid: 7 }),
       ),
     );
   });
@@ -115,13 +116,13 @@ describe("MRMergeButton", () => {
 
   it("calls mergeMR with the MR's identity on click", async () => {
     mergeMR.mockResolvedValue({});
-    const mr = readyMR({ project_path: "group/project", mr_iid: 42, host: "https://gitlab.com" });
+    const mr = readyMR({ project_path: PROJECT_PATH, mr_iid: 42, host: "https://gitlab.com" });
     renderButton(mr);
     fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
     await vi.waitFor(() => expect(mergeMR).toHaveBeenCalledTimes(1));
     expect(mergeMR).toHaveBeenCalledWith({
       workspaceId: "ws-1",
-      project: "group/project",
+      project: PROJECT_PATH,
       iid: 42,
       host: "https://gitlab.com",
       squash: false,
