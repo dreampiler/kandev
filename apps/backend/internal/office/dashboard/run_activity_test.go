@@ -37,7 +37,6 @@ func createTaskSessionsTable(t *testing.T, deps *testDeps) {
 		CREATE TABLE IF NOT EXISTS task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
-			agent_execution_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			state TEXT NOT NULL DEFAULT 'CREATED',
 			started_at TIMESTAMP NOT NULL,
@@ -355,7 +354,7 @@ func TestLiveRuns_StatusMapping(t *testing.T) {
 	}
 	statusBySession := map[string]string{}
 	for _, r := range runs {
-		// Note: agentId in this test setup will be the agent_execution_id from session (empty string default)
+		// Note: agentId in this test setup will be the agent_profile_id from session (empty string default)
 		// We key by taskId instead.
 		taskID, _ := r["taskId"].(string)
 		status, _ := r["status"].(string)
