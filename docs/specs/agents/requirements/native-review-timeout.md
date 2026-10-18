@@ -23,7 +23,10 @@ worker. Abandoned-run recovery is a separate change.
 - **AC-AGENTS-NATIVE-REVIEW-TIMEOUT-001.2:** A typed child request deadline with a
   live parent follows the existing transient failure policy. Parent cancellation
   or deadline stops execution before host fallback or another candidate. Partial
-  output is never replayed through a successor.
+  output is never replayed through a successor. Implementation status: incomplete.
+  Unconfirmed request deadlines currently stop automatic fallback; fulfilling
+  child-timeout recovery requires future exact child-termination proof from its
+  native owner. A live parent or empty transport response is insufficient.
 - **AC-AGENTS-NATIVE-REVIEW-TIMEOUT-001.3:** Candidate exhaustion records the
   existing run as failed through its existing detached failure-write context.
   A storage error is surfaced rather than reported as a terminal write success.

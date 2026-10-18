@@ -38,11 +38,12 @@ func nativeReviewRoute(t *testing.T, retry bool, options ...dynamic.EngineOption
 	t.Helper()
 	_, profiles, tasks := openTasklessDynamicRepo(t)
 	ctx := context.Background()
-	provider, err := profiles.GetAgent(ctx, "concrete-agent")
+	require.NoError(t, profiles.CreateAgent(ctx, &settings.Agent{ID: "claude-row", Name: "claude-acp"}))
+	candidate, err := profiles.GetAgentProfile(ctx, "concrete-profile")
 	require.NoError(t, err)
-	provider.Name = "claude-acp"
-	require.NoError(t, profiles.UpdateAgent(ctx, provider))
-	require.NoError(t, profiles.CreateAgentProfile(ctx, &settings.AgentProfile{ID: "candidate-b", AgentID: "concrete-agent", Name: "Second", Model: "second", Enabled: true}))
+	candidate.AgentID = "claude-row"
+	require.NoError(t, profiles.UpdateAgentProfile(ctx, candidate))
+	require.NoError(t, profiles.CreateAgentProfile(ctx, &settings.AgentProfile{ID: "candidate-b", AgentID: "claude-row", Name: "Second", Model: "second", Enabled: true}))
 	repo := profiles.(settingsstore.DynamicProfileRepository)
 	policy := routingpolicy.DefaultDocument()
 	if retry {
@@ -62,6 +63,7 @@ func nativeReviewIdentity(t *testing.T, resolver *agentruntime.ProfileExecutionR
 	identity, err := review.NewResolver(reviewProfileLookup{profiles: profiles, execution: resolver}, nil, nil).Resolve(context.Background(), "profile-dynamic")
 	require.NoError(t, err)
 	require.NotNil(t, identity.Route)
+	require.Equal(t, "claude-acp", identity.Route.AgentID)
 	return identity
 }
 

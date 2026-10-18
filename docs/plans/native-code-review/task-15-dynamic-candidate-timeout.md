@@ -77,7 +77,14 @@ No contributor code, dependency install, compiler or test runs on the review hos
 
 ## Results
 
-Hosted verification is pending. Exact source, attempts, raw logs, artifacts and
-review dispositions are retained in the external PR delivery evidence. Historical
-contributor disposable-probe timings are not acceptance evidence. No live-provider
-or installed-runtime timeout recovery acceptance is claimed.
+The first hosted proof failed before its mutation phase: pointer-receiver fixture
+errors prevented review-package compilation; provider catalogue mismatches stopped
+synthetic routing and pending-policy cases; an unrelated whole-package sweep hit
+its 120-second test budget. That attempt earns no mutation RED or GREEN credit.
+Corrected focused proofs select all new routing/handler/runner regressions and
+unchanged controls without increasing budgets. Full unmodified CI owns the complete
+packages and platform matrix. Exact source-bound results, attempts, raw logs,
+artifacts and review dispositions live in the external PR delivery evidence and
+PR validation record. Historical contributor disposable-probe timings are not
+acceptance evidence. No live-provider or installed-runtime timeout recovery
+acceptance is claimed.
