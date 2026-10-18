@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -121,7 +122,7 @@ func TestNativeReviewAdapterStopsPartialDeadlineCapacityAndParent(t *testing.T) 
 					return nil, context.Canceled
 				}
 			}}
-			_, err := (reviewInference{session: session, profiles: resolver}).Run(ctx, identity, "session", "prompt")
+			_, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(ctx, identity, "session", "prompt")
 			require.Error(t, err)
 			require.Equal(t, 1, calls)
 			after, _ := engine.State(identity.Route.SessionID)
@@ -245,4 +246,12 @@ func TestNativeReviewPendingRouteCarriesExactResumeIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "candidate-b", successor.ExecutionProfileID)
 	require.Equal(t, route.Generation+1, successor.Generation)
+}
+
+func TestNativeReviewAdapterHostFallbackReachable(t *testing.T) {
+	cause := errors.New("session execution unavailable")
+	session := &reviewRouteSession{run: func(context.Context, string, string) (*utility.PromptResponse, error) { return nil, cause }}
+	_, err := (reviewInference{session: session, host: &hostutility.Manager{}}).Run(context.Background(), review.ReviewerIdentity{ProfileID: "concrete"}, "session", "prompt")
+	require.EqualError(t, err, "utility profile resolver is not configured")
+	require.NotErrorIs(t, err, cause)
 }
