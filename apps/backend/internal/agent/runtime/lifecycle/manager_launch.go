@@ -1405,7 +1405,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	// sharing one task environment must have separate files. A session remains
 	// the stable owner across agentctl replacement; the environment fallback is
 	// only for callers that do not provide a session identity.
-	journalOwnerID := reqWithWorktree.SessionID
+	journalOwnerID := launchInventorySessionID(reqWithWorktree)
 	if journalOwnerID == "" {
 		journalOwnerID = reqWithWorktree.TaskEnvironmentID
 	}
