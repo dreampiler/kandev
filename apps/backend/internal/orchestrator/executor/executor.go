@@ -523,6 +523,8 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
+	// ResumePassthrough selects conversation resume independently of runtime ownership.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
@@ -1107,15 +1109,17 @@ type CoordinatorLookup interface {
 
 // Executor manages agent execution for tasks
 type Executor struct {
-	agentManager      AgentManagerClient
-	attachmentReader  AttachmentReader
-	repo              executorStore
-	secretStore       secrets.SecretStore
-	shellPrefs        ShellPreferenceProvider
-	capabilities      ExecutorTypeCapabilities
-	gitlabCredentials GitLabCredentialResolver
-	logger            *logger.Logger
-	canvasesEnabled   bool
+	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
+	executorAdmission         func(context.Context, string, string, string) (context.Context, error)
+	agentManager              AgentManagerClient
+	attachmentReader          AttachmentReader
+	repo                      executorStore
+	secretStore               secrets.SecretStore
+	shellPrefs                ShellPreferenceProvider
+	capabilities              ExecutorTypeCapabilities
+	gitlabCredentials         GitLabCredentialResolver
+	logger                    *logger.Logger
+	canvasesEnabled           bool
 
 	// coordinators resolves a coordinator conversation task to its
 	// coordinator and reports profile readiness, for the fail-closed

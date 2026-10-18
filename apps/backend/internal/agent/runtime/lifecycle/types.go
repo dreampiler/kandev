@@ -252,9 +252,13 @@ type AgentExecution struct {
 	// passthroughLifecycleMu serializes process replacement paths. A workflow
 	// context reset and a delayed exit auto-restart must not both replace the
 	// same PTY, or the execution can point at the wrong process.
-	passthroughLifecycleMu sync.Mutex
-	PassthroughProcessID   string    // Process ID in the interactive runner (empty if not in passthrough mode)
-	PassthroughStartedAt   time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
+	remotePassthroughMu       sync.Mutex
+	remotePassthroughRecordMu sync.Mutex
+	remotePassthrough         remotePassthroughState
+	sshApprovedEnvKeys        []string
+	passthroughLifecycleMu    sync.Mutex
+	PassthroughProcessID      string    // Process ID in the interactive runner (empty if not in passthrough mode)
+	PassthroughStartedAt      time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
 	// passthroughInitialPromptProcessID identifies the fresh PTY process that
 	// still needs its initial task prompt through stdin.
 	passthroughInitialPromptProcessID string
@@ -378,6 +382,9 @@ type AgentExecution struct {
 	// so a never-started prompt cannot be kept alive by traffic that carries
 	// no evidence of a turn.
 	lastActivityAt time.Time
+	// lastLiveActivityAt belongs to this backend process. Unknown replay may
+	// discard restored history but cannot discard activity observed here.
+	lastLiveActivityAt time.Time
 	// agentEventSincePrompt is armed (false) on each prompt dispatch and set
 	// true by the first genuine agent event (recordActivity/handleCompleteEvent)
 	// that follows. It lets the stall watchdog distinguish "the agent never
@@ -697,6 +704,7 @@ func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bo
 func (e *AgentExecution) armPromptActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = false
 	e.providerDiagnosticCandidate = false
 	e.providerDiagnosticText = ""
@@ -707,14 +715,56 @@ func (e *AgentExecution) armPromptActivity() {
 func (e *AgentExecution) markAgentActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.agentEventSincePrompt = true
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
 
+// markRecoveredAgentActivity records output and advances the activity epoch
+// using the retained observation time, never the time of replay.
+func (e *AgentExecution) markRecoveredAgentActivity(at *time.Time) {
+	e.lastActivityAtMu.Lock()
+	e.setRecoveredActivityAtLocked(at)
+	e.agentEventSincePrompt = true
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+const idleActivityMetadataKey = "idle_activity"
+
+func (e *AgentExecution) restoreIdleActivity(metadata map[string]interface{}) {
+	snapshot, ok := metadata[idleActivityMetadataKey].(map[string]interface{})
+	if !ok || getMetadataString(snapshot, "execution_id") != e.ID {
+		return
+	}
+	at, err := time.Parse(time.RFC3339Nano, getMetadataString(snapshot, "activity_at"))
+	if err != nil || at.IsZero() || at.After(time.Now()) {
+		return
+	}
+	e.lastActivityAtMu.Lock()
+	e.lastActivityAt = at
+	e.promptActivityEpoch++
+	e.lastActivityAtMu.Unlock()
+}
+
+// Unknown replay time discards uncertain restored history while preserving
+// observations made by this backend. Without live activity, the idle owner
+// starts a full interval at the first settled observation.
+func (e *AgentExecution) setRecoveredActivityAtLocked(at *time.Time) {
+	if at == nil || at.IsZero() || at.After(time.Now()) {
+		e.lastActivityAt = e.lastLiveActivityAt
+		return
+	}
+	if at.After(e.lastActivityAt) {
+		e.lastActivityAt = *at
+	}
+}
+
 func (e *AgentExecution) markLifecycleActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
+	e.lastLiveActivityAt = e.lastActivityAt
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
@@ -1511,6 +1561,8 @@ type RouteOverride struct {
 
 // LaunchRequest contains parameters for launching an agent
 type LaunchRequest struct {
+	// ResumePassthrough preserves provider resume intent after runtime cleanup.
+	ResumePassthrough            bool
 	RequiredNativeConversationID string
 	InterruptedSubmissionID      string
 	InterruptedStreamID          string
