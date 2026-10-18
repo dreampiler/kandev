@@ -738,6 +738,28 @@ func startAgentInfrastructure(
 	// the handler, and the SSR terminal-list routes call CheckTaskAccess /
 	// CheckEnvironmentAccess / CheckTaskEnvironmentAccess in a route guard.
 	wireLifecycleAccessCheckers(lifecycleMgr, services.Task)
+	wireExecutorAdmission(services.Auth, services.Task, lifecycleMgr)
+	if services.GitHub != nil {
+		services.GitHub.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.GitLab != nil {
+		services.GitLab.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Jira != nil {
+		services.Jira.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Linear != nil {
+		services.Linear.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Sentry != nil {
+		services.Sentry.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.AzureDevOps != nil {
+		services.AzureDevOps.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
+	if services.Automation != nil {
+		services.Automation.Service.SetExecutorContext(services.Task.PrepareAutonomousExecutor)
+	}
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
 	// once a real consumer (workflow-engine / cron-driven trigger handlers) exists.
@@ -1794,6 +1816,11 @@ func activateOfficeServices(
 	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
 		log.Error("Failed to register office event subscribers", zap.Error(err))
+		return false
+	}
+
+	if err := services.OfficeSvcs.Scheduler.RegisterTaskCompletionSubscriber(eventBus); err != nil {
+		log.Error("Failed to register office completion subscriber", zap.Error(err))
 		return false
 	}
 
