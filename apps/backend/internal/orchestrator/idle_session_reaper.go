@@ -90,6 +90,7 @@ type idleParkingCandidateKey struct {
 	policyUpdated  int64
 	timeoutMinutes int
 	idleSince      int64
+	focusedAt      int64
 	promptGen      uint64
 	activityEpoch  uint64
 }
@@ -471,7 +472,11 @@ func (s *Service) workspaceIdleCandidate(
 	if !ok {
 		return workspaceIdleCandidate{}, reason, false
 	}
-	return buildWorkspaceIdleCandidate(current, task, workspace, executionID, generation, activityEpoch, lastActivityAt), "", true
+	candidate := buildWorkspaceIdleCandidate(current, task, workspace, executionID, generation, activityEpoch, lastActivityAt)
+	if focusedAt := persistedIdleParkingFocusAt(session, executionID, now); !focusedAt.IsZero() {
+		candidate.key.focusedAt = focusedAt.UnixNano()
+	}
+	return candidate, "", true
 }
 
 func (s *Service) currentWorkspaceIdleExecutor(
@@ -642,6 +647,9 @@ func (s *Service) idleParkingCandidateDue(key idleParkingCandidateKey, now time.
 		}
 		if policyAt := time.Unix(0, key.policyUpdated).UTC(); policyAt.After(started) {
 			started = policyAt
+		}
+		if focusedAt := time.Unix(0, key.focusedAt).UTC(); key.focusedAt != 0 && focusedAt.After(started) {
+			started = focusedAt
 		}
 		if focusedAt := s.idleParkingFocusAt[key.sessionID]; focusedAt.After(started) {
 			started = focusedAt

@@ -60,11 +60,15 @@ func TestIdleActivityDurableReplayUsesJournalTimeWithoutChangingPayload(t *testi
 	old := time.Now().UTC().Add(-time.Hour)
 	payload, err := json.Marshal(agentctl.AgentEvent{Type: "complete"})
 	require.NoError(t, err)
+	repository, database := runOwnerTestRepository(t)
 	client, committed, stream, acknowledged := newIdleActivityJournalPeer(t, journal.Event{
 		SessionID: "session", IncarnationID: "incarnation", HarnessGeneration: 2,
 		StreamID: "stream", Type: "complete", Payload: payload, CreatedAt: old, Terminal: true,
-	})
-	repository, database := runOwnerTestRepository(t)
+	}, repository)
+	status, err := client.GetDeliveryStatus(ctx, "stream")
+	require.NoError(t, err, "positive control: real ACK owner descriptor route is available")
+	require.True(t, status.Durable)
+	require.Equal(t, "incarnation", status.IncarnationID)
 	require.NoError(t, repository.CreateTask(ctx, &models.Task{ID: "task", Title: "Idle replay"}))
 	require.NoError(t, repository.CreateTaskSession(ctx, &models.TaskSession{
 		ID: "session", TaskID: "task", QueueIncarnationID: "incarnation",
@@ -112,7 +116,7 @@ func TestIdleActivityDurableReplayUsesJournalTimeWithoutChangingPayload(t *testi
 	require.Equal(t, 1, effects, "duplicate terminal must not apply twice")
 }
 
-func newIdleActivityJournalPeer(t *testing.T, source journal.Event) (*agentctl.Client, journal.Event, journal.Stream, <-chan uint64) {
+func newIdleActivityJournalPeer(t *testing.T, source journal.Event, repository AgentDeliveryRepository) (*agentctl.Client, journal.Event, journal.Stream, <-chan uint64) {
 	t.Helper()
 	retained := openRetentionLifecycleJournal(t, filepath.Join(t.TempDir(), "idle.bbolt"))
 	committed, err := retained.Append(t.Context(), source)
@@ -121,6 +125,19 @@ func newIdleActivityJournalPeer(t *testing.T, source journal.Event) (*agentctl.C
 	require.NoError(t, err)
 	acknowledged := make(chan uint64, 4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Query().Get("stream_id") != source.StreamID {
+			http.Error(w, "unexpected delivery stream", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Path == "/api/v1/agent/delivery" {
+			descriptor, err := retained.RecoveryDescriptor(r.Context(), source.SessionID, source.IncarnationID, source.HarnessGeneration, source.StreamID)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(descriptor)
+			return
+		}
 		if r.URL.Path == "/api/v1/agent/delivery/stream/ack" {
 			var ack struct {
 				StreamID string `json:"stream_id"`
@@ -128,6 +145,12 @@ func newIdleActivityJournalPeer(t *testing.T, source journal.Event) (*agentctl.C
 			}
 			if err := json.NewDecoder(r.Body).Decode(&ack); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			cursor, err := repository.GetAgentDeliveryCursor(r.Context(), ack.StreamID)
+			if err != nil || cursor == nil || cursor.ProjectedSequence < int64(ack.Sequence) {
+				t.Errorf("ACK preceded SQL projection: cursor=%+v, err=%v", cursor, err)
+				http.Error(w, "ACK preceded SQL projection", http.StatusConflict)
 				return
 			}
 			if err := retained.Acknowledge(r.Context(), ack.StreamID, ack.Sequence); err != nil {
