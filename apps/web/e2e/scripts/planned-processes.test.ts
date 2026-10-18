@@ -16,8 +16,8 @@ afterEach(() => {
 describe("planned runner transform cache ownership", () => {
   it("isolates four concurrent writers and retains their caches until every child closes", async () => {
     const current = fixture(4);
-    const inherited = path.join(current.dir, "ordinary-cache");
-    fs.mkdirSync(inherited);
+    const inherited = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-inherited-transform-"));
+    directories.push(inherited);
     const moduleName = "compiled-module.js";
     fs.writeFileSync(path.join(inherited, moduleName), "ordinary runner");
     vi.stubEnv("PWTEST_CACHE_DIR", inherited);
