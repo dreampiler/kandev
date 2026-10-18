@@ -117,3 +117,9 @@ this backend change does not claim a visible stale badge.
 `UsageService.IsPotentiallyRateLimited` evaluates the preserved real windows,
 but has no current production caller, so scheduler deferral is not implemented
 by this change.
+
+The web `getAgentUtilization` helper currently has no production caller. The
+Office page renders utilization bars only when `agent.utilization` is already
+populated, and the ordinary agent DTO mapping does not populate this field.
+The explicit utilization HTTP endpoint is the concrete transport for this cache
+contract; this change does not claim overview polling or a scheduler rollout.

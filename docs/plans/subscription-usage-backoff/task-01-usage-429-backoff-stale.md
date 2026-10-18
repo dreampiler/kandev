@@ -138,3 +138,10 @@ HTTP failures retain bounded stale fallback. Permanent service-level tests cover
 both paths with healthy first-read controls. Hosted assertion RED against the earlier
 source and corrected GREEN are required delivery evidence. Temporary probes
 reported above are historical and do not substitute for these permanent tests.
+
+The hosted shared-control run exposed a test synchronization error: waiting for
+a synctest bubble to become idle while goroutines contend on a real mutex
+prevents the test from releasing the provider gate. Concurrency regressions now
+use explicit arrival, provider, independent-key, completion, and cancellation
+channels. All result, error-cause, and provider-call-count assertions remain; the
+hosted test timeout is unchanged. Fake time remains in the cache age tests.

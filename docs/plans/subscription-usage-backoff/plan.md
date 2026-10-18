@@ -45,7 +45,8 @@ success marked `Stale` for at most 30 minutes.
 
 ## Changed-path coverage
 
-The work order owns the five `apps/backend/internal/agent/usage/` files above,
+The work order owns the `apps/backend/internal/agent/usage/` files above and
+the permanent regression tests,
 the extended `docs/specs/costs/requirements/subscription-usage.md` acceptance
 criteria, and the new `docs/specs/costs/system-design/subscription-usage.md`
 design. This manifest and its sole sibling order complete the coverage package.
