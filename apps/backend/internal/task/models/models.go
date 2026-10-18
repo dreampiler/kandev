@@ -839,6 +839,10 @@ const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"
 // was in when the turn started. Absent when the task held no step.
 const TurnMetaKeyWorkflowStepIDAtStart = "workflow_step_id_at_start"
 
+// TurnMetaKeyWorkflowStepTransitionIDAtStart identifies the accepted entry
+// observed under the same task lock as the turn's workflow-step stamp.
+const TurnMetaKeyWorkflowStepTransitionIDAtStart = "workflow_step_transition_id_at_start"
+
 // TurnMetaKeyLifecycleOnly marks a turn created only to parent a lifecycle
 // message (for example the agent_boot script_execution message on resume).
 // A lifecycle turn never reflects real agent work and must never be current-
@@ -1844,10 +1848,11 @@ const (
 
 // Workflow represents a task workflow
 type Workflow struct {
-	ID          string `json:"id"`
-	WorkspaceID string `json:"workspace_id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	CreatedByUserID string `json:"-"`
+	ID              string `json:"id"`
+	WorkspaceID     string `json:"workspace_id"`
+	Name            string `json:"name"`
+	Description     string `json:"description"`
 	// Prompt is optional workflow-level agent instructions prepended at
 	// every step entry before the step prompt. Empty means off.
 	Prompt             string  `json:"prompt,omitempty"`
@@ -2373,6 +2378,7 @@ type SessionBranchInfo struct {
 // TaskSession represents a persistent agent execution session for a task.
 // This replaces the in-memory TaskExecution tracking and survives backend restarts.
 type TaskSession struct {
+	ExecutorActorUserID    string                 `json:"-"`
 	ID                     string                 `json:"id"`
 	TaskID                 string                 `json:"task_id"`
 	QueueIncarnationID     string                 `json:"queue_incarnation_id"`
@@ -2873,16 +2879,18 @@ const (
 
 // Executor represents an execution target.
 type Executor struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name"`
-	Type      ExecutorType      `json:"type"`
-	Status    ExecutorStatus    `json:"status"`
-	IsSystem  bool              `json:"is_system"`
-	Resumable bool              `json:"resumable"`
-	Config    map[string]string `json:"config,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
-	DeletedAt *time.Time        `json:"deleted_at,omitempty"`
+	OwnershipIntent *ExecutorOwnershipIntent `json:"-"`
+	OwnerUserID     string                   `json:"owner_user_id,omitempty"`
+	ID              string                   `json:"id"`
+	Name            string                   `json:"name"`
+	Type            ExecutorType             `json:"type"`
+	Status          ExecutorStatus           `json:"status"`
+	IsSystem        bool                     `json:"is_system"`
+	Resumable       bool                     `json:"resumable"`
+	Config          map[string]string        `json:"config,omitempty"`
+	CreatedAt       time.Time                `json:"created_at"`
+	UpdatedAt       time.Time                `json:"updated_at"`
+	DeletedAt       *time.Time               `json:"deleted_at,omitempty"`
 	// Provider is a transient projection populated from the live plugin catalog.
 	Provider *ExecutorProvider `json:"provider,omitempty" db:"-"`
 }
@@ -2944,16 +2952,18 @@ type ProfileEnvVar struct {
 
 // ExecutorProfile represents a named configuration preset for an executor.
 type ExecutorProfile struct {
-	ID            string            `json:"id"`
-	ExecutorID    string            `json:"executor_id"`
-	Name          string            `json:"name"`
-	McpPolicy     string            `json:"mcp_policy,omitempty"`
-	Config        map[string]string `json:"config,omitempty"`
-	PrepareScript string            `json:"prepare_script,omitempty"`
-	CleanupScript string            `json:"cleanup_script,omitempty"`
-	EnvVars       []ProfileEnvVar   `json:"env_vars,omitempty"`
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	OwnershipIntent *ExecutorOwnershipIntent `json:"-"`
+	OwnerUserID     string                   `json:"owner_user_id,omitempty"`
+	ID              string                   `json:"id"`
+	ExecutorID      string                   `json:"executor_id"`
+	Name            string                   `json:"name"`
+	McpPolicy       string                   `json:"mcp_policy,omitempty"`
+	Config          map[string]string        `json:"config,omitempty"`
+	PrepareScript   string                   `json:"prepare_script,omitempty"`
+	CleanupScript   string                   `json:"cleanup_script,omitempty"`
+	EnvVars         []ProfileEnvVar          `json:"env_vars,omitempty"`
+	CreatedAt       time.Time                `json:"created_at"`
+	UpdatedAt       time.Time                `json:"updated_at"`
 }
 
 // EnvironmentKind represents the runtime type for environments.

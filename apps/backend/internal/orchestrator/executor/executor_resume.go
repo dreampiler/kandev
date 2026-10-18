@@ -1270,6 +1270,13 @@ func (e *Executor) ResumeSessionWithOptions(
 	startAgent bool,
 	options ResumeOptions,
 ) (*TaskExecution, error) {
+	if session != nil && e.executorAdmission != nil {
+		var err error
+		ctx, err = e.executorAdmission(ctx, session.ID, session.ExecutorID, session.ExecutorProfileID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if session != nil {
 		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
 	}
@@ -2103,6 +2110,7 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		ResumePassthrough:            startAgent && session.IsPassthrough && !options.ForceContextContinuation,
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
