@@ -26,7 +26,8 @@ authorized workspace/coordinator lists, and existing current conversation reuse.
 4. Resolve existing task/session identities without the conversation POST or
    automatic recovery; reuse the native renderer and session drafts.
 5. Run focused existing flag checks, frontend contracts/type/lint/i18n checks,
-   and temporary rendered navigation probes. Do not add permanent tests.
+   and permanent route, ownership, read-lifetime, lifecycle, and desktop/phone
+   browser regressions. Hosted execution is required for the delivery review.
 
 Work order: [Navigation and current conversation](task-01-navigation-and-current-conversation.md).
 
@@ -39,7 +40,12 @@ remain the existing owners' responsibilities.
 Rollback is the flag's OFF state plus the previous normal workspace navigation;
 no schema/data migration or runtime setting activation is part of this change.
 
-## Verification
+## Historical contributor verification
+
+The results below describe the original contribution and disposable probes, not
+final delivery acceptance. Permanent regressions are being added during PR review;
+all current-head hosted gates and actual browser results remain pending.
+
 
 - Runtime flag registry/profile packages passed. The new identity has no active
   or retired collision, defaults OFF in prod/dev/e2e, and requires restart under

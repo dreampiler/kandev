@@ -27,10 +27,10 @@ from selection; do not clear drafts or change real workspace selection.
 
 Deliver native typed flag wiring, shared desktop/phone navigation, real current
 data, an original-conversation adapter, and actual focused verification results.
-No permanent test files, new pollers, fingerprinting, operation changes, database
-cleanup, agent launches, public writes, or changes to provider/model ordering.
-Temporary probes live outside repository test discovery in the assigned transient
-location and are disposable. Git integration is performed by the parent owner.
+Add permanent regressions for navigation admission, ownership, asynchronous read
+lifetimes, original VCS scope, and desktop/phone user outcomes. Do not add new
+pollers, fingerprinting, database cleanup, navigation-triggered agent launches,
+or changes to provider/model ordering. The delivery reviewer owns integration.
 
 Acceptance: OFF has the legacy picker/sidebar and no integrated requests;
 ON opens five-menu dedicated navigation; selecting a second workspace's existing
@@ -80,7 +80,16 @@ already GREEN). All five cases passed after the fixes (1.41s total); the existin
 locale formatter suite passed all 40 cases (0.995s total). An initial probe read
 an abandoned test render rather than a committed result; its layout-only observer
 was corrected before repeating both baseline and corrected-product executions.
-No standing tests or runtime operations were added. The review request for new
-permanent test files conflicts with this work order's explicit prohibition;
-focused disposable checks are the scoped alternative, not a claim of permanent
-coverage. Public reply/resolution/publication remains with the existing owner.
+No standing tests or runtime operations were added. The disposable probes do not satisfy the permanent-coverage review finding.
+Permanent real-module regressions are now part of this work order. Current-head
+hosted verification and final review disposition remain pending.
+
+## Delivery review regression coverage
+
+Permanent tests now cover route admission, original task/workspace/session context,
+all four task ownership predicates, commit-time ownership changes, authorization
+generations, stale and unmounted reads, scoped PR filtering and WebSocket events,
+unlink/read races, rejected sync refresh, abandoned renders, and inspection-only
+focus/visibility and pending recovery invalidation with explicit retry controls.
+Hosted RED/GREEN results and desktop/phone acceptance are pending; no local
+contributor code, tests, compiler, hooks, or dependency installation was executed.
