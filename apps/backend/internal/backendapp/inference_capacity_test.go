@@ -315,7 +315,7 @@ func (e *rootInferenceEndpoint) SetInferenceConsumer(consumer agentruntime.Infer
 func TestNativeInferenceRootProductionWiringUsesSameAdmissionAndPreservesSettings(t *testing.T) {
 	h := newNativeInferenceHarness(t, 0, true)
 	first, second := &rootInferenceEndpoint{nativeInferenceHarness: h}, &rootInferenceEndpoint{nativeInferenceHarness: h}
-	wireSharedInferenceCapacity(h.capacity, h.raw, first, second)
+	wireSharedInferenceCapacity(h.capacity, h.raw, nil, first, second)
 	if first.consumer == nil || first.consumer != second.consumer {
 		t.Fatal("actual consumers did not share installed owner")
 	}

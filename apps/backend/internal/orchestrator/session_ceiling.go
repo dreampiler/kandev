@@ -154,6 +154,7 @@ type sessionCeilingController struct {
 	reservations      map[string]*ceilingReservation
 	lister            admittedSessionLister
 	logger            *zap.Logger
+	populationLogger  *zap.Logger
 	now               func() time.Time
 	newKey            func() string
 	queuedTasks       func(context.Context) ([]queuedTaskCapacityCandidate, error)
@@ -169,12 +170,13 @@ func newSessionCeilingController(ceiling int, lister admittedSessionLister, logg
 		logger = zap.NewNop()
 	}
 	return &sessionCeilingController{
-		ceiling:      ceiling,
-		reservations: make(map[string]*ceilingReservation),
-		lister:       lister,
-		logger:       logger,
-		now:          time.Now,
-		newKey:       func() string { return "launch-" + uuid.NewString() },
+		ceiling:          ceiling,
+		reservations:     make(map[string]*ceilingReservation),
+		lister:           lister,
+		logger:           logger,
+		populationLogger: newPopulationDiagnosticLogger(logger),
+		now:              time.Now,
+		newKey:           func() string { return "launch-" + uuid.NewString() },
 	}
 }
 
