@@ -30,41 +30,42 @@ terminal-state write did not settle the retained run.
 
 ## Files and verification
 
-`apps/backend/internal/review/runner.go` and `recovery.go` own the change.
-Run `go test ./internal/review -count=1` from `apps/backend` and the changed-file
-Go lint from the repository root. A collector-excluded temporary Go overlay
-uses the existing runner harness to compare native manual/workflow abandonment
-with agent ownership; retain its observed results here without adding a test
-framework or standing collector.
+`apps/backend/internal/review/runner.go` and `recovery.go` own admission and
+cancellation ordering. Permanent coverage lives alongside them:
 
-## Results
+- `recovery_sql_test.go`: manual/workflow pending/running settlement; original
+  history, accounting and finding preservation; multiple retained native rows;
+  agent/unclassified ownership, including an older owner hidden by a native row;
+  workflow-entry redelivery and a distinct new entry.
+- `recovery_test.go`: active-read and settlement errors, nil/nonterminal
+  settlement, inconsistent terminal active rows and errors after settlement.
+  Every stopped admission checks zero inference and uses a successful request
+  after storage recovery to prove claim release.
+- `recovery_ordering_test.go`: a live worker rejoins without duplicate inference;
+  inference leaves settlement and independent task claims available; real
+  ReviewService/SQLite cancellation and settlement preserve the acknowledged
+  terminal state in both write orders. Repository barriers pause the actual
+  service between its reads and SQL write.
 
-The temporary exact-runner proof failed both native cases on the original source
-and passed after classified settlement; the agent-owned case remained unchanged.
-The selected existing active-run, entry-redelivery, concurrency and cancellation
-checks passed. A temporary store reproducing the service's split read/write
-boundary confirmed that cancellation acknowledgement can be overwritten without
-serialization; removing only the new settlement mutex failed that assertion.
-With serialization the same proof passed. The existing review package, scoped
-Go lint, documentation catalog and specification lint passed. An initial
-synctest fixture was interrupted because mutex waits are not durably blocked;
-that fixture result supplies no production failure or passing evidence.
-No live provider, database or installed-runtime acceptance is claimed.
+Run from `apps/backend`:
 
-## Multiple retained runs follow-up
+```sh
+go test -trimpath -tags fts5 -race ./internal/review -count=1 -v
+```
 
-The active lookup returns only the newest pending/running row. A disposable
-actual-runner case reproduced a fresh dispatch while an older native row was
-still running, and another fresh dispatch that bypassed an older agent owner
-(RED, review 0.183s). Recovery now rechecks the active lookup after each confirmed
-native settlement under the existing cancellation mutex. It rejoins any older
-agent/legacy owner, and reports inconsistent terminal active rows instead of
-admitting a duplicate. Existing history and entry identity stay intact.
+Run changed-file Go lint, documentation catalog and specification validation
+from the repository root. Execution for this review is hosted only. Focused
+proofs must show assertion failures for disabled native recovery, newest-only
+settlement and missing cancellation serialization, with unchanged positive
+controls. They are deliberate source mutations, not claims that the final
+source fails. Full final-head backend, frontend and E2E workflows remain
+acceptance gates; a path-filter wrapper is not full-suite evidence.
 
-The existing `apps/backend/internal/review/runner_test.go` fake now excludes its
-terminal pointer from ActiveRun, matching the actual service contract; no new
-standing test was added. Collector-excluded multiple-run, native manual/workflow,
-agent preservation and cancellation-settlement probes passed together under
-race (GREEN, review 1.145s). The full review package with the same overlay also passed under race (1.194s).
-Final normal hooks retain scoped lint responsibility; this does not claim a new
-public head or installed acceptance.
+## Results and evidence
+
+Permanent tests now replace the disposable preparation probes as the standing
+regression contract. Historical package timings, temporary overlays and the
+interrupted synctest fixture are not acceptance evidence for this revision.
+Hosted focused and full-suite results are pending and must be recorded against
+actual source, workflow and attempt identities in the PR delivery receipt.
+No live-provider or installed-runtime acceptance is claimed by these tests.

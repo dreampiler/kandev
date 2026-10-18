@@ -41,3 +41,15 @@ that entry identity can start fresh work.
 AC-AGENTS-NATIVE-CODE-REVIEW-001.14 is satisfied by the task claim, classified
 native settlement, terminal readback and retained entry-ID deduplication. No
 schema, timer, provider retry policy or public command is added.
+
+
+## Permanent verification
+
+The runner's recovery tests exercise the real review service and SQLite
+repository for native settlement, history/finding preservation, multiple active
+rows, external ownership and workflow-entry redelivery. Store-boundary fault
+injection proves read/settlement failures stop inference and release the claim.
+A real repository write barrier covers both cancellation/settlement orders;
+live inference coverage proves rejoin and the separate lock scopes. See the
+[work order](../../../plans/native-code-review/task-14-abandoned-native-admission.md)
+for commands and the hosted acceptance requirements.
