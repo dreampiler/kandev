@@ -1,7 +1,7 @@
 ---
 id: "05-preserve-restart-idle-interval"
 title: "Preserve the idle interval across backend restart"
-status: in_progress
+status: completed
 wave: 5
 depends_on: ["04-resume-safe-idle-reclaim"]
 plan: "plan.md"
@@ -57,4 +57,8 @@ Run on hosted execution only for this review. From `apps/backend`:
 
 The original contribution reported temporary overlay checks and targeted local checks, then removed the overlays. Those historical author reports are not permanent regression coverage or final-head hosted proof. The original work order's instruction to exclude permanent tests has been superseded by current repository and review requirements.
 
-Independent review identified missing permanent coverage, loss of newer live activity on unknown replay, and loss of the explicit-focus floor on backend restart. The scan-level Info advisory is addressed by retaining routine skip summaries at Debug. Current permanent regressions are committed; focused hosted proofs and full final-source gates are pending. No current validation PASS is claimed here until its actual hosted result is available.
+Independent review identified missing permanent coverage, loss of newer live activity on unknown replay, and loss of the explicit-focus floor on backend restart. The scan-level Info advisory is addressed by retaining routine skip summaries at Debug. All 21 new permanent top-level regressions passed on committed application source `b1eb394e8dad2b7a1269734f7647b4b6219c3f2e` in [hosted focused GREEN run 39081986921](https://github.com/kdlbs/kandev/actions/runs/39081986921). The four Go packages ran with `-race`; documentation catalog, specification lint, and public-documentation validation also passed. The tested artifact and source archive are retained with verified content hashes and ZIP CRC.
+
+Hosted RED run 39077958720 established 15 live-activity replay assertion failures with passing controls. Run 39080767441 established the focus-floor assertion failure after a passing live-focus control. Earlier nil-executor, repository-interface, stale-row, missing delivery-owner, and missing ACK-descriptor fixture failures are retained as failed attempts and are not product RED. The completed tests use the real journal owner descriptor and assert SQL projection at the actual ACK boundary.
+
+Full backend, frontend, and E2E verification on the published final head remains a delivery gate. [PR 4510](https://github.com/kdlbs/kandev/pull/4510) records those actual workflow results and the final review dispositions. No contributor code, tests, hooks, or dependency installation ran on the review host.
