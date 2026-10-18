@@ -31,6 +31,7 @@ The Office cost dashboard shows `$0` for every agent running on a subscription p
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.10:** When a usage read is refused with 429, the cache holds the key in backoff for the provider's `Retry-After` hint when present, otherwise an exponential window starting at 15 seconds and capped at 15 minutes, so a refused read is not retried on every poll.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.11:** When a refresh fails while a preserved success is younger than 30 minutes, the cache serves that reading with `ProviderUsage.Stale` set; once the preserved success is at least 30 minutes old, the cache reports the provider error instead.
 - **AC-COSTS-SUBSCRIPTION-USAGE-001.12:** A failed usage refresh never returns a nil reading as success; when no bounded stale reading is available, the cache returns the provider error to the caller.
+- **AC-COSTS-SUBSCRIPTION-USAGE-001.13:** A decoded TeamClaude status response containing no usable accounts remains an error even when the cache holds a recent success. This authoritative no-capacity result takes precedence over stale fallback; ordinary transient provider failures retain the bounded stale policy.
 
 ## Migrated source detail
 

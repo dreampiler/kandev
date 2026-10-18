@@ -16,14 +16,15 @@ Carry the residual upstream port of the subscription usage cache fix: honor a
 provider `Retry-After` hint, apply an exponential backoff to a refused usage
 read, and serve the last known success as explicitly stale for a bounded window
 instead of returning a nil, error pair. One sequential work order covers the
-provider clients, the shared cache, the `ProviderUsage.Stale` field, and the
+provider clients, the shared cache, the `ProviderUsage.Stale` field, the TeamClaude no-capacity exception, and the
 requirement/design pair that owns the contract.
 
 ## Scope
 
 In scope: `apps/backend/internal/agent/usage/client_claude.go`,
 `client_codex.go`, `cache.go`, the new `retry_after.go` status-error helper, and
-the `ProviderUsage.Stale` marker in `types.go`.
+the `ProviderUsage.Stale` marker in `types.go`, and the authoritative
+no-capacity error in `client_teamclaude.go`.
 
 Excluded: the fork-only `usage/errors.go`, Office overview rendering, locale
 copies, web API/DTO plumbing, a new production time seam. The
@@ -53,7 +54,8 @@ design. This manifest and its sole sibling order complete the coverage package.
 
 Permanent regression coverage lives beside the real usage modules in
 `cache_internal_test.go`, `cache_concurrency_internal_test.go`,
-`retry_after_internal_test.go`, and `provider_backoff_internal_test.go`.
+`retry_after_internal_test.go`, `provider_backoff_internal_test.go`, and
+`teamclaude_cache_internal_test.go`.
 It covers parser boundaries, finite retry progression and resets, exact stale
 limits, cancellation, credential-key sharing, per-key coalescing, HTTP status
 propagation, and token-refresh compatibility. Time-sensitive cache cases use

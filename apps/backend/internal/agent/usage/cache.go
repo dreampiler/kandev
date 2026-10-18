@@ -142,6 +142,11 @@ func (c *UsageCache) lookup(key string, maxAge time.Duration) (*ProviderUsage, b
 	if now.Before(e.backoffUntil) {
 		// A negative-cache success stores a nil usage, so only clone a real
 		// reading; otherwise fall through to the cached error.
+		// A decoded pool with no usable accounts is authoritative capacity
+		// evidence; an older reading cannot replace that refusal.
+		if errors.Is(e.err, errNoUsablePoolCapacity) {
+			return nil, true, e.err
+		}
 		if e.usage != nil && !e.successAt.IsZero() && now.Sub(e.successAt) < maxStaleUsageAge {
 			stale := *e.usage
 			stale.Stale = true

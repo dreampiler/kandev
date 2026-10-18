@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-COSTS-SUBSCRIPTION-USAGE-001.10
   - AC-COSTS-SUBSCRIPTION-USAGE-001.11
   - AC-COSTS-SUBSCRIPTION-USAGE-001.12
+  - AC-COSTS-SUBSCRIPTION-USAGE-001.13
 system_design:
   - ../../specs/costs/system-design/subscription-usage.md
 ---
@@ -129,8 +130,11 @@ or threshold change.
 ## Review remediation
 
 Permanent tests now cover the actual cache, public provider FetchUsage methods,
-and service registration and policy boundaries. The source-only review found no
-additional production correction necessary at the original head: its overflow
-and lookup ordering fixes are retained. Hosted assertion RED against the earlier
+and service registration and policy boundaries. The overflow and lookup ordering fixes at the original head are retained.
+The subsequent Codex finding exposed a TeamClaude interaction: authoritative
+empty/all-unavailable pool errors must not become an old low-utilization success.
+A shared error identity now preserves that refusal through the cache; ordinary
+HTTP failures retain bounded stale fallback. Permanent service-level tests cover
+both paths with healthy first-read controls. Hosted assertion RED against the earlier
 source and corrected GREEN are required delivery evidence. Temporary probes
 reported above are historical and do not substitute for these permanent tests.

@@ -64,7 +64,11 @@ Adjacent contracts this design uses but does not own:
 
 ## Failure and recovery
 
-- A preserved success younger than 30 minutes is served as `Stale`, so a caller
+- A decoded TeamClaude pool with no usable accounts carries a shared error
+  identity. During its negative window the cache returns that capacity error
+  before considering stale fallback, preserving the control plane's explicit
+  no-capacity evidence. Ordinary transport or HTTP failures remain degradable.
+- Otherwise, a preserved success younger than 30 minutes is served as `Stale`, so a caller
   keeps a real reading instead of an unactionable error.
 - A preserved success at least 30 minutes old, or no usable (non-nil) preserved
   success, reports the provider error.
