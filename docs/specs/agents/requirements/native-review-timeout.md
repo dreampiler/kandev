@@ -11,7 +11,7 @@ owners: [backend]
 ### REQ-AGENTS-NATIVE-REVIEW-TIMEOUT-001: Recover a failed reviewer candidate in the same run
 
 Reuse the shared dynamic profile resolver and utility execution loop. Preserve
-candidate order, saved failure policies, the existing eight-attempt bound and
+candidate order, saved failure policies, the existing eight-attempt bound per prompt batch and
 timeout values. Do not create another review run, retry ledger or background
 worker. Abandoned-run recovery is a separate change.
 

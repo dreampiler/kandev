@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/review"
@@ -340,7 +341,16 @@ func reviewResponseFinal(response *agentctlutil.PromptResponse, err error) bool 
 }
 
 func reviewSessionErrorFinal(err error, hasHost bool) bool {
-	return err != nil && (!hasHost || agentruntime.IsInferenceCapacityError(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
+	if err == nil {
+		return false
+	}
+	if !hasHost || agentruntime.IsInferenceCapacityError(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Classified provider failures belong to the shared candidate policy.
+	// A host retry of that candidate would bypass its saved retry/skip decision.
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: err.Error()})
+	return failure.FallbackAllowed
 }
 
 func reviewerRoute(execution agentruntime.ProfileExecution) *review.ReviewerRoute {

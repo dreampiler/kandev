@@ -540,7 +540,8 @@ errors today.
 
 Native code review uses the same saved candidate policy for classified provider
 failures and keeps its selected candidate across prompt batches in one review
-run. A review dispatches at most eight requests. Partial output, cancellation,
+run. Each prompt batch permits at most eight candidate dispatch attempts. Partial
+output, cancellation,
 and inference admission refusals stop automatic fallback. A request deadline
 without confirmed child termination also stops the review, even while its parent
 budget remains active; automatic recovery from that deadline is not available.

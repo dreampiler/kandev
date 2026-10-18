@@ -17,7 +17,8 @@ reviewer identity. The review package imports no agent runtime. Batches retain
 the current route instead of selecting again. Successful results retain the
 existing parse/publish/complete pipeline and one review run.
 
-The shared helper owns only the bounded invocation loop. ProfileExecutionResolver
+The shared helper owns only the bounded invocation loop, with at most eight
+candidate dispatch attempts per prompt batch. ProfileExecutionResolver
 and the existing dynamic engine own order, generation fences, failure policy and
 retry/reset deadlines. A due pending decision is resumed through the existing
 ResumePendingRoute method; a caller-context timer waits for that deadline without

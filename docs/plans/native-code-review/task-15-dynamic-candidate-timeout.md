@@ -26,10 +26,12 @@ and its independent task claim and cancellation settlement boundaries.
 
 ## Delivered scope and remaining acceptance
 
-Classified provider failures follow saved policy, including bounded pending
+Classified provider failures reach saved policy before same-candidate host
+fallback, including bounded pending
 retry waits. Partial output, parent cancellation and typed capacity refusals stop
 before another candidate or a host bypass. Every dispatched failure reaches its
-policy, including the eighth; the bound permits no ninth dispatch or extra wait.
+policy, including the eighth attempt in each prompt batch. That batch permits no
+ninth dispatch or extra wait.
 Server-read task, session and review-run relationships reach inference alongside
 logical and concrete profile identity. The existing detached ten-second terminal
 failure writer preserves both execution and storage errors.
@@ -55,6 +57,9 @@ error boundaries remain.
   dynamic engine over isolated SQLite profile storage, native adapter and runner,
   route retention across batches, stale generation fencing, pending-route resume
   identity, server-verified task/session/run relationships and stop conditions.
+- `internal/utility/handlers/routing_identity_test.go`: registered HTTP session
+  and host paths retain the server-created call identity through fallback and
+  persist the selected concrete profile. Browser-supplied identities are ignored.
 - `internal/review/routing_contract_test.go`: bound blank-model versus explicit
   validation, real ReviewService/SQLite terminal failure, detached write context,
   and joined execution/storage causes.

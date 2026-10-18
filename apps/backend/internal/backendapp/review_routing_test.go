@@ -255,3 +255,21 @@ func TestNativeReviewAdapterHostFallbackReachable(t *testing.T) {
 	require.EqualError(t, err, "utility profile resolver is not configured")
 	require.NotErrorIs(t, err, cause)
 }
+
+func TestNativeReviewClassifiedSessionErrorUsesPolicyBeforeHostFallback(t *testing.T) {
+	resolver, _, profiles, _ := nativeReviewRoute(t, false)
+	identity := nativeReviewIdentity(t, resolver, profiles)
+	var calls []string
+	session := &reviewRouteSession{run: func(_ context.Context, id, prompt string) (*utility.PromptResponse, error) {
+		calls = append(calls, id)
+		if id == "concrete-profile" {
+			return nil, errors.New("rate limit exceeded")
+		}
+		return &utility.PromptResponse{Success: true, Response: `{"findings":[]}`}, nil
+	}}
+	result, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(context.Background(), identity, "session", "prompt")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
+	require.Equal(t, "candidate-b", identity.Route.ExecutionProfileID)
+}
