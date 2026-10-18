@@ -69,7 +69,7 @@ afterEach(cleanup);
 it("renders the original Azure link without replacing another workspace's cache", async () => {
   const view = mount();
   const ordinary = store.getState().azureDevOpsTaskPullRequests;
-  await waitFor(() => expect(view.getByRole("link")).toHaveAttribute("href", pr.pullRequestUrl));
+  await waitFor(() => expect(view.getByRole("link").getAttribute("href")).toBe(pr.pullRequestUrl));
   expect(api.list.mock.calls[0][0]).toBe("beta");
   expect(store.getState().azureDevOpsTaskPullRequests).toBe(ordinary);
   expect(store.getState().workspaces.activeId).toBe("alpha");
@@ -77,7 +77,7 @@ it("renders the original Azure link without replacing another workspace's cache"
 
 it("does not reuse an embedded Azure response across authorization generations", async () => {
   const view = mount();
-  await waitFor(() => expect(view.getByRole("link")).toBeInTheDocument());
+  await waitFor(() => expect(view.queryByRole("link")).not.toBeNull());
   const pending = Promise.withResolvers<{
     taskPrs: Record<string, AzureDevOpsTaskPullRequest[]>;
   }>();
@@ -119,7 +119,7 @@ it("refreshes a stale embedded association in its original workspace only", asyn
   const view = mount();
   const ordinary = store.getState().azureDevOpsTaskPullRequests;
   await waitFor(() =>
-    expect(view.getByRole("link")).toHaveAttribute("href", pr.pullRequestUrl.replace("42", "43")),
+    expect(view.getByRole("link").getAttribute("href")).toBe(pr.pullRequestUrl.replace("42", "43")),
   );
   expect(api.sync).toHaveBeenCalledWith(
     "beta",

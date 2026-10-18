@@ -74,7 +74,7 @@ it("never commits the original renderer under an unverified new workspace claimi
   expect(boundary.rendererCommits).toEqual([]);
   await act(async () => pending.resolve(task));
   expect(boundary.rendererCommits).toEqual([]);
-  expect(view.getByRole("alert")).toHaveTextContent(
+  expect(view.getByRole("alert").textContent).toBe(
     "This conversation is unavailable or no longer accessible.",
   );
 });

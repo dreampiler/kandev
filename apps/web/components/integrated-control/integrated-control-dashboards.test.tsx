@@ -19,13 +19,11 @@ beforeEach(() => {
   api.workspaces
     .mockReset()
     .mockResolvedValue({ workspaces: [{ id: "beta", name: "Beta", scopes: ["workspace.read"] }] });
-  api.coordinators
-    .mockReset()
-    .mockResolvedValue({
-      coordinators: [
-        { id: "coordinator", workspace_id: "beta", name: "Coordinator", updated_at: updated },
-      ],
-    });
+  api.coordinators.mockReset().mockResolvedValue({
+    coordinators: [
+      { id: "coordinator", workspace_id: "beta", name: "Coordinator", updated_at: updated },
+    ],
+  });
 });
 afterEach(async () => {
   cleanup();
@@ -51,10 +49,10 @@ it("renders the activity timestamp with the active locale and preserves its mach
     new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
       new Date(updated),
     );
-  expect(view.container.querySelector("time")).toHaveAttribute("datetime", updated);
-  expect(view.container.querySelector("time")).toHaveTextContent(expected("pt-PT"));
+  expect(view.container.querySelector("time")?.getAttribute("datetime")).toBe(updated);
+  expect(view.container.querySelector("time")?.textContent).toBe(expected("pt-PT"));
   await act(async () => {
     await activateLocale("ja");
   });
-  expect(view.container.querySelector("time")).toHaveTextContent(expected("ja"));
+  expect(view.container.querySelector("time")?.textContent).toBe(expected("ja"));
 });

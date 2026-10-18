@@ -23,6 +23,9 @@ const session = {
   task_id: "task",
   state: "WAITING_FOR_INPUT",
   is_primary: true,
+  active_subagent_count: 0,
+  foreground_activity: null,
+  supports_steering: false,
 } as TaskSession;
 function wrapper({ children }: { children: ReactNode }) {
   return <StateProvider>{children}</StateProvider>;

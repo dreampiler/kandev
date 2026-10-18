@@ -98,7 +98,7 @@ describe("MRMergeButton", () => {
         </TaskWorkspaceProvider>
       </ToastProvider>,
     );
-    expect(screen.getByTestId(MERGE_BUTTON_TESTID)).toBeDisabled();
+    expect((screen.getByTestId(MERGE_BUTTON_TESTID) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByTestId(MERGE_BUTTON_TESTID));
     expect(mergeMR).not.toHaveBeenCalled();
   });

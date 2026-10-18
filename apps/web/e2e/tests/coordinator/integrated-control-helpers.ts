@@ -122,7 +122,7 @@ function observe(page: Page) {
       expect(writes).toEqual([]);
       expect(
         gateway.filter((frame) =>
-          /session\.launch|task\.prepare|task\.resume|session\.resume|agent\.capabilities|session\.prompt/.test(
+          /session\.(launch|ensure|fork|recover|restore|resume|prompt)|task\.(prepare|resume|start)|agent\.capabilities/.test(
             frame.action ?? "",
           ),
         ),
