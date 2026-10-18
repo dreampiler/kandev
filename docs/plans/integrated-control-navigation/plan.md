@@ -43,9 +43,11 @@ no schema/data migration or runtime setting activation is part of this change.
 ## Historical contributor verification
 
 The results below describe the original contribution and disposable probes, not
-final delivery acceptance. Permanent regressions are being added during PR review;
-all current-head hosted gates and actual browser results remain pending.
-
+final delivery acceptance. Permanent route, hook, store/context, lifecycle, component
+and desktop/phone browser regressions have been added during PR review. Ownership,
+Azure cache isolation, unlink races and phone navigation corrections are covered
+by those real-module tests; all current-head hosted gates and actual browser
+results remain pending.
 
 - Runtime flag registry/profile packages passed. The new identity has no active
   or retired collision, defaults OFF in prod/dev/e2e, and requires restart under

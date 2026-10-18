@@ -93,3 +93,16 @@ unlink/read races, rejected sync refresh, abandoned renders, and inspection-only
 focus/visibility and pending recovery invalidation with explicit retry controls.
 Hosted RED/GREEN results and desktop/phone acceptance are pending; no local
 contributor code, tests, compiler, hooks, or dependency installation was executed.
+
+The delivery correction also keeps Azure embedded reads and the route's workspace
+collection local, invalidates retained callbacks after unmount, and masks task
+ownership across workspace/coordinator/authentication changes before commit.
+Permanent component tests exercise the native renderer boundary and Azure link
+with the real context/store, and existing merge-button tests verify explicit
+GitHub/GitLab actions use the original workspace. The flag test covers all three
+profile defaults and restart metadata; activity rendering checks locale changes.
+Permanent desktop and phone browser cases cover opt-in entry, all five destinations,
+the original second-workspace conversation, draft/runtime selection, visible failure
+states, no execution, global selection/cache preservation, and phone hit targets,
+containment, scroll ownership, dismissal and back navigation. These cases have
+been authored; actual hosted results remain pending.

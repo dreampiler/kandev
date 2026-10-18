@@ -162,7 +162,7 @@ function CoordinatorFacts({ view, rows }: { view: ControlView; rows: FactRows })
           )}
           {coordinator.conversation_task_id ? (
             <Link
-              className="inline-flex min-h-7 cursor-pointer items-center gap-2 rounded text-sm underline underline-offset-4 [@media(pointer:coarse)]:min-h-11"
+              className="inline-flex min-h-7 cursor-pointer items-center gap-2 rounded text-sm underline underline-offset-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
               href={controlHref(view, workspace.id, coordinator.id)}
             >
               {t("sidebar:integratedControl.currentConversation")}

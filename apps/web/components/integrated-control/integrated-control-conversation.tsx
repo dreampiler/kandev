@@ -80,12 +80,12 @@ function ExistingConversation({
         <span className="break-all">
           {t("sidebar:integratedControl.task")}: {taskId}
         </span>
-        <label className="ml-auto flex items-center gap-2">
+        <label className="ml-auto flex min-w-0 max-w-full items-center gap-2">
           {t("sidebar:integratedControl.runtimeSession")}
           <select
             value={session.id}
             onChange={(event) => control?.selectSession(taskId, event.target.value)}
-            className="max-w-64 rounded border bg-background p-1 [@media(pointer:coarse)]:min-h-11"
+            className="min-w-0 max-w-64 rounded border bg-background p-1 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           >
             {result.sessions.map((item) => (
               <option key={item.id} value={item.id}>

@@ -138,7 +138,11 @@ export function AppNavSheet(props: AppNavSheetProps) {
 
 function AppNavigationMode({ close, children }: { close: () => void; children: ReactNode }) {
   const control = useIntegratedControl();
-  return control?.active ? <IntegratedControlNavigation onNavigate={close} /> : children;
+  return control?.active ? (
+    <IntegratedControlNavigation scrollable={false} onNavigate={close} />
+  ) : (
+    children
+  );
 }
 
 function NavigationMetrics({ open }: { open: boolean }) {

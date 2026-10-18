@@ -1030,6 +1030,15 @@ describe("useSessionResumption skipAutomaticRecovery", () => {
       10000,
     );
   });
+});
+
+describe("inspection recovery lifecycle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockConnectionStatus = "connected";
+    mockPreventAutoStart = false;
+    mockSessionItems = { s1: { started_at: STARTED_AT } };
+  });
 
   it.each(["focus", "visibilitychange"])(
     "inspection suppresses automatic %s recovery even when idle resume is allowed",

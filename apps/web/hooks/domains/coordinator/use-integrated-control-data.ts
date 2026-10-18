@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkspaces } from "@/hooks/journey-metadata-resources";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -45,13 +45,28 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const request = useRef<AbortController | null>(null);
+  const committedOwner = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committedOwner.current = owner;
+    return () => {
+      committedOwner.current = null;
+      request.current?.abort();
+    };
+  }, [owner]);
   const refresh = useCallback(async () => {
-    if (!enabled) return;
+    if (
+      !enabled ||
+      committedOwner.current !== owner ||
+      stateReadScopeIdentity(store.getState()) !== identity
+    )
+      return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
     const current = () =>
-      !controller.signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+      !controller.signal.aborted &&
+      committedOwner.current === owner &&
+      stateReadScopeIdentity(store.getState()) === identity;
     setLoading(true);
     setError(false);
     try {
@@ -63,7 +78,6 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
       const workspaces = result.workspaces
         .map(mapWorkspaceItem)
         .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
-      store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
       const byWorkspace = coordinatorEnabled
         ? await readCoordinatorLists(workspaces, controller.signal)
         : {};

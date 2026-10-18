@@ -27,3 +27,7 @@ export function useTaskWorkspaceId(taskId: string | null): string | null {
   if (owner) return owner.taskId === taskId ? owner.workspaceId : null;
   return activeWorkspaceId;
 }
+
+export function useEmbeddedTaskWorkspace(): TaskWorkspace | null {
+  return useContext(Context);
+}

@@ -120,6 +120,9 @@ describe("embedded original-task PR associations", () => {
     await act(async () => pending.resolve(response([pr])));
     expect(result.current.prs).toEqual([]);
   });
+});
+
+describe("embedded PR mutations and refresh", () => {
   it("does not resurrect an association from a WS read started during unlink", async () => {
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));
@@ -179,6 +182,9 @@ describe("embedded original-task PR associations", () => {
     expect(api.unlink).not.toHaveBeenCalled();
     expect([...api.handlers.values()].every((callbacks) => callbacks.size === 0)).toBe(true);
   });
+});
+
+describe("retired embedded PR read ownership", () => {
   it("does not read retired identity after a pending sync resolves", async () => {
     const { result } = mount();
     await waitFor(() => expect(result.current.loaded).toBe(true));

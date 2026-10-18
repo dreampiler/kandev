@@ -18,9 +18,11 @@ const icons = [IconLayoutDashboard, IconActivity, IconBuilding, IconTopologyStar
 
 export function IntegratedControlNavigation({
   collapsed = false,
+  scrollable = true,
   onNavigate,
 }: {
   collapsed?: boolean;
+  scrollable?: boolean;
   onNavigate?: () => void;
 }) {
   const { t } = useTranslation();
@@ -29,7 +31,10 @@ export function IntegratedControlNavigation({
   if (!control?.active) return null;
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2"
+      className={cn(
+        "flex min-h-0 flex-col gap-3 p-2",
+        scrollable ? "flex-1 overflow-y-auto" : "flex-none",
+      )}
       data-testid="integrated-control-navigation"
     >
       <div className="flex flex-col gap-1">
@@ -45,7 +50,7 @@ export function IntegratedControlNavigation({
               aria-current={view === item ? "page" : undefined}
               onNavigated={onNavigate}
               className={cn(
-                "flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11",
+                "flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
                 view === item ? "bg-accent font-medium" : "hover:bg-muted",
               )}
               data-testid={`control-nav-${item}`}
@@ -79,6 +84,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
         <Button
           variant="ghost"
           size="sm"
+          className="max-md:min-h-11"
           disabled={control.loading}
           onClick={() => void control.refresh()}
         >
@@ -102,7 +108,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
           className="min-w-0 rounded-md"
           data-testid={`control-workspace-${workspace.id}`}
         >
-          <summary className="cursor-pointer truncate px-2 py-1.5 text-sm font-medium [@media(pointer:coarse)]:min-h-11">
+          <summary className="cursor-pointer truncate px-2 py-1.5 text-sm font-medium max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
             {workspace.name}
           </summary>
           <div className="ml-3 border-l pl-2">
@@ -118,7 +124,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
             )}
             {control.data?.byWorkspace[workspace.id]?.items.map((coordinator) => (
               <details key={coordinator.id} open className="min-w-0">
-                <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
+                <summary className="cursor-pointer truncate px-2 py-1.5 text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
                   {coordinator.name}
                 </summary>
                 {coordinator.conversation_task_id ? (
@@ -131,7 +137,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
                         ? "page"
                         : undefined
                     }
-                    className="ml-3 flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
+                    className="ml-3 flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
                     data-testid={`control-conversation-${coordinator.id}`}
                   >
                     <IconMessage className="size-3.5 shrink-0" aria-hidden />

@@ -104,7 +104,8 @@ profile's authentication controls, then return to the tour.
 
 ## Browse coordinator conversations across workspaces
 
-Enable **Integrated control** in **Settings > System > Feature Toggles** and
+Enable **Integrated control** and **Workspace coordinators** in
+**Settings > System > Feature Toggles** and
 restart Kandev, then select **Integrated control** in the workspace picker. The
 toggle is off by default. Its dedicated navigation lists available workspaces,
 coordinators and each coordinator’s existing current conversation. The phone
@@ -116,6 +117,10 @@ workspace, permissions and draft; browsing it does not switch the active
 workspace or start an agent. An unavailable conversation shows its state rather
 than creating a replacement. This first view does not create additional
 coordinator conversations or aggregate archived conversations.
+
+The **Provider / model** and **History** views summarize the current coordinator
+records available in this first slice. They do not provide provider usage totals
+or a searchable archive of past conversations.
 
 ## Find a setting
 

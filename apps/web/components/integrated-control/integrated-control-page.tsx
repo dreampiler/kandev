@@ -43,6 +43,7 @@ export function IntegratedControlPage() {
         <Button
           variant="ghost"
           size="sm"
+          className="max-md:min-h-11"
           disabled={control.loading}
           onClick={() => void control.refresh()}
         >
