@@ -738,13 +738,14 @@ type passthroughDispatchToken struct {
 
 // Service is the main orchestrator service
 type Service struct {
-	config        ServiceConfig
-	logger        *logger.Logger
-	eventBus      bus.EventBus
-	taskRepo      scheduler.TaskRepository
-	repo          sessionExecutorStore
-	promptTargets taskPullRequestTargetStore
-	agentManager  executor.AgentManagerClient
+	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
+	config                    ServiceConfig
+	logger                    *logger.Logger
+	eventBus                  bus.EventBus
+	taskRepo                  scheduler.TaskRepository
+	repo                      sessionExecutorStore
+	promptTargets             taskPullRequestTargetStore
+	agentManager              executor.AgentManagerClient
 	// ACP mode and model reports mutate one selector snapshot per session.
 	sessionSettingsSnapshotLocks [64]sync.Mutex
 
@@ -1268,6 +1269,11 @@ type Service struct {
 	lifecycleSweepCancel  context.CancelFunc
 	lifecycleSweepStopped bool
 	lifecycleSweepWorkers sync.WaitGroup
+
+	// orphanReentryWorkers tracks detached re-entry goroutines from
+	// reenterSchedulingOrphanStep so that Stop can join them without blocking
+	// the startup sweep. See stopOrphanReentryWorkers.
+	orphanReentryWorkers sync.WaitGroup
 
 	// unreclaimedWorkspaces holds the automation runs whose workspace removal
 	// was attempted and did not actually free the directory. Retention selects
@@ -3421,7 +3427,8 @@ func (s *Service) startWatcherAndScheduler(ctx context.Context) error {
 	}
 	s.reconcileDurablePlanCommentDeliveriesOnStartup(ctx)
 
-	// Run the startup lifecycle sweep (reconcileTaskLifecycleTokens, then
+	// Run the startup lifecycle sweep (reconcileSchedulingOrphansOnStartup,
+	// reconcileTaskLifecycleTokens, then
 	// reconcileDependencyLaunchesOnStartup — sequenced so an
 	// admitted-by-promotion task is already eligible for the dependency sweep
 	// when reconcileTaskLifecycleTokens returns normally) in the background,
@@ -3560,6 +3567,7 @@ func (s *Service) Stop() error {
 	s.stopDynamicSuccessorWorkers()
 	s.stopDynamicPolicyRecovery()
 	s.stopLifecycleSweepAsync()
+	s.stopOrphanReentryWorkers()
 
 	// Stop components in reverse order
 	var errs []error
@@ -3627,6 +3635,11 @@ func (s *Service) startLifecycleSweepAsync(ctx context.Context) bool {
 	s.lifecycleSweepMu.Unlock()
 	go func() {
 		defer s.lifecycleSweepWorkers.Done()
+		// Restart interrupted automatic starts before the durable-token sweep:
+		// a task a token still owns is skipped here, while a token the sweep
+		// clears would otherwise leave the task looking orphaned until its
+		// detached launch created a session.
+		s.reconcileSchedulingOrphansOnStartup(sweepCtx)
 		s.reconcileTaskLifecycleTokens(sweepCtx)
 		s.reconcileDependencyLaunchesOnStartup(sweepCtx)
 	}()
@@ -3658,6 +3671,23 @@ func (s *Service) stopLifecycleSweepAsync() {
 	case <-done:
 	case <-time.After(sendNowClaimRecoveryTimeout):
 		s.logger.Warn("timed out waiting for startup lifecycle sweep during shutdown")
+	}
+}
+
+// stopOrphanReentryWorkers waits for detached orphan re-entry goroutines
+// to complete, with a timeout. These goroutines are tracked in
+// orphanReentryWorkers and represent the re-entry of SCHEDULING tasks
+// onto their existing sessions during startup recovery.
+func (s *Service) stopOrphanReentryWorkers() {
+	done := make(chan struct{})
+	go func() {
+		s.orphanReentryWorkers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(sendNowClaimRecoveryTimeout):
+		s.logger.Warn("timed out waiting for orphan re-entry workers during shutdown")
 	}
 }
 
