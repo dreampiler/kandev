@@ -193,7 +193,13 @@ async function originalConversation(context: Context, mobile: boolean) {
 }
 
 export function controlNavigationCases(mobile: boolean) {
-  test("OFF retains ordinary navigation and does not read another workspace's coordinators", async (context) => {
+  test("OFF retains ordinary navigation and does not read another workspace's coordinators", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    const context = { testPage, backend, apiClient, seedData };
     const seeded = await setup(context, false);
     const reads: string[] = [];
     context.testPage.on("request", (request) => {
@@ -213,11 +219,23 @@ export function controlNavigationCases(mobile: boolean) {
     }
   });
 
-  test("opt-in navigation preserves the second workspace's original conversation, draft and selected runtime without execution", async (context) => {
+  test("opt-in navigation preserves the second workspace's original conversation, draft and selected runtime without execution", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    const context = { testPage, backend, apiClient, seedData };
     await originalConversation(context, mobile);
   });
 
-  test("denied, failed and missing collections stay visible and never create a replacement", async (context) => {
+  test("denied, failed and missing collections stay visible and never create a replacement", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    const context = { testPage, backend, apiClient, seedData };
     const seeded = await setup(context, true);
     const page = context.testPage;
     const observation = observe(page);
@@ -257,7 +275,13 @@ export function controlNavigationCases(mobile: boolean) {
 }
 
 export function controlPhoneGeometryCase() {
-  test("phone navigation has one contained scroll owner, usable targets and keyboard dismissal", async (context) => {
+  test("phone navigation has one contained scroll owner, usable targets and keyboard dismissal", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+  }) => {
+    const context = { testPage, backend, apiClient, seedData };
     const seeded = await setup(context, true);
     const page = context.testPage;
     try {

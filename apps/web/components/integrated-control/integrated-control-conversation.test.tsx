@@ -3,6 +3,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { Task, TaskSession } from "@/lib/types/http";
+import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
 import { IntegratedControlConversation } from "./integrated-control-conversation";
@@ -39,12 +40,21 @@ const coordinator = {
   workspace_id: "beta",
   conversation_task_id: "task",
 } as Coordinator;
-const task = {
-  id: "task",
-  workspace_id: "beta",
+const task: Task = {
+  id: taskId("task"),
+  workspace_id: workspaceId("beta"),
+  workflow_id: workflowId("workflow"),
+  workflow_step_id: "step",
+  position: 0,
+  title: "Original coordinator conversation",
+  description: "",
+  state: "WAITING_FOR_INPUT",
+  priority: "medium",
+  created_at: "",
+  updated_at: "",
   origin: "coordinator",
   metadata: { coordinator_id: "coordinator" },
-} as Task;
+};
 const session = {
   id: "session",
   task_id: "task",

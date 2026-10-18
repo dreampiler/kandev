@@ -3,6 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { Task, TaskSession } from "@/lib/types/http";
+import { taskId, workspaceId, workflowId } from "@/lib/types/ids";
 import { useExistingControlConversation } from "./use-existing-control-conversation";
 
 const api = vi.hoisted(() => ({ task: vi.fn(), sessions: vi.fn() }));
@@ -12,12 +13,21 @@ vi.mock("@/lib/api", async (original) => ({
   listTaskSessions: api.sessions,
 }));
 
-const task = {
-  id: "task",
-  workspace_id: "beta",
+const task: Task = {
+  id: taskId("task"),
+  workspace_id: workspaceId("beta"),
+  workflow_id: workflowId("workflow"),
+  workflow_step_id: "step",
+  position: 0,
+  title: "Original coordinator conversation",
+  description: "",
+  state: "WAITING_FOR_INPUT",
+  priority: "medium",
+  created_at: "",
+  updated_at: "",
   origin: "coordinator",
   metadata: { coordinator_id: "coordinator" },
-} as Task;
+};
 const session = {
   id: "session",
   task_id: "task",
