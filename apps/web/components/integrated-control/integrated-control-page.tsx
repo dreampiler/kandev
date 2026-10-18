@@ -6,6 +6,7 @@ import { controlView } from "@/lib/navigation/integrated-control";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { IntegratedControlConversation } from "./integrated-control-conversation";
+import { ControlTaskActivity } from "./control-task-activity";
 import { IntegratedControlDashboard } from "./integrated-control-dashboards";
 import type { ControlView } from "@/lib/navigation/integrated-control";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
@@ -105,6 +106,12 @@ function ControlBody({
       </p>
     );
   if (!hasSelection) return <IntegratedControlDashboard view={view} />;
+  if (workspace && !coordinatorRequested && !taskId)
+    return (
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
+        <ControlTaskActivity workspaceId={workspace.id} />
+      </div>
+    );
   const lists = workspace && control.data.conversationsByWorkspace[workspace.id];
   const originalTaskId =
     coordinatorRequested && !coordinator

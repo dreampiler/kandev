@@ -99,9 +99,7 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
       ws.on("task.created", () => void refresh()),
       ws.on("task.updated", () => void refresh()),
       ws.on("task.deleted", () => void refresh()),
-      ws.on("session.state_changed", ({ payload }) => {
-        if (payload.new_state === "CREATED") void refresh();
-      }),
+      ws.on("session.state_changed", () => void refresh()),
     ];
     return () => removers.forEach((remove) => remove());
   }, [enabled, ws, refresh]);

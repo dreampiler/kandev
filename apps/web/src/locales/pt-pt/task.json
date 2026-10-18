@@ -2779,5 +2779,15 @@
   "launchQueueRefusalGrade": "Último motivo de espera: limite da categoria de execução.",
   "launchQueueRefusalBoth": "Último motivo de espera: limites global e da categoria.",
   "launchQueueRefusalConfiguration": "Último motivo de espera: é necessário configurar a categoria de execução.",
-  "launchQueueRefusalUnknown": "Último motivo de espera: não foi possível verificar o inventário de execuções."
+  "launchQueueRefusalUnknown": "Último motivo de espera: não foi possível verificar o inventário de execuções.",
+  "launchQueueConfigureExecutionCapacity": "Configurar limites de execução",
+  "launchQueueExecutionScope": "Limites globais de execução",
+  "launchQueueWaitingExecutionCapacity": "A aguardar capacidade de execução.",
+  "launchQueueExecutionCapacity": "{{inUse}} de {{limit}} execuções em uso. Verificado em {{checkedAt}}.",
+  "launchQueueExecutionCapacityStale": "{{inUse}} de {{limit}} execuções em uso. Os dados estão desatualizados. Última verificação em {{checkedAt}}.",
+  "launchQueueExecutionCapacityDisconnected": "{{inUse}} de {{limit}} execuções em uso. A ligação de capacidade está indisponível. Última verificação em {{checkedAt}}.",
+  "launchQueueGradeHeading": "Graus de execução",
+  "launchQueueGradeUsage": "{{inUse}} de {{limit}} execuções",
+  "launchQueueGradesUnavailable": "As observações dos graus de execução estão indisponíveis.",
+  "launchQueueGradeNeedsConfiguration": "É necessário configurar um grau de execução ativo."
 }

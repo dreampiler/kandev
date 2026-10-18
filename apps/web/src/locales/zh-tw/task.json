@@ -2779,5 +2779,15 @@
   "launchQueueRefusalGrade": "最近等待原因：執行等級已達上限。",
   "launchQueueRefusalBoth": "最近等待原因：執行總數和等級均已達上限。",
   "launchQueueRefusalConfiguration": "最近等待原因：需要設定執行等級。",
-  "launchQueueRefusalUnknown": "最近等待原因：無法確認執行清單。"
+  "launchQueueRefusalUnknown": "最近等待原因：無法確認執行清單。",
+  "launchQueueConfigureExecutionCapacity": "設定執行限制",
+  "launchQueueExecutionScope": "全域執行限制",
+  "launchQueueWaitingExecutionCapacity": "正在等待執行容量。",
+  "launchQueueExecutionCapacity": "正在使用 {{limit}} 個執行名額中的 {{inUse}} 個。檢查時間：{{checkedAt}}。",
+  "launchQueueExecutionCapacityStale": "正在使用 {{limit}} 個名額中的 {{inUse}} 個。容量資料已過期。上次檢查：{{checkedAt}}。",
+  "launchQueueExecutionCapacityDisconnected": "正在使用 {{limit}} 個名額中的 {{inUse}} 個。容量連線不可用。上次檢查：{{checkedAt}}。",
+  "launchQueueGradeHeading": "執行等級",
+  "launchQueueGradeUsage": "{{limit}} 個名額中的 {{inUse}} 個執行",
+  "launchQueueGradesUnavailable": "執行等級觀測不可用。",
+  "launchQueueGradeNeedsConfiguration": "需要設定一個活動執行等級。"
 }

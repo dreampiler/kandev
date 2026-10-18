@@ -1,3 +1,5 @@
+import Link from "@/components/routing/app-link";
+import { controlHref } from "@/lib/navigation/integrated-control";
 import { useTranslation } from "react-i18next";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { useNow } from "@/hooks/use-now";
@@ -63,12 +65,26 @@ export function ControlCapacitySnapshot({
           </p>
           {validTime && (
             <p className="text-xs text-muted-foreground">
-              {t("sidebar:integratedControl.updated")}:{" "}
+              {t("sidebar:controlInspection.observedAt")}:{" "}
               <time dateTime={observation.observed_at}>
-                {formatDateTime(observation.observed_at)}
+                {formatDateTime(observation.observed_at, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                })}
               </time>
             </p>
           )}
+          {!known && <CapacityUnknownReason validTime={validTime} />}
+          <Link
+            className="inline-flex min-h-7 items-center text-sm underline [@media(pointer:coarse)]:min-h-11"
+            href={controlHref("activity")}
+          >
+            {t("sidebar:controlInspection.openSessions")}
+          </Link>
           {!observation.enabled && <p>{t("sidebar:integratedControl.capacityDisabled")}</p>}
           <dl>
             <dt>{t("sidebar:integratedControl.capacityTotal")}</dt>
@@ -160,5 +176,16 @@ function CapacityWaitCounts({
         ))}
       </dl>
     </div>
+  );
+}
+
+function CapacityUnknownReason({ validTime }: { validTime: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <p className="text-sm text-muted-foreground">
+      {t(
+        validTime ? "sidebar:controlInspection.noReason" : "sidebar:controlInspection.invalidTime",
+      )}
+    </p>
   );
 }

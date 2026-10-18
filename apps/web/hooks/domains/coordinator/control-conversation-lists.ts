@@ -4,10 +4,16 @@ import {
   listQuickChatSessions,
   type QuickChatSessionResponse,
 } from "@/lib/api/domains/workspace-api";
+import type { Task } from "@/lib/types/http";
 import type { ControlWorkspace } from "./use-integrated-control-data";
 
 export type ControlCollection<T> = { items: T[]; error: boolean; denied: boolean };
-export type ControlTaskCount = { total: number | null; error: boolean; denied: boolean };
+export type ControlTaskCount = {
+  total: number | null;
+  error: boolean;
+  denied: boolean;
+  items?: Task[];
+};
 export type ControlConversationLists = {
   tasks?: ControlTaskCount;
   independent: ControlCollection<QuickChatSessionResponse>;
@@ -48,14 +54,19 @@ async function readControlTaskCount(
   options: ApiRequestOptions,
 ): Promise<ControlTaskCount> {
   try {
-    const { total } = await listTasksByWorkspace(
+    const { total, tasks } = await listTasksByWorkspace(
       workspaceId,
-      { page: 1, pageSize: 1, includeArchived: false },
+      { page: 1, pageSize: 20, includeArchived: false },
       options,
     );
     if (!Number.isSafeInteger(total) || total < 0)
       return { total: null, error: true, denied: false };
-    return { total, error: false, denied: false };
+    return {
+      total,
+      items: tasks.filter((task) => task.workspace_id === workspaceId),
+      error: false,
+      denied: false,
+    };
   } catch (error) {
     return { total: null, error: true, denied: error instanceof ApiError && error.status === 403 };
   }

@@ -1,3 +1,6 @@
+import { ControlTaskActivity } from "./control-task-activity";
+import { ControlProviderUsage } from "./control-provider-usage";
+import { linkToTasks } from "@/lib/links";
 import { ControlCapacitySnapshot } from "./control-capacity-snapshot";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
@@ -35,7 +38,14 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         <div className="grid gap-3">
           {workspaces.map((workspace) => (
             <section key={workspace.id} className="rounded-lg border p-4">
-              <h2 className="font-medium">{workspace.name}</h2>
+              <h2 className="font-medium">
+                <Link
+                  className="inline-flex min-h-7 items-center underline [@media(pointer:coarse)]:min-h-11"
+                  href={controlHref("workspaces", workspace.id)}
+                >
+                  {workspace.name}
+                </Link>
+              </h2>
               {workspace.description && (
                 <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
                   {workspace.description}
@@ -58,9 +68,14 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           ))}
         </div>
       )}
-      {(view === "activity" || view === "providers") && (
-        <CoordinatorFacts view={view} rows={rows} />
+      {view === "activity" && (
+        <>
+          <ControlCapacitySnapshot observation={control.data.capacity} />
+          <ControlTaskActivity />
+          <CoordinatorFacts view={view} rows={rows} />
+        </>
       )}
+      {view === "providers" && <ControlProviderUsage />}
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
@@ -123,7 +138,7 @@ function ControlOverview({
           value={independentCount ?? unknown}
         />
         <Fact label={t("sidebar:integratedControl.coordinators")} value={coordinatorCount} />
-        <Fact label={t("sidebar:integratedControl.currentConversations")} value={currentCount} />
+        <Fact label={t("sidebar:controlInspection.nativeConversations")} value={currentCount} />
       </div>
     </>
   );
@@ -132,9 +147,18 @@ function ControlOverview({
 function UnavailableHistory() {
   const { t } = useTranslation();
   return (
-    <p role="status" className="text-sm text-muted-foreground">
-      {t("sidebar:integratedControl.unavailable")}
-    </p>
+    <section className="space-y-3">
+      <p role="status" className="text-sm text-muted-foreground">
+        {t("sidebar:controlInspection.historyHelp")}
+      </p>
+      <Link
+        className="inline-flex min-h-7 items-center underline [@media(pointer:coarse)]:min-h-11"
+        href={linkToTasks()}
+      >
+        {t("sidebar:controlInspection.openTasks")}
+      </Link>
+      <ControlTaskActivity />
+    </section>
   );
 }
 
