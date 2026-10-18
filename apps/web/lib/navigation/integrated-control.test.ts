@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CONTROL_VIEWS,
+  CONTROL_VIEW_LABEL_KEYS,
   controlHref,
   controlView,
   isIntegratedControlPath,
@@ -38,3 +39,16 @@ describe("Integrated control destinations (AC-UI-INTEGRATED-CONTROL-001.2)", () 
     );
   });
 });
+
+it.each([
+  ["overview", "sidebar:integratedControl.views.overview"],
+  ["activity", "sidebar:integratedControl.views.activity"],
+  ["workspaces", "common:workspaces"],
+  ["providers", "sidebar:integratedControl.views.providers"],
+  ["history", "sidebar:integratedControl.views.history"],
+] as const)(
+  "shares the canonical %s label between control navigation and its header",
+  (view, key) => {
+    expect(CONTROL_VIEW_LABEL_KEYS[view]).toBe(key);
+  },
+);

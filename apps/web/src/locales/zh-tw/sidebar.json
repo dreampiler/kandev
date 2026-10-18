@@ -166,7 +166,6 @@
   "integratedControl.refresh": "重新整理",
   "integratedControl.views.overview": "整合摘要",
   "integratedControl.views.activity": "活動狀態",
-  "integratedControl.views.workspaces": "工作區",
   "integratedControl.views.providers": "供應商 / 模型",
   "integratedControl.views.history": "歷程"
 }

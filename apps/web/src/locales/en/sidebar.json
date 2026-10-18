@@ -166,7 +166,6 @@
   "integratedControl.refresh": "Refresh",
   "integratedControl.views.overview": "Overview",
   "integratedControl.views.activity": "Activity",
-  "integratedControl.views.workspaces": "Workspaces",
   "integratedControl.views.providers": "Provider / model",
   "integratedControl.views.history": "History"
 }

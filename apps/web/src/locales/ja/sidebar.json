@@ -166,7 +166,6 @@
   "integratedControl.refresh": "更新",
   "integratedControl.views.overview": "統合概要",
   "integratedControl.views.activity": "動作状況",
-  "integratedControl.views.workspaces": "ワークスペース",
   "integratedControl.views.providers": "プロバイダー / モデル",
   "integratedControl.views.history": "履歴"
 }

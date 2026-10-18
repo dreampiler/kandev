@@ -166,7 +166,6 @@
   "integratedControl.refresh": "새로고침",
   "integratedControl.views.overview": "통합 요약",
   "integratedControl.views.activity": "동작 현황",
-  "integratedControl.views.workspaces": "Workspace 현황",
   "integratedControl.views.providers": "공급자 / 모델",
   "integratedControl.views.history": "이력"
 }

@@ -10,7 +10,12 @@ import {
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
-import { CONTROL_VIEWS, controlHref, controlView } from "@/lib/navigation/integrated-control";
+import {
+  CONTROL_VIEWS,
+  CONTROL_VIEW_LABEL_KEYS,
+  controlHref,
+  controlView,
+} from "@/lib/navigation/integrated-control";
 import { cn } from "@/lib/utils";
 import { useIntegratedControl } from "./integrated-control-provider";
 
@@ -40,7 +45,7 @@ export function IntegratedControlNavigation({
       <div className="flex flex-col gap-1">
         {CONTROL_VIEWS.map((item, index) => {
           const Icon = icons[index];
-          const label = t(`sidebar:integratedControl.views.${item}`);
+          const label = t(CONTROL_VIEW_LABEL_KEYS[item]);
           return (
             <Link
               key={item}

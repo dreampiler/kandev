@@ -12,10 +12,11 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://localhost:8443" }),
 }));
 
-const navigationMock = vi.hoisted(() => ({ push: vi.fn() }));
+const navigationMock = vi.hoisted(() => ({ push: vi.fn(), pathname: "/" }));
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: navigationMock.push }),
+  usePathname: () => navigationMock.pathname,
 }));
 
 // Radix dropdown primitives rely on pointer/portal behaviour that jsdom doesn't
@@ -48,7 +49,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 }));
 
 const storeState = {
-  features: { office: false },
+  features: { office: false, integratedControl: false },
   userSettings: { startupPage: "task_overview" as StartupPage },
   workspaces: {
     items: [
@@ -71,6 +72,8 @@ let cookieDescriptor: PropertyDescriptor | undefined;
 
 function resetWorkspaceSelectTest() {
   navigationMock.push = vi.fn();
+  navigationMock.pathname = "/";
+  storeState.features.integratedControl = false;
   storeState.features.office = false;
   storeState.userSettings.startupPage = "task_overview";
   storeState.workspaces.activeId = "w1";
@@ -90,6 +93,8 @@ function resetWorkspaceSelectTest() {
 }
 
 function cleanupWorkspaceSelectTest() {
+  storeState.features.integratedControl = false;
+  navigationMock.pathname = "/";
   clearNavigationBlockerForTests();
   if (cookieDescriptor) {
     Object.defineProperty(document, "cookie", cookieDescriptor);
@@ -408,5 +413,49 @@ describe("AppSidebarWorkspacePicker — controlled open state", () => {
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(menuOpenState()).toBe("false");
+  });
+});
+
+describe("AppSidebarWorkspacePicker — integrated control admission", () => {
+  beforeEach(resetWorkspaceSelectTest);
+  afterEach(cleanupWorkspaceSelectTest);
+
+  it("keeps ordinary active-workspace behavior on a control URL when the flag is off", () => {
+    navigationMock.pathname = "/control/overview";
+    render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.queryByTestId("workspace-picker-integrated-control")).toBeNull();
+    expect(screen.getByTestId("sidebar-workspace-trigger").textContent).toContain(
+      "Default Workspace",
+    );
+    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("enters opted-in control without changing the ordinary active workspace", () => {
+    storeState.features.integratedControl = true;
+    const onActionComplete = vi.fn();
+    render(<AppSidebarWorkspacePicker onActionComplete={onActionComplete} />);
+
+    fireEvent.click(screen.getByTestId("workspace-picker-integrated-control"));
+    expect(navigationMock.push).toHaveBeenCalledExactlyOnceWith("/control");
+    expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
+    expect(storeState.resetKanbanWorkspaceContext).not.toHaveBeenCalled();
+    expect(storeState.workspaces.activeId).toBe("w1");
+    expect(onActionComplete).toHaveBeenCalledOnce();
+  });
+
+  it("leaves control for the original active workspace when its row is selected", () => {
+    storeState.features.integratedControl = true;
+    navigationMock.pathname = "/control/history";
+    render(<AppSidebarWorkspacePicker />);
+
+    expect(screen.getByTestId("sidebar-workspace-trigger").textContent).toContain(
+      "Integrated control",
+    );
+    fireEvent.click(screen.getByTestId(KANBAN_WORKSPACE_ITEM));
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledExactlyOnceWith("w1");
+    expect(navigationMock.push).toHaveBeenCalledExactlyOnceWith("/?home=overview&workspaceId=w1");
   });
 });

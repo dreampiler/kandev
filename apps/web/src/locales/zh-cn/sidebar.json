@@ -166,7 +166,6 @@
   "integratedControl.refresh": "刷新",
   "integratedControl.views.overview": "综合概览",
   "integratedControl.views.activity": "活动状态",
-  "integratedControl.views.workspaces": "工作区",
   "integratedControl.views.providers": "提供商 / 模型",
   "integratedControl.views.history": "历史记录"
 }

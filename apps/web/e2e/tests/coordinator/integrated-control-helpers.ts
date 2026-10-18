@@ -192,6 +192,69 @@ async function originalConversation(context: Context, mobile: boolean) {
   }
 }
 
+async function refreshCollections(page: Page, path: string) {
+  const loaded = waitForHttp(page, "GET", new RegExp(`${path}$`));
+  const button = page
+    .getByTestId("integrated-control-page")
+    .getByRole("button", { name: "Refresh", exact: true });
+  await button.click();
+  await loaded;
+  await expect(button).toBeEnabled();
+}
+
+async function unavailableCollections(context: Context, mobile: boolean) {
+  const seeded = await setup(context, true);
+  const page = context.testPage;
+  const observation = observe(page);
+  try {
+    const path = `/api/v1/workspaces/${seeded.workspace.id}/coordinators`;
+    await page.route(`**${path}`, (route) =>
+      route.fulfill({ status: 403, json: { error: "denied" } }),
+    );
+    const ordinaryCatalogReady = waitForHttp(page, "GET", /\/api\/v1\/agents\/available$/);
+    await page.goto(`/kanban?workspace=${context.seedData.workspaceId}`);
+    await ordinaryCatalogReady;
+    await openPicker(page, mobile);
+    observation.begin();
+    await page.getByTestId("workspace-picker-integrated-control").click();
+    await expect(page.getByTestId("control-dashboard-overview")).toBeVisible();
+    const errorNav = await navigation(page, mobile);
+    await errorNav.getByTestId("control-nav-workspaces").click();
+    await expect(page.getByTestId("control-dashboard-workspaces").getByRole("alert")).toContainText(
+      ["Could not load this collection.", "Some workspace data could not be loaded."],
+    );
+    await page.unroute(`**${path}`);
+    await refreshCollections(page, path);
+    const restoredNav = await navigation(page, mobile);
+    await restoredNav.getByTestId(`control-conversation-${seeded.coordinator.id}`).click();
+    await expect(page.getByTestId("integrated-control-conversation")).toHaveAttribute(
+      "data-task-id",
+      seeded.original.task_id,
+    );
+    await page.route(`**${path}`, (route) => route.fulfill({ json: { coordinators: [] } }));
+    await refreshCollections(page, path);
+    await expect(
+      page.getByText("This conversation is unavailable or no longer accessible.", { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByTestId("integrated-control-conversation")).toHaveCount(0);
+    await page.unroute(`**${path}`);
+    const missingNav = await navigation(page, mobile);
+    await missingNav.getByTestId("control-nav-overview").click();
+    await refreshCollections(page, path);
+    await page.route(`**/api/v1/tasks/${seeded.original.task_id}`, (route) =>
+      route.fulfill({ status: 404, json: { error: "missing" } }),
+    );
+    const taskNav = await navigation(page, mobile);
+    await taskNav.getByTestId(`control-conversation-${seeded.coordinator.id}`).click();
+    await expect(page.getByRole("alert")).toContainText(
+      "This conversation is unavailable or no longer accessible.",
+    );
+    await observation.assertNoExecution();
+  } finally {
+    await seeded.dispose();
+  }
+}
+
 export function controlNavigationCases(mobile: boolean) {
   test("OFF retains ordinary navigation and does not read another workspace's coordinators", async ({
     testPage,
@@ -235,42 +298,7 @@ export function controlNavigationCases(mobile: boolean) {
     apiClient,
     seedData,
   }) => {
-    const context = { testPage, backend, apiClient, seedData };
-    const seeded = await setup(context, true);
-    const page = context.testPage;
-    const observation = observe(page);
-    try {
-      const path = `/api/v1/workspaces/${seeded.workspace.id}/coordinators`;
-      await page.route(`**${path}`, (route) =>
-        route.fulfill({ status: 403, json: { error: "denied" } }),
-      );
-      await page.goto("/control/workspaces");
-      await expect(
-        page.getByTestId("control-dashboard-workspaces").getByRole("alert"),
-      ).toContainText([
-        "Could not load this collection.",
-        "Some workspace data could not be loaded.",
-      ]);
-      await page.unroute(`**${path}`);
-      await page.goto(`/control/overview?workspace=${seeded.workspace.id}&coordinator=missing`);
-      await expect(
-        page.getByText("This conversation is unavailable or no longer accessible.", {
-          exact: true,
-        }),
-      ).toBeVisible();
-      await page.route(`**/api/v1/tasks/${seeded.original.task_id}`, (route) =>
-        route.fulfill({ status: 404, json: { error: "missing" } }),
-      );
-      await page.goto(
-        `/control/overview?workspace=${seeded.workspace.id}&coordinator=${seeded.coordinator.id}`,
-      );
-      await expect(page.getByRole("alert")).toContainText(
-        "This conversation is unavailable or no longer accessible.",
-      );
-      await observation.assertNoExecution();
-    } finally {
-      await seeded.dispose();
-    }
+    await unavailableCollections({ testPage, backend, apiClient, seedData }, mobile);
   });
 }
 
