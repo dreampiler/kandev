@@ -29,4 +29,6 @@ worker. Abandoned-run recovery is a separate change.
   A storage error is surfaced rather than reported as a terminal write success.
 - **AC-AGENTS-NATIVE-REVIEW-TIMEOUT-001.4:** Actual child admission and settlement
   remain the lifecycle/host-utility callback's responsibility. Add no operating
-  changes, model calls, permanent tests or new queue/poller.
+  changes, model calls or new queue/poller. Permanent regression tests exercise
+  the real routing, identity and terminal-write boundaries with synthetic
+  execution and isolated stores.
