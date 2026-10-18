@@ -40,7 +40,7 @@ instead of returning a nil, error pair.
 ## Out of scope
 
 The fork-only `usage/errors.go`, Office overview rendering, locale copies, web
-API/DTO plumbing, a clock seam, and every standing test file.
+API/DTO plumbing, a new production clock seam.
 
 ## Acceptance
 
@@ -93,7 +93,7 @@ the rate-limit signal.
 
 `sequential`
 
-## Results
+## Historical author results
 
 Implemented on branch `feature/p49-usage-429-backof-hrh`. Provider clients and
 the cache changed as scoped; `go build`, `go vet`, and `gofmt -l` are clean and
@@ -125,3 +125,12 @@ The normal hook rejected the initial extra parser branch at nestif complexity 5.
 Moving range recognition to a flat early guard preserved all 22 race checks
 (1.380s); the existing usage package passed again (0.200s), with no lint guard
 or threshold change.
+
+## Review remediation
+
+Permanent tests now cover the actual cache, public provider FetchUsage methods,
+and service registration and policy boundaries. The source-only review found no
+additional production correction necessary at the original head: its overflow
+and lookup ordering fixes are retained. Hosted assertion RED against the earlier
+source and corrected GREEN are required delivery evidence. Temporary probes
+reported above are historical and do not substitute for these permanent tests.

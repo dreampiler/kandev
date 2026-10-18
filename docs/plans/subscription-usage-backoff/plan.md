@@ -26,7 +26,7 @@ In scope: `apps/backend/internal/agent/usage/client_claude.go`,
 the `ProviderUsage.Stale` marker in `types.go`.
 
 Excluded: the fork-only `usage/errors.go`, Office overview rendering, locale
-copies, web API/DTO plumbing, a time seam, and every standing test file. The
+copies, web API/DTO plumbing, a new production time seam. The
 upstream shared failure cache is reused, not replaced.
 
 ## Technical approach
@@ -51,12 +51,17 @@ design. This manifest and its sole sibling order complete the coverage package.
 
 ## Verification
 
-- `go build ./internal/agent/usage/...`, `go vet`, and `gofmt -l` clean.
-- Existing package tests pass with a temporary in-package probe for the four
-  contract cases; the probe is removed after the run.
-- `python scripts/list-docs.py validate` and
-  `python scripts/lint-spec-files.py --all` pass.
-- `validateCoverage` reports `covered` for the changed paths plus this package.
+Permanent regression coverage lives beside the real usage modules in
+`cache_internal_test.go`, `cache_concurrency_internal_test.go`,
+`retry_after_internal_test.go`, and `provider_backoff_internal_test.go`.
+It covers parser boundaries, finite retry progression and resets, exact stale
+limits, cancellation, credential-key sharing, per-key coalescing, HTTP status
+propagation, and token-refresh compatibility. Time-sensitive cache cases use
+`testing/synctest`; HTTP cases use only local servers and temporary credentials.
+
+Hosted execution and full CI receipts are retained outside the source tree.
+Deleted probes recorded in the original work order are historical author
+reports and do not satisfy the permanent regression gate.
 
 ## Risks
 

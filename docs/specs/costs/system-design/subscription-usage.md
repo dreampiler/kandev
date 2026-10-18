@@ -17,8 +17,8 @@ Adjacent contracts this design uses but does not own:
 
 - Agent profile identity and credential paths belong to the
   [agent system](../../agents/README.md).
-- Office cost display and scheduler deferral consume a reading but own their own
-  policy; the reading's freshness contract is defined here.
+- Office utilization display consumes a reading but owns its own presentation.
+  The reading's freshness contract is defined here.
 
 ## Requirement mapping
 
@@ -94,3 +94,22 @@ identifier.
 ## Related decisions
 
 None.
+
+## Current consumer scope
+
+`backendapp.usageProviderAdapter` registers direct provider clients using the
+backend process home directory, or the explicit loopback TeamClaude resolver.
+Direct provider cache keys include the provider and credential path; profiles
+using the same path share a cache entry and backoff. Re-registering a client does
+not invalidate that entry, and credential contents are not part of the key.
+`Invalidate` explicitly clears a key; it has no current production caller.
+This change does not add account-generation invalidation or change credential
+resolution.
+
+The Office agent utilization handler serializes `ProviderUsage` directly, so
+`stale` and the original `fetched_at` are present in its JSON response. The web
+`ProviderUsage` type and utilization bars do not currently interpret `stale`;
+this backend change does not claim a visible stale badge.
+`UsageService.IsPotentiallyRateLimited` evaluates the preserved real windows,
+but has no current production caller, so scheduler deferral is not implemented
+by this change.
