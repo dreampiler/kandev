@@ -28,9 +28,9 @@ func TestReviewBoundBlankModelAndExplicitValidation(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			resolver := NewResolver(profiles, nil, nil)
 			if source == SourceUtilityAgent {
-				resolver.Utility = boundReviewUtility{}
+				resolver.Utility = &boundReviewUtility{}
 			} else {
-				resolver.Defaults = boundReviewDefaults{}
+				resolver.Defaults = &boundReviewDefaults{}
 			}
 			identity, err := resolver.Resolve(context.Background(), "")
 			require.NoError(t, err)

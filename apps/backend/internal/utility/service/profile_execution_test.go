@@ -122,6 +122,7 @@ func TestProfilePromptEightFailuresNoNinthDispatchOrWait(t *testing.T) {
 				t.Fatalf("wrong attribution %s/%d", current, generation)
 			}
 			next := promptTestSuccessor("a", 7)
+			next.AgentName = "claude-acp"
 			if resolver.failures == 8 {
 				deadline := time.Now().Add(time.Hour)
 				next.Decision.Deadline = &deadline

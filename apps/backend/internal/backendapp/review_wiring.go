@@ -266,6 +266,7 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
 		concrete := identity
 		concrete.ProfileID = id
+		concrete.AgentID, concrete.Model = prepared.AgentCLI, prepared.Model
 		return r.runConcrete(attempt, concrete, sessionID, prompt)
 	})
 	if identity.Route != nil {
@@ -298,7 +299,7 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 		if reviewResponseFinal(resp, err) {
 			return resp, err
 		}
-		if reviewSessionErrorFinal(err, r.host != nil) {
+		if reviewSessionErrorFinal(err, r.host != nil, identity.AgentID) {
 			return resp, err
 		}
 	}
@@ -340,7 +341,7 @@ func reviewResponseFinal(response *agentctlutil.PromptResponse, err error) bool 
 	return response != nil && (response.Response != "" || (err == nil && (response.Success || response.Error != "")))
 }
 
-func reviewSessionErrorFinal(err error, hasHost bool) bool {
+func reviewSessionErrorFinal(err error, hasHost bool, provider string) bool {
 	if err == nil {
 		return false
 	}
@@ -349,7 +350,7 @@ func reviewSessionErrorFinal(err error, hasHost bool) bool {
 	}
 	// Classified provider failures belong to the shared candidate policy.
 	// A host retry of that candidate would bypass its saved retry/skip decision.
-	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: err.Error()})
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: provider, Stderr: err.Error()})
 	return failure.FallbackAllowed
 }
 

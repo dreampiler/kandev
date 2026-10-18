@@ -34,14 +34,14 @@ type originRouteExecutor struct {
 func (e *originRouteExecutor) ExecuteInferenceProfilePrompt(ctx context.Context, session, id, prompt string) (*utility.PromptResponse, error) {
 	e.identities <- agentruntime.InferenceIdentityFromContext(ctx)
 	if id == "first" {
-		return nil, errors.New("rate limit exceeded")
+		return nil, errors.New("too many requests")
 	}
 	return &utility.PromptResponse{Success: true, Response: "answer"}, nil
 }
 func (e *originRouteExecutor) ExecuteProfilePrompt(ctx context.Context, id, prompt string) (*hostutility.PromptResult, error) {
 	e.identities <- agentruntime.InferenceIdentityFromContext(ctx)
 	if id == "first" {
-		return nil, errors.New("rate limit exceeded")
+		return nil, errors.New("too many requests")
 	}
 	return &hostutility.PromptResult{Response: "answer"}, nil
 }

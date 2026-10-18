@@ -38,6 +38,10 @@ func nativeReviewRoute(t *testing.T, retry bool, options ...dynamic.EngineOption
 	t.Helper()
 	_, profiles, tasks := openTasklessDynamicRepo(t)
 	ctx := context.Background()
+	provider, err := profiles.GetAgent(ctx, "concrete-agent")
+	require.NoError(t, err)
+	provider.Name = "claude-acp"
+	require.NoError(t, profiles.UpdateAgent(ctx, provider))
 	require.NoError(t, profiles.CreateAgentProfile(ctx, &settings.AgentProfile{ID: "candidate-b", AgentID: "concrete-agent", Name: "Second", Model: "second", Enabled: true}))
 	repo := profiles.(settingsstore.DynamicProfileRepository)
 	policy := routingpolicy.DefaultDocument()
@@ -90,7 +94,7 @@ func TestNativeReviewRouteRetainedAcrossBatchesAndStaleCAS(t *testing.T) {
 	state, ok := engine.State(original.SessionID)
 	require.True(t, ok)
 	require.Equal(t, "candidate-b", state.ExecutionProfileID)
-	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: "rate limit exceeded"})
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: "claude-acp", Stderr: "rate limit exceeded"})
 	_, err := resolver.ResolveExecutionAfterFailure(ctx, original.SessionID, "profile-dynamic", "concrete-profile", original.Generation, failure)
 	require.ErrorIs(t, err, dynamic.ErrStaleGeneration)
 	after, _ := engine.State(original.SessionID)
@@ -229,7 +233,7 @@ func TestNativeReviewPendingRouteCarriesExactResumeIdentity(t *testing.T) {
 	resolver, _, profiles, _ := nativeReviewRoute(t, true, dynamic.WithClock(func() time.Time { return now }))
 	identity := nativeReviewIdentity(t, resolver, profiles)
 	route := identity.Route
-	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, Stderr: "rate limit exceeded"})
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: "claude-acp", Stderr: "rate limit exceeded"})
 	next, err := resolver.ResolveExecutionAfterFailure(context.Background(), route.SessionID, "profile-dynamic", route.ExecutionProfileID, route.Generation, failure)
 	require.ErrorIs(t, err, dynamic.ErrRecoveryPending)
 	require.Equal(t, route.SessionID, next.RouteSessionID)
@@ -257,19 +261,51 @@ func TestNativeReviewAdapterHostFallbackReachable(t *testing.T) {
 }
 
 func TestNativeReviewClassifiedSessionErrorUsesPolicyBeforeHostFallback(t *testing.T) {
+	for _, channel := range []string{"transport", "response"} {
+		t.Run(channel, func(t *testing.T) {
+			resolver, _, profiles, _ := nativeReviewRoute(t, false)
+			identity := nativeReviewIdentity(t, resolver, profiles)
+			var calls []string
+			session := &reviewRouteSession{run: func(_ context.Context, id, prompt string) (*utility.PromptResponse, error) {
+				calls = append(calls, id)
+				if id == "concrete-profile" {
+					if channel == "response" {
+						return &utility.PromptResponse{Error: "rate limit exceeded"}, nil
+					}
+					return nil, errors.New("rate limit exceeded")
+				}
+				return &utility.PromptResponse{Success: true, Response: `{"findings":[]}`}, nil
+			}}
+			result, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(context.Background(), identity, "session", "prompt")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
+			require.Equal(t, "candidate-b", identity.Route.ExecutionProfileID)
+		})
+	}
+}
+
+func TestNativeReviewHostPolicyUsesSuccessorProviderIdentity(t *testing.T) {
 	resolver, _, profiles, _ := nativeReviewRoute(t, false)
+	ctx := context.Background()
+	require.NoError(t, profiles.CreateAgent(ctx, &settings.Agent{ID: "codex-row", Name: "codex-acp"}))
+	candidate, err := profiles.GetAgentProfile(ctx, "candidate-b")
+	require.NoError(t, err)
+	candidate.AgentID = "codex-row"
+	require.NoError(t, profiles.UpdateAgentProfile(ctx, candidate))
 	identity := nativeReviewIdentity(t, resolver, profiles)
+	first := errors.New("rate limit exceeded")
+	successor := errors.New("rate_limit_exceeded")
 	var calls []string
 	session := &reviewRouteSession{run: func(_ context.Context, id, prompt string) (*utility.PromptResponse, error) {
 		calls = append(calls, id)
 		if id == "concrete-profile" {
-			return nil, errors.New("rate limit exceeded")
+			return nil, first
 		}
-		return &utility.PromptResponse{Success: true, Response: `{"findings":[]}`}, nil
+		return nil, successor
 	}}
-	result, err := (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(context.Background(), identity, "session", "prompt")
-	require.NoError(t, err)
-	require.NotNil(t, result)
+	_, err = (reviewInference{session: session, host: &hostutility.Manager{}, profiles: resolver}).Run(ctx, identity, "session", "prompt")
+	require.ErrorIs(t, err, successor)
 	require.Equal(t, []string{"concrete-profile", "candidate-b"}, calls)
-	require.Equal(t, "candidate-b", identity.Route.ExecutionProfileID)
+	require.Equal(t, "codex-acp", identity.Route.AgentID)
 }
