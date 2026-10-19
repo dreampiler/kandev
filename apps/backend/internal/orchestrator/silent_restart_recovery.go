@@ -361,6 +361,9 @@ func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID
 	if err != nil {
 		return noop, fmt.Errorf("resolve queue identity before silent restore: %w", err)
 	}
+	// PauseAutoRunIfPending reports true whenever rows are pending, even when
+	// Auto-run was already off, so remember whether this restore turned it off.
+	wasAutoRun := s.messageQueue.GetStatus(ctx, sessionID).AutoRun
 	paused, err := s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
 	if err != nil {
 		return noop, fmt.Errorf("pause queued work before silent restore: %w", err)
@@ -369,6 +372,9 @@ func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID
 		return noop, nil
 	}
 	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
+	if !wasAutoRun {
+		return noop, nil
+	}
 	return func() {
 		resumeCtx := context.WithoutCancel(ctx)
 		if err := s.messageQueue.SetAutoRunForSession(resumeCtx, identity, true); err != nil {
