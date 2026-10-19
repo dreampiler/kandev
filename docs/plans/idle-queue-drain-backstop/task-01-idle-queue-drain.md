@@ -29,10 +29,11 @@ dispatch was returned to the queue reaches an idle session without a new event.
 - `messagequeue.Service.ListSessionsWithPending` with memory and SQLite
   implementations; the SQLite query joins live sessions and skips in-flight rows.
 - `orchestrator.Service.drainIdleQueues`, called at the end of
-  `ceilingSweepTick`, delegating each due session to
-  `DrainQueuedMessageIfAutoRun`.
+  `ceilingSweepTick`, running each due session through the body of
+  `DrainQueuedMessageIfAutoRun` under a `TryLock` of its cancel-in-flight guard;
+  a busy session is skipped for that pass.
 - `idleQueueDrainBackoff`: immediate first attempt, then 1 to 15 minutes,
-  reset when the session leaves the listing.
+  reset when the session leaves the listing with no queued dispatch in flight.
 
 ## Out of scope
 

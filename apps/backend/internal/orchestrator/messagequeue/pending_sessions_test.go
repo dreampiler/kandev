@@ -38,3 +38,27 @@ func TestListSessionsWithPendingSkipsRowsOfDeletedSessions(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []string{"live"}, sessions)
 }
+
+func TestListSessionsWithPendingSkipsReservedRows(t *testing.T) {
+	for _, factory := range autoRunRepositoryFactories {
+		t.Run(factory.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := factory.new(t)
+			if _, ok := repo.(*sqliteRepository); ok {
+				seedLiveSessions(t, repo, "reserved-only", "mixed")
+			}
+			reserved := map[string]interface{}{MetadataLifecycleReserved: true}
+			for _, row := range []struct {
+				session  string
+				metadata map[string]interface{}
+			}{{"reserved-only", reserved}, {"mixed", reserved}, {"mixed", nil}} {
+				require.NoError(t, repo.Insert(ctx, &QueuedMessage{
+					SessionID: row.session, TaskID: "t1", Content: "body", QueuedBy: "user-1", Metadata: row.metadata,
+				}, 10))
+			}
+			sessions, err := repo.(pendingSessionLister).ListSessionsWithPending(ctx)
+			require.NoError(t, err)
+			require.Equal(t, []string{"mixed"}, sessions)
+		})
+	}
+}

@@ -37,9 +37,13 @@ so that the conversation does not silently stop.
   path as an Auto-run drain. It shall not change the Auto-run policy, shall not
   dispatch to a running or otherwise non-promptable session, and shall keep the
   existing recovery-block, clarification, cancellation, and in-flight guards.
+  A session whose cancellation guard is held shall be skipped for that pass
+  rather than waited on, so one busy session cannot stall the sweep.
 - **AC-TASKS-IDLE-QUEUE-DRAIN-001.3:** Repeated attempts for one session shall
   back off from one minute up to fifteen minutes, and the backoff shall reset
-  once the session no longer holds queued messages.
+  once the session no longer holds queued messages and has no dispatch in
+  flight. A message returned to the queue by an in-flight dispatch shall wait
+  out the current backoff.
 - **AC-TASKS-IDLE-QUEUE-DRAIN-001.4:** Queued rows whose session no longer
   exists shall not be offered.
 
