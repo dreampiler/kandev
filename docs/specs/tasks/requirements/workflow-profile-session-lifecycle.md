@@ -109,6 +109,7 @@ starts and ends, so repeated stages use the intended context.
   navigation, and no document-level horizontal overflow.
 
 - **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.14:** If destination validation rejects an automatic transition after a turn completes, the current conversation shall accept another message without cancellation. The workflow step and primary session shall remain unchanged. This recovery shall not stop a newer turn or reopen a terminal session. Desktop and phone shall receive the recovered session state through the existing update channel.
+- **AC-TASKS-WORKFLOW-PROFILE-SESSIONS-001.15:** When a queued message starts a turn whose `on_turn_start` action moves the task to a step with a different agent profile, and the source step parks its session, Kandev shall park the source session and finish the queued dispatch. The dispatch shall not stall, and the session's queue shall not stay blocked behind it.
 
 ### REQ-TASKS-WORKFLOW-PROFILE-SESSIONS-002: Explicit workflow session recipients
 

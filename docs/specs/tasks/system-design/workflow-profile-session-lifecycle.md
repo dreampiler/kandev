@@ -112,7 +112,8 @@ consumed tombstone remains durable.
 10. If the end setting is `park`, persist the execution-stamped stop intent.
     Set the source to `WAITING_FOR_INPUT` and clear `CompletedAt`.
 11. Release the source lifecycle guard before runtime stop. If the caller owns
-    the guard, schedule the stop after the lifecycle operation returns.
+    the guard, as a queued prompt's after-claim `on_turn_start` does, schedule
+    the stop after the lifecycle operation returns.
 12. Consume only the old execution's stamped intent; treat its stream close as
     teardown acknowledgement and skip normal terminal processing.
 
