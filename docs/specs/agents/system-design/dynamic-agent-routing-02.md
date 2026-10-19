@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-20
 owners:
   - cfl
 ---
@@ -127,6 +127,17 @@ require the current exclusive probe lease.
   it holds or loads with a stale-generation error before it opens any circuit.
   Such a failure neither opens the current candidate's circuit nor advances the
   route. A session without known route state keeps the existing behavior.
+- A qualifying classified failure that the orchestrator may not route, because
+  the attempt already observed output or effects, still charges the candidate's
+  shared circuit. The orchestrator's ineligible branch calls
+  `ProfileExecutionResolver.RecordFailureCircuit`, which loads the logical
+  profile and calls `Engine.RecordFailureCircuit`. The engine applies the same
+  generation and candidate fence as `ApplyFailureContext`, ignores codes that
+  do not qualify and owner-release codes (the account-block hold already
+  applies), and opens the circuit with the standard backoff and reset hint. It
+  does not select, claim a generation, launch a successor, or change route
+  status, so the failed turn keeps its existing recovery surface and only later
+  selections skip the candidate.
 - Lifecycle stream events capture the execution's concrete profile separately
   from its logical profile or Office identity. The stream-error handler passes
   that concrete profile to the same failure guard as terminal lifecycle events.
@@ -213,6 +224,10 @@ require the current exclusive probe lease.
 - **GIVEN** two tasks use profiles with the same proven Fable credential
   binding, **WHEN** one opens its quota circuit, **THEN** the second skips Fable
   without making a failing launch.
+- **GIVEN** a candidate reports a provider-unavailable error after the turn
+  already produced output, **WHEN** the failure is handled, **THEN** the turn
+  keeps its manual recovery surface on the same route generation and the next
+  selection by any session skips that candidate until its circuit recovers.
 - **GIVEN** another profile uses a different or unknown Fable credential
   binding, **WHEN** its resource key is evaluated, **THEN** the first binding's
   quota circuit does not disable it.

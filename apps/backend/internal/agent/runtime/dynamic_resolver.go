@@ -251,6 +251,26 @@ func (r *ProfileExecutionResolver) HoldAccountBlock(executionProfileID string, c
 	return r.engine.HoldAccountBlock(executionProfileID, code)
 }
 
+// RecordFailureCircuit opens the shared resource circuit of the concrete
+// candidate that produced a qualifying classified failure, without advancing
+// the route. It reports whether a circuit was opened; a failure for a
+// superseded generation or candidate returns dynamic.ErrStaleGeneration.
+func (r *ProfileExecutionResolver) RecordFailureCircuit(
+	ctx context.Context,
+	sessionID, profileID, candidateID string,
+	generation int64,
+	failure *routingerr.Error,
+) (bool, error) {
+	if r == nil || r.engine == nil || sessionID == "" || profileID == "" {
+		return false, nil
+	}
+	profile, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return false, err
+	}
+	return r.engine.RecordFailureCircuit(ctx, sessionID, profile, generation, candidateID, failure)
+}
+
 // ReleaseAccountBlock closes the owner-release hold of one concrete execution
 // profile and reports whether a hold was closed.
 func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {

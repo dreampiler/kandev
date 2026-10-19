@@ -2,7 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
+	"go.uber.org/zap"
+
+	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -40,4 +45,39 @@ func (s *Service) dynamicFailureSession(
 func failureFromSupersededCandidate(data watcher.AgentEventData, session *models.TaskSession) bool {
 	return data.ExecutionProfileID != "" && session != nil &&
 		session.ExecutionProfileID != data.ExecutionProfileID
+}
+
+// recordIneligibleFailureCircuit charges a classified failure that may not
+// advance the route, such as one reported after the attempt produced output
+// or effects, to the shared circuit of the candidate that produced it. The
+// route, its generation, and the recovery surface are left unchanged, so the
+// failed turn stays with the operator while later selections skip the
+// unhealthy candidate. The engine fences the failure to the route's current
+// generation and candidate and ignores codes that do not qualify.
+func (s *Service) recordIneligibleFailureCircuit(
+	ctx context.Context,
+	session *models.TaskSession,
+	classified *routingerr.Error,
+) {
+	if s.profileExecutionResolver == nil || session == nil || classified == nil {
+		return
+	}
+	opened, err := s.profileExecutionResolver.RecordFailureCircuit(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID,
+		session.RouteGeneration, classified,
+	)
+	if err != nil {
+		if !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+			s.logger.Warn("failed to record dynamic candidate circuit for a non-routable failure",
+				zap.String("session_id", session.ID),
+				zap.String("execution_profile_id", session.ExecutionProfileID), zap.Error(err))
+		}
+		return
+	}
+	if opened {
+		s.logger.Info("opened dynamic candidate circuit for a non-routable failure",
+			zap.String("session_id", session.ID),
+			zap.String("execution_profile_id", session.ExecutionProfileID),
+			zap.String("error_code", string(classified.Code)))
+	}
 }

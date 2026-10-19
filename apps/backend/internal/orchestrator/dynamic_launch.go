@@ -878,6 +878,7 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 	}
 	evidence, eligible := s.prepareDynamicFailureEvidence(ctx, data, session, classified, startupEvidence, unclassified)
 	if !eligible {
+		s.recordIneligibleFailureCircuit(ctx, session, classified)
 		return dynamicFailureRouteResult{}
 	}
 	conductor := s.profileExecutionResolver.NewConductor(nil)
