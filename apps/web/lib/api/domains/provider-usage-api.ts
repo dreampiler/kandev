@@ -32,6 +32,19 @@ export type ProfileExecutionUsage = {
   session_id: string;
   report: ExecutionUsageReport;
 };
+export type CachedProfileUsage = {
+  profile_id: string;
+  cached_only: true;
+  executions: ProfileExecutionUsage[];
+};
+
+/** A distinct suffix stays unavailable on older provider-refreshing servers. */
+export const readCachedProfileExecutionUsage = (profileId: string, options?: ApiRequestOptions) =>
+  fetchJson<CachedProfileUsage>(
+    `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/usage/cached`,
+    options,
+  );
+
 export const readProfileExecutionUsage = (profileId: string, options?: ApiRequestOptions) =>
   fetchJson<{ profile_id: string; executions: ProfileExecutionUsage[] }>(
     `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/usage`,

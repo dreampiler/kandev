@@ -1,0 +1,84 @@
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { OverviewLast24h } from "./control-history-list";
+import { occurredTime } from "./overview-format";
+import type { OverviewEvent } from "@/lib/types/control-overview";
+
+afterEach(cleanup);
+const EVENT_ROW = "overview-event";
+
+describe("reused last 24 hours list", () => {
+  it("applies the row cap after selecting an event kind and preserves task/SID navigation", () => {
+    const events: OverviewEvent[] = Array.from({ length: 55 }, (_, index) => ({
+      kind: "task_created",
+      at: "2026-10-18T13:00:00Z",
+      task_id: `task-${index}`,
+      title: `Created ${index}`,
+    }));
+    events.push({
+      kind: "session_failed",
+      at: "2026-10-18T12:00:00Z",
+      task_id: "failed-task",
+      session_id: "exact-session",
+      title: "Failure outside initial cap",
+      workspace_id: "workspace-one",
+    });
+    render(
+      <OverviewLast24h events={events} workspaceNames={{ "workspace-one": "Workspace One" }} />,
+    );
+    expect(screen.getAllByTestId(EVENT_ROW)).toHaveLength(50);
+    expect(screen.getByTestId("overview-event-visible-count").textContent).toBe("50 of 56");
+    fireEvent.click(screen.getByTestId("overview-event-kind-session_failed"));
+    const row = screen.getByTestId(EVENT_ROW);
+    expect(row.textContent).toContain("Failure outside initial cap");
+    expect(row.getAttribute("href")).toBe("/t/failed-task?sessionId=exact-session");
+    expect(
+      screen.getByTestId("overview-event-kind-session_failed").getAttribute("aria-pressed"),
+    ).toBe("true");
+  });
+  it("returns to all kinds when a refreshed result no longer contains the selected kind", () => {
+    const event: OverviewEvent = {
+      kind: "session_failed",
+      at: "2026-10-18T12:00:00Z",
+      title: "Failed",
+      task_id: "failed",
+    };
+    const view = render(<OverviewLast24h events={[event]} workspaceNames={{}} />);
+    fireEvent.click(screen.getByTestId("overview-event-kind-session_failed"));
+    view.rerender(
+      <OverviewLast24h
+        events={[{ ...event, kind: "task_created", title: "New" }]}
+        workspaceNames={{}}
+      />,
+    );
+    expect(screen.getByTestId(EVENT_ROW).textContent).toContain("New");
+    expect(screen.getByTestId("overview-event-kind-all").getAttribute("aria-pressed")).toBe("true");
+  });
+  it("retains existing automation detail navigation", () => {
+    render(
+      <OverviewLast24h
+        events={[
+          {
+            kind: "automation_run",
+            at: "2026-10-18T12:00:00Z",
+            workspace_id: "w",
+            automation_id: "a",
+            title: "Automation",
+          },
+        ]}
+        workspaceNames={{ w: "Workspace" }}
+      />,
+    );
+    expect(screen.getByTestId(EVENT_ROW).getAttribute("href")).toBe(
+      "/settings/workspaces/w/automations/a",
+    );
+  });
+  it("preserves empty list state and a fixed time across midnight", () => {
+    render(<OverviewLast24h events={[]} workspaceNames={{}} />);
+    expect(screen.queryByTestId(EVENT_ROW)).toBeNull();
+    const now = new Date(2026, 9, 18, 0, 1).getTime();
+    const yesterday = new Date(2026, 9, 17, 23, 59).toISOString();
+    expect(occurredTime(yesterday, now)).toContain("10-17");
+    expect(occurredTime("invalid", now)).toBe("");
+  });
+});

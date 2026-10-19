@@ -18,6 +18,7 @@ import {
 export type ControlWorkspace = WorkspaceState["items"][number];
 export type ControlCoordinatorList = { items: Coordinator[]; error: boolean };
 type Snapshot = {
+  receivedAt?: string;
   capacity?: SessionCapacityObservation;
   identity: string;
   owner: object;
@@ -73,7 +74,14 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
       store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
       const details = await readControlDetails(workspaces, coordinatorEnabled, controller.signal);
-      if (current()) setSnapshot({ identity, owner, workspaces, ...details });
+      if (current())
+        setSnapshot({
+          identity,
+          owner,
+          workspaces,
+          ...details,
+          receivedAt: new Date().toISOString(),
+        });
     } catch {
       if (current()) {
         setSnapshot(undefined);

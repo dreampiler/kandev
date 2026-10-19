@@ -1,23 +1,26 @@
 import { ControlTaskActivity } from "./control-task-activity";
 import { ControlProviderUsage } from "./control-provider-usage";
-import { linkToTasks } from "@/lib/links";
+import { ControlHistory } from "./control-history";
+import { ControlWorkspaces } from "./control-workspaces";
 import { ControlCapacitySnapshot } from "./control-capacity-snapshot";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
 import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
-import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
-import {
-  controlTaskTotal,
-  type ControlTaskCount,
-} from "@/hooks/domains/coordinator/control-conversation-lists";
+import { controlTaskTotal } from "@/hooks/domains/coordinator/control-conversation-lists";
 
-export function IntegratedControlDashboard({ view }: { view: ControlView }) {
+export function IntegratedControlDashboard({
+  view,
+  workspaceId,
+}: {
+  view: ControlView;
+  workspaceId?: string;
+}) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   if (!control?.data) return null;
-  const { workspaces, byWorkspace, conversationsByWorkspace } = control.data;
+  const { workspaces, byWorkspace } = control.data;
   const rows = workspaces.flatMap((workspace) =>
     (byWorkspace[workspace.id]?.items ?? []).map((coordinator) => ({ workspace, coordinator })),
   );
@@ -33,40 +36,9 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           coordinatorEnabled={control.coordinatorEnabled}
         />
       )}
-      {view === "history" && <UnavailableHistory />}
+      {view === "history" && <ControlHistory workspaceId={workspaceId} />}
       {(view === "workspaces" || view === "overview") && (
-        <div className="grid gap-3">
-          {workspaces.map((workspace) => (
-            <section key={workspace.id} className="rounded-lg border p-4">
-              <h2 className="font-medium">
-                <Link
-                  className="inline-flex min-h-7 items-center underline [@media(pointer:coarse)]:min-h-11"
-                  href={controlHref("workspaces", workspace.id)}
-                >
-                  {workspace.name}
-                </Link>
-              </h2>
-              {workspace.description && (
-                <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                  {workspace.description}
-                </p>
-              )}
-              <p className="mt-2 text-xs text-muted-foreground">
-                {t(
-                  hasScope(workspace.scopes, SCOPE.workspaceManage)
-                    ? "sidebar:integratedControl.manageAccess"
-                    : "sidebar:integratedControl.readAccess",
-                )}
-              </p>
-              <WorkspaceTaskCount count={conversationsByWorkspace[workspace.id]?.tasks} />
-              {byWorkspace[workspace.id]?.error && (
-                <p role="alert" className="mt-2 text-sm text-destructive">
-                  {t("sidebar:integratedControl.loadError")}
-                </p>
-              )}
-            </section>
-          ))}
-        </div>
+        <ControlWorkspaces workspaceId={workspaceId} />
       )}
       {view === "activity" && (
         <>
@@ -75,7 +47,7 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
           <CoordinatorFacts view={view} rows={rows} />
         </>
       )}
-      {view === "providers" && <ControlProviderUsage />}
+      {view === "providers" && <ControlProviderUsage workspaceId={workspaceId} />}
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
@@ -144,24 +116,6 @@ function ControlOverview({
   );
 }
 
-function UnavailableHistory() {
-  const { t } = useTranslation();
-  return (
-    <section className="space-y-3">
-      <p role="status" className="text-sm text-muted-foreground">
-        {t("sidebar:controlInspection.historyHelp")}
-      </p>
-      <Link
-        className="inline-flex min-h-7 items-center underline [@media(pointer:coarse)]:min-h-11"
-        href={linkToTasks()}
-      >
-        {t("sidebar:controlInspection.openTasks")}
-      </Link>
-      <ControlTaskActivity />
-    </section>
-  );
-}
-
 function hasPartialControlData(
   data: NonNullable<NonNullable<ReturnType<typeof useIntegratedControl>>["data"]>,
 ) {
@@ -170,26 +124,6 @@ function hasPartialControlData(
     Object.values(data.conversationsByWorkspace).some(
       (list) => list.independent.error || list.tasks?.error,
     )
-  );
-}
-
-function WorkspaceTaskCount({ count }: { count?: ControlTaskCount }) {
-  const { t } = useTranslation();
-  return (
-    <>
-      <p className="mt-2 text-sm">
-        {t("sidebar:integratedControl.unarchivedTasks")}: {count?.total ?? t("common:unknown")}
-      </p>
-      {count?.error && (
-        <p role="alert" className="mt-2 text-sm text-destructive">
-          {t(
-            count.denied
-              ? "sidebar:integratedControl.readDenied"
-              : "sidebar:integratedControl.loadError",
-          )}
-        </p>
-      )}
-    </>
   );
 }
 

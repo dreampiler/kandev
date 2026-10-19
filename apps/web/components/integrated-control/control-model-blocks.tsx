@@ -1,0 +1,99 @@
+import { useTranslation } from "react-i18next";
+import { useControlProviderHealth } from "@/hooks/domains/coordinator/use-control-provider-health";
+import type { ProviderHealth } from "@/lib/state/slices/office/types";
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+import { formatDateTime } from "@/lib/i18n/formats";
+import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlReadState } from "./control-read-state";
+import { SectionCard } from "./overview-section-card";
+
+const STATE_KEYS = {
+  healthy: "office:healthy",
+  short_retry: "office:shortRetry",
+  degraded: "office:degraded",
+  user_action_required: "office:needsAction",
+};
+
+export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
+  const { t } = useTranslation();
+  const control = useIntegratedControl();
+  const workspaces = (control?.data?.workspaces ?? []).filter(
+    (workspace) => !workspaceId || workspace.id === workspaceId,
+  );
+  const result = useControlProviderHealth(
+    workspaces.map((workspace) => workspace.id),
+    control?.data,
+  );
+  return (
+    <SectionCard title={t("office:providerHealth")}>
+      <p className="p-3 text-xs text-muted-foreground">
+        {t("sidebar:controlRestore.nativeHealthScope")}
+      </p>
+      <ControlReadState status={result.status} />
+      {result.data?.map((workspace) => (
+        <section
+          key={workspace.id}
+          className="space-y-2 border-t p-3 text-sm"
+          data-testid="control-provider-health"
+        >
+          <h3 className="font-medium">
+            {workspaces.find((item) => item.id === workspace.id)?.name}
+          </h3>
+          <ControlReadState status={workspace.status} />
+          {workspace.status === "ready" && workspace.health.length === 0 && (
+            <p>{t("sidebar:controlRestore.noProviderHealth")}</p>
+          )}
+          <div className="grid gap-2 sm:grid-cols-2">
+            {workspace.health.map((row) => (
+              <ProviderHealthRow
+                key={row.provider_id + ":" + row.scope + ":" + row.scope_value}
+                row={row}
+              />
+            ))}
+          </div>
+          {workspace.status === "ready" && (
+            <p className="text-xs text-muted-foreground">
+              {t("sidebar:controlRestore.healthReadAt")}:{" "}
+              {healthTime(result.receivedAt) ?? t("common:unknown")} (
+              {Intl.DateTimeFormat().resolvedOptions().timeZone})
+            </p>
+          )}
+        </section>
+      ))}
+    </SectionCard>
+  );
+}
+
+function ProviderHealthRow({ row }: { row: ProviderHealth }) {
+  const { t } = useTranslation();
+  const retry = healthTime(row.retry_at);
+  return (
+    <div
+      className="space-y-1 break-words rounded-md border p-3"
+      data-testid="control-provider-health-row"
+    >
+      <h4 className="font-medium">
+        {row.provider_id} {row.scope_value}
+      </h4>
+      <p>{t(STATE_KEYS[row.state])}</p>
+      {row.error_code && <p>{row.error_code}</p>}
+      <p>
+        {t("sidebar:controlRestore.healthScope")}: {row.scope}
+      </p>
+      <p>
+        {t("sidebar:controlRestore.recordedRetryAt")}: {retry ?? t("common:unknown")}
+      </p>
+      {retry && Date.parse(row.retry_at!) <= Date.now() && (
+        <p>{t("sidebar:controlRestore.retryElapsed")}</p>
+      )}
+      <p>
+        {t("sidebar:controlRestore.lastFailureAt")}:{" "}
+        {healthTime(row.last_failure) ?? t("common:unknown")}
+      </p>
+    </div>
+  );
+}
+
+function healthTime(at: string | undefined) {
+  return parseTurnTimestamp(at) === null ? undefined : formatDateTime(at!);
+}

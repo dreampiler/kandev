@@ -1,47 +1,35 @@
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "@/components/state-provider";
-import { ProviderUsageCard } from "@/components/settings/provider-usage-card";
-import { useIntegratedControl } from "./integrated-control-provider";
-import { linkToTask } from "@/lib/links";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { ControlModelActivity } from "./control-model-activity";
+import { ControlModelBlocks } from "./control-model-blocks";
+import { ControlCachedUsage } from "./control-cached-usage";
+import Link from "@/components/routing/app-link";
 
-export function ControlProviderUsage() {
+export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
-  const control = useIntegratedControl();
-  const usageEnabled = useFeature("providerUsageLimits");
-  const agents = useAppStore((state) => state.agentProfiles.items);
-  if (!control?.data) return null;
-  if (!usageEnabled) return <p role="status">{t("sidebar:controlInspection.usageDisabled")}</p>;
-  const tasks = Object.values(control.data.conversationsByWorkspace).flatMap(
-    (list) => list.tasks?.items ?? [],
-  );
-  const profiles = [
-    ...new Set(
-      tasks.flatMap((task) =>
-        task.primary_agent_profile_id ? [task.primary_agent_profile_id] : [],
-      ),
-    ),
-  ];
-  const sessionLinks = Object.fromEntries(
-    tasks.flatMap((task) =>
-      task.primary_session_id
-        ? [[task.primary_session_id, linkToTask(task.id, { sessionId: task.primary_session_id })]]
-        : [],
-    ),
-  );
+  const limitsEnabled = useFeature("providerUsageLimits");
   return (
-    <section className="space-y-3" data-testid="control-provider-usage">
-      <p className="text-sm text-muted-foreground">{t("sidebar:controlInspection.usageScope")}</p>
-      {profiles.map((id) => (
-        <div key={id}>
-          <h2 className="mb-2 font-medium">
-            {agents.find((profile) => profile.id === id)?.label ??
-              t("sidebar:integratedControl.agentProfile")}
-          </h2>
-          <ProviderUsageCard profileId={id} autoRead hideAccount sessionLinks={sessionLinks} />
-        </div>
-      ))}
-      {profiles.length === 0 && <p role="status">{t("sidebar:controlInspection.noProfiles")}</p>}
+    <section className="space-y-4" data-testid="control-provider-usage">
+      <p className="text-sm text-muted-foreground">{t("sidebar:controlRestore.providerScope")}</p>
+      <Link
+        className="inline-flex min-h-7 cursor-pointer items-center text-sm underline [@media(pointer:coarse)]:min-h-11"
+        href="/settings/agents/dynamic"
+      >
+        {t("sidebar:controlRestore.selectionPolicies")}
+      </Link>
+      {limitsEnabled ? (
+        <ControlCachedUsage workspaceId={workspaceId} />
+      ) : (
+        <p
+          role="status"
+          className="rounded-md border p-3 text-sm"
+          data-testid="control-usage-unavailable"
+        >
+          {t("sidebar:controlInspection.usageDisabled")}
+        </p>
+      )}
+      <ControlModelActivity workspaceId={workspaceId} />
+      <ControlModelBlocks workspaceId={workspaceId} />
     </section>
   );
 }

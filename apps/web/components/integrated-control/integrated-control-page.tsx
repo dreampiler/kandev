@@ -17,7 +17,9 @@ function originalControlTask(
   lists: ControlConversationLists | undefined | false,
   coordinator: Coordinator | undefined,
   taskId: string | null,
+  coordinatorRequested = false,
 ) {
+  if (coordinatorRequested && !coordinator) return undefined;
   if (!lists) return undefined;
   if (!coordinator) return lists.independent.items.find((item) => item.task_id === taskId)?.task_id;
   return !taskId || taskId === coordinator.conversation_task_id
@@ -106,6 +108,8 @@ function ControlBody({
       </p>
     );
   if (!hasSelection) return <IntegratedControlDashboard view={view} />;
+  if (workspace && workspaceDashboard(view, coordinatorRequested, taskId))
+    return <IntegratedControlDashboard view={view} workspaceId={workspace.id} />;
   if (workspace && !coordinatorRequested && !taskId)
     return (
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
@@ -113,10 +117,7 @@ function ControlBody({
       </div>
     );
   const lists = workspace && control.data.conversationsByWorkspace[workspace.id];
-  const originalTaskId =
-    coordinatorRequested && !coordinator
-      ? undefined
-      : originalControlTask(lists, coordinator, taskId);
+  const originalTaskId = originalControlTask(lists, coordinator, taskId, coordinatorRequested);
   if (workspace && originalTaskId)
     return (
       <IntegratedControlConversation
@@ -130,4 +131,12 @@ function ControlBody({
       {t("sidebar:integratedControl.conversationUnavailable")}
     </p>
   );
+}
+
+function workspaceDashboard(
+  view: ControlView,
+  coordinatorRequested: boolean,
+  taskId: string | null,
+) {
+  return !coordinatorRequested && !taskId && ["workspaces", "history", "providers"].includes(view);
 }
