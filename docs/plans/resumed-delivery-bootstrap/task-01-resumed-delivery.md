@@ -83,3 +83,25 @@ block, prompt, or journal was mutated. Temporary diagnostic code was removed.
 Public session/recovery behavior is unchanged; internal design documentation is
 updated. No UI markup or copy changed, so screenshots and browser tests are not
 required for this backend repair.
+
+
+## Authorized continuation preflight follow-up (2026-10-19)
+
+The next-generation continuation path hit the same missing-checkpoint contract
+before event projection: a retained setup frame in generation two was rejected
+by the generation-one-only preflight exception. The earlier generation commit
+wait remains required after replay starts.
+
+The replay exception now accepts only explicitly authorized adjacent-generation
+continuations with a fully retained, unacknowledged stream and no unresolved or
+retained prompt submissions. Authenticated descriptor validation still runs
+first. Preflight writes no cursor or receipt; event processing still waits for
+SQL generation authority and checks the live owner before receipt/projection.
+
+A temporary real-repository preflight regression reproduced the exact checkpoint
+error on a372. The changed preflight plus unauthorized/foreign/generation,
+acknowledged/pruned-history and unresolved/submission negative cases passed.
+Existing bootstrap/owner checks and the prior commit-wait/cancellation probes
+passed in the same focused lifecycle race run (5.220s). No permanent test,
+operating recovery request, or provider call was added. The independent retained
+inference-owner admission failure is not resolved by this delivery change.
