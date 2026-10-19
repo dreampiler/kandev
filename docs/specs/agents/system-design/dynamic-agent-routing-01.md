@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-06
+updated: 2026-10-20
 owners:
   - cfl
 ---
@@ -421,6 +421,9 @@ for the structured reason, and replaces rather than merges provider-specific
 - At the deadline, one worker acquires a half-open probe lease. Other tasks keep
   using alternatives or wait. Probe success closes the circuit, failure extends
   its backoff.
+- The backoff is a fixed minute, extended only by a later provider reset hint.
+  The opt-in escalation ladder is described in
+  [dynamic circuit backoff](dynamic-circuit-backoff.md).
 - Recovery affects future route selection. A healthy active fallback session is
   not interrupted when an earlier candidate recovers.
 

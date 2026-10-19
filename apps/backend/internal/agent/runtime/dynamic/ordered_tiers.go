@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// reasonPolicySkip is the route reason for a selection that skipped a candidate by policy.
+const reasonPolicySkip = "policy_skip"
+
 const (
 	orderedTierMode = "order"
 	orderedSameTier = "same_tier_next"
@@ -101,7 +104,7 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 	if current == "" {
 		current = chain.LastCandidateID
 	}
-	fallback := excluded != "" || preferred != "" || reason == "retry" || reason == "policy_skip" || reason == "try_next"
+	fallback := excluded != "" || preferred != "" || reason == "retry" || reason == reasonPolicySkip || reason == "try_next"
 	if fallback && current != "" {
 		chain = chain.withCandidate(current)
 	}

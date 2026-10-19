@@ -29,7 +29,7 @@ type midTurnCircuitRoute struct {
 // setupMidTurnCircuitRoute projects an active dynamic route on midTurnFailing
 // onto a running session whose current execution is executionID, and records
 // sessionProfile as the route's current candidate on the session.
-func setupMidTurnCircuitRoute(t *testing.T, taskID, sessionID, executionID, sessionProfile string) midTurnCircuitRoute {
+func setupMidTurnCircuitRoute(t *testing.T, taskID, sessionID, executionID, sessionProfile string, circuitOptions ...dynamicruntime.CircuitRegistryOption) midTurnCircuitRoute {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -37,7 +37,7 @@ func setupMidTurnCircuitRoute(t *testing.T, taskID, sessionID, executionID, sess
 	taskRepo := newMockTaskRepo()
 	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
-	circuits := dynamicruntime.NewCircuitRegistry()
+	circuits := dynamicruntime.NewCircuitRegistry(circuitOptions...)
 	resolver := newWorkflowDynamicProfileResolverWithCandidates(t, midTurnDynamicID, []workflowDynamicCandidate{
 		{executionProfileID: midTurnFailing, enabled: true, rulesJSON: `{"on_provider_error":"try_next"}`},
 		{executionProfileID: midTurnNext, enabled: true},

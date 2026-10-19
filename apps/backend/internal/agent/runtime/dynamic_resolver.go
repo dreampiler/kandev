@@ -271,6 +271,25 @@ func (r *ProfileExecutionResolver) RecordFailureCircuit(
 	return r.engine.RecordFailureCircuit(ctx, sessionID, profile, generation, candidateID, failure)
 }
 
+// ResetCircuitFailures clears the consecutive failure count of the concrete
+// candidate's shared circuit after its turn completed without a provider
+// error. It reports whether a count was cleared.
+func (r *ProfileExecutionResolver) ResetCircuitFailures(
+	ctx context.Context,
+	sessionID, profileID, candidateID string,
+	generation int64,
+) (bool, error) {
+	if r == nil || r.engine == nil || sessionID == "" || profileID == "" ||
+		!r.engine.Circuits().EscalationEnabled() {
+		return false, nil
+	}
+	profile, err := r.loadDynamicProfile(ctx, profileID)
+	if err != nil {
+		return false, err
+	}
+	return r.engine.ResetCircuitFailures(ctx, sessionID, profile, generation, candidateID)
+}
+
 // ReleaseAccountBlock closes the owner-release hold of one concrete execution
 // profile and reports whether a hold was closed.
 func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, executionProfileID string) (bool, error) {

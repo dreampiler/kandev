@@ -102,6 +102,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Escalating dynamic routing circuit backoff for repeated candidate failures.
+  # Off in every shipped profile; disabled keeps the fixed one-minute backoff.
+  KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

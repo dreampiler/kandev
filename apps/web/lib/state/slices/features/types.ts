@@ -17,6 +17,7 @@ export const defaultFeatureFlags = {
   providerUsageLimits: false,
   workspaceCollaboration: false,
   integratedControl: false,
+  dynamicCircuitBackoffEscalation: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   needsYouInbox: false,

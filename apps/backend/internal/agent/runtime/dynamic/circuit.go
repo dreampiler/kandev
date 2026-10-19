@@ -40,6 +40,10 @@ type circuit struct {
 	until      time.Time
 	code       routingerr.Code
 	probeUntil time.Time
+	// failures counts consecutive qualifying failures while backoff
+	// escalation is enabled. Only a turn that completes without a provider
+	// error resets it; a successful probe closes the circuit but keeps it.
+	failures int
 }
 
 // held reports whether the circuit stays open until an owner release: it has
@@ -56,6 +60,9 @@ type CircuitSnapshot struct {
 	Until      time.Time
 	Code       routingerr.Code
 	ProbeUntil time.Time
+	// Failures is the consecutive qualifying failure count. It is ignored on
+	// restore while backoff escalation is disabled.
+	Failures int
 }
 
 // CircuitPersistence stores shared resource health across backend restarts.
@@ -88,13 +95,21 @@ func WithCircuitLogger(log *zap.Logger) CircuitRegistryOption {
 	}
 }
 
+// WithCircuitBackoffEscalation enables the escalating backoff ladder for
+// repeated qualifying failures of one resource. Disabled, every open uses the
+// fixed backoff and persisted failure counts are ignored.
+func WithCircuitBackoffEscalation(enabled bool) CircuitRegistryOption {
+	return func(registry *CircuitRegistry) { registry.escalation = enabled }
+}
+
 type CircuitRegistry struct {
-	mu       sync.Mutex
-	now      func() time.Time
-	circuits map[string]circuit
-	persist  CircuitPersistence
-	logger   *zap.Logger
-	pending  map[string]struct{}
+	mu         sync.Mutex
+	now        func() time.Time
+	circuits   map[string]circuit
+	persist    CircuitPersistence
+	logger     *zap.Logger
+	pending    map[string]struct{}
+	escalation bool
 }
 
 func NewCircuitRegistry(options ...CircuitRegistryOption) *CircuitRegistry {
@@ -122,10 +137,14 @@ func (r *CircuitRegistry) Restore(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, snapshot := range snapshots {
-		r.circuits[snapshot.Key] = circuit{
+		entry := circuit{
 			state: snapshot.State, until: snapshot.Until,
 			code: snapshot.Code, probeUntil: snapshot.ProbeUntil,
 		}
+		if r.escalation && snapshot.Failures > 0 {
+			entry.failures = snapshot.Failures
+		}
+		r.circuits[snapshot.Key] = entry
 	}
 	return nil
 }
@@ -256,12 +275,21 @@ func (r *CircuitRegistry) ReleaseProbe(lease ProbeLease, success bool, backoff t
 	r.flushPendingLocked(lease.Key)
 	entry.probeUntil = time.Time{}
 	if success {
+		// The failure count survives a successful probe: only a turn that
+		// completes without a provider error clears it (ResetFailures).
 		entry.state = CircuitClosed
 		entry.until = time.Time{}
 		entry.code = ""
 	} else {
+		now := r.now()
 		entry.state = CircuitOpen
-		entry.until = r.now().Add(backoff)
+		entry.until = now.Add(backoff)
+		if r.escalation {
+			entry.failures++
+			if escalated := now.Add(escalatedBackoff(entry.failures)); escalated.After(entry.until) {
+				entry.until = escalated
+			}
+		}
 	}
 	r.circuits[lease.Key] = entry
 	_ = r.persistSnapshotLocked(lease.Key)
@@ -312,7 +340,7 @@ func (r *CircuitRegistry) persistSnapshotLocked(key string) error {
 	}
 	err := r.persist.SaveCircuit(context.Background(), CircuitSnapshot{
 		Key: key, State: entry.state, Until: entry.until,
-		Code: entry.code, ProbeUntil: entry.probeUntil,
+		Code: entry.code, ProbeUntil: entry.probeUntil, Failures: entry.failures,
 	})
 	if err != nil {
 		_, alreadyPending := r.pending[key]

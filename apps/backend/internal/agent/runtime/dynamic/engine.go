@@ -628,7 +628,7 @@ func (e *Engine) routeToUnclassifiedSuccessor(
 	var found bool
 	if e.orderedTiers {
 		var err error
-		plan, err = e.prepareOrderedPlan(ctx, state, profile, expectedGeneration+1, currentCandidateID, "", "policy_skip")
+		plan, err = e.prepareOrderedPlan(ctx, state, profile, expectedGeneration+1, currentCandidateID, "", reasonPolicySkip)
 		if err != nil {
 			return RouteDecision{}, err
 		}
@@ -703,7 +703,7 @@ func unclassifiedSuccessorRoute(
 	decision := RouteDecision{
 		SessionID: state.SessionID, LogicalProfileID: profile.ID,
 		ExecutionProfileID: successor.ID, Generation: generation,
-		ProfileVersion: profile.Version, Reason: "policy_skip",
+		ProfileVersion: profile.Version, Reason: reasonPolicySkip,
 		Status: routeStatusStarting, ErrorCode: failure.Code,
 		ErrorClass:       routingerr.ClassUnclassified,
 		CatalogueVersion: routingerr.CatalogueVersion,
@@ -879,7 +879,7 @@ func (e *Engine) applyPolicyFailure(
 	}
 
 	if evaluation.Kind == routingpolicy.DecisionSkip {
-		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", "policy_skip")
+		return e.selectContext(ctx, sessionID, profile, expectedGeneration, currentCandidateID, "", reasonPolicySkip)
 	}
 	nextState := state
 	if !exists {
@@ -1435,16 +1435,13 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		until := e.now().Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
-			until = *failure.ResetHint
-		}
-		e.circuits.Open(candidate.BindingKey, until, failure.Code)
+		e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
+			Code: failure.Code, Now: e.now(),
+			ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
+		})
 		return
 	}
 }
-
-const circuitBackoff = time.Minute
 
 func qualifiesForCircuit(code routingerr.Code) bool {
 	switch code {

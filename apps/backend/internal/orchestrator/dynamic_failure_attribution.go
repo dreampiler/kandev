@@ -81,3 +81,31 @@ func (s *Service) recordIneligibleFailureCircuit(
 			zap.String("error_code", string(classified.Code)))
 	}
 }
+
+// resetDynamicCircuitFailuresForCompletion clears the consecutive failure
+// count of the candidate whose turn completed without a provider error, so a
+// later failure restarts the backoff ladder. A completion of a superseded
+// execution or candidate clears nothing.
+func (s *Service) resetDynamicCircuitFailuresForCompletion(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	session *models.TaskSession,
+) {
+	if s.profileExecutionResolver == nil || session == nil || session.RouteGeneration <= 0 ||
+		session.ExecutionProfileID == "" || session.AgentProfileID == "" {
+		return
+	}
+	if session.AgentExecutionID != "" && data.AgentExecutionID != "" &&
+		session.AgentExecutionID != data.AgentExecutionID {
+		return
+	}
+	if failureFromSupersededCandidate(data, session) {
+		return
+	}
+	if _, err := s.profileExecutionResolver.ResetCircuitFailures(
+		ctx, session.ID, session.AgentProfileID, session.ExecutionProfileID, session.RouteGeneration,
+	); err != nil && !errors.Is(err, dynamicruntime.ErrStaleGeneration) {
+		s.logger.Debug("could not reset dynamic candidate circuit failures after a completed turn",
+			zap.String("session_id", session.ID), zap.Error(err))
+	}
+}
