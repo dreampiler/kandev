@@ -2463,9 +2463,14 @@ func (s *Service) resolveDynamicLaunchExecution(
 		}
 		return resolved.ExecutionProfileID, nil
 	}
+	observed := *session
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	changed, err := s.PersistDynamicRouteSelection(ctx, &observed, session)
+	if err != nil {
 		return "", fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	if !changed {
+		return "", dynamicruntime.ErrStaleGeneration
 	}
 	return resolved.ExecutionProfileID, nil
 }

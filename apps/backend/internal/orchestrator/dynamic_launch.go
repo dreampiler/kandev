@@ -185,16 +185,21 @@ func (s *Service) persistDynamicLaunchDecision(
 	sessionID string,
 	decision dynamicruntime.RouteDecision,
 ) error {
+	settingsLock := s.sessionSettingsSnapshotLock(sessionID)
+	settingsLock.Lock()
+	defer settingsLock.Unlock()
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
 	}
+	resetRuntime := dynamicCandidateRuntimeResetRequired(session, decision.ExecutionProfileID)
 	if session.ExecutionProfileID == decision.ExecutionProfileID &&
 		session.RouteGeneration == decision.Generation &&
-		decision.Status == "" {
+		decision.Status == "" && !resetRuntime {
 		return nil
 	}
 	previousExecutionProfileID := session.ExecutionProfileID
+	expectedState, expectedUpdatedAt := session.State, session.UpdatedAt
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Status
@@ -212,6 +217,9 @@ func (s *Service) persistDynamicLaunchDecision(
 	}
 	if previousExecutionProfileID != decision.ExecutionProfileID {
 		session.DownstreamACPSessionID = ""
+	}
+	if resetRuntime {
+		return s.persistDynamicCandidateRuntimeReset(ctx, session, expectedState, expectedUpdatedAt)
 	}
 	return s.repo.UpdateTaskSession(ctx, session)
 }
@@ -765,9 +773,14 @@ func (s *Service) dynamicLaunchDecision(
 		session.RouteGeneration == resolved.Generation {
 		return resolved.Decision, true, nil
 	}
+	observed := *session
 	applyResolvedExecution(session, resolved)
-	if err := s.repo.UpdateTaskSession(ctx, session); err != nil {
+	changed, err := s.PersistDynamicRouteSelection(ctx, &observed, session)
+	if err != nil {
 		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	if !changed {
+		return dynamicruntime.RouteDecision{}, false, dynamicruntime.ErrStaleGeneration
 	}
 	return resolved.Decision, true, nil
 }

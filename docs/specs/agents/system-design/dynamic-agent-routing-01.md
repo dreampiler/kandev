@@ -135,6 +135,22 @@ its work through complete existing agent profiles.
 - A dynamic profile references existing concrete agent profiles. It never
   copies or merges their credentials, environment, model, ACP options, flags,
   permissions, passthrough behavior, or MCP configuration.
+- Switching concrete candidates atomically clears the previous provider's
+  observed runtime model, mode, and ACP options with the route projection.
+  Explicit user overrides, historical baselines, and the current workflow's
+  declared mode survive. A missing workflow contract or changed session revision
+  prevents this write. Same-candidate recovery retains its runtime settings.
+  The switch shares the settings-event lock, and subsequent mode/model events
+  from the previous concrete profile cannot restore its discarded settings.
+  The new provider must still advertise and confirm the requested mode before
+  any prompt is sent; this boundary does not map modes between providers.
+  Manual route actions share this same transaction. A retry may also discard
+  provider observations after a typed permission-mode application failure that
+  belongs to the current execution and proves no prompt was sent. This handles
+  already-failed sessions from older builds without changing explicit overrides
+  or the profile default. Late settings from that rejected execution are fenced;
+  unrelated errors, another execution's failure, and post-prompt failures do not
+  authorize this reset.
 - A dynamic profile's candidate list can reference only concrete, launchable
   profiles. It cannot reference itself, another dynamic profile, or a rich
   Office identity in the first version. An Office identity's separate

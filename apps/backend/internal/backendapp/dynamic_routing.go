@@ -24,6 +24,7 @@ func dynamicRouteActionHandler(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	persistSelection func(context.Context, *models.TaskSession, *models.TaskSession) (bool, error),
 	launchers ...func(context.Context, string) error,
 ) func(context.Context, orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
 	var launchSuccessor func(context.Context, string) error
@@ -31,7 +32,7 @@ func dynamicRouteActionHandler(
 		launchSuccessor = launchers[0]
 	}
 	return func(ctx context.Context, request orchestrator.RouteActionRequest) (*orchestrator.RouteActionResult, error) {
-		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, launchSuccessor, request)
+		return applyDynamicRouteAction(ctx, repo, profileRepo, resolver, persistSelection, launchSuccessor, request)
 	}
 }
 
@@ -40,6 +41,7 @@ func applyDynamicRouteAction(
 	repo *sqliterepo.Repository,
 	profileRepo settingsstore.Repository,
 	resolver *agentruntime.ProfileExecutionResolver,
+	persistSelection func(context.Context, *models.TaskSession, *models.TaskSession) (bool, error),
 	launchSuccessor func(context.Context, string) error,
 	request orchestrator.RouteActionRequest,
 ) (*orchestrator.RouteActionResult, error) {
@@ -65,7 +67,7 @@ func applyDynamicRouteAction(
 	if err != nil {
 		return handleDynamicRouteActionError(ctx, repo, session, expectedState, err)
 	}
-	changed, err := persistDynamicRouteSelection(ctx, repo, session, expectedState, decision)
+	changed, err := persistDynamicRouteSelection(ctx, repo, session, decision, persistSelection)
 	if err != nil {
 		return nil, err
 	}
@@ -151,9 +153,13 @@ func persistDynamicRouteSelection(
 	ctx context.Context,
 	repo *sqliterepo.Repository,
 	session *models.TaskSession,
-	expectedState models.TaskSessionState,
 	decision agentruntime.ProfileExecution,
+	persistSelection func(context.Context, *models.TaskSession, *models.TaskSession) (bool, error),
 ) (bool, error) {
+	if persistSelection == nil {
+		return false, errors.New("dynamic route selection persister unavailable")
+	}
+	observed := *session
 	session.ExecutionProfileID = decision.ExecutionProfileID
 	session.RouteGeneration = decision.Generation
 	session.RouteState = decision.Decision.Status
@@ -170,7 +176,7 @@ func persistDynamicRouteSelection(
 	// A candidate change never carries a provider-native ACP identity across
 	// profiles. The conductor will populate this after a fresh launch.
 	session.DownstreamACPSessionID = ""
-	changed, err := repo.UpdateTaskSessionIfCurrentState(ctx, session, expectedState)
+	changed, err := persistSelection(ctx, &observed, session)
 	if err != nil {
 		return false, routeActionPersistenceError(ctx, repo, session, err)
 	}
