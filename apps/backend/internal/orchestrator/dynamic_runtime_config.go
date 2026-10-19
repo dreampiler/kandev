@@ -72,9 +72,6 @@ func (s *Service) persistDynamicCandidateRuntimeReset(
 		return false, err
 	}
 	session.Metadata = cloneSessionMetadata(session.Metadata)
-	if session.Metadata == nil {
-		session.Metadata = make(map[string]interface{})
-	}
 	delete(session.Metadata, models.SessionMetaKeyRuntimeConfig)
 	delete(session.Metadata, models.SessionMetaKeySessionMode)
 	if mode != "" {
