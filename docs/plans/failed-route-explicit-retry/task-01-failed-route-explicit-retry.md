@@ -41,7 +41,7 @@ backend route-action handler.
 1. Retry with the current generation on a FAILED session with a `starting`
    route, no live runtime, and only its stopped local history row marks the
    generation `action_required` and the retry proceeds; the row is preserved.
-2. A live runtime or a non-stopped executor row returns
+2. A live runtime, an absent executor row, or a non-stopped executor row returns
    `dynamic_route_pending` and leaves the route `starting`.
 3. The manual relaunch reset reopens FAILED only for a manual prompt relaunch
    of the current generation.

@@ -36,8 +36,8 @@ backend route-action handler.
 `prepareFailedDynamicRouteRetry` runs after the active-turn check. Under the
 session lifecycle lock it reloads the session and acts only for a FAILED session
 whose `starting` generation equals the request. It probes runtime liveness and
-accepts either no executor row or the stopped standalone local/worktree history
-row of the session's own execution, then marks the same generation
+accepts only the stopped standalone local/worktree history row of the session's
+own execution, then marks the same generation
 `action_required` through the generation CAS and mirrors the projection. The
 relaunch reset re-checks the generation and allows FAILED to
 WAITING_FOR_INPUT only for a manual prompt relaunch.
@@ -65,6 +65,9 @@ entry in `docs/specs/agents/system-design/dynamic-agent-routing-02.md`.
 
 - Reclaiming a route that still has a live launch would duplicate a runtime;
   a live or unprobeable runtime and any non-history executor row keep the guard.
+- Without an executor row the manual relaunch cold-resumes and is refused for
+  the missing record, so an absent row keeps the guard instead of admitting a
+  Retry that cannot start a runtime.
 - Reopening a terminal session from an automatic path could resurrect a
   cancelled task; only a manual prompt relaunch for the current generation may
   reopen FAILED.

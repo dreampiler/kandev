@@ -29,12 +29,16 @@ func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 	tests := []struct {
 		name        string
 		running     bool
+		noRow       bool
 		rowStatus   string
 		wantPending bool
 	}{
 		{name: "stopped local history", rowStatus: models.ExecutorRunningStatusStopped},
 		{name: "live runtime", running: true, rowStatus: models.ExecutorRunningStatusStopped, wantPending: true},
 		{name: "runtime record not stopped", rowStatus: "ready", wantPending: true},
+		// Without an executor row the manual relaunch cold-resumes and is
+		// refused for the missing record, so Retry must keep the guard.
+		{name: "executor row absent", noRow: true, wantPending: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -49,12 +53,14 @@ func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
 			decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
 			seenAt := time.Now().UTC()
-			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-				ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
-				ExecutorID: models.ExecutorIDWorktree, Runtime: runtimekind.RuntimeStandalone,
-				Status: tt.rowStatus, LastSeenAt: &seenAt,
-			}); err != nil {
-				t.Fatalf("seed executors_running: %v", err)
+			if !tt.noRow {
+				if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+					ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
+					ExecutorID: models.ExecutorIDWorktree, Runtime: runtimekind.RuntimeStandalone,
+					Status: tt.rowStatus, LastSeenAt: &seenAt,
+				}); err != nil {
+					t.Fatalf("seed executors_running: %v", err)
+				}
 			}
 			// The production Retry handler resumes the existing route state.
 			svc.SetRouteActionHandler(func(ctx context.Context, request RouteActionRequest) (*RouteActionResult, error) {
