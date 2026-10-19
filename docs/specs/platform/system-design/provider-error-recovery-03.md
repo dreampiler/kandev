@@ -64,7 +64,13 @@ the actual sanitized error rather than replacing it with a generic initial
 prompt-delivery failure. The dynamic and concrete recovery gates may disregard
 the recorded diagnostic as output only if the terminal failure classifies to
 the identical semantic code and the same generation has no later assistant
-output, thought output, partial utility result, or tool activity.
+output, thought output, partial utility result, or tool activity. A chunk
+recorded from text alone is compared with the terminal failure at both
+fidelities: its structured classification (`http_status`, `rpc_code`,
+`error_kind`) and its text-only classification. Structured signals may refine
+the code (a Codex usage-limit message is `quota_limited` by text and
+`rate_limited` with HTTP 429), and recovery must not depend on whether the
+chunk or the terminal failure is delivered first.
 
 This is a correlation rule, not broad error-text suppression. A changed code
 (for example, a 529 diagnostic followed by a 500 failure), a stale generation,

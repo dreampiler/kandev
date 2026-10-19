@@ -710,7 +710,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 // itself. Callers must hold e.mu.
 func (e *promptAttemptEvidence) outputObservedLocked(data watcher.AgentEventData) bool {
 	if e.providerDiagnosticCode != "" && e.providerDiagnosticText != "" &&
-		matchingProviderFailureCode(data) == e.providerDiagnosticCode &&
+		providerFailureCodeMatches(data, e.providerDiagnosticCode) &&
 		strings.Contains(normalizeDiagnosticText(matchingProviderFailureMessage(data)), e.providerDiagnosticText) {
 		// Claude ACP emits a human-readable agent_message_chunk immediately
 		// before returning the same provider error from session/prompt. The
@@ -734,6 +734,28 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 		return ""
 	}
 	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
+}
+
+// providerFailureCodeMatches reports whether the terminal failure classifies to
+// the recorded diagnostic code at either fidelity. A stream chunk is recorded
+// from its text alone, while the terminal failure may carry structured signals
+// that refine the code (Codex usage-limit prose is quota_limited, HTTP 429 is
+// rate_limited). Comparing the text-only classification too keeps recovery
+// independent of whether the chunk or the terminal failure arrives first; the
+// text-containment check in outputObservedLocked still ties the two together.
+func providerFailureCodeMatches(data watcher.AgentEventData, recorded routingerr.Code) bool {
+	message := matchingProviderFailureMessage(data)
+	if message == "" {
+		return false
+	}
+	if matchingProviderFailureCode(data) == recorded {
+		return true
+	}
+	return routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhasePromptSend,
+		ProviderID: data.AgentID,
+		Stderr:     message,
+	}).Code == recorded
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
