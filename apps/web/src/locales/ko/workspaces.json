@@ -288,5 +288,9 @@
   "idlePolicyTitle": "리소스 절약",
   "idleSuspensionEnabled": "쉬는 ACP 에이전트 일시 중지",
   "idleTimeoutMinutes": "유휴 시간 제한(분)",
-  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요."
+  "idleTimeoutMustBePositive": "0보다 큰 정수를 입력하세요.",
+  "dynamicRoutingPolicyTitle": "동적 라우팅",
+  "dynamicRoutingPolicyDescription": "턴 도중 공급자에 장애가 생겼을 때 이 워크스페이스의 동적 에이전트 프로필이 어떻게 복구할지 정합니다. 기본적으로 꺼져 있습니다.",
+  "midTurnFailoverEnabled": "공급자 한도에 걸리면 다음 후보로 전환",
+  "midTurnFailoverDescription": "이미 출력이 나온 턴이 사용량 제한, 할당량 소진, 공급자 과부하로 멈추면 다음 후보로 한 번 전환하고 저장된 작업 맥락에서 이어갑니다. 실패한 요청은 다시 보내지 않습니다. 끄면 세션이 사용자를 기다립니다."
 }

@@ -288,5 +288,9 @@
   "idlePolicyTitle": "リソースを節約",
   "idleSuspensionEnabled": "アイドル状態の ACP エージェントを一時停止",
   "idleTimeoutMinutes": "アイドルタイムアウト（分）",
-  "idleTimeoutMustBePositive": "0 より大きい整数を入力してください。"
+  "idleTimeoutMustBePositive": "0 より大きい整数を入力してください。",
+  "dynamicRoutingPolicyTitle": "動的ルーティング",
+  "dynamicRoutingPolicyDescription": "ターンの途中でプロバイダーが失敗したときに、このワークスペースの動的エージェントプロファイルをどのように回復するかを選択します。この設定は既定でオフです。",
+  "midTurnFailoverEnabled": "プロバイダーの上限に達したら次の候補を試す",
+  "midTurnFailoverDescription": "すでに出力があったターンがレート制限、クォータ切れ、プロバイダーの過負荷で停止した場合、次の候補に一度だけ切り替え、保存されたタスクのコンテキストから続行します。失敗したリクエストは再送信しません。オフの場合、セッションはユーザーの操作を待ちます。"
 }

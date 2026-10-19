@@ -288,5 +288,9 @@
   "idlePolicyTitle": "节省资源",
   "idleSuspensionEnabled": "挂起空闲 ACP 代理",
   "idleTimeoutMinutes": "空闲超时（分钟）",
-  "idleTimeoutMustBePositive": "请输入大于零的整数。"
+  "idleTimeoutMustBePositive": "请输入大于零的整数。",
+  "dynamicRoutingPolicyTitle": "动态路由",
+  "dynamicRoutingPolicyDescription": "选择当提供方在轮次中途失败时，此工作区中的动态智能体配置如何恢复。此设置默认关闭。",
+  "midTurnFailoverEnabled": "达到提供方限制后尝试下一个候选",
+  "midTurnFailoverDescription": "当已产生输出的轮次因速率限制、配额耗尽或提供方过载而停止时，切换到下一个候选一次，并从已保存的任务上下文继续。失败的请求不会重新发送。关闭时，会话将等待你的操作。"
 }
