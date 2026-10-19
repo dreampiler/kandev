@@ -544,6 +544,11 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	// A fixed profile whose resource circuit is open must not be launched,
+	// even though it is not routed through dynamic selection.
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -845,6 +850,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}

@@ -218,6 +218,30 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	return entry.state == CircuitOpen && !entry.until.IsZero()
 }
 
+// ActiveSuspension reports the circuit refusing a new dispatch on key at now.
+// A held circuit has no reset instant and a half-open circuit is probing one.
+// A timed circuit blocks only before its reset instant: unlike IsOpen it does
+// not stay blocking after expiry, because a fixed-profile dispatch acquires no
+// probe lease. The second result is false when nothing blocks the key.
+func (r *CircuitRegistry) ActiveSuspension(key string, now time.Time) (CircuitSnapshot, bool) {
+	if key == "" {
+		return CircuitSnapshot{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed {
+		return CircuitSnapshot{}, false
+	}
+	if !entry.held() && entry.state != CircuitHalfOpen && !now.Before(entry.until) {
+		return CircuitSnapshot{}, false
+	}
+	return CircuitSnapshot{
+		Key: key, State: entry.state, Until: entry.until,
+		Code: entry.code, ProbeUntil: entry.probeUntil,
+	}, true
+}
+
 type ProbeLease struct {
 	Key       string
 	ExpiresAt time.Time
