@@ -46,3 +46,18 @@ every shipped profile. Disabling it restores the existing navigation without
 deleting data or changing active work. Coordinator data also requires the
 existing coordinator feature. AI cross-workspace control is a separate feature;
 its completion does not block this authorized browser read surface.
+
+### REQ-UI-INTEGRATED-CONTROL-002: Office aggregate dashboard
+
+- **AC-UI-INTEGRATED-CONTROL-002.1:** With Integrated control and Office both ON, Overview shows a stall band, an attention list, and a per-workspace comparison table fed by one `GET /api/v1/office/workspaces/aggregate` read (`REQ-OFFICE-WORKSPACE-OVERVIEW-001`). With Office OFF the aggregate is not read and these panels are absent; with Integrated control OFF nothing changes.
+- **AC-UI-INTEGRATED-CONTROL-002.2:** A workspace is stalled when it has in-progress tasks and no working agent. The attention list raises one row per stalled workspace, per workspace with blocked tasks, and per workspace with pending approvals, in that order and largest count first; each row opens the Office page of its own workspace.
+- **AC-UI-INTEGRATED-CONTROL-002.3:** The comparison table shows one row per Office workspace with its status and task, approval, and working-agent counts, plus a total row. Listed workspaces the aggregate does not cover are counted as not included, not as zero.
+- **AC-UI-INTEGRATED-CONTROL-002.4:** History shows the aggregate's merged recent Office activity, newest first, with consecutive repeats of the same action by the same actor on the same target folded into one row with a count.
+- **AC-UI-INTEGRATED-CONTROL-002.5:** Loading and failed reads are distinct from empty data. A failed refresh keeps the last snapshot and says so. Refresh is explicit or foreground-driven; there is no timer.
+- **AC-UI-INTEGRATED-CONTROL-002.6:** On phone widths the panels cause no horizontal page overflow and their links are at least 44px tall.
+
+The second slice reads Office's read-only multi-workspace aggregate. It shows
+only what that read returns. Execution grades, provider usage limits, inference
+capacity, per-task stall signals (queued messages, failed sessions, repeated step
+moves), and recorded control history are not part of this slice and are not
+inferred from the aggregate.

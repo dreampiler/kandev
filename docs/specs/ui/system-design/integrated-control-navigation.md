@@ -6,6 +6,7 @@ system: ui
 owners: [kandev]
 requirements:
   - REQ-UI-INTEGRATED-CONTROL-001
+  - REQ-UI-INTEGRATED-CONTROL-002
 ---
 
 # Integrated control navigation design
@@ -102,7 +103,8 @@ The five dashboards consume the facts available in this slice and label current
 conversation rows explicitly. They do not label historical runtime sessions as
 independent conversations or manufacture execution/usage measurements. Later
 work adds those data sources and the independent conversation lifecycle. The
-existing Office-only aggregate contribution is neither duplicated nor required.
+Office multi-workspace aggregate is read only by the Office aggregate dashboard
+section below; navigation does not depend on it.
 
 AppNavSheet owns phone navigation scrolling; its integrated tree does not create
 a second scroll region. Phone widths below 768px and coarse-pointer layouts use
@@ -110,3 +112,45 @@ at least 44px active navigation, disclosure, refresh, and session targets. Fine
 desktop pointers retain the surrounding compact controls. Permanent Playwright
 cases cover both desktop and phone user outcomes plus narrow fine-pointer hit
 testing, containment, scroll ownership, dismissal, and unchanged selection.
+
+## Office aggregate dashboard
+
+`REQ-UI-INTEGRATED-CONTROL-002` adds one read to the route-scoped provider:
+`useControlAggregate` calls `getWorkspaceAggregate` when the route is active,
+the user is authenticated, and `features.office` is on. It keeps one snapshot
+per authenticated read identity, aborts superseded requests, keeps the last
+snapshot when a refresh fails, and refreshes on the header/sidebar Refresh
+button and on foreground return. It adds no timer and no WebSocket subscription.
+The navigation flag stays `features.integratedControl`; no new flag is added.
+
+`control-aggregate-signals.ts` derives everything from the aggregate entries as
+pure functions: workspace status (stalled, blocked, active, idle), totals, the
+ordered attention list, the uncovered-workspace count against the navigation's
+workspace list, and the folded activity groups. `control-aggregate-overview.tsx`
+renders the stall band, attention list, and comparison table on Overview;
+`control-grouped-history.tsx` renders folded activity on History with the shared
+Office `ActivityRow`. Links target `/office`, `/office/tasks`, and
+`/office/inbox` with the source `workspaceId`, so the existing Office pages
+select the right workspace.
+
+```text
+Overview (desktop)
++--------------------------------------------------------------+
+| 1 workspace has work in progress and no working agent         |
+| In progress 3   Blocked 1   Pending approvals 2   Working 1/3 |
++--------------------------------------------------------------+
+| Needs attention                                               |
+| [Stalled]  Alpha: 2 tasks in progress, no agent working [Open]|
+| [Blocked]  Alpha: 1 blocked task                        [Open]|
+| [Approvals] Beta: 2 approvals waiting for a decision    [Open]|
++--------------------------------------------------------------+
+| Workspace comparison                                          |
+| Workspace  Status  Tasks Open InProg Blocked Done Appr Working |
+| Alpha      Stalled   3    0    2      1      0    0     0     |
+| Beta       Active    1    0    1      0      0    2     1     |
+| Total                4    0    3      1      0    2     1     |
++--------------------------------------------------------------+
+```
+
+On phones the band facts wrap to two columns, attention rows wrap, and the
+comparison table scrolls inside its own container so the page does not overflow.

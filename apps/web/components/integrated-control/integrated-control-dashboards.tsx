@@ -4,6 +4,8 @@ import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlAggregateOverview } from "./control-aggregate-overview";
+import { ControlGroupedHistory } from "./control-grouped-history";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -36,6 +38,15 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
             }
           />
         </div>
+      )}
+      {view === "overview" && control.officeEnabled && (
+        <ControlAggregateOverview
+          aggregate={control.aggregate}
+          controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+        />
+      )}
+      {view === "history" && control.officeEnabled && (
+        <ControlGroupedHistory aggregate={control.aggregate} />
       )}
       {view === "workspaces" || view === "overview" ? (
         <div className="grid gap-3">
