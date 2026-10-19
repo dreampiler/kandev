@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/winproc"
 )
 
 const capturedOutputLimit = 64 * 1024
@@ -146,8 +148,14 @@ func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdown
 func (s *processSupervisor) attachSignals() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	stopLocal, err := winproc.ListenForShutdown(ch)
+	if err != nil {
+		launcherInfof("cooperative shutdown listener unavailable: %v", err)
+		stopLocal = func() {}
+	}
 	shutdownDebugf("launcher signal handler armed launcher_pid=%d", os.Getpid())
 	go func() {
+		defer stopLocal()
 		sig := <-ch
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
 		shutdownDone := make(chan int, 1)
