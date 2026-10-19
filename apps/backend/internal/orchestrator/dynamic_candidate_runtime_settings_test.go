@@ -171,6 +171,44 @@ func TestSessionModeEventFromPreviousCandidateIsIgnoredAfterSwitch(t *testing.T)
 	}
 }
 
+// The models handler persists the current model after its staleness check, so
+// a late models event from the previous candidate must be dropped there too.
+func TestSessionModelsEventFromPreviousCandidateIsIgnoredAfterSwitch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-candidate-late-models", "session-candidate-late-models", models.TaskSessionStateFailed)
+	seedDynamicCandidateRuntimeSettings(t, repo, "session-candidate-late-models")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
+
+	if err := svc.persistDynamicLaunchDecision(ctx, "session-candidate-late-models", dynamicruntime.RouteDecision{
+		ExecutionProfileID: nextCandidateProfileID,
+		Generation:         2,
+	}); err != nil {
+		t.Fatalf("persist candidate switch: %v", err)
+	}
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:             "task-candidate-late-models",
+		SessionID:          "session-candidate-late-models",
+		ExecutionID:        "previous-execution",
+		ExecutionProfileID: previousCandidateProfileID,
+		Data:               &lifecycle.AgentStreamEventData{CurrentModelID: "previous-model"},
+	})
+
+	session, err := repo.GetTaskSession(ctx, "session-candidate-late-models")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
+	if effective.Model == "previous-model" {
+		t.Fatalf("late models event from the previous candidate restored its model: %#v", session.Metadata)
+	}
+	if len(eventBus.events) != 0 {
+		t.Fatalf("late models event from the previous candidate was published: %d events", len(eventBus.events))
+	}
+}
+
 // Manual route actions persist a candidate switch through the exported entry
 // point; a session revision that moved since the caller read it must not be
 // overwritten.

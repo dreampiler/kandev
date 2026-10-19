@@ -64,7 +64,8 @@ Permanent regression coverage lives in
   explicit override;
 - a workflow-declared mode survives the switch;
 - a same-candidate retry keeps its runtime settings;
-- a late mode event from the previous candidate does not restore its mode;
+- a late mode or models event from the previous candidate does not restore its
+  mode or model;
 - the exported switch used by manual route actions rejects a changed revision.
 
 ## Risks
