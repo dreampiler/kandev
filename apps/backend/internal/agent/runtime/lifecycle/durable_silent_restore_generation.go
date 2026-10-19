@@ -7,10 +7,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// Native restore and fresh start can emit setup events before their successor
-// generation is committed in SQL. Only an explicit interrupted-conversation
-// successor or fresh-start replacement may wait for that commit; receipt and
-// projection still require the committed generation and live owner.
+// Native restore, fresh start, and context continuation can emit setup events
+// before their successor generation is committed in SQL. Only an explicit
+// interrupted-conversation successor, fresh-start replacement, or authorized
+// context continuation may wait for that commit; receipt and projection still
+// require the committed generation and live owner.
 func awaitSilentRestoreGeneration(
 	ctx context.Context, execution *AgentExecution, reader harnessGenerationReader, sessionID, incarnationID string,
 ) (*models.HarnessSessionGeneration, error) {
@@ -49,7 +50,7 @@ func successorGenerationPending(execution *AgentExecution, current *models.Harne
 }
 
 func replacementGenerationPending(execution *AgentExecution, current *models.HarnessSessionGeneration) bool {
-	return execution != nil && current != nil && execution.ReplacesNativeConversation &&
+	return execution != nil && current != nil && execution.replacesPredecessorGeneration() &&
 		current.SessionID == execution.SessionID && current.IncarnationID == execution.DeliveryIncarnationID &&
 		uint64(current.Generation)+1 == execution.DeliveryHarnessGeneration
 }
