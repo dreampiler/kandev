@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
+	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -27,14 +28,8 @@ func (s *Service) prepareFailedDynamicRouteRetry(ctx context.Context, request Ro
 		session.RouteGeneration != request.ExpectedGeneration {
 		return nil
 	}
-	if s.agentManager == nil || s.agentManager.IsAgentRunningForSession(ctx, session.ID) {
-		return dynamicruntime.ErrRecoveryPending
-	}
-	if _, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID); !errors.Is(err, models.ErrExecutorRunningNotFound) {
-		if err != nil {
-			return fmt.Errorf("check failed route runtime owner: %w", err)
-		}
-		return dynamicruntime.ErrRecoveryPending
+	if err := s.checkFailedRouteRuntimeStopped(ctx, session); err != nil {
+		return err
 	}
 	decision, err := s.profileExecutionResolver.MarkRouteActionRequired(ctx, session.ID, session.RouteGeneration, "failed_start_route_retry")
 	if err != nil {
@@ -42,4 +37,39 @@ func (s *Service) prepareFailedDynamicRouteRetry(ctx context.Context, request Ro
 	}
 	s.mirrorDynamicRouteProjection(ctx, session, session.RouteGeneration, decision.Status, decision.Reason)
 	return nil
+}
+
+func (s *Service) checkFailedRouteRuntimeStopped(ctx context.Context, session *models.TaskSession) error {
+	if s.agentManager == nil {
+		return fmt.Errorf("%w: failed_route_manager_unavailable", dynamicruntime.ErrRecoveryPending)
+	}
+	running, err := s.probeAgentRunning(ctx, session.ID)
+	if err != nil {
+		return fmt.Errorf("%w: failed_route_runtime_probe_unknown", dynamicruntime.ErrRecoveryPending)
+	}
+	if running {
+		return fmt.Errorf("%w: failed_route_runtime_live", dynamicruntime.ErrRecoveryPending)
+	}
+	row, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
+	if errors.Is(err, models.ErrExecutorRunningNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check failed route runtime owner: %w", err)
+	}
+	if !failedRouteHasStoppedLocalHistory(session, row) {
+		return fmt.Errorf("%w: failed_route_runtime_record_not_stopped", dynamicruntime.ErrRecoveryPending)
+	}
+	return nil
+}
+
+// Normal cleanup preserves stopped rows for conversation and workspace resume.
+// This predicate observes that history without deleting it or settling claims.
+func failedRouteHasStoppedLocalHistory(session *models.TaskSession, row *models.ExecutorRunning) bool {
+	return row != nil && row.SessionID == session.ID && row.TaskID == session.TaskID &&
+		row.AgentExecutionID != "" && row.AgentExecutionID == session.AgentExecutionID &&
+		row.Runtime == runtimekind.RuntimeStandalone &&
+		(row.ExecutorID == models.ExecutorIDLocal || row.ExecutorID == models.ExecutorIDWorktree) &&
+		row.Status == models.ExecutorRunningStatusStopped && row.LocalPID == 0 && row.PID == 0 &&
+		row.LastSeenAt != nil && !row.LastSeenAt.IsZero() && !row.UpdatedAt.IsZero()
 }
