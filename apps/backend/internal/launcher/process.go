@@ -148,7 +148,10 @@ func (s *processSupervisor) forceKillAll(reason string) []managedProcessShutdown
 func (s *processSupervisor) attachSignals() {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	stopLocal, err := winproc.ListenForShutdown(ch)
+	// The parent's Windows stop request has its own channel so it can start
+	// shutdown but never counts as the second signal that forces a kill.
+	cooperative := make(chan os.Signal, 1)
+	stopLocal, err := winproc.ListenForShutdown(cooperative)
 	if err != nil {
 		launcherInfof("cooperative shutdown listener unavailable: %v", err)
 		stopLocal = func() {}
@@ -156,7 +159,11 @@ func (s *processSupervisor) attachSignals() {
 	shutdownDebugf("launcher signal handler armed launcher_pid=%d", os.Getpid())
 	go func() {
 		defer stopLocal()
-		sig := <-ch
+		var sig os.Signal
+		select {
+		case sig = <-ch:
+		case sig = <-cooperative:
+		}
 		shutdownDebugf("launcher received signal=%s launcher_pid=%d", sig.String(), os.Getpid())
 		shutdownDone := make(chan int, 1)
 		go func() {

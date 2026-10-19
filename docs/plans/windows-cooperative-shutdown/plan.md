@@ -59,8 +59,11 @@ Permanent regression coverage lives beside the changed code:
   console-less child running the real launcher signal handler and requires the
   graceful request to succeed and the child to exit cleanly.
 - `apps/backend/internal/backendapp/startup_shutdown_windows_test.go`: the
-  startup signal controller treats the request as its first signal and drops the
+  startup signal controller treats the request as its first signal, ignores a
+  request that arrives after a console signal started shutdown, and drops the
   event when released.
+- `apps/backend/internal/common/winproc/shutdown_name_test.go`: the event name
+  matches the shell's `Local\KandevShutdown-<pid>` on every platform.
 - `apps/desktop/src-tauri/src/backend.rs`:
   `terminate_child_stops_console_less_child_cooperatively` requires
   `terminate_child_with_timeout` to stop a console-less child cleanly.
@@ -69,6 +72,8 @@ Permanent regression coverage lives beside the changed code:
 
 - A sender that created the event would make a later listener fail; senders only
   open an existing event.
-- A repeated request must not become the second signal that forces exit; the
-  waiter forwards at most one signal.
+- A repeated or late request must not become the second signal that forces
+  exit; the waiter forwards at most one signal into its own channel, and only
+  OS signals are read during the second-signal wait. Ctrl+C in a console shared
+  by the launcher and backend produces exactly that late request.
 - The development `make` wrapper has no event and keeps the tree-wide request.

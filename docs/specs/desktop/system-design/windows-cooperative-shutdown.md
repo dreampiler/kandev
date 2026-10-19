@@ -35,10 +35,15 @@ Each Kandev process that owns a signal-driven teardown registers a manual-reset
 named event, `Local\KandevShutdown-<pid>`, through
 `internal/common/winproc.ListenForShutdown`. The launcher registers it beside
 its `os.Interrupt`/`SIGTERM` handler and the backend registers it in its startup
-signal controller. A waiter forwards one `os.Interrupt` into the existing
-signal channel when the event is set, so a set event is the first signal and
-never the second signal that forces exit. Releasing the handler stops the
-waiter and closes both handles, after which a stop request falls back.
+signal controller. A waiter forwards one `os.Interrupt` into a dedicated
+cooperative channel when the event is set. The handler accepts that channel
+only while waiting for the first signal; the second-signal wait that forces
+exit reads OS signals alone. When `kandev start` or `kandev run` shares a
+console with the backend, Ctrl+C reaches both processes and the launcher then
+sets the backend's event, so this separation keeps that late request from
+cutting the backend's teardown short. Releasing the handler stops the waiter
+and closes both handles, after which a stop request falls back. The event name
+helper is untagged so every platform tests the name shared with the shell.
 
 A parent sets the event for the exact child PID it still owns:
 `windows_shutdown::request` in the shell and `winproc.RequestShutdown` in the
