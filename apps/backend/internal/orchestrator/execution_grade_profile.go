@@ -82,6 +82,13 @@ func (s *Service) resolveExplicitWorkflowStartRoute(
 	} else if recordedSession != nil {
 		session, route = recordedSession, recordedRoute
 	}
+	s.logWorkflowStartSelection(ctx, taskID, stepID, entryIdentity, profileID, session, previewTask)
+	return session, profileID, route, nil
+}
+
+func (s *Service) logWorkflowStartSelection(
+	ctx context.Context, taskID, stepID, entryIdentity, profileID string, session *models.TaskSession, previewTask *models.Task,
+) {
 	flow := logger.ExecutionFlow{Stage: "workflow_selection", Outcome: "selected", TaskID: taskID, StepID: stepID, EntryID: entryIdentity, ProfileID: profileID}
 	if session != nil {
 		flow.SessionID = session.ID
@@ -91,7 +98,6 @@ func (s *Service) resolveExplicitWorkflowStartRoute(
 		flow.WorkflowID = previewTask.WorkflowID
 	}
 	s.logger.Flow(ctx, flow)
-	return session, profileID, route, nil
 }
 
 // reserveSelectedStartLocked credits a counted destination without borrowing any
