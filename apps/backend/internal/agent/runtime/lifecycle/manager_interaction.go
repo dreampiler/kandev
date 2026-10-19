@@ -2246,11 +2246,15 @@ func (m *Manager) restoreExecutionAfterStreamRecovery(ctx context.Context, execu
 
 func (m *Manager) restoreRecoveredFailedExecution(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
-	defer releaseClient()
 	if client == nil {
+		releaseClient()
 		return fmt.Errorf("agentctl client is unavailable")
 	}
 	status, err := client.GetStatus(ctx)
+	// The lease covers only the status read. Marking the execution ready takes
+	// the execution store lock and persists the row, which must not run while
+	// this execution's client lease is held.
+	releaseClient()
 	if err != nil {
 		return fmt.Errorf("failed to verify agent status after stream recovery: %w", err)
 	}
