@@ -120,13 +120,10 @@ export function ControlIndependentConversations({
           label={item.name || t("sidebar:integratedControl.unnamedConversation")}
         />
       ))}
-      {collection && !collection.error && collection.items.length === 0 && (
-        <p className="px-5 py-1.5 text-xs text-muted-foreground">
-          {t("sidebar:integratedControl.noIndependentConversations")}
-        </p>
-      )}
     </>
   );
+  // An empty list is said once for the whole tree, not under every workspace.
+  if (!independentVisible(collection)) return null;
   return grouped ? (
     <details open className="min-w-0">
       <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
@@ -138,5 +135,14 @@ export function ControlIndependentConversations({
     <div className="min-w-0" data-testid="control-direct-conversations">
       {content}
     </div>
+  );
+}
+
+/** Whether a workspace's independent conversations have anything to show: items or a read problem. */
+export function independentVisible(
+  collection?: Pick<ControlCollection<unknown>, "items" | "error" | "denied">,
+) {
+  return Boolean(
+    collection && (collection.error || collection.denied || collection.items.length > 0),
   );
 }

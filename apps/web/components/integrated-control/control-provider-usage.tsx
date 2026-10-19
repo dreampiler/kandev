@@ -10,13 +10,13 @@ export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) 
   const limitsEnabled = useFeature("providerUsageLimits");
   return (
     <section className="space-y-4" data-testid="control-provider-usage">
-      <p className="text-sm text-muted-foreground">{t("sidebar:controlRestore.providerScope")}</p>
       <Link
         className="inline-flex min-h-7 cursor-pointer items-center text-sm underline [@media(pointer:coarse)]:min-h-11"
         href="/settings/agents/dynamic"
       >
         {t("sidebar:controlRestore.selectionPolicies")}
       </Link>
+      <ControlModelActivity workspaceId={workspaceId} />
       {limitsEnabled ? (
         <ControlCachedUsage workspaceId={workspaceId} />
       ) : (
@@ -28,7 +28,6 @@ export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) 
           {t("sidebar:controlInspection.usageDisabled")}
         </p>
       )}
-      <ControlModelActivity workspaceId={workspaceId} />
       <ControlModelBlocks workspaceId={workspaceId} />
     </section>
   );

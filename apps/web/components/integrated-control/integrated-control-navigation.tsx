@@ -9,13 +9,26 @@ import {
 import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import { usePathname } from "@/lib/routing/client-router";
-import { CONTROL_VIEWS, controlHref, controlView } from "@/lib/navigation/integrated-control";
+import {
+  CONTROL_VIEWS,
+  controlHref,
+  controlView,
+  type ControlView,
+} from "@/lib/navigation/integrated-control";
 import { cn } from "@/lib/utils";
 import { useIntegratedControl } from "./integrated-control-provider";
 import {
   ControlCoordinatorConversations,
   ControlIndependentConversations,
+  independentVisible,
 } from "./integrated-control-conversation-links";
+import { ControlStatusPill } from "./control-status-pill";
+import { useControlSignals } from "./use-control-signals";
+import type { WorkspaceStatus } from "./control-signals";
+import type {
+  ControlCoordinatorList,
+  ControlWorkspace,
+} from "@/hooks/domains/coordinator/use-integrated-control-data";
 import { ControlReadState, ControlSnapshotReadState } from "./control-read-state";
 
 const icons = [IconLayoutDashboard, IconActivity, IconBuilding, IconTopologyStar, IconHistory];
@@ -69,10 +82,18 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const view = controlView(usePathname());
+  const signals = useControlSignals({ tasks: false, history: false });
   if (!control) return null;
+  const data = control.data;
+  const conversations = data?.workspaces.map(
+    (workspace) => data.conversationsByWorkspace[workspace.id]?.independent,
+  );
+  const noIndependent =
+    Boolean(conversations?.length) &&
+    conversations!.every((list) => list && !list.error && !list.denied && list.items.length === 0);
   return (
     <section
-      className="space-y-2 border-t pt-3"
+      className="space-y-1 border-t pt-3"
       aria-label={t("sidebar:integratedControl.workspaces")}
     >
       <div className="flex items-center justify-between gap-2 px-2">
@@ -88,53 +109,113 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
           {t("sidebar:integratedControl.refresh")}
         </Button>
       </div>
-      <ControlSnapshotReadState />
-      {control.data?.workspaces.map((workspace) => (
-        <details
+      {control.error && <ControlSnapshotReadState />}
+      {!control.coordinatorEnabled && (
+        <p className="px-2 text-xs text-muted-foreground">
+          {t("sidebar:integratedControl.coordinatorsOff")}
+        </p>
+      )}
+      {data?.workspaces.map((workspace) => (
+        <ControlWorkspaceEntry
           key={workspace.id}
-          open
-          className="min-w-0 rounded-md"
-          data-testid={`control-workspace-${workspace.id}`}
-        >
-          <summary className="cursor-pointer truncate px-2 py-1.5 text-sm font-medium [@media(pointer:coarse)]:min-h-11">
-            {workspace.name}
-          </summary>
-          <div className="ml-3 border-l pl-2">
-            {!control.coordinatorEnabled && (
-              <p className="p-2 text-xs text-muted-foreground">
-                {t("sidebar:integratedControl.coordinatorsOff")}
-              </p>
-            )}
-            {control.data?.byWorkspace[workspace.id]?.error && (
-              <ControlReadState status="error" {...control.data.byWorkspace[workspace.id]} />
-            )}
-            {control.data?.byWorkspace[workspace.id]?.items.map((coordinator) => (
-              <details key={coordinator.id} open className="min-w-0">
-                <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
-                  {coordinator.name}
-                </summary>
-                <ControlCoordinatorConversations
-                  workspaceId={workspace.id}
-                  coordinator={coordinator}
-                  view={view}
-                  onNavigate={onNavigate}
-                />
-              </details>
-            ))}
-            <ControlIndependentConversations
-              workspaceId={workspace.id}
-              grouped={Boolean(control.data?.byWorkspace[workspace.id]?.items.length)}
-              view={view}
-              onNavigate={onNavigate}
-            />
-          </div>
-        </details>
+          workspace={workspace}
+          status={signals.statusById[workspace.id]}
+          view={view}
+          onNavigate={onNavigate}
+        />
       ))}
-      {control.data?.workspaces.length === 0 && (
+      {noIndependent && (
+        <p className="px-2 pt-1 text-xs text-muted-foreground" data-testid="control-no-independent">
+          {t("sidebar:controlSummary.nav.noIndependent")}
+        </p>
+      )}
+      {data?.workspaces.length === 0 && (
         <p className="px-2 text-sm text-muted-foreground">
           {t("sidebar:integratedControl.noWorkspaces")}
         </p>
       )}
     </section>
+  );
+}
+
+function ControlWorkspaceEntry({
+  workspace,
+  status,
+  view,
+  onNavigate,
+}: {
+  workspace: ControlWorkspace;
+  status?: WorkspaceStatus;
+  view: ControlView;
+  onNavigate?: () => void;
+}) {
+  const data = useIntegratedControl()?.data;
+  const coordinators = data?.byWorkspace[workspace.id];
+  const chip = status && status !== "active" ? <ControlStatusPill state={status} /> : null;
+  const nested =
+    Boolean(coordinators?.error || coordinators?.items.length) ||
+    independentVisible(data?.conversationsByWorkspace[workspace.id]?.independent);
+  if (!nested)
+    return (
+      <Link
+        href={controlHref("workspaces", workspace.id)}
+        onNavigated={onNavigate}
+        className="flex min-h-7 cursor-pointer items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted [@media(pointer:coarse)]:min-h-11"
+        data-testid={`control-workspace-${workspace.id}`}
+      >
+        <span className="truncate">{workspace.name}</span>
+        {chip}
+      </Link>
+    );
+  return (
+    <details open className="min-w-0 rounded-md" data-testid={`control-workspace-${workspace.id}`}>
+      <summary className="flex cursor-pointer items-center justify-between gap-2 px-2 py-1.5 text-sm font-medium [@media(pointer:coarse)]:min-h-11">
+        <span className="truncate">{workspace.name}</span>
+        {chip}
+      </summary>
+      <WorkspaceChildren
+        workspaceId={workspace.id}
+        coordinators={coordinators}
+        view={view}
+        onNavigate={onNavigate}
+      />
+    </details>
+  );
+}
+
+function WorkspaceChildren({
+  workspaceId,
+  coordinators,
+  view,
+  onNavigate,
+}: {
+  workspaceId: string;
+  coordinators?: ControlCoordinatorList;
+  view: ControlView;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div className="ml-3 border-l pl-2">
+      {coordinators?.error && <ControlReadState status="error" {...coordinators} />}
+      {coordinators?.items.map((coordinator) => (
+        <details key={coordinator.id} open className="min-w-0">
+          <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
+            {coordinator.name}
+          </summary>
+          <ControlCoordinatorConversations
+            workspaceId={workspaceId}
+            coordinator={coordinator}
+            view={view}
+            onNavigate={onNavigate}
+          />
+        </details>
+      ))}
+      <ControlIndependentConversations
+        workspaceId={workspaceId}
+        grouped={Boolean(coordinators?.items.length)}
+        view={view}
+        onNavigate={onNavigate}
+      />
+    </div>
   );
 }

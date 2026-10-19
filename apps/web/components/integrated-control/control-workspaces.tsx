@@ -9,7 +9,6 @@ import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrate
 import type { OverviewTaskFilter } from "@/lib/types/control-overview";
 import { workspaceHomeHref } from "@/lib/navigation/workspace-home";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
-import { formatDateTime } from "@/lib/i18n/formats";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { NativeWorkspaceFigures } from "./control-native-metrics";
 import { ControlReadState } from "./control-read-state";
@@ -45,20 +44,11 @@ function ControlWorkspaceCard({ workspace }: { workspace: ControlWorkspace }) {
       aria-busy={detail.status === "loading" || Boolean(detail.refreshing)}
     >
       <ControlWorkspaceHeader workspace={workspace} />
-      <p className="px-4 pt-1 text-xs text-muted-foreground">
-        {t("sidebar:controlRestore.processScope")}
-      </p>
-      <ControlReadState {...detail} />
+      {(detail.status !== "ready" || detail.stale) && <ControlReadState {...detail} />}
       {detail.status === "ready" && !metrics && <ControlReadState status="unsupported" />}
       {metrics && <NativeWorkspaceFigures data={metrics} filter={filter} onFilter={setFilter} />}
       {!metrics && <ControlWorkspaceSample list={taskCount} />}
       <div className="px-4 pb-3 pt-2">
-        <p className="text-xs text-muted-foreground">
-          {t("sidebar:controlRestore.sampleAt")}:{" "}
-          {detail.data?.generated_at ? formatDateTime(detail.data.generated_at) : t(UNKNOWN_KEY)} (
-          {Intl.DateTimeFormat().resolvedOptions().timeZone})
-        </p>
-        <NativeReadTime />
         <Button
           variant="ghost"
           size="sm"
@@ -79,18 +69,6 @@ function ControlWorkspaceCard({ workspace }: { workspace: ControlWorkspace }) {
         />
       )}
     </Card>
-  );
-}
-
-function NativeReadTime() {
-  const { t } = useTranslation();
-  const control = useIntegratedControl();
-  return (
-    <p className="text-xs text-muted-foreground">
-      {t("sidebar:controlRestore.readAt")}:{" "}
-      {control?.data?.receivedAt ? formatDateTime(control.data.receivedAt) : t(UNKNOWN_KEY)} (
-      {Intl.DateTimeFormat().resolvedOptions().timeZone})
-    </p>
   );
 }
 

@@ -7,6 +7,9 @@ import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlReadState } from "./control-read-state";
 import { OverviewLast24h } from "./control-history-list";
 
+/** Routine office records that say nothing happened; listed only on request. */
+const QUIET_KINDS = ["run_idle_skipped"];
+
 export function ControlHistory({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
@@ -32,13 +35,13 @@ export function ControlHistory({ workspaceId }: { workspaceId?: string }) {
       data-testid="control-history"
       aria-busy={result.status === "loading" || Boolean(result.refreshing)}
     >
-      <p className="text-sm text-muted-foreground">{t("sidebar:controlRestore.historyScope")}</p>
-      <ControlReadState {...result} />
+      {(result.status !== "ready" || result.stale) && <ControlReadState {...result} />}
       {result.data?.some((w) => Boolean(w.data)) && (
         <OverviewLast24h
           events={events}
           workspaceNames={names}
           emptyLabel={t("sidebar:controlNative.noSupportedEvents")}
+          quietKinds={QUIET_KINDS}
         />
       )}
       {result.data

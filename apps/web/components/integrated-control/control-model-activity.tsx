@@ -1,93 +1,167 @@
+import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { useNativeLedger } from "@/hooks/domains/coordinator/use-control-native";
-import type { NativeModel } from "@/lib/types/control-native";
-import { formatDateTime } from "@/lib/i18n/formats";
+import { formatDateTime, formatNumber } from "@/lib/i18n/formats";
+import { formatSubcentsUsd } from "@/lib/coordinator/autonomy";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlReadState } from "./control-read-state";
 import { SectionCard } from "./overview-section-card";
+import {
+  modelTotals,
+  visibleTokenFields,
+  type Measured,
+  type ModelTotal,
+  type TokenField,
+} from "./control-model-totals";
 
+const TOKEN_LABELS: Record<TokenField, string> = {
+  tokens_in: "sidebar:controlNative.tokensIn",
+  tokens_out: "sidebar:controlNative.tokensOut",
+  tokens_cached_read: "sidebar:controlNative.tokensCachedRead",
+  tokens_cached_write: "sidebar:controlNative.tokensCachedWrite",
+  tokens_total: "sidebar:controlNative.tokensTotal",
+};
+
+function MeasuredValue({ value, cost = false }: { value: Measured; cost?: boolean }) {
+  const { t } = useTranslation();
+  if (value.value === null)
+    return <span className="text-muted-foreground">{t("common:unknown")}</span>;
+  const text = cost
+    ? t("sidebar:controlSummary.providers.usd", { amount: formatSubcentsUsd(value.value) })
+    : formatNumber(value.value);
+  return (
+    <span title={value.partial ? t("sidebar:controlSummary.providers.partial") : undefined}>
+      {text}
+      {value.partial && "+"}
+    </span>
+  );
+}
+
+/** Recorded usage per model across workspaces; the workspace split opens per row. */
 export function ControlModelActivity({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const workspaces = (control?.data?.workspaces ?? []).filter(
     (w) => !workspaceId || w.id === workspaceId,
   );
+  const names = Object.fromEntries(workspaces.map((w) => [w.id, w.name]));
   const result = useNativeLedger(
     workspaces.map((w) => w.id),
     control?.data,
   );
+  const ready = (result.data ?? []).flatMap((w) => (w.data ? [{ id: w.id, data: w.data }] : []));
+  const rows = modelTotals(ready.map((w) => ({ workspaceId: w.id, models: w.data.models })));
+  const tokenFields = visibleTokenFields(rows);
+  const period = ready[0]?.data;
   return (
-    <SectionCard title={t("sidebar:controlNative.ledgerTitle")}>
-      <p className="p-3 text-xs text-muted-foreground">{t("sidebar:controlNative.ledgerScope")}</p>
-      <ControlReadState {...result} />
-      {result.data?.map((w) => (
-        <section
-          key={w.id}
-          className="space-y-2 border-t p-3 text-sm"
-          data-testid="control-model-ledger"
-        >
-          <h3 className="font-medium">{workspaces.find((x) => x.id === w.id)?.name}</h3>
-          <ControlReadState {...w} />
-          {w.data && (
-            <>
-              <p className="text-xs text-muted-foreground">
-                {formatDateTime(w.data.since)} - {formatDateTime(w.data.generated_at)} (
-                {Intl.DateTimeFormat().resolvedOptions().timeZone})
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                {w.data.models.map((model, index) => (
-                  <LedgerModel key={index} model={model} />
-                ))}
-              </div>
-              {w.data.models.length === 0 && <p>{t("sidebar:controlRestore.noModelActivity")}</p>}
-            </>
-          )}
-        </section>
-      ))}
+    <SectionCard
+      title={t("sidebar:controlNative.ledgerTitle")}
+      action={
+        period && (
+          <span className="text-xs text-muted-foreground">
+            {formatDateTime(period.since)} - {formatDateTime(period.generated_at)}
+          </span>
+        )
+      }
+    >
+      {(result.status !== "ready" || result.stale) && <ControlReadState {...result} />}
+      {result.data
+        ?.filter((w) => w.status !== "ready")
+        .map((w) => (
+          <div key={w.id} className="flex items-center px-3 text-xs text-muted-foreground">
+            {names[w.id]}
+            <ControlReadState {...w} />
+          </div>
+        ))}
+      {result.status === "ready" && rows.length === 0 && (
+        <p className="p-3 text-sm">{t("sidebar:controlRestore.noModelActivity")}</p>
+      )}
+      {rows.length > 0 && (
+        <Table data-testid="control-model-table">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("sidebar:controlSummary.providers.model")}</TableHead>
+              <TableHead>{t("sidebar:controlNative.recordedProvider")}</TableHead>
+              <TableHead className="text-right">{t("sidebar:controlNative.events")}</TableHead>
+              {tokenFields.map((field) => (
+                <TableHead key={field} className="text-right">
+                  {t(TOKEN_LABELS[field])}
+                </TableHead>
+              ))}
+              <TableHead className="text-right">
+                {t("sidebar:controlSummary.providers.cost")}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <ModelRow key={row.model} row={row} tokenFields={tokenFields} names={names} />
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </SectionCard>
   );
 }
 
-function LedgerModel({ model }: { model: NativeModel }) {
+function ModelRow({
+  row,
+  tokenFields,
+  names,
+}: {
+  row: ModelTotal;
+  tokenFields: TokenField[];
+  names: Record<string, string>;
+}) {
   const { t } = useTranslation();
-  const unknown = t("common:unknown");
-  const reported = (source: string) =>
-    Boolean(source && !["unknown", "unavailable", "unpriced"].includes(source.toLowerCase()));
-  const known = reported(model.measurement_source) && reported(model.usage_completeness);
-  const figure = (value: number | null, observed = true) =>
-    observed && value !== null ? new Intl.NumberFormat().format(value) : unknown;
-  const fields: [string, string][] = [
-    ["sidebar:controlNative.events", figure(model.event_count)],
-    ["sidebar:controlNative.tokensIn", figure(model.tokens_in, known)],
-    ["sidebar:controlNative.tokensOut", figure(model.tokens_out, known)],
-    ["sidebar:controlNative.tokensCachedRead", figure(model.tokens_cached_read, known)],
-    ["sidebar:controlNative.tokensCachedWrite", figure(model.tokens_cached_write, known)],
-    ["sidebar:controlNative.tokensTotal", figure(model.tokens_total, known)],
-    [
-      "sidebar:controlNative.costSubcents",
-      figure(model.cost_subcents, reported(model.cost_source)),
-    ],
-  ];
+  const [open, setOpen] = useState(false);
+  const numeric = "text-right font-mono tabular-nums";
   return (
-    <div className="space-y-2 rounded-md border p-3" data-testid="control-ledger-model">
-      <h4 className="break-words font-medium">
-        {model.model && model.model.toLowerCase() !== "dynamic" ? model.model : unknown}
-      </h4>
-      <p className="break-words text-xs">
-        {t("sidebar:controlNative.recordedProvider")}: {model.provider || unknown}
-      </p>
-      <dl className="grid grid-cols-2 gap-1 text-xs">
-        {fields.map(([key, value]) => (
-          <div key={key} className="contents">
-            <dt className="text-muted-foreground">{t(key)}</dt>
-            <dd className="text-right tabular-nums">{value}</dd>
-          </div>
+    <Fragment>
+      <TableRow data-testid="control-ledger-model">
+        <TableCell className="max-w-72 whitespace-normal break-all">
+          <button
+            type="button"
+            className="cursor-pointer text-left"
+            aria-expanded={open}
+            onClick={() => setOpen((value) => !value)}
+          >
+            <span aria-hidden className="mr-1 inline-block w-3 text-muted-foreground">
+              {open ? "▾" : "▸"}
+            </span>
+            {row.model || t("common:unknown")}
+          </button>
+        </TableCell>
+        <TableCell className="text-muted-foreground">
+          {row.providers.join(", ") || t("common:unknown")}
+        </TableCell>
+        <TableCell className={numeric}>{formatNumber(row.events)}</TableCell>
+        {tokenFields.map((field) => (
+          <TableCell key={field} className={numeric} data-testid={`control-ledger-${field}`}>
+            <MeasuredValue value={row.tokens[field]} />
+          </TableCell>
         ))}
-      </dl>
-      <p className="break-words text-xs text-muted-foreground">
-        {model.measurement_source} · {model.usage_completeness} · {model.cost_source}
-        {model.estimated ? ` · ${t("sidebar:controlNative.estimated")}` : ""}
-      </p>
-    </div>
+        <TableCell className={numeric} data-testid="control-ledger-cost">
+          <MeasuredValue value={row.cost} cost />
+        </TableCell>
+      </TableRow>
+      {open &&
+        row.workspaces.map((share) => (
+          <TableRow key={share.workspaceId} className="bg-muted/30 text-xs">
+            <TableCell className="pl-8 text-muted-foreground">
+              {names[share.workspaceId] ?? share.workspaceId}
+            </TableCell>
+            <TableCell />
+            <TableCell className={numeric}>{formatNumber(share.events)}</TableCell>
+            {tokenFields.map((field) => (
+              <TableCell key={field} />
+            ))}
+            <TableCell className={numeric}>
+              <MeasuredValue value={share.cost} cost />
+            </TableCell>
+          </TableRow>
+        ))}
+    </Fragment>
   );
 }

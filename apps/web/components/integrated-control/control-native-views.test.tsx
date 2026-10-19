@@ -68,10 +68,11 @@ afterEach(cleanup);
 describe("native control views", () => {
   it("distinguishes measured zero, nullable tokens, unpriced cost and a policy model", () => {
     render(<ControlModelActivity workspaceId="w" />);
-    expect(screen.getByText("Input tokens").nextElementSibling?.textContent).toBe("0");
-    expect(screen.getByText("Output tokens").nextElementSibling?.textContent).toBe("Unknown");
-    expect(screen.getByText("Cache read tokens").nextElementSibling?.textContent).toBe("0");
-    expect(screen.getByText("Cost (subcents)").nextElementSibling?.textContent).toBe("Unknown");
+    expect(screen.getByTestId("control-ledger-tokens_in").textContent).toBe("0");
+    expect(screen.getByTestId("control-ledger-tokens_cached_read").textContent).toBe("0");
+    // A column no record reported is not drawn at all rather than filled with Unknown.
+    expect(screen.queryByTestId("control-ledger-tokens_out")).toBeNull();
+    expect(screen.getByTestId("control-ledger-cost").textContent).toBe("Unknown");
     expect(screen.queryByText("Dynamic")).toBeNull();
   });
   it("includes archived completion records and labels update time while retaining the SID link", () => {
@@ -92,9 +93,9 @@ describe("native control views", () => {
       fixture.model.measurement_source = "unknown";
       fixture.model.cost_source = "unavailable";
       render(<ControlModelActivity />);
-      expect(screen.getByText("Input tokens").nextElementSibling?.textContent).toBe("Unknown");
-      expect(screen.getByText("Total tokens").nextElementSibling?.textContent).toBe("Unknown");
-      expect(screen.getByText("Cost (subcents)").nextElementSibling?.textContent).toBe("Unknown");
+      expect(screen.queryByText("Input tokens")).toBeNull();
+      expect(screen.queryByText("Total tokens")).toBeNull();
+      expect(screen.getByTestId("control-ledger-cost").textContent).toBe("Unknown");
     } finally {
       Object.assign(fixture.model, original);
     }
@@ -122,6 +123,5 @@ describe("native control views", () => {
     fireEvent.click(screen.getByRole("button", { name: /Process sessions running/ }));
     expect(onFilter).toHaveBeenCalledWith("sessions");
     expect(screen.getByText("Failed process sessions").closest("button")).toBeNull();
-    expect(screen.getByText(/Live inference, last output/)).toBeTruthy();
   });
 });

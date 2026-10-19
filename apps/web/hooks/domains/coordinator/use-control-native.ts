@@ -41,6 +41,11 @@ export const useNativeLedger = (ids: string[], revision: object | undefined) =>
   useWorkspaceReads(ids, revision, readNativeLedger);
 export const useNativeDashboards = (ids: string[], revision: object | undefined) =>
   useWorkspaceReads(ids, revision, readNativeDashboard);
+const readAllActiveTasks = (id: string, options: ApiRequestOptions) =>
+  readNativeTasks(id, "all", "active", -1, options);
+/** Every unarchived task per workspace, for views that rank tasks across workspaces. */
+export const useNativeTaskRows = (ids: string[], revision: object | undefined) =>
+  useWorkspaceReads(ids, revision, readAllActiveTasks);
 export function useNativeDashboard(id: string, revision: object | undefined) {
   const read = useCallback(
     (signal: AbortSignal) => readNativeDashboard(id, { cache: "no-store", init: { signal } }),

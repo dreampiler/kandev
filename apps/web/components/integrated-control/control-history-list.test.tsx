@@ -85,3 +85,33 @@ describe("reused last 24 hours list", () => {
     expect(occurredTime("invalid", now)).toBe("");
   });
 });
+
+describe("history list folding", () => {
+  it("hides routine records until asked, names untitled office runs and folds step moves", () => {
+    const moves: OverviewEvent[] = Array.from({ length: 3 }, (_, index) => ({
+      id: `transition:${index}`,
+      kind: "step_move",
+      at: `2026-10-18T12:0${3 - index}:00Z`,
+      task_id: "looping",
+      title: "Looping task",
+    }));
+    const routine: OverviewEvent = {
+      id: "activity:0f8c2b8e-5d43-4a77-9c0e-1f6c8f1d2a3b",
+      kind: "run_idle_skipped",
+      at: "2026-10-18T11:00:00Z",
+    };
+    render(
+      <OverviewLast24h
+        events={[...moves, routine]}
+        workspaceNames={{}}
+        quietKinds={["run_idle_skipped"]}
+      />,
+    );
+    expect(screen.getAllByTestId("control-history-move-run")).toHaveLength(1);
+    expect(screen.queryByTestId(EVENT_ROW)).toBeNull();
+    fireEvent.click(screen.getByTestId("overview-event-quiet"));
+    const row = screen.getByTestId(EVENT_ROW);
+    expect(row.textContent).toContain("Office automatic run");
+    expect(row.textContent).not.toContain("activity:");
+  });
+});

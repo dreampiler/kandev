@@ -10,8 +10,20 @@ const STATUS_KEYS = {
   error: "sidebar:integratedControl.loadError",
 };
 
-export function ControlReadState({ status, receivedAt, refreshing, stale }: ControlRead<unknown>) {
+/**
+ * A read's state. A plain successful read says nothing unless `showTime` asks
+ * for its time: the page header carries the one read time a screen needs, so
+ * cards stay quiet until a read is loading, failing or retained after a failure.
+ */
+export function ControlReadState({
+  status,
+  receivedAt,
+  refreshing,
+  stale,
+  showTime = false,
+}: ControlRead<unknown> & { showTime?: boolean }) {
   const { t } = useTranslation();
+  if (status === "ready" && !stale && !showTime) return null;
   if (status === "ready" && !receivedAt && !refreshing) return null;
   const key = readStatusKey({ status, refreshing, stale, receivedAt });
   const text = `${t(key)}${receivedAt ? ` · ${formatDateTime(receivedAt)} (${Intl.DateTimeFormat().resolvedOptions().timeZone})` : ""}`;
@@ -44,6 +56,7 @@ export function ControlSnapshotReadState() {
       refreshing={control?.loading}
       stale={control?.error && Boolean(control.data)}
       receivedAt={control?.data?.receivedAt}
+      showTime
     />
   );
 }

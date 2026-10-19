@@ -11,11 +11,13 @@ export function ControlUnattributedUsage({ entries }: { entries: ProfileExecutio
     rows.set(key, [...(rows.get(key) ?? []), entry]);
   }
   return (
-    <section className="space-y-2 rounded-lg border p-3" data-testid="control-unattributed-usage">
-      <h2 className="text-sm font-medium">
-        {t("sidebar:controlRefresh.unattributedTitle", { count: entries.length })}
-      </h2>
-      <p className="text-xs text-muted-foreground">
+    <details className="rounded-lg border px-3 py-2" data-testid="control-unattributed-usage">
+      <summary className="min-h-7 cursor-pointer [@media(pointer:coarse)]:min-h-11">
+        <h2 className="inline text-sm font-medium">
+          {t("sidebar:controlRefresh.unattributedTitle", { count: entries.length })}
+        </h2>
+      </summary>
+      <p className="pt-1 text-xs text-muted-foreground">
         {t("sidebar:controlRefresh.unattributedScope")}
       </p>
       <div className="divide-y">
@@ -43,6 +45,6 @@ export function ControlUnattributedUsage({ entries }: { entries: ProfileExecutio
           </details>
         ))}
       </div>
-    </section>
+    </details>
   );
 }

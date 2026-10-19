@@ -24,35 +24,44 @@ export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
     workspaces.map((workspace) => workspace.id),
     control?.data,
   );
+  const nameOf = (id: string) => workspaces.find((item) => item.id === id)?.name ?? id;
+  const isEmpty = (row: { status: string; health: unknown[] }) =>
+    row.status === "ready" && row.health.length === 0;
+  const empty = result.data?.filter(isEmpty) ?? [];
   return (
     <SectionCard title={t("office:providerHealth")}>
       <p className="p-3 text-xs text-muted-foreground">
         {t("sidebar:controlRestore.nativeHealthScope")}
       </p>
       <ControlReadState {...result} />
-      {result.data?.map((workspace) => (
-        <section
-          key={workspace.id}
-          className="space-y-2 border-t p-3 text-sm"
-          data-testid="control-provider-health"
-        >
-          <h3 className="font-medium">
-            {workspaces.find((item) => item.id === workspace.id)?.name}
-          </h3>
-          <ControlReadState {...workspace} />
-          {workspace.status === "ready" && workspace.health.length === 0 && (
-            <p>{t("sidebar:controlRestore.noProviderHealth")}</p>
-          )}
-          <div className="grid gap-2 sm:grid-cols-2">
-            {workspace.health.map((row) => (
-              <ProviderHealthRow
-                key={row.provider_id + ":" + row.scope + ":" + row.scope_value}
-                row={row}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      {empty.length > 0 && (
+        <p className="border-t p-3 text-sm text-muted-foreground">
+          {t("sidebar:controlRestore.noProviderHealth")}{" "}
+          <span className="text-xs">
+            ({empty.map((workspace) => nameOf(workspace.id)).join(", ")})
+          </span>
+        </p>
+      )}
+      {result.data
+        ?.filter((workspace) => !isEmpty(workspace))
+        .map((workspace) => (
+          <section
+            key={workspace.id}
+            className="space-y-2 border-t p-3 text-sm"
+            data-testid="control-provider-health"
+          >
+            <h3 className="font-medium">{nameOf(workspace.id)}</h3>
+            <ControlReadState {...workspace} />
+            <div className="grid gap-2 sm:grid-cols-2">
+              {workspace.health.map((row) => (
+                <ProviderHealthRow
+                  key={row.provider_id + ":" + row.scope + ":" + row.scope_value}
+                  row={row}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
     </SectionCard>
   );
 }

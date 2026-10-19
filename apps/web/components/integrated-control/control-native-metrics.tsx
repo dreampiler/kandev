@@ -33,9 +33,6 @@ export function NativeWorkspaceFigures({
   ];
   return (
     <section data-testid="control-native-metrics">
-      <p className="px-4 pt-2 text-xs text-muted-foreground">
-        {t("sidebar:controlNative.metricScope")}
-      </p>
       <div className="grid grid-cols-2 gap-1 px-2 pt-2 lg:grid-cols-4">
         {items.map(([key, value, next]) => (
           <Metric
