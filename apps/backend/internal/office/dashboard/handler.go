@@ -139,6 +139,9 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 // -- Dashboard --
 
 func (h *Handler) getDashboard(c *gin.Context) {
+	if h.controlRead(c, "dashboard") {
+		return
+	}
 	wsID := c.Param("wsId")
 	ctx := c.Request.Context()
 
@@ -385,6 +388,9 @@ func rejectAgentTaskReader(c *gin.Context) bool {
 
 func (h *Handler) listTasks(c *gin.Context) {
 	if rejectAgentTaskReader(c) {
+		return
+	}
+	if h.controlRead(c, "tasks") {
 		return
 	}
 

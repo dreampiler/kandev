@@ -21,5 +21,5 @@ func (h *Handlers) httpReadNativeProfileUsage(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "usage observation unavailable"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"profile_id": c.Param("id"), "executions": entries})
+	c.JSON(http.StatusOK, gin.H{"profile_id": c.Param("id"), "executions": entries, "cached_only": true})
 }

@@ -26,7 +26,8 @@ func (m *Manager) configureAgentUsage(ctx context.Context, client *agentctl.Clie
 }
 
 // ReadProfileExecutionUsage observes existing native actors only. Session
-// access is checked before borrowing a client; reads never prepare/start one.
+// access is checked before borrowing a client; reads never prepare/start one
+// or refresh provider observations.
 func (m *Manager) ReadProfileExecutionUsage(ctx context.Context, profileID string) ([]usage.ProfileExecutionUsage, error) {
 	return m.readExecutionUsage(ctx, func(execution *AgentExecution) bool { return execution.AgentProfileID == profileID })
 }
@@ -63,7 +64,7 @@ func (m *Manager) readExecutionUsage(ctx context.Context, match func(*AgentExecu
 		report := &usage.ExecutionUsageReport{Reason: "execution_unavailable", Model: model}
 		client, release := execution.AcquireAgentCtlClient()
 		if client != nil {
-			if observed, err := client.ReadExecutionUsage(ctx, model); err == nil {
+			if observed, err := client.PeekExecutionUsage(ctx); err == nil {
 				report = observed
 			}
 		}
