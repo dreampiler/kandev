@@ -33,8 +33,8 @@ func TestWorkspaceMidTurnFailoverSettingDefaultsOffAndRoundTrips(t *testing.T) {
 
 	listed, err := repo.ListWorkspaces(ctx)
 	require.NoError(t, err)
-	require.Len(t, listed, 1)
-	require.True(t, listed[0].DynamicMidTurnFailoverEnabled)
+	listedWorkspace := findListedWorkspace(t, listed, created.ID)
+	require.True(t, listedWorkspace.DynamicMidTurnFailoverEnabled)
 
 	full := *renamed
 	full.DynamicMidTurnFailoverEnabled = false

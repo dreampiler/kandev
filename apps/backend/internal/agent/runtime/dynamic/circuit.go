@@ -237,6 +237,25 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	return entry.state == CircuitOpen && !entry.until.IsZero()
 }
 
+// OpenUntil reports when a timed open circuit may next admit a probe: its
+// expiry while open, or the in-flight probe's lease expiry while half-open.
+// A missing, closed, or held circuit reports false.
+func (r *CircuitRegistry) OpenUntil(key string) (time.Time, bool) {
+	if key == "" {
+		return time.Time{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed || entry.held() {
+		return time.Time{}, false
+	}
+	if entry.state == CircuitHalfOpen {
+		return entry.probeUntil, true
+	}
+	return entry.until, !entry.until.IsZero()
+}
+
 type ProbeLease struct {
 	Key       string
 	ExpiresAt time.Time
