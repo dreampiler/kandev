@@ -27,8 +27,12 @@ generation no longer overwrites the handoff with an empty continuation.
   engine is attached.
 - `Engine.saveContinuation` serializes with status transitions, rejects a stale
   generation with `ErrStaleGeneration`, saves durably, then refreshes the cache.
+- The policy-failure and `CancelPending` transitions hold the engine mutex
+  across their route read, durable write and cache update, like `MarkActive`.
 
 ## Verification
 
 `go test ./internal/task/repository/sqlite/ -run TestContinuationConsistency`
 covers starting, retrying, cancellation, stale generation and a failed save.
+`TestContinuationSurvivesConcurrentStatusTransition` pauses a policy failure
+and a cancel between their read and write while a continuation is saved.

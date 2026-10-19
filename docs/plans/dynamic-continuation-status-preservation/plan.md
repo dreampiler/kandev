@@ -21,8 +21,8 @@ handoff. The successor then starts without the continuation it was promised.
 ## Scope
 
 In scope: `apps/backend/internal/agent/runtime/dynamic/conductor.go`, the new
-`engine_continuation.go`, and a SQLite regression test through the public
-repository APIs.
+`engine_continuation.go`, the policy-failure and cancel transitions in
+`engine.go`, and SQLite regression tests through the public repository APIs.
 
 Excluded: schema, SQL adapters, configuration, providers and UI.
 
@@ -31,7 +31,9 @@ Excluded: schema, SQL adapters, configuration, providers and UI.
 Route continuation saves through the engine when one is attached. The engine
 holds its existing status-transition mutex, refuses a stale generation, saves
 durably, and only then refreshes its cached continuation. A failed save leaves
-the cache unchanged.
+the cache unchanged. Every same-generation status transition holds that mutex
+across its route read, durable write and cache update, so a save cannot land
+between a transition's read and write and be overwritten by its stale snapshot.
 
 ## Work orders
 

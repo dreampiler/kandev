@@ -24,6 +24,13 @@ type continuationHarness struct {
 
 func newContinuationHarness(t *testing.T) *continuationHarness {
 	t.Helper()
+	return newContinuationHarnessWith(t, nil)
+}
+
+// newContinuationHarnessWith lets a test wrap the engine's route persistence;
+// continuation saves and state loads still go straight to the repository.
+func newContinuationHarnessWith(t *testing.T, wrap func(*Repository) d.Persistence) *continuationHarness {
+	t.Helper()
 	r := newRepoForSessionTests(t)
 	ctx := context.Background()
 	var workspaceID string
@@ -37,7 +44,11 @@ func newContinuationHarness(t *testing.T) *continuationHarness {
 		t.Fatal(err)
 	}
 	h := &continuationHarness{repo: r, now: time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)}
-	h.engine = d.NewEngine(d.WithPersistence(r), d.WithStateLoader(r), d.WithClock(func() time.Time { return h.now }))
+	var persistence d.Persistence = r
+	if wrap != nil {
+		persistence = wrap(r)
+	}
+	h.engine = d.NewEngine(d.WithPersistence(persistence), d.WithStateLoader(r), d.WithClock(func() time.Time { return h.now }))
 	h.conductor = d.NewConductor(h.engine, nil, nil, d.WithContinuationPersistence(r))
 	doc := routingpolicy.DefaultDocument()
 	doc.Transient.Retry = routingpolicy.RetryPolicy{Enabled: true, MaxRetries: 1, InitialIntervalSeconds: 5}
