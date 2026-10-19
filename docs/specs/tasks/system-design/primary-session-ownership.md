@@ -73,6 +73,18 @@ passes `false`; it now excludes terminal sessions, which it accepted before.
 Both promote through `SetPrimarySession`, which neither moves queued messages
 nor changes an explicit session selection (`001.4`).
 
+With `features.terminalPrimaryQueueHandoff` on (`001.5`), `SetPrimarySession`
+first reads the current primary. When that session is COMPLETED, FAILED or
+CANCELLED, after the promotion write it schedules `handOffTerminalSessionQueue`
+to run after the caller returns. Promotion runs inside the stopping session's
+queue admission while the transfer locks both sessions in ID order, so running
+it inline deadlocks when the receiver's ID sorts first; the scheduled hand-off
+uses a context that does not claim the caller's admission. It transfers the queue with the existing `transferQueuedSessionState`
+(attachments and compensation included) and then offers the new primary to
+`DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
+the queue on the terminal session. The flag is read once at startup into the
+orchestrator service config.
+
 ## Failure and recovery
 
 A failed task or step read during selection treats every session as matching,

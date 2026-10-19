@@ -2101,6 +2101,43 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	}
 }
 
+// handOffTerminalSessionQueue moves messages still queued for a session that
+// reached a terminal state to the session that inherited the primary role.
+// A terminal session never becomes promptable again, so without the move the
+// messages stay queued forever. The receiver drains them only when its own
+// Auto-run policy allows it.
+//
+// Promotion runs inside the stopping session's queue admission, and the
+// transfer needs admission on both sessions, so the hand-off runs after the
+// caller returns rather than inside it.
+func (s *Service) scheduleTerminalSessionQueueHandOff(ctx context.Context, taskID, fromSessionID, toSessionID string) {
+	handOffCtx := messagequeue.WithoutSessionAdmission(context.WithoutCancel(ctx))
+	go s.handOffTerminalSessionQueue(handOffCtx, taskID, fromSessionID, toSessionID)
+}
+
+func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) {
+	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil ||
+		fromSessionID == "" || toSessionID == "" || fromSessionID == toSessionID {
+		return
+	}
+	pending, err := s.messageQueue.HasPendingForSession(ctx, fromSessionID)
+	if err != nil || !pending {
+		return
+	}
+	if err := s.transferQueuedSessionState(ctx, taskID, fromSessionID, toSessionID); err != nil {
+		s.logger.Warn("failed to hand off queued messages from terminal session",
+			zap.String("task_id", taskID),
+			zap.String("from_session_id", fromSessionID),
+			zap.String("to_session_id", toSessionID),
+			zap.Error(err))
+		return
+	}
+	if _, err := s.DrainQueuedMessageIfAutoRun(ctx, toSessionID); err != nil {
+		s.logger.Debug("queued hand-off left for the next drain",
+			zap.String("session_id", toSessionID), zap.Error(err))
+	}
+}
+
 func isTerminalSessionState(s models.TaskSessionState) bool {
 	return s == models.TaskSessionStateCompleted ||
 		s == models.TaskSessionStateFailed ||

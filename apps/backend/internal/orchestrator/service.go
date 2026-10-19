@@ -68,6 +68,10 @@ type ServiceConfig struct {
 	// conversation forks. It is restart-required, matching agentctl transport
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
+
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
