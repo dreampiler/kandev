@@ -83,6 +83,15 @@ an allocated/launching or unrelated attempt still blocks it. Legacy composer
 uncertainty is cleared only for an exactly retired submission. An explicit null
 propagates that clearing to clients even when no recovery notice existed.
 
+A notice marked `recovered` can outlive its execution after a later readiness
+failure reopens the delivery block. Explicit Resume can reuse the current ready
+native execution and restore that notice through the same authenticated
+retirement transaction. The current execution, native identity, full submission
+inventory, and cursor checks remain mandatory. The notice keeps its historical
+execution ID, submission, payload, and unknown outcome; only its phase, revision,
+and timestamp change. State-only Retry is unchanged.
+Delivery: [Recovered notice resume](../../../plans/resume-delivery-notices/plan.md).
+
 ## Entry points
 
 Startup/runtime replacement and explicit Resume reuse existing restore ownership
