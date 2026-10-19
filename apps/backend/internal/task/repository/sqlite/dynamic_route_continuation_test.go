@@ -8,7 +8,6 @@ import (
 	"time"
 
 	d "github.com/kandev/kandev/internal/agent/runtime/dynamic"
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agent/runtime/routingpolicy"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -85,7 +84,7 @@ func (h *continuationHarness) want(t *testing.T, conversation, status string) {
 
 func (h *continuationHarness) wait(t *testing.T) {
 	t.Helper()
-	pending, err := h.engine.ApplyFailure(h.decision.SessionID, h.profile, h.decision.Generation, "A", &routingerr.Error{Code: routingerr.CodeRateLimited, Class: routingerr.ClassTransient, FallbackAllowed: true})
+	pending, err := h.engine.ApplyFailureContext(context.Background(), h.decision.SessionID, h.profile, h.decision.Generation, "A", rateLimited())
 	if !errors.Is(err, d.ErrRecoveryPending) || pending.Status != "retry_wait" {
 		t.Fatalf("retry wait: %#v %v", pending, err)
 	}
