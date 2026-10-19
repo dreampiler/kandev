@@ -58,6 +58,12 @@ console windows over my work.
 - **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.4:** When a managed console
   helper runs without a visible console window, it shall keep a console handle
   so that default console descendants inherit the hidden console.
+- **AC-PLATFORM-WINDOWS-BACKGROUND-CONSOLE-001.5:** When the process that starts
+  agentctl, an agentctl-managed process, an ACP utility command, or a Cursor
+  native MCP command has no console window to share and Windows Terminal is the
+  default terminal application, the system shall still start the helper without
+  a visible terminal window. When a console window exists, the helper shall keep
+  attaching to it as before.
 
 ## Out of scope
 

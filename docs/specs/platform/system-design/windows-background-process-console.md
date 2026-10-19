@@ -42,11 +42,23 @@ and can use console APIs. Go's standard-handle setup remains separate, so
 When a managed helper starts from a backend with no console, the helper gets a
 hidden console. A console descendant started with default flags attaches to
 that same hidden console. This keeps descendants hidden and leaves console
-APIs available. `CREATE_NO_WINDOW` is not suitable here: it starts a console
-program without a console handle, so an unflagged console descendant can create
-its own visible console. `HideWindow` also supplies an initial show state to a
-GUI program, so the process paths in this design must remain console-helper
-paths.
+APIs available. `HideWindow` also supplies an initial show state to a GUI
+program, so the process paths in this design must remain console-helper paths.
+
+When Windows Terminal is the default terminal application, a new console is
+handed to Windows Terminal, which opens a visible window and does not apply the
+`SW_HIDE` show state. `HideWindow` alone then opens one terminal window per
+helper. For that case `winproc.NoConsoleWindowFlag` adds `CREATE_NO_WINDOW` when
+the starting process has no console window (`GetConsoleWindow` returns null).
+The helper still gets a console without a window, and a descendant started with
+default flags inherits it: on a Windows 11 machine with Windows Terminal as the
+default terminal, a probe started with `DETACHED_PROCESS` started a child with
+these flags and that child started a default-flag grandchild; the child and
+grandchild had a console (`GetConsoleCP` 949, `GetConsoleWindow` null), their
+pipes carried output, and no Windows Terminal or OpenConsole process appeared.
+Before the change the same machine opened a Windows Terminal window for every
+agent that agentctl started from a detached backend. When the starting process
+has a console window, the flag is zero and helpers keep attaching to it.
 
 When the backend already has a console, the helper attaches to that console.
 `HideWindow` does not hide the shared console window. This preserves terminal
@@ -57,10 +69,10 @@ visibility for a backend started from a terminal.
 | Package | Function | Windows process attributes |
 | --- | --- | --- |
 | `internal/common/subproc` | `prepareGitLifecycleCommand` | Caller flags, `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED` |
-| `internal/agent/mcpconfig` | `prepareNativeMCPProcess` | Caller flags, `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED` |
-| `internal/agentctl/server/utility` | `setACPCommandProcAttr` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED` |
-| `internal/agentctl/server/process` | `setProcGroup`, `setManagedProcGroup`, `setAgentProcGroup` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, plus `CREATE_SUSPENDED` for managed processes (scripts, piped commands, code-server) and agents |
-| `internal/agent/runtime/agentctl/launcher` | `buildSysProcAttr` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP` |
+| `internal/agent/mcpconfig` | `prepareNativeMCPProcess` | Caller flags, `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED`, `NoConsoleWindowFlag` |
+| `internal/agentctl/server/utility` | `setACPCommandProcAttr` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED`, `NoConsoleWindowFlag` |
+| `internal/agentctl/server/process` | `setProcGroup`, `setManagedProcGroup`, `setAgentProcGroup` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `NoConsoleWindowFlag`, plus `CREATE_SUSPENDED` for managed processes (scripts, piped commands, code-server) and agents |
+| `internal/agent/runtime/agentctl/launcher` | `buildSysProcAttr` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED`, `NoConsoleWindowFlag` |
 | `internal/agent/acpdbg`, `internal/agent/codexdbg` | `configureProcessTree` | `HideWindow`, `CREATE_NEW_PROCESS_GROUP`, `CREATE_SUSPENDED` |
 
 `prepareGitLifecycleCommand` and `prepareNativeMCPProcess` reject a caller

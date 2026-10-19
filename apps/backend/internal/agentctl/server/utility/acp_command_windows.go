@@ -11,6 +11,7 @@ import (
 	"syscall"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
 
@@ -20,7 +21,7 @@ import (
 func setACPCommandProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		HideWindow:    true,
-		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED | commonwinproc.NoConsoleWindowFlag(),
 	}
 }
 
