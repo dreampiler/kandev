@@ -657,7 +657,11 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 		data.DynamicRouteAttempt = true
 	}
 	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
-		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText)
+		var diagnostic *streams.ProviderError
+		if data.ProviderError != nil && normalizeDiagnosticText(data.ProviderError.Message) == normalizeDiagnosticText(lifecycleDiagnosticText) {
+			diagnostic = data.ProviderError
+		}
+		s.observeLifecycleProviderDiagnosticLocked(evidence, data.AgentID, lifecycleDiagnosticText, diagnostic)
 	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
@@ -677,7 +681,7 @@ func (s *Service) withPromptAttemptEvidenceLocked(data watcher.AgentEventData) w
 // event may arrive after the terminal failure because those events use
 // separate subscriptions, so an absent or unclassifiable diagnostic fails
 // closed as ordinary output.
-func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string) {
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, providerID, message string, diagnostic *streams.ProviderError) {
 	message = normalizeDiagnosticText(message)
 	if message == "" {
 		evidence.output = true
@@ -685,11 +689,7 @@ func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttem
 		evidence.providerDiagnosticText = ""
 		return
 	}
-	classified := routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: providerID,
-		Stderr:     message,
-	})
+	classified := routingerr.Classify(diagnostic.RoutingInput(routingerr.PhasePromptSend, providerID, message))
 	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
 		evidence.output = true
 		evidence.providerDiagnosticCode = ""
@@ -733,11 +733,7 @@ func matchingProviderFailureCode(data watcher.AgentEventData) routingerr.Code {
 	if message == "" {
 		return ""
 	}
-	return routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhasePromptSend,
-		ProviderID: data.AgentID,
-		Stderr:     message,
-	}).Code
+	return routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhasePromptSend, data.AgentID, message)).Code
 }
 
 func (s *Service) withDynamicAttemptEvidence(data watcher.AgentEventData) watcher.AgentEventData {
