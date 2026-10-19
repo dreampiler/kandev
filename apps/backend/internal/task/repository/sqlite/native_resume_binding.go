@@ -266,8 +266,10 @@ func nativeResumeIncidentOwnerMatches(block models.SessionRecoveryBlock, proof *
 }
 
 func nativeResumeNoticeMatches(proof *models.NativeResumeDeliveryEvidence, recovery models.AgentDeliveryRecovery) bool {
+	// A recovered transport can later lose its execution. Authenticated native
+	// retirement may restore that notice while retaining its historical owner.
 	if recovery.HarnessGeneration != proof.HarnessGeneration || (recovery.StreamID != "" && recovery.StreamID != proof.StreamID) ||
-		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting) {
+		(recovery.Phase != models.AgentDeliveryRecoveryUncertain && recovery.Phase != models.AgentDeliveryRecoveryReconnecting && recovery.Phase != models.AgentDeliveryRecoveryRecovered) {
 		return false
 	}
 	found := false
