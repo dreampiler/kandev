@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -20,6 +21,15 @@ func queuedContents(t *testing.T, svc *Service, sessionID string) []string {
 	return contents
 }
 
+// requireQueueMoved waits for the asynchronous hand-off.
+func requireQueueMoved(t *testing.T, svc *Service, from, to string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		return len(queuedContents(t, svc, from)) == 0 && len(queuedContents(t, svc, to)) == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, to))
+}
+
 // A message queued for a primary that then fails would otherwise stay queued
 // forever: the terminal session never becomes promptable again.
 func TestPrimaryPromotionHandsOffTerminalSessionQueue(t *testing.T) {
@@ -34,8 +44,7 @@ func TestPrimaryPromotionHandsOffTerminalSessionQueue(t *testing.T) {
 	svc.maybePromotePrimary(ctx, primaryTaskID, primaryStoppedID, models.TaskSessionStateFailed)
 
 	require.Equal(t, "session-live", primarySessionID(t, repo))
-	require.Empty(t, queuedContents(t, svc, primaryStoppedID))
-	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, "session-live"))
+	requireQueueMoved(t, svc, primaryStoppedID, "session-live")
 }
 
 // An explicit primary choice that moves the role off a terminal session
@@ -54,8 +63,7 @@ func TestExplicitPrimaryChoiceHandsOffTerminalSessionQueue(t *testing.T) {
 	require.NoError(t, svc.SetPrimarySession(ctx, next.ID))
 
 	require.Equal(t, "session-next", primarySessionID(t, repo))
-	require.Empty(t, queuedContents(t, svc, primaryStoppedID))
-	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, "session-next"))
+	requireQueueMoved(t, svc, primaryStoppedID, "session-next")
 }
 
 // A live previous primary keeps its own queue.
@@ -72,4 +80,35 @@ func TestPrimaryChoiceKeepsQueueOfLiveSession(t *testing.T) {
 
 	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, primaryStoppedID))
 	require.Empty(t, queuedContents(t, svc, "session-next"))
+}
+
+// Promotion runs inside the stopping session's queue admission. A receiver whose
+// ID sorts before the stopping session used to deadlock the transfer, which
+// locks both sessions in ID order.
+func TestPrimaryPromotionInsideAdmissionHandsOffWithoutDeadlock(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-a-receiver", State: models.TaskSessionStateRunning},
+	)
+	ctx := context.Background()
+	require.Less(t, "session-a-receiver", primaryStoppedID)
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateCancelled, ""))
+
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.messageQueue.WithSessionAdmission(ctx, primaryStoppedID, func(admitted context.Context) error {
+			svc.maybePromotePrimary(admitted, primaryTaskID, primaryStoppedID, models.TaskSessionStateCancelled)
+			return nil
+		})
+	}()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("promotion inside the stopping session's admission did not return")
+	}
+
+	require.Equal(t, "session-a-receiver", primarySessionID(t, repo))
+	requireQueueMoved(t, svc, primaryStoppedID, "session-a-receiver")
 }

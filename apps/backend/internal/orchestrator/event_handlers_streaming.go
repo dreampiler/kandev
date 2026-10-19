@@ -2106,6 +2106,15 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 // A terminal session never becomes promptable again, so without the move the
 // messages stay queued forever. The receiver drains them only when its own
 // Auto-run policy allows it.
+//
+// Promotion runs inside the stopping session's queue admission, and the
+// transfer needs admission on both sessions, so the hand-off runs after the
+// caller returns rather than inside it.
+func (s *Service) scheduleTerminalSessionQueueHandOff(ctx context.Context, taskID, fromSessionID, toSessionID string) {
+	handOffCtx := messagequeue.WithoutSessionAdmission(context.WithoutCancel(ctx))
+	go s.handOffTerminalSessionQueue(handOffCtx, taskID, fromSessionID, toSessionID)
+}
+
 func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) {
 	if s.messageQueue == nil || fromSessionID == "" || toSessionID == "" || fromSessionID == toSessionID {
 		return
