@@ -128,6 +128,15 @@ same shutdown boundary.
 
 ## Risks
 
+### Windows native follow-up
+
+The 2026-10-19 continuation in task-01 adds a cooperative event for owned native
+Windows children before the existing tree fallback. Desktop, launcher, and
+backend participate in the same normal teardown chain. It changes neither
+inference claim recovery nor operating data. The earlier Windows-only fallback
+description below still applies to wrappers and older children without that
+event. Native-only packaging cannot deliver the Desktop part of this fix.
+
 - A root-only signal must not orphan the `make` wrapper or Vite child on
   Windows. Windows retains the documented tree-wide graceful fallback, while
   Unix dev targets the backend PID handoff.

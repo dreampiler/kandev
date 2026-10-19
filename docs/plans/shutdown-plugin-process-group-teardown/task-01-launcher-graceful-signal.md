@@ -96,3 +96,46 @@ tree-wide graceful fallback because signaling only that wrapper could orphan
 descendants. Process-group cleanup runs after root exit on supported platforms.
 The plugin adapter was not modified: its existing DEBUG-for-deliberate-stop and
 ERROR-for-unexpected-exit policy passed the focused tests.
+
+### Windows cooperative shutdown follow-up (2026-10-19)
+
+The console-less Windows child regression reproduced a normal-stop defect:
+`taskkill /T` failed, the existing force fallback exited the child with code 1,
+and its retained inference owner remained active. The same isolated owner
+closed normally when its ordered teardown ran. This establishes a source
+failure mode; it does not prove which internal stop branch a past operating
+Desktop took.
+
+Desktop now opens the still-owned launcher's local shutdown event. The
+launcher opens the corresponding backend event. Each recipient bridges one
+event into its existing signal-driven teardown; repeated event requests do
+not become the second signal that forces exit. Receivers own and drain the
+waiter and both event handles. Failed duplicate registration releases its
+handle. Senders cannot create an event or mark a journal settled. Existing
+wrapper fallback, grace deadlines, second-signal handling, and forced cleanup
+remain available. Backend detach and inference ownership rules are unchanged.
+
+After cleanup reports an error, the Windows launcher checks the root process
+handle to distinguish confirmed exit from localized taskkill output. An
+inaccessible or live process remains a failure. This retains the existing
+missing-root semantics and does not add a guarantee about orphan descendants.
+
+Focused temporary overlays, with no permanent test additions, established:
+
+- Original real-child stop: RED, active owner, forced exit (0.615s).
+- Existing exited-PID regression: RED on localized taskkill output (2.334s).
+- Corrected real-child stop and actual Rust sender: closed owner, exit 0;
+  managed stop reports graceful with no force. Launcher race checks passed
+  (7.566s), backend startup signal bridge passed (1.236s), event drain passed
+  (1.044s).
+- Rust library compilation and the existing Desktop shutdown-budget test
+  passed with and without `desktop-runtime`, with the unchanged lockfile.
+- Duplicate event registration/drain and the existing corrupt-owner,
+  foreign-token, prepared-versus-started finalization, and consume/cancel race
+  checks passed (winproc 1.036s, utility 1.074s).
+- Normal commit hooks are recorded in the accompanying source handoff.
+
+Already-retained active owners are not adopted or rewritten by this change.
+Their exact predecessor settlement remains a separate recovery prerequisite.
+The changed Desktop shell and native launcher/backend must travel together;
+a six-binary native-only replacement is not sufficient for this follow-up.

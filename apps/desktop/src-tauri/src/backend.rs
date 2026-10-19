@@ -17,6 +17,10 @@ use std::{
 };
 use url::Url;
 
+#[cfg(windows)]
+#[path = "windows_shutdown.rs"]
+mod windows_shutdown;
+
 #[cfg(feature = "desktop-runtime")]
 use tauri::{AppHandle, Manager, State, WebviewWindow};
 
@@ -1494,6 +1498,9 @@ fn request_graceful_child_shutdown(child: &Child) -> bool {
 
 #[cfg(windows)]
 fn request_graceful_child_shutdown(child: &Child) -> bool {
+    if windows_shutdown::request(child.id()) {
+        return true;
+    }
     let pid = child.id().to_string();
     Command::new("taskkill")
         .args(["/T", "/PID", &pid])

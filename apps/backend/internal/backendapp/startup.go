@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/winproc"
 	"github.com/kandev/kandev/internal/startup"
 	"go.uber.org/zap"
 )
@@ -35,11 +36,12 @@ type processContextKey struct{}
 type workerCancelContextKey struct{}
 
 type startupSignalController struct {
-	first   chan os.Signal
-	stop    chan struct{}
-	done    chan struct{}
-	signals chan os.Signal
-	once    sync.Once
+	first     chan os.Signal
+	stop      chan struct{}
+	done      chan struct{}
+	signals   chan os.Signal
+	once      sync.Once
+	stopLocal func()
 }
 
 func newStartupSignalController(ctx context.Context, cancel context.CancelFunc, log *logger.Logger) *startupSignalController {
@@ -50,6 +52,15 @@ func newStartupSignalController(ctx context.Context, cancel context.CancelFunc, 
 		signals: make(chan os.Signal, 2),
 	}
 	signal.Notify(controller.signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	stopLocal, err := winproc.ListenForShutdown(controller.signals)
+	if err != nil {
+		if log != nil {
+			log.Error("cooperative shutdown listener unavailable", zap.Error(err))
+		}
+		cancel()
+		stopLocal = func() {}
+	}
+	controller.stopLocal = stopLocal
 	if log != nil {
 		log.Debug("shutdown signal handler armed",
 			zap.Int("pid", os.Getpid()),
@@ -161,6 +172,9 @@ func (controller *startupSignalController) stopAndWait() {
 		return
 	}
 	controller.once.Do(func() {
+		if controller.stopLocal != nil {
+			controller.stopLocal()
+		}
 		signal.Stop(controller.signals)
 		close(controller.stop)
 		<-controller.done
