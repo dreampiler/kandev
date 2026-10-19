@@ -2102,28 +2102,54 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 }
 
 // handOffTerminalSessionQueue moves messages still queued for a session that
-// reached a terminal state to the session that inherited the primary role.
+// reached a terminal state to the session that now holds the primary role.
 // A terminal session never becomes promptable again, so without the move the
-// messages stay queued forever. The receiver drains them only when its own
-// Auto-run policy allows it.
+// messages stay queued forever. The receiver keeps its own Auto-run setting
+// and drains them only when that setting allows it.
 //
 // Promotion runs inside the stopping session's queue admission, and the
 // transfer needs admission on both sessions, so the hand-off runs after the
-// caller returns rather than inside it.
-func (s *Service) scheduleTerminalSessionQueueHandOff(ctx context.Context, taskID, fromSessionID, toSessionID string) {
-	handOffCtx := messagequeue.WithoutSessionAdmission(context.WithoutCancel(ctx))
-	go s.handOffTerminalSessionQueue(handOffCtx, taskID, fromSessionID, toSessionID)
+// caller returns rather than inside it. The worker is detached from the
+// request but bound to the service lifetime, so Stop cancels and joins it.
+func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID string) {
+	s.parkedLoopMu.Lock()
+	if s.parkedLoopStopped || s.parkedLoopCtx == nil {
+		s.parkedLoopMu.Unlock()
+		return
+	}
+	handOffCtx := messagequeue.WithoutSessionAdmission(s.parkedLoopCtx)
+	// Add while parkedLoopMu is held so Stop cannot finish waiting before
+	// this worker is registered.
+	s.parkedLoopWorkers.Add(1)
+	s.parkedLoopMu.Unlock()
+	go func() {
+		defer s.parkedLoopWorkers.Done()
+		s.handOffTerminalSessionQueue(handOffCtx, taskID, fromSessionID)
+	}()
 }
 
-func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) {
-	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil ||
-		fromSessionID == "" || toSessionID == "" || fromSessionID == toSessionID {
+// handOffTerminalSessionQueue resolves the receiver when it runs instead of
+// when it was scheduled. Hand-offs are serialized, so when successive
+// promotions fail one primary after another, an earlier hand-off cannot move
+// its messages onto a primary that already handed its own queue on.
+func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID string) {
+	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil || fromSessionID == "" {
+		return
+	}
+	s.terminalQueueHandOffMu.Lock()
+	defer s.terminalQueueHandOffMu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	toSessionID := s.currentPrimarySessionID(ctx, taskID)
+	if toSessionID == "" || toSessionID == fromSessionID {
 		return
 	}
 	pending, err := s.messageQueue.HasPendingForSession(ctx, fromSessionID)
 	if err != nil || !pending {
 		return
 	}
+	receiverAutoRun := s.messageQueue.GetStatus(ctx, toSessionID).AutoRun
 	if err := s.transferQueuedSessionState(ctx, taskID, fromSessionID, toSessionID); err != nil {
 		s.logger.Warn("failed to hand off queued messages from terminal session",
 			zap.String("task_id", taskID),
@@ -2132,10 +2158,34 @@ func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromS
 			zap.Error(err))
 		return
 	}
+	// The transfer combines both sessions' Auto-run settings. The source is
+	// retired, so its setting must not pause the receiver.
+	if receiverAutoRun && !s.messageQueue.GetStatus(ctx, toSessionID).AutoRun {
+		if err := s.messageQueue.SetAutoRun(ctx, toSessionID, true); err != nil {
+			s.logger.Warn("failed to keep receiver Auto-run after queue hand-off",
+				zap.String("session_id", toSessionID), zap.Error(err))
+		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
 	if _, err := s.DrainQueuedMessageIfAutoRun(ctx, toSessionID); err != nil {
 		s.logger.Debug("queued hand-off left for the next drain",
 			zap.String("session_id", toSessionID), zap.Error(err))
 	}
+}
+
+func (s *Service) currentPrimarySessionID(ctx context.Context, taskID string) string {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return ""
+	}
+	for _, session := range sessions {
+		if session.IsPrimary {
+			return session.ID
+		}
+	}
+	return ""
 }
 
 func isTerminalSessionState(s models.TaskSessionState) bool {

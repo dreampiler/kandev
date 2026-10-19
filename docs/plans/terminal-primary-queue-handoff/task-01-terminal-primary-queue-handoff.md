@@ -27,11 +27,13 @@ to the new primary and drains it when Auto-run allows.
 - `FeaturesConfig.TerminalPrimaryQueueHandoff`, runtime flag registry entry,
   `KANDEV_FEATURES_TERMINAL_PRIMARY_QUEUE_HANDOFF` in `profiles.yaml`, and
   `orchestrator.ServiceConfig.TerminalPrimaryQueueHandoff`.
-- `SetPrimarySession` reads the previous primary and calls
-  `handOffTerminalSessionQueue` when it is terminal.
+- `SetPrimarySession` reads the previous primary and schedules
+  `handOffTerminalSessionQueue` on the service-owned worker lifetime when it is
+  terminal; hand-offs are serialized and resolve the current primary.
 
 ## Verification
 
 `go test ./internal/orchestrator/ -run 'TestPrimary|TestExplicitPrimary'` covers
-automatic promotion, an explicit choice, a live previous primary, and the
-flag-off default.
+automatic promotion, an explicit choice, a live previous primary, the
+flag-off default, a paused previous primary with an enabled receiver,
+successive terminal promotions, and no hand-off after `Stop`.

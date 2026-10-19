@@ -895,6 +895,10 @@ type Service struct {
 	parkedLoopStopped bool
 	parkedLoopWorkers sync.WaitGroup
 
+	// terminalQueueHandOffMu serializes terminal primary queue hand-offs so
+	// each one resolves the current primary after earlier hand-offs finish.
+	terminalQueueHandOffMu sync.Mutex
+
 	// silentRestore workers are bounded to the startup inventory and joined
 	// during shutdown before the repositories and runtime are torn down.
 	silentRestoreMu           sync.Mutex

@@ -61,7 +61,9 @@ return to an earlier conversation.
   `features.terminalPrimaryQueueHandoff` flag is on and the primary role moves
   off a session in a terminal state, the messages still queued on that session
   shall move to the new primary through the existing queue transfer and drain
-  only when the new primary's Auto-run allows it. The flag is off in every
+  only when the new primary's Auto-run allows it. The hand-off shall keep the
+  new primary's Auto-run setting and shall deliver to the primary current when
+  it runs, so successive terminal promotions do not strand messages. The flag is off in every
   shipped profile; with it off, queued messages keep their session target. A
   live previous primary always keeps its queue.
 

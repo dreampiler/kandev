@@ -79,8 +79,16 @@ CANCELLED, after the promotion write it schedules `handOffTerminalSessionQueue`
 to run after the caller returns. Promotion runs inside the stopping session's
 queue admission while the transfer locks both sessions in ID order, so running
 it inline deadlocks when the receiver's ID sorts first; the scheduled hand-off
-uses a context that does not claim the caller's admission. It transfers the queue with the existing `transferQueuedSessionState`
-(attachments and compensation included) and then offers the new primary to
+uses a context that does not claim the caller's admission. The worker is
+derived from the service-owned worker context, so `Stop` cancels it and waits
+for it, and no hand-off starts after `Stop`. Hand-offs are serialized and each
+resolves the task's current primary when it runs, not when it was scheduled:
+if successive promotions fail one primary after another, an earlier hand-off
+delivers to the latest primary instead of a session that already handed its
+own queue on. It transfers the queue with the existing
+`transferQueuedSessionState` (attachments and compensation included), keeps
+the receiver's own Auto-run setting (the transfer would otherwise combine it
+with the retired source's setting), and then offers the new primary to
 `DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
 the queue on the terminal session. The flag is read once at startup into the
 orchestrator service config.

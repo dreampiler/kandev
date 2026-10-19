@@ -6092,7 +6092,7 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
 	if previous != nil {
-		s.scheduleTerminalSessionQueueHandOff(ctx, previous.TaskID, previous.ID, sessionID)
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
 	}
 	return nil
 }

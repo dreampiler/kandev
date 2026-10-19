@@ -10,8 +10,13 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func enableTerminalPrimaryQueueHandoff(svc *Service) *Service {
+// enableTerminalPrimaryQueueHandoff also starts the service-owned worker
+// lifetime that production Start creates, and joins it when the test ends.
+func enableTerminalPrimaryQueueHandoff(t *testing.T, svc *Service) *Service {
+	t.Helper()
 	svc.config.TerminalPrimaryQueueHandoff = true
+	svc.resetParkedSamplingWorkers()
+	t.Cleanup(svc.stopParkedSamplingLoops)
 	return svc
 }
 
@@ -41,7 +46,7 @@ func TestPrimaryPromotionHandsOffTerminalSessionQueue(t *testing.T) {
 	svc, repo := newPrimaryPromotionFixture(t, "",
 		&models.TaskSession{ID: "session-live", State: models.TaskSessionStateRunning},
 	)
-	enableTerminalPrimaryQueueHandoff(svc)
+	enableTerminalPrimaryQueueHandoff(t, svc)
 	ctx := context.Background()
 	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
 	require.NoError(t, err)
@@ -57,7 +62,7 @@ func TestPrimaryPromotionHandsOffTerminalSessionQueue(t *testing.T) {
 // carries its queue too, e.g. when no candidate existed at stop time.
 func TestExplicitPrimaryChoiceHandsOffTerminalSessionQueue(t *testing.T) {
 	svc, repo := newPrimaryPromotionFixture(t, "")
-	enableTerminalPrimaryQueueHandoff(svc)
+	enableTerminalPrimaryQueueHandoff(t, svc)
 	ctx := context.Background()
 	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
 	require.NoError(t, err)
@@ -76,7 +81,7 @@ func TestExplicitPrimaryChoiceHandsOffTerminalSessionQueue(t *testing.T) {
 // A live previous primary keeps its own queue.
 func TestPrimaryChoiceKeepsQueueOfLiveSession(t *testing.T) {
 	svc, repo := newPrimaryPromotionFixture(t, "")
-	enableTerminalPrimaryQueueHandoff(svc)
+	enableTerminalPrimaryQueueHandoff(t, svc)
 	ctx := context.Background()
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateRunning, ""))
 	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
@@ -115,7 +120,7 @@ func TestPrimaryPromotionInsideAdmissionHandsOffWithoutDeadlock(t *testing.T) {
 	svc, repo := newPrimaryPromotionFixture(t, "",
 		&models.TaskSession{ID: "session-a-receiver", State: models.TaskSessionStateRunning},
 	)
-	enableTerminalPrimaryQueueHandoff(svc)
+	enableTerminalPrimaryQueueHandoff(t, svc)
 	ctx := context.Background()
 	require.Less(t, "session-a-receiver", primaryStoppedID)
 	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
@@ -138,4 +143,68 @@ func TestPrimaryPromotionInsideAdmissionHandsOffWithoutDeadlock(t *testing.T) {
 
 	require.Equal(t, "session-a-receiver", primarySessionID(t, repo))
 	requireQueueMoved(t, svc, primaryStoppedID, "session-a-receiver")
+}
+
+// The transfer combines both sessions' Auto-run settings. A paused previous
+// primary must not pause the receiver, or the moved messages never drain.
+func TestTerminalPrimaryQueueHandoffKeepsReceiverAutoRun(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-live", State: models.TaskSessionStateRunning},
+	)
+	enableTerminalPrimaryQueueHandoff(t, svc)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	require.NoError(t, svc.messageQueue.SetAutoRun(ctx, primaryStoppedID, false))
+	require.True(t, svc.messageQueue.GetStatus(ctx, "session-live").AutoRun)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	svc.maybePromotePrimary(ctx, primaryTaskID, primaryStoppedID, models.TaskSessionStateFailed)
+
+	requireQueueMoved(t, svc, primaryStoppedID, "session-live")
+	require.True(t, svc.messageQueue.GetStatus(ctx, "session-live").AutoRun,
+		"the hand-off must keep the receiver's own Auto-run setting")
+}
+
+// A fails and B takes over, then B fails and C takes over before either
+// hand-off runs. B's hand-off can run first and find B's queue empty; A's
+// hand-off must then deliver to C, not to the already-failed B.
+func TestSuccessiveTerminalPromotionsDeliverQueueToFinalPrimary(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-b", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "session-c", State: models.TaskSessionStateRunning},
+	)
+	enableTerminalPrimaryQueueHandoff(t, svc)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+
+	// Hold both hand-offs until both promotions have happened.
+	svc.terminalQueueHandOffMu.Lock()
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	require.NoError(t, svc.SetPrimarySession(ctx, "session-b"))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-b", models.TaskSessionStateFailed, ""))
+	require.NoError(t, svc.SetPrimarySession(ctx, "session-c"))
+	svc.terminalQueueHandOffMu.Unlock()
+
+	requireQueueMoved(t, svc, primaryStoppedID, "session-c")
+	require.Empty(t, queuedContents(t, svc, "session-b"))
+}
+
+// After Stop, no detached hand-off starts; the queue keeps its target.
+func TestTerminalPrimaryQueueHandoffDoesNotStartAfterStop(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "")
+	enableTerminalPrimaryQueueHandoff(t, svc)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	stopPrimary(t, svc, repo)
+	svc.stopParkedSamplingLoops()
+
+	next := &models.TaskSession{ID: "session-next", TaskID: primaryTaskID, State: models.TaskSessionStateStarting}
+	require.NoError(t, repo.CreateTaskSession(ctx, next))
+	require.NoError(t, svc.SetPrimarySession(ctx, next.ID))
+
+	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, primaryStoppedID))
+	require.Empty(t, queuedContents(t, svc, "session-next"))
 }
