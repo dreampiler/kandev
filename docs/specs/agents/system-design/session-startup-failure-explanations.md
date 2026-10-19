@@ -2,7 +2,7 @@
 status: current
 system: agents
 created: 2026-09-30
-updated: 2026-10-06
+updated: 2026-10-20
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006
 owners:
@@ -97,6 +97,11 @@ cases within that code. Existing timeout, authentication, and cancellation
 handling retains its precedence. Context cancellation and terminal-session
 sentinels remain outside bootstrap error conversion; a deadline must retain
 its timeout meaning instead of being relabelled an application rejection.
+A model application call that fails because the agent stream is not connected
+or the ACP transport is dead (the same phrases `session/load` already treats as
+transport-dead) is a teardown or transport race, not a provider rejection. The
+model branches return that error unchanged, so it reaches the generic bootstrap
+cause instead of `model_selection_failed`/`application_failed`.
 
 Produce typed evidence at the decision branch. Keep `Cause` for `errors.Is` and
 `errors.As`; no persistence consumer uses its `Error()` as user detail.
