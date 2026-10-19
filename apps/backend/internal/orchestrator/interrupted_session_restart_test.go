@@ -233,7 +233,7 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 	require.NotEqual(t, candidateExecutionIDs[0], candidateExecutionIDs[1], "each native process attempt needs a fresh execution identity")
 	candidatesMu.Unlock()
 	queueStatus := queue.GetStatus(ctx, session.ID)
-	require.False(t, queueStatus.AutoRun, "recovery must visibly pause auto-run while preserving queued work")
+	require.True(t, queueStatus.AutoRun, "a successful restore resumes the auto-run it paused; the next drain pass delivers the queue")
 	queuedCount := queue.GetStatus(ctx, session.ID).Count
 	require.Equal(t, 1, queuedCount)
 
@@ -270,18 +270,12 @@ func TestRestartRecoveryRestoresNativeConversationWithoutPrompt(t *testing.T) {
 	require.Equal(t, models.TaskSessionStateWaitingForInput, settled.State,
 		"the normal completion event must make the session available for queued work")
 	queuedCount = queue.GetStatus(ctx, session.ID).Count
-	require.Equal(t, 1, queuedCount, "ordinary chat must leave the preserved queue entry intact")
-	autoRun, dispatched, err := service.SetQueueAutoRun(ctx, session.ID, true)
-	require.NoError(t, err)
-	require.True(t, autoRun)
-	require.True(t, dispatched, "the user can re-enable Auto-run and dispatch the preserved item")
-	queuedCount = queue.GetStatus(ctx, session.ID).Count
-	require.Zero(t, queuedCount)
+	require.Zero(t, queuedCount, "the turn-end drain delivers the item the restore preserved")
 	require.Eventually(t, func() bool {
 		manager.mu.Lock()
 		defer manager.mu.Unlock()
 		return len(manager.capturedPrompts) == 2
-	}, 2*time.Second, 10*time.Millisecond, "the re-enabled queue prompt should reach the restored native conversation")
+	}, 2*time.Second, 10*time.Millisecond, "the preserved queue prompt should reach the restored native conversation")
 	manager.mu.Lock()
 	require.Equal(t, []string{"ordinary follow-up", "queued before restart"}, manager.capturedPrompts)
 	manager.mu.Unlock()
