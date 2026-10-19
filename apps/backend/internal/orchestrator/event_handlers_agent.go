@@ -2058,7 +2058,10 @@ func (s *Service) queuedMessageAfterClaim(
 		if session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID); err == nil &&
 			s.queuedSessionMatchesIdentity(session, identity) &&
 			!turnStartAlreadyProcessed(queuedMsg.Metadata) {
-			s.processOnTurnStartViaEngine(ctx, queuedMsg.TaskID, session)
+			// The synchronous after-claim callback still owns this session's
+			// dispatch guard; profile retirement must not acquire it again.
+			workflowCtx := withWorkflowProfileSwitchGuardHeld(ctx, session.ID, "")
+			s.processOnTurnStartViaEngine(workflowCtx, queuedMsg.TaskID, session)
 		}
 		s.armQueuedInitialCreatePromptPassthroughForLaunch(ctx, queuedMsg, identity)
 		return nil

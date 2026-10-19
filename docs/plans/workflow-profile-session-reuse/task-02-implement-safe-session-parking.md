@@ -22,6 +22,35 @@ system_design:
 
 # Task 02: Route Source and Destination Behavior
 
+## Queued turn-start guard correction, 2026-10-19
+
+The R3 incident completed its previous turn before draining a queued input.
+That input created a successor turn and ran `on_turn_start` while its prompt
+claim still owned the source session dispatch guard. Profile-switch parking
+then attempted to acquire the same non-reentrant guard. The retained backend
+stack and exact session logs identify this boundary; the destination was
+prepared but source parking and prompt dispatch had not finished.
+
+The queued after-claim callback now passes its existing guard ownership to
+synchronous workflow handling. Mutex acquisition, session identity checks,
+stamped parking, and deferred runtime teardown remain unchanged. This follows
+the existing lifecycle design's control-flow steps 8-12 and acceptance criteria
+001.4/001.6; it introduces no recovery action or owner-release exception.
+
+A temporary Go overlay reproduced the deadlock through the real claim and
+callback in both engine and legacy paths (RED, 2.285s). The corrected paths and
+synchronous stopped callbacks passed with race detection (1.399s). Existing
+parking, terminal-event identity, queued claim/reset/reselection, and unknown
+delivery recovery regressions passed with race detection (1.953s). The probe
+is not registered as a permanent test. An initial probe assertion incorrectly
+watched `StopAgentWithReason` instead of the existing `StopAgent` park path;
+the final probe invokes the real stopped handler from that correct callback.
+
+This source correction does not unlock an already-running old process.
+Existing startup recovery still preserves unknown queued delivery outcomes
+behind an explicit recovery block. No operating call or queued-input replay
+was performed during the repair.
+
 ## Summary
 
 Use the destination step for session selection and the source step for session
