@@ -269,5 +269,14 @@
   "controlNative.recordedProvider": "記錄的供應商",
   "controlNative.estimated": "估算",
   "controlNative.primarySession": "主程序工作階段",
-  "controlNative.noSupportedEvents": "這些工作區樣本的受支援來源沒有返回事件。"
+  "controlNative.noSupportedEvents": "這些工作區樣本的受支援來源沒有返回事件。",
+  "controlRefresh.refreshing": "正在刷新；顯示最後確認的樣本",
+  "controlRefresh.lastConfirmed": "最後確認的樣本",
+  "controlRefresh.retainedError": "刷新失敗；顯示最後確認的樣本",
+  "controlRefresh.unattributedScope": "這些快取報告未標明供應商帳戶，不能用於確認目前模型選擇或執行准入狀態。",
+  "controlRefresh.capacityResponseAt": "回應產生時間",
+  "controlRefresh.capacityClock": "回應產生時間並非推理收集時間。未提供源數據收集時間。",
+  "controlRefresh.unattributedTitle_one": "來源未確認的執行報告（{{count}}）",
+  "controlRefresh.unattributedTitle_other": "來源未確認的執行報告（{{count}}）",
+  "controlRefresh.readAt": "讀取完成時間"
 }

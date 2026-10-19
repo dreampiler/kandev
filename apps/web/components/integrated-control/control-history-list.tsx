@@ -61,8 +61,11 @@ export function OverviewLast24h({
 }) {
   const { t } = useTranslation();
   const [kind, setKind] = useState<EventFilter>("all");
-  const counts = useMemo(() => countEventKinds(events), [events]);
-  const selected = counts.some((entry) => entry.kind === kind) ? kind : "all";
+  const counts = useMemo(() => {
+    const rows = countEventKinds(events);
+    return rows.some((entry) => entry.kind === kind) ? rows : [...rows, { kind, count: 0 }];
+  }, [events, kind]);
+  const selected = kind;
   const filtered = useMemo(
     () => (selected === "all" ? events : events.filter((event) => event.kind === selected)),
     [events, selected],

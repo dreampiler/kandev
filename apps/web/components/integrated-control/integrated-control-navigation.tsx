@@ -16,6 +16,7 @@ import {
   ControlCoordinatorConversations,
   ControlIndependentConversations,
 } from "./integrated-control-conversation-links";
+import { ControlReadState, ControlSnapshotReadState } from "./control-read-state";
 
 const icons = [IconLayoutDashboard, IconActivity, IconBuilding, IconTopologyStar, IconHistory];
 
@@ -87,16 +88,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
           {t("sidebar:integratedControl.refresh")}
         </Button>
       </div>
-      {control.loading && (
-        <p role="status" className="px-2 text-xs text-muted-foreground">
-          {t("common:loading")}
-        </p>
-      )}
-      {control.error && (
-        <p role="alert" className="px-2 text-xs text-destructive">
-          {t("sidebar:integratedControl.loadError")}
-        </p>
-      )}
+      <ControlSnapshotReadState />
       {control.data?.workspaces.map((workspace) => (
         <details
           key={workspace.id}
@@ -114,9 +106,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
               </p>
             )}
             {control.data?.byWorkspace[workspace.id]?.error && (
-              <p role="alert" className="p-2 text-xs text-destructive">
-                {t("sidebar:integratedControl.loadError")}
-              </p>
+              <ControlReadState status="error" {...control.data.byWorkspace[workspace.id]} />
             )}
             {control.data?.byWorkspace[workspace.id]?.items.map((coordinator) => (
               <details key={coordinator.id} open className="min-w-0">
@@ -133,6 +123,7 @@ function ControlWorkspaceTree({ onNavigate }: { onNavigate?: () => void }) {
             ))}
             <ControlIndependentConversations
               workspaceId={workspace.id}
+              grouped={Boolean(control.data?.byWorkspace[workspace.id]?.items.length)}
               view={view}
               onNavigate={onNavigate}
             />

@@ -82,7 +82,7 @@ describe("native workspace provider health", () => {
   it("rejects an incompatible response and never reveals a foreign workspace row", async () => {
     fixture.readHealth.mockResolvedValue({ health: [{ ...warning, workspace_id: "foreign" }] });
     render(<ControlModelBlocks workspaceId="w1" />);
-    expect(await screen.findByText("sidebar:integratedControl.loadError")).toBeTruthy();
+    expect(await screen.findByText("sidebar:controlRestore.contractUnavailable")).toBeTruthy();
     expect(screen.queryByText("recorded-model")).toBeNull();
     expect(screen.queryByText("sidebar:controlRestore.noProviderHealth")).toBeNull();
   });

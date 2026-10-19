@@ -41,7 +41,7 @@ describe("control read boundaries", () => {
     });
     await waitFor(() => expect(result.current.data).toBe("second owner"));
   });
-  it("clears old values while a manual refresh is pending, then reports denied", async () => {
+  it("retains the same scope while refreshing, then clears it on denied", async () => {
     const read = vi
       .fn()
       .mockResolvedValueOnce([1])
@@ -52,9 +52,48 @@ describe("control read boundaries", () => {
     );
     await waitFor(() => expect(result.current.data).toEqual([1]));
     rerender({ revision: {} });
-    expect(result.current.data).toBeUndefined();
+    expect(result.current.data).toEqual([1]);
+    expect(result.current.refreshing).toBe(true);
     await waitFor(() => expect(result.current.status).toBe("denied"));
     expect(result.current.data).toBeUndefined();
     expect(read).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("control refresh continuity", () => {
+  it("retains a dated snapshot on transient failure and recovers on reconnect", async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce([1])
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce([2]);
+    const { result, rerender } = renderHook(
+      ({ revision }) => useControlResource<number[]>(read, revision),
+      { initialProps: { revision: {} } },
+    );
+    await waitFor(() => expect(result.current.data).toEqual([1]));
+    const at = result.current.receivedAt;
+    rerender({ revision: {} });
+    await waitFor(() => expect(result.current.status).toBe("error"));
+    expect(result.current.data).toEqual([1]);
+    expect(result.current.receivedAt).toBe(at);
+    expect(result.current.stale).toBe(true);
+    rerender({ revision: {} });
+    await waitFor(() => expect(result.current.data).toEqual([2]));
+    expect(result.current.stale).toBeFalsy();
+  });
+  it("clears synchronously when a resource key changes or the route disables reads", async () => {
+    const first = vi.fn().mockResolvedValue("first");
+    const second = vi.fn().mockImplementation(() => new Promise(() => {}));
+    const { result, rerender } = renderHook(
+      ({ read, revision }: { read: typeof first; revision?: object }) =>
+        useControlResource(read, revision),
+      { initialProps: { read: first, revision: {} as object | undefined } },
+    );
+    await waitFor(() => expect(result.current.data).toBe("first"));
+    rerender({ read: second, revision: {} });
+    expect(result.current.data).toBeUndefined();
+    rerender({ read: first, revision: undefined });
+    expect(result.current.data).toBeUndefined();
   });
 });

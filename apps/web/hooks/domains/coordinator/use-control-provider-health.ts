@@ -1,7 +1,8 @@
 import { useCallback } from "react";
 import { getProviderHealth } from "@/lib/api/domains/office-routing-api";
+import { NativeControlContractError } from "@/lib/api/domains/control-native-api";
 import type { ProviderHealth } from "@/lib/state/slices/office/types";
-import { controlReadFailure, useControlResource } from "./use-control-resource";
+import { controlReadFailure, retainControlRows, useControlResource } from "./use-control-resource";
 
 /** Existing workspace-scoped stored health; never calls routing retry or preview. */
 export function useControlProviderHealth(workspaceIds: string[], revision: object | undefined) {
@@ -17,7 +18,9 @@ export function useControlProviderHealth(workspaceIds: string[], revision: objec
               !response.health.every((row) => validHealth(row, id))
             ) {
               // i18n-exempt: diagnostic only; the UI displays the localized read error.
-              throw new Error("Incompatible workspace provider health response");
+              throw new NativeControlContractError(
+                "Incompatible workspace provider health response",
+              );
             }
             return { id, status: "ready" as const, health: response.health };
           } catch (error) {
@@ -27,7 +30,7 @@ export function useControlProviderHealth(workspaceIds: string[], revision: objec
       ),
     [ids],
   );
-  return useControlResource(read, revision);
+  return useControlResource(read, revision, retainControlRows);
 }
 
 function validHealth(row: ProviderHealth, workspaceId: string) {

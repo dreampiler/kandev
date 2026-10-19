@@ -1,11 +1,10 @@
 import Link from "@/components/routing/app-link";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import { useTranslation } from "react-i18next";
-import { useOptionalAppStore } from "@/components/state-provider";
-import { useNow } from "@/hooks/use-now";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { SessionCapacityObservation } from "@/lib/types/system";
-import { LAUNCH_QUEUE_CAPACITY_STALE_AFTER_MS } from "@/lib/tasks/launch-queue-view-model";
+import { ControlCapacityReadState } from "./control-capacity-read-state";
+import { useControlCapacityFreshness } from "@/hooks/domains/coordinator/use-control-capacity-freshness";
 
 const WAIT_LABELS = {
   ceiling_total_limit: "sidebar:integratedControl.capacityWaitingTotal",
@@ -31,20 +30,18 @@ function freshnessKey(known: boolean, stale: boolean) {
 
 export function ControlCapacitySnapshot({
   observation,
+  lastConfirmed,
 }: {
   observation?: SessionCapacityObservation;
+  lastConfirmed?: SessionCapacityObservation;
 }) {
   const { t } = useTranslation();
-  const now = useNow(5_000);
-  const connected = useOptionalAppStore((state) => state.connection.status === "connected", true);
   const unknown = t("common:unknown");
-  const sampledAt = Date.parse(observation?.observed_at ?? "");
-  const validTime = Number.isFinite(sampledAt) && sampledAt <= now + 5_000;
-  const known = observation?.known === true && validTime;
-  const stale = !connected || now - sampledAt >= LAUNCH_QUEUE_CAPACITY_STALE_AFTER_MS;
+  const { validTime, known, stale } = useControlCapacityFreshness(observation);
   return (
     <section className="space-y-3 rounded-lg border p-4" data-testid="control-capacity-snapshot">
       <h2 className="font-medium">{t("sidebar:integratedControl.capacityTitle")}</h2>
+      <ControlCapacityReadState lastConfirmed={lastConfirmed} />
       {!observation ? (
         <p>{t("sidebar:integratedControl.capacityUnavailable")}</p>
       ) : (
@@ -65,7 +62,7 @@ export function ControlCapacitySnapshot({
           </p>
           {validTime && (
             <p className="text-xs text-muted-foreground">
-              {t("sidebar:controlInspection.observedAt")}:{" "}
+              {t("sidebar:controlRefresh.capacityResponseAt")}:{" "}
               <time dateTime={observation.observed_at}>
                 {formatDateTime(observation.observed_at, {
                   year: "numeric",

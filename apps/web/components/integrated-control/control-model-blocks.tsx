@@ -29,7 +29,7 @@ export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
       <p className="p-3 text-xs text-muted-foreground">
         {t("sidebar:controlRestore.nativeHealthScope")}
       </p>
-      <ControlReadState status={result.status} />
+      <ControlReadState {...result} />
       {result.data?.map((workspace) => (
         <section
           key={workspace.id}
@@ -39,7 +39,7 @@ export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
           <h3 className="font-medium">
             {workspaces.find((item) => item.id === workspace.id)?.name}
           </h3>
-          <ControlReadState status={workspace.status} />
+          <ControlReadState {...workspace} />
           {workspace.status === "ready" && workspace.health.length === 0 && (
             <p>{t("sidebar:controlRestore.noProviderHealth")}</p>
           )}
@@ -51,13 +51,6 @@ export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
               />
             ))}
           </div>
-          {workspace.status === "ready" && (
-            <p className="text-xs text-muted-foreground">
-              {t("sidebar:controlRestore.healthReadAt")}:{" "}
-              {healthTime(result.receivedAt) ?? t("common:unknown")} (
-              {Intl.DateTimeFormat().resolvedOptions().timeZone})
-            </p>
-          )}
         </section>
       ))}
     </SectionCard>

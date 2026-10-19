@@ -269,5 +269,14 @@
   "controlNative.recordedProvider": "Ŕēćōŕďēď ƥŕōvĩďēŕ",
   "controlNative.estimated": "Ēśţĩḿàţēď",
   "controlNative.primarySession": "Ƥŕĩḿàŕŷ ƥŕōćēśś śēśśĩōń",
-  "controlNative.noSupportedEvents": "Ńō ēvēńţś ŵēŕē ŕēţũŕńēď ƒŕōḿ ţĥē śũƥƥōŕţēď śōũŕćēś ĩń ţĥēśē ŵōŕķśƥàćē śàḿƥĺēś."
+  "controlNative.noSupportedEvents": "Ńō ēvēńţś ŵēŕē ŕēţũŕńēď ƒŕōḿ ţĥē śũƥƥōŕţēď śōũŕćēś ĩń ţĥēśē ŵōŕķśƥàćē śàḿƥĺēś.",
+  "controlRefresh.refreshing": "Ŕēƒŕēśĥĩńĝ; śĥōŵĩńĝ ţĥē ĺàśţ ćōńƒĩŕḿēď śàḿƥĺē",
+  "controlRefresh.lastConfirmed": "Ĺàśţ ćōńƒĩŕḿēď śàḿƥĺē",
+  "controlRefresh.retainedError": "Ŕēƒŕēśĥ ƒàĩĺēď; śĥōŵĩńĝ ţĥē ĺàśţ ćōńƒĩŕḿēď śàḿƥĺē",
+  "controlRefresh.unattributedScope": "Ţĥēśē ćàćĥēď ŕēƥōŕţś ďō ńōţ ĩďēńţĩƒŷ à ƥŕōvĩďēŕ àććōũńţ. Ţĥēŷ ďō ńōţ ćōńƒĩŕḿ ţĥē ćũŕŕēńţ ḿōďēĺ śēĺēćţĩōń ōŕ àďḿĩśśĩōń śţàţē.",
+  "controlRefresh.capacityResponseAt": "Ŕēśƥōńśē àśśēḿƀĺēď àţ",
+  "controlRefresh.capacityClock": "Ţĥē ŕēśƥōńśē ţĩḿē ĩś ńōţ ţĥē ĩńƒēŕēńćē ćōĺĺēćţĩōń ţĩḿē. Śōũŕćē ćōĺĺēćţĩōń ţĩḿē ĩś ńōţ ƥŕōvĩďēď.",
+  "controlRefresh.unattributedTitle_one": "Ũńàţţŕĩƀũţēď ēxēćũţĩōń ŕēƥōŕţ ({{count}})",
+  "controlRefresh.unattributedTitle_other": "Ũńàţţŕĩƀũţēď ēxēćũţĩōń ŕēƥōŕţś ({{count}})",
+  "controlRefresh.readAt": "[!! Read completed at !!]"
 }

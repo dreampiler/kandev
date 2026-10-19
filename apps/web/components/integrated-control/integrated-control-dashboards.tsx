@@ -26,7 +26,7 @@ export function IntegratedControlDashboard({
   );
   return (
     <div
-      className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6"
+      className="min-h-0 w-full min-w-0 flex-1 space-y-5 overflow-y-auto p-4 md:p-6 [scrollbar-gutter:stable]"
       data-testid={`control-dashboard-${view}`}
     >
       {view === "overview" && (
@@ -42,7 +42,10 @@ export function IntegratedControlDashboard({
       )}
       {view === "activity" && (
         <>
-          <ControlCapacitySnapshot observation={control.data.capacity} />
+          <ControlCapacitySnapshot
+            observation={control.data.capacity}
+            lastConfirmed={control.data.lastConfirmedCapacity}
+          />
           <ControlTaskActivity />
           <CoordinatorFacts view={view} rows={rows} />
         </>
@@ -101,7 +104,10 @@ function ControlOverview({
   }
   return (
     <>
-      <ControlCapacitySnapshot observation={data.capacity} />
+      <ControlCapacitySnapshot
+        observation={data.capacity}
+        lastConfirmed={data.lastConfirmedCapacity}
+      />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Fact label={t("sidebar:integratedControl.workspaces")} value={workspaces.length} />
         <Fact label={t("sidebar:integratedControl.unarchivedTasks")} value={taskTotal ?? unknown} />

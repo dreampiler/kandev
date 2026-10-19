@@ -269,5 +269,14 @@
   "controlNative.recordedProvider": "记录的供应商",
   "controlNative.estimated": "估算",
   "controlNative.primarySession": "主进程会话",
-  "controlNative.noSupportedEvents": "这些工作区样本的受支持来源没有返回事件。"
+  "controlNative.noSupportedEvents": "这些工作区样本的受支持来源没有返回事件。",
+  "controlRefresh.refreshing": "正在刷新；显示最后确认的样本",
+  "controlRefresh.lastConfirmed": "最后确认的样本",
+  "controlRefresh.retainedError": "刷新失败；显示最后确认的样本",
+  "controlRefresh.unattributedScope": "这些缓存报告未标明供应商账户，不能用于确认当前模型选择或运行准入状态。",
+  "controlRefresh.capacityResponseAt": "响应生成时间",
+  "controlRefresh.capacityClock": "响应生成时间并非推理收集时间。未提供源数据收集时间。",
+  "controlRefresh.unattributedTitle_one": "来源未确认的执行报告（{{count}}）",
+  "controlRefresh.unattributedTitle_other": "来源未确认的执行报告（{{count}}）",
+  "controlRefresh.readAt": "读取完成时间"
 }

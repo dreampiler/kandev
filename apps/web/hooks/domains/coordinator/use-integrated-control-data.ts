@@ -14,12 +14,23 @@ import {
   readControlConversationLists,
   type ControlConversationLists,
 } from "./control-conversation-lists";
+import { controlReadFailure, type ControlReadStatus } from "./use-control-resource";
+import { retainCapacity, retainControlDetails } from "./control-refresh-snapshot";
 
 export type ControlWorkspace = WorkspaceState["items"][number];
-export type ControlCoordinatorList = { items: Coordinator[]; error: boolean };
+export type ControlCoordinatorList = {
+  items: Coordinator[];
+  error: boolean;
+  transient?: boolean;
+  receivedAt?: string;
+  stale?: boolean;
+};
 type Snapshot = {
   receivedAt?: string;
   capacity?: SessionCapacityObservation;
+  lastConfirmedCapacity?: SessionCapacityObservation;
+  capacityStatus?: ControlReadStatus;
+  capacityReceivedAt?: string;
   identity: string;
   owner: object;
   workspaces: ControlWorkspace[];
@@ -36,8 +47,11 @@ async function readCoordinatorLists(workspaces: ControlWorkspace[], signal: Abor
           init: { signal },
         });
         return [workspace.id, { items: result.coordinators, error: false }];
-      } catch {
-        return [workspace.id, { items: [], error: true }];
+      } catch (error) {
+        return [
+          workspace.id,
+          { items: [], error: true, transient: controlReadFailure(error) === "error" },
+        ];
       }
     }),
   );
@@ -75,16 +89,22 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
       store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
       const details = await readControlDetails(workspaces, coordinatorEnabled, controller.signal);
       if (current())
-        setSnapshot({
+        setSnapshot((previous) => ({
           identity,
           owner,
           workspaces,
           ...details,
+          ...retainControlDetails(previous?.owner === owner ? previous : undefined, details),
+          ...retainCapacity(
+            previous?.owner === owner ? previous : undefined,
+            details.capacity,
+            details.capacityStatus,
+          ),
           receivedAt: new Date().toISOString(),
-        });
-    } catch {
+        }));
+    } catch (error) {
       if (current()) {
-        setSnapshot(undefined);
+        if (controlReadFailure(error) !== "error") setSnapshot(undefined);
         setError(true);
       }
     } finally {
@@ -125,7 +145,15 @@ async function readControlDetails(
   const [byWorkspace, conversationsByWorkspace, capacity] = await Promise.all([
     coordinatorEnabled ? readCoordinatorLists(workspaces, signal) : Promise.resolve({}),
     readControlConversationLists(workspaces, signal),
-    fetchSessionCapacityObservation({ init: { signal } }).catch(() => undefined),
+    fetchSessionCapacityObservation({ init: { signal } }).then(
+      (value) => ({ value, status: "ready" as const }),
+      (error: unknown) => ({ value: undefined, status: controlReadFailure(error) }),
+    ),
   ]);
-  return { byWorkspace, conversationsByWorkspace, capacity };
+  return {
+    byWorkspace,
+    conversationsByWorkspace,
+    capacity: capacity.value,
+    capacityStatus: capacity.status,
+  };
 }

@@ -87,14 +87,14 @@ export function ControlWorkspaceTaskList({
         ))}
       </div>
       <p className="text-xs text-muted-foreground">{t("sidebar:controlNative.taskScope")}</p>
-      <ControlReadState status={list.status} />
+      <ControlReadState {...list} />
       {list.status === "ready" && !rows && <ControlReadState status="unsupported" />}
       <ul className="divide-y">
         {rows?.map((row) => (
           <NativeTaskRow key={row.task_id} row={row} />
         ))}
       </ul>
-      {list.status === "ready" && rows && (
+      {rows && (
         <p className="text-xs text-muted-foreground">
           {t("office:overviewShowingOf", { shown: rows.length, total: list.data?.total })}
         </p>

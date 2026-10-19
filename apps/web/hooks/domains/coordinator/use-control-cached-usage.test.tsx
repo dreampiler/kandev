@@ -78,7 +78,7 @@ describe("cached-only account usage", () => {
     fixture.read.mockResolvedValue(response);
     const revision = {};
     const { result } = renderHook(() => useControlCachedUsage(["w1"], revision));
-    await waitFor(() => expect(result.current.data?.[0]?.status).toBe("error"));
+    await waitFor(() => expect(result.current.data?.[0]?.status).toBe("unsupported"));
     expect(result.current.data?.[0]?.entries).toEqual([]);
   });
 

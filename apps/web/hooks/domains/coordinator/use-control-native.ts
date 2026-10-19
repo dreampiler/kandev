@@ -8,7 +8,7 @@ import {
 } from "@/lib/api/domains/control-native-api";
 import type { OverviewTaskFilter } from "@/lib/types/control-overview";
 import type { NativeArchive } from "@/lib/types/control-native";
-import { useControlResource, controlReadFailure } from "./use-control-resource";
+import { useControlResource, controlReadFailure, retainControlRows } from "./use-control-resource";
 
 function useWorkspaceReads<T>(
   workspaceIds: string[],
@@ -33,7 +33,7 @@ function useWorkspaceReads<T>(
       ),
     [ids, reader],
   );
-  return useControlResource(read, revision);
+  return useControlResource(read, revision, retainControlRows);
 }
 export const useNativeHistory = (ids: string[], revision: object | undefined) =>
   useWorkspaceReads(ids, revision, readNativeHistory);

@@ -1,8 +1,9 @@
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { NativeControlContractError } from "@/lib/api/domains/control-native-api";
 import { readCachedProfileExecutionUsage } from "@/lib/api/domains/provider-usage-api";
 import { isCachedProfileUsage } from "@/lib/control-ui/usage";
-import { controlReadFailure, useControlResource } from "./use-control-resource";
+import { controlReadFailure, retainControlRows, useControlResource } from "./use-control-resource";
 
 /** The caller supplies only workspaces with the new recorded-control API contract. */
 export function useControlCachedUsage(workspaceIds: string[], revision: object | undefined) {
@@ -31,7 +32,7 @@ export function useControlCachedUsage(workspaceIds: string[], revision: object |
             });
             if (!isCachedProfileUsage(response, id)) {
               // i18n-exempt: diagnostic only; the UI displays the localized read error.
-              throw new Error("Incompatible cached profile usage response");
+              throw new NativeControlContractError("Incompatible cached profile usage response");
             }
             return {
               id,
@@ -47,5 +48,5 @@ export function useControlCachedUsage(workspaceIds: string[], revision: object |
       ),
     [ids],
   );
-  return useControlResource(read, revision);
+  return useControlResource(read, revision, retainControlRows);
 }

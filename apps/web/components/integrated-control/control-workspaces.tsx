@@ -40,15 +40,15 @@ function ControlWorkspaceCard({ workspace }: { workspace: ControlWorkspace }) {
   const taskCount = control?.data?.conversationsByWorkspace[workspace.id]?.tasks;
   return (
     <Card
-      className="gap-0 overflow-hidden p-0"
+      className="w-full min-w-0 gap-0 overflow-hidden p-0"
       data-testid="control-workspace-card"
-      aria-busy={detail.status === "loading"}
+      aria-busy={detail.status === "loading" || Boolean(detail.refreshing)}
     >
       <ControlWorkspaceHeader workspace={workspace} />
       <p className="px-4 pt-1 text-xs text-muted-foreground">
         {t("sidebar:controlRestore.processScope")}
       </p>
-      <ControlReadState status={detail.status} />
+      <ControlReadState {...detail} />
       {detail.status === "ready" && !metrics && <ControlReadState status="unsupported" />}
       {metrics && <NativeWorkspaceFigures data={metrics} filter={filter} onFilter={setFilter} />}
       {!metrics && <ControlWorkspaceSample list={taskCount} />}

@@ -12,6 +12,7 @@ import type { ControlView } from "@/lib/navigation/integrated-control";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ControlConversationLists } from "@/hooks/domains/coordinator/control-conversation-lists";
+import { ControlSnapshotReadState } from "./control-read-state";
 
 function originalControlTask(
   lists: ControlConversationLists | undefined | false,
@@ -57,6 +58,9 @@ export function IntegratedControlPage() {
             </p>
           )}
         </div>
+        <div className="sr-only md:not-sr-only md:max-w-72">
+          <ControlSnapshotReadState />
+        </div>
         <Button
           variant="ghost"
           size="sm"
@@ -95,7 +99,7 @@ function ControlBody({
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  if (control?.error)
+  if (control?.error && !control.data)
     return (
       <p role="alert" className="p-6 text-sm text-destructive">
         {t("sidebar:integratedControl.loadError")}

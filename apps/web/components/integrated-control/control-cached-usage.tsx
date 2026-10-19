@@ -1,10 +1,10 @@
 import { useTranslation } from "react-i18next";
 import { useControlCachedUsage } from "@/hooks/domains/coordinator/use-control-cached-usage";
 import { groupExecutionUsage } from "@/lib/control-ui/usage";
-import { formatDateTime } from "@/lib/i18n/formats";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlProviderAccount } from "./control-provider-account";
 import { ControlReadState } from "./control-read-state";
+import { ControlUnattributedUsage } from "./control-unattributed-usage";
 
 export function ControlCachedUsage({ workspaceId }: { workspaceId?: string }) {
   const { t } = useTranslation();
@@ -17,18 +17,25 @@ export function ControlCachedUsage({ workspaceId }: { workspaceId?: string }) {
     control?.data,
   );
   const groups = groupExecutionUsage(result.data?.flatMap((profile) => profile.entries) ?? []);
-  const failures = [...new Set(result.data?.map((profile) => profile.status) ?? [])].filter(
-    (status) => status !== "ready",
-  );
+  const failures = [
+    ...new Map(
+      result.data
+        ?.filter((profile) => profile.status !== "ready")
+        .map((profile) => [
+          JSON.stringify([profile.status, "receivedAt" in profile ? profile.receivedAt : null]),
+          profile,
+        ]),
+    ).values(),
+  ];
   return (
     <section
       className="space-y-3"
       data-testid="control-cached-usage"
-      aria-busy={result.status === "loading"}
+      aria-busy={result.status === "loading" || Boolean(result.refreshing)}
     >
-      <ControlReadState status={result.status} />
-      {failures.map((status) => (
-        <ControlReadState key={status} status={status} />
+      <ControlReadState {...result} />
+      {failures.map((profile) => (
+        <ControlReadState key={profile.id} {...profile} />
       ))}
       {result.status === "ready" && groups.length === 0 && (
         <p
@@ -39,15 +46,14 @@ export function ControlCachedUsage({ workspaceId }: { workspaceId?: string }) {
           {t("sidebar:controlInspection.usageUnknown")}
         </p>
       )}
-      {groups.map((group) => (
-        <ControlProviderAccount key={group.key} group={group} />
-      ))}
-      {result.receivedAt && Boolean(result.data?.length) && (
-        <p className="text-xs text-muted-foreground">
-          {t("sidebar:controlRestore.usageReadAt")}: {formatDateTime(result.receivedAt)} (
-          {Intl.DateTimeFormat().resolvedOptions().timeZone})
-        </p>
-      )}
+      {groups
+        .filter((group) => group.sample)
+        .map((group) => (
+          <ControlProviderAccount key={group.key} group={group} />
+        ))}
+      <ControlUnattributedUsage
+        entries={groups.filter((group) => !group.sample).flatMap((group) => group.entries)}
+      />
     </section>
   );
 }

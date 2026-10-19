@@ -6,6 +6,7 @@ import type { OverviewEvent } from "@/lib/types/control-overview";
 
 afterEach(cleanup);
 const EVENT_ROW = "overview-event";
+const FAILED_FILTER = "overview-event-kind-session_failed";
 
 describe("reused last 24 hours list", () => {
   it("applies the row cap after selecting an event kind and preserves task/SID navigation", () => {
@@ -28,15 +29,13 @@ describe("reused last 24 hours list", () => {
     );
     expect(screen.getAllByTestId(EVENT_ROW)).toHaveLength(50);
     expect(screen.getByTestId("overview-event-visible-count").textContent).toBe("50 of 56");
-    fireEvent.click(screen.getByTestId("overview-event-kind-session_failed"));
+    fireEvent.click(screen.getByTestId(FAILED_FILTER));
     const row = screen.getByTestId(EVENT_ROW);
     expect(row.textContent).toContain("Failure outside initial cap");
     expect(row.getAttribute("href")).toBe("/t/failed-task?sessionId=exact-session");
-    expect(
-      screen.getByTestId("overview-event-kind-session_failed").getAttribute("aria-pressed"),
-    ).toBe("true");
+    expect(screen.getByTestId(FAILED_FILTER).getAttribute("aria-pressed")).toBe("true");
   });
-  it("returns to all kinds when a refreshed result no longer contains the selected kind", () => {
+  it("preserves an explicit filter when refreshed events no longer contain that kind", () => {
     const event: OverviewEvent = {
       kind: "session_failed",
       at: "2026-10-18T12:00:00Z",
@@ -44,15 +43,19 @@ describe("reused last 24 hours list", () => {
       task_id: "failed",
     };
     const view = render(<OverviewLast24h events={[event]} workspaceNames={{}} />);
-    fireEvent.click(screen.getByTestId("overview-event-kind-session_failed"));
+    fireEvent.click(screen.getByTestId(FAILED_FILTER));
     view.rerender(
       <OverviewLast24h
         events={[{ ...event, kind: "task_created", title: "New" }]}
         workspaceNames={{}}
       />,
     );
-    expect(screen.getByTestId(EVENT_ROW).textContent).toContain("New");
-    expect(screen.getByTestId("overview-event-kind-all").getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByTestId(EVENT_ROW)).toBeNull();
+    expect(screen.getByTestId(FAILED_FILTER).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId(FAILED_FILTER).textContent).toContain("0");
+    expect(screen.getByTestId("overview-event-kind-all").getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
   it("retains existing automation detail navigation", () => {
     render(

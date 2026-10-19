@@ -19,7 +19,7 @@ export function ControlModelActivity({ workspaceId }: { workspaceId?: string }) 
   return (
     <SectionCard title={t("sidebar:controlNative.ledgerTitle")}>
       <p className="p-3 text-xs text-muted-foreground">{t("sidebar:controlNative.ledgerScope")}</p>
-      <ControlReadState status={result.status} />
+      <ControlReadState {...result} />
       {result.data?.map((w) => (
         <section
           key={w.id}
@@ -27,7 +27,7 @@ export function ControlModelActivity({ workspaceId }: { workspaceId?: string }) 
           data-testid="control-model-ledger"
         >
           <h3 className="font-medium">{workspaces.find((x) => x.id === w.id)?.name}</h3>
-          <ControlReadState status={w.status} />
+          <ControlReadState {...w} />
           {w.data && (
             <>
               <p className="text-xs text-muted-foreground">

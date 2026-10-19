@@ -30,49 +30,61 @@ export function ControlHistory({ workspaceId }: { workspaceId?: string }) {
     <section
       className="space-y-3"
       data-testid="control-history"
-      aria-busy={result.status === "loading"}
+      aria-busy={result.status === "loading" || Boolean(result.refreshing)}
     >
       <p className="text-sm text-muted-foreground">{t("sidebar:controlRestore.historyScope")}</p>
-      <ControlReadState status={result.status} />
-      {result.data?.map((w) => (
-        <div key={w.id}>
-          <ControlReadState status={w.status} />
-          {w.data && (
-            <details
-              className="text-xs text-muted-foreground"
-              data-testid="control-history-coverage"
-            >
-              <summary className="min-h-7 cursor-pointer [@media(pointer:coarse)]:min-h-11">
-                {names[w.id]} · {formatDateTime(w.data.generated_at)} (
-                {Intl.DateTimeFormat().resolvedOptions().timeZone}) · {w.data.coverage} ·{" "}
-                {t("sidebar:controlNative.sourceCoverage")}
-              </summary>
-              <p>{t("sidebar:controlNative.historyCoverage")}</p>
-              <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-1">
-                {Object.entries(w.data.sources).map(([name, s]) => (
-                  <div key={name} className="contents">
-                    <dt className="break-words">{name}</dt>
-                    <dd>
-                      {s.state === "known"
-                        ? `${s.returned}/${s.total ?? t("common:unknown")}`
-                        : t("common:unknown")}{" "}
-                      {s.reason} {s.truncated && t("sidebar:controlNative.truncated")}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
-              {w.data.truncated && <p>{t("sidebar:controlNative.truncated")}</p>}
-            </details>
-          )}
-        </div>
-      ))}
-      {result.data?.some((w) => w.status === "ready") && (
+      <ControlReadState {...result} />
+      {result.data?.some((w) => Boolean(w.data)) && (
         <OverviewLast24h
           events={events}
           workspaceNames={names}
           emptyLabel={t("sidebar:controlNative.noSupportedEvents")}
         />
       )}
+      {result.data
+        ?.filter((w) => w.status !== "ready")
+        .map((w) => (
+          <div key={w.id} className="text-xs text-muted-foreground">
+            <span>{names[w.id]}</span>
+            <ControlReadState {...w} />
+          </div>
+        ))}
+      <details className="text-xs text-muted-foreground" data-testid="control-history-metadata">
+        <summary className="min-h-7 cursor-pointer [@media(pointer:coarse)]:min-h-11">
+          {t("sidebar:controlNative.sourceCoverage")}
+        </summary>
+        {result.data?.map((w) => (
+          <div key={w.id}>
+            {w.data && (
+              <details
+                className="text-xs text-muted-foreground"
+                data-testid="control-history-coverage"
+              >
+                <summary className="min-h-7 cursor-pointer [@media(pointer:coarse)]:min-h-11">
+                  {names[w.id]} · {formatDateTime(w.data.generated_at)} (
+                  {Intl.DateTimeFormat().resolvedOptions().timeZone}) · {w.data.coverage} ·{" "}
+                  {t("sidebar:controlNative.sourceCoverage")}
+                </summary>
+                <p>{t("sidebar:controlNative.historyCoverage")}</p>
+                <dl className="grid grid-cols-[minmax(0,1fr)_auto] gap-1">
+                  {Object.entries(w.data.sources).map(([name, s]) => (
+                    <div key={name} className="contents">
+                      <dt className="break-words">{name}</dt>
+                      <dd>
+                        {s.state === "known"
+                          ? `${s.returned}/${s.total ?? t("common:unknown")}`
+                          : t("common:unknown")}{" "}
+                        {s.reason} {s.truncated && t("sidebar:controlNative.truncated")}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                {w.data.truncated && <p>{t("sidebar:controlNative.truncated")}</p>}
+              </details>
+            )}
+          </div>
+        ))}
+      </details>
     </section>
   );
 }

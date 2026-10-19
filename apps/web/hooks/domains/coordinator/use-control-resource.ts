@@ -5,12 +5,19 @@ import { NativeControlContractError } from "@/lib/api/domains/control-native-api
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 
 export type ControlReadStatus = "loading" | "ready" | "unsupported" | "denied" | "error";
-export type ControlRead<T> = { status: ControlReadStatus; data?: T; receivedAt?: string };
+export type ControlRead<T> = {
+  status: ControlReadStatus;
+  data?: T;
+  receivedAt?: string;
+  refreshing?: boolean;
+  stale?: boolean;
+};
 
 /** Route-owned reads follow the existing control snapshot. No timer or provider refresh. */
 export function useControlResource<T>(
   read: (signal: AbortSignal) => Promise<T>,
   revision: object | undefined,
+  reconcile?: (previous: T | undefined, next: T) => T,
 ): ControlRead<T> {
   const identity = useAppStore(stateReadScopeIdentity);
   const [result, setResult] = useState<
@@ -19,18 +26,51 @@ export function useControlResource<T>(
   useEffect(() => {
     if (!revision) return;
     const request = new AbortController();
-    const publish = (value: ControlRead<T>) => {
-      if (!request.signal.aborted) setResult({ ...value, identity, read, revision });
+    const publish = (update: (previous?: ControlRead<T>) => ControlRead<T>) => {
+      if (request.signal.aborted) return;
+      setResult((previous) => ({
+        ...update(previous?.identity === identity && previous.read === read ? previous : undefined),
+        identity,
+        read,
+        revision,
+      }));
     };
     void read(request.signal).then(
-      (data) => publish({ status: "ready", data, receivedAt: new Date().toISOString() }),
-      (error: unknown) => publish({ status: controlReadFailure(error) }),
+      (data) =>
+        publish((previous) => ({
+          status: "ready",
+          data: reconcile ? reconcile(previous?.data, data) : data,
+          receivedAt: new Date().toISOString(),
+        })),
+      (error: unknown) =>
+        publish((previous) => {
+          const status = controlReadFailure(error);
+          return status === "error" && previous?.data !== undefined
+            ? { ...previous, status, stale: true, refreshing: false }
+            : { status };
+        }),
     );
     return () => request.abort();
-  }, [identity, read, revision]);
-  return result?.identity === identity && result.read === read && result.revision === revision
-    ? result
-    : { status: "loading" as const };
+  }, [identity, read, revision, reconcile]);
+  if (!revision || result?.identity !== identity || result.read !== read)
+    return { status: "loading" };
+  return result.revision === revision ? result : { ...result, refreshing: true };
+}
+
+/** A transient row failure retains only the same authorized row's dated snapshot. */
+export function retainControlRows<T extends { id: string; status: ControlReadStatus }>(
+  previous: T[] | undefined,
+  next: T[],
+): Array<T & { receivedAt?: string; stale?: boolean }> {
+  const at = new Date().toISOString();
+  return next.map((row) => {
+    const old = previous?.find((item) => item.id === row.id) as
+      | (T & { receivedAt?: string })
+      | undefined;
+    if (row.status === "error" && old?.receivedAt)
+      return { ...old, status: row.status, stale: true };
+    return { ...row, receivedAt: row.status === "ready" ? at : undefined };
+  });
 }
 
 export function controlReadFailure(error: unknown): ControlReadStatus {

@@ -269,5 +269,14 @@
   "controlNative.recordedProvider": "Recorded provider",
   "controlNative.estimated": "Estimated",
   "controlNative.primarySession": "Primary process session",
-  "controlNative.noSupportedEvents": "No events were returned from the supported sources in these workspace samples."
+  "controlNative.noSupportedEvents": "No events were returned from the supported sources in these workspace samples.",
+  "controlRefresh.refreshing": "Refreshing; showing the last confirmed sample",
+  "controlRefresh.lastConfirmed": "Last confirmed sample",
+  "controlRefresh.retainedError": "Refresh failed; showing the last confirmed sample",
+  "controlRefresh.unattributedScope": "These cached reports do not identify a provider account. They do not confirm the current model selection or admission state.",
+  "controlRefresh.capacityResponseAt": "Response assembled at",
+  "controlRefresh.capacityClock": "The response time is not the inference collection time. Source collection time is not provided.",
+  "controlRefresh.unattributedTitle_one": "Unattributed execution report ({{count}})",
+  "controlRefresh.unattributedTitle_other": "Unattributed execution reports ({{count}})",
+  "controlRefresh.readAt": "Read completed at"
 }

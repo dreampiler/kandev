@@ -1,4 +1,4 @@
-import { ApiError, type ApiRequestOptions } from "@/lib/api/client";
+import type { ApiRequestOptions } from "@/lib/api/client";
 import { listTasksByWorkspace } from "@/lib/api/domains/kanban-api";
 import {
   listQuickChatSessions,
@@ -6,13 +6,24 @@ import {
 } from "@/lib/api/domains/workspace-api";
 import type { Task } from "@/lib/types/http";
 import type { ControlWorkspace } from "./use-integrated-control-data";
+import { controlReadFailure } from "./use-control-resource";
 
-export type ControlCollection<T> = { items: T[]; error: boolean; denied: boolean };
+export type ControlCollection<T> = {
+  items: T[];
+  error: boolean;
+  denied: boolean;
+  transient?: boolean;
+  receivedAt?: string;
+  stale?: boolean;
+};
 export type ControlTaskCount = {
   total: number | null;
   error: boolean;
   denied: boolean;
   items?: Task[];
+  transient?: boolean;
+  receivedAt?: string;
+  stale?: boolean;
 };
 export type ControlConversationLists = {
   tasks?: ControlTaskCount;
@@ -23,7 +34,8 @@ async function readCollection<T>(load: () => Promise<T[]>): Promise<ControlColle
   try {
     return { items: await load(), error: false, denied: false };
   } catch (error) {
-    return { items: [], error: true, denied: error instanceof ApiError && error.status === 403 };
+    const status = controlReadFailure(error);
+    return { items: [], error: true, denied: status === "denied", transient: status === "error" };
   }
 }
 
@@ -68,7 +80,8 @@ async function readControlTaskCount(
       denied: false,
     };
   } catch (error) {
-    return { total: null, error: true, denied: error instanceof ApiError && error.status === 403 };
+    const status = controlReadFailure(error);
+    return { total: null, error: true, denied: status === "denied", transient: status === "error" };
   }
 }
 

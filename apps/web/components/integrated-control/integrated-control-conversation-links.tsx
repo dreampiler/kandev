@@ -6,6 +6,7 @@ import { useSearchParams } from "@/lib/routing/client-router";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ControlCollection } from "@/hooks/domains/coordinator/control-conversation-lists";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { ControlReadState } from "./control-read-state";
 
 function ConversationLink({
   workspaceId,
@@ -47,18 +48,15 @@ function ConversationLink({
 function CollectionNotice({
   collection,
 }: {
-  collection?: Pick<ControlCollection<unknown>, "error" | "denied">;
+  collection?: Pick<ControlCollection<unknown>, "error" | "denied" | "stale" | "receivedAt">;
 }) {
-  const { t } = useTranslation();
   if (!collection?.error && !collection?.denied) return null;
   return (
-    <p role="alert" className="px-2 py-1.5 text-xs text-destructive">
-      {t(
-        collection.denied
-          ? "sidebar:integratedControl.readDenied"
-          : "sidebar:integratedControl.loadError",
-      )}
-    </p>
+    <ControlReadState
+      status={collection.denied ? "denied" : "error"}
+      stale={collection.stale}
+      receivedAt={collection.receivedAt}
+    />
   );
 }
 
@@ -99,19 +97,18 @@ export function ControlIndependentConversations({
   workspaceId,
   view,
   onNavigate,
+  grouped = true,
 }: {
   workspaceId: string;
   view: ControlView;
   onNavigate?: () => void;
+  grouped?: boolean;
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const collection = control?.data?.conversationsByWorkspace[workspaceId]?.independent;
-  return (
-    <details open className="min-w-0">
-      <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
-        {t("sidebar:integratedControl.independentConversations")}
-      </summary>
+  const content = (
+    <>
       <CollectionNotice collection={collection} />
       {collection?.items.map((item) => (
         <ConversationLink
@@ -128,6 +125,18 @@ export function ControlIndependentConversations({
           {t("sidebar:integratedControl.noIndependentConversations")}
         </p>
       )}
+    </>
+  );
+  return grouped ? (
+    <details open className="min-w-0">
+      <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
+        {t("sidebar:integratedControl.independentConversations")}
+      </summary>
+      {content}
     </details>
+  ) : (
+    <div className="min-w-0" data-testid="control-direct-conversations">
+      {content}
+    </div>
   );
 }
