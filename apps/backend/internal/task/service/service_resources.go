@@ -159,6 +159,8 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		ACPIdleTimeoutMinutes:    120,
 
 		DynamicFailedRouteAutoRetryMax: models.DefaultDynamicFailedRouteAutoRetryMax,
+
+		ClarificationUnansweredRetentionDays: models.DefaultClarificationUnansweredRetentionDays,
 	}
 	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
 	if placementErr != nil {
@@ -229,6 +231,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	}
 	if limit := req.DynamicFailedRouteAutoRetryMax; limit != nil && !models.ValidDynamicFailedRouteAutoRetryMax(*limit) {
 		return nil, ErrWorkspaceFailedRouteAutoRetryMaxInvalid
+	}
+	if err := validateClarificationUnansweredRetention(req.ClarificationUnansweredRetentionDays); err != nil {
+		return nil, err
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
