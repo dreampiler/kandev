@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "DB 일시 사용 불가 · 자동 재시도 중",
   "controlRefresh.bannerDisconnected": "서버 연결 끊김 · 자동 재시도 중",
   "controlRefresh.bannerError": "갱신 실패 · 자동 재시도 중",
+  "controlRefresh.bannerUnsupported": "이 서버는 이 항목을 제공하지 않습니다.",
   "controlRefresh.bannerValuesAt": "아래 숫자는 {{time}} 값",
   "controlRefresh.bannerRetryAt": "다음 시도 {{time}}",
   "controlRefresh.unattributedScope": "이 캐시 보고에는 공급자 계정 출처가 없습니다. 현재 모델 선택이나 실행 허용 상태를 확인하는 정보가 아닙니다.",

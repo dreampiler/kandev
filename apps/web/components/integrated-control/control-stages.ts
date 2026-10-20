@@ -37,6 +37,10 @@ export function emptyStageCounts(): TaskStageCounts {
   return { startable: 0, running: 0, review: 0, held: 0, completed: 0 };
 }
 
+/**
+ * Counts the loaded active-task rows. The board and its chips use this sample;
+ * the comparison table uses the dashboard's complete state counts below.
+ */
 export function stageCounts(
   tasks: ReadonlyArray<Pick<NativeTask, "state" | "stage_type">>,
 ): TaskStageCounts {

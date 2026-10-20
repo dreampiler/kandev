@@ -1,7 +1,10 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { getProviderHealth } from "@/lib/api/domains/office-routing-api";
-import { useControlResource } from "@/hooks/domains/coordinator/use-control-resource";
+import {
+  useControlResource,
+  type ControlReadStatus,
+} from "@/hooks/domains/coordinator/use-control-resource";
 import type { ProviderHealth } from "@/lib/state/slices/office/routing-types";
 import { useIntegratedControl } from "./integrated-control-provider";
 
@@ -11,6 +14,13 @@ const HEALTH_KEYS: Record<ProviderHealth["state"], string> = {
   degraded: "office:degraded",
   user_action_required: "office:needsAction",
 };
+
+/** A refused, unsupported and failed read are different answers, not one error. */
+function readFailureKey(status: ControlReadStatus): string {
+  if (status === "denied") return "sidebar:integratedControl.readDenied";
+  if (status === "unsupported") return "sidebar:controlRefresh.bannerUnsupported";
+  return "sidebar:integratedControl.loadError";
+}
 
 function ProviderHealthRows({ rows }: { rows: ProviderHealth[] }) {
   const { t } = useTranslation();
@@ -68,7 +78,7 @@ export function ControlProviderHealth({ workspaceId }: { workspaceId?: string })
       {result.status === "ready" ? (
         <ProviderHealthRows rows={rows} />
       ) : (
-        <p className="text-sm text-muted-foreground">{t("sidebar:integratedControl.loadError")}</p>
+        <p className="text-sm text-muted-foreground">{t(readFailureKey(result.status))}</p>
       )}
     </section>
   );

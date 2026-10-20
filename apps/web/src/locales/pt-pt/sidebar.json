@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "Base de dados temporariamente indisponível · a tentar novamente automaticamente",
   "controlRefresh.bannerDisconnected": "Ligação ao servidor perdida · a tentar novamente automaticamente",
   "controlRefresh.bannerError": "Falha na atualização · a tentar novamente automaticamente",
+  "controlRefresh.bannerUnsupported": "Este servidor não fornece esta leitura.",
   "controlRefresh.bannerValuesAt": "os valores abaixo são de {{time}}",
   "controlRefresh.bannerRetryAt": "próxima tentativa {{time}}",
   "controlRefresh.unattributedScope": "Estes relatórios em cache não identificam uma conta de fornecedor. Não confirmam a seleção atual do modelo nem o estado de admissão.",

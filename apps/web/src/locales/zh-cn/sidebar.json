@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "数据库暂时不可用 · 正在自动重试",
   "controlRefresh.bannerDisconnected": "服务器连接中断 · 正在自动重试",
   "controlRefresh.bannerError": "刷新失败 · 正在自动重试",
+  "controlRefresh.bannerUnsupported": "此服务器不提供此项读数。",
   "controlRefresh.bannerValuesAt": "以下数值来自 {{time}}",
   "controlRefresh.bannerRetryAt": "下次尝试 {{time}}",
   "controlRefresh.unattributedScope": "这些缓存报告未标明供应商账户，不能用于确认当前模型选择或运行准入状态。",

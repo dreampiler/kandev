@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "Database temporarily unavailable · retrying automatically",
   "controlRefresh.bannerDisconnected": "Server connection lost · retrying automatically",
   "controlRefresh.bannerError": "Refresh failed · retrying automatically",
+  "controlRefresh.bannerUnsupported": "This server does not provide this reading.",
   "controlRefresh.bannerValuesAt": "values below are from {{time}}",
   "controlRefresh.bannerRetryAt": "next try {{time}}",
   "controlRefresh.unattributedScope": "These cached reports do not identify a provider account. They do not confirm the current model selection or admission state.",

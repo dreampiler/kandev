@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "DB が一時的に利用できません · 自動で再試行中",
   "controlRefresh.bannerDisconnected": "サーバー接続が切れました · 自動で再試行中",
   "controlRefresh.bannerError": "更新失敗 · 自動で再試行中",
+  "controlRefresh.bannerUnsupported": "このサーバーはこの項目を提供していません。",
   "controlRefresh.bannerValuesAt": "下の数値は {{time}} 時点",
   "controlRefresh.bannerRetryAt": "次の試行 {{time}}",
   "controlRefresh.unattributedScope": "このキャッシュ報告ではプロバイダーのアカウントを特定できません。現在のモデル選択や実行許可状態を確認する情報ではありません。",

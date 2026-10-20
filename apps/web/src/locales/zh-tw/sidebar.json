@@ -262,6 +262,7 @@
   "controlRefresh.bannerUnavailable": "資料庫暫時無法使用 · 正在自動重試",
   "controlRefresh.bannerDisconnected": "伺服器連線中斷 · 正在自動重試",
   "controlRefresh.bannerError": "重新整理失敗 · 正在自動重試",
+  "controlRefresh.bannerUnsupported": "此伺服器不提供此項讀數。",
   "controlRefresh.bannerValuesAt": "以下數值來自 {{time}}",
   "controlRefresh.bannerRetryAt": "下次嘗試 {{time}}",
   "controlRefresh.unattributedScope": "這些快取報告未標明供應商帳戶，不能用於確認目前模型選擇或執行准入狀態。",
