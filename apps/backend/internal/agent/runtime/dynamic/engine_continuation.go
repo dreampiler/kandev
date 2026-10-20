@@ -14,6 +14,9 @@ func (e *Engine) saveContinuation(ctx context.Context, persistence ContinuationP
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// Read only the cache. A route not loaded yet has no cached continuation to
+	// refresh, and SaveRouteContinuation fences the durable row on its
+	// generation, so a stale record is still refused without a DB load here.
 	state, exists := e.states[record.SessionID]
 	if exists && state.Generation != record.Generation {
 		return ErrStaleGeneration
