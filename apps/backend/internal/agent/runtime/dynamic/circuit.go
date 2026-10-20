@@ -218,6 +218,47 @@ func (r *CircuitRegistry) IsOpen(key string, now time.Time) bool {
 	return entry.state == CircuitOpen && !entry.until.IsZero()
 }
 
+// ActiveSuspension reports the circuit refusing a new dispatch on key at now.
+// A held circuit has no reset instant. A half-open circuit blocks only while
+// its probe lease is live; once that lease expires the entry falls back to its
+// reset instant, which a probe acquisition has already passed. A timed circuit
+// blocks only before its reset instant. Unlike IsOpen it never stays blocking
+// after expiry, because a fixed-profile dispatch acquires no probe lease. The
+// second result is false when nothing blocks the key.
+func (r *CircuitRegistry) ActiveSuspension(key string, now time.Time) (CircuitSnapshot, bool) {
+	if key == "" {
+		return CircuitSnapshot{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entry, ok := r.circuits[key]
+	if !ok || entry.state == CircuitClosed {
+		return CircuitSnapshot{}, false
+	}
+	if !entry.blocksFixedDispatchAt(now) {
+		return CircuitSnapshot{}, false
+	}
+	return CircuitSnapshot{
+		Key: key, State: entry.state, Until: entry.until,
+		Code: entry.code, ProbeUntil: entry.probeUntil,
+	}, true
+}
+
+// blocksFixedDispatchAt reports whether a circuit still refuses a dispatch that
+// acquires no probe lease. A hold is unbounded. A half-open entry blocks only
+// while a live probe owns it; an expired probe defers to the reset instant, so
+// a probe lease restored after a restart can never wedge the profile forever.
+// Anything else blocks until its reset instant.
+func (c circuit) blocksFixedDispatchAt(now time.Time) bool {
+	if c.held() {
+		return true
+	}
+	if c.state == CircuitHalfOpen {
+		return now.Before(c.probeUntil) || now.Before(c.until)
+	}
+	return now.Before(c.until)
+}
+
 type ProbeLease struct {
 	Key       string
 	ExpiresAt time.Time
