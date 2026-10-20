@@ -16,6 +16,7 @@ import {
   type ControlView,
 } from "@/lib/navigation/integrated-control";
 import { cn } from "@/lib/utils";
+import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
 import {
   ControlCoordinatorConversation,
@@ -152,6 +153,7 @@ function ControlWorkspaceEntry({
             workspaceId={workspace.id}
             coordinator={coordinator}
             named={items.length > 1}
+            canManage={hasScope(workspace.scopes, SCOPE.workspaceManage)}
             view={view}
             onNavigate={onNavigate}
           />

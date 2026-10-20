@@ -16,7 +16,10 @@ export type ControlRefreshSchedulerOptions = {
   settleMs?: number;
   minGapMs?: number;
   backoffMs?: number[];
-  /** A periodic tick while this returns false is skipped; the foreground return reads instead. */
+  /**
+   * A periodic or live-event read due while this returns false is skipped; the
+   * caller's foreground-return read (one `request()`) covers it instead.
+   */
   isVisible?: () => boolean;
   /** The time of the next automatic retry after a failure, or null once a read succeeds. */
   onRetryScheduled?: (at: number | null) => void;
@@ -97,6 +100,8 @@ export function createControlRefreshScheduler(
       const next = followUp;
       followUp = null;
       if (next) {
+        // The follow-up starts now, so no retry time is pending any more.
+        options.onRetryScheduled?.(null);
         void launch().then(next.resolve);
         return;
       }
@@ -126,6 +131,7 @@ export function createControlRefreshScheduler(
       () => {
         eventTimer = undefined;
         firstEventAt = null;
+        if (options.isVisible && !options.isVisible()) return;
         lastEventReadAt = Date.now();
         void request();
       },

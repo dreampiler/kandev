@@ -167,7 +167,6 @@
   "integratedControl.unnamedConversation": "未命名对话",
   "integratedControl.coordinatorConversation": "协调器对话",
   "integratedControl.coordinatorConversationNamed": "协调器对话 · {{name}}",
-  "integratedControl.openConversationFailed": "无法打开对话。",
   "integratedControl.independentConversationCount_one": "独立对话 {{count}}",
   "integratedControl.independentConversationCount_other": "独立对话 {{count}}",
   "integratedControl.updated": "协调器更新时间",

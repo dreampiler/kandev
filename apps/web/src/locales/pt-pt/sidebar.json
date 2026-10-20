@@ -167,7 +167,6 @@
   "integratedControl.unnamedConversation": "Conversa sem título",
   "integratedControl.coordinatorConversation": "Conversa do coordenador",
   "integratedControl.coordinatorConversationNamed": "Conversa do coordenador · {{name}}",
-  "integratedControl.openConversationFailed": "Não foi possível abrir a conversa.",
   "integratedControl.independentConversationCount_one": "{{count}} conversa independente",
   "integratedControl.independentConversationCount_other": "{{count}} conversas independentes",
   "integratedControl.updated": "Coordenador atualizado",

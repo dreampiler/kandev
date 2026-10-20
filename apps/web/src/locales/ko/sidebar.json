@@ -167,7 +167,6 @@
   "integratedControl.unnamedConversation": "제목 없는 대화",
   "integratedControl.coordinatorConversation": "코디네이터 대화",
   "integratedControl.coordinatorConversationNamed": "코디네이터 대화 · {{name}}",
-  "integratedControl.openConversationFailed": "대화를 열지 못했습니다.",
   "integratedControl.independentConversationCount_one": "독립 대화 {{count}}",
   "integratedControl.independentConversationCount_other": "독립 대화 {{count}}",
   "integratedControl.updated": "코디네이터 수정 시각",

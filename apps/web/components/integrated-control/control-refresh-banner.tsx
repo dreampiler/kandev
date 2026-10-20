@@ -43,23 +43,29 @@ export function ControlRefreshBanner() {
       </p>
     );
   }
-  const parts = [t(FAILURE_KEYS[failure.kind])];
+  const details: string[] = [];
   if (data?.receivedAt)
-    parts.push(
+    details.push(
       t("sidebar:controlRefresh.bannerValuesAt", { time: formatControlClock(data.receivedAt) }),
     );
   if (failure.retryAt)
-    parts.push(
+    details.push(
       t("sidebar:controlRefresh.bannerRetryAt", { time: formatControlClock(failure.retryAt) }),
     );
+  // Only the failure kind is live: a new retry time is not re-announced every backoff step.
   return (
     <p
-      role="alert"
       className="shrink-0 border-b bg-amber-500/15 px-4 py-2 text-xs font-medium text-amber-800 tabular-nums dark:text-amber-200"
       data-testid="control-refresh-banner"
       data-kind={failure.kind}
     >
-      {parts.join(" · ")}
+      <span role="status">{t(FAILURE_KEYS[failure.kind])}</span>
+      {details.map((detail) => (
+        <span key={detail}>
+          {" · "}
+          {detail}
+        </span>
+      ))}
     </p>
   );
 }

@@ -167,7 +167,6 @@
   "integratedControl.unnamedConversation": "無題の会話",
   "integratedControl.coordinatorConversation": "コーディネーター会話",
   "integratedControl.coordinatorConversationNamed": "コーディネーター会話 · {{name}}",
-  "integratedControl.openConversationFailed": "会話を開けませんでした。",
   "integratedControl.independentConversationCount_one": "独立会話 {{count}}",
   "integratedControl.independentConversationCount_other": "独立会話 {{count}}",
   "integratedControl.updated": "コーディネーター更新日時",

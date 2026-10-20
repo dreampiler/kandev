@@ -167,7 +167,6 @@
   "integratedControl.unnamedConversation": "Untitled conversation",
   "integratedControl.coordinatorConversation": "Coordinator conversation",
   "integratedControl.coordinatorConversationNamed": "Coordinator conversation · {{name}}",
-  "integratedControl.openConversationFailed": "The conversation could not be opened.",
   "integratedControl.independentConversationCount_one": "{{count}} independent conversation",
   "integratedControl.independentConversationCount_other": "{{count}} independent conversations",
   "integratedControl.updated": "Coordinator updated",

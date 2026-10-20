@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { runOpenSequence } from "./use-copilot-open-sequence";
+import { runOpenSequence, type OpenSequenceState } from "./use-copilot-open-sequence";
 
 /**
  * Opens a coordinator's conversation from the control tree when it has none
@@ -15,16 +15,16 @@ export function useOpenControlConversation(
 ) {
   const inFlight = useRef(false);
   const [pending, setPending] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failure, setFailure] = useState<OpenSequenceState | null>(null);
   const open = useCallback(async (): Promise<boolean> => {
     if (inFlight.current) return false;
     inFlight.current = true;
     setPending(true);
-    setFailed(false);
+    setFailure(null);
     try {
       const result = await runOpenSequence(workspaceId, coordinatorId);
       if (result.kind !== "ready") {
-        setFailed(true);
+        setFailure(result);
         return false;
       }
       await refresh?.();
@@ -34,5 +34,6 @@ export function useOpenControlConversation(
       setPending(false);
     }
   }, [workspaceId, coordinatorId, refresh]);
-  return { open, pending, failed };
+  /** The open sequence's non-ready outcome, so the caller can say why it failed. */
+  return { open, pending, failure };
 }
