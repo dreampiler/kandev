@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
@@ -29,15 +30,28 @@ func TestMain(m *testing.M) {
 }
 
 func TestWindowsACPCommandProcAttrHidesConsoleWindow(t *testing.T) {
-	cmd := exec.Command("cmd.exe")
-	setACPCommandProcAttr(cmd)
+	for _, tc := range []struct {
+		name          string
+		consoleWindow bool
+		wantNoWindow  bool
+	}{
+		{name: "shares existing console window", consoleWindow: true, wantNoWindow: false},
+		{name: "no console window to share", consoleWindow: false, wantNoWindow: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(commonwinproc.SetConsoleWindowProbeForTest(tc.consoleWindow))
+			cmd := exec.Command("cmd.exe")
+			setACPCommandProcAttr(cmd)
 
-	require.NotNil(t, cmd.SysProcAttr)
-	flags := cmd.SysProcAttr.CreationFlags
-	require.NotZero(t, flags&syscall.CREATE_NEW_PROCESS_GROUP, "CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
-	require.NotZero(t, flags&windows.CREATE_SUSPENDED, "CreationFlags = %#x, want CREATE_SUSPENDED", flags)
-	require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
-	require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+			require.NotNil(t, cmd.SysProcAttr)
+			flags := cmd.SysProcAttr.CreationFlags
+			require.NotZero(t, flags&syscall.CREATE_NEW_PROCESS_GROUP, "CreationFlags = %#x, want CREATE_NEW_PROCESS_GROUP", flags)
+			require.NotZero(t, flags&windows.CREATE_SUSPENDED, "CreationFlags = %#x, want CREATE_SUSPENDED", flags)
+			require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
+			require.Equal(t, tc.wantNoWindow, flags&windows.CREATE_NO_WINDOW != 0,
+				"CreationFlags = %#x, CREATE_NO_WINDOW presence", flags)
+		})
+	}
 }
 
 func TestWindowsACPCommandLifecycleJobKillsDescendants(t *testing.T) {
