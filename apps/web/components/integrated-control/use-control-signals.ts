@@ -7,6 +7,7 @@ import {
 import { nativeEvents } from "@/lib/control-ui/native-control";
 import type { NativeTask } from "@/lib/types/control-native";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { useControlInbox } from "./control-inbox-provider";
 import { buildAttention } from "./control-attention";
 import {
   capacityWaitingTotal,
@@ -33,6 +34,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
   const taskReads = useNativeTaskRows(tasks ? ids : NO_IDS, data);
   const historyReads = useNativeHistory(history ? ids : NO_IDS, data);
   const coordinatorEnabled = Boolean(control?.coordinatorEnabled);
+  const inbox = useControlInbox()?.byWorkspace;
   return useMemo(() => {
     const figures: Record<string, WorkspaceFigures | undefined> = {};
     for (const row of dashboards.data ?? [])
@@ -63,6 +65,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
       tasks: allTasks,
       repeats,
       coordinators,
+      inbox,
     });
     return {
       dashboards,
@@ -80,7 +83,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
       attention,
       coordinators,
     };
-  }, [dashboards, taskReads, historyReads, data, ids, coordinatorEnabled]);
+  }, [dashboards, taskReads, historyReads, data, ids, coordinatorEnabled, inbox]);
 }
 
 export type ControlSignals = ReturnType<typeof useControlSignals>;

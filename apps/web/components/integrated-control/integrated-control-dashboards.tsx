@@ -4,6 +4,7 @@ import { ControlWorkspaces } from "./control-workspaces";
 import { ControlCapacityLine } from "./control-capacity-bars";
 import { ControlTaskBoard } from "./control-task-board";
 import { ControlOverview } from "./control-overview";
+import { ControlInbox } from "./control-inbox";
 import { ControlWorkspaceCompare } from "./control-workspace-compare";
 import { ControlReadingGuide } from "./control-reading-guide";
 import { useControlSignals } from "./use-control-signals";
@@ -33,6 +34,7 @@ export function IntegratedControlDashboard({
       data-testid={`control-dashboard-${view}`}
     >
       {view === "overview" && <ControlOverview />}
+      {view === "inbox" && <ControlInbox />}
       {view === "history" && (
         <>
           <ControlHistory workspaceId={workspaceId} />

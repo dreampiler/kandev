@@ -30,6 +30,7 @@ export function toneTextClass(tone: ControlTone): string {
 }
 
 const TONES: Record<PillState, ControlTone> = {
+  question: "delayed",
   stalled: "error",
   repeat: "error",
   failed: "delayed",
@@ -44,6 +45,7 @@ const TONES: Record<PillState, ControlTone> = {
 };
 
 const LABEL_KEYS: Record<PillState, string> = {
+  question: "sidebar:controlSummary.state.question",
   stalled: "sidebar:controlSummary.state.stalled",
   repeat: "sidebar:controlSummary.state.repeat",
   failed: "sidebar:controlSummary.state.failed",

@@ -167,4 +167,15 @@ describe("attention rules", () => {
       buildAttention({ ...on, coordinators: { enabled: true, known: true, total: 1 } }),
     ).toEqual([]);
   });
+  it("lists a workspace's waiting Needs-you items first and counts them", () => {
+    const inbox = { answerable: 2, earlier: 1, recovery: 0, oldest: "2026-10-19T08:00:00Z" };
+    const items = buildAttention({
+      ...base,
+      tasks: [task({ task_id: "f", state: "IN_PROGRESS", session_state: "FAILED" })],
+      inbox: { w1: inbox },
+    });
+    expect(items[0]).toEqual({ kind: "question", scope: "workspace", workspaceId: "w1", inbox });
+    expect(countAttention(items).question).toBe(1);
+    expect(buildAttention({ ...base, inbox: {} })).toEqual([]);
+  });
 });

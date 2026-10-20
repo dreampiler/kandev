@@ -6,8 +6,9 @@ import {
   type TaskSignal,
 } from "./control-signals";
 import type { RepeatedMoves } from "./control-step-moves";
+import type { WorkspaceInboxFigures } from "./control-inbox-model";
 
-export type AttentionKind = "repeat" | "stalled" | "failed" | "config";
+export type AttentionKind = "question" | "repeat" | "stalled" | "failed" | "config";
 
 export type AttentionItem = {
   kind: AttentionKind;
@@ -18,6 +19,8 @@ export type AttentionItem = {
   figures?: WorkspaceFigures;
   /** For the coordinator rule: how many workspaces have none. */
   workspaceCount?: number;
+  /** For a question row: what the workspace's Needs-you inbox is waiting on. */
+  inbox?: WorkspaceInboxFigures;
 };
 
 export type AttentionInput = {
@@ -29,6 +32,8 @@ export type AttentionInput = {
   tasks: NativeTask[];
   repeats: Map<string, RepeatedMoves>;
   coordinators: { enabled: boolean; known: boolean; total: number };
+  /** Needs-you figures per workspace; a workspace with nothing waiting is absent. */
+  inbox?: Record<string, WorkspaceInboxFigures>;
 };
 
 const TASK_KINDS: Partial<Record<TaskSignal, AttentionKind>> = {
@@ -37,6 +42,7 @@ const TASK_KINDS: Partial<Record<TaskSignal, AttentionKind>> = {
   failed: "failed",
 };
 const ORDER: Record<string, number> = {
+  "question:workspace": -1,
   "repeat:task": 0,
   "stalled:workspace": 1,
   "stalled:task": 2,
@@ -46,7 +52,8 @@ const ORDER: Record<string, number> = {
 
 /**
  * The rows the overview raises for a person, from recorded state only:
- * a stalled workspace, a task with unconsumed messages and nothing running,
+ * a workspace whose Needs-you inbox holds questions or recovery decisions
+ * (listed first), a stalled workspace, a task with unconsumed messages and nothing running,
  * a failed primary session on unfinished work, a task moving between steps
  * at the repeat rate, and coordinators switched on with none configured.
  * Each task appears once, under its most urgent signal.
@@ -54,6 +61,8 @@ const ORDER: Record<string, number> = {
 export function buildAttention(input: AttentionInput): AttentionItem[] {
   const items: AttentionItem[] = [];
   for (const workspaceId of input.workspaceIds) {
+    const inbox = input.inbox?.[workspaceId];
+    if (inbox) items.push({ kind: "question", scope: "workspace", workspaceId, inbox });
     const figures = input.figures[workspaceId];
     if (figures && workspaceStatus(figures, input.waiting) === "stalled")
       items.push({ kind: "stalled", scope: "workspace", workspaceId, figures });
@@ -86,13 +95,13 @@ export function buildAttention(input: AttentionInput): AttentionItem[] {
 
 /** When the condition was last recorded as changing; earlier sorts first. */
 function since(item: AttentionItem): number {
-  const value = item.task?.updated_at ?? item.repeat?.end;
+  const value = item.task?.updated_at ?? item.repeat?.end ?? item.inbox?.oldest;
   const time = value ? Date.parse(value) : NaN;
   return Number.isNaN(time) ? Number.MAX_SAFE_INTEGER : time;
 }
 
 export function countAttention(items: AttentionItem[]): Record<AttentionKind | "all", number> {
-  const counts = { all: items.length, repeat: 0, stalled: 0, failed: 0, config: 0 };
+  const counts = { all: items.length, question: 0, repeat: 0, stalled: 0, failed: 0, config: 0 };
   for (const item of items) counts[item.kind] += 1;
   return counts;
 }

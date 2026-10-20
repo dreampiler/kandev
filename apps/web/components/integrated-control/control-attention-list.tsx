@@ -12,7 +12,7 @@ import { durationSince, occurredTime, sessionStateLabel, taskStateLabel } from "
 import { ATTENTION_ANCHOR } from "./control-summary-head";
 
 type Filter = Exclude<AttentionKind, "config"> | "all";
-const FILTERS: Filter[] = ["all", "stalled", "failed", "repeat"];
+const FILTERS: Filter[] = ["all", "question", "stalled", "failed", "repeat"];
 
 function repeatReason(t: TFunction, item: AttentionItem) {
   return t("sidebar:controlSummary.attention.reasonRepeat", {
@@ -34,6 +34,12 @@ function stalledReason(t: TFunction, item: AttentionItem) {
 }
 
 const REASONS: Record<AttentionKind, (t: TFunction, item: AttentionItem) => string> = {
+  question: (t, item) =>
+    t("sidebar:controlSummary.attention.reasonQuestion", {
+      answerable: item.inbox?.answerable ?? 0,
+      earlier: item.inbox?.earlier ?? 0,
+      recovery: item.inbox?.recovery ?? 0,
+    }),
   repeat: repeatReason,
   stalled: stalledReason,
   failed: (t, item) =>
@@ -52,6 +58,8 @@ function reason(t: TFunction, item: AttentionItem): string {
 }
 
 function target(item: AttentionItem, firstWorkspaceId?: string): { href: string; key: string } {
+  if (item.kind === "question")
+    return { href: controlHref("inbox"), key: "sidebar:controlSummary.attention.openInbox" };
   const taskId = item.task?.task_id ?? item.repeat?.taskId;
   if (taskId)
     return {
@@ -76,6 +84,11 @@ function target(item: AttentionItem, firstWorkspaceId?: string): { href: string;
 
 function subject(t: TFunction, item: AttentionItem): string {
   if (item.scope === "global") return t("sidebar:integratedControl.coordinators");
+  if (item.kind === "question")
+    return t("sidebar:controlSummary.attention.questionSubject", {
+      count:
+        (item.inbox?.answerable ?? 0) + (item.inbox?.earlier ?? 0) + (item.inbox?.recovery ?? 0),
+    });
   if (item.scope === "workspace") return t("sidebar:controlSummary.attention.wholeWorkspace");
   return item.task?.title || item.repeat?.title || t("common:unknown");
 }
@@ -135,7 +148,7 @@ export function ControlAttentionList({
             <TableBody>
               {visible.map((item, index) => {
                 const link = target(item, firstWorkspaceId);
-                const since = item.task?.updated_at;
+                const since = item.task?.updated_at ?? item.inbox?.oldest;
                 return (
                   <TableRow
                     key={`${item.kind}:${item.task?.task_id ?? item.repeat?.taskId ?? item.workspaceId ?? index}`}

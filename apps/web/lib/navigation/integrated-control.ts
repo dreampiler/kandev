@@ -1,6 +1,7 @@
 export const INTEGRATED_CONTROL_HREF = "/control";
 export const CONTROL_VIEWS = [
   "overview",
+  "inbox",
   "activity",
   "workspaces",
   "providers",
