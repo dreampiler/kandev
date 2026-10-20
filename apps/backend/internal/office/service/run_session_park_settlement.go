@@ -38,6 +38,7 @@ func (s *Service) handleTaskSessionStateChanged(ctx context.Context, event *bus.
 	if err != nil || data == nil {
 		return nil
 	}
+	s.resolvePendingAgentFailure(ctx, *data)
 	if !isSuccessfulTurnPark(*data) {
 		return nil
 	}
