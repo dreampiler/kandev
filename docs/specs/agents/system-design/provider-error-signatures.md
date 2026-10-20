@@ -59,6 +59,27 @@ active (paid) Claude [Pro|Max|Team|Enterprise] subscription", "subscription
 expired / is required / is inactive / not active", and "no active
 subscription".
 
+Structured error-type signature (provider-neutral,
+`provider.structured_error_type.v1`): an AI-SDK error envelope that opens a
+line with an error label (`Internal error:`, `API Error:`, `AI_APICallError:`,
+or `Error:`), optionally after the `Agent encountered an error:` status prefix,
+and carries `"error_type":"provider_unavailable"` classifies as
+`provider_unavailable` at high confidence. The underscore-joined value never
+matches the space-separated prose in `provider.unavailable.v1`, and the field is
+emitted by the adapter rather than authored by the model, so the rule sits
+immediately before that generic rule. The label is required, not optional,
+because an assistant chunk is classified on its own; a bare JSON object that
+merely carries the field does not classify.
+
+Context-length signature (provider-neutral,
+`provider.context_length_exceeded.v1`): a line that opens with an optional error
+label and reports `maximum context length is <n> tokens` classifies at high
+confidence under the named rule, keeping the `agent_runtime_error` code.
+Retrying the same candidate cannot succeed, but the code is unchanged so the
+repeated-unclassified-failure route can still try a candidate with a larger
+context window; `agent_runtime_error` keeps `FallbackAllowed` and
+`AutoRetryable` false, exactly as the anonymous phase default did.
+
 Rule order and confidence are unchanged, so a provider signature that matched
 before still yields the same code, confidence, and flags. Text that matched
 only through a topic word now falls through to the next rule, the
@@ -67,4 +88,5 @@ provider-neutral rules, or the phase default.
 ## Observability
 
 The existing `agent failure classified for provider routing` log records the
-rule ID. Rule IDs are unchanged.
+rule ID. Existing rule IDs are unchanged; adding a signature introduces a new
+one.

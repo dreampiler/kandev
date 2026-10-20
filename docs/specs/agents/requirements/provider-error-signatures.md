@@ -63,9 +63,28 @@ errors does not take its own healthy account out of rotation.
   precedence and the existing provider-specific rules (usage limits, session
   limits, credit exhaustion, payment required, authentication, model, and
   installation rules) shall keep their classification.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6:** An AI-SDK error envelope that
+  opens a line with an `Internal error:`, `API Error:`, `AI_APICallError:`, or
+  `Error:` label (optionally after the `Agent encountered an error:` status
+  prefix) and carries the structured field `"error_type":"provider_unavailable"`
+  shall classify as `provider_unavailable` with high confidence under the named
+  rule `provider.structured_error_type.v1`, so the shared transient policy can
+  recover it. A JSON object that carries the field without the error label, and
+  agent prose that mentions the field without opening a line with the envelope,
+  shall not classify.
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** A line that opens with an
+  optional error label and reports `maximum context length is <n> tokens` shall
+  classify at high confidence under the named rule
+  `provider.context_length_exceeded.v1`, keeping the `agent_runtime_error` code
+  with `FallbackAllowed: false` and `AutoRetryable: false`. Retrying the same
+  candidate cannot succeed, but the failure stays a runtime error so the
+  repeated-unclassified-failure route can still try a candidate with a larger
+  context window.
 
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags.
-- Changing the provider-neutral rules or the runtime-environment rules.
+- Reordering or reclassifying the existing provider-neutral rules. Adding a new
+  provider-neutral signature for a captured diagnostic is in scope.
+- Changing the runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.
