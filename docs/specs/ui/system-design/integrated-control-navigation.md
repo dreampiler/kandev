@@ -20,9 +20,22 @@ workspace is not rewritten by central selection.
 A route-scoped provider shares authorized workspace/coordinator reads between
 the persistent app sidebar, phone AppNavSheet, and central content. Reads use
 existing native APIs and discard superseded or retired identity responses.
-Refresh is explicit, foreground-driven, or driven by existing WebSocket events;
-there is no timer. Failures remain distinct from empty results, and failed or
-denied collections do not retain selectable stale conversations.
+Reads run on entry, every 30 seconds while the page is visible, on foreground
+return, on the header Refresh button, and after existing WebSocket events. One
+scheduler (`control-refresh-scheduler.ts`) owns that lifetime: events settle for
+2 seconds and start at most one read per 10 seconds, and any request during a
+read joins one follow-up read instead of aborting the read in flight. The header
+shows a fixed-width `HH:MM:SS` last-refresh time and spins only the Refresh icon.
+A transient failure keeps the last values and is reported once, in a banner under
+the header, with 5, 10, 20, 40 then 60 second retries; a denied read clears its
+data and is not retried early. Failures remain distinct from empty results.
+
+The sidebar tree lists each workspace with one coordinator conversation entry
+per coordinator, without status, loading, or error lines of its own. An entry
+with a current conversation links to it. An entry without one is an explicit
+"+ Coordinator conversation" action: it calls the existing coordinator
+conversation route (`runOpenSequence`, the same profile check and POST the
+coordinator page uses), refreshes the snapshot, and then opens the result.
 
 The central adapter resolves only `conversation_task_id` already returned by
 the coordinator list and existing sessions of that task. It verifies the task's
@@ -75,9 +88,10 @@ Desktop:
 | Workspaces               |                                      |
 | Provider / model         | Original conversation                |
 | History                  |                                      |
-| v Workspace A            |                                      |
-|   v Coordinator A        |                                      |
-|     Current conversation | Existing per-session composer        |
+| Workspace A              |                                      |
+|   Coordinator convers.   |                                      |
+| Workspace B              | Existing per-session composer        |
+|   + Coordinator convers. |                                      |
 +--------------------------+--------------------------------------+
 ```
 
@@ -94,8 +108,8 @@ Phone:
 | Integrated control [v]         |
 | Overview / Activity            |
 | Workspaces / Provider / History|
-| v Workspace / Coordinator      |
-|   Current conversation         |
+| Workspace                      |
+|   Coordinator conversation     |
 +-------------------------------+
 ```
 
@@ -119,8 +133,12 @@ testing, containment, scroll ownership, dismissal, and unchanged selection.
 `useControlAggregate` calls `getWorkspaceAggregate` when the route is active,
 the user is authenticated, and `features.office` is on. It keeps one snapshot
 per authenticated read identity, aborts superseded requests, keeps the last
-snapshot when a refresh fails, and refreshes on the header/sidebar Refresh
-button and on foreground return. It adds no timer and no WebSocket subscription.
+snapshot when a refresh fails, and uses the same scheduler as the workspace
+snapshot: every 30 seconds while visible, on the header Refresh button, and on
+foreground return, never aborting a read in flight. It adds no WebSocket
+subscription. A failed refresh with a kept snapshot is reported in the page
+banner rather than inside the panels; the comparison table uses fixed column
+widths, right-aligned tabular numbers, and dimmed zeros.
 The navigation flag stays `features.integratedControl`; no new flag is added.
 
 `control-aggregate-signals.ts` derives everything from the aggregate entries as

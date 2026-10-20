@@ -65,11 +65,6 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
                     : "sidebar:integratedControl.readAccess",
                 )}
               </p>
-              {byWorkspace[workspace.id]?.error && (
-                <p role="alert" className="mt-2 text-sm text-destructive">
-                  {t("sidebar:integratedControl.loadError")}
-                </p>
-              )}
             </section>
           ))}
         </div>
@@ -79,11 +74,6 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
       {!control.coordinatorEnabled && (
         <p role="status" className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.coordinatorsOff")}
-        </p>
-      )}
-      {Object.values(byWorkspace).some((list) => list.error) && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("sidebar:integratedControl.partialData")}
         </p>
       )}
       {workspaces.length === 0 && (

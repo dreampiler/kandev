@@ -12,6 +12,7 @@ import {
   type AggregateTotals,
   type AggregateWorkspaceStatus,
 } from "./control-aggregate-signals";
+import { numberCellClass } from "./control-table";
 
 const LINK_CLASS =
   "inline-flex min-h-7 cursor-pointer items-center underline underline-offset-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
@@ -57,11 +58,6 @@ export function ControlAggregateOverview({
   const uncovered = uncoveredWorkspaceIds(controlWorkspaceIds, entries).length;
   return (
     <div className="space-y-5" data-testid="control-aggregate-overview">
-      {aggregate.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("sidebar:integratedControl.aggregate.staleError")}
-        </p>
-      )}
       <ControlStallBand totals={totals} />
       <ControlAggregateAttention items={attention} />
       <ControlWorkspaceCompare entries={entries} totals={totals} />
@@ -83,7 +79,7 @@ function ControlStallBand({ totals }: { totals: AggregateTotals }) {
       data-testid="control-stall-band"
       data-stalled={stalled}
     >
-      <h2 className="font-medium">
+      <h2 className="font-medium" title={t("sidebar:integratedControl.aggregate.stallRule")}>
         {stalled > 0
           ? t("sidebar:integratedControl.aggregate.stalledHeadline", { count: stalled })
           : t("sidebar:integratedControl.aggregate.noStallHeadline")}
@@ -103,9 +99,6 @@ function ControlStallBand({ totals }: { totals: AggregateTotals }) {
           value={`${totals.runningAgents} / ${totals.agents}`}
         />
       </dl>
-      <p className="mt-3 text-xs text-muted-foreground">
-        {t("sidebar:integratedControl.aggregate.stallRule")}
-      </p>
     </section>
   );
 }
@@ -114,7 +107,7 @@ function BandFact({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-xl font-semibold">{value}</dd>
+      <dd className="text-xl font-semibold tabular-nums">{value}</dd>
     </div>
   );
 }
@@ -246,7 +239,14 @@ function ControlWorkspaceCompare({
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[40rem] text-sm">
+          <table className="w-full min-w-[44rem] table-fixed text-sm">
+            <colgroup>
+              <col className="w-48" />
+              <col className="w-28" />
+              {COLUMNS.map((column) => (
+                <col key={column.field} className="w-20" />
+              ))}
+            </colgroup>
             <thead className="text-left text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2 font-medium">
@@ -256,7 +256,10 @@ function ControlWorkspaceCompare({
                   {t("sidebar:integratedControl.aggregate.status")}
                 </th>
                 {COLUMNS.map((column) => (
-                  <th key={column.field} className="px-2 py-2 text-right font-medium">
+                  <th
+                    key={column.field}
+                    className="px-2 py-2 text-right font-medium whitespace-normal"
+                  >
                     {t(column.label)}
                   </th>
                 ))}
@@ -271,7 +274,7 @@ function ControlWorkspaceCompare({
                     data-testid="control-compare-row"
                     data-status={status}
                   >
-                    <td className="px-4 py-2">
+                    <td className="truncate px-4 py-2">
                       <Link className={LINK_CLASS} href={officeHref("/office", entry.workspace_id)}>
                         {entry.name}
                       </Link>
@@ -284,7 +287,10 @@ function ControlWorkspaceCompare({
                       </span>
                     </td>
                     {COLUMNS.map((column) => (
-                      <td key={column.field} className="px-2 py-2 text-right tabular-nums">
+                      <td
+                        key={column.field}
+                        className={numberCellClass(entry[column.field], "px-2 py-2")}
+                      >
                         {entry[column.field]}
                       </td>
                     ))}
@@ -298,7 +304,10 @@ function ControlWorkspaceCompare({
                   {t("sidebar:integratedControl.aggregate.total")}
                 </td>
                 {COLUMNS.map((column) => (
-                  <td key={column.field} className="px-2 py-2 text-right tabular-nums">
+                  <td
+                    key={column.field}
+                    className={numberCellClass(totals[column.total], "px-2 py-2")}
+                  >
                     {totals[column.total]}
                   </td>
                 ))}

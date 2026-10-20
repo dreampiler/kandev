@@ -11,7 +11,7 @@ owners: [kandev]
 ### REQ-UI-INTEGRATED-CONTROL-001: Native navigation and original conversations
 
 - **AC-UI-INTEGRATED-CONTROL-001.1:** OFF preserves legacy navigation and performs no integrated reads; every shipped profile defaults OFF.
-- **AC-UI-INTEGRATED-CONTROL-001.2:** ON adds the picker destination, five separate menus, and the same workspace/coordinator/current-conversation tree on desktop and phone.
+- **AC-UI-INTEGRATED-CONTROL-001.2:** ON adds the picker destination, five separate menus, and the same tree of workspaces with one coordinator conversation entry per coordinator on desktop and phone.
 - **AC-UI-INTEGRATED-CONTROL-001.3:** Selecting an existing conversation keeps integrated navigation, original IDs and drafts, with no prepare/open/resume/prompt or agent launch.
 - **AC-UI-INTEGRATED-CONTROL-001.4:** Existing native permissions apply; unavailable and failed reads are distinct from empty data; scope limitations are not reported as completed capabilities.
 
@@ -25,7 +25,10 @@ task/session centrally while keeping this navigation on desktop and phone.
 Existing workspace permissions remain authoritative. Listing uses workspace
 read access; the existing interactive coordinator conversation requires workspace
 management access. Navigation never creates, prepares, resumes, copies, or moves
-a task/session, sends a prompt, or starts an agent. Session drafts, selections,
+a task/session, sends a prompt, or starts an agent. The one explicit exception is
+the "+ Coordinator conversation" entry shown when a coordinator has no current
+conversation: clicking it calls the existing coordinator conversation route and
+then opens that conversation. Session drafts, selections,
 questions, results, and histories retain their original identity.
 
 The original task's GitHub/GitLab/Azure links, connection status, feedback,
@@ -39,7 +42,8 @@ data. Full execution dashboards, provider/account/model usage, historical
 conversation discovery, and multiple independently live conversations remain
 parts of the same feature, not capabilities claimed by this slice. A coordinator's
 current task, an earlier archived task, and runtime sessions of one task are
-different objects. No new aggregate API, poller, ACL, or task ledger is introduced.
+different objects. No new aggregate API, ACL, or task ledger is introduced; the
+existing reads are repeated every 30 seconds while the page is visible.
 
 `features.integratedControl` / `KANDEV_FEATURES_INTEGRATED_CONTROL` is off in
 every shipped profile. Disabling it restores the existing navigation without
@@ -53,7 +57,7 @@ its completion does not block this authorized browser read surface.
 - **AC-UI-INTEGRATED-CONTROL-002.2:** A workspace is stalled when it has in-progress tasks and no working agent. The attention list raises one row per stalled workspace, per workspace with blocked tasks, and per workspace with pending approvals, in that order and largest count first; each row opens the Office page of its own workspace.
 - **AC-UI-INTEGRATED-CONTROL-002.3:** The comparison table shows one row per Office workspace with its status and task, approval, and working-agent counts, plus a total row. Listed workspaces the aggregate does not cover are counted as not included, not as zero.
 - **AC-UI-INTEGRATED-CONTROL-002.4:** History shows the aggregate's merged recent Office activity, newest first, with consecutive repeats of the same action by the same actor on the same target folded into one row with a count.
-- **AC-UI-INTEGRATED-CONTROL-002.5:** Loading and failed reads are distinct from empty data. A failed refresh keeps the last snapshot and says so. Refresh is explicit or foreground-driven; there is no timer.
+- **AC-UI-INTEGRATED-CONTROL-002.5:** Loading and failed reads are distinct from empty data. A failed refresh keeps the last snapshot and says so once, in the page banner. Reads repeat every 30 seconds while the page is visible, on foreground return, and on the Refresh button; a read in flight is never aborted for another.
 - **AC-UI-INTEGRATED-CONTROL-002.6:** On phone widths the panels cause no horizontal page overflow and their links are at least 44px tall.
 
 The second slice reads Office's read-only multi-workspace aggregate. It shows

@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createControlRefreshScheduler,
+  type ControlRefreshOutcome,
+  type ControlRefreshScheduler,
+} from "./control-refresh-scheduler";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import {
@@ -25,8 +30,10 @@ type Snapshot = { identity: string; data: ControlAggregate };
 /**
  * Reads the read-only multi-workspace aggregate for the integrated control
  * dashboard. One request covers every Office workspace the caller can reach;
- * a snapshot read under another identity is never shown. A failed refresh
- * keeps the last good snapshot and reports the error beside it.
+ * a snapshot read under another identity is never shown. It re-reads every
+ * 30 seconds; a request during a read joins one follow-up read instead of
+ * aborting it. A failed refresh keeps the last good snapshot, reports the
+ * error beside it and retries with backoff.
  */
 export function useControlAggregate(enabled: boolean): ControlAggregateRead {
   const store = useAppStoreApi();
@@ -34,42 +41,49 @@ export function useControlAggregate(enabled: boolean): ControlAggregateRead {
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const request = useRef<AbortController | null>(null);
+  const scheduler = useRef<ControlRefreshScheduler | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!enabled) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    const current = () =>
-      !controller.signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
-    setLoading(true);
-    try {
-      const wire = await getWorkspaceAggregate({
-        cache: "no-store",
-        init: { signal: controller.signal },
-      });
-      if (!current()) return;
-      setSnapshot({
-        identity,
-        data: {
-          workspaces: wire.workspaces ?? [],
-          recentActivity: (wire.recent_activity ?? []).map(normalizeActivityEntry),
-        },
-      });
-      setError(false);
-    } catch {
-      if (current()) setError(true);
-    } finally {
-      if (current()) setLoading(false);
-    }
-  }, [enabled, store, identity]);
+  const read = useCallback(
+    async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
+      const current = () =>
+        !signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+      setLoading(true);
+      try {
+        const wire = await getWorkspaceAggregate({ cache: "no-store", init: { signal } });
+        if (!current()) return "ok";
+        setSnapshot({
+          identity,
+          data: {
+            workspaces: wire.workspaces ?? [],
+            recentActivity: (wire.recent_activity ?? []).map(normalizeActivityEntry),
+          },
+        });
+        setError(false);
+        return "ok";
+      } catch {
+        if (current()) setError(true);
+        return "retry";
+      } finally {
+        if (current()) setLoading(false);
+      }
+    },
+    [store, identity],
+  );
 
   useEffect(() => {
     if (!enabled) return;
-    void refresh();
-    return () => request.current?.abort();
-  }, [enabled, refresh]);
+    const next = createControlRefreshScheduler({
+      run: read,
+      isVisible: () => document.visibilityState === "visible",
+    });
+    scheduler.current = next;
+    void next.request();
+    return () => {
+      next.dispose();
+      if (scheduler.current === next) scheduler.current = null;
+    };
+  }, [enabled, read]);
+  const refresh = useCallback(() => scheduler.current?.request() ?? Promise.resolve(), []);
   useForegroundRefresh(refresh, enabled, identity);
 
   const data = enabled && snapshot?.identity === identity ? snapshot.data : undefined;
