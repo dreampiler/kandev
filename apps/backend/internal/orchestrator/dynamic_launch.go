@@ -1751,8 +1751,8 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 // reports whether the successor may launch. An absent predecessor counts as
 // stopped. Callers pass the execution handle recorded on the session or in the
 // failed event, so an empty value means no execution was recorded; the restart
-// orphan sweep leaves exactly that shape, and there is nothing to stop in that
-// case. A runtime that confirms the execution is not found is absent too.
+// orphan sweep can leave that shape, and there is nothing to stop in that case.
+// A runtime that confirms the execution is not found is absent too.
 // Every other stop error keeps the relaunch from launching over an unresolved
 // teardown. executor.StopExecution also wraps a genuine teardown failure in
 // ErrExecutionNotFound, so only the bare sentinel (returned when there is no
