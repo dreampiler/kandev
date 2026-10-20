@@ -21,6 +21,13 @@ type parkedRunFixture struct {
 
 func newParkedRunFixture(t *testing.T) parkedRunFixture {
 	t.Helper()
+	return newParkedRunFixtureForTask(t, "")
+}
+
+// newParkedRunFixtureForTask seeds the parked-run task; a non-empty projectID
+// makes it an Office task that receives the Office IDLE teardown.
+func newParkedRunFixtureForTask(t *testing.T, projectID string) parkedRunFixture {
+	t.Helper()
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: &mockTaskStarter{}})
 	svc.SetSyncHandlers(true)
 	eb := bus.NewMemoryEventBus(logger.Default())
@@ -34,8 +41,8 @@ func newParkedRunFixture(t *testing.T) parkedRunFixture {
 	if err := svc.CreateAgentInstance(context.Background(), agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
-		VALUES ('task-parked', 'ws-1', 'Routine task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, project_id, title, created_at, updated_at)
+		VALUES ('task-parked', 'ws-1', ?, 'Routine task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, projectID)
 	claimedAt := time.Now().UTC().Add(-time.Minute)
 	svc.ExecSQL(t, `
 		INSERT INTO runs (
@@ -122,5 +129,33 @@ func TestParkedSessionSettlementIgnoresFailuresAndForeignSessions(t *testing.T) 
 				t.Fatalf("run status = %q, want claimed (this transition does not complete the run)", got)
 			}
 		})
+	}
+}
+
+// An Office task gets the Office IDLE teardown after its turn completes, which
+// emits AgentStopped and settles the run. Settling on the earlier park would
+// free the agent slot while that teardown is still pending, so the next queued
+// run could reuse the live execution and then be stopped by the late
+// teardown. The park must leave the run claimed; AgentStopped settles it.
+func TestParkedOfficeSessionRunSettlesOnAgentStoppedNotPark(t *testing.T) {
+	f := newParkedRunFixtureForTask(t, "proj-office")
+
+	f.publishSessionState(t, "session-launched", "RUNNING", "WAITING_FOR_INPUT", "")
+
+	if got := f.runStatus(t); got != service.RunStatusClaimed {
+		t.Fatalf("run status = %q, want claimed until the Office teardown stops the agent", got)
+	}
+
+	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
+		"task_id":          "task-parked",
+		"session_id":       "session-launched",
+		"agent_profile_id": f.agent.ID,
+		"run_id":           "run-parked",
+	})
+	if err := f.eb.Publish(context.Background(), events.AgentStopped, event); err != nil {
+		t.Fatalf("publish agent stopped: %v", err)
+	}
+	if got := f.runStatus(t); got != service.RunStatusFinished {
+		t.Fatalf("run status = %q, want finished after AgentStopped", got)
 	}
 }

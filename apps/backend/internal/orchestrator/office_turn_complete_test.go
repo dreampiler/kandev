@@ -298,3 +298,59 @@ func TestHandleOfficeTurnComplete_OtherStopReasonsStillIdle(t *testing.T) {
 		})
 	}
 }
+
+// A late Office teardown (it runs after the synchronous git-status capture)
+// must not stop a session that was relaunched for the next run in the
+// meantime: the next run reuses the live execution, and stopping it fails
+// that run with "has no agentctl client".
+func TestHandleOfficeTurnComplete_SkipsTeardownAfterRelaunch(t *testing.T) {
+	cases := []struct {
+		name          string
+		snapshotState models.TaskSessionState
+		currentState  models.TaskSessionState
+		currentExecID string
+	}{
+		{"relaunched to RUNNING after the park", models.TaskSessionStateWaitingForInput, models.TaskSessionStateRunning, "exec-late"},
+		{"relaunch STARTING", models.TaskSessionStateRunning, models.TaskSessionStateStarting, "exec-late"},
+		{"execution replaced", models.TaskSessionStateRunning, models.TaskSessionStateWaitingForInput, "exec-next"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedOfficeSession(t, repo, "t-late", "s-late", "exec-late")
+			mgr := &mockAgentManager{}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+
+			snapshot, err := repo.GetTaskSession(ctx, "s-late")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			snapshot.State = tc.snapshotState
+
+			if _, err := repo.DB().Exec(`UPDATE task_sessions SET state = ? WHERE id = ?`, string(tc.currentState), "s-late"); err != nil {
+				t.Fatalf("relaunch session: %v", err)
+			}
+			if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+				ID: "s-late", SessionID: "s-late", TaskID: "t-late",
+				AgentExecutionID: tc.currentExecID, Status: "ready",
+			}); err != nil {
+				t.Fatalf("update executors_running: %v", err)
+			}
+
+			if !svc.handleOfficeTurnComplete(ctx, "t-late", "s-late", snapshot, "") {
+				t.Fatal("an Office completion must stay claimed even when its teardown is skipped")
+			}
+			if len(mgr.stopAgentArgs) != 0 {
+				t.Fatalf("late teardown stopped the relaunched execution: %+v", mgr.stopAgentArgs)
+			}
+			got, err := repo.GetTaskSession(ctx, "s-late")
+			if err != nil {
+				t.Fatalf("re-read session: %v", err)
+			}
+			if got.State != tc.currentState {
+				t.Fatalf("state = %q, want %q (late teardown must not flip it to IDLE)", got.State, tc.currentState)
+			}
+		})
+	}
+}
