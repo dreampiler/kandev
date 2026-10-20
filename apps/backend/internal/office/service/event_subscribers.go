@@ -460,6 +460,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
+	s.dropPendingAgentFailure(data.SessionID)
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -871,6 +872,15 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	if s.tryPostStartFallback(ctx, run, data.ErrorMessage, data.ProviderError) {
 		return nil
 	}
+	if s.deferAgentFailureUntilSessionVerdict(ctx, run, *data) {
+		return nil
+	}
+	return s.failClaimedTaskRun(ctx, run, *data)
+}
+
+// failClaimedTaskRun applies the terminal Office failure path to a claimed
+// task run and dispatches the workflow's on_agent_error trigger.
+func (s *Service) failClaimedTaskRun(ctx context.Context, run *runmodels.Run, data AgentLifecycleData) error {
 	// Office failure path: terminal for every error except a classified-
 	// transient failure, which HandleAgentFailure itself retries a
 	// bounded number of times before it counts toward auto-pause
