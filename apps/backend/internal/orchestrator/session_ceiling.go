@@ -121,10 +121,13 @@ type sessionCeilingController struct {
 	now          func() time.Time
 	newKey       func() string
 
-	memoryGate       hostmemory.Gate
-	memoryReader     memoryPressureReader
-	memoryExempt     memoryGateExemption
-	memoryReadFailed bool
+	memoryGate          hostmemory.Gate
+	memoryReader        memoryPressureReader
+	memoryExempt        memoryGateExemption
+	memoryReadFailed    bool
+	memorySample        hostmemory.Reading
+	memorySampleAt      time.Time
+	memorySamplePresent bool
 }
 
 func newSessionCeilingController(ceiling int, lister admittedSessionLister, logger *zap.Logger) *sessionCeilingController {
@@ -303,7 +306,7 @@ func (c *sessionCeilingController) admit(ctx context.Context, req admissionReque
 	// The memory condition is consulted even when the ceiling is unlimited.
 	// Only a pressured host needs the population read that recognizes an
 	// already-admitted session, so the unlimited fast path is kept otherwise.
-	pressured := c.memoryPressuredLocked(ctx, req)
+	pressured := c.memoryPressuredLocked(ctx, origin, req)
 	if c.ceiling == unlimitedSessionCeiling && !pressured {
 		return c.admitUnlimitedLocked(req, origin)
 	}
@@ -346,11 +349,11 @@ func (c *sessionCeilingController) decideLocked(
 		populationKnown: true,
 		ceiling:         c.ceiling,
 	}
-	// Host memory pressure refuses a launch that would add an agent process,
-	// for every origin: the manual override passes the session-count ceiling
-	// but never the host-memory condition. An already-admitted session returned
-	// above, so a prompt into a live session is never held. The refusal carries
-	// no population reading, so its card note describes the host.
+	// Host memory pressure refuses an automatic launch that would add an agent
+	// process before the free-slot branch. Manual launches never reach here
+	// pressured, and an already-admitted session returned above, so a prompt
+	// into a live session is never held. The refusal carries no population
+	// reading, so its card note describes the host.
 	if pressured {
 		decision.reasonCode = ceilingReasonMemoryPressure
 		decision.populationKnown = false
@@ -530,7 +533,7 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	pressured := c.memoryPressuredLocked(ctx, req)
+	pressured := c.memoryPressuredLocked(ctx, origin, req)
 	if c.ceiling == unlimitedSessionCeiling && !pressured {
 		return c.admitUnlimitedLocked(req, origin)
 	}

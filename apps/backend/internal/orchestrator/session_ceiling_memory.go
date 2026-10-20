@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/kandev/kandev/internal/system/hostmemory"
 	"github.com/kandev/kandev/internal/task/models"
@@ -30,6 +31,12 @@ type memoryGateExemption func(ctx context.Context, taskID string) bool
 // reading (an unsupported platform, for example). It is not a host failure.
 var errMemoryReadingIncomplete = errors.New("host memory reading is incomplete")
 
+// memorySampleTTL bounds how long one complete host reading is reused. Launches
+// arrive in bursts, and the admission decisions inside a burst are separated by
+// milliseconds, so one sample per second keeps the lock short without letting
+// pressure lag behind.
+const memorySampleTTL = time.Second
+
 // configureMemoryGate enables the host-memory condition on the controller. A
 // disabled gate leaves the reader nil, so the host is never read.
 func (c *sessionCeilingController) configureMemoryGate(
@@ -46,28 +53,57 @@ func (c *sessionCeilingController) configureMemoryGate(
 }
 
 // memoryPressuredLocked reports whether the host is under memory pressure for
-// this launch. A disabled gate, an exempt task, or an unreadable or incomplete
-// reading report "not pressured" (fail open) so an unmeasurable host never
-// stalls launches.
-func (c *sessionCeilingController) memoryPressuredLocked(ctx context.Context, req admissionRequest) bool {
+// this launch. Manual launches are never judged, and the host is not read for
+// them, so a user-initiated start, resume, or prompt keeps its existing
+// admission and its input. A disabled gate, an exempt task, or an unreadable or
+// incomplete reading report "not pressured" (fail open) so an unmeasurable host
+// never stalls launches.
+func (c *sessionCeilingController) memoryPressuredLocked(ctx context.Context, origin launchOrigin, req admissionRequest) bool {
 	if c == nil || !c.memoryGate.Enabled || c.memoryReader == nil {
 		return false
 	}
+	if origin == launchOriginManual {
+		return false
+	}
+	reading, ok := c.memoryReadingLocked(ctx)
+	if !ok {
+		return false
+	}
+	if pressured, _ := c.memoryGate.Pressured(reading); !pressured {
+		return false
+	}
+	// The exemption reads the task, so it is consulted only when the host is
+	// actually pressured.
 	if c.memoryExempt != nil && c.memoryExempt(ctx, req.taskID) {
 		return false
 	}
+	return true
+}
+
+// memoryReadingLocked returns a complete host reading, reusing one sample inside
+// memorySampleTTL. A failed or incomplete reading is never cached, so the next
+// launch probes again and a failure streak keeps its single warning.
+func (c *sessionCeilingController) memoryReadingLocked(ctx context.Context) (hostmemory.Reading, bool) {
+	now := c.now()
+	if c.memorySamplePresent && now.Sub(c.memorySampleAt) < memorySampleTTL {
+		return c.memorySample, true
+	}
 	reading, err := c.memoryReader.Read(ctx)
 	if err != nil {
+		c.memorySamplePresent = false
 		c.logMemoryUnavailableLocked(err)
-		return false
+		return hostmemory.Reading{}, false
 	}
-	pressured, unknown := c.memoryGate.Pressured(reading)
-	if unknown {
+	if !reading.Complete {
+		c.memorySamplePresent = false
 		c.logMemoryUnavailableLocked(errMemoryReadingIncomplete)
-		return false
+		return hostmemory.Reading{}, false
 	}
+	c.memorySample = reading
+	c.memorySampleAt = now
+	c.memorySamplePresent = true
 	c.memoryReadFailed = false
-	return pressured
+	return reading, true
 }
 
 // logMemoryUnavailableLocked reports the first failure of a failure streak so

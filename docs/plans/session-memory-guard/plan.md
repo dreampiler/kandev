@@ -18,8 +18,9 @@ and manual starts pass the ceiling entirely. Each agent tree costs hundreds of
 megabytes to over a gigabyte, so a burst of launches can push the host into
 swap or a watchdog restart that takes every session down. Behind
 `features.sessionMemoryGuard`, off in every shipped profile, the ceiling now
-also holds launches that would add an agent process while the host is under
-memory pressure.
+also holds automatic launches that would add an agent process while the host is
+under memory pressure. Manual launches keep their existing admission so no user
+input waits on the host condition.
 
 ## Scope
 

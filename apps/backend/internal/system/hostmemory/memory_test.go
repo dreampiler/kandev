@@ -112,3 +112,53 @@ func TestReadConfigIgnoresInvalidValues(t *testing.T) {
 		t.Fatalf("MaxCommitPercent = %v, want default", gate.MaxCommitPercent)
 	}
 }
+
+const procMeminfoOvercommitted = `MemTotal:       16384000 kB
+MemFree:         1000000 kB
+MemAvailable:   12000000 kB
+Buffers:          100000 kB
+Cached:          2000000 kB
+CommitLimit:     8192000 kB
+Committed_AS:   20000000 kB
+`
+
+// Under the heuristic and always overcommit modes the kernel does not enforce
+// CommitLimit, so a Committed_AS far above it is normal and must not pressure.
+func TestReadingFromProcIgnoresCommitUnlessOvercommitStrict(t *testing.T) {
+	gate := Gate{Enabled: true, MinAvailableBytes: 8 << 30, MaxCommitPercent: 75}
+	for _, mode := range []string{"0\n", "1\n", ""} {
+		reading, err := readingFromProc(procMeminfoOvercommitted, mode)
+		if err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+		if reading.CommitKnown {
+			t.Fatalf("mode %q: commit must not be judged", mode)
+		}
+		if pressured, unknown := gate.Pressured(reading); pressured || unknown {
+			t.Fatalf("mode %q: pressured=%v unknown=%v, want a clear host", mode, pressured, unknown)
+		}
+	}
+	reading, err := readingFromProc(procMeminfoOvercommitted, "2\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reading.CommitKnown || reading.CommitLimitBytes != 8192000<<10 || reading.CommitUsedBytes != 20000000<<10 {
+		t.Fatalf("strict mode reading = %+v, want the commit pair", reading)
+	}
+	if pressured, _ := gate.Pressured(reading); !pressured {
+		t.Fatal("strict overcommit above the commit ceiling must pressure")
+	}
+}
+
+func TestReadingFromProcAvailableFallbackAndMissingTotal(t *testing.T) {
+	reading, err := readingFromProc("MemTotal: 1000 kB\nMemFree: 10 kB\nBuffers: 20 kB\nCached: 30 kB\n", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reading.Complete || reading.TotalBytes != 1000<<10 || reading.AvailableBytes != 60<<10 {
+		t.Fatalf("fallback reading = %+v", reading)
+	}
+	if reading, err := readingFromProc("MemFree: 10 kB\n", "2"); err == nil || reading.Complete {
+		t.Fatalf("missing MemTotal must be an incomplete reading, got %+v err=%v", reading, err)
+	}
+}

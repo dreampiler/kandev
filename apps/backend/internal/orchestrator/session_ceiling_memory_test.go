@@ -96,9 +96,27 @@ func TestSessionCeilingMemoryCommitAboveCeilingDefers(t *testing.T) {
 	requireMemoryRefusal(t, c, c.admit(context.Background(), memoryRequest("s-new", launchOriginAutomatic)))
 }
 
-func TestSessionCeilingMemoryManualLaunchIsDeferred(t *testing.T) {
-	c := newMemoryController(10, &fakeAdmittedLister{}, &fakeMemoryReader{reading: pressuredReading()})
-	requireMemoryRefusal(t, c, c.admit(context.Background(), memoryRequest("s-manual", launchOriginManual)))
+// Manual launches are never held by the host condition, and the host is not
+// read for them, so a user-initiated start, resume, or prompt keeps its input.
+// That includes the unknown-population path, which already admits manual
+// launches.
+func TestSessionCeilingMemoryManualLaunchIsNotHeld(t *testing.T) {
+	for name, lister := range map[string]*fakeAdmittedLister{
+		"population known":   {},
+		"population unknown": {err: errors.New("population unreadable")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reader := &fakeMemoryReader{reading: pressuredReading()}
+			c := newMemoryController(10, lister, reader)
+			decision := c.admit(context.Background(), memoryRequest("s-manual", launchOriginManual))
+			if !decision.admitted || decision.reasonCode == ceilingReasonMemoryPressure {
+				t.Fatalf("manual launch was held by host memory: admitted=%v reason=%q", decision.admitted, decision.reasonCode)
+			}
+			if reader.calls != 0 {
+				t.Fatalf("a manual launch must not read the host, got %d reads", reader.calls)
+			}
+		})
+	}
 }
 
 // The manual override still passes the session-count ceiling on a clear host;
@@ -145,17 +163,27 @@ func TestSessionCeilingMemoryHandOffAdmissionOfNewSessionIsHeld(t *testing.T) {
 }
 
 func TestSessionCeilingMemoryExemptTaskIsAdmitted(t *testing.T) {
-	reader := &fakeMemoryReader{reading: pressuredReading()}
-	c := newSessionCeilingController(10, &fakeAdmittedLister{}, zap.NewNop())
-	c.configureMemoryGate(testMemoryGate(), reader, func(_ context.Context, taskID string) bool {
-		return taskID == "task-1"
-	})
-	decision := c.admit(context.Background(), memoryRequest("s-new", launchOriginAutomatic))
-	if !decision.admitted {
-		t.Fatalf("exempt task was held by host memory: reason=%q", decision.reasonCode)
-	}
-	if reader.calls != 0 {
-		t.Fatalf("an exempt launch must not read the host, got %d reads", reader.calls)
+	for name, reading := range map[string]hostmemory.Reading{
+		"pressured": pressuredReading(),
+		"clear":     clearReading(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			lookups := 0
+			c := newSessionCeilingController(10, &fakeAdmittedLister{}, zap.NewNop())
+			c.configureMemoryGate(testMemoryGate(), &fakeMemoryReader{reading: reading}, func(_ context.Context, taskID string) bool {
+				lookups++
+				return taskID == "task-1"
+			})
+			decision := c.admit(context.Background(), memoryRequest("s-new", launchOriginAutomatic))
+			if !decision.admitted {
+				t.Fatalf("exempt task was held by host memory: reason=%q", decision.reasonCode)
+			}
+			// The exemption reads the task, so it is consulted only when the
+			// host is actually pressured.
+			if want := map[string]int{"pressured": 1, "clear": 0}[name]; lookups != want {
+				t.Fatalf("exemption lookups = %d, want %d", lookups, want)
+			}
+		})
 	}
 }
 
@@ -205,12 +233,35 @@ func TestSessionCeilingMemoryWarningLoggedOncePerStreak(t *testing.T) {
 func TestSessionCeilingMemoryReentryAfterPressureClears(t *testing.T) {
 	reader := &fakeMemoryReader{reading: pressuredReading()}
 	c := newMemoryController(10, &fakeAdmittedLister{}, reader)
+	clock := time.Unix(1_700_000_000, 0)
+	c.now = func() time.Time { return clock }
 	if decision := c.admit(context.Background(), memoryRequest("s-new", launchOriginAutomatic)); decision.admitted {
 		t.Fatal("launch was admitted while pressured")
 	}
 	reader.reading = clearReading()
+	clock = clock.Add(2 * time.Second)
 	if decision := c.admit(context.Background(), memoryRequest("s-new", launchOriginAutomatic)); !decision.admitted {
 		t.Fatalf("launch was not admitted after the pressure cleared: reason=%q", decision.reasonCode)
+	}
+}
+
+// A burst of admissions inside the sample window reads the host once; a later
+// admission reads it again.
+func TestSessionCeilingMemorySampleIsReusedBriefly(t *testing.T) {
+	reader := &fakeMemoryReader{reading: clearReading()}
+	c := newMemoryController(10, &fakeAdmittedLister{}, reader)
+	clock := time.Unix(1_700_000_000, 0)
+	c.now = func() time.Time { return clock }
+	for i := 0; i < 3; i++ {
+		c.admit(context.Background(), memoryRequest("s-burst", launchOriginAutomatic))
+	}
+	if reader.calls != 1 {
+		t.Fatalf("host reads within the sample window = %d, want 1", reader.calls)
+	}
+	clock = clock.Add(2 * time.Second)
+	c.admit(context.Background(), memoryRequest("s-later", launchOriginAutomatic))
+	if reader.calls != 2 {
+		t.Fatalf("host reads after the sample window = %d, want 2", reader.calls)
 	}
 }
 

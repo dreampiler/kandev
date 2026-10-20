@@ -27,10 +27,12 @@ above the ceiling.
 
 ## In scope
 
-- `internal/system/hostmemory`: `Reading`, `Gate.Pressured`, `ReadConfig`, and
+- `internal/system/hostmemory`: `Reading`, `Gate.Pressured`, `ReadConfig`,
+  `readingFromProc` (commit judged only under strict Linux overcommit), and
   Windows, Linux, and unsupported readers.
-- `sessionCeilingController.configureMemoryGate`, `memoryPressuredLocked`, and
-  the `memory_pressure` refusal in `admit`, `handOffOrAdmit`, and
+- `sessionCeilingController.configureMemoryGate`, `memoryPressuredLocked`
+  (automatic origin only), `memoryReadingLocked` (one-second sample), and the
+  `memory_pressure` refusal in `admit`, `handOffOrAdmit`, and
   `decideLocked`; the coordinator exemption; the card note text.
 - Runtime flag `features.sessionMemoryGuard` /
   `KANDEV_FEATURES_SESSION_MEMORY_GUARD`, off in prod, dev, and e2e.

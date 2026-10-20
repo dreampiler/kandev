@@ -149,14 +149,16 @@ failures, or a host watchdog restart.
 
 - **AC-AGENTS-SESSION-CEILING-003.1:** When `features.sessionMemoryGuard` is on
   and host available physical memory is below the configured floor or system
-  commit charge is above the configured ceiling, a launch that would add an
-  agent process shall be deferred through the existing ceiling queue with the
-  `memory_pressure` reason, for automatic and manual origins alike, and whether
-  or not the session-count ceiling is enabled. Its card note shall describe the
-  host condition rather than a session count.
-- **AC-AGENTS-SESSION-CEILING-003.2:** A prompt or resume into an already counted
-  session, a dynamic-route hand-off of a counted session, running turns, and
-  Office coordinator conversations shall not be held by memory pressure.
+  commit charge is above the configured ceiling, an automatic launch that would
+  add an agent process shall be deferred through the existing ceiling queue
+  with the `memory_pressure` reason, whether or not the session-count ceiling
+  is enabled. Its card note shall describe the host condition rather than a
+  session count.
+- **AC-AGENTS-SESSION-CEILING-003.2:** A manual launch (a user-initiated start,
+  resume, or prompt, including when the admitted population cannot be read), a
+  prompt or resume into an already counted session, a dynamic-route hand-off of
+  a counted session, running turns, and Office coordinator conversations shall
+  not be held by memory pressure, and a manual launch shall not read the host.
 - **AC-AGENTS-SESSION-CEILING-003.3:** A deferred launch shall be replayed by the
   existing retry sweep once the host is no longer under pressure.
 - **AC-AGENTS-SESSION-CEILING-003.4:** When host memory cannot be read or the
@@ -173,7 +175,8 @@ failures, or a host watchdog restart.
 - Per-workspace or per-user ceilings.
 - Changing workflow WIP limits or imposing a hard session-count limit on
   manual launches. The opt-in host-memory hold of REQ-AGENTS-SESSION-CEILING-003
-  is a host resource condition, not a count limit.
+  is a host resource condition, not a count limit, and applies only to
+  automatic launches.
 - A release toggle or YAML setting for the session-count ceiling, or automatic
   CPU-based capacity selection.
 - Replacing the orchestrator's existing launch seams or task repository.
