@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
+	runmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -321,6 +322,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		{events.BuildSessionPromptUsageWildcardSubject(), maybeAsync(s.handlePromptUsage)},
 		{events.BuildAgentStreamWildcardSubject(), maybeAsync(s.handleAgentStreamUsage)},
 		{events.AgentTurnMessageSaved, maybeAsync(s.handleAgentTurnMessageSaved)},
+		{events.TaskSessionStateChanged, maybeAsync(s.handleTaskSessionStateChanged)},
 	}
 	for _, sub := range subs {
 		if _, err := eb.Subscribe(sub.subject, sub.handler); err != nil {
@@ -476,6 +478,13 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
+	return s.completeClaimedTaskRun(ctx, run, *data)
+}
+
+// completeClaimedTaskRun finishes a claimed task run whose agent turn ended
+// without error and applies the completion side effects once. It is shared
+// by the lifecycle completion events and the parked-session settlement.
+func (s *Service) completeClaimedTaskRun(ctx context.Context, run *runmodels.Run, data AgentLifecycleData) error {
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -512,7 +521,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		"session_id": data.SessionID,
 	})
 	s.markRoutingSuccess(ctx, run)
-	s.recordRunOutputSummary(ctx, run, *data)
+	s.recordRunOutputSummary(ctx, run, data)
 	s.warnIfReviewDecisionMissing(ctx, run)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
