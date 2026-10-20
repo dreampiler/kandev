@@ -30,10 +30,14 @@ func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 		name        string
 		running     bool
 		noRow       bool
+		neverSeen   bool
 		rowStatus   string
 		wantPending bool
 	}{
 		{name: "stopped local history", rowStatus: models.ExecutorRunningStatusStopped},
+		// A launch that failed before agentctl reported an endpoint or PID
+		// persists its terminal row without a last_seen_at stamp.
+		{name: "stopped local history never seen", neverSeen: true, rowStatus: models.ExecutorRunningStatusStopped},
 		{name: "live runtime", running: true, rowStatus: models.ExecutorRunningStatusStopped, wantPending: true},
 		{name: "runtime record not stopped", rowStatus: "ready", wantPending: true},
 		// Without an executor row the manual relaunch cold-resumes and is
@@ -53,11 +57,15 @@ func TestApplyRouteActionRetryRecoversFailedStartingRoute(t *testing.T) {
 			svc.SetProfileExecutionResolver(agentruntime.NewProfileExecutionResolver(nil, engine, true))
 			decision := seedClaimedDynamicRoute(t, ctx, repo, engine, sessionID, executionID)
 			seenAt := time.Now().UTC()
+			lastSeenAt := &seenAt
+			if tt.neverSeen {
+				lastSeenAt = nil
+			}
 			if !tt.noRow {
 				if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
 					ID: sessionID, SessionID: sessionID, TaskID: taskID, AgentExecutionID: executionID,
 					ExecutorID: models.ExecutorIDWorktree, Runtime: runtimekind.RuntimeStandalone,
-					Status: tt.rowStatus, LastSeenAt: &seenAt,
+					Status: tt.rowStatus, LastSeenAt: lastSeenAt,
 				}); err != nil {
 					t.Fatalf("seed executors_running: %v", err)
 				}
