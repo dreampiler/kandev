@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // MaxRetryCount is the maximum number of retry attempts before marking failed.
@@ -26,11 +28,13 @@ var retryDelays = []time.Duration{
 // HandleRunFailure handles a failed run by scheduling a retry or
 // marking it as permanently failed and escalating to the CEO agent.
 // A launch-validation failure is never retried: the next attempt would build
-// the same command and leave another failed session.
+// the same command and leave another failed session. An unsafe workspace
+// reuse verdict (an inherited environment that cannot be resolved or owned)
+// is never retried either: backoff would only hide a deterministic refusal.
 func (s *Service) HandleRunFailure(
 	ctx context.Context, run *models.Run, runErr error,
 ) error {
-	if routingerr.IsBuiltCommandValidationError(runErr) {
+	if routingerr.IsBuiltCommandValidationError(runErr) || errors.Is(runErr, taskmodels.ErrWorkspaceReuseUnsafe) {
 		return s.escalateFailure(ctx, run, runErr)
 	}
 	if run.RetryCount < MaxRetryCount {
