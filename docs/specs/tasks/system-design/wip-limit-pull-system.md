@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 created: 2026-07-27
-updated: 2026-08-12
+updated: 2026-10-20
 owners:
   - kandev
 ---
@@ -454,3 +454,18 @@ Auto-start idempotency repair (single agent per review task):
 
 Queued task moves and queue presentation:
 [`../../plans/queued-task-moves/plan.md`](../../../plans/queued-task-moves/plan.md).
+
+Deferred entry observability:
+[`../../plans/onenter-wip-deferral-visibility/plan.md`](../../../plans/onenter-wip-deferral-visibility/plan.md).
+
+## Deferred entry observability
+
+AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10 covers the engine-driven transition path.
+`applyEngineTransitionWithCommitMode` commits the source transition, re-reads
+the task, and returns before `launchProcessOnEnter` when the task is queued for
+the destination and not admitted. That early return is the deferral of
+AC-001.3. It writes one `Info` entry, `workflow on_enter deferred until
+destination step admits the task`, with `task_id`, `session_id`,
+`from_step_id`, `to_step_id`, `wip_limit`, and `reason=wip_limit_reached`.
+Queue promotion still owns the later entry behavior; this change does not alter
+admission, promotion order, or session state.

@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-27
-updated: 2026-08-12
+updated: 2026-10-20
 owners:
   - kandev
 ---
@@ -42,3 +42,10 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   capacity in tasks and global session capacity in sessions. If WIP promotion
   exposes a global session limit, the displayed reason shall follow the current
   authoritative queue state. Changing one limit shall not bypass the other.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10:** When a workflow transition commits a
+  task into a full limited step and defers that step's entry behavior until
+  promotion, the backend shall record one operator log entry for the deferral.
+  The entry shall name the task, the session that completed the source step,
+  the source and destination steps, the destination WIP limit, and the reason
+  `wip_limit_reached`, so a queued arrival is distinguishable from entry
+  behavior that never ran.

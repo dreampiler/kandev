@@ -8426,6 +8426,13 @@ func (s *Service) applyEngineTransitionWithCommitMode(
 	if queuedErr == nil && queuedTask != nil && queuedTask.QueuedForStepID == result.ToStepID && !queuedTask.WIPAdmitted {
 		// The source transition is committed, but destination state and
 		// on_enter behavior wait for the queue promotion event.
+		s.logger.Info(wipDeferredOnEnterLogMessage,
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("from_step_id", result.FromStepID),
+			zap.String("to_step_id", result.ToStepID),
+			zap.Int("wip_limit", targetStep.WIPLimit),
+			zap.String("reason", wipDeferredOnEnterReason))
 		if sessionLifecycle {
 			if mode == transitionLifecycleOnTurnStart {
 				if err := s.prepareWorkflowTurnStartSessionState(ctx, taskID, session.ID); err != nil {
