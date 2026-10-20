@@ -36,8 +36,10 @@ turn and queued follow-up to settle without freezing my other sessions.
   execution shall release its client lease after the agent status read and
   before it marks the execution ready and persists it.
 - **AC-PLATFORM-AGENTCTL-CLIENT-LEASE-001.3:** The URL read shall return the
-  current replacement client's URL when one is published and an empty value
-  when no client is set or a client replacement is in progress.
+  current client's URL and an empty value when no client is set. While a client
+  replacement or detach is in progress, it shall return the URL of the
+  replacement client published at that moment, which can still be the previous
+  client, or an empty value when no replacement client is published.
 
 ## Compatibility and exclusions
 

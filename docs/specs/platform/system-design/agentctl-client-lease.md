@@ -28,12 +28,23 @@ Execution persistence (`buildRunningFromExecution`) runs under the execution
 store lock and reads `AgentctlURL`. That read therefore never takes the lease:
 it loads the atomic override first and otherwise reads the construction-time
 client under `agentctlSourceMu.TryRLock`, returning "" when the source lock is
-busy. The base URL is immutable per client, so no lease is needed to keep it
-valid.
+busy. While a replacement or detach holds the source lock, the read therefore
+returns whichever replacement client is published at that moment (possibly the
+previous one) or "". The base URL is immutable per client, so no lease is
+needed to keep it valid. Persistence does not fall back to the prior row's URL
+for an empty read, because an empty URL is also the correct value after a
+detach.
 
 `restoreRecoveredFailedExecution` holds the lease only for `GetStatus` and
 releases it before `markBootReadyFromFailed`, so the lease is never held across
 the store lock.
+
+Releasing the lease early opens one accepted race: a terminal stop can
+take the write side and detach the client between `GetStatus` and
+`markBootReadyFromFailed`. The execution is then marked ready without a
+client, and the next prompt fails because the agentctl client is unavailable.
+That prompt failure is accepted in place of the deadlock that holding the
+lease across the store lock caused.
 
 ## Verification
 
