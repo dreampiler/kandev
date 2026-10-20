@@ -1562,10 +1562,7 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		metaMap = make(map[string]interface{})
 	}
 	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
-	messageID := uuid.NewSHA1(
-		uuid.NameSpaceOID,
-		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
-	).String()
+	messageID := queuedTranscriptMessageID(queuedMsg, sourceIDs)
 	if err := s.messageCreator.CreateUserMessageIdempotent(
 		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
 	); err != nil {
@@ -2571,6 +2568,15 @@ func (s *Service) restoreQueuedMessageForSession(
 		zap.String("queue_id", restored.ID),
 		zap.Int64("position", restored.Position))
 	s.publishQueueStatusEventForIdentity(ctx, identity)
+}
+
+// queuedTranscriptMessageID is the deterministic transcript row ID a queued
+// dispatch records for its user message.
+func queuedTranscriptMessageID(queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) string {
+	return uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
+	).String()
 }
 
 func markQueuedUserMessageRecorded(queuedMsg *messagequeue.QueuedMessage) {
