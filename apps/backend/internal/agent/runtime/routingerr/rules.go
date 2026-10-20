@@ -88,6 +88,18 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
+		// Gateway rate-limit notices that state their own cadence. Each gets its
+		// own rule ID so routing can scope the failure from the reason code
+		// instead of the shared code alone; they must stay ahead of the generic
+		// rate rule. The daily reason codes survive sanitization (see
+		// securityutil.Sanitize) so the full notice still matches.
+		mustRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
+		mustRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
+		// OpenCode Zen's "Rate limit exceeded. Please try again later", optionally
+		// wrapped as "Error from provider (<host>):". The wording states no day or
+		// minute cadence, so it is a generic rate limit and never a daily
+		// allowance; the rule ID only names the signature.
+		mustRule("opencode.rate.try_later.v1", `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
 	},
