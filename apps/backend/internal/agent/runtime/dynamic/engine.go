@@ -214,6 +214,7 @@ func (e *Engine) selectContext(
 			return RouteDecision{}, err
 		}
 		e.states[sessionID] = nextState
+		e.logTierSelection(profile, sessionID, generation, reason, candidate.ID, plan.observe, now)
 		return decision, nil
 	}
 	nextState := RouteState{
