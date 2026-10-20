@@ -210,9 +210,7 @@ Use the existing profile-session-policy fields as a propagation reference, inclu
 Candidate policy API serialization, browser normalization, editor drafts, and save requests preserve the new section.
 A browser edit of unrelated settings must not disable an API-configured policy.
 
-No rendered controls or layout changes are planned. Desktop and phone use existing manual recovery and route-change presentation.
-Use the existing `policy_skip` path and structured unknown error code. Do not manufacture a classified provider reason.
-Existing chat state, composer contents, and historical provider attribution remain intact.
+The dynamic profile editor renders one unclassified policy per candidate inside the existing per-candidate policy disclosure: a switch and a bounded consecutive-failure threshold (2 to 10), with a summary line in the disclosure header and an invalid threshold annotating the save reason. A profile-wide apply control sets every candidate to enabled with a threshold of 2, leaving candidate order, priority groups, model options, and the transient and hard policies unchanged. Desktop and phone use the existing manual recovery and route-change presentation; the workflow veto is unchanged.
 Public documentation must explain API configuration, threshold counting, the workflow veto, and the conservative eligibility limits when implementation ships.
 
 ## Verification boundaries
