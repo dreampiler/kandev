@@ -5,7 +5,7 @@
     {
       "engine": "sqlite3",
       "file": "sqlite.sql",
-      "sha256": "b7c763f6c3f1f6000e8a8f90a123ee3b114582bdd3a0aabf162eedae18cf57a3",
+      "sha256": "5e4ad5bae46918d40003017415be4206e7f44f8a86c1c11ddb515754d48be98a",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-sqlite-sentinel"
       },
@@ -247,7 +247,7 @@
     {
       "engine": "pgx",
       "file": "postgres.sql",
-      "sha256": "8dd108b73d1daaf9cd35ee2255f06f2800f90a7101ba3337c9ee4b0951a51de6",
+      "sha256": "9ddf4a47567503fec1064136f1a5b9152264bd4c07ffd1fb94556009016cf8f1",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
