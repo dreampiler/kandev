@@ -805,6 +805,10 @@ type workflowEntryTransitionLister interface {
 	ListTaskStepTransitions(ctx context.Context, taskID string, beforeID int64, limit int) ([]models.StepTransition, error)
 }
 
+// errWorkflowEntryTransitionLedgerUnavailable reports a repository that cannot
+// read the step-transition ledger, so a lagging route cannot be proven.
+var errWorkflowEntryTransitionLedgerUnavailable = errors.New("workflow entry transition ledger is unavailable")
+
 // unboundSessionlessStartMatchesLaggedRoute reports whether a sessionless start
 // record names the task's current workflow entry while the committed route
 // belongs to exactly the immediately previous entry. Entry admission defers the
@@ -875,7 +879,10 @@ func (s *Service) routeNamesImmediatelyPreviousEntry(
 	}
 	lister, ok := s.repo.(workflowEntryTransitionLister)
 	if !ok {
-		return false, nil
+		// Without the ledger the one-entry lag cannot be distinguished from a
+		// superseded route. Report read uncertainty so the sweep retains the
+		// record for a later pass instead of silently dropping it.
+		return false, errWorkflowEntryTransitionLedgerUnavailable
 	}
 	previous, err := lister.ListTaskStepTransitions(ctx, task.ID, entryID, 1)
 	if err != nil {

@@ -184,6 +184,14 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
    step or entry, a route that is older than one entry or carries a foreign entry
    identity, a record without an entry id, every session-bearing record, and
    every bound record keep the strict comparison and stay superseded.
+   The exception applies only to the step-changed branch
+   (`orchestrator/ceiling_entry.go:713-732`). The legacy sessionless drop at
+   `orchestrator/ceiling_entry.go:737-744` is an intentional guard and is
+   excluded: without an entry identity the record cannot be distinguished from
+   an old visit to the same step, so it is disposed of instead of retargeted.
+   A repository that cannot read the step-transition ledger reports
+   `ceilingEntryUnavailable` for the exception path, so the record is retained
+   for a later pass instead of being mistaken for a superseded route.
 
 ### How a hold ends
 

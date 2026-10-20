@@ -244,3 +244,25 @@ func TestValidateCeilingEntry_BoundStartWithStaleRouteStaysSuperseded(t *testing
 	require.NoError(t, err)
 	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
 }
+
+// A repository without the transition-ledger capability cannot prove that the
+// route lags by one entry. That is read uncertainty, not proof of supersession,
+// so the record is retained for a later pass instead of being dropped.
+func TestValidateCeilingEntry_LaggedRouteWithoutLedgerCapabilityIsRetried(t *testing.T) {
+	f := newStaleRouteFixture(t)
+	f.svc.repo = staleRouteNoLedgerRepo{
+		sessionExecutorStore:         f.repo,
+		workflowStepTransitionReader: f.repo,
+	}
+
+	disposition, detail, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), f.unboundStart())
+	require.Error(t, err)
+	require.Equal(t, ceilingEntryUnavailable, disposition, detail)
+}
+
+// staleRouteNoLedgerRepo keeps the latest-entry read but hides the ledger list,
+// so the one-entry lag cannot be proven.
+type staleRouteNoLedgerRepo struct {
+	sessionExecutorStore
+	workflowStepTransitionReader
+}
