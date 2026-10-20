@@ -1,0 +1,114 @@
+---
+status: draft
+system: office
+requirements:
+  - REQ-OFFICE-RUN-SETTLE-001
+  - REQ-OFFICE-RUN-SETTLE-002
+  - REQ-OFFICE-RUN-SETTLE-003
+---
+
+# Office Run Settlement Integrity System Design
+
+## Purpose and boundaries
+
+Office owns run settlement: when a claimed run finishes, fails, or escalates.
+The orchestrator owns session states and workspace inheritance; Office reads
+them through the `task_session.state_changed` event and the session row. Dynamic
+routing owns its failover decision; this design only waits for its outcome.
+
+## Requirement mapping
+
+| Requirement | Design section |
+| --- | --- |
+| `REQ-OFFICE-RUN-SETTLE-001` | [Parked-session settlement](#parked-session-settlement) |
+| `REQ-OFFICE-RUN-SETTLE-002` | [Inheritance resolution](#inheritance-resolution) |
+| `REQ-OFFICE-RUN-SETTLE-003` | [Session verdict guard](#session-verdict-guard) |
+
+## Components and responsibilities
+
+- `office/service/run_session_park_settlement.go` subscribes to
+  `task_session.state_changed`, resolves deferred failures, and settles parked
+  launched sessions.
+- `office/service/event_subscribers.go` shares one completion body
+  (`completeClaimedTaskRun`) between lifecycle completion events and park
+  settlement, and one failure body (`failClaimedTaskRun`) between immediate and
+  deferred failures.
+- `office/service/agent_error_session_verdict.go` holds the opt-in guard.
+- `office/service/retry.go` classifies launch failures for retry or escalation.
+- `orchestrator/handoff_inheritance.go` resolves the inherited environment.
+
+## Data and contracts
+
+- Park settlement reads `task_id`, `session_id`, `old_state`, `new_state`,
+  `error_message`, and `agent_profile_id` from `task_session.state_changed`.
+- The run is matched with `GetClaimedRunByTaskAndAgent` and settles only when
+  `runs.session_id` equals the event's session.
+- The guard reads `task_sessions.state` and `task_sessions.error_message`
+  through `GetTaskSessionState`.
+- The flag is `FeaturesConfig.OfficeAgentErrorSessionVerdict`, registered in
+  `runtimeflags/registry.go` and set off in every profile.
+
+## Control flow
+
+### Parked-session settlement
+
+A successful turn on the per-launch session model publishes
+`RUNNING -> WAITING_FOR_INPUT` with an empty error. Office loads the agent's
+claimed run on the task, checks the launched session, and runs the AgentCompleted
+completion body: finish, routing success, output summary, checkout release, and
+runtime stamp. Office task sessions park at `IDLE` and keep their teardown path.
+
+### Inheritance resolution
+
+`resolveInheritedEnvironmentChecked` rejects an archived parent first, then
+tries, in order: the parent's primary session environment; the one environment
+all parent sessions hold when no primary exists; the parent-owned task
+environment; the workspace group environment. Each candidate passes the existing
+existence and owner check. Sessions bound to different environments yield no
+session candidate. No valid candidate keeps the unsafe-reuse refusal.
+
+`HandleRunFailure` treats `ErrWorkspaceReuseUnsafe` like a launch-validation
+error: the run fails and `escalateFailure` records the `agent.error` activity and
+queues the coordinator escalation.
+
+### Session verdict guard
+
+With the flag on, `handleAgentFailed` keeps its run event, working-state clear,
+and post-start fallback, then parks the failure keyed by session ID. A parked
+entry has one taker: the state handler, the bounded re-check timer, a later
+AgentCompleted for the session, or the immediate path when the session already
+records a verdict. `sync.Map.CompareAndDelete` decides the taker.
+
+| Session state | Verdict |
+| --- | --- |
+| `FAILED`, `CANCELLED`, errored `WAITING_FOR_INPUT` | failure: apply `failClaimedTaskRun` |
+| `STARTING` (after the failure), clean `WAITING_FOR_INPUT`, `IDLE`, `COMPLETED` | superseded: discard |
+| `CREATED`, `STARTING` or `RUNNING` read at failure time | pending: park |
+
+## Failure and recovery
+
+- A missing or unreadable session at failure time applies the failure at once.
+- The re-check (default two minutes) applies only a recorded failure verdict; a
+  still-live session keeps the run claimed for its current execution.
+- A parked failure does not survive a restart; the run stays claimed until
+  stale-claim recovery requeues it.
+
+## Persistence
+
+No schema change. Parked failures live in memory.
+
+## Security
+
+No new trust boundary. Events and rows are internal.
+
+## Observability
+
+- Park settlement logs `settling Office run after its launched session parked`.
+- The guard appends `agent_error.deferred` and `agent_error.superseded` run
+  events and logs both transitions.
+- Unsafe workspace reuse appears as the run's `error` event, the `agent.error`
+  activity, and the coordinator escalation.
+
+## Related decisions
+
+- [Runtime settings overrides](../../../decisions/0018-runtime-settings-overrides.md)
