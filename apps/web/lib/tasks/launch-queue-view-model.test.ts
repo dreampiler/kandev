@@ -135,6 +135,30 @@ describe("launchQueueCapacityCause", () => {
     ).toBe("task:launchQueueCauseGrade");
   });
 
+  it("names the observed overall limit when both limits refused and no grade is full", () => {
+    const view = buildLaunchQueueViewModel(
+      {
+        queued_at: queuedAt,
+        reason: "session_capacity",
+        retrying: true,
+        capacity_reason: "ceiling_both_limits",
+        capacity: {
+          policy: "all",
+          in_use: 14,
+          limit: 14,
+          observed_at: queuedAt,
+          grade_in_use: { control: 3, dev: 9 },
+          grade_limits: { control: 4, dev: 10 },
+        },
+      },
+      { now: Date.parse(queuedAt) },
+    )!;
+    expect(launchQueueCapacityCause(view)).toEqual({
+      key: "task:launchQueueCauseTotal",
+      values: { inUse: 14, limit: 14 },
+    });
+  });
+
   it("says the grade limit without numbers when the payload has no grade usage", () => {
     expect(launchQueueCapacityCause(queue("ceiling_grade_limit"))).toEqual({
       key: "task:launchQueueCauseGradeUnmeasured",
