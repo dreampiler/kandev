@@ -31,6 +31,10 @@ type TierPreviewEntry struct {
 	RemainingPct          *float64 `json:"remaining_pct,omitempty"`
 	ConsumptionRateKnown  bool     `json:"consumption_rate_known"`
 	ConsumptionPctPerHour *float64 `json:"consumption_pct_per_hour,omitempty"`
+	// resetAt is the proved reset behind the remaining reading. It is kept
+	// internal because the preview's public shape is unchanged by this work.
+	resetAt      time.Time
+	resetAtKnown bool
 }
 
 func tierEligibilityReason(candidate Candidate, excluded map[string]bool, preferred string, unavailable map[string]string) string {
@@ -65,7 +69,7 @@ func rankTierRows(tier orderedTier, number int, excluded map[string]bool, prefer
 	if tier.mode == tierModeRoundRobin {
 		return rotateRoundRobinRows(rows, history)
 	}
-	return rankUsageRows(rows, tier.mode)
+	return rankUsageRows(rows, tier.mode, now)
 }
 
 // Observe an expired circuit's probe availability; only candidateSelectable
