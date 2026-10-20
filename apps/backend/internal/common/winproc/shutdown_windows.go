@@ -69,7 +69,3 @@ func RequestShutdown(pid int) error {
 	defer func() { _ = windows.CloseHandle(event) }()
 	return windows.SetEvent(event)
 }
-
-func shutdownEventName(pid int) string {
-	return fmt.Sprintf(`Local\KandevShutdown-%d`, pid)
-}
