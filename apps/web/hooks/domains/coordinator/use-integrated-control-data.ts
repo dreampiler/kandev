@@ -1,5 +1,6 @@
 import { fetchSessionCapacityObservation } from "@/lib/api/domains/session-capacity-api";
-import type { SessionCapacityObservation } from "@/lib/types/system";
+import { fetchPersistenceDiagnostics } from "@/lib/api/domains/system-api";
+import type { PersistenceDiagnostics, SessionCapacityObservation } from "@/lib/types/system";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkspaces } from "@/hooks/journey-metadata-resources";
@@ -25,7 +26,11 @@ import {
   type ControlRefreshOutcome,
   type ControlRefreshScheduler,
 } from "./control-refresh-scheduler";
-import { retainCapacity, retainControlDetails } from "./control-refresh-snapshot";
+import {
+  retainCapacity,
+  retainControlDetails,
+  retainPersistence,
+} from "./control-refresh-snapshot";
 
 export type ControlWorkspace = WorkspaceState["items"][number];
 export type ControlCoordinatorList = {
@@ -41,6 +46,8 @@ type Snapshot = {
   lastConfirmedCapacity?: SessionCapacityObservation;
   capacityStatus?: ControlReadStatus;
   capacityReceivedAt?: string;
+  persistence?: PersistenceDiagnostics;
+  persistenceStatus?: ControlReadStatus;
   identity: string;
   owner: object;
   workspaces: ControlWorkspace[];
@@ -115,6 +122,11 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
             details.capacity,
             details.capacityStatus,
           ),
+          ...retainPersistence(
+            previous?.owner === owner ? previous : undefined,
+            details.persistence,
+            details.persistenceStatus,
+          ),
           receivedAt: new Date().toISOString(),
         }));
         setFailure(null);
@@ -124,7 +136,7 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         const kind = controlFailureKind(error);
         if (kind === "denied") setSnapshot(undefined);
         setFailure((previous) => ({ ...previous, kind }));
-        return kind === "denied" ? "ok" : "retry";
+        return kind === "denied" || kind === "unsupported" ? "ok" : "retry";
       } finally {
         if (current()) setLoading(false);
       }
@@ -179,10 +191,14 @@ async function readControlDetails(
   coordinatorEnabled: boolean,
   signal: AbortSignal,
 ) {
-  const [byWorkspace, conversationsByWorkspace, capacity] = await Promise.all([
+  const [byWorkspace, conversationsByWorkspace, capacity, persistence] = await Promise.all([
     coordinatorEnabled ? readCoordinatorLists(workspaces, signal) : Promise.resolve({}),
     readControlConversationLists(workspaces, signal),
     fetchSessionCapacityObservation({ init: { signal } }).then(
+      (value) => ({ value, status: "ready" as const }),
+      (error: unknown) => ({ value: undefined, status: controlReadFailure(error) }),
+    ),
+    fetchPersistenceDiagnostics({ cache: "no-store", init: { signal } }).then(
       (value) => ({ value, status: "ready" as const }),
       (error: unknown) => ({ value: undefined, status: controlReadFailure(error) }),
     ),
@@ -192,5 +208,7 @@ async function readControlDetails(
     conversationsByWorkspace,
     capacity: capacity.value,
     capacityStatus: capacity.status,
+    persistence: persistence.value,
+    persistenceStatus: persistence.status,
   };
 }

@@ -1,4 +1,4 @@
-import type { SessionCapacityObservation } from "@/lib/types/system";
+import type { PersistenceDiagnostics, SessionCapacityObservation } from "@/lib/types/system";
 import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import type { ControlConversationLists } from "./control-conversation-lists";
 import type { ControlCoordinatorList } from "./use-integrated-control-data";
@@ -93,5 +93,22 @@ export function retainCapacity(
     capacityReceivedAt: retained ? previous?.capacityReceivedAt : new Date().toISOString(),
     lastConfirmedCapacity:
       confirmedCapacity(capacity) ?? (allowed ? previous?.lastConfirmedCapacity : undefined),
+  };
+}
+
+type PersistenceSnapshot = {
+  persistence?: PersistenceDiagnostics;
+  persistenceStatus?: ControlReadStatus;
+};
+/** A transient diagnostics failure keeps the last reading rather than claiming a state. */
+export function retainPersistence(
+  previous: PersistenceSnapshot | undefined,
+  persistence: PersistenceDiagnostics | undefined,
+  status: ControlReadStatus,
+) {
+  const retained = status === "error";
+  return {
+    persistence: retained ? previous?.persistence : persistence,
+    persistenceStatus: status,
   };
 }

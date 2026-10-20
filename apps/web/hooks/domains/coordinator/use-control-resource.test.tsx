@@ -1,7 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
-import { controlReadFailure, useControlResource } from "./use-control-resource";
+import { NativeControlContractError } from "@/lib/api/domains/control-native-api";
+import { controlFailureKind, controlReadFailure, useControlResource } from "./use-control-resource";
 
 const scope = vi.hoisted(() => ({ identity: "owner-one" }));
 vi.mock("@/components/state-provider", () => ({ useAppStore: () => scope.identity }));
@@ -18,6 +19,12 @@ describe("control read boundaries", () => {
     [500, "error"],
   ])("classifies HTTP %s without substituting zero", (status, expected) => {
     expect(controlReadFailure(new ApiError("failure", Number(status), null))).toBe(expected);
+  });
+  it("reports an unsupported projection as unsupported, not as a permission denial", () => {
+    expect(controlFailureKind(new NativeControlContractError("unsupported"))).toBe("unsupported");
+    expect(controlFailureKind(new ApiError("missing", 404, null))).toBe("unsupported");
+    expect(controlFailureKind(new ApiError("denied", 403, null))).toBe("denied");
+    expect(controlFailureKind(new ApiError("unavailable", 503, null))).toBe("unavailable");
   });
   it("discards the previous identity synchronously and rejects a late read", async () => {
     const pending: Array<(value: string) => void> = [];

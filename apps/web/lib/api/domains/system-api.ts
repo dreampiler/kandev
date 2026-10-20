@@ -26,6 +26,7 @@ import type {
   UpdatesChannel,
   RetentionSettings,
   RetentionStatus,
+  PersistenceDiagnostics,
 } from "@/lib/types/system";
 import type { AgentRuntimeAvailability, AgentRuntimeRetryRequest } from "@/lib/types/agent-runtime";
 
@@ -35,6 +36,15 @@ const SYSTEM_BASE = "/api/v1/system";
 
 export function fetchSystemInfo(options?: ApiRequestOptions): Promise<SystemInfo> {
   return fetchJson<SystemInfo>(`${SYSTEM_BASE}/info`, options);
+}
+
+// --- Persistence diagnostics --------------------------------------------
+
+/** The required-store diagnostics the control header reads for its DB badge. */
+export function fetchPersistenceDiagnostics(
+  options?: ApiRequestOptions,
+): Promise<PersistenceDiagnostics> {
+  return fetchJson<PersistenceDiagnostics>(`${SYSTEM_BASE}/diagnostics/persistence`, options);
 }
 
 // --- Disk usage ---------------------------------------------------------
