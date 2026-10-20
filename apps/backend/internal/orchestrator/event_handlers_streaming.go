@@ -3607,7 +3607,7 @@ func (s *Service) reconcileCompleteEventRuntime(
 		return false
 	}
 	stopReason := extractStopReason(payload)
-	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason) {
+	if s.handleOfficeTurnComplete(ctx, payload.TaskID, payload.SessionID, session, stopReason, completionTurnID) {
 		return true
 	}
 	if payload.Data.TurnID != "" && payload.Data.TurnID == completionTurnID {
@@ -3806,7 +3806,7 @@ const stopReasonCancelled = "cancelled"
 
 // Returns true when handled as office (state→IDLE + StopAgent); stopReason "cancelled" returns false to keep the session promptable.
 func (s *Service) handleOfficeTurnComplete(
-	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason string,
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, stopReason, completionTurnID string,
 ) bool {
 	if session == nil || session.AgentProfileID == "" {
 		return false
@@ -3824,7 +3824,7 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 
-	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session) {
+	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
 		return true
 	}
 
@@ -3856,7 +3856,7 @@ func (s *Service) handleOfficeTurnComplete(
 // session may already serve the next run on the same live execution; flipping
 // it IDLE and stopping that execution would fail the new run.
 func (s *Service) officeSessionRelaunchedSince(
-	ctx context.Context, taskID, sessionID string, snapshot *models.TaskSession,
+	ctx context.Context, taskID, sessionID string, snapshot *models.TaskSession, completionTurnID string,
 ) bool {
 	current, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || current == nil {
@@ -3865,7 +3865,8 @@ func (s *Service) officeSessionRelaunchedSince(
 	relaunched := current.State == models.TaskSessionStateStarting ||
 		(current.State == models.TaskSessionStateRunning && snapshot.State != models.TaskSessionStateRunning) ||
 		(current.AgentExecutionID != "" && snapshot.AgentExecutionID != "" &&
-			current.AgentExecutionID != snapshot.AgentExecutionID)
+			current.AgentExecutionID != snapshot.AgentExecutionID) ||
+		s.sessionTurnAdvancedSince(ctx, sessionID, completionTurnID)
 	if !relaunched {
 		return false
 	}
@@ -3875,8 +3876,21 @@ func (s *Service) officeSessionRelaunchedSince(
 		zap.String("snapshot_state", string(snapshot.State)),
 		zap.String("current_state", string(current.State)),
 		zap.String("snapshot_execution_id", snapshot.AgentExecutionID),
-		zap.String("current_execution_id", current.AgentExecutionID))
+		zap.String("current_execution_id", current.AgentExecutionID),
+		zap.String("completion_turn_id", completionTurnID))
 	return true
+}
+
+// sessionTurnAdvancedSince reports whether the session is running a turn other
+// than the one that just completed. A relaunched session reuses the same live
+// execution, so the execution id is unchanged; the new turn is the signal that
+// distinguishes it from the completing turn.
+func (s *Service) sessionTurnAdvancedSince(ctx context.Context, sessionID, completionTurnID string) bool {
+	if completionTurnID == "" {
+		return false
+	}
+	currentTurnID := s.currentTurnIDForSession(ctx, sessionID)
+	return currentTurnID != "" && currentTurnID != completionTurnID
 }
 
 // handleAgentPlanEvent handles agent_plan events from tool calls (e.g. ExitPlanMode).

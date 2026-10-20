@@ -68,10 +68,13 @@ later `AgentStopped` is a no-op on the finished run.
 
 `handleOfficeTurnComplete` reloads the session before the IDLE flip and
 `StopAgent`. It skips both, and still claims the completion, when the session
-is `STARTING`, is `RUNNING` while the completion snapshot was not, or holds an
-agent execution other than the snapshot's. The reload narrows, but does not
-fully close, the window between the reload and `StopAgent`; a relaunch that
-lands inside that window can still be stopped.
+is `STARTING`, is `RUNNING` while the completion snapshot was not, holds an
+agent execution other than the snapshot's, or is running a turn other than the
+one that just completed. A relaunch that reuses the live execution keeps the
+execution id and can leave the session `RUNNING`, so its new turn is the signal
+that the session moved on. The guard narrows, but does not fully close, the
+window between the reload and `StopAgent`: it is a mitigation, not full mutual
+exclusion, and a relaunch that lands inside that window can still be stopped.
 
 ### Inheritance resolution
 

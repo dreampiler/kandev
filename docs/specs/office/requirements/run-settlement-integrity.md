@@ -69,8 +69,9 @@ never relaunches finished work.
   no-op on the finished run.
 - **AC-OFFICE-RUN-SETTLE-001.5:** When an Office IDLE teardown runs after its
   session was relaunched (the session is `STARTING`, is `RUNNING` again after
-  the completion snapshot was not `RUNNING`, or holds a different agent
-  execution), the system shall skip the IDLE flip and the agent stop.
+  the completion snapshot was not `RUNNING`, holds a different agent execution,
+  or is running a turn other than the one that just completed), the system
+  shall skip the IDLE flip and the agent stop.
 
 ### REQ-OFFICE-RUN-SETTLE-002: Inherited workspace launch resolution
 
