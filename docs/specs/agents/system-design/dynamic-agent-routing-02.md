@@ -4,7 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-DYNAMIC-AGENT-ROUTING-001
 created: 2026-08-13
-updated: 2026-10-12
+updated: 2026-10-20
 owners:
   - cfl
 ---
@@ -169,6 +169,15 @@ require the current exclusive probe lease.
   cannot release the route while no runtime backs it, and no other pass
   recovers it. A live executor row, an unreadable row, a stale generation, and
   any other parked state keep the existing exclusion.
+- A Retry or Try next on such an orphaned route has no predecessor to stop and
+  no cold-resume source. The relaunch treats an empty predecessor execution ID,
+  and a runtime that confirms the execution is gone, as already stopped; any
+  other stop error still refuses the launch. A manual relaunch prompts through
+  a resume only when an `executors_running` row exists. Otherwise it starts a
+  fresh execution with the latest user prompt, as an automatic fallback does.
+  That replayed prompt skips user messages whose transcript row belongs to an
+  entry still in the session queue, so the queue delivers a held message once,
+  after the relaunched turn settles.
 - If the backend restarts during `switching`, it reconciles the persisted route
   generation and downstream ownership before launching. An ambiguous launch is
   not duplicated.
