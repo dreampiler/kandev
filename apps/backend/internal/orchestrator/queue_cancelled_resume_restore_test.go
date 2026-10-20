@@ -91,7 +91,7 @@ func TestCancelledResumeRestoresExactReservation(t *testing.T) {
 		t.Fatalf("reserved = %#v, ok=%t", reserved, ok)
 	}
 	service := &Service{logger: testLogger(), messageQueue: queue}
-	reservation := service.newQueuedDispatchReservation(ctx, "session-1", reserved.ID, identity, reserved)
+	reservation := newQueuedDispatchReservation("session-1", reserved.ID, identity, reserved)
 
 	service.finishQueuedMessageExecution(
 		ctx, "session-1", "session-1", reserved, reservation, false, false, false, errCancelledResumeDispatch,
