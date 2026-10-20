@@ -345,6 +345,7 @@ const (
 // (e.g., task_description, session_id) are treated as launch-time-only and
 // are NOT copied on resume.
 var persistentMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Sprites runtime
@@ -455,6 +456,7 @@ var persistentMetadataPrefixes = []string{
 // the second session would try to attach to the first session's agentctl
 // process and end up sharing its ACP session and instance port.
 var sessionScopedMetadataKeys = map[string]bool{
+	idleActivityMetadataKey:              true,
 	metadataKeySSHPassthroughState:       true,
 	deliveryPromptTurnBindingMetadataKey: true,
 	// Project MCP ownership belongs to the execution that materialized the
