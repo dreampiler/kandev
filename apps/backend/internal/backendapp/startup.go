@@ -31,6 +31,9 @@ type bootstrapRuntime struct {
 
 type startupSignalContextKey struct{}
 
+// startupExit ends the process after a second shutdown signal. Tests replace it.
+var startupExit = os.Exit
+
 type processContextKey struct{}
 
 type workerCancelContextKey struct{}
@@ -74,10 +77,12 @@ func newStartupSignalController(ctx context.Context, cancel context.CancelFunc, 
 	}
 	go func() {
 		defer close(controller.done)
+		var pairing winproc.ShutdownPairing
 		var sig os.Signal
 		select {
 		case sig = <-controller.signals:
 		case sig = <-controller.cooperative:
+			sig = pairing.CooperativeFirst(sig, controller.signals)
 		case <-ctx.Done():
 			return
 		case <-controller.stop:
@@ -85,16 +90,27 @@ func newStartupSignalController(ctx context.Context, cancel context.CancelFunc, 
 		}
 		controller.first <- sig
 		cancel()
-		// Only a deliberate second OS signal forces exit; a later cooperative
-		// request is left unread on its own channel.
-		select {
-		case second := <-controller.signals:
-			if log != nil {
-				log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
-				_ = log.Close()
+		// Only a deliberate second OS signal forces exit. A later cooperative
+		// request is left unread on its own channel, and the OS signal from the
+		// same Ctrl+C as a cooperative first request is absorbed.
+		for {
+			select {
+			case second := <-controller.signals:
+				if !pairing.Forces(second) {
+					if log != nil {
+						log.Debug("ignored console signal paired with cooperative shutdown", zap.String("signal", second.String()))
+					}
+					continue
+				}
+				if log != nil {
+					log.Warn("Received second shutdown signal, forcing exit", zap.String("signal", second.String()))
+					_ = log.Close()
+				}
+				startupExit(1)
+				return
+			case <-controller.stop:
+				return
 			}
-			os.Exit(1)
-		case <-controller.stop:
 		}
 	}()
 	return controller

@@ -62,6 +62,11 @@ Permanent regression coverage lives beside the changed code:
   startup signal controller treats the request as its first signal, ignores a
   request that arrives after a console signal started shutdown, and drops the
   event when released.
+- `apps/backend/internal/backendapp/startup_signal_pairing_test.go` and
+  `apps/backend/internal/common/winproc/shutdown_pairing_test.go`: when the
+  cooperative request starts shutdown, the OS signal from the same Ctrl+C is
+  absorbed and only a further signal forces exit; a waiting OS signal is
+  preferred over the cooperative request.
 - `apps/backend/internal/common/winproc/shutdown_name_test.go`: the event name
   matches the shell's `Local\KandevShutdown-<pid>` on every platform.
 - `apps/desktop/src-tauri/src/backend.rs`:
@@ -75,5 +80,7 @@ Permanent regression coverage lives beside the changed code:
 - A repeated or late request must not become the second signal that forces
   exit; the waiter forwards at most one signal into its own channel, and only
   OS signals are read during the second-signal wait. Ctrl+C in a console shared
-  by the launcher and backend produces exactly that late request.
+  by the launcher and backend produces exactly that late request. When the
+  cooperative request is taken first instead, the next OS signal is its console
+  pair and is absorbed once, in both the launcher and the backend.
 - The development `make` wrapper has no event and keeps the tree-wide request.

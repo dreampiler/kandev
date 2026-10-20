@@ -43,7 +43,9 @@ signaling, the development `make` wrapper, and taskkill output localization.
    the launcher's graceful stop request, without forced cleanup.
 2. The backend startup signal controller treats the request as its first signal
    and cancels startup; a request after a console signal does not force exit;
-   after release, a request fails so callers fall back.
+   when the request comes first, the OS signal from the same Ctrl+C does not
+   force exit but a further one does; after release, a request fails so callers
+   fall back.
 3. The shell's `terminate_child_with_timeout` stops a console-less child that
    registered the event with a clean exit.
 
@@ -58,6 +60,7 @@ signaling, the development `make` wrapper, and taskkill output localization.
 
 - `apps/backend/internal/common/winproc/shutdown_windows.go` (new)
 - `apps/backend/internal/common/winproc/shutdown_name.go` (new)
+- `apps/backend/internal/common/winproc/shutdown_pairing.go` (new)
 - `.github/workflows/backend-tests.yml`
 - `apps/backend/internal/common/winproc/shutdown_other.go` (new)
 - `apps/backend/internal/launcher/process.go`

@@ -41,7 +41,12 @@ only while waiting for the first signal; the second-signal wait that forces
 exit reads OS signals alone. When `kandev start` or `kandev run` shares a
 console with the backend, Ctrl+C reaches both processes and the launcher then
 sets the backend's event, so this separation keeps that late request from
-cutting the backend's teardown short. Releasing the handler stops the waiter
+cutting the backend's teardown short. The two requests from one Ctrl+C can
+also arrive in the other order: `winproc.ShutdownPairing` takes an OS signal
+that is already waiting in preference to the cooperative request, and when the
+cooperative request still starts shutdown it absorbs exactly one later OS
+signal as that request's console pair, so only a further Ctrl+C forces exit.
+Releasing the handler stops the waiter
 and closes both handles, after which a stop request falls back. The event name
 helper is untagged so every platform tests the name shared with the shell.
 
