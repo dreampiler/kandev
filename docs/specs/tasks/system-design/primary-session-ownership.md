@@ -95,22 +95,34 @@ The existing `auto-promoted primary session` log keeps the old and new IDs.
 ## Replaced session reclaim
 
 With `features.replacedSessionReclaim` on (`ServiceConfig.ReplacedSessionReclaim`),
-`SetPrimarySession` reads the previous primary and promotes under
-`primarySessionReclaimMu`, then registers the previous primary's current
-`executors_running.agent_execution_id` in `replacedSessionReclaims`.
-`transferQueuedSessionState` registers the queue donor the same way. A
-registration is attempted immediately and retried by
-`reclaimReplacedSessionsOnce` on each idle-reaper tick (`001.6`).
+only the explicit user promotion (`session.set_primary`, which calls
+`PromotePrimarySession`) registers a replaced session. It reads the previous
+primary and promotes under `primarySessionReclaimMu`, then registers the
+previous primary's current `executors_running.agent_execution_id` in
+`replacedSessionReclaims`. Nothing is stopped inline:
+`reclaimReplacedSessionsOnce` evaluates registrations on each idle-reaper tick
+(`001.6`).
+
+`SetPrimarySession`, used by automatic promotion, session deletion, and
+workflow profile switches, never registers. Those paths only take
+`primarySessionReclaimMu` around the write, so a stop decision cannot act on a
+session they have just promoted. A workflow switch therefore parks or completes
+its source with the runtime it expects, and its queue transfer registers
+nothing.
 
 A stop runs under the session's prompt admission and a non-blocking lifecycle
 lock, and again under `primarySessionReclaimMu`. It drops the registration when
 the session became primary again, left the task, or its execution rotated or
-stopped. It defers while the session has known idle work (an active turn,
-language-server lease, background work, or open clarification), is parked, is
-an Office task, belongs to an archived task, or is not eligible for automatic
-resume. Otherwise it calls `StopSessionDetailed` with reason "session replaced"
-and falls back to `StopExecution` for the exact execution.
+stopped, and when the claim can never stop the session: it is parked, is in a
+terminal state (completed, failed, or cancelled), is an Office task, belongs to
+an archived or missing task, or is not eligible for automatic resume. It
+defers, keeping the registration, while the session is still starting or
+running, while a read fails, or while it has known idle work (an active turn,
+language-server lease, background work, open clarification, pending permission,
+or pending queued message). Otherwise it calls `StopExecution` for the exact
+execution with reason "session replaced". There is no session state write; the
+`agent.stopped` handler preserves `WAITING_FOR_INPUT` and `IDLE`, so the
+conversation resumes on the next prompt.
 
-With the flag off, both registration and the tick return immediately and
-`SetPrimarySession` performs only the promotion.
-
+With the flag off, `PromotePrimarySession` is `SetPrimarySession`, the tick
+returns immediately, and `SetPrimarySession` performs only the promotion.

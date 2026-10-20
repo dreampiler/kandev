@@ -48,11 +48,13 @@ By default, the message goes to the task's primary session. To target another se
 - `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
 - The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
 
-With `features.replacedSessionReclaim` on, when a replacement takes over as
-primary or receives the old session's queued messages, Kandev stops the
-obsolete non-primary execution after its active turn and known pending work
-settle. Office and coordinator owners and parked workflow sessions keep their
-existing lifecycle rules.
+With `features.replacedSessionReclaim` on, when you make another session the
+primary, Kandev stops the previous primary's agent process within about 30
+seconds, after its active turn and known pending work settle. The conversation
+stays waiting for input and resumes when you message it again. Automatic
+promotion and workflow step switches do not stop anything. Office and
+coordinator owners and parked workflow sessions keep their existing lifecycle
+rules.
 
 Delivery behaviour depends on the target session's state at the moment of the call:
 

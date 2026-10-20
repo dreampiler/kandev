@@ -18,26 +18,27 @@ system_design:
 ## Summary
 
 With `features.replacedSessionReclaim` on, stop the execution a session held
-when it lost the primary role or handed its queue to a replacement, once that
-session settles.
+when the user promoted another session over it, once that session settles.
 
 ## In scope
 
-- `registerReplacedSessionReclaim`, `reclaimReplacedSession`,
-  `reclaimReplacedSessionsOnce`, and `stopReplacedSessionIfSettled` in
-  `orchestrator/replaced_session_reclaim.go`.
-- `SetPrimarySession` records the previous primary under
-  `primarySessionReclaimMu`; `transferQueuedSessionState` registers the donor;
-  the idle-reaper tick retries registrations.
+- `PromotePrimarySession`, `registerReplacedSessionReclaim`,
+  `reclaimReplacedSessionsOnce`, `stopReplacedSessionIfSettled`, and
+  `replacedSessionReclaimEligibility` in
+  `orchestrator/replaced_session_reclaim.go`; the `session.set_primary`
+  handler calls `PromotePrimarySession`.
+- `SetPrimarySession` only takes `primarySessionReclaimMu` around its write and
+  never registers; the idle-reaper tick performs every stop.
 - Runtime flag `features.replacedSessionReclaim` /
   `KANDEV_FEATURES_REPLACED_SESSION_RECLAIM`, off in prod, dev, and e2e.
 
 ## Out of scope
 
-Automatic promotion, idle suspension policy, Office and coordinator lifecycle,
-and queue routing.
+Automatic promotion, session deletion, workflow profile switches and their
+queue transfer, idle suspension policy, Office and coordinator lifecycle, and
+queue routing.
 
 ## Verification
 
-- `go test ./internal/orchestrator/ -run 'TestPrimaryReplacement|TestQueueReplacementStopsSettledDemotedExecution' -count=1`
+- `go test ./internal/orchestrator/ -run 'TestPrimaryReplacement|TestAutomaticPrimaryPromotionDoesNotReclaim|TestQueueTransferDoesNotReclaimDonor|TestProfileSwitchParkWithReclaimOnParksSource' -count=1`
 - `go test ./internal/runtimeflags/ ./internal/profiles/ -count=1`
