@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
+import { numberCellClass } from "./control-table";
 import Link from "@/components/routing/app-link";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import { linkToTask } from "@/lib/links";
@@ -132,19 +133,8 @@ export function ControlAttentionList({
         </p>
       ) : (
         <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("sidebar:controlSummary.column.state")}</TableHead>
-                <TableHead>{t("sidebar:controlSummary.column.workspace")}</TableHead>
-                <TableHead>{t("sidebar:controlSummary.column.task")}</TableHead>
-                <TableHead>{t("sidebar:controlSummary.column.reason")}</TableHead>
-                <TableHead>{t("sidebar:controlSummary.column.duration")}</TableHead>
-                <TableHead>
-                  <span className="sr-only">{t("sidebar:controlSummary.attention.open")}</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
+          <Table className="min-w-[48rem] table-fixed">
+            <AttentionTableHead />
             <TableBody>
               {visible.map((item, index) => {
                 const link = target(item, firstWorkspaceId);
@@ -157,18 +147,20 @@ export function ControlAttentionList({
                     <TableCell>
                       <ControlStatusPill state={item.kind} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">
+                    <TableCell className="truncate">
                       {item.workspaceId
                         ? (names[item.workspaceId] ?? item.workspaceId)
                         : t("sidebar:controlSummary.attention.allWorkspaces")}
                     </TableCell>
-                    <TableCell className="max-w-72 whitespace-normal break-words">
+                    <TableCell className="whitespace-normal break-words">
                       {subject(t, item)}
                     </TableCell>
-                    <TableCell className="max-w-96 whitespace-normal text-xs text-muted-foreground">
+                    <TableCell className="whitespace-normal text-xs text-muted-foreground">
                       {reason(t, item)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+                    <TableCell
+                      className={numberCellClass(undefined, "text-xs text-muted-foreground")}
+                    >
                       {since ? durationSince(since) : "-"}
                     </TableCell>
                     <TableCell>
@@ -187,5 +179,36 @@ export function ControlAttentionList({
         </div>
       )}
     </section>
+  );
+}
+
+/** Fixed column widths keep the duration column lined up across filters. */
+function AttentionTableHead() {
+  const { t } = useTranslation();
+  return (
+    <>
+      <colgroup>
+        <col className="w-28" />
+        <col className="w-36" />
+        <col />
+        <col />
+        <col className="w-20" />
+        <col className="w-28" />
+      </colgroup>
+      <TableHeader>
+        <TableRow>
+          <TableHead>{t("sidebar:controlSummary.column.state")}</TableHead>
+          <TableHead>{t("sidebar:controlSummary.column.workspace")}</TableHead>
+          <TableHead>{t("sidebar:controlSummary.column.task")}</TableHead>
+          <TableHead>{t("sidebar:controlSummary.column.reason")}</TableHead>
+          <TableHead className="text-right">
+            {t("sidebar:controlSummary.column.duration")}
+          </TableHead>
+          <TableHead>
+            <span className="sr-only">{t("sidebar:controlSummary.attention.open")}</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+    </>
   );
 }

@@ -14,7 +14,17 @@ import {
   readControlConversationLists,
   type ControlConversationLists,
 } from "./control-conversation-lists";
-import { controlReadFailure, type ControlReadStatus } from "./use-control-resource";
+import {
+  controlFailureKind,
+  controlReadFailure,
+  type ControlFailureKind,
+  type ControlReadStatus,
+} from "./use-control-resource";
+import {
+  createControlRefreshScheduler,
+  type ControlRefreshOutcome,
+  type ControlRefreshScheduler,
+} from "./control-refresh-scheduler";
 import { retainCapacity, retainControlDetails } from "./control-refresh-snapshot";
 
 export type ControlWorkspace = WorkspaceState["items"][number];
@@ -58,7 +68,19 @@ async function readCoordinatorLists(workspaces: ControlWorkspace[], signal: Abor
   return Object.fromEntries(rows);
 }
 
-/** One authorized read lifetime shared by the route and both navigation surfaces. */
+/** Why the last snapshot read failed; the page shows it once, as one banner. */
+export type ControlRefreshFailure = {
+  kind: ControlFailureKind;
+  /** When the next automatic retry runs, if one is scheduled. */
+  retryAt?: string;
+};
+
+/**
+ * One authorized read lifetime shared by the route and both navigation
+ * surfaces. Reads run every 30 seconds, live events are coalesced into one
+ * settled read, and a request during a read joins one follow-up read instead
+ * of aborting the read in flight.
+ */
 export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: boolean) {
   const store = useAppStoreApi();
   const identity = useAppStore(stateReadScopeIdentity);
@@ -66,29 +88,22 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const ws = useWebSocketClient();
   const [snapshot, setSnapshot] = useState<Snapshot>();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
-  const request = useRef<AbortController | null>(null);
-  const refresh = useCallback(async () => {
-    if (!enabled) return;
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    const current = () =>
-      !controller.signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
-    setLoading(true);
-    setError(false);
-    try {
-      const result = await readJourneyWorkspaces(store, {
-        signal: controller.signal,
-        refresh: true,
-      });
-      if (!current()) return;
-      const workspaces = result.workspaces
-        .map(mapWorkspaceItem)
-        .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
-      store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
-      const details = await readControlDetails(workspaces, coordinatorEnabled, controller.signal);
-      if (current())
+  const [failure, setFailure] = useState<ControlRefreshFailure | null>(null);
+  const scheduler = useRef<ControlRefreshScheduler | null>(null);
+  const read = useCallback(
+    async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
+      const current = () =>
+        !signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+      setLoading(true);
+      try {
+        const result = await readJourneyWorkspaces(store, { signal, refresh: true });
+        if (!current()) return "ok";
+        const workspaces = result.workspaces
+          .map(mapWorkspaceItem)
+          .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
+        store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
+        const details = await readControlDetails(workspaces, coordinatorEnabled, signal);
+        if (!current()) return "ok";
         setSnapshot((previous) => ({
           identity,
           owner,
@@ -102,40 +117,62 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
           ),
           receivedAt: new Date().toISOString(),
         }));
-    } catch (error) {
-      if (current()) {
-        if (controlReadFailure(error) !== "error") setSnapshot(undefined);
-        setError(true);
+        setFailure(null);
+        return "ok";
+      } catch (error) {
+        if (!current()) return "ok";
+        const kind = controlFailureKind(error);
+        if (kind === "denied") setSnapshot(undefined);
+        setFailure((previous) => ({ ...previous, kind }));
+        return kind === "denied" ? "ok" : "retry";
+      } finally {
+        if (current()) setLoading(false);
       }
-    } finally {
-      if (current()) setLoading(false);
-    }
-  }, [enabled, coordinatorEnabled, store, identity, owner]);
+    },
+    [coordinatorEnabled, store, identity, owner],
+  );
 
   useEffect(() => {
     if (!enabled) return;
-    void refresh();
-    return () => request.current?.abort();
-  }, [enabled, refresh]);
+    const next = createControlRefreshScheduler({
+      run: read,
+      isVisible: () => document.visibilityState === "visible",
+      onRetryScheduled: (at) =>
+        setFailure((previous) =>
+          previous ? { ...previous, retryAt: at ? new Date(at).toISOString() : undefined } : null,
+        ),
+    });
+    scheduler.current = next;
+    void next.request();
+    return () => {
+      next.dispose();
+      if (scheduler.current === next) scheduler.current = null;
+    };
+  }, [enabled, read]);
+  const refresh = useCallback(() => scheduler.current?.request() ?? Promise.resolve(), []);
   useForegroundRefresh(refresh, enabled, identity);
   useEffect(() => {
     if (!enabled || !ws) return;
-    const removers = [
-      ws.on("coordinator.updated", () => void refresh()),
-      ws.on("workspace.updated", () => void refresh()),
-      ws.on("workspace.deleted", () => void refresh()),
-      ws.on("task.created", () => void refresh()),
-      ws.on("task.updated", () => void refresh()),
-      ws.on("task.deleted", () => void refresh()),
-      ws.on("session.state_changed", () => void refresh()),
-    ];
+    const onEvent = () => scheduler.current?.event();
+    const removers = CONTROL_REFRESH_EVENTS.map((event) => ws.on(event, onEvent));
     return () => removers.forEach((remove) => remove());
-  }, [enabled, ws, refresh]);
+  }, [enabled, ws]);
 
   const data =
     enabled && snapshot?.identity === identity && snapshot.owner === owner ? snapshot : undefined;
-  return { data, loading, error, refresh };
+  const visibleFailure = enabled ? failure : null;
+  return { data, loading, error: Boolean(visibleFailure), failure: visibleFailure, refresh };
 }
+
+const CONTROL_REFRESH_EVENTS = [
+  "coordinator.updated",
+  "workspace.updated",
+  "workspace.deleted",
+  "task.created",
+  "task.updated",
+  "task.deleted",
+  "session.state_changed",
+] as const;
 
 async function readControlDetails(
   workspaces: ControlWorkspace[],

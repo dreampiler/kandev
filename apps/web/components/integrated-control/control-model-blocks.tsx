@@ -30,9 +30,6 @@ export function ControlModelBlocks({ workspaceId }: { workspaceId?: string }) {
   const empty = result.data?.filter(isEmpty) ?? [];
   return (
     <SectionCard title={t("office:providerHealth")}>
-      <p className="p-3 text-xs text-muted-foreground">
-        {t("sidebar:controlRestore.nativeHealthScope")}
-      </p>
       <ControlReadState {...result} />
       {empty.length > 0 && (
         <p className="border-t p-3 text-sm text-muted-foreground">

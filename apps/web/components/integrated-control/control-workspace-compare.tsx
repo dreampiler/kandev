@@ -3,10 +3,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import Link from "@/components/routing/app-link";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import { useRouter } from "@/lib/routing/client-router";
-import { cn } from "@/lib/utils";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlStatusPill, toneTextClass } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
+import { numberCellClass } from "./control-table";
 import type { WorkspaceFigures } from "./control-signals";
 import type { ControlSignals } from "./use-control-signals";
 
@@ -39,10 +39,9 @@ function emphasis(signals: ControlSignals, id: string, key: keyof WorkspaceFigur
 function NumberCell({ value, tone }: { value: number | string; tone: Emphasis }) {
   return (
     <TableCell
-      className={cn(
-        "text-right font-mono tabular-nums",
+      className={numberCellClass(
+        tone ? undefined : value,
         tone && `font-semibold ${toneTextClass(tone)}`,
-        !tone && value === 0 && "text-muted-foreground",
       )}
       data-emphasis={tone}
     >
@@ -68,18 +67,23 @@ export function ControlWorkspaceCompare({
   );
   return (
     <section className="space-y-2" data-testid="control-workspace-compare">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
-        <p className="text-xs text-muted-foreground">{t("sidebar:controlSummary.compare.hint")}</p>
-      </div>
+      <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
       <div className="rounded-lg border">
-        <Table>
+        <Table className="min-w-[52rem] table-fixed">
+          <colgroup>
+            <col className="w-48" />
+            <col className="w-28" />
+            {COLUMNS.map((column) => (
+              <col key={column.key} className="w-20" />
+            ))}
+            <col className="w-24" />
+          </colgroup>
           <TableHeader>
             <TableRow>
               <TableHead>{t("sidebar:controlSummary.column.workspace")}</TableHead>
               <TableHead>{t("sidebar:controlSummary.column.state")}</TableHead>
               {COLUMNS.map((column) => (
-                <TableHead key={column.key} className="text-right">
+                <TableHead key={column.key} className="whitespace-normal text-right">
                   {t(column.label)}
                 </TableHead>
               ))}
@@ -106,7 +110,7 @@ export function ControlWorkspaceCompare({
                   onClick={() => router.push(href)}
                   data-testid="control-compare-row"
                 >
-                  <TableCell className="font-medium">
+                  <TableCell className="truncate font-medium">
                     <Link href={href} onClick={(event) => event.stopPropagation()}>
                       {workspace.name}
                     </Link>

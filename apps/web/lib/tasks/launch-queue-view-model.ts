@@ -120,3 +120,41 @@ export function buildLaunchQueueViewModel(
     capacity,
   };
 }
+
+export type LaunchQueueCapacityCause = {
+  key:
+    | "task:launchQueueCauseGrade"
+    | "task:launchQueueCauseGradeUnmeasured"
+    | "task:launchQueueCauseTotal";
+  values?: Record<string, string | number>;
+};
+
+/**
+ * The one limit that holds the launch, from the recorded refusal reason and
+ * the capacity sample the payload already carries. A grade refusal names the
+ * full grade and its usage when exactly one grade is full; otherwise it says
+ * the grade limit without numbers. When both limits refused, the narrower
+ * grade limit is the one named.
+ */
+export function launchQueueCapacityCause(
+  view: LaunchQueueViewModel,
+): LaunchQueueCapacityCause | null {
+  const reason = view.capacityReason;
+  if (reason === "ceiling_grade_limit" || reason === "ceiling_both_limits") {
+    const full = (view.capacity?.grades ?? []).filter(
+      (row) => row.inUse !== null && row.limit !== null && row.inUse >= row.limit,
+    );
+    if (full.length !== 1) return { key: "task:launchQueueCauseGradeUnmeasured" };
+    const [row] = full;
+    return {
+      key: "task:launchQueueCauseGrade",
+      values: { grade: row.grade, inUse: row.inUse!, limit: row.limit! },
+    };
+  }
+  if (reason === "ceiling_total_limit" && view.capacity)
+    return {
+      key: "task:launchQueueCauseTotal",
+      values: { inUse: view.capacity.inUse, limit: view.capacity.limit },
+    };
+  return null;
+}

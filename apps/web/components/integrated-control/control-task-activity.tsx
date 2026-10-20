@@ -17,7 +17,6 @@ export function ControlTaskActivity({ workspaceId }: { workspaceId?: string }) {
   return (
     <section className="space-y-3" data-testid="control-task-activity">
       <h2 className="font-medium">{t("sidebar:controlInspection.tasks")}</h2>
-      <p className="text-sm text-muted-foreground">{t("sidebar:controlInspection.taskScope")}</p>
       {workspaces
         .filter((workspace) => !workspaceId || workspace.id === workspaceId)
         .map((workspace) => {

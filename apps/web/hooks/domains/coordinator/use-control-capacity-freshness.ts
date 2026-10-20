@@ -21,8 +21,9 @@ export function useControlCapacityFreshness(observation?: SessionCapacityObserva
   };
 }
 
+/** A failed read makes the shown capacity stale; a read in progress does not. */
 function capacityReadPending(control: ReturnType<typeof useIntegratedControl>) {
-  return Boolean(control?.error || control?.loading || control?.data?.capacityStatus === "error");
+  return Boolean(control?.error || control?.data?.capacityStatus === "error");
 }
 
 function capacityIsStale(connected: boolean, refreshing: boolean, age: number) {

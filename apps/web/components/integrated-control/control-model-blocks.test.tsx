@@ -76,7 +76,6 @@ describe("native workspace provider health", () => {
     fixture.readHealth.mockResolvedValue({ health: [] });
     render(<ControlModelBlocks workspaceId="w1" />);
     expect(await screen.findByText("sidebar:controlRestore.noProviderHealth")).toBeTruthy();
-    expect(screen.getByText("sidebar:controlRestore.nativeHealthScope")).toBeTruthy();
   });
 
   it("rejects an incompatible response and never reveals a foreign workspace row", async () => {

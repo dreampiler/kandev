@@ -6,7 +6,6 @@ import { ControlTaskBoard } from "./control-task-board";
 import { ControlOverview } from "./control-overview";
 import { ControlInbox } from "./control-inbox";
 import { ControlWorkspaceCompare } from "./control-workspace-compare";
-import { ControlReadingGuide } from "./control-reading-guide";
 import { useControlSignals } from "./use-control-signals";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
@@ -35,12 +34,7 @@ export function IntegratedControlDashboard({
     >
       {view === "overview" && <ControlOverview />}
       {view === "inbox" && <ControlInbox />}
-      {view === "history" && (
-        <>
-          <ControlHistory workspaceId={workspaceId} />
-          <ControlReadingGuide view="history" />
-        </>
-      )}
+      {view === "history" && <ControlHistory workspaceId={workspaceId} />}
       {view === "workspaces" && <WorkspacesView workspaceId={workspaceId} />}
       {view === "activity" && (
         <>
@@ -50,20 +44,9 @@ export function IntegratedControlDashboard({
           />
           <ControlTaskBoard />
           {rows.length > 0 && <CoordinatorFacts view={view} rows={rows} />}
-          <ControlReadingGuide view="activity" />
         </>
       )}
-      {view === "providers" && (
-        <>
-          <ControlProviderUsage workspaceId={workspaceId} />
-          <ControlReadingGuide view="providers" />
-        </>
-      )}
-      {hasPartialControlData(control.data) && (
-        <p role="alert" className="text-sm text-destructive">
-          {t("sidebar:integratedControl.partialData")}
-        </p>
-      )}
+      {view === "providers" && <ControlProviderUsage workspaceId={workspaceId} />}
       {workspaces.length === 0 && (
         <p className="text-sm text-muted-foreground">
           {t("sidebar:integratedControl.noWorkspaces")}
@@ -80,21 +63,11 @@ function WorkspacesView({ workspaceId }: { workspaceId?: string }) {
     <>
       <ControlWorkspaceCompare signals={signals} workspaceId={workspaceId} />
       {workspaceId && <ControlWorkspaces workspaceId={workspaceId} />}
-      <ControlReadingGuide view="workspaces" />
     </>
   );
 }
 
 type ControlData = NonNullable<NonNullable<ReturnType<typeof useIntegratedControl>>["data"]>;
-
-function hasPartialControlData(data: ControlData) {
-  return (
-    Object.values(data.byWorkspace).some((list) => list.error) ||
-    Object.values(data.conversationsByWorkspace).some(
-      (list) => list.independent.error || list.tasks?.error,
-    )
-  );
-}
 
 type FactRows = Array<{
   workspace: ControlData["workspaces"][number];

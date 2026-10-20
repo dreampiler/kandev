@@ -1,12 +1,11 @@
 import { useTranslation } from "react-i18next";
-import { IconMessage } from "@tabler/icons-react";
+import { IconMessage, IconPlus } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
 import { controlHref, type ControlView } from "@/lib/navigation/integrated-control";
-import { useSearchParams } from "@/lib/routing/client-router";
+import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
-import type { ControlCollection } from "@/hooks/domains/coordinator/control-conversation-lists";
+import { useOpenControlConversation } from "@/hooks/domains/coordinator/use-open-control-conversation";
 import { useIntegratedControl } from "./integrated-control-provider";
-import { ControlReadState } from "./control-read-state";
 
 function ConversationLink({
   workspaceId,
@@ -36,7 +35,7 @@ function ConversationLink({
       onNavigated={onNavigate}
       aria-current={selected ? "page" : undefined}
       title={label}
-      className="ml-3 flex min-h-7 cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
+      className="flex min-h-7 cursor-pointer min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-muted aria-[current=page]:bg-accent [@media(pointer:coarse)]:min-h-11"
       data-testid={`control-conversation-${current ? coordinatorId : taskId}`}
     >
       <IconMessage className="size-3.5 shrink-0" aria-hidden />
@@ -45,72 +44,91 @@ function ConversationLink({
   );
 }
 
-function CollectionNotice({
-  collection,
-}: {
-  collection?: Pick<ControlCollection<unknown>, "error" | "denied" | "stale" | "receivedAt">;
-}) {
-  if (!collection?.error && !collection?.denied) return null;
-  return (
-    <ControlReadState
-      status={collection.denied ? "denied" : "error"}
-      stale={collection.stale}
-      receivedAt={collection.receivedAt}
-    />
-  );
-}
-
-export function ControlCoordinatorConversations({
+/**
+ * One "Coordinator conversation" entry. With a conversation it links to it;
+ * without one it opens a new conversation through the existing coordinator
+ * route and then shows it.
+ */
+export function ControlCoordinatorConversation({
   workspaceId,
   coordinator,
+  named,
   view,
   onNavigate,
 }: {
   workspaceId: string;
   coordinator: Coordinator;
+  named: boolean;
   view: ControlView;
   onNavigate?: () => void;
 }) {
   const { t } = useTranslation();
+  const control = useIntegratedControl();
+  const router = useRouter();
+  const opener = useOpenControlConversation(workspaceId, coordinator.id, control?.refresh);
+  const label = named
+    ? t("sidebar:integratedControl.coordinatorConversationNamed", { name: coordinator.name })
+    : t("sidebar:integratedControl.coordinatorConversation");
+  if (coordinator.conversation_task_id)
+    return (
+      <ConversationLink
+        workspaceId={workspaceId}
+        coordinatorId={coordinator.id}
+        taskId={coordinator.conversation_task_id}
+        current
+        view={view}
+        onNavigate={onNavigate}
+        label={label}
+      />
+    );
   return (
     <>
-      {coordinator.conversation_task_id ? (
-        <ConversationLink
-          workspaceId={workspaceId}
-          coordinatorId={coordinator.id}
-          taskId={coordinator.conversation_task_id}
-          current
-          view={view}
-          onNavigate={onNavigate}
-          label={t("sidebar:integratedControl.currentConversation")}
-        />
-      ) : (
-        <p className="px-5 py-1.5 text-xs text-muted-foreground">
-          {t("sidebar:integratedControl.noConversation")}
+      <button
+        type="button"
+        disabled={opener.pending}
+        title={label}
+        onClick={async () => {
+          if (!(await opener.open())) return;
+          router.push(controlHref(view, workspaceId, coordinator.id));
+          onNavigate?.();
+        }}
+        className="flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted disabled:cursor-wait [@media(pointer:coarse)]:min-h-11"
+        data-testid={`control-open-conversation-${coordinator.id}`}
+      >
+        <IconPlus className="size-3.5 shrink-0" aria-hidden />
+        <span className="truncate">{label}</span>
+      </button>
+      {opener.failed && (
+        <p role="alert" className="px-2 py-1 text-xs text-muted-foreground">
+          {t("sidebar:integratedControl.openConversationFailed")}
         </p>
       )}
     </>
   );
 }
 
+/** A workspace's independent conversations, folded to one line with their count. */
 export function ControlIndependentConversations({
   workspaceId,
   view,
   onNavigate,
-  grouped = true,
 }: {
   workspaceId: string;
   view: ControlView;
   onNavigate?: () => void;
-  grouped?: boolean;
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
   const collection = control?.data?.conversationsByWorkspace[workspaceId]?.independent;
-  const content = (
-    <>
-      <CollectionNotice collection={collection} />
-      {collection?.items.map((item) => (
+  if (!collection?.items.length) return null;
+  return (
+    <details className="min-w-0" data-testid="control-independent-conversations">
+      <summary className="cursor-pointer truncate px-2 py-1.5 text-xs text-muted-foreground [@media(pointer:coarse)]:min-h-11">
+        {t("sidebar:integratedControl.independentConversationCount", {
+          count: collection.items.length,
+        })}
+      </summary>
+      {collection.items.map((item) => (
         <ConversationLink
           key={item.task_id}
           workspaceId={workspaceId}
@@ -120,29 +138,6 @@ export function ControlIndependentConversations({
           label={item.name || t("sidebar:integratedControl.unnamedConversation")}
         />
       ))}
-    </>
-  );
-  // An empty list is said once for the whole tree, not under every workspace.
-  if (!independentVisible(collection)) return null;
-  return grouped ? (
-    <details open className="min-w-0">
-      <summary className="cursor-pointer truncate px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11">
-        {t("sidebar:integratedControl.independentConversations")}
-      </summary>
-      {content}
     </details>
-  ) : (
-    <div className="min-w-0" data-testid="control-direct-conversations">
-      {content}
-    </div>
-  );
-}
-
-/** Whether a workspace's independent conversations have anything to show: items or a read problem. */
-export function independentVisible(
-  collection?: Pick<ControlCollection<unknown>, "items" | "error" | "denied">,
-) {
-  return Boolean(
-    collection && (collection.error || collection.denied || collection.items.length > 0),
   );
 }

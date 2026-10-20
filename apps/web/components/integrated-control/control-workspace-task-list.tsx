@@ -86,7 +86,6 @@ export function ControlWorkspaceTaskList({
           </Button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">{t("sidebar:controlNative.taskScope")}</p>
       <ControlReadState {...list} />
       {list.status === "ready" && !rows && <ControlReadState status="unsupported" />}
       <ul className="divide-y">

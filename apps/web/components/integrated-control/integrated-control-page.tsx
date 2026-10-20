@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
+import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { cn } from "@/lib/utils";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { controlView } from "@/lib/navigation/integrated-control";
@@ -12,7 +14,8 @@ import type { ControlView } from "@/lib/navigation/integrated-control";
 import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrated-control-data";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ControlConversationLists } from "@/hooks/domains/coordinator/control-conversation-lists";
-import { ControlSnapshotReadState } from "./control-read-state";
+import { ControlLastRefresh } from "./control-read-state";
+import { ControlRefreshBanner } from "./control-refresh-banner";
 
 function originalControlTask(
   lists: ControlConversationLists | undefined | false,
@@ -58,18 +61,21 @@ export function IntegratedControlPage() {
             </p>
           )}
         </div>
-        <div className="sr-only md:not-sr-only md:max-w-72">
-          <ControlSnapshotReadState />
-        </div>
+        <ControlLastRefresh />
         <Button
           variant="ghost"
           size="sm"
-          disabled={control.loading}
           onClick={() => void control.refresh()}
+          data-testid="control-refresh"
         >
+          <IconRefresh
+            className={cn("size-4", control.loading && "animate-spin")}
+            aria-hidden="true"
+          />
           {t("sidebar:integratedControl.refresh")}
         </Button>
       </header>
+      <ControlRefreshBanner />
       <ControlBody
         view={view}
         workspace={workspace}
@@ -99,12 +105,8 @@ function ControlBody({
 }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  if (control?.error && !control.data)
-    return (
-      <p role="alert" className="p-6 text-sm text-destructive">
-        {t("sidebar:integratedControl.loadError")}
-      </p>
-    );
+  // A failed first read is reported by the page banner alone.
+  if (control?.failure && !control.data) return null;
   if (!control?.data)
     return (
       <p role="status" className="p-6 text-sm">

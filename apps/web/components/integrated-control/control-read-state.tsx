@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { ControlRead } from "@/hooks/domains/coordinator/use-control-resource";
-import { formatDateTime } from "@/lib/i18n/formats";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { formatControlClock } from "./control-refresh-clock";
 
 const STATUS_KEYS = {
   loading: "common:loading",
@@ -11,52 +11,41 @@ const STATUS_KEYS = {
 };
 
 /**
- * A read's state. A plain successful read says nothing unless `showTime` asks
- * for its time: the page header carries the one read time a screen needs, so
- * cards stay quiet until a read is loading, failing or retained after a failure.
+ * A card read's problem, if any. A successful or refreshing read says
+ * nothing: the page header carries the one read time a screen needs. While
+ * the page banner reports a failed snapshot read, failed cards stay quiet and
+ * keep their last values instead of repeating the same failure.
  */
-export function ControlReadState({
-  status,
-  receivedAt,
-  refreshing,
-  stale,
-  showTime = false,
-}: ControlRead<unknown> & { showTime?: boolean }) {
+export function ControlReadState({ status, receivedAt, stale }: ControlRead<unknown>) {
   const { t } = useTranslation();
-  if (status === "ready" && !stale && !showTime) return null;
-  if (status === "ready" && !receivedAt && !refreshing) return null;
-  const key = readStatusKey({ status, refreshing, stale, receivedAt });
-  const text = `${t(key)}${receivedAt ? ` · ${formatDateTime(receivedAt)} (${Intl.DateTimeFormat().resolvedOptions().timeZone})` : ""}`;
+  const bannerShown = Boolean(useIntegratedControl()?.failure);
+  if (status === "ready" && !stale) return null;
+  if (bannerShown && (status === "error" || stale)) return null;
+  const retained = stale && receivedAt;
+  const text = retained
+    ? t("sidebar:controlRefresh.retainedAt", { time: formatControlClock(receivedAt) })
+    : t(STATUS_KEYS[status === "ready" ? "error" : status]);
   return (
     <p
       role={status === "error" || status === "denied" ? "alert" : "status"}
-      className="h-8 min-w-0 truncate px-3 py-2 text-xs text-muted-foreground"
-      title={text}
+      className="min-w-0 px-3 py-2 text-xs text-muted-foreground tabular-nums"
     >
       {text}
     </p>
   );
 }
 
-function readStatusKey({ status, refreshing, stale, receivedAt }: ControlRead<unknown>) {
-  if (refreshing) return receivedAt ? "sidebar:controlRefresh.refreshing" : "common:loading";
-  if (stale && receivedAt) return "sidebar:controlRefresh.retainedError";
-  if (status === "ready") return "sidebar:controlRefresh.readAt";
-  return STATUS_KEYS[status];
-}
-
-export function ControlSnapshotReadState() {
-  const control = useIntegratedControl();
-  let status: ControlRead<unknown>["status"] = "loading";
-  if (control?.data) status = "ready";
-  if (control?.error) status = "error";
+/** The header's read time: fixed-width digits, never replaced by a refreshing label. */
+export function ControlLastRefresh() {
+  const { t } = useTranslation();
+  const receivedAt = useIntegratedControl()?.data?.receivedAt;
+  if (!receivedAt) return null;
   return (
-    <ControlReadState
-      status={status}
-      refreshing={control?.loading}
-      stale={control?.error && Boolean(control.data)}
-      receivedAt={control?.data?.receivedAt}
-      showTime
-    />
+    <span
+      className="shrink-0 whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground"
+      data-testid="control-last-refresh"
+    >
+      {t("sidebar:controlRefresh.lastRefresh", { time: formatControlClock(receivedAt) })}
+    </span>
   );
 }

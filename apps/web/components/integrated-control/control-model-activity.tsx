@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
+import { NUMBER_CELL, numberCellClass } from "./control-table";
 import { useNativeLedger } from "@/hooks/domains/coordinator/use-control-native";
 import { formatDateTime, formatNumber } from "@/lib/i18n/formats";
 import { formatSubcentsUsd } from "@/lib/coordinator/autonomy";
@@ -116,7 +117,7 @@ function ModelRow({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const numeric = "text-right font-mono tabular-nums";
+  const numeric = NUMBER_CELL;
   return (
     <Fragment>
       <TableRow data-testid="control-ledger-model">
@@ -136,9 +137,13 @@ function ModelRow({
         <TableCell className="text-muted-foreground">
           {row.providers.join(", ") || t("common:unknown")}
         </TableCell>
-        <TableCell className={numeric}>{formatNumber(row.events)}</TableCell>
+        <TableCell className={numberCellClass(row.events)}>{formatNumber(row.events)}</TableCell>
         {tokenFields.map((field) => (
-          <TableCell key={field} className={numeric} data-testid={`control-ledger-${field}`}>
+          <TableCell
+            key={field}
+            className={numberCellClass(row.tokens[field].value)}
+            data-testid={`control-ledger-${field}`}
+          >
             <MeasuredValue value={row.tokens[field]} />
           </TableCell>
         ))}
