@@ -47,6 +47,8 @@ teardown, and unblocking a process that is already stalled.
   fails on the previous source after 10 seconds per subtest with the dispatch
   goroutine blocked in `parkSessionForProfileSwitch`, and passes with the
   change, including 10 repeated runs under `-race`.
+- Task 02 replaced that test with tests that also check exactly-once delivery
+  to the destination session.
 
 ## Files likely touched
 
