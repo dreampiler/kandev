@@ -28,15 +28,22 @@ process identity, and let Windows `OwnedSessionTerminated` and
 - `processidentity.Identity.WindowsJobName`, `WindowsJobNamePrefix`, and
   `WindowsJobNameEnv`.
 - Windows `Inspect` reports `StateExited` when the process has an exit time.
-- Windows `Capture(os.Getpid())` records the inherited job name only after
+- `processidentity.TakeWindowsJobNameFromEnv`, called first in agentctl's
+  `runMain`, takes the job name and unsets it, so agentctl's descendants do not
+  inherit it. Windows `Capture(os.Getpid())` records the taken name only after
   `IsProcessInJob` confirms membership.
 - Windows `OwnedSessionTerminated`: live owner is not terminated; exited owner
-  with an empty or closed owned job is terminated; reused PID, unknown state,
-  missing or foreign job name, or unreadable job fail closed.
+  or a reused PID with an empty or closed owned job is terminated; unknown
+  state, missing or foreign job name, or unreadable job fail closed.
 - Windows `TerminateOwnedSession` terminates and waits on the owned job after
-  confirmed owner exit.
-- The launcher names the job, passes it to the child, and keeps the identity
-  even when capture fails (cleanup then still fails closed).
+  confirmed owner exit or PID reuse.
+- The job name is read in the same Windows session that created it (`Local\`
+  namespace); see the system design.
+- The launcher names the job and passes it to the child on Windows only,
+  removes an inherited copy elsewhere, and keeps the job name even when capture
+  fails (the identity then has no PID or birth token, so cleanup fails closed).
+- `KANDEV_INTERNAL_WINDOWS_JOB_NAME` is a startup catalog exclusion (internal
+  wiring) and is listed in the public configuration exclusions.
 
 ## Out of scope
 
@@ -46,6 +53,13 @@ Linux and macOS containment and every caller of the identity API.
 
 - `go test ./internal/common/processidentity/ -run 'TestWindows(ExitedOwner|OwnedSessionWithoutOwnedJob|OwnedSessionMockProcessTable|OwnedSessionAliveIsNotTerminated|ContainmentRejectsUnknownAndLiveProcesses)' -count=1`
   (no child process is started)
+- In-process tests without child processes: `TestTakeWindowsJobNameFromEnv*`,
+  `TestWindowsCaptureIgnoresJobNameLeftInEnvironment`,
+  `TestWindowsReusedOwnerPIDUsesOwnedJobEvidence`, the launcher
+  `TestNewWindowsJobNameOnlyOnWindows`,
+  `TestWithWindowsJobNameReplacesInheritedValue`, and
+  `TestStartedProcessIdentityCaptureFailureKeepsOnlyJobName`, and the config
+  catalog tests.
 - Process tests that start child processes:
   `TestWindowsOwnedSessionNamedJobProvesTermination` and
   `TestWindowsNamedJobContainsOrphanAfterLeaderExit` (with its helper

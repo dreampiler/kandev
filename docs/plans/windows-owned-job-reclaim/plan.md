@@ -24,7 +24,8 @@ could not be contained and replaced.
 
 In scope: `apps/backend/internal/common/processidentity` (shared identity and
 the Windows implementation), `internal/common/winproc` (named kill-on-close
-jobs), and the agentctl launcher (`launcher.go`, `lifecycle_windows.go`).
+jobs), the agentctl launcher (`launcher.go`, `lifecycle_windows.go`), agentctl
+startup (`cmd/agentctl/main.go`), and the configuration catalog exclusion.
 
 Excluded: Linux and macOS containment, callers of the identity API, and any
 change to when recovery or cleanup is attempted.
@@ -41,6 +42,7 @@ original owner is confirmed exited.
 
 ## Changed-path coverage
 
-The work order owns the processidentity, winproc, and launcher files above,
+The work order owns the processidentity, winproc, launcher, agentctl startup,
+and configuration catalog files above, `docs/public/configuration.md`,
 their permanent tests, `AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.7`, and the
 Windows containment paragraph of the agent runtime availability design.

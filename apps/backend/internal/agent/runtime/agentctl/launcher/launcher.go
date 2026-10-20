@@ -283,12 +283,8 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 	if err != nil {
 		return err
 	}
-	jobName := ""
-	if runtime.GOOS == "windows" {
-		jobName = processidentity.WindowsJobNamePrefix + uuid.NewString()
-	}
-	overrides = append(overrides, processidentity.WindowsJobNameEnv+"="+jobName)
-	l.cmd.Env = environmentWithOverrides(os.Environ(), overrides...)
+	jobName := newWindowsJobName(runtime.GOOS)
+	l.cmd.Env = withWindowsJobName(environmentWithOverrides(os.Environ(), overrides...), jobName)
 	l.cmd.SysProcAttr = buildSysProcAttr(l.startupConfig.AgentSurvivalEnabled)
 
 	// Kill-path #1 (design 01's kill-paths list, "parent-liveness pipe"):
@@ -319,8 +315,7 @@ func (l *Launcher) buildAndStartProcess(nonce string) error {
 		closePipeOnStartFailure(pipeWrite, l.cmd)
 		return fmt.Errorf("failed to start agentctl: %w", err)
 	}
-	identity, identityErr := processidentity.Capture(l.cmd.Process.Pid)
-	identity.WindowsJobName = jobName
+	identity, identityErr := startedProcessIdentity(l.cmd.Process.Pid, jobName)
 	l.processIdentity = identity
 	if identityErr != nil {
 		l.logger.Warn("could not capture agentctl process identity; descendant cleanup will fail closed",
@@ -378,6 +373,47 @@ func (l *Launcher) childEnvOverrides(nonce string) ([]string, error) {
 		overrides = append(overrides, commonconfig.InternalAgentctlStartupConfigEnv+"="+encoded)
 	}
 	return overrides, nil
+}
+
+// captureProcessIdentity is replaced by tests of the capture-failure path.
+var captureProcessIdentity = processidentity.Capture
+
+// newWindowsJobName returns the name of the launcher-owned Job Object for one
+// Windows launch, and empty on other platforms, where no job is created.
+func newWindowsJobName(goos string) string {
+	if goos != "windows" {
+		return ""
+	}
+	return processidentity.WindowsJobNamePrefix + uuid.NewString()
+}
+
+// withWindowsJobName drops any inherited job name and passes jobName to the
+// child only when this launch creates a named job.
+func withWindowsJobName(env []string, jobName string) []string {
+	result := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		// Windows environment names are case-insensitive.
+		if key, _, ok := strings.Cut(entry, "="); ok && strings.EqualFold(key, processidentity.WindowsJobNameEnv) {
+			continue
+		}
+		result = append(result, entry)
+	}
+	if jobName != "" {
+		result = append(result, processidentity.WindowsJobNameEnv+"="+jobName)
+	}
+	return result
+}
+
+// startedProcessIdentity records the started child's identity. When capture
+// fails the record keeps no PID or birth token, so cleanup fails closed, but
+// it keeps the job name so containment still installs the named job.
+func startedProcessIdentity(pid int, jobName string) (processidentity.Identity, error) {
+	identity, err := captureProcessIdentity(pid)
+	if err != nil {
+		identity = processidentity.Identity{}
+	}
+	identity.WindowsJobName = jobName
+	return identity, err
 }
 
 func environmentWithOverrides(base []string, overrides ...string) []string {
