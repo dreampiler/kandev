@@ -216,8 +216,12 @@ type AgentExecution struct {
 	prepareProgressRecorder *prepareProgressRecorder
 
 	// agentctl client for this execution
-	agentctl                  *agentctl.Client
-	agentctlOverride          atomic.Pointer[agentctl.Client]
+	agentctl         *agentctl.Client
+	agentctlOverride atomic.Pointer[agentctl.Client]
+	// agentctlURLFallback is the URL a replacement or detach publishes before it
+	// takes agentctlSourceMu's write side, so a concurrent persistence read never
+	// reports an empty endpoint for an execution that still has one.
+	agentctlURLFallback       atomic.Pointer[string]
 	agentctlLifecycleMu       sync.RWMutex
 	agentctlSourceMu          sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
@@ -1197,12 +1201,25 @@ func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback f
 	return true
 }
 
+// publishAgentctlURL records the URL that reads must fall back to while a
+// client replacement or detach holds agentctlSourceMu's write side. Writers call
+// it before taking the lock: persistence reads the URL from another goroutine
+// and must still report a real endpoint instead of blanking
+// executors_running.agentctl_url.
+func (ae *AgentExecution) publishAgentctlURL(url string) {
+	if ae == nil {
+		return
+	}
+	ae.agentctlURLFallback.Store(&url)
+}
+
 // replaceAgentctlClient atomically publishes a replacement connection while
 // retaining the construction-time field for test/source compatibility.
 func (ae *AgentExecution) replaceAgentctlClient(client *agentctl.Client) *agentctl.Client {
 	if ae == nil || client == nil {
 		return nil
 	}
+	ae.publishAgentctlURL(client.BaseURL())
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	previous := ae.currentAgentCtlClient()
@@ -1216,6 +1233,7 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
+	ae.publishAgentctlURL("")
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
@@ -1240,8 +1258,9 @@ func (ae *AgentExecution) IsAgentctlReady() bool {
 // the execution store lock, possibly from a caller that already holds a read
 // lease, and a terminal stop may be waiting for the lease's write side. The
 // base URL is immutable per client, so an atomic or try-locked snapshot is
-// enough; a concurrent client replacement or detach yields "" for that one
-// snapshot.
+// enough. While a replacement or detach holds the source write side, the read
+// returns the URL that writer published before taking it, so a concurrent
+// persistence write never blanks a live endpoint.
 func (ae *AgentExecution) AgentctlURL() string {
 	if ae == nil {
 		return ""
@@ -1250,6 +1269,9 @@ func (ae *AgentExecution) AgentctlURL() string {
 		return client.BaseURL()
 	}
 	if !ae.agentctlSourceMu.TryRLock() {
+		if url := ae.agentctlURLFallback.Load(); url != nil {
+			return *url
+		}
 		return ""
 	}
 	defer ae.agentctlSourceMu.RUnlock()

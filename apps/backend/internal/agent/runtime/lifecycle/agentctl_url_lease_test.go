@@ -71,6 +71,63 @@ func TestAgentctlURLDoesNotWaitBehindPendingLifecycleWriter(t *testing.T) {
 	}
 }
 
+// A replacement publishes its URL before it takes the client source write side,
+// and a detach publishes an empty URL the same way. Persistence reads the URL
+// from another goroutine, so it must still report a real endpoint while the
+// write side is held; otherwise the executors_running upsert blanks
+// agentctl_url for a live execution.
+func TestAgentctlURLKeepsURLWhileClientSourceIsWriteLocked(t *testing.T) {
+	original := agentctl.NewClient("127.0.0.1", 41001, newTestLogger())
+	replacement := agentctl.NewClient("127.0.0.1", 41002, newTestLogger())
+	execution := &AgentExecution{ID: "exec-source-window", agentctl: original}
+
+	writerLocked := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		execution.agentctlSourceMu.Lock()
+		close(writerLocked)
+		<-releaseWriter
+		execution.agentctlSourceMu.Unlock()
+	}()
+	<-writerLocked
+
+	replacementDone := make(chan struct{})
+	go func() {
+		defer close(replacementDone)
+		execution.replaceAgentctlClient(replacement)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var got string
+	for {
+		got = execution.AgentctlURL()
+		if got != "" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got != replacement.BaseURL() {
+		close(releaseWriter)
+		<-replacementDone
+		<-writerDone
+		t.Fatalf("AgentctlURL() while the client source is write-locked = %q, want %q", got, replacement.BaseURL())
+	}
+
+	close(releaseWriter)
+	<-replacementDone
+	<-writerDone
+	if got := execution.AgentctlURL(); got != replacement.BaseURL() {
+		t.Fatalf("AgentctlURL() after replacement = %q, want %q", got, replacement.BaseURL())
+	}
+
+	execution.detachAgentctlClient()
+	if got := execution.AgentctlURL(); got != "" {
+		t.Fatalf("AgentctlURL() after detach = %q, want empty", got)
+	}
+}
+
 func TestAgentctlURLReadsOverrideAndEmptyClient(t *testing.T) {
 	if got := (&AgentExecution{}).AgentctlURL(); got != "" {
 		t.Fatalf("AgentctlURL() without a client = %q, want empty", got)

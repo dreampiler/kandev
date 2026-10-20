@@ -26,14 +26,17 @@ agentctl client lease, and release the lease in
 ## In scope
 
 - `AgentctlURL`: nil-safe; atomic override first, then the source client under
-  `TryRLock`; "" when no client is set or the source lock is busy.
+  `TryRLock`. A read that cannot take the read side returns the URL that the
+  replacement or detach published before taking the write side, so an empty URL
+  means no client is set.
 - `restoreRecoveredFailedExecution`: release the lease after `GetStatus` and
   on the nil-client path, not by `defer`.
 
 ## Out of scope
 
-Lease handling in other call sites, the terminal stop path, client replacement,
-and detach.
+Lease handling in other call sites and the terminal stop path. Client
+replacement and detach keep their lease semantics; they only publish their URL
+before taking the source write side.
 
 ## Verification
 

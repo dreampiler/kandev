@@ -25,17 +25,22 @@ launching and streaming.
 ## Scope
 
 In scope: `apps/backend/internal/agent/runtime/lifecycle/types.go`
-(`AgentctlURL`), `manager_interaction.go` (`restoreRecoveredFailedExecution`),
-and a permanent unit test.
+(`AgentctlURL`, plus the URL publication in client replacement and detach),
+`manager_interaction.go` (`restoreRecoveredFailedExecution`), and a permanent
+unit test.
 
-Excluded: other lease users, the terminal stop path, and any change to client
-replacement or detach.
+Excluded: other lease users, the terminal stop path, and any change to the
+lease semantics of client replacement or detach.
 
 ## Technical approach
 
 - `AgentctlURL` never takes the client lease. The base URL is immutable per
   client, so it reads the atomic override first, then the construction-time
-  client under a try-locked source read, and returns "" if that lock is busy.
+  client under a try-locked source read.
+- A replacement or detach publishes its URL with an atomic before taking the
+  source write side, and a read that cannot take the read side returns that
+  value. Persistence therefore never blanks `executors_running.agentctl_url`
+  for a live execution.
 - `restoreRecoveredFailedExecution` releases the lease right after
   `GetStatus`, before marking the execution ready.
 

@@ -27,13 +27,19 @@ nested read lease blocks until the outer one is released.
 Execution persistence (`buildRunningFromExecution`) runs under the execution
 store lock and reads `AgentctlURL`. That read therefore never takes the lease:
 it loads the atomic override first and otherwise reads the construction-time
-client under `agentctlSourceMu.TryRLock`, returning "" when the source lock is
-busy. While a replacement or detach holds the source lock, the read therefore
-returns whichever replacement client is published at that moment (possibly the
-previous one) or "". The base URL is immutable per client, so no lease is
-needed to keep it valid. Persistence does not fall back to the prior row's URL
-for an empty read, because an empty URL is also the correct value after a
-detach.
+client under `agentctlSourceMu.TryRLock`. The base URL is immutable per client,
+so no lease is needed to keep it valid.
+
+A replacement or detach holds the source write side, which would make
+`TryRLock` fail for a persistence read running on another goroutine. Both
+writers therefore publish the URL they are moving to or from with an atomic
+before they take the lock: a replacement publishes the incoming client's URL and
+a detach publishes the empty string. A read that cannot take the read side
+returns that published value instead of blanking
+`executors_running.agentctl_url` and `last_seen_at` for a live execution; an
+empty URL therefore only appears when no client is set. Persistence still does
+not fall back to the prior row's URL for an empty read, because an empty URL is
+the correct value when no client is set.
 
 `restoreRecoveredFailedExecution` holds the lease only for `GetStatus` and
 releases it before `markBootReadyFromFailed`, so the lease is never held across
@@ -50,4 +56,6 @@ lease across the store lock caused.
 
 Lifecycle unit tests hold a read lease, queue a writer, and require
 `AgentctlURL` to return the client URL without waiting, plus the override and
-empty-client cases. No process is started.
+empty-client cases. One test holds the source write side while a replacement
+publishes its URL and requires the read to keep that URL, so the executors
+upsert cannot blank a live endpoint. No process is started.
