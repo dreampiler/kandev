@@ -649,12 +649,18 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 	}
 	conversation := make([]string, 0, len(messages))
 	toolSummary := make([]string, 0)
+	held := s.queuedTranscriptMessageIDs(ctx, sessionID)
 	for _, message := range messages {
 		if message == nil || strings.TrimSpace(message.Content) == "" {
 			continue
 		}
 		content := strings.TrimSpace(message.Content)
 		if message.AuthorType == models.MessageAuthorUser {
+			if _, queued := held[message.ID]; queued {
+				// Still owned by the queue, which delivers it after the
+				// successor starts; the continuation must not carry it too.
+				continue
+			}
 			input.UserMessages = append(input.UserMessages, content)
 			continue
 		}
@@ -1697,7 +1703,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	launchMode := dynamicRelaunchLaunchModeCreated
 	if officeErr != nil || isOfficeTask {
 		launchMode = dynamicRelaunchLaunchModePrepared
-	} else if origin == launchOriginManual {
+	} else if origin == launchOriginManual && s.dynamicRelaunchHasResumeSource(ctx, data.SessionID) {
 		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
@@ -1716,7 +1722,19 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	return task, session, prompt, launchMode, true
 }
 
+// stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
+// reports whether the successor may launch. A predecessor that is already
+// gone counts as stopped: a session with no recorded execution (an orphaned
+// route whose executors_running row is absent) and a runtime that confirms
+// the execution is not found. Every other stop error keeps the relaunch from
+// launching over an unresolved teardown. executor.StopExecution also wraps a
+// genuine teardown failure in ErrExecutionNotFound, so only the bare sentinel
+// (returned when there is no execution to address) counts as absence.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if agentExecutionID == "" {
+		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
+		return true
+	}
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
 	}
@@ -1724,7 +1742,8 @@ func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecu
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, agentruntime.ErrNotFound) {
+	//nolint:errorlint // Identity match: a wrapped ErrExecutionNotFound carries a genuine stop failure.
+	if errors.Is(err, agentruntime.ErrNotFound) || err == executor.ErrExecutionNotFound {
 		s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
 		return true
 	}
@@ -1891,10 +1910,16 @@ func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (
 	if err != nil {
 		return capturedPrompt{}, false
 	}
+	held := s.queuedTranscriptMessageIDs(ctx, sessionID)
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
 		if message == nil || message.AuthorType != models.MessageAuthorUser ||
 			strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		if _, queued := held[message.ID]; queued {
+			// The queue still owns this message and delivers it once the
+			// relaunched session settles; replaying it here would send it twice.
 			continue
 		}
 		return capturedPrompt{text: message.Content}, true
