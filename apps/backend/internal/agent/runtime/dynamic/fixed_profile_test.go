@@ -1,6 +1,7 @@
 package dynamic
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -48,6 +49,42 @@ func TestCircuitActiveSuspensionExpiry(t *testing.T) {
 	snapshot, ok = held.ActiveSuspension(key, now.Add(365*24*time.Hour))
 	if !ok || !snapshot.Until.IsZero() {
 		t.Fatalf("held circuit = %#v, %v; want a blocking circuit with no reset instant", snapshot, ok)
+	}
+}
+
+// A half-open probe that was live when the process stopped must not wedge a
+// fixed profile after it is restored: the expired probe falls back to its reset
+// instant, which the probe acquisition already passed.
+func TestCircuitActiveSuspensionExpiredProbeAfterRestore(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	persist := newStubCircuitPersistence()
+	key := "credential:acme"
+	persist.rows[key] = CircuitSnapshot{
+		Key: key, State: CircuitHalfOpen,
+		Until: now.Add(-2 * time.Minute), ProbeUntil: now.Add(-time.Minute),
+		Code: routingerr.CodeQuotaLimited,
+	}
+
+	restored := NewCircuitRegistry(WithCircuitPersistence(persist), WithCircuitClock(func() time.Time { return now }))
+	if err := restored.Restore(ctx); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if _, ok := restored.ActiveSuspension(key, now); ok {
+		t.Fatal("an expired restored probe still blocked a fixed-profile dispatch")
+	}
+
+	persist.rows[key] = CircuitSnapshot{
+		Key: key, State: CircuitHalfOpen,
+		Until: now.Add(-time.Minute), ProbeUntil: now.Add(time.Minute),
+		Code: routingerr.CodeQuotaLimited,
+	}
+	live := NewCircuitRegistry(WithCircuitPersistence(persist), WithCircuitClock(func() time.Time { return now }))
+	if err := live.Restore(ctx); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if _, ok := live.ActiveSuspension(key, now); !ok {
+		t.Fatal("a live restored probe lease stopped blocking")
 	}
 }
 

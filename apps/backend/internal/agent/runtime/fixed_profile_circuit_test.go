@@ -82,3 +82,45 @@ func TestRecordAndReadFixedProfileSuspension(t *testing.T) {
 		t.Fatal("an unreadable profile reported a known verdict")
 	}
 }
+
+type fixedCircuitPersistence struct {
+	snapshots []dynamic.CircuitSnapshot
+}
+
+func (p *fixedCircuitPersistence) SaveCircuit(context.Context, dynamic.CircuitSnapshot) error {
+	return nil
+}
+
+func (p *fixedCircuitPersistence) LoadCircuits(context.Context) ([]dynamic.CircuitSnapshot, error) {
+	return p.snapshots, nil
+}
+
+// A half-open probe restored after a backend restart with an expired lease must
+// not refuse a fixed-profile dispatch: the fixed path acquires no probe, so it
+// has to admit once the probe and reset instants have both passed.
+func TestFixedProfileSuspensionAfterRestoredExpiredProbe(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	key := dynamic.ResourceKey(dynamic.ScopeProfile, "concrete-profile")
+	persist := &fixedCircuitPersistence{snapshots: []dynamic.CircuitSnapshot{{
+		Key: key, State: dynamic.CircuitHalfOpen,
+		Until: now.Add(-2 * time.Minute), ProbeUntil: now.Add(-time.Minute),
+		Code: routingerr.CodeQuotaLimited,
+	}}}
+	registry := dynamic.NewCircuitRegistry(
+		dynamic.WithCircuitPersistence(persist), dynamic.WithCircuitClock(func() time.Time { return now }),
+	)
+	if err := registry.Restore(ctx); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	engine := dynamic.NewEngine(dynamic.WithCircuitRegistry(registry), dynamic.WithClock(func() time.Time { return now }))
+	profiles := &dynamicResolverTestProfiles{
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+	}
+	resolver := NewProfileExecutionResolver(profiles, engine, true)
+
+	suspension, known := resolver.FixedProfileSuspension(ctx, "concrete-profile", now)
+	if !known || suspension.Blocked() {
+		t.Fatalf("restored expired probe = %#v, %v; want known and unblocked", suspension, known)
+	}
+}
