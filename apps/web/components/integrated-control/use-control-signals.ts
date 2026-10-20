@@ -17,6 +17,7 @@ import {
   type WorkspaceFigures,
   type WorkspaceStatus,
 } from "./control-signals";
+import { stageCountsFromStates, sumStageCounts, type TaskStageCounts } from "./control-stages";
 import { repeatedMoves } from "./control-step-moves";
 
 const NO_IDS: string[] = [];
@@ -39,6 +40,9 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
     const figures: Record<string, WorkspaceFigures | undefined> = {};
     for (const row of dashboards.data ?? [])
       if (row.data) figures[row.id] = workspaceFigures(row.data);
+    const stagesById: Record<string, TaskStageCounts | undefined> = {};
+    for (const row of dashboards.data ?? [])
+      if (row.data) stagesById[row.id] = stageCountsFromStates(row.data.tasks);
     const waiting = capacityWaitingTotal(data?.capacity);
     const statusById: Record<string, WorkspaceStatus | undefined> = {};
     for (const id of ids) {
@@ -47,6 +51,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
     }
     const known = ids.filter((id) => figures[id]);
     const total = sumFigures(known.map((id) => figures[id]!));
+    const stages = sumStageCounts(known.map((id) => stagesById[id]!));
     const allTasks: NativeTask[] = (taskReads.data ?? []).flatMap((row) => row.data?.tasks ?? []);
     const events = (historyReads.data ?? [])
       .flatMap((row) => (row.data ? nativeEvents(row.data) : []))
@@ -72,6 +77,8 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
       taskReads,
       historyReads,
       figures,
+      stagesById,
+      stages,
       loading: dashboards.status === "loading",
       complete: known.length === ids.length,
       total,
