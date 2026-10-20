@@ -18,6 +18,7 @@ export const DYNAMIC_UNCLASSIFIED_MAX_THRESHOLD = 10;
 export function isDynamicUnclassifiedPolicyValid(policy: DynamicUnclassifiedPolicy): boolean {
   if (!policy.enabled) return policy.consecutiveFailureThreshold === 0;
   return (
+    Number.isInteger(policy.consecutiveFailureThreshold) &&
     policy.consecutiveFailureThreshold >= DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD &&
     policy.consecutiveFailureThreshold <= DYNAMIC_UNCLASSIFIED_MAX_THRESHOLD
   );
@@ -96,6 +97,7 @@ export function DynamicUnclassifiedPolicyEditor({
               type="number"
               min={DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD}
               max={DYNAMIC_UNCLASSIFIED_MAX_THRESHOLD}
+              step={1}
               value={policy.consecutiveFailureThreshold}
               onChange={(event) =>
                 onChange({ consecutiveFailureThreshold: Number(event.target.value) || 0 })

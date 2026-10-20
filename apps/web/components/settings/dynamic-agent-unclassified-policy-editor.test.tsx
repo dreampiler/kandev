@@ -68,6 +68,15 @@ describe("isDynamicUnclassifiedPolicyValid", () => {
       isDynamicUnclassifiedPolicyValid({ enabled: true, consecutiveFailureThreshold: 1 }),
     ).toBe(false);
   });
+
+  it("rejects a non-integer threshold that the backend cannot decode", () => {
+    expect(
+      isDynamicUnclassifiedPolicyValid({ enabled: true, consecutiveFailureThreshold: 2.5 }),
+    ).toBe(false);
+    expect(
+      isDynamicUnclassifiedPolicyValid({ enabled: true, consecutiveFailureThreshold: 3.0000001 }),
+    ).toBe(false);
+  });
 });
 
 describe("DynamicUnclassifiedPolicyEditor", () => {
@@ -97,7 +106,20 @@ describe("DynamicUnclassifiedPolicyEditor", () => {
     const input = screen.getByRole("spinbutton", { name: "agents:dynamicUnclassifiedThreshold" });
     expect(input.getAttribute("min")).toBe(String(DYNAMIC_UNCLASSIFIED_MIN_THRESHOLD));
     expect(input.getAttribute("max")).toBe(String(DYNAMIC_UNCLASSIFIED_MAX_THRESHOLD));
+    expect(input.getAttribute("step")).toBe("1");
     expect(screen.getByTestId("dynamic-policy-option-help-unclassified")).toBeTruthy();
+  });
+
+  it("flags a fractional threshold as invalid", () => {
+    render(
+      <TooltipProvider>
+        <StatefulEditor initial={{ enabled: true, consecutiveFailureThreshold: 2.5 }} />
+      </TooltipProvider>,
+    );
+
+    const input = screen.getByRole("spinbutton", { name: "agents:dynamicUnclassifiedThreshold" });
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText("agents:dynamicUnclassifiedThresholdValidation")).toBeTruthy();
   });
 
   it("flags an out-of-range threshold as invalid", () => {
