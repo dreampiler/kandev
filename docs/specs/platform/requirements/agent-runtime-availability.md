@@ -47,6 +47,7 @@ Runtime recovery does not imply that interrupted agent work can safely resume.
 - **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.4:** Requests and callbacks from a retired runtime shall not modify a successor. Mutations interrupted by replacement shall not be automatically retried.
 - **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.5:** Recovery shall preserve owned worktrees, native state, and journals. Port numbers alone shall not authorize process cleanup.
 - **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.6:** Runtime recovery shall work for a locally launched or previously adopted local control server, with survival enabled or disabled.
+- **AC-PLATFORM-AGENT-RUNTIME-AVAILABILITY-002.7:** On Windows, when the original control server is confirmed exited, Kandev shall prove termination of its owned process tree from the launcher's named containment job and terminate the job's remaining members. An empty or already closed job shall count as terminated. A live owner, reused PID, missing or foreign job name, or unreadable job shall remain unverified.
 
 ### REQ-PLATFORM-AGENT-RUNTIME-AVAILABILITY-003: Session reconciliation after replacement
 
