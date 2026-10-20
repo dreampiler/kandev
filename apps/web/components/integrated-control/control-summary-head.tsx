@@ -142,6 +142,11 @@ export function ControlKpis({
         testId="control-kpi-capacity"
       >
         <ControlCapacityBars observation={capacity} />
+        {signals.waiting !== null && (
+          <p className="truncate text-xs text-muted-foreground">
+            {t("sidebar:controlSummary.capacityWaiting", { waiting: signals.waiting })}
+          </p>
+        )}
       </Kpi>
       <Kpi
         label={t("sidebar:controlSummary.kpi.inProgress")}

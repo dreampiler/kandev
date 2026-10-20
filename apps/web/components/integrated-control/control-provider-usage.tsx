@@ -3,6 +3,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { ControlModelActivity } from "./control-model-activity";
 import { ControlModelBlocks } from "./control-model-blocks";
 import { ControlCachedUsage } from "./control-cached-usage";
+import { ControlProviderHealth } from "./control-provider-health";
 import Link from "@/components/routing/app-link";
 
 export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) {
@@ -16,6 +17,7 @@ export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) 
       >
         {t("sidebar:controlRestore.selectionPolicies")}
       </Link>
+      <ControlProviderHealth workspaceId={workspaceId} />
       <ControlModelActivity workspaceId={workspaceId} />
       {limitsEnabled ? (
         <ControlCachedUsage workspaceId={workspaceId} />

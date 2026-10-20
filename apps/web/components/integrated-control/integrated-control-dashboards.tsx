@@ -2,6 +2,7 @@ import { ControlProviderUsage } from "./control-provider-usage";
 import { ControlHistory } from "./control-history";
 import { ControlWorkspaces } from "./control-workspaces";
 import { ControlCapacityLine } from "./control-capacity-bars";
+import { ControlBlockerChips } from "./control-blocker-chips";
 import { ControlTaskBoard } from "./control-task-board";
 import { ControlOverview } from "./control-overview";
 import { ControlInbox } from "./control-inbox";
@@ -42,6 +43,7 @@ export function IntegratedControlDashboard({
             observation={control.data.capacity}
             lastConfirmed={control.data.lastConfirmedCapacity}
           />
+          <ControlBlockerChips />
           <ControlTaskBoard />
           {rows.length > 0 && <CoordinatorFacts view={view} rows={rows} />}
         </>
