@@ -58,18 +58,20 @@ claimed run on the task, checks the launched session, and runs the AgentComplete
 completion body: finish, routing success, output summary, checkout release, and
 runtime stamp. Office task sessions park at `IDLE` and keep their teardown path.
 
-Park settlement skips Office tasks: it reads `is_from_office` through
-`GetTaskExecutionFields`, the same predicate `handleOfficeTurnComplete` uses
-with the session agent profile. Those tasks also park at `WAITING_FOR_INPUT`
-before their IDLE teardown, which runs after a synchronous git-status capture
-and can arrive tens of seconds later. Settling on that park freed the agent's
-run slot early; the next run reused the live execution and the late teardown
-stopped it. Office runs therefore settle only on `AgentStopped`.
+Park settlement runs for Office tasks too. A session parks at
+`WAITING_FOR_INPUT` either with no IDLE teardown (Routine-workflow tasks, and
+Office turns that never reach a stopping teardown: a cancelled turn, a session
+without an agent execution, or a session relaunched for the next run) or just
+before the Office IDLE teardown. The park is the one signal every turn
+produces, so it settles the run and releases the agent ceiling; the teardown's
+later `AgentStopped` is a no-op on the finished run.
 
 `handleOfficeTurnComplete` reloads the session before the IDLE flip and
 `StopAgent`. It skips both, and still claims the completion, when the session
 is `STARTING`, is `RUNNING` while the completion snapshot was not, or holds an
-agent execution other than the snapshot's.
+agent execution other than the snapshot's. The reload narrows, but does not
+fully close, the window between the reload and `StopAgent`; a relaunch that
+lands inside that window can still be stopped.
 
 ### Inheritance resolution
 

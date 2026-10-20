@@ -61,11 +61,12 @@ never relaunches finished work.
   leave the run claimed.
 - **AC-OFFICE-RUN-SETTLE-001.3:** When an Office task session parks at `IDLE`,
   the system shall leave settlement to the existing teardown completion path.
-- **AC-OFFICE-RUN-SETTLE-001.4:** When the parked session belongs to an Office
-  task that receives the Office IDLE teardown (the task is an Office task and
-  the session carries an agent profile), the system shall leave the run claimed
-  on the `WAITING_FOR_INPUT` park and settle it when the teardown reports the
-  agent stopped.
+- **AC-OFFICE-RUN-SETTLE-001.4:** The `RUNNING` to `WAITING_FOR_INPUT` park
+  settles the run for an Office task as well, so a turn whose IDLE teardown
+  does not stop the agent (a cancelled turn, a session without an agent
+  execution, or a session relaunched for the next run) does not leave the run
+  claimed and the agent ceiling held. The teardown's later `AgentStopped` is a
+  no-op on the finished run.
 - **AC-OFFICE-RUN-SETTLE-001.5:** When an Office IDLE teardown runs after its
   session was relaunched (the session is `STARTING`, is `RUNNING` again after
   the completion snapshot was not `RUNNING`, or holds a different agent
