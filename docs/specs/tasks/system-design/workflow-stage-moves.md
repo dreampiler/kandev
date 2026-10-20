@@ -143,6 +143,8 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
 
 - `orchestrator.(*Service).validateCeilingDestination` decides whether a
   ceiling-deferred launch is still deliverable.
+- `orchestrator.(*Service).validateCeilingEntryWithDestinationState` compares an
+  unbound record with the task's current entry and the committed route.
 - `orchestrator.(*Service).allowEngineSignalCompletion` gates an
   `auto_advance_requires_signal` step on its completion signal.
 - `models.CeilingDeferral`, `models.CeilingWorkflowEntryBinding`, and the
@@ -170,6 +172,15 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
    existing paths (AC-TASKS-WORKFLOW-STAGE-MOVES-003.4). The completion signal
    stays recorded on the session, so the advance can happen on a later
    completion after the prompt is delivered.
+4. An unbound record whose payload step differs from the committed
+   `workflow_session_route` is not automatically superseded: the route can
+   legitimately name the previous entry because entry admission defers the
+   start before the destination route is materialized. The record is current
+   exactly when its `workflow_entry_id` is the task's latest ledger entry and its
+   step is the task's current step, matching any readable step workflow. Such a
+   record validates its destination without retargeting the older route. A record
+   naming any other step or entry, a record without an entry id, and every bound
+   record keep the strict comparison and stay superseded.
 
 ### How a hold ends
 

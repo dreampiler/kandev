@@ -711,6 +711,18 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 			return ceilingEntryUnavailable, "workflow entry route is unavailable", nil
 		}
 		if payloadStepID != "" && route.DestinationStepID != payloadStepID {
+			currentEntry, currentEntryErr := s.unboundCeilingEntryTargetsCurrentEntry(
+				ctx, task, deferral.Payload, payloadStepID)
+			if currentEntryErr != nil {
+				return ceilingEntryUnavailable, currentEntryErr.Error(), currentEntryErr
+			}
+			if currentEntry {
+				// The committed route still belongs to the previous entry: the
+				// task already carries this record's step and ledger entry, and
+				// the deferred start is what will replace the route. Validate the
+				// destination without retargeting the older route to a newer entry.
+				return s.validateCeilingDestination(ctx, task, deferral, models.CeilingWorkflowEntryBinding{}, checkDestinationState), "", nil
+			}
 			return ceilingEntrySuperseded, ceilingEntryDetailStepChanged, nil
 		}
 		if payloadSessionID := sessionIDFromCeilingPayload(deferral); payloadSessionID != "" &&
@@ -779,6 +791,47 @@ func (s *Service) validateCeilingEntryWithDestinationState(
 		}
 	}
 	return s.validateCeilingDestination(ctx, task, deferral, binding, checkDestinationState), "", nil
+}
+
+// unboundCeilingEntryTargetsCurrentEntry reports whether a record without a
+// stored binding names the task's current workflow entry while the committed
+// session route still belongs to the previous entry. Entry admission defers the
+// start before the destination route is materialized, so the route can lag the
+// task row by exactly one entry; the queue record itself carries the current
+// step and ledger identity. A record whose entry is not the latest ledger row,
+// or whose step the task already left, is not current and stays superseded.
+func (s *Service) unboundCeilingEntryTargetsCurrentEntry(
+	ctx context.Context,
+	task *models.Task,
+	payload map[string]interface{},
+	payloadStepID string,
+) (bool, error) {
+	if task == nil || payloadStepID == "" || task.WorkflowStepID != payloadStepID {
+		return false, nil
+	}
+	entryID := int64Field(payload, "workflow_entry_id")
+	if entryID <= 0 {
+		return false, nil
+	}
+	currentEntryIdentity, err := s.readWorkflowEntryIdentity(ctx, task.ID)
+	if err != nil {
+		return false, err
+	}
+	if currentEntryIdentity == legacyWorkflowEntryIdentity ||
+		currentEntryIdentity != workflowEntryIdentityForID(entryID) {
+		return false, nil
+	}
+	if s.workflowStepGetter == nil {
+		return true, nil
+	}
+	step, stepErr := s.workflowStepGetter.GetStep(ctx, payloadStepID)
+	if stepErr != nil && !errors.Is(stepErr, wfmodels.ErrWorkflowStepNotFound) {
+		return false, stepErr
+	}
+	if step == nil || (step.WorkflowID != "" && task.WorkflowID != "" && step.WorkflowID != task.WorkflowID) {
+		return false, nil
+	}
+	return true, nil
 }
 
 func (s *Service) validateUnroutedWorkflowEntry(
