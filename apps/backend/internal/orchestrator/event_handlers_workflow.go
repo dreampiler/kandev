@@ -6435,6 +6435,11 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 		s.requeueAutoStartStepMessage(state)
 		return newWorkflowAutoStartSessionTerminalizedError(fresh)
 	}
+	if fresh.State != models.TaskSessionStateCreated {
+		lock.Unlock()
+		release()
+		return s.continueAutoStartAfterCreatedStateLost(state, fresh)
+	}
 	var releaseOnce sync.Once
 	heldRelease := func() {
 		releaseOnce.Do(func() {
@@ -6469,6 +6474,16 @@ func (s *Service) launchCreatedAutoStartStepPrompt(state *autoStartStepPromptSta
 	)
 	if execution == nil {
 		workflowAttempt.retire()
+	}
+	if isCreatedStateLostError(err) {
+		workflowAttempt.retire()
+		heldRelease()
+		latest, reloadErr := s.repo.GetTaskSession(state.ctx, state.sessionID)
+		if reloadErr != nil {
+			s.requeueAutoStartStepMessage(state)
+			return reloadErr
+		}
+		return s.continueAutoStartAfterCreatedStateLost(state, latest)
 	}
 	if err != nil {
 		workflowAttempt.retire()
