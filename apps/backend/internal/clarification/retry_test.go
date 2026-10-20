@@ -39,6 +39,42 @@ func retryBundleMessage(id string, index int, status string, response map[string
 	return &taskmodels.Message{ID: id, TaskSessionID: "sess-1", Metadata: meta}
 }
 
+func TestRecordedOutcome_AnsweredBundleCarriesDurableAnswerChannel(t *testing.T) {
+	answered := retryBundleMessage("m1", 0, "answered", map[string]any{"custom_text": "thread reply"})
+	answered.Metadata["answered_by"] = map[string]any{
+		"channel": "slack_thread",
+		"ref":     "C012AB345CD/1729000000.000100",
+	}
+	status, resp, ok := RecordedOutcome("p-retry", []*taskmodels.Message{answered}, nil)
+	require.True(t, ok)
+	assert.Equal(t, StatusAnswered, status)
+	require.NotNil(t, resp)
+	assert.Equal(t, AnsweredBy{
+		Channel: "slack_thread",
+		Ref:     "C012AB345CD/1729000000.000100",
+	}, resp.AnsweredBy)
+}
+
+func TestRecordedOutcome_RejectedBundleCarriesDurableAnswerChannel(t *testing.T) {
+	rejected := retryBundleMessage("m1", 0, "rejected", nil)
+	rejected.Metadata["answered_by"] = map[string]any{"channel": "slack_thread"}
+	status, resp, ok := RecordedOutcome("p-retry", []*taskmodels.Message{rejected}, nil)
+	require.True(t, ok)
+	assert.Equal(t, StatusRejected, status)
+	require.NotNil(t, resp)
+	assert.Equal(t, AnsweredBy{Channel: "slack_thread"}, resp.AnsweredBy)
+}
+
+func TestRecordedOutcome_UnmarkedBundleHasNoAnswerChannel(t *testing.T) {
+	msgs := []*taskmodels.Message{
+		retryBundleMessage("m1", 0, "answered", map[string]any{"custom_text": "popup answer"}),
+	}
+	_, resp, ok := RecordedOutcome("p-retry", msgs, nil)
+	require.True(t, ok)
+	require.NotNil(t, resp)
+	assert.Equal(t, AnsweredBy{}, resp.AnsweredBy)
+}
+
 func TestRecordedOutcome_PendingBundleIsNotRecorded(t *testing.T) {
 	msgs := []*taskmodels.Message{
 		retryBundleMessage("m1", 0, "pending", nil),

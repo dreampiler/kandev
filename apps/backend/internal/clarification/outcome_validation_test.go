@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func fixedNow() time.Time {
@@ -320,6 +322,38 @@ func TestNormalizeAnswered_ByteIdenticalForEquivalentSubmissions(t *testing.T) {
 	fb := stripServerSetFields(t, sb)
 	if fa != fb {
 		t.Fatalf("expected byte-identical answers/rejected/reject_reason once pending_id/responded_at are excluded:\na=%s\nb=%s", fa, fb)
+	}
+}
+
+// TestResponsesFromAnswers_CarriesAnsweredByMarker proves the resolver passes
+// the answer channel into the durable claim through the reserved bundle-wide
+// key, on the answered and rejected paths, while an unmarked rejection still
+// keeps the upstream nil map.
+func TestResponsesFromAnswers_CarriesAnsweredByMarker(t *testing.T) {
+	by := AnsweredBy{Channel: "slack_thread", Ref: "thread-1"}
+
+	answered := responsesFromAnswers([]Answer{{QuestionID: "q1"}}, by)
+	if _, ok := answered["q1"]; !ok {
+		t.Fatalf("answered responses lost the per-question answer: %#v", answered)
+	}
+	marker, ok := answered[taskmodels.ClarificationAnsweredByResponseKey].(taskmodels.ClarificationAnsweredBy)
+	if !ok {
+		t.Fatalf("missing answered_by marker: %#v", answered)
+	}
+	if marker.Channel != by.Channel || marker.Ref != by.Ref {
+		t.Fatalf("marker = %+v, want %+v", marker, by)
+	}
+
+	rejected := responsesFromAnswers(nil, by)
+	if len(rejected) != 1 {
+		t.Fatalf("rejected responses = %#v, want only the marker", rejected)
+	}
+	if _, ok := rejected[taskmodels.ClarificationAnsweredByResponseKey]; !ok {
+		t.Fatalf("rejected responses lost the marker: %#v", rejected)
+	}
+
+	if plain := responsesFromAnswers(nil, AnsweredBy{}); plain != nil {
+		t.Fatalf("unmarked rejection = %#v, want nil", plain)
 	}
 }
 
