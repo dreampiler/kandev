@@ -10,9 +10,7 @@ import (
 
 func withConsoleWindow(t *testing.T, present bool) {
 	t.Helper()
-	previous := hasConsoleWindow
-	hasConsoleWindow = func() bool { return present }
-	t.Cleanup(func() { hasConsoleWindow = previous })
+	t.Cleanup(SetConsoleWindowProbeForTest(present))
 }
 
 func TestNoConsoleWindowFlagKeepsInheritedConsole(t *testing.T) {

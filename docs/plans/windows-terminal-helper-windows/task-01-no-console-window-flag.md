@@ -29,3 +29,15 @@ command add it to their creation flags.
   detached parent, child with these flags, default-flag grandchild; both
   descendants had a console and no Windows Terminal or OpenConsole process
   appeared.
+- The creation-flag tests of the launcher, agentctl process attributes, ACP
+  utility commands and Cursor native MCP command replace the console probe with
+  `winproc.SetConsoleWindowProbeForTest` and assert both the shared-console and
+  the no-console-window flags, so they do not depend on the test runner's
+  console. They start no process.
+
+## Known limitation
+
+Helpers started with `CREATE_NO_WINDOW` each get their own windowless console,
+and graceful `taskkill` without `/F` is expected not to reach them, so helpers
+that do not exit from stdin close are force-killed after the grace period. See
+the process attributes section of the system design.

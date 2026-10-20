@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
@@ -47,19 +48,32 @@ func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
 }
 
 func TestWindowsProcGroupsHideConsoleWindow(t *testing.T) {
-	for name, configure := range map[string]func(*exec.Cmd){
-		"setProcGroup":        setProcGroup,
-		"setManagedProcGroup": setManagedProcGroup,
-		"setAgentProcGroup":   setAgentProcGroup,
+	for _, tc := range []struct {
+		name          string
+		consoleWindow bool
+		wantNoWindow  bool
+	}{
+		{name: "shares existing console window", consoleWindow: true, wantNoWindow: false},
+		{name: "no console window to share", consoleWindow: false, wantNoWindow: true},
 	} {
-		t.Run(name, func(t *testing.T) {
-			cmd := exec.Command(os.Args[0])
-			configure(cmd)
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(commonwinproc.SetConsoleWindowProbeForTest(tc.consoleWindow))
+			for name, configure := range map[string]func(*exec.Cmd){
+				"setProcGroup":        setProcGroup,
+				"setManagedProcGroup": setManagedProcGroup,
+				"setAgentProcGroup":   setAgentProcGroup,
+			} {
+				t.Run(name, func(t *testing.T) {
+					cmd := exec.Command(os.Args[0])
+					configure(cmd)
 
-			require.NotNil(t, cmd.SysProcAttr)
-			flags := cmd.SysProcAttr.CreationFlags
-			require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
-			require.Zero(t, flags&windows.CREATE_NO_WINDOW, "CreationFlags = %#x, must not include CREATE_NO_WINDOW", flags)
+					require.NotNil(t, cmd.SysProcAttr)
+					flags := cmd.SysProcAttr.CreationFlags
+					require.True(t, cmd.SysProcAttr.HideWindow, "HideWindow = false, want true")
+					require.Equal(t, tc.wantNoWindow, flags&windows.CREATE_NO_WINDOW != 0,
+						"CreationFlags = %#x, CREATE_NO_WINDOW presence", flags)
+				})
+			}
 		})
 	}
 }
