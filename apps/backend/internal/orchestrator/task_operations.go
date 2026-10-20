@@ -1110,7 +1110,8 @@ func (s *Service) startCreatedSession(
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
 		}
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) ||
+			errors.Is(err, executor.ErrSessionStateChangedBeforeStart) {
 			if initialTurnCreated {
 				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 			}
