@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -277,7 +276,6 @@ type httpUpdateWorkflowRequest struct {
 	Description    *string `json:"description"`
 	Prompt         *string `json:"prompt"`
 	AgentProfileID *string `json:"agent_profile_id"`
-	Hidden         *bool   `json:"hidden"`
 }
 
 func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
@@ -295,12 +293,7 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		Description:    body.Description,
 		Prompt:         body.Prompt,
 		AgentProfileID: body.AgentProfileID,
-		Hidden:         body.Hidden,
 	})
-	if errors.Is(err, service.ErrSystemWorkflowVisibility) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
@@ -518,7 +511,6 @@ type wsUpdateWorkflowRequest struct {
 	Description    *string `json:"description,omitempty"`
 	Prompt         *string `json:"prompt,omitempty"`
 	AgentProfileID *string `json:"agent_profile_id,omitempty"`
-	Hidden         *bool   `json:"hidden,omitempty"`
 }
 
 func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -538,11 +530,7 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		Description:    req.Description,
 		Prompt:         req.Prompt,
 		AgentProfileID: req.AgentProfileID,
-		Hidden:         req.Hidden,
 	})
-	if errors.Is(err, service.ErrSystemWorkflowVisibility) {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
-	}
 	if err != nil {
 		h.logger.Error("failed to update workflow", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update workflow", nil)
