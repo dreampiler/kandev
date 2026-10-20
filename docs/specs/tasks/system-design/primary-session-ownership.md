@@ -59,7 +59,11 @@ are not active. It ranks the rest:
    workflow default. A task without a step, an unreadable step, or no
    resolvable profile treats every session as matching.
 2. Any other session.
-3. A session with a valid `workflow_parking` marker, last.
+3. A session with a valid `workflow_parking` marker.
+4. A session that awaits a recovery action, last: `sessionAwaitsRecoveryAction`
+   finds an open `session_recovery_blocks` row for its current incarnation and
+   generation through `GetOpenSessionRecoveryBlock`, or its `route_state` is
+   `action_required`. An unreadable block counts as open.
 
 Inside a rank it keeps the existing order: `RUNNING`, then other active states,
 then idle (`001.2`). It returns an empty ID only when no session is eligible,
@@ -70,8 +74,21 @@ so a task with only unmatched sessions still gets a primary (`001.3`).
 `maybePromotePrimary` passes `activeOnly=true`, which keeps its rule that only
 an active session can inherit the role. `promoteNextPrimaryAfterRemoval`
 passes `false`; it now excludes terminal sessions, which it accepted before.
-Both promote through `SetPrimarySession`, which neither moves queued messages
-nor changes an explicit session selection (`001.4`).
+Both promote through `SetPrimarySession`, which does not change an explicit
+session selection (`001.4`).
+
+`maybePromotePrimary` ignores a FAILED while `resumeAttemptInFlight` reports
+that the resume attempt registry still holds a live attempt for that session.
+The resume rollback (`terminalRollbackState`) and the attempt-fenced
+bootstrap failure both publish FAILED inside that attempt, so the session the
+user is restoring keeps the role (`001.2`).
+
+`SetPrimarySession` schedules the terminal-primary queue hand-off (`001.5`)
+only when the previous primary is terminal and no resume attempt owns it. The
+detached worker checks again that the source is terminal and unowned before it
+moves anything, and inside the transfer admission it aborts with
+`errTerminalQueueReceiverAwaitsRecovery` when the receiver awaits a recovery
+action, so the messages keep their session target.
 
 ## Failure and recovery
 

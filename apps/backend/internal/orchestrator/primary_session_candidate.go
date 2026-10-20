@@ -8,14 +8,20 @@ import (
 
 // primaryCandidateRank orders sessions for an automatic primary promotion. The
 // ranking prefers a workflow-compatible session, then an unmatched session,
-// then a parked session. Any eligible fallback can retain the primary role.
+// then a parked session, then a session that awaits a recovery action. Any
+// eligible fallback can retain the primary role.
 type primaryCandidateRank int
 
 const (
+	// primaryCandidateAwaitingRecovery is a session that cannot take prompts
+	// until an operator resolves its open recovery block or its
+	// action_required dynamic route. An automatic promotion reaches for it
+	// only when no other eligible session exists.
+	primaryCandidateAwaitingRecovery primaryCandidateRank = iota
 	// primaryCandidateParked is a session a profile switch parked. It stays
 	// available for its own conversation, but an automatic promotion reaches
-	// for it last.
-	primaryCandidateParked primaryCandidateRank = iota
+	// for it after every session that can take prompts.
+	primaryCandidateParked
 	// primaryCandidateOther is a session whose profile is not the current
 	// step's effective profile.
 	primaryCandidateOther
@@ -63,7 +69,10 @@ func (s *Service) effectiveWorkflowProfileForTask(ctx context.Context, task *mod
 // bestPrimarySessionCandidate returns the session an automatic promotion
 // should take, or "" when no session is eligible.
 //
-// Terminal sessions are never candidates. activeOnly keeps each caller's
+// Terminal sessions are never candidates. A session with an open recovery
+// block or an action_required dynamic route ranks below every other eligible
+// session, so a newer blocked session cannot win the role by recency alone.
+// activeOnly keeps each caller's
 // eligibility: maybePromotePrimary passes true, so only an active session can
 // inherit the role after a stop; promoteNextPrimaryAfterRemoval passes false,
 // so any nonterminal session can inherit it after a deletion.
@@ -89,7 +98,9 @@ func (s *Service) bestPrimarySessionCandidate(
 			continue
 		}
 		rank := primaryCandidateOther
-		if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
+		if s.sessionAwaitsRecoveryAction(ctx, session) {
+			rank = primaryCandidateAwaitingRecovery
+		} else if _, parked := models.LoadWorkflowParking(session.Metadata); parked {
 			rank = primaryCandidateParked
 		} else if workflowCompatibleSession(task, session, effectiveProfileID) {
 			rank = primaryCandidateCompatible

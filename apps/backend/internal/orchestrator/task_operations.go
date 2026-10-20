@@ -6119,7 +6119,9 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 }
 
 // terminalPrimaryBeforeSwitch returns the current primary when the role is
-// about to move off a session that can no longer accept prompts.
+// about to move off a session that can no longer accept prompts. A FAILED
+// session that a resume attempt still owns is being restored, so it keeps its
+// queue.
 func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID string) *models.TaskSession {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
@@ -6131,6 +6133,9 @@ func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID str
 	}
 	for _, previous := range sessions {
 		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) {
+			if s.resumeAttemptInFlight(previous.ID) {
+				return nil
+			}
 			return previous
 		}
 	}
