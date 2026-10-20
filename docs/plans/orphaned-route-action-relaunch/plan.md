@@ -42,6 +42,30 @@ modes record the relaunch rules.
 - `executor.StopExecution` wraps a genuine teardown failure in
   `ErrExecutionNotFound` as well. Only the bare sentinel and the runtime
   not-found error mean the predecessor is absent.
+- The operator evidence supplied with this defect also records a relaunch step
+  failing with `InvalidStatus: server rejected WebSocket connection: HTTP 503`.
+  Neither `swap-primary` nor that error string appears anywhere in this
+  repository, so the relaunch decision changed here does not raise it. The
+  changed code (predecessor classification, launch-mode choice, prompt replay)
+  opens no WebSocket (`dynamic_launch.go:1706-1711`,
+  `dynamic_launch.go:1733-1752`, `dynamic_launch.go:1899-1927`), and the
+  backend's WebSocket clients use `gorilla/websocket`
+  (`internal/agent/runtime/agentctl/client.go:17`), whose handshake failure text
+  is different.
+- The 503 matches the required-persistence gate instead. While required
+  persistence is unhealthy, the gate answers stateful requests with 503
+  `persistence_unavailable`
+  (`internal/backendapp/persistence_middleware.go:18-31`). `/ws` is not on the
+  excluded list, so the upgrade is rejected too
+  (`persistence_middleware.go:34-38`, pinned by
+  `persistence_middleware_test.go:133-139`). The operator record for the
+  reported timestamp places it inside such an unhealthy window, when other
+  `/api/v1` calls also returned 503.
+- That makes the WebSocket rejection a separate cause, not evidence that the
+  orphaned route relaunch still fails. This change neither fixes nor regresses
+  it. No reproduction with healthy required persistence has been observed; if
+  one appears, it is a new defect. Persistence unavailability itself is
+  operational scope.
 
 ## Scope
 
@@ -50,9 +74,10 @@ modes record the relaunch rules.
   predecessor. Other stop errors still refuse the launch.
 - Use the prompt launch mode for a manual relaunch only when an executor row
   exists. Otherwise start a fresh execution, as an automatic fallback does.
-- Skip user messages owned by a still-queued entry when choosing the replayed
-  relaunch prompt. The two lookups live in `dynamic_launch_orphan_route.go` so
-  `dynamic_launch.go` stays within the file length rules.
+- Skip user messages owned by a still-queued entry in both the replayed
+  relaunch prompt and the dynamic continuation. The two lookups live in
+  `dynamic_launch_orphan_route.go` so `dynamic_launch.go` stays within the file
+  length rules.
 
 ## Out of scope
 
@@ -60,6 +85,11 @@ modes record the relaunch rules.
   route-action handler's claim and failure projection.
 - A session whose only user messages are held in the queue. Its relaunch has no
   prompt to replay and fails visibly, as before.
+- The `InvalidStatus: server rejected WebSocket connection: HTTP 503` failure
+  reported next to the relaunch. It is the persistence gate rejecting a client
+  WebSocket upgrade, not the orphaned-route decision
+  (`persistence_middleware.go:18-38`); a reproduction with healthy persistence
+  would be a new defect.
 
 ## Tests
 
@@ -109,3 +139,8 @@ binary, because the shared CPU lock made `go test` runs wait behind other lanes.
 - A manual relaunch for a session without an executor row now starts a fresh
   execution instead of failing in the resume path. That matches the automatic
   fallback, which already used this path.
+- A queue-owned user message is also skipped when an automatic fallback builds
+  its continuation, not only for a manual route action. With auto-run off, the
+  successor starts from the earlier durable prompt and the held message reaches
+  it only when the queue releases it, so the message is delayed, never
+  duplicated. The relaunch subtest pins the exclusion at the launch boundary.

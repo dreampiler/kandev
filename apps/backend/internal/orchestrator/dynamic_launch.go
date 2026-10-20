@@ -1723,13 +1723,15 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 }
 
 // stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
-// reports whether the successor may launch. A predecessor that is already
-// gone counts as stopped: a session with no recorded execution (an orphaned
-// route whose executors_running row is absent) and a runtime that confirms
-// the execution is not found. Every other stop error keeps the relaunch from
-// launching over an unresolved teardown. executor.StopExecution also wraps a
-// genuine teardown failure in ErrExecutionNotFound, so only the bare sentinel
-// (returned when there is no execution to address) counts as absence.
+// reports whether the successor may launch. An absent predecessor counts as
+// stopped. Callers pass the execution handle recorded on the session or in the
+// failed event, so an empty value means no execution was recorded; the restart
+// orphan sweep leaves exactly that shape, and there is nothing to stop in that
+// case. A runtime that confirms the execution is not found is absent too.
+// Every other stop error keeps the relaunch from launching over an unresolved
+// teardown. executor.StopExecution also wraps a genuine teardown failure in
+// ErrExecutionNotFound, so only the bare sentinel (returned when there is no
+// execution to address) counts as absence.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
 	if agentExecutionID == "" {
 		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
