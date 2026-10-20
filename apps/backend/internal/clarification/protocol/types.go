@@ -44,6 +44,6 @@ type Response struct {
 	Answers      []Answer   `json:"answers,omitempty"`
 	Rejected     bool       `json:"rejected,omitempty"`
 	RejectReason string     `json:"reject_reason,omitempty"` // If rejected
-	AnsweredBy   AnsweredBy `json:"answered_by,omitempty"`   // E5: which channel carried the answer
+	AnsweredBy   AnsweredBy `json:"answered_by,omitzero"`    // E5: which channel carried the answer
 	RespondedAt  time.Time  `json:"responded_at"`
 }

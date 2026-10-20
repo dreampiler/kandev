@@ -136,6 +136,46 @@ func TestSerializeResponse_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestResponseJSON_OmitsZeroAnsweredBy proves the direct wire shape omits an
+// unrecorded channel. `omitempty` does not omit a zero struct, so the field
+// carries `omitzero`; a popup answer must not gain "answered_by":{} while a
+// recorded channel still serializes.
+func TestResponseJSON_OmitsZeroAnsweredBy(t *testing.T) {
+	plain := Response{
+		PendingID:   "pending-90",
+		Answers:     []Answer{{QuestionID: "q1", CustomText: "popup answer"}},
+		RespondedAt: time.Date(2026, 5, 6, 7, 8, 9, 0, time.UTC),
+	}
+	raw, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var plainRaw map[string]any
+	if err := json.Unmarshal(raw, &plainRaw); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, ok := plainRaw["answered_by"]; ok {
+		t.Fatalf("expected no \"answered_by\" key for an unrecorded channel, got %s", raw)
+	}
+
+	plain.AnsweredBy = AnsweredBy{Channel: "slack_thread", Ref: "thread-1"}
+	raw, err = json.Marshal(plain)
+	if err != nil {
+		t.Fatalf("marshal marked: %v", err)
+	}
+	var markedRaw map[string]any
+	if err := json.Unmarshal(raw, &markedRaw); err != nil {
+		t.Fatalf("unmarshal marked: %v", err)
+	}
+	by, ok := markedRaw["answered_by"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected \"answered_by\" object, got %s", raw)
+	}
+	if by["channel"] != "slack_thread" || by["ref"] != "thread-1" {
+		t.Fatalf("answered_by = %v, want slack_thread/thread-1", by)
+	}
+}
+
 // TestSerializeResponse_AnsweredByChannelRoundTrip proves the E5 seam
 // survives the durable record: a slack_thread channel serializes and
 // deserializes unchanged, while an unrecorded channel stays absent from
