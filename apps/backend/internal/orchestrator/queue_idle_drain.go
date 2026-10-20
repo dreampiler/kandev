@@ -25,8 +25,10 @@ type idleQueueDrainAttempt struct {
 	delay time.Duration
 }
 
-// retain forgets sessions whose queue emptied since the last pass.
-func (b *idleQueueDrainBackoff) retain(pending []string) {
+// retain forgets sessions whose queue emptied since the last pass. A session
+// whose dispatch is still in flight keeps its delay: its reserved message is
+// absent from the pending list but may yet be returned to the queue.
+func (b *idleQueueDrainBackoff) retain(pending []string, inFlight func(sessionID string) bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	live := make(map[string]struct{}, len(pending))
@@ -34,7 +36,7 @@ func (b *idleQueueDrainBackoff) retain(pending []string) {
 		live[id] = struct{}{}
 	}
 	for id := range b.state {
-		if _, ok := live[id]; !ok {
+		if _, ok := live[id]; !ok && (inFlight == nil || !inFlight(id)) {
 			delete(b.state, id)
 		}
 	}
@@ -79,13 +81,19 @@ func (s *Service) drainIdleQueues(ctx context.Context) {
 		s.logger.Debug("idle queue drain skipped", zap.Error(err))
 		return
 	}
-	s.idleQueueDrain.retain(pending)
+	s.idleQueueDrain.retain(pending, s.isQueuedDispatchInFlight)
 	now := time.Now()
 	for _, sessionID := range pending {
+		if ctx.Err() != nil {
+			return
+		}
 		if !s.idleQueueDrain.due(sessionID, now) {
 			continue
 		}
-		dispatched, drainErr := s.DrainQueuedMessageIfAutoRun(ctx, sessionID)
+		dispatched, busy, drainErr := s.tryDrainQueuedMessageIfAutoRun(ctx, sessionID)
+		if busy {
+			continue
+		}
 		if drainErr != nil {
 			s.logger.Debug("idle queue drain failed",
 				zap.String("session_id", sessionID), zap.Error(drainErr))
@@ -96,4 +104,19 @@ func (s *Service) drainIdleQueues(ctx context.Context) {
 		}
 		s.idleQueueDrain.attempted(sessionID, now)
 	}
+}
+
+// tryDrainQueuedMessageIfAutoRun is DrainQueuedMessageIfAutoRun for the sweep:
+// it never waits on the session's cancel-in-flight guard. A busy guard means a
+// cancel, steer or dispatch owns the session; the sweep reports it busy and
+// revisits it on a later pass instead of blocking every session behind it.
+func (s *Service) tryDrainQueuedMessageIfAutoRun(ctx context.Context, sessionID string) (dispatched, busy bool, err error) {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	if !lock.TryLock() {
+		return false, true, nil
+	}
+	defer lock.Unlock()
+	dispatched, err = s.drainQueuedMessageIfAutoRunLocked(ctx, sessionID)
+	return dispatched, false, err
 }

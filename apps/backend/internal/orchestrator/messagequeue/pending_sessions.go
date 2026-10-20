@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -42,9 +43,10 @@ func (r *memoryRepository) ListSessionsWithPending(_ context.Context) ([]string,
 }
 
 func (r *sqliteRepository) ListSessionsWithPending(ctx context.Context) ([]string, error) {
+	// Only the session and its reservation marker are needed; message bodies
+	// and attachments are neither read nor decoded on every sweep.
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT q.id, q.session_id, q.task_id, q.position, q.content, q.model, q.plan_mode,
-		       q.attachments_json, q.metadata_json, q.queued_at, q.queued_by
+		SELECT q.session_id, q.metadata_json
 		FROM queued_messages q
 		INNER JOIN task_sessions s ON s.id = q.session_id
 		ORDER BY q.session_id ASC, q.position ASC
@@ -55,17 +57,36 @@ func (r *sqliteRepository) ListSessionsWithPending(ctx context.Context) ([]strin
 	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
-		msg, scanErr := scanQueuedRow(rows)
-		if scanErr != nil {
+		var sessionID, metaJSON string
+		if scanErr := rows.Scan(&sessionID, &metaJSON); scanErr != nil {
 			return nil, fmt.Errorf("list sessions with pending scan: %w", scanErr)
 		}
-		if msg.IsReservedInFlight() || (len(out) > 0 && out[len(out)-1] == msg.SessionID) {
+		if len(out) > 0 && out[len(out)-1] == sessionID {
 			continue
 		}
-		out = append(out, msg.SessionID)
+		reserved, decodeErr := metadataJSONReservedInFlight(metaJSON)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("list sessions with pending scan: %w", decodeErr)
+		}
+		if !reserved {
+			out = append(out, sessionID)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list sessions with pending rows: %w", err)
 	}
 	return out, nil
+}
+
+// metadataJSONReservedInFlight mirrors QueuedMessage.IsReservedInFlight for a
+// stored metadata_json value.
+func metadataJSONReservedInFlight(metaJSON string) (bool, error) {
+	if metaJSON == "" || metaJSON == "{}" {
+		return false, nil
+	}
+	msg := QueuedMessage{}
+	if err := json.Unmarshal([]byte(metaJSON), &msg.Metadata); err != nil {
+		return false, fmt.Errorf("unmarshal metadata: %w", err)
+	}
+	return msg.IsReservedInFlight(), nil
 }
