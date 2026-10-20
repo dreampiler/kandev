@@ -3676,6 +3676,10 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 
+	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session) {
+		return true
+	}
+
 	s.logger.Info("office turn complete — IDLE + tearing down execution",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -3696,6 +3700,34 @@ func (s *Service) handleOfficeTurnComplete(
 				zap.Error(err))
 		}
 	}
+	return true
+}
+
+// officeSessionRelaunchedSince reloads the session right before the Office
+// teardown. The teardown runs after a synchronous git-status capture, so the
+// session may already serve the next run on the same live execution; flipping
+// it IDLE and stopping that execution would fail the new run.
+func (s *Service) officeSessionRelaunchedSince(
+	ctx context.Context, taskID, sessionID string, snapshot *models.TaskSession,
+) bool {
+	current, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || current == nil {
+		return false
+	}
+	relaunched := current.State == models.TaskSessionStateStarting ||
+		(current.State == models.TaskSessionStateRunning && snapshot.State != models.TaskSessionStateRunning) ||
+		(current.AgentExecutionID != "" && snapshot.AgentExecutionID != "" &&
+			current.AgentExecutionID != snapshot.AgentExecutionID)
+	if !relaunched {
+		return false
+	}
+	s.logger.Info("office turn complete — session relaunched, skipping stale teardown",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.String("snapshot_state", string(snapshot.State)),
+		zap.String("current_state", string(current.State)),
+		zap.String("snapshot_execution_id", snapshot.AgentExecutionID),
+		zap.String("current_execution_id", current.AgentExecutionID))
 	return true
 }
 

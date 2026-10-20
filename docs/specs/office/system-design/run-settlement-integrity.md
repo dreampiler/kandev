@@ -58,6 +58,19 @@ claimed run on the task, checks the launched session, and runs the AgentComplete
 completion body: finish, routing success, output summary, checkout release, and
 runtime stamp. Office task sessions park at `IDLE` and keep their teardown path.
 
+Park settlement skips Office tasks: it reads `is_from_office` through
+`GetTaskExecutionFields`, the same predicate `handleOfficeTurnComplete` uses
+with the session agent profile. Those tasks also park at `WAITING_FOR_INPUT`
+before their IDLE teardown, which runs after a synchronous git-status capture
+and can arrive tens of seconds later. Settling on that park freed the agent's
+run slot early; the next run reused the live execution and the late teardown
+stopped it. Office runs therefore settle only on `AgentStopped`.
+
+`handleOfficeTurnComplete` reloads the session before the IDLE flip and
+`StopAgent`. It skips both, and still claims the completion, when the session
+is `STARTING`, is `RUNNING` while the completion snapshot was not, or holds an
+agent execution other than the snapshot's.
+
 ### Inheritance resolution
 
 `resolveInheritedEnvironmentChecked` rejects an archived parent first, then
@@ -113,6 +126,8 @@ No new trust boundary. Events and rows are internal.
 ## Observability
 
 - Park settlement logs `settling Office run after its launched session parked`.
+- A skipped late teardown logs
+  `office turn complete — session relaunched, skipping stale teardown`.
 - The guard appends `agent_error.deferred` and `agent_error.superseded` run
   events and logs both transitions.
 - Unsafe workspace reuse appears as the run's `error` event, the `agent.error`
