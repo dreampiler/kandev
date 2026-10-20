@@ -52,7 +52,9 @@ func (s *Service) checkFailedRouteRuntimeStopped(ctx context.Context, session *m
 	}
 	row, err := s.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if errors.Is(err, models.ErrExecutorRunningNotFound) {
-		return nil
+		// The manual relaunch cold-resumes from this record; without it the
+		// retried prompt cannot start a runtime, so keep the guard.
+		return fmt.Errorf("%w: failed_route_runtime_record_absent", dynamicruntime.ErrRecoveryPending)
 	}
 	if err != nil {
 		return fmt.Errorf("check failed route runtime owner: %w", err)
