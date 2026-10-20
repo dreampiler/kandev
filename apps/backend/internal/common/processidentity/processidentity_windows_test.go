@@ -82,7 +82,10 @@ func TestWindowsOwnedSessionMockProcessTable(t *testing.T) {
 		{name: "empty owned job", state: StateExited, jobName: name, wantTerminated: true, wantJobRead: true},
 		{name: "orphan in owned job", state: StateExited, jobName: name, active: 1, wantJobRead: true},
 		{name: "closed kill-on-close job", state: StateExited, jobName: name, jobErr: windows.ERROR_FILE_NOT_FOUND, wantTerminated: true, wantJobRead: true},
-		{name: "PID reused", state: StateReused, jobName: name, wantErr: true},
+		{name: "PID reused with empty owned job", state: StateReused, jobName: name, wantTerminated: true, wantJobRead: true},
+		{name: "PID reused with closed owned job", state: StateReused, jobName: name, jobErr: windows.ERROR_FILE_NOT_FOUND, wantTerminated: true, wantJobRead: true},
+		{name: "PID reused with orphan in owned job", state: StateReused, jobName: name, active: 1, wantJobRead: true},
+		{name: "PID reused without owned job", state: StateReused, wantErr: true},
 		{name: "unknown process", state: StateUnknown, jobName: name, wantErr: true},
 		{name: "legacy unknown job", state: StateExited, wantErr: true},
 		{name: "foreign job", state: StateExited, jobName: "foreign", wantErr: true},
@@ -114,6 +117,43 @@ func TestWindowsContainmentRejectsUnknownAndLiveProcesses(t *testing.T) {
 	identity.BirthToken = "windows:1"
 	require.ErrorIs(t, TerminateOwnedSession(context.Background(), identity, 0), ErrUnverifiableIdentity)
 	require.True(t, errors.Is(TerminateOwnedSession(context.Background(), Identity{PID: os.Getpid()}, 0), ErrUnverifiableIdentity))
+}
+
+func TestWindowsCaptureIgnoresJobNameLeftInEnvironment(t *testing.T) {
+	resetTakenWindowsJobName(t)
+	name := WindowsJobNamePrefix + uuid.NewString()
+	createEmptyNamedJob(t, name)
+	t.Setenv(WindowsJobNameEnv, name)
+
+	identity, err := Capture(os.Getpid())
+	require.NoError(t, err)
+	require.Empty(t, identity.WindowsJobName, "Capture must use only the name taken at startup")
+}
+
+func TestWindowsReusedOwnerPIDUsesOwnedJobEvidence(t *testing.T) {
+	// The current PID with another birth time is a reused PID: the original
+	// owner is gone and this process is not in the named job.
+	reused := func(jobName string) Identity {
+		return Identity{PID: os.Getpid(), BirthToken: "windows:1", WindowsJobName: jobName}
+	}
+	state, err := Inspect(reused(""))
+	require.NoError(t, err)
+	require.Equal(t, StateReused, state)
+
+	name := WindowsJobNamePrefix + uuid.NewString()
+	createEmptyNamedJob(t, name)
+	terminated, err := OwnedSessionTerminated(reused(name))
+	require.NoError(t, err)
+	require.True(t, terminated, "an empty owned job proves termination after PID reuse")
+	require.NoError(t, TerminateOwnedSession(context.Background(), reused(name), 0))
+
+	closed := WindowsJobNamePrefix + uuid.NewString()
+	terminated, err = OwnedSessionTerminated(reused(closed))
+	require.NoError(t, err)
+	require.True(t, terminated, "a closed kill-on-close job proves termination after PID reuse")
+
+	_, err = OwnedSessionTerminated(reused(""))
+	require.ErrorIs(t, err, ErrUnverifiableIdentity)
 }
 
 type windowsOwnedJobHelperResult struct {
@@ -165,6 +205,7 @@ func TestWindowsOwnedJobHelper(t *testing.T) {
 		defer timer.Stop()
 		<-timer.C
 	case "root":
+		TakeWindowsJobNameFromEnv()
 		identity, err := Capture(os.Getpid())
 		require.NoError(t, err)
 		child := exec.Command(os.Args[0], "-test.run=^TestWindowsOwnedJobHelper$")
