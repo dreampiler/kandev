@@ -70,9 +70,9 @@ type ServiceConfig struct {
 	// composition and the feature's runtime flag.
 	CodexAppServerEnabled bool
 
-	// ReplacedSessionReclaim stops the obsolete execution of a session that
-	// lost the primary role or handed its queue to a replacement, once that
-	// session has settled.
+	// ReplacedSessionReclaim stops the execution of a session the user
+	// replaced as primary (PromotePrimarySession), once that session has
+	// settled.
 	ReplacedSessionReclaim bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
