@@ -6104,12 +6104,15 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	}
 
 	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	s.primarySwitchMu.Lock()
+	err := s.repo.SetSessionPrimary(ctx, sessionID)
+	s.primarySwitchMu.Unlock()
+	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
 	if previous != nil {
-		s.scheduleTerminalSessionQueueHandOff(ctx, previous.TaskID, previous.ID, sessionID)
+		s.scheduleTerminalSessionQueueHandOff(previous.TaskID, previous.ID)
 	}
 	return nil
 }
