@@ -112,3 +112,37 @@ func TestOpenCodeDailyLimitRulesMaskOpaqueExcerpt(t *testing.T) {
 		t.Fatalf("RawExcerpt leaked the opaque run: %q", got.RawExcerpt)
 	}
 }
+
+// Reading the raw diagnostic must not lift the daily rules above the provider
+// rules that already outrank them: a payment or credit notice on the same
+// diagnostic still wins, and its user-action / retry invariants are preserved.
+func TestOpenCodeDailyLimitRulesKeepHigherPriority(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		name string
+		text string
+		code Code
+		rule string
+	}{
+		{
+			name: "payment required wins",
+			text: "Payment required\nAI_APICallError: Rate limit exceeded: free-models-per-day",
+			code: CodeSubscriptionRequired,
+			rule: "opencode.stderr.subscription.v1",
+		},
+		{
+			name: "insufficient credits wins",
+			text: "AI_APICallError: Rate limit exceeded: free-models-per-day. Insufficient credits",
+			code: CodeQuotaLimited,
+			rule: "opencode.stderr.credit.v1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: tc.text})
+			if got.Code != tc.code || got.ClassifierRule != tc.rule {
+				t.Fatalf("Classify(%q) = %s/%s, want %s/%s", tc.text, got.Code, got.ClassifierRule, tc.code, tc.rule)
+			}
+		})
+	}
+}

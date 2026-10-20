@@ -7,6 +7,11 @@ type rule struct {
 	pattern    *regexp.Regexp
 	code       Code
 	confidence Confidence
+	// rawText matches the raw diagnostic instead of the sanitized excerpt. It is
+	// for a signature whose identifying text the shared sanitizer masks; the
+	// rule still keeps its place in the catalogue, so a higher-priority provider
+	// rule (a payment or credit notice on the same diagnostic) still wins.
+	rawText bool
 }
 
 // Provider rules match provider error signatures, never a bare topic word.
@@ -88,12 +93,19 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
+		// The OpenRouter daily notices state their own cadence. They read the raw
+		// diagnostic because the shared sanitizer masks the daily reason code
+		// ("free-models-per-day-high-balance" falls to the opaque-run catch-all
+		// and "limit_rpd/<model>" is collapsed by the path pass), and they keep
+		// this catalogue position so a payment, credit or quota notice on the
+		// same diagnostic still wins.
+		mustRawRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
+		mustRawRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
 		// OpenCode Zen's "Rate limit exceeded. Please try again later", optionally
 		// wrapped as "Error from provider (<host>):". The wording states no day or
 		// minute cadence, so it is a generic rate limit and never a daily
 		// allowance; the rule ID only names the signature. It stays ahead of the
-		// generic rate rule. The OpenRouter daily notices live in rawTextRules,
-		// because the shared sanitizer masks their daily reason code.
+		// generic rate rule.
 		mustRule("opencode.rate.try_later.v1", `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
@@ -114,6 +126,12 @@ func mustRule(id, pat string, code Code, conf Confidence) rule {
 	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf}
 }
 
+// mustRawRule builds a rule matched against the raw diagnostic instead of the
+// sanitized excerpt (see rule.rawText).
+func mustRawRule(id, pat string, code Code, conf Confidence) rule {
+	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf, rawText: true}
+}
+
 // HasProviderRules reports whether providerID is a rules catalogue key (an
 // agent ID such as "opencode-acp"). Diagnostics can carry a different
 // provider identity, e.g. OpenCode's model-provider ID "opencode-go", which
@@ -123,44 +141,17 @@ func HasProviderRules(providerID string) bool {
 	return ok
 }
 
-func matchProviderRules(providerID, text string) (*Error, bool) {
+func matchProviderRules(providerID, excerpt, rawText string) (*Error, bool) {
 	rules, ok := providerRules[providerID]
-	if !ok || text == "" {
+	if !ok || (excerpt == "" && rawText == "") {
 		return nil, false
 	}
 	for _, r := range rules {
-		if r.pattern.MatchString(text) {
-			return &Error{
-				Code:           r.code,
-				Confidence:     r.confidence,
-				ClassifierRule: r.id,
-			}, true
+		text := excerpt
+		if r.rawText {
+			text = rawText
 		}
-	}
-	return nil, false
-}
-
-// rawTextRules match a gateway notice whose daily reason code the shared
-// sanitizer masks before the catalogue sees it: OpenRouter's 32-character
-// "free-models-per-day-high-balance" falls to the opaque-run catch-all and
-// "limit_rpd/<model>" is collapsed by the path pass. They run against the raw
-// diagnostic so the reason code is still present, and they stay anchored to the
-// error line so agent prose that quotes the notice mid-sentence cannot match.
-// Only the sanitized excerpt is stored as RawExcerpt.
-var rawTextRules = map[string][]rule{
-	"opencode-acp": {
-		mustRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
-		mustRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
-	},
-}
-
-func matchRawTextRules(providerID, rawText string) (*Error, bool) {
-	rules, ok := rawTextRules[providerID]
-	if !ok || rawText == "" {
-		return nil, false
-	}
-	for _, r := range rules {
-		if r.pattern.MatchString(rawText) {
+		if text != "" && r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,
 				Confidence:     r.confidence,
