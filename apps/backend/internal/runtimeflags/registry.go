@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keyReplacedSessionReclaim                     = "features.replacedSessionReclaim"
+	envReplacedSessionReclaim                     = "KANDEV_FEATURES_REPLACED_SESSION_RECLAIM"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -215,6 +217,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keyReplacedSessionReclaim,
+			EnvVar:          envReplacedSessionReclaim,
+			Kind:            KindFeature,
+			Label:           "Stop replaced session runtimes",
+			Description:     "When a session loses the primary role or hands its queue to a replacement, stops its obsolete agent execution once its active turn and known pending work settle.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "An obsolete session's agent process is stopped automatically; its conversation stays resumable. Office and coordinator owners, parked workflow sessions, archived tasks, and sessions that cannot auto-resume are never stopped. Leave it off to keep replaced sessions running until idle suspension or manual stop.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ReplacedSessionReclaim },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ReplacedSessionReclaim = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

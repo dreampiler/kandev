@@ -3454,6 +3454,7 @@ func (s *Service) transferQueuedSessionState(ctx context.Context, taskID, oldSes
 	}
 	s.publishQueueStatusEvent(ctx, oldSessionID)
 	s.publishQueueStatusEvent(ctx, newSessionID)
+	s.registerReplacedSessionReclaim(ctx, taskID, oldSessionID, newSessionID)
 	return nil
 }
 

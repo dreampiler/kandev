@@ -6104,10 +6104,12 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 		return err
 	}
 
-	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+	taskID, previousPrimaryID, err := s.setSessionPrimaryRecordingPrevious(ctx, sessionID)
+	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
+	s.reclaimReplacedSession(ctx, taskID, previousPrimaryID, sessionID)
 	return nil
 }
 

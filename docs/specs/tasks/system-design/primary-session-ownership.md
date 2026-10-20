@@ -91,3 +91,26 @@ No permission or trust boundary changes.
 ## Observability
 
 The existing `auto-promoted primary session` log keeps the old and new IDs.
+
+## Replaced session reclaim
+
+With `features.replacedSessionReclaim` on (`ServiceConfig.ReplacedSessionReclaim`),
+`SetPrimarySession` reads the previous primary and promotes under
+`primarySessionReclaimMu`, then registers the previous primary's current
+`executors_running.agent_execution_id` in `replacedSessionReclaims`.
+`transferQueuedSessionState` registers the queue donor the same way. A
+registration is attempted immediately and retried by
+`reclaimReplacedSessionsOnce` on each idle-reaper tick (`001.6`).
+
+A stop runs under the session's prompt admission and a non-blocking lifecycle
+lock, and again under `primarySessionReclaimMu`. It drops the registration when
+the session became primary again, left the task, or its execution rotated or
+stopped. It defers while the session has known idle work (an active turn,
+language-server lease, background work, or open clarification), is parked, is
+an Office task, belongs to an archived task, or is not eligible for automatic
+resume. Otherwise it calls `StopSessionDetailed` with reason "session replaced"
+and falls back to `StopExecution` for the exact execution.
+
+With the flag off, both registration and the tick return immediately and
+`SetPrimarySession` performs only the promotion.
+
