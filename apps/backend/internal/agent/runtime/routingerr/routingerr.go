@@ -231,6 +231,13 @@ func classify(in Input) *Error {
 		e.ResetHint = in.ResetHint
 		return applyInvariants(e)
 	}
+	if e, ok := matchRawTextRules(in.ProviderID, rawText); ok {
+		e.Phase = in.Phase
+		e.ExitCode = in.ExitCode
+		e.ResetHint = in.ResetHint
+		e.RawExcerpt = excerpt
+		return applyInvariants(e)
+	}
 	if e, ok := matchProviderRules(in.ProviderID, excerpt); ok {
 		e.Phase = in.Phase
 		e.ExitCode = in.ExitCode

@@ -2,7 +2,6 @@ package securityutil
 
 import (
 	"regexp"
-	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -49,50 +48,6 @@ var credentialRedactions = []redaction{
 	literalRedaction(`(?i)([a-z][a-z0-9+.-]*://)[^\s/?#]+@`, "$1"+redactionMask+"@"),
 }
 
-// limitReasonTokenPattern matches the reason code a gateway appends to a rate
-// limit notice: OpenRouter's account-wide "free-models-per-day" (and its
-// 32-character "-high-balance" variant, which the opaque-run catch-all would
-// otherwise mask) and the per-model "limit_rpd/<model>" form, whose model path
-// the path pass would otherwise collapse. The code names a public model or
-// allowance, never an account, and routing reads how far a limit reaches from
-// it. The model part is lowercase-only so a mixed-case opaque value cannot ride
-// on the prefix.
-var limitReasonTokenPattern = regexp.MustCompile(`\b(?:free-models-per-(?:day|min)(?:-high-balance)?|limit_rp[dm]/[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*)*(?::[a-z]+)?)`)
-
-// protectedTokenMask builds a mask token no broad redaction rule can match: it
-// carries no '/', ':' or 32-plus-character run, so the path, home and
-// opaque-run passes leave it untouched.
-func protectedTokenMask(index int) string { return "kandevkeepmask" + strconv.Itoa(index) + "x" }
-
-var protectedMaskPattern = regexp.MustCompile(`kandevkeepmask(\d+)x`)
-
-// maskLimitReasonTokens replaces every limit reason code with a positional mask
-// token and returns the originals in the same order.
-func maskLimitReasonTokens(s string) (string, []string) {
-	var kept []string
-	s = limitReasonTokenPattern.ReplaceAllStringFunc(s, func(token string) string {
-		kept = append(kept, token)
-		return protectedTokenMask(len(kept) - 1)
-	})
-	return s, kept
-}
-
-// unmaskLimitReasonTokens restores the masked reason codes. A token that no
-// longer resolves (for example one left by a truncated excerpt) is left in
-// place: it exposes nothing, and dropping it would corrupt unrelated text.
-func unmaskLimitReasonTokens(s string, kept []string) string {
-	if len(kept) == 0 {
-		return s
-	}
-	return protectedMaskPattern.ReplaceAllStringFunc(s, func(token string) string {
-		index, err := strconv.Atoi(protectedMaskPattern.FindStringSubmatch(token)[1])
-		if err != nil || index < 0 || index >= len(kept) {
-			return token
-		}
-		return kept[index]
-	})
-}
-
 var redactions = append(append([]redaction{
 	// Provider diagnostics may include account/workspace links and opaque
 	// session identifiers. These are not useful recovery details and must not
@@ -103,7 +58,10 @@ var redactions = append(append([]redaction{
 	literalRedaction(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`, "$1$2"),
 	literalRedaction(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`, "[redacted-id]"),
 }, credentialRedactions...), []redaction{
-	redactBroadPreservingLimitReasons,
+	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
+	literalRedaction(`/Users/[^/\s]+/`, "/Users/<redacted>/"),
+	literalRedaction(`/home/[^/\s]+/`, "/home/<redacted>/"),
+	redactLocalPaths,
 }...)
 
 // credentialAssignmentKey matches a password/secret/token/api-key field name
@@ -351,27 +309,6 @@ func scanContinuation(s string) int {
 		i++
 	}
 	return i
-}
-
-var (
-	opaqueRunPattern = regexp.MustCompile(`[A-Za-z0-9+/=_-]{32,}`)
-	usersHomePattern = regexp.MustCompile(`/Users/[^/\s]+/`)
-	homeDirPattern   = regexp.MustCompile(`/home/[^/\s]+/`)
-)
-
-// redactBroadPreservingLimitReasons applies the broad redactions tier: the
-// opaque-run catch-all, home-path normalization and local-path collapse. It
-// masks the gateway's rate-limit reason code first and restores it afterwards,
-// because the catch-all would otherwise mask a 32-character reason such as
-// "free-models-per-day-high-balance" and the path pass would collapse
-// "limit_rpd/<model>". Credentials were already masked by the earlier rules.
-func redactBroadPreservingLimitReasons(s string) string {
-	masked, kept := maskLimitReasonTokens(s)
-	masked = opaqueRunPattern.ReplaceAllString(masked, redactionMask)
-	masked = usersHomePattern.ReplaceAllString(masked, "/Users/<redacted>/")
-	masked = homeDirPattern.ReplaceAllString(masked, "/home/<redacted>/")
-	masked = redactLocalPaths(masked)
-	return unmaskLimitReasonTokens(masked, kept)
 }
 
 // localUnixPathPattern and localWindowsPathPattern back redactLocalPaths,

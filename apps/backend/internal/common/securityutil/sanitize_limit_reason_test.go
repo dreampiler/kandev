@@ -5,41 +5,28 @@ import (
 	"testing"
 )
 
-// The gateway's rate-limit reason code names a public model or allowance, not
-// an account, and routing reads how far a limit reaches from it. The broad
-// redaction tier must not mask it, and Sanitize must stay idempotent.
-func TestSanitizePreservesLimitReasonCodes(t *testing.T) {
-	cases := []struct {
-		in   string
-		keep string
-	}{
-		{
-			in:   "AI_APICallError: Rate limit exceeded: free-models-per-day-high-balance",
-			keep: "free-models-per-day-high-balance",
-		},
-		{
-			in:   "AI_APICallError: Rate limit exceeded: limit_rpd/nvidia/nemotron-3-ultra-550b-a55b:free",
-			keep: "limit_rpd/nvidia/nemotron-3-ultra-550b-a55b:free",
-		},
-	}
-	for _, tc := range cases {
-		got := Sanitize(tc.in)
-		if !strings.Contains(got, tc.keep) {
-			t.Fatalf("Sanitize(%q) = %q, want it to keep %q", tc.in, got, tc.keep)
-		}
-		if again := Sanitize(got); again != got {
-			t.Fatalf("Sanitize is not idempotent: %q -> %q", got, again)
+// A gateway's daily reason code must not become an exception from the
+// diagnostic redaction: an opaque value that merely wears the "limit_rpd/"
+// prefix is still masked, and a trailing mixed-case run does not survive.
+func TestSanitizeMasksLimitReasonShapedOpaqueRuns(t *testing.T) {
+	run := strings.Repeat("a", 40)
+	for _, in := range []string{
+		"diagnostic: limit_rpd/" + run,
+		"diagnostic: limit_rpd/" + run + "XYZ",
+	} {
+		got := Sanitize(in)
+		if strings.Contains(got, run) {
+			t.Fatalf("Sanitize(%q) = %q, want the opaque run masked", in, got)
 		}
 	}
 }
 
-// Preserving the reason code must not weaken credential redaction beside it.
-func TestSanitizeStillRedactsCredentialsBesideLimitReason(t *testing.T) {
-	got := Sanitize("AI_APICallError: Rate limit exceeded: free-models-per-day api_key=sk-abcdefghijklmnopqrstuvwxyz0123456789")
-	if !strings.Contains(got, "free-models-per-day") {
-		t.Fatalf("Sanitize = %q, want it to keep the reason code", got)
-	}
-	if strings.Contains(got, "abcdefghijklmnopqrstuvwxyz0123456789") {
-		t.Fatalf("Sanitize = %q, want the credential redacted", got)
+// Sanitize never restores a token it did not mask, so an original string that
+// looks like an internal marker survives untouched rather than being rewritten
+// into a different diagnostic.
+func TestSanitizeDoesNotRestoreMarkerLookalikes(t *testing.T) {
+	in := "Rate limit exceeded: kandevkeepmask0x"
+	if got := Sanitize(in); got != in {
+		t.Fatalf("Sanitize(%q) = %q, want it unchanged", in, got)
 	}
 }

@@ -1,6 +1,9 @@
 package routingerr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // The Zen/OpenRouter daily-limit notices collected for the fork failover
 // catalogue. Each must reach its own rule so routing can scope the failure from
@@ -80,5 +83,32 @@ func TestOpenCodeDailyLimitRulesIgnoreQuotedProse(t *testing.T) {
 		case "opencode.rate.free_models_per_day.v1", "opencode.rate.model_per_day.v1", "opencode.rate.try_later.v1":
 			t.Fatalf("prose %q matched %s", text, got.ClassifierRule)
 		}
+	}
+}
+
+// A diagnostic that only wears the marker text must not be rewritten into a
+// daily signature: classification reads the raw diagnostic, so an original
+// string cannot gain a reason code it never carried.
+func TestOpenCodeDailyLimitRulesDoNotFabricateSignature(t *testing.T) {
+	resetInjection()
+	got := Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: "opencode-acp",
+		Stderr:     "Rate limit exceeded: kandevkeepmask0x\nquoted: free-models-per-day",
+	})
+	switch got.ClassifierRule {
+	case "opencode.rate.free_models_per_day.v1", "opencode.rate.model_per_day.v1":
+		t.Fatalf("classification = %s, want no daily rule", got.ClassifierRule)
+	}
+}
+
+// The stored excerpt keeps the shared sanitizer's masking: a "limit_rpd/"
+// prefix must not carry an opaque run into RawExcerpt.
+func TestOpenCodeDailyLimitRulesMaskOpaqueExcerpt(t *testing.T) {
+	resetInjection()
+	run := strings.Repeat("a", 40)
+	got := Classify(Input{Phase: PhasePromptSend, ProviderID: "opencode-acp", Stderr: "diagnostic: limit_rpd/" + run})
+	if strings.Contains(got.RawExcerpt, run) {
+		t.Fatalf("RawExcerpt leaked the opaque run: %q", got.RawExcerpt)
 	}
 }

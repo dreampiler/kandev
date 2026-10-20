@@ -88,17 +88,12 @@ var providerRules = map[string][]rule{
 		mustRule("opencode.stderr.credit.v1", `(?im)^\s*(?:AI_APICallError:[^\n]*\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b|(?:(?:Error|Internal\s+error|API\s+Error):\s*)?\b(?:credit\s+limit\s+reached|out\s+of\s+credits?|insufficient\s+credits?|insufficient\s+balance)\b)`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.subscription.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?payment\s+required\b`, CodeSubscriptionRequired, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", genericQuotaSignature, CodeQuotaLimited, ConfMedium),
-		// Gateway rate-limit notices that state their own cadence. Each gets its
-		// own rule ID so routing can scope the failure from the reason code
-		// instead of the shared code alone; they must stay ahead of the generic
-		// rate rule. The daily reason codes survive sanitization (see
-		// securityutil.Sanitize) so the full notice still matches.
-		mustRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
-		mustRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
 		// OpenCode Zen's "Rate limit exceeded. Please try again later", optionally
 		// wrapped as "Error from provider (<host>):". The wording states no day or
 		// minute cadence, so it is a generic rate limit and never a daily
-		// allowance; the rule ID only names the signature.
+		// allowance; the rule ID only names the signature. It stays ahead of the
+		// generic rate rule. The OpenRouter daily notices live in rawTextRules,
+		// because the shared sanitizer masks their daily reason code.
 		mustRule("opencode.rate.try_later.v1", `(?im)^\s*(?:AI_APICallError:\s*)?(?:Error\s+from\s+provider\s+\([^)\n]{1,64}\):\s*)?rate\s+limit\s+exceeded\.?\s+please\s+try\s+again\s+later\b`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.rate.v1", genericRateLimitSignature, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
@@ -135,6 +130,37 @@ func matchProviderRules(providerID, text string) (*Error, bool) {
 	}
 	for _, r := range rules {
 		if r.pattern.MatchString(text) {
+			return &Error{
+				Code:           r.code,
+				Confidence:     r.confidence,
+				ClassifierRule: r.id,
+			}, true
+		}
+	}
+	return nil, false
+}
+
+// rawTextRules match a gateway notice whose daily reason code the shared
+// sanitizer masks before the catalogue sees it: OpenRouter's 32-character
+// "free-models-per-day-high-balance" falls to the opaque-run catch-all and
+// "limit_rpd/<model>" is collapsed by the path pass. They run against the raw
+// diagnostic so the reason code is still present, and they stay anchored to the
+// error line so agent prose that quotes the notice mid-sentence cannot match.
+// Only the sanitized excerpt is stored as RawExcerpt.
+var rawTextRules = map[string][]rule{
+	"opencode-acp": {
+		mustRule("opencode.rate.free_models_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*free-models-per-day\b`, CodeRateLimited, ConfHigh),
+		mustRule("opencode.rate.model_per_day.v1", `(?im)^\s*(?:AI_APICallError:\s*)?rate\s+limit\s+exceeded:\s*limit_rpd/\S+`, CodeRateLimited, ConfHigh),
+	},
+}
+
+func matchRawTextRules(providerID, rawText string) (*Error, bool) {
+	rules, ok := rawTextRules[providerID]
+	if !ok || rawText == "" {
+		return nil, false
+	}
+	for _, r := range rules {
+		if r.pattern.MatchString(rawText) {
 			return &Error{
 				Code:           r.code,
 				Confidence:     r.confidence,
