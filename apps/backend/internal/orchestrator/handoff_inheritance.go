@@ -213,18 +213,14 @@ func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *
 			zap.String("task_id", task.ID),
 			zap.String("parent_task_id", task.ParentID),
 			zap.Error(err))
-	} else if parent := findPrimarySession(parentSessions); parent != nil && parent.TaskEnvironmentID != "" {
-		available, validateErr := s.validateInheritedEnvironmentReference(ctx, task, parent.TaskEnvironmentID)
-		if validateErr != nil {
-			return "", "", validateErr
+	} else if candidate, candidateSource := parentSessionEnvironmentCandidate(parentSessions); candidate != "" {
+		envID, err = s.availableInheritedEnvironment(ctx, task, candidate, candidateSource)
+		if err != nil || envID != "" {
+			return envID, candidateSource, err
 		}
-		if available {
-			return parent.TaskEnvironmentID, "parent_session", nil
-		}
-		s.logger.Warn("inherit_parent: parent session environment no longer exists",
-			zap.String("task_id", task.ID),
-			zap.String("parent_task_id", task.ParentID),
-			zap.String("task_environment_id", parent.TaskEnvironmentID))
+	}
+	if envID, err = s.parentOwnedEnvironment(ctx, task); err != nil || envID != "" {
+		return envID, "parent_task_environment", err
 	}
 	if s.workspaceMaterializer == nil {
 		return "", "", nil
@@ -243,6 +239,66 @@ func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *
 			zap.String("task_environment_id", envID))
 	}
 	return "", "", nil
+}
+
+// parentSessionEnvironmentCandidate picks the environment a parent's sessions
+// point at. The primary session wins. Office sessions are never primary, so a
+// parent without a primary session falls back to the environment its
+// sessions hold, but only when they all agree on one environment: sessions
+// bound to different environments leave the choice to the parent-owned
+// environment and the workspace group instead of guessing.
+func parentSessionEnvironmentCandidate(sessions []*models.TaskSession) (envID, source string) {
+	if primary := findPrimarySession(sessions); primary != nil {
+		if primary.TaskEnvironmentID == "" {
+			return "", ""
+		}
+		return primary.TaskEnvironmentID, "parent_session"
+	}
+	for _, session := range sessions {
+		if session == nil || session.TaskEnvironmentID == "" {
+			continue
+		}
+		if envID != "" && envID != session.TaskEnvironmentID {
+			return "", ""
+		}
+		envID = session.TaskEnvironmentID
+	}
+	if envID == "" {
+		return "", ""
+	}
+	return envID, "parent_environment_session"
+}
+
+// availableInheritedEnvironment returns envID when it still exists and its
+// owner is not archived. A missing environment returns "" so the caller can
+// try the next source; an unverifiable owner fails closed.
+func (s *Service) availableInheritedEnvironment(ctx context.Context, task *v1.Task, envID, source string) (string, error) {
+	available, err := s.validateInheritedEnvironmentReference(ctx, task, envID)
+	if err != nil {
+		return "", err
+	}
+	if available {
+		return envID, nil
+	}
+	s.logger.Warn("inherit_parent: parent environment no longer exists",
+		zap.String("task_id", task.ID),
+		zap.String("parent_task_id", task.ParentID),
+		zap.String("task_environment_id", envID),
+		zap.String("source", source))
+	return "", nil
+}
+
+// parentOwnedEnvironment resolves the environment row the parent task itself
+// owns. It covers a parent whose sessions carry no environment pointer.
+func (s *Service) parentOwnedEnvironment(ctx context.Context, task *v1.Task) (string, error) {
+	env, err := s.repo.GetTaskEnvironmentByTaskID(ctx, task.ParentID)
+	if err != nil {
+		return "", fmt.Errorf("%w: parent task %s environment could not be read", models.ErrWorkspaceReuseUnsafe, task.ParentID)
+	}
+	if env == nil || env.ID == "" {
+		return "", nil
+	}
+	return s.availableInheritedEnvironment(ctx, task, env.ID, "parent_task_environment")
 }
 
 // validateInheritedEnvironmentReference confirms that an inherited
