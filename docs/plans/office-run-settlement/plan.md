@@ -59,8 +59,9 @@ replacement run is created.
 - Park settlement finishes a run on any clean `RUNNING -> WAITING_FOR_INPUT`
   of its launched session, including a recovery settlement that abandoned a
   turn without an error.
-- Immediate escalation also applies when the parent has not materialized a
-  workspace yet; the coordinator escalation replaces the silent backoff.
+- A pending inheritance (live parent, no environment yet) keeps the retry
+  backoff and escalates only after `MaxRetryCount`, as before; its first
+  deferral is now recorded on the run and in activity.
 
 ## Verification
 

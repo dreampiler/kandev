@@ -67,9 +67,18 @@ environment; the workspace group environment. Each candidate passes the existing
 existence and owner check. Sessions bound to different environments yield no
 session candidate. No valid candidate keeps the unsafe-reuse refusal.
 
-`HandleRunFailure` treats `ErrWorkspaceReuseUnsafe` like a launch-validation
-error: the run fails and `escalateFailure` records the `agent.error` activity and
-queues the coordinator escalation.
+When nothing resolves, the refusal is marked `ErrInheritedWorkspacePending`
+(still wrapped with `ErrWorkspaceReuseUnsafe`) only if the parent is live and no
+source names any environment: no parent session holds one, the parent owns
+none, and the workspace group has none. Any reference that failed to resolve,
+or an archived or terminal parent, keeps the refusal permanent.
+
+`HandleRunFailure` treats a permanent `ErrWorkspaceReuseUnsafe` like a
+launch-validation error: the run fails and `escalateFailure` records the
+`agent.error` activity and queues the coordinator escalation. A pending
+refusal keeps the existing backoff; on `retry_count = 0` it appends a warn
+`workspace.inheritance_pending` run event and a `run.workspace_pending`
+activity entry carrying the reason.
 
 ### Session verdict guard
 

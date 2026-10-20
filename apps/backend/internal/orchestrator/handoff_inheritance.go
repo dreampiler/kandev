@@ -137,6 +137,10 @@ func (s *Service) inheritFromParentEnvironment(ctx context.Context, task *v1.Tas
 	}
 	if envID == "" {
 		parent, _ := s.repo.GetTask(ctx, task.ParentID)
+		if s.inheritedEnvironmentPending(ctx, task, parent) {
+			return fmt.Errorf("%w: %w: %s", models.ErrWorkspaceReuseUnsafe, models.ErrInheritedWorkspacePending,
+				models.DescribeInheritedEnvironmentPending(task.ParentID))
+		}
 		return fmt.Errorf("%w: %s", models.ErrWorkspaceReuseUnsafe,
 			models.DescribeInheritedEnvironmentUnavailable(task.ParentID, parent))
 	}
@@ -239,6 +243,37 @@ func (s *Service) resolveInheritedEnvironmentChecked(ctx context.Context, task *
 			zap.String("task_environment_id", envID))
 	}
 	return "", "", nil
+}
+
+// inheritedEnvironmentPending reports whether an unresolved inheritance can
+// still succeed: the parent is live (not archived or terminal) and no source
+// names any environment yet. Any environment reference that failed to resolve
+// (dangling, foreign or archived owner, or conflicting session bindings) makes
+// the refusal permanent.
+func (s *Service) inheritedEnvironmentPending(ctx context.Context, task *v1.Task, parent *models.Task) bool {
+	if parent == nil || parent.ArchivedAt != nil || isTerminalTaskState(parent.State) {
+		return false
+	}
+	sessions, err := s.repo.ListTaskSessions(ctx, task.ParentID)
+	if err != nil {
+		return false
+	}
+	for _, session := range sessions {
+		if session != nil && session.TaskEnvironmentID != "" {
+			return false
+		}
+	}
+	if env, err := s.repo.GetTaskEnvironmentByTaskID(ctx, task.ParentID); err != nil || env != nil {
+		return false
+	}
+	if s.workspaceMaterializer != nil && s.workspaceMaterializer.GetSharedGroupEnvironment(ctx, task.ID) != "" {
+		return false
+	}
+	return true
+}
+
+func isTerminalTaskState(state v1.TaskState) bool {
+	return state == v1.TaskStateCompleted || state == v1.TaskStateFailed || state == v1.TaskStateCancelled
 }
 
 // parentSessionEnvironmentCandidate picks the environment a parent's sessions

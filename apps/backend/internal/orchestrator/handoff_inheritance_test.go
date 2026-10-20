@@ -522,3 +522,74 @@ func TestInheritFromParentEnvironment_PrimarylessParentOwnedEnvironment(t *testi
 		t.Fatalf("child session environment = %q, want env-parent", got.TaskEnvironmentID)
 	}
 }
+
+// seedEnvironmentlessParent builds a parent with one session and no task
+// environment, in the given task state.
+func seedEnvironmentlessParent(t *testing.T, state v1.TaskState) *Service {
+	t.Helper()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "parent", WorkflowID: "wf1", Title: "P", State: state, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "office-ps", TaskID: "parent", AgentProfileID: "office-agent", State: models.TaskSessionStateStarting,
+		StartedAt: now, UpdatedAt: now,
+	})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+	return svc
+}
+
+// A child launched before its live parent materialized a workspace can still
+// succeed later, so its refusal is marked pending (and still unsafe).
+func TestInheritFromParentEnvironment_LiveParentWithoutEnvironmentIsPending(t *testing.T) {
+	svc := seedEnvironmentlessParent(t, v1.TaskStateInProgress)
+
+	err := svc.inheritFromParentEnvironment(context.Background(), &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) || !errors.Is(err, models.ErrInheritedWorkspacePending) {
+		t.Fatalf("error = %v, want unsafe reuse marked pending", err)
+	}
+}
+
+// A terminal parent with no environment will never materialize one.
+func TestInheritFromParentEnvironment_TerminalParentWithoutEnvironmentIsPermanent(t *testing.T) {
+	svc := seedEnvironmentlessParent(t, v1.TaskStateCompleted)
+
+	err := svc.inheritFromParentEnvironment(context.Background(), &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) || errors.Is(err, models.ErrInheritedWorkspacePending) {
+		t.Fatalf("error = %v, want permanent unsafe reuse", err)
+	}
+}
+
+// Parent sessions bound to different environments cannot be disambiguated.
+func TestInheritFromParentEnvironment_ConflictingEnvironmentsArePermanent(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "WS", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "parent", WorkflowID: "wf1", Title: "P", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "child", ParentID: "parent", WorkflowID: "wf1", Title: "C", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now})
+	for _, env := range []string{"env-a", "env-b"} {
+		_ = repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{ID: env, TaskID: "other-" + env, Status: models.TaskEnvironmentStatusReady})
+		_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID: "ps-" + env, TaskID: "parent", State: models.TaskSessionStateIdle,
+			TaskEnvironmentID: env, StartedAt: now, UpdatedAt: now,
+		})
+	}
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "cs1", TaskID: "child", State: models.TaskSessionStateRunning, IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.inheritFromParentEnvironment(ctx, &v1.Task{ID: "child", ParentID: "parent"}, "cs1")
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) || errors.Is(err, models.ErrInheritedWorkspacePending) {
+		t.Fatalf("error = %v, want permanent unsafe reuse", err)
+	}
+}

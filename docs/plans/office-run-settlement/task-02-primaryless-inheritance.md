@@ -12,6 +12,7 @@ acceptance_criteria:
   - AC-OFFICE-RUN-SETTLE-002.2
   - AC-OFFICE-RUN-SETTLE-002.3
   - AC-OFFICE-RUN-SETTLE-002.4
+  - AC-OFFICE-RUN-SETTLE-002.5
 system_design:
   - ../../specs/office/system-design/run-settlement-integrity.md
 ---
@@ -36,7 +37,8 @@ parent has no primary session, and an unsafe reuse is escalated at once.
 
 - Primaryless parents resolve through their session environment or the
   parent-owned environment; existing fail-closed regressions still pass.
-- An unsafe workspace reuse launch failure fails the run without a retry.
+- A permanent unsafe workspace reuse fails the run without a retry; a live
+  parent without any environment yet keeps the backoff and is recorded once.
 
 ## Verification
 
@@ -58,3 +60,10 @@ error (`parent task parent workspace could not be resolved`).
 `TestHandleRunFailure_WorkspaceReuseUnsafeDoesNotRetry` failed with
 `run status = "queued"`. All pass after the change, with the dangling and
 archived fail-closed regressions.
+
+Refinement: `TestInheritFromParentEnvironment_LiveParentWithoutEnvironmentIsPending`
+failed before it (`...workspace could not be resolved, want unsafe reuse marked
+pending`) and `TestHandleRunFailure_PendingInheritedWorkspaceRetriesVisibly`
+failed with `run status = "failed" retry_count = 0, want queued with one
+retry`. Both pass after it, with the terminal-parent and conflicting-environment
+permanent tests.

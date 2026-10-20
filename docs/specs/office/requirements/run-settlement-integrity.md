@@ -81,9 +81,17 @@ instead of retried silently.
   owner is archived or unverifiable, the system shall refuse the launch as an
   unsafe workspace reuse.
 - **AC-OFFICE-RUN-SETTLE-002.4:** When a run's launch is refused as an unsafe
-  workspace reuse, the system shall fail the run without scheduling a retry and
-  shall escalate it through the existing failure activity and coordinator
-  escalation.
+  workspace reuse that can never succeed (archived parent, terminal parent
+  without an environment, a dangling or foreign-owner environment, or
+  conflicting session environments), the system shall fail the run without
+  scheduling a retry and shall escalate it through the existing failure
+  activity and coordinator escalation.
+- **AC-OFFICE-RUN-SETTLE-002.5:** When the refusal is only that a live parent
+  (not archived and not terminal) has not materialized any environment yet, the
+  system shall keep the run on the existing retry backoff without escalating it,
+  and on the first deferral shall record the refusal reason as a
+  `workspace.inheritance_pending` run event and a `run.workspace_pending`
+  activity entry.
 
 ### REQ-OFFICE-RUN-SETTLE-003: Agent-error session verdict
 
