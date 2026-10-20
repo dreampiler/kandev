@@ -60,11 +60,13 @@ describe("task3 native control contracts", () => {
       inference_state: "unknown",
       tasks: {},
       sessions: {},
+      waiting_input_tasks: 0,
       queued_messages: 0,
       transitions_24h: 0,
       completed_tasks_24h: 0,
     };
     expect(nativeDashboard(data, "w")).toBe(true);
+    expect(nativeDashboard({ ...data, waiting_input_tasks: undefined }, "w")).toBe(false);
     expect(nativeDashboard({ ...data, sessions: { RUNNING: -1 } }, "w")).toBe(false);
     expect(nativeDashboard({ workspace_id: "w", agents: [] }, "w")).toBe(false);
   });

@@ -21,7 +21,7 @@ export function workspaceFigures(data: NativeDashboard): WorkspaceFigures {
   return {
     inProgress: ACTIVE_TASK_STATES.reduce((sum, state) => sum + (data.tasks[state] ?? 0), 0),
     running: data.sessions.RUNNING ?? 0,
-    waitingInput: data.sessions.WAITING_FOR_INPUT ?? 0,
+    waitingInput: data.waiting_input_tasks,
     queued: data.queued_messages,
     completed24h: data.completed_tasks_24h,
     moves24h: data.transitions_24h,

@@ -69,7 +69,9 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
     return false;
   return (
     [v.tasks, v.sessions].every((m) => nativeRecord(m) && Object.values(m).every(count)) &&
-    [v.queued_messages, v.transitions_24h, v.completed_tasks_24h].every(count)
+    [v.waiting_input_tasks, v.queued_messages, v.transitions_24h, v.completed_tasks_24h].every(
+      count,
+    )
   );
 }
 export function nativeTasks(

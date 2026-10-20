@@ -151,7 +151,7 @@ export function ControlKpis({
         {note(t("sidebar:controlSummary.kpi.runningSessions", { value: total.running }))}
       </Kpi>
       <Kpi label={t("sidebar:controlSummary.kpi.waitingInput")} value={total.waitingInput}>
-        {note(t("sidebar:controlSummary.kpi.sessionBasis"))}
+        {note(t("sidebar:controlSummary.kpi.waitingInputBasis"))}
       </Kpi>
       <Kpi
         label={t("sidebar:controlSummary.kpi.queued")}

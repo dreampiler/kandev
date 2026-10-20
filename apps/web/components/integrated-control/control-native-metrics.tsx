@@ -20,7 +20,7 @@ export function NativeWorkspaceFigures({
       "active",
     ],
     ["sidebar:controlRestore.processRunning", data.sessions.RUNNING ?? 0, "sessions"],
-    ["sidebar:controlRestore.waitingInput", data.sessions.WAITING_FOR_INPUT ?? 0, null],
+    ["sidebar:controlRestore.waitingInput", data.waiting_input_tasks, null],
     ["chat:queuedMessages", data.queued_messages, "queued"],
     ["office:overviewCompleted24h", data.completed_tasks_24h, "completed"],
     [

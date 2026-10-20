@@ -31,6 +31,8 @@ export type NativeDashboard = {
   inference_state: "unknown";
   tasks: Record<string, number>;
   sessions: Record<string, number>;
+  /** Unarchived, unfinished tasks whose primary session waits for input. */
+  waiting_input_tasks: number;
   queued_messages: number;
   transitions_24h: number;
   completed_tasks_24h: number;

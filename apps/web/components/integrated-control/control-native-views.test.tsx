@@ -111,7 +111,8 @@ describe("native control views", () => {
           basis: "recorded_task_session_queue_transition_state",
           inference_state: "unknown",
           tasks: { IN_PROGRESS: 2 },
-          sessions: { RUNNING: 3, FAILED: 1 },
+          sessions: { RUNNING: 3, FAILED: 1, WAITING_FOR_INPUT: 7 },
+          waiting_input_tasks: 2,
           queued_messages: 0,
           transitions_24h: 4,
           completed_tasks_24h: 1,
@@ -123,5 +124,8 @@ describe("native control views", () => {
     fireEvent.click(screen.getByRole("button", { name: /Process sessions running/ }));
     expect(onFilter).toHaveBeenCalledWith("sessions");
     expect(screen.getByText("Failed process sessions").closest("button")).toBeNull();
+    const waiting = screen.getByText("Waiting for input").parentElement;
+    expect(waiting?.textContent).toContain("2");
+    expect(waiting?.textContent).not.toContain("7");
   });
 });

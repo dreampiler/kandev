@@ -52,6 +52,7 @@ describe("workspace figures and status", () => {
     const data = {
       tasks: { IN_PROGRESS: 2, REVIEW: 3, SCHEDULING: 1, TODO: 4 },
       sessions: { RUNNING: 1, WAITING_FOR_INPUT: 5, FAILED: 2 },
+      waiting_input_tasks: 2,
       queued_messages: 3,
       transitions_24h: 9,
       completed_tasks_24h: 1,
@@ -59,7 +60,7 @@ describe("workspace figures and status", () => {
     expect(workspaceFigures(data)).toEqual({
       inProgress: 6,
       running: 1,
-      waitingInput: 5,
+      waitingInput: 2,
       queued: 3,
       completed24h: 1,
       moves24h: 9,

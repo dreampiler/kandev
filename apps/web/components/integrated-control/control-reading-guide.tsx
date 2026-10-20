@@ -4,6 +4,7 @@ const KEYS = {
   overview: [
     "sidebar:controlSummary.guide.recorded",
     "sidebar:controlSummary.guide.windows",
+    "sidebar:controlSummary.guide.waitingInput",
     "sidebar:controlSummary.guide.rules",
     "sidebar:controlNative.metricScope",
   ],
@@ -15,6 +16,7 @@ const KEYS = {
   workspaces: [
     "sidebar:controlSummary.guide.recorded",
     "sidebar:controlSummary.guide.windows",
+    "sidebar:controlSummary.guide.waitingInput",
     "sidebar:controlRestore.processScope",
   ],
   history: ["sidebar:controlRestore.historyScope", "sidebar:controlSummary.guide.history"],
