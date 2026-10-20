@@ -132,20 +132,30 @@ func TestParkedSessionSettlementIgnoresFailuresAndForeignSessions(t *testing.T) 
 	}
 }
 
-// An Office task gets the Office IDLE teardown after its turn completes, which
-// emits AgentStopped and settles the run. Settling on the earlier park would
-// free the agent slot while that teardown is still pending, so the next queued
-// run could reuse the live execution and then be stopped by the late
-// teardown. The park must leave the run claimed; AgentStopped settles it.
-func TestParkedOfficeSessionRunSettlesOnAgentStoppedNotPark(t *testing.T) {
+// An Office turn that never reaches a stopping teardown — a cancelled turn,
+// a session without an agent execution, or a session relaunched for the next
+// run — would otherwise leave its claimed run stuck and hold the agent
+// ceiling. The park is the turn's only completion signal in every case, so it
+// settles the run; the Office IDLE teardown's later AgentStopped is then a
+// no-op.
+func TestParkedOfficeSessionRunSettlesOnPark(t *testing.T) {
 	f := newParkedRunFixtureForTask(t, "proj-office")
 
 	f.publishSessionState(t, "session-launched", "RUNNING", "WAITING_FOR_INPUT", "")
 
-	if got := f.runStatus(t); got != service.RunStatusClaimed {
-		t.Fatalf("run status = %q, want claimed until the Office teardown stops the agent", got)
+	if got := f.runStatus(t); got != service.RunStatusFinished {
+		t.Fatalf("run status = %q, want finished after the Office session parked", got)
+	}
+	free, err := f.svc.CheckoutTask(context.Background(), "task-parked", "agent-other")
+	if err != nil {
+		t.Fatalf("checkout after settle: %v", err)
+	}
+	if !free {
+		t.Fatal("task checkout is still held after the Office run settled")
 	}
 
+	// The Office IDLE teardown still fires AgentStopped afterwards; it must not
+	// error or re-settle the already finished run.
 	event := bus.NewEvent(events.AgentStopped, "test", map[string]string{
 		"task_id":          "task-parked",
 		"session_id":       "session-launched",
@@ -156,6 +166,6 @@ func TestParkedOfficeSessionRunSettlesOnAgentStoppedNotPark(t *testing.T) {
 		t.Fatalf("publish agent stopped: %v", err)
 	}
 	if got := f.runStatus(t); got != service.RunStatusFinished {
-		t.Fatalf("run status = %q, want finished after AgentStopped", got)
+		t.Fatalf("run status = %q, want finished after the late AgentStopped", got)
 	}
 }
