@@ -435,6 +435,9 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		case errors.Is(err, service.ErrActiveTaskSessions):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task is used by an active agent session", nil)
+		case errors.As(err, new(*service.TaskDeleteChildWorkspaceConflictError)):
+			details, _ := taskDeleteChildConflictDetails(err)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), details)
 		case isCascadePostCommitError(err):
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", req.ID), zap.Error(err))
@@ -444,7 +447,8 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 				dependencyKeyTaskID: req.ID,
 			})
 		default:
-			h.logger.Error("failed to delete task", zap.Error(err))
+			h.logger.Error("failed to delete task",
+				zap.String("task_id", req.ID), zap.Bool("cascade", req.Cascade), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete task", nil)
 		}
 	}
