@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -207,4 +208,60 @@ func TestTerminalPrimaryQueueHandoffDoesNotStartAfterStop(t *testing.T) {
 
 	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, primaryStoppedID))
 	require.Empty(t, queuedContents(t, svc, "session-next"))
+}
+
+// The hand-off resolves the live primary B, then an explicit promotion moves
+// the role to C before the transfer commits. B is live, so it schedules no
+// hand-off of its own; the messages must still reach C, the session that holds
+// the primary role when they move.
+func TestTerminalPrimaryQueueHandoffFollowsPromotionBeforeTransfer(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-b", State: models.TaskSessionStateRunning},
+		&models.TaskSession{ID: "session-c", State: models.TaskSessionStateRunning},
+	)
+	enableTerminalPrimaryQueueHandoff(t, svc)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	promoted := false
+	svc.beforeTerminalQueueTransfer = func(toSessionID string) {
+		if promoted {
+			return
+		}
+		promoted = true
+		assert.Equal(t, "session-b", toSessionID)
+		assert.NoError(t, svc.SetPrimarySession(ctx, "session-c"))
+	}
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	require.NoError(t, svc.SetPrimarySession(ctx, "session-b"))
+
+	requireQueueMoved(t, svc, primaryStoppedID, "session-c")
+	require.Empty(t, queuedContents(t, svc, "session-b"))
+	require.Equal(t, "session-c", primarySessionID(t, repo))
+}
+
+// A user who pauses the receiver's Auto-run while the hand-off is in flight
+// keeps that pause; the hand-off must not restore an earlier value and drain.
+func TestTerminalPrimaryQueueHandoffKeepsReceiverPauseDuringTransfer(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-live", State: models.TaskSessionStateWaitingForInput},
+	)
+	enableTerminalPrimaryQueueHandoff(t, svc)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+	require.True(t, svc.messageQueue.GetStatus(ctx, "session-live").AutoRun)
+	svc.beforeTerminalQueueTransfer = func(toSessionID string) {
+		assert.NoError(t, svc.messageQueue.SetAutoRun(ctx, toSessionID, false))
+	}
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	svc.maybePromotePrimary(ctx, primaryTaskID, primaryStoppedID, models.TaskSessionStateFailed)
+
+	requireQueueMoved(t, svc, primaryStoppedID, "session-live")
+	svc.stopParkedSamplingLoops() // join the hand-off worker
+	require.False(t, svc.messageQueue.GetStatus(ctx, "session-live").AutoRun,
+		"the hand-off must keep the receiver's Auto-run pause made during the transfer")
+	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, "session-live"))
 }

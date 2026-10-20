@@ -85,10 +85,17 @@ for it, and no hand-off starts after `Stop`. Hand-offs are serialized and each
 resolves the task's current primary when it runs, not when it was scheduled:
 if successive promotions fail one primary after another, an earlier hand-off
 delivers to the latest primary instead of a session that already handed its
-own queue on. It transfers the queue with the existing
-`transferQueuedSessionState` (attachments and compensation included), keeps
-the receiver's own Auto-run setting (the transfer would otherwise combine it
-with the retired source's setting), and then offers the new primary to
+own queue on. It transfers the queue with
+`messagequeue.TransferRetiredSessionWithDurableAttachmentPreparation`
+(attachments and compensation included), which lifts the retired source's
+Auto-run pause inside the transfer's admission on both sessions, so the
+repository's combined setting is the receiver's own value at commit, including
+a pause the user set while the hand-off waited. Inside that admission the
+hand-off also confirms the receiver still holds the primary role, holding the
+read side of `primarySwitchMu` until the transfer returns; `SetPrimarySession`
+takes the write side only around its repository write. If the role moved
+first, the transfer rolls back and the hand-off resolves the primary again (up
+to five attempts). It then offers the new primary to
 `DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
 the queue on the terminal session. The flag is read once at startup into the
 orchestrator service config.

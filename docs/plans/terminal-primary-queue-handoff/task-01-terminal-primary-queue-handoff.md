@@ -30,10 +30,15 @@ to the new primary and drains it when Auto-run allows.
 - `SetPrimarySession` reads the previous primary and schedules
   `handOffTerminalSessionQueue` on the service-owned worker lifetime when it is
   terminal; hand-offs are serialized and resolve the current primary.
+- `messagequeue.TransferRetiredSessionWithDurableAttachmentPreparation` keeps
+  the receiver's Auto-run inside the transfer's admission, and the hand-off
+  re-checks the receiver's primary role there, retrying when it moved.
 
 ## Verification
 
 `go test ./internal/orchestrator/ -run 'TestPrimary|TestExplicitPrimary'` covers
 automatic promotion, an explicit choice, a live previous primary, the
 flag-off default, a paused previous primary with an enabled receiver,
-successive terminal promotions, and no hand-off after `Stop`.
+successive terminal promotions, no hand-off after `Stop`, a promotion that
+lands between receiver resolution and transfer, and a receiver Auto-run pause
+made during the hand-off.

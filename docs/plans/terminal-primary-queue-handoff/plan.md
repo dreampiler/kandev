@@ -29,8 +29,10 @@ queue of a live session.
 
 ## Technical approach
 
-Reuse `transferQueuedSessionState` and `DrainQueuedMessageIfAutoRun`; the only
-new decision is whether the previous primary is terminal.
+Reuse the queue transfer and `DrainQueuedMessageIfAutoRun`; the new decisions
+are whether the previous primary is terminal, that the retired source's
+Auto-run does not combine into the receiver's, and that the receiver must
+still be primary inside the transfer's admission.
 
 ## Work orders
 

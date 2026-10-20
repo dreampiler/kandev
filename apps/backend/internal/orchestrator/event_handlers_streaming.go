@@ -2128,51 +2128,111 @@ func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID stri
 	}()
 }
 
+// errTerminalQueueReceiverChanged aborts a hand-off transfer whose receiver
+// lost the primary role before the transfer was admitted.
+var errTerminalQueueReceiverChanged = errors.New("terminal queue hand-off receiver is no longer primary")
+
+// terminalQueueHandOffAttempts bounds re-resolving the receiver when the
+// primary role keeps moving while a hand-off waits for admission.
+const terminalQueueHandOffAttempts = 5
+
 // handOffTerminalSessionQueue resolves the receiver when it runs instead of
 // when it was scheduled. Hand-offs are serialized, so when successive
 // promotions fail one primary after another, an earlier hand-off cannot move
-// its messages onto a primary that already handed its own queue on.
+// its messages onto a primary that already handed its own queue on. The
+// transfer confirms the receiver is still primary inside its admission and
+// resolves it again when the role moved, so a promotion that lands while the
+// transfer waits cannot leave the messages on a session that lost the role.
 func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID string) {
 	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil || fromSessionID == "" {
 		return
 	}
 	s.terminalQueueHandOffMu.Lock()
 	defer s.terminalQueueHandOffMu.Unlock()
-	if ctx.Err() != nil {
-		return
-	}
-	toSessionID := s.currentPrimarySessionID(ctx, taskID)
-	if toSessionID == "" || toSessionID == fromSessionID {
-		return
-	}
-	pending, err := s.messageQueue.HasPendingForSession(ctx, fromSessionID)
-	if err != nil || !pending {
-		return
-	}
-	receiverAutoRun := s.messageQueue.GetStatus(ctx, toSessionID).AutoRun
-	if err := s.transferQueuedSessionState(ctx, taskID, fromSessionID, toSessionID); err != nil {
-		s.logger.Warn("failed to hand off queued messages from terminal session",
-			zap.String("task_id", taskID),
-			zap.String("from_session_id", fromSessionID),
-			zap.String("to_session_id", toSessionID),
-			zap.Error(err))
-		return
-	}
-	// The transfer combines both sessions' Auto-run settings. The source is
-	// retired, so its setting must not pause the receiver.
-	if receiverAutoRun && !s.messageQueue.GetStatus(ctx, toSessionID).AutoRun {
-		if err := s.messageQueue.SetAutoRun(ctx, toSessionID, true); err != nil {
-			s.logger.Warn("failed to keep receiver Auto-run after queue hand-off",
+	for attempt := 0; attempt < terminalQueueHandOffAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return
+		}
+		toSessionID := s.currentPrimarySessionID(ctx, taskID)
+		if toSessionID == "" || toSessionID == fromSessionID {
+			return
+		}
+		pending, err := s.messageQueue.HasPendingForSession(ctx, fromSessionID)
+		if err != nil || !pending {
+			return
+		}
+		if s.beforeTerminalQueueTransfer != nil {
+			s.beforeTerminalQueueTransfer(toSessionID)
+		}
+		err = s.transferTerminalSessionQueue(ctx, taskID, fromSessionID, toSessionID)
+		if errors.Is(err, errTerminalQueueReceiverChanged) {
+			continue
+		}
+		if err != nil {
+			s.logger.Warn("failed to hand off queued messages from terminal session",
+				zap.String("task_id", taskID),
+				zap.String("from_session_id", fromSessionID),
+				zap.String("to_session_id", toSessionID),
+				zap.Error(err))
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if _, err := s.DrainQueuedMessageIfAutoRun(ctx, toSessionID); err != nil {
+			s.logger.Debug("queued hand-off left for the next drain",
 				zap.String("session_id", toSessionID), zap.Error(err))
 		}
-	}
-	if ctx.Err() != nil {
 		return
 	}
-	if _, err := s.DrainQueuedMessageIfAutoRun(ctx, toSessionID); err != nil {
-		s.logger.Debug("queued hand-off left for the next drain",
-			zap.String("session_id", toSessionID), zap.Error(err))
+	s.logger.Warn("terminal queue hand-off gave up while the primary role kept moving",
+		zap.String("task_id", taskID),
+		zap.String("from_session_id", fromSessionID))
+}
+
+// transferTerminalSessionQueue moves a terminal session's queue to the
+// primary. The receiver keeps its own Auto-run: the retired source's setting
+// is not combined into it, and a change the user made before the transfer was
+// admitted is kept. Inside the admission it confirms toSessionID still holds
+// the primary role and keeps primary switches out until the transfer commits.
+func (s *Service) transferTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) error {
+	prepareAttachments, rollbackAttachments := s.queuedAttachmentTransferCallbacks(taskID, fromSessionID, toSessionID)
+	fenced := false
+	defer func() {
+		if fenced {
+			s.primarySwitchMu.RUnlock()
+		}
+	}()
+	attachmentsPrepared := false
+	transferErr := s.messageQueue.TransferRetiredSessionWithDurableAttachmentPreparation(
+		ctx,
+		taskID,
+		fromSessionID,
+		toSessionID,
+		func(admittedCtx context.Context, attachmentIDs []string) error {
+			if !fenced {
+				s.primarySwitchMu.RLock()
+				fenced = true
+			}
+			if s.currentPrimarySessionID(admittedCtx, taskID) != toSessionID {
+				return errTerminalQueueReceiverChanged
+			}
+			attachmentsPrepared = true
+			return prepareAttachments(admittedCtx, attachmentIDs)
+		},
+		func(rollbackCtx context.Context, attachmentIDs []string) error {
+			if !attachmentsPrepared {
+				return nil
+			}
+			return rollbackAttachments(rollbackCtx, attachmentIDs)
+		},
+	)
+	if transferErr != nil {
+		return fmt.Errorf("transfer queued state: %w", transferErr)
 	}
+	s.publishQueueStatusEvent(ctx, fromSessionID)
+	s.publishQueueStatusEvent(ctx, toSessionID)
+	return nil
 }
 
 func (s *Service) currentPrimarySessionID(ctx context.Context, taskID string) string {
