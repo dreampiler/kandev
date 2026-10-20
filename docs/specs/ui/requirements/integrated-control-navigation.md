@@ -14,6 +14,7 @@ owners: [kandev]
 - **AC-UI-INTEGRATED-CONTROL-001.2:** ON adds the picker destination, five separate menus, and the same tree of workspaces with one coordinator conversation entry per coordinator on desktop and phone.
 - **AC-UI-INTEGRATED-CONTROL-001.3:** Selecting an existing conversation keeps integrated navigation, original IDs and drafts, with no prepare/open/resume/prompt or agent launch.
 - **AC-UI-INTEGRATED-CONTROL-001.4:** Existing native permissions apply; unavailable and failed reads are distinct from empty data; scope limitations are not reported as completed capabilities.
+- **AC-UI-INTEGRATED-CONTROL-001.5:** A coordinator without a current conversation shows a "+ Coordinator conversation" entry only to users with workspace management access. Only an explicit click on it calls the existing coordinator conversation open path (profile check, then the conversation route), refreshes the tree, and opens the new conversation; a failure says why (unusable profile, removed coordinator, conflict, or open failure) and navigates nowhere.
 
 The workspace picker offers an opt-in Integrated control destination. It owns
 a dedicated navigation context, rather than representing a synthetic workspace.

@@ -70,7 +70,9 @@ describe("control refresh scheduler", () => {
     expect(calls.length).toBeGreaterThanOrEqual(2);
     scheduler.dispose();
   });
+});
 
+describe("control refresh scheduler timing", () => {
   it("re-reads every thirty seconds and restarts that clock after any read", async () => {
     const { calls, scheduler } = harness();
     void scheduler.request();
@@ -92,6 +94,31 @@ describe("control refresh scheduler", () => {
     visible = true;
     void scheduler.request();
     expect(calls).toHaveLength(2);
+    scheduler.dispose();
+  });
+
+  it("does not read for live events while hidden; the foreground return reads once", async () => {
+    let visible = false;
+    const { calls, scheduler } = harness({ isVisible: () => visible });
+    for (let index = 0; index < 5; index += 1) {
+      scheduler.event();
+      await vi.advanceTimersByTimeAsync(5_000);
+    }
+    expect(calls).toHaveLength(0);
+    visible = true;
+    void scheduler.request();
+    void scheduler.request();
+    expect(calls).toHaveLength(1);
+    scheduler.dispose();
+  });
+
+  it("clears the retry time when a failed read is followed by a queued read", async () => {
+    const { calls, retries, scheduler } = harness();
+    void scheduler.request();
+    void scheduler.request();
+    await settle(calls[0], "retry");
+    expect(calls).toHaveLength(2);
+    expect(retries).toEqual([null]);
     scheduler.dispose();
   });
 

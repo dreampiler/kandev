@@ -132,13 +132,17 @@ testing, containment, scroll ownership, dismissal, and unchanged selection.
 `REQ-UI-INTEGRATED-CONTROL-002` adds one read to the route-scoped provider:
 `useControlAggregate` calls `getWorkspaceAggregate` when the route is active,
 the user is authenticated, and `features.office` is on. It keeps one snapshot
-per authenticated read identity, aborts superseded requests, keeps the last
-snapshot when a refresh fails, and uses the same scheduler as the workspace
-snapshot: every 30 seconds while visible, on the header Refresh button, and on
-foreground return, never aborting a read in flight. It adds no WebSocket
-subscription. A failed refresh with a kept snapshot is reported in the page
-banner rather than inside the panels; the comparison table uses fixed column
-widths, right-aligned tabular numbers, and dimmed zeros.
+per authenticated read identity and discards responses from a retired identity.
+It uses the same scheduler as the workspace snapshot: every 30 seconds while
+visible, on the header Refresh button, and on foreground return, never aborting
+a read in flight. It adds no WebSocket subscription. The comparison table uses
+fixed column widths, right-aligned tabular numbers, and dimmed zeros.
+
+Aggregate failures are handled apart from workspace snapshot failures. A failed
+aggregate refresh keeps the last snapshot, retries on the 5, 10, 20, 40 then 60
+second schedule, and is reported in the page banner as the Office summary
+failing, not inside the panels. A failed first read, with no snapshot to keep,
+is reported in place of the panels, and the rest of the dashboard still renders.
 The navigation flag stays `features.integratedControl`; no new flag is added.
 
 `control-aggregate-signals.ts` derives everything from the aggregate entries as

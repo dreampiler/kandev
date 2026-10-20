@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "No permission to read this collection",
   "integratedControl.coordinatorConversation": "Coordinator conversation",
   "integratedControl.coordinatorConversationNamed": "Coordinator conversation · {{name}}",
-  "integratedControl.openConversationFailed": "The conversation could not be opened.",
   "integratedControl.views.overview": "Overview",
   "integratedControl.views.activity": "Activity",
   "integratedControl.views.providers": "Provider / model",

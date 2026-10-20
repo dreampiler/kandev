@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "無權讀取此集合",
   "integratedControl.coordinatorConversation": "協調器對話",
   "integratedControl.coordinatorConversationNamed": "協調器對話 · {{name}}",
-  "integratedControl.openConversationFailed": "無法開啟對話。",
   "integratedControl.views.overview": "整合摘要",
   "integratedControl.views.activity": "活動狀態",
   "integratedControl.views.providers": "供應商 / 模型",

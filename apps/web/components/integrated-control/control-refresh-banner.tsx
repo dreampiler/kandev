@@ -59,14 +59,21 @@ export function ControlRefreshBanner() {
   const control = useIntegratedControl();
   const parts = control ? bannerParts(control, t) : [];
   if (!control || parts.length === 0) return null;
+  const [headline, ...details] = parts;
+  // Only the headline is live: a new retry time is not re-announced every backoff step.
   return (
     <p
-      role={control.failure ? "alert" : "status"}
       className="shrink-0 border-b bg-amber-500/15 px-4 py-2 text-xs font-medium text-amber-800 tabular-nums dark:text-amber-200"
       data-testid="control-refresh-banner"
       data-kind={control.failure?.kind}
     >
-      {parts.join(" · ")}
+      <span role="status">{headline}</span>
+      {details.map((detail) => (
+        <span key={detail}>
+          {" · "}
+          {detail}
+        </span>
+      ))}
     </p>
   );
 }

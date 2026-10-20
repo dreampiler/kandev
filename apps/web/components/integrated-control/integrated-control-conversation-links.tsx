@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import { useOpenControlConversation } from "@/hooks/domains/coordinator/use-open-control-conversation";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { openFailureMessages } from "./control-open-failure";
 
 const ROW_CLASS =
   "flex min-h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
@@ -19,12 +20,15 @@ export function ControlCoordinatorConversation({
   workspaceId,
   coordinator,
   named,
+  canManage,
   view,
   onNavigate,
 }: {
   workspaceId: string;
   coordinator: Coordinator;
   named: boolean;
+  /** Opening a conversation needs workspace management access, like the conversation screen. */
+  canManage: boolean;
   view: ControlView;
   onNavigate?: () => void;
 }) {
@@ -54,6 +58,7 @@ export function ControlCoordinatorConversation({
       </Link>
     );
   }
+  if (!canManage) return null;
   return (
     <>
       <button
@@ -71,11 +76,11 @@ export function ControlCoordinatorConversation({
         <IconPlus className="size-3.5 shrink-0" aria-hidden />
         <span className="truncate">{label}</span>
       </button>
-      {opener.failed && (
-        <p role="alert" className="px-2 py-1 text-xs text-muted-foreground">
-          {t("sidebar:integratedControl.openConversationFailed")}
+      {openFailureMessages(opener.failure, t).map((message) => (
+        <p key={message} role="alert" className="px-2 py-1 text-xs text-muted-foreground">
+          {message}
         </p>
-      )}
+      ))}
     </>
   );
 }

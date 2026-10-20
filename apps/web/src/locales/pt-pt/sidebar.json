@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "Sem permissão para ler esta coleção",
   "integratedControl.coordinatorConversation": "Conversa do coordenador",
   "integratedControl.coordinatorConversationNamed": "Conversa do coordenador · {{name}}",
-  "integratedControl.openConversationFailed": "Não foi possível abrir a conversa.",
   "integratedControl.views.overview": "Resumo",
   "integratedControl.views.activity": "Atividade",
   "integratedControl.views.providers": "Fornecedor / modelo",

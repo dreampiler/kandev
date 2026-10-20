@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "이 목록을 볼 권한 없음",
   "integratedControl.coordinatorConversation": "코디네이터 대화",
   "integratedControl.coordinatorConversationNamed": "코디네이터 대화 · {{name}}",
-  "integratedControl.openConversationFailed": "대화를 열지 못했습니다.",
   "integratedControl.views.overview": "통합 요약",
   "integratedControl.views.activity": "동작 현황",
   "integratedControl.views.providers": "공급자 / 모델",

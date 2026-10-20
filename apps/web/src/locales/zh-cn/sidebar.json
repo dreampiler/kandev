@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "无权读取此集合",
   "integratedControl.coordinatorConversation": "协调器对话",
   "integratedControl.coordinatorConversationNamed": "协调器对话 · {{name}}",
-  "integratedControl.openConversationFailed": "无法打开对话。",
   "integratedControl.views.overview": "综合概览",
   "integratedControl.views.activity": "活动状态",
   "integratedControl.views.providers": "提供商 / 模型",

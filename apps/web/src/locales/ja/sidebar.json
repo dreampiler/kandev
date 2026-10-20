@@ -172,7 +172,6 @@
   "controlRefresh.bannerDenied": "このコレクションを読む権限がありません",
   "integratedControl.coordinatorConversation": "コーディネーター会話",
   "integratedControl.coordinatorConversationNamed": "コーディネーター会話 · {{name}}",
-  "integratedControl.openConversationFailed": "会話を開けませんでした。",
   "integratedControl.views.overview": "統合概要",
   "integratedControl.views.activity": "動作状況",
   "integratedControl.views.providers": "プロバイダー / モデル",

@@ -49,6 +49,7 @@ describe("ControlCoordinatorConversation", () => {
         workspaceId="w1"
         coordinator={coordinator({ conversation_task_id: "t1" })}
         named={false}
+        canManage
         view="overview"
       />,
     );
@@ -74,6 +75,7 @@ describe("ControlCoordinatorConversation", () => {
         workspaceId="w1"
         coordinator={coordinator()}
         named
+        canManage
         view="activity"
         onNavigate={onNavigate}
       />,
@@ -91,13 +93,26 @@ describe("ControlCoordinatorConversation", () => {
     expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
-  it("stays in place and says so when the conversation cannot be opened", async () => {
-    fixture.open.mockResolvedValue({ kind: "error", error: "open-failed" });
+  it.each([
+    [
+      { kind: "profile-unavailable", agentStatus: "missing", executorStatus: "ok" },
+      ["coordinator:copilotAgentMissingMessage"],
+    ],
+    [
+      { kind: "profile-unavailable", agentStatus: "ok", executorStatus: "missing" },
+      ["coordinator:copilotExecutorMissingMessage"],
+    ],
+    [{ kind: "gone" }, ["coordinator:copilotGoneMessage"]],
+    [{ kind: "error", error: "conflict" }, ["coordinator:copilotConflictMessage"]],
+    [{ kind: "error", error: "open-failed" }, ["coordinator:copilotOpenFailedMessage"]],
+  ])("stays in place and says why opening failed: %o", async (state, messages) => {
+    fixture.open.mockResolvedValue(state);
     render(
       <ControlCoordinatorConversation
         workspaceId="w1"
         coordinator={coordinator()}
         named={false}
+        canManage
         view="overview"
       />,
     );
@@ -106,8 +121,20 @@ describe("ControlCoordinatorConversation", () => {
     });
     expect(fixture.refresh).not.toHaveBeenCalled();
     expect(fixture.push).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe(
-      "sidebar:integratedControl.openConversationFailed",
+    expect(screen.getAllByRole("alert").map((item) => item.textContent)).toEqual(messages);
+  });
+
+  it("offers no open action without workspace management access", () => {
+    render(
+      <ControlCoordinatorConversation
+        workspaceId="w1"
+        coordinator={coordinator()}
+        named={false}
+        canManage={false}
+        view="overview"
+      />,
     );
+    expect(screen.queryByTestId("control-open-conversation-c1")).toBeNull();
+    expect(fixture.open).not.toHaveBeenCalled();
   });
 });
