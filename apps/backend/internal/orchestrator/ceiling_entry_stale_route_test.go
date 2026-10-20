@@ -13,69 +13,101 @@ import (
 )
 
 type staleRouteFixture struct {
-	ctx          context.Context
-	repo         *sqliterepo.Repository
-	svc          *Service
-	taskID       string
-	sessionID    string
-	previousStep string
-	currentStep  string
-	previousEnt  int64
-	currentEnt   int64
+	ctx         context.Context
+	repo        *sqliterepo.Repository
+	svc         *Service
+	taskID      string
+	sessionID   string
+	steps       []string
+	entries     []int64
+	routeStep   string
+	routeEntry  int64
+	currentStep string
+	currentEnt  int64
+	previousEnt int64
 }
 
-// newStaleRouteFixture seeds a task that moved from previousStep to currentStep
-// while the committed workflow_session_route still belongs to previousStep's
-// entry. This is the state a queued start sees when capacity deferral kept the
-// destination route from being materialized.
+// newStaleRouteFixture seeds a task that moved from the previous step to the
+// current one while the committed workflow_session_route still belongs to the
+// previous entry. This is the state a queued sessionless start sees when
+// capacity deferral kept the destination route from being materialized.
 func newStaleRouteFixture(t *testing.T) *staleRouteFixture {
+	t.Helper()
+	return newStaleRouteFixtureWithRouteLag(t, 1,
+		"stale-route-previous", "stale-route-current")
+}
+
+// newTwoEntryLagFixture keeps the stale route two entries behind the task, so
+// the route does not describe the immediately previous entry.
+func newTwoEntryLagFixture(t *testing.T) *staleRouteFixture {
+	t.Helper()
+	return newStaleRouteFixtureWithRouteLag(t, 2,
+		"stale-route-predecessor", "stale-route-previous", "stale-route-current")
+}
+
+// newStaleRouteFixtureWithRouteLag seeds the given step history through the
+// real transition ledger and leaves the task on the last step. The committed
+// route is pinned routeLag entries back, naming that entry's destination step.
+func newStaleRouteFixtureWithRouteLag(t *testing.T, routeLag int, steps ...string) *staleRouteFixture {
 	t.Helper()
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	const (
-		taskID       = "stale-route-task"
-		sessionID    = "stale-route-session"
-		previousStep = "stale-route-previous"
-		currentStep  = "stale-route-current"
+		taskID    = "stale-route-task"
+		sessionID = "stale-route-session"
 	)
-	seedTaskAndSessionWithStep(t, repo, taskID, sessionID, previousStep)
-	previousEntry, err := repo.GetLatestTaskStepTransitionID(ctx, taskID)
-	require.NoError(t, err)
-	require.Positive(t, previousEntry)
+	require.GreaterOrEqual(t, len(steps), 2)
+	seedTaskAndSessionWithStep(t, repo, taskID, sessionID, steps[0])
 
-	task, err := repo.GetTask(ctx, taskID)
+	entries := make([]int64, 0, len(steps))
+	genesisEntry, err := repo.GetLatestTaskStepTransitionID(ctx, taskID)
 	require.NoError(t, err)
-	task.WorkflowStepID = currentStep
-	require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
-	currentEntry, err := repo.GetLatestTaskStepTransitionID(ctx, taskID)
-	require.NoError(t, err)
-	require.Greater(t, currentEntry, previousEntry)
+	require.Positive(t, genesisEntry)
+	entries = append(entries, genesisEntry)
+	for _, step := range steps[1:] {
+		task, taskErr := repo.GetTask(ctx, taskID)
+		require.NoError(t, taskErr)
+		task.WorkflowStepID = step
+		require.NoError(t, repo.UpdateTaskPreservingDeferredLaunch(ctx, task))
+		entryID, entryErr := repo.GetLatestTaskStepTransitionID(ctx, taskID)
+		require.NoError(t, entryErr)
+		require.Greater(t, entryID, entries[len(entries)-1])
+		entries = append(entries, entryID)
+	}
 
+	routeIndex := len(steps) - 1 - routeLag
+	require.GreaterOrEqual(t, routeIndex, 0)
+	routeStep := steps[routeIndex]
+	routeEntry := entries[routeIndex]
 	require.NoError(t, repo.SetTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowSessionRoute,
 		models.WorkflowSessionRoute{
-			OperationID:       "route-previous",
-			DestinationStepID: previousStep,
-			EntryIdentity:     workflowEntryIdentityForID(previousEntry),
+			OperationID:       "route-stale",
+			DestinationStepID: routeStep,
+			EntryIdentity:     workflowEntryIdentityForID(routeEntry),
 			TargetKind:        "new_session",
 			DestinationID:     sessionID,
 			Phase:             "committed",
 		}))
 
 	stepGetter := newMockStepGetter()
-	stepGetter.steps[currentStep] = &wfmodels.WorkflowStep{ID: currentStep, WorkflowID: "wf1"}
-	stepGetter.steps[previousStep] = &wfmodels.WorkflowStep{ID: previousStep, WorkflowID: "wf1"}
+	for _, step := range steps {
+		stepGetter.steps[step] = &wfmodels.WorkflowStep{ID: step, WorkflowID: "wf1"}
+	}
 	stepGetter.steps["stale-route-successor"] = &wfmodels.WorkflowStep{ID: "stale-route-successor", WorkflowID: "wf1"}
 
 	return &staleRouteFixture{
-		ctx:          ctx,
-		repo:         repo,
-		svc:          createTestService(repo, stepGetter, newMockTaskRepo()),
-		taskID:       taskID,
-		sessionID:    sessionID,
-		previousStep: previousStep,
-		currentStep:  currentStep,
-		previousEnt:  previousEntry,
-		currentEnt:   currentEntry,
+		ctx:         ctx,
+		repo:        repo,
+		svc:         createTestService(repo, stepGetter, newMockTaskRepo()),
+		taskID:      taskID,
+		sessionID:   sessionID,
+		steps:       steps,
+		entries:     entries,
+		routeStep:   routeStep,
+		routeEntry:  routeEntry,
+		currentStep: steps[len(steps)-1],
+		currentEnt:  entries[len(entries)-1],
+		previousEnt: entries[len(entries)-2],
 	}
 }
 
@@ -104,9 +136,9 @@ func (f *staleRouteFixture) unboundStart() models.CeilingDeferral {
 	}
 }
 
-// A committed route belonging to the previous entry is not proof that the
-// current entry was superseded: the task already carries the record's step and
-// ledger entry, so the queued start must stay replayable.
+// A committed route belonging to the immediately previous entry is not proof
+// that the current entry was superseded: the task already carries the record's
+// step and ledger entry, so the sessionless queued start must stay replayable.
 func TestValidateCeilingEntry_UnboundStartWithStaleRouteStaysValid(t *testing.T) {
 	f := newStaleRouteFixture(t)
 
@@ -115,8 +147,51 @@ func TestValidateCeilingEntry_UnboundStartWithStaleRouteStaysValid(t *testing.T)
 	require.Equal(t, ceilingEntryValid, disposition, detail)
 }
 
-// The same stale route must still reject a record that names an older entry:
-// the task's latest ledger identity is the admission contract.
+// A session-bearing record keeps the payload-session comparison: only the
+// sessionless seam-1 start may treat the previous entry's route as lag.
+func TestValidateCeilingEntry_SessionBoundStartWithStaleRouteStaysSuperseded(t *testing.T) {
+	f := newStaleRouteFixture(t)
+	deferral := f.unboundStart()
+	deferral.Kind = models.CeilingLaunchStartCreated
+	deferral.Payload[metaKeySessionID] = f.sessionID
+
+	disposition, detail, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), deferral)
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
+}
+
+// A route two entries behind does not describe the immediately previous entry,
+// so it is not lag and must not be forgiven.
+func TestValidateCeilingEntry_UnboundStartWithOlderStaleRouteStaysSuperseded(t *testing.T) {
+	f := newTwoEntryLagFixture(t)
+	require.NotEqual(t, f.previousEnt, f.routeEntry)
+
+	disposition, detail, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), f.unboundStart())
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
+}
+
+// A route naming a foreign entry identity is not the previous entry even when
+// its destination step matches.
+func TestValidateCeilingEntry_UnboundStartWithForeignRouteEntryStaysSuperseded(t *testing.T) {
+	f := newStaleRouteFixture(t)
+	require.NoError(t, f.repo.SetTaskMetadataKey(f.ctx, f.taskID, models.MetaKeyWorkflowSessionRoute,
+		models.WorkflowSessionRoute{
+			OperationID:       "route-stale",
+			DestinationStepID: f.routeStep,
+			EntryIdentity:     workflowEntryIdentityForID(f.routeEntry + 500),
+			TargetKind:        "new_session",
+			DestinationID:     f.sessionID,
+			Phase:             "committed",
+		}))
+
+	disposition, detail, err := f.svc.validateCeilingEntry(f.ctx, f.task(t), f.unboundStart())
+	require.NoError(t, err)
+	require.Equal(t, ceilingEntrySuperseded, disposition, detail)
+}
+
+// The same lag guard must still reject a record that names an older entry: the
+// task's latest ledger identity is the admission contract.
 func TestValidateCeilingEntry_UnboundStartWithOlderEntryStaysSuperseded(t *testing.T) {
 	f := newStaleRouteFixture(t)
 	deferral := f.unboundStart()
@@ -147,17 +222,17 @@ func TestValidateCeilingEntry_BoundStartWithStaleRouteStaysSuperseded(t *testing
 	f := newStaleRouteFixture(t)
 	binding := models.CeilingWorkflowEntryBinding{
 		WorkflowID:           "wf1",
-		DestinationStepID:    f.previousStep,
-		RouteOperationID:     "route-previous",
-		EntryIdentity:        workflowEntryIdentityForID(f.previousEnt),
+		DestinationStepID:    f.routeStep,
+		RouteOperationID:     "route-stale",
+		EntryIdentity:        workflowEntryIdentityForID(f.routeEntry),
 		DestinationSessionID: f.sessionID,
 	}
 	deferral := models.CeilingDeferral{
 		Kind: models.CeilingLaunchStartCreated,
 		Payload: map[string]interface{}{
 			metaKeySessionID:                    f.sessionID,
-			metaKeyWorkflowStepID:               f.previousStep,
-			"workflow_entry_id":                 f.previousEnt,
+			metaKeyWorkflowStepID:               f.routeStep,
+			"workflow_entry_id":                 f.routeEntry,
 			models.CeilingLaunchEntryBindingKey: ceilingEntryBindingValue(binding),
 		},
 		Origin:     string(launchOriginAutomatic),

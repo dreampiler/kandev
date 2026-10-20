@@ -172,15 +172,18 @@ Cross-step promotions keep their delivered ledger id and are unchanged.
    existing paths (AC-TASKS-WORKFLOW-STAGE-MOVES-003.4). The completion signal
    stays recorded on the session, so the advance can happen on a later
    completion after the prompt is delivered.
-4. An unbound record whose payload step differs from the committed
+4. A **sessionless** start whose payload step differs from the committed
    `workflow_session_route` is not automatically superseded: the route can
-   legitimately name the previous entry because entry admission defers the
-   start before the destination route is materialized. The record is current
-   exactly when its `workflow_entry_id` is the task's latest ledger entry and its
-   step is the task's current step, matching any readable step workflow. Such a
-   record validates its destination without retargeting the older route. A record
-   naming any other step or entry, a record without an entry id, and every bound
-   record keep the strict comparison and stay superseded.
+   legitimately name the immediately previous entry because entry admission
+   defers the start before the destination route is materialized. The record is
+   current exactly when its `workflow_entry_id` is the task's latest ledger
+   entry, its step is the task's current step (matching any readable step
+   workflow), and the route names exactly the ledger row immediately before that
+   entry, both by entry identity and by destination step. Such a record validates
+   its destination without retargeting the older route. A record naming any other
+   step or entry, a route that is older than one entry or carries a foreign entry
+   identity, a record without an entry id, every session-bearing record, and
+   every bound record keep the strict comparison and stay superseded.
 
 ### How a hold ends
 
