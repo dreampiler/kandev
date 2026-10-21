@@ -14,11 +14,12 @@ import (
 // tierLimitAdapter maps the provider tier service onto the dynamic routing
 // allowance seams.
 type tierLimitAdapter struct {
-	usage *usageProviderAdapter
+	usage    *usageProviderAdapter
+	calendar *dynamicLimitCalendar
 }
 
-func newTierLimitAdapter(usage *usageProviderAdapter) *tierLimitAdapter {
-	return &tierLimitAdapter{usage: usage}
+func newTierLimitAdapter(usage *usageProviderAdapter, calendar *dynamicLimitCalendar) *tierLimitAdapter {
+	return &tierLimitAdapter{usage: usage, calendar: calendar}
 }
 
 // CheckLimit reports the first exhausted configured allowance.
@@ -44,7 +45,23 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
 		return failure
 	}
-	return a.usage.tierLimits.resolveFailure(ctx, candidate, failure)
+	resolved := a.usage.tierLimits.resolveFailure(ctx, candidate, failure)
+	if resolved == nil {
+		resolved = failure
+	}
+	// A classified quota limit on a paid model without the provider's own
+	// reset uses the operator-entered monthly reset, so the suspension the
+	// router stores actually waits for it.
+	if resolved.Code == routingerr.CodeQuotaLimited && resolved.ResetHint == nil &&
+		a.calendar != nil && !dynamicruntime.IsFreeModel(candidate.ModelID) {
+		now := time.Now()
+		if reset, ok := a.calendar.MonthlyReset(ctx, candidate, now); ok && reset.After(now) {
+			copy := *resolved
+			copy.ResetHint = &reset
+			return &copy
+		}
+	}
+	return resolved
 }
 
 // ObserveLimit records the classified limit and learns an undisclosed

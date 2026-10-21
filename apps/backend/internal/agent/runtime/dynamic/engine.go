@@ -172,12 +172,14 @@ func (e *Engine) selectContext(
 	}
 	generation := currentGeneration + 1
 	now := e.now()
-	var limitRetryAt time.Time
 	for _, candidate := range profile.Candidates {
-		if deadline, blocked := e.blockedByLimit(ctx, candidate, sessionID, now); blocked {
-			if limitRetryAt.IsZero() || deadline.Before(limitRetryAt) {
-				limitRetryAt = deadline
-			}
+		if !candidate.Enabled || candidate.ID == excludeProfileID {
+			continue
+		}
+		if preferredProfileID != "" && candidate.ID != preferredProfileID {
+			continue
+		}
+		if _, blocked := e.blockedByLimit(ctx, candidate, sessionID, now); blocked {
 			continue
 		}
 		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
@@ -227,7 +229,7 @@ func (e *Engine) selectContext(
 	}
 	e.states[sessionID] = nextState
 	return RouteDecision{}, &NoEligibleCandidateError{
-		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation, RetryAt: limitRetryAt,
+		SessionID: sessionID, LogicalProfile: profile.ID, Generation: generation,
 	}
 }
 
@@ -1402,12 +1404,7 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if failure.ResetHint != nil && failure.ResetHint.After(until) {
 			until = *failure.ResetHint
 		}
-		key := candidate.BindingKey
-		if candidate.ModelKey != "" &&
-			(failure.Code == routingerr.CodeRateLimited || failure.Code == routingerr.CodeQuotaLimited) {
-			key = candidate.ModelKey
-		}
-		e.circuits.Open(key, until, failure.Code)
+		e.circuits.Open(candidate.BindingKey, until, failure.Code)
 		return
 	}
 }

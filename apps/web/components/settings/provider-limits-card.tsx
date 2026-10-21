@@ -27,8 +27,8 @@ type ProviderLimitsCardProps = {
 
 /**
  * Operator-entered provider limits for dynamic routing: the monthly reset used
- * when the provider does not report one, and a manual block of every paid
- * model until a time seen on the provider's console.
+ * when the provider does not report one, and a manual block of every model of
+ * the provider until a time seen on its console.
  */
 export function ProviderLimitsCard({ provider }: ProviderLimitsCardProps) {
   const limitsEnabled = useFeature("providerUsageLimits");

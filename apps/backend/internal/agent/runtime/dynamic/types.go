@@ -46,9 +46,6 @@ type Candidate struct {
 	BindingKey string
 	// ModelID is the concrete provider model this candidate launches.
 	ModelID string
-	// ModelKey identifies this candidate's model on its account for
-	// model-scoped limit suspension.
-	ModelKey string
 	// SuspendedUntil is an operator-entered provider block.
 	SuspendedUntil time.Time
 	// RemoteExecution marks a candidate that authenticates against a different
@@ -322,9 +319,6 @@ type NoEligibleCandidateError struct {
 	SessionID      string
 	LogicalProfile string
 	Generation     int64
-	// RetryAt is the earliest exhausted allowance reset when the only reason no
-	// candidate was eligible was a provider limit.
-	RetryAt time.Time
 }
 
 func (e *NoEligibleCandidateError) Error() string {

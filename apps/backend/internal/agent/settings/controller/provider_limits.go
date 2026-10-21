@@ -30,7 +30,7 @@ type ProviderLimitDTO struct {
 	// the provider reports one and otherwise from the operator setting.
 	NextMonthlyReset       *time.Time `json:"next_monthly_reset,omitempty"`
 	NextMonthlyResetSource string     `json:"next_monthly_reset_source,omitempty"`
-	// BlockUntil pauses every paid model of the provider until that instant.
+	// BlockUntil pauses every model of the provider until that instant.
 	BlockUntil *time.Time `json:"block_until,omitempty"`
 	// ObservedExhaustedUntil is the latest reset among fully consumed usage
 	// windows the provider reports.

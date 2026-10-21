@@ -67,7 +67,6 @@ func (r *ProfileExecutionResolver) applyResourceLimits(ctx context.Context, cand
 		if !candidate.Enabled || candidate.ModelID == "" {
 			continue
 		}
-		candidate.ModelKey = dynamic.ResourceKey(dynamic.ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
 		if limit, ok := limits[dynamic.ProviderOf(candidate.ModelID)]; ok {
 			if until, blocked := limit.BlockedUntilCandidate(*candidate, now); blocked {
 				candidate.SuspendedUntil = until

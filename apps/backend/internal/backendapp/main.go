@@ -1535,7 +1535,7 @@ func startGatewayAndServe(
 		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
 		usageAdapter.tierLimits = tierLimits
 		providerLimits.tiers = tierLimits
-		limiter := newTierLimitAdapter(usageAdapter)
+		limiter := newTierLimitAdapter(usageAdapter, providerLimits.calendar)
 		services.DynamicProfileResolver.SetLimitChecker(limiter)
 		services.DynamicProfileResolver.SetLimitObserver(limiter)
 		services.DynamicProfileResolver.SetLimitFailureResolver(limiter)

@@ -52,9 +52,6 @@ func TestConfiguredLimitDefersWhenEveryCandidateIsExhausted(t *testing.T) {
 	if !errors.As(err, &noCandidate) {
 		t.Fatalf("error = %v, want NoEligibleCandidateError", err)
 	}
-	if !noCandidate.RetryAt.Equal(now.Add(time.Hour)) {
-		t.Fatalf("RetryAt = %s, want the earliest reset", noCandidate.RetryAt)
-	}
 }
 
 func TestSuspendedCandidateIsNotSelectable(t *testing.T) {
@@ -97,4 +94,26 @@ type stubObserver struct{ candidateID string }
 
 func (s *stubObserver) ObserveLimit(_ context.Context, candidate Candidate, _ *routingerr.Error, _ time.Time) {
 	s.candidateID = candidate.ID
+}
+
+func TestRateLimitedFailureSuspendsTheCredentialBinding(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	profile := Profile{ID: "p", Version: 1, Candidates: []Candidate{
+		{ID: "a", Enabled: true, BindingKey: ResourceKey(ScopeProfile, "a"), ModelID: "opencode/a"},
+	}}
+	if _, err := engine.SelectContext(context.Background(), "s", profile, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.ApplyFailureContext(context.Background(), "s", profile, 1, "a",
+		&routingerr.Error{Code: routingerr.CodeRateLimited}); err == nil {
+		t.Fatal("expected the only candidate to be exhausted")
+	}
+	if !engine.Circuits().IsOpen(ResourceKey(ScopeProfile, "a"), now) {
+		t.Fatal("a rate-limited failure did not suspend the credential binding")
+	}
+	modelKey := ResourceKey(ScopeModel, ResourceKey(ScopeProfile, "a")+"|opencode/a")
+	if engine.Circuits().IsOpen(modelKey, now) {
+		t.Fatal("a rate-limited failure created an unused model-key circuit")
+	}
 }

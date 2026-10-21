@@ -60,9 +60,6 @@ func (r *Repository) initUsageLimitObservationsSchema() error {
 			learned_json TEXT NOT NULL DEFAULT '{}',
 			updated_at TIMESTAMP NOT NULL
 		);
-
-		CREATE INDEX IF NOT EXISTS idx_dynamic_route_attempts_logical_created
-			ON dynamic_route_attempts(logical_profile_id, created_at);
 	`)
 	if err != nil {
 		return fmt.Errorf("create usage limit observations: %w", err)
@@ -118,37 +115,4 @@ func (r *Repository) ListUsageLimitObservationsSince(
 		 ORDER BY observed_at DESC
 	`), since.UTC())
 	return observations, err
-}
-
-// LastDynamicRouteSelections returns when each concrete candidate of a logical
-// dynamic profile was last selected, from the durable route attempt log. The
-// scan is bounded to recent attempts because only the latest per candidate
-// matters.
-func (r *Repository) LastDynamicRouteSelections(
-	ctx context.Context,
-	logicalProfileID string,
-) (map[string]time.Time, error) {
-	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT execution_profile_id, created_at
-		  FROM dynamic_route_attempts
-		 WHERE logical_profile_id = ? AND execution_profile_id <> ''
-		 ORDER BY created_at DESC
-		 LIMIT 500
-	`), logicalProfileID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	latest := make(map[string]time.Time)
-	for rows.Next() {
-		var candidateID string
-		var createdAt time.Time
-		if err := rows.Scan(&candidateID, &createdAt); err != nil {
-			return nil, err
-		}
-		if _, seen := latest[candidateID]; !seen {
-			latest[candidateID] = createdAt
-		}
-	}
-	return latest, rows.Err()
 }
