@@ -1,0 +1,89 @@
+package dynamic
+
+import (
+	"context"
+	"time"
+
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+)
+
+// LimitVerdict is the mutable account capacity of one candidate at a new turn.
+// Empty Reason means the candidate may be admitted.
+type LimitVerdict struct {
+	Reason  string
+	RetryAt time.Time
+}
+
+// LimitChecker rechecks configured provider allowances at selection time.
+// Implementations must preserve candidate order: a blocked candidate is skipped
+// for this decision, never reordered or replaced by another model.
+type LimitChecker interface {
+	CheckLimit(context.Context, Candidate, string, time.Time) (LimitVerdict, error)
+}
+
+// LimitObserver records a classified provider limit against the candidate's
+// account. It never changes the routing decision.
+type LimitObserver interface {
+	ObserveLimit(context.Context, Candidate, *routingerr.Error, time.Time)
+}
+
+// LimitFailureResolver refines a classified limit failure with account evidence
+// (for example a provider key counter that separates a minute block from the
+// daily reset). A nil result keeps the original failure.
+type LimitFailureResolver interface {
+	ResolveLimitFailure(context.Context, Candidate, *routingerr.Error) *routingerr.Error
+}
+
+// SetLimitChecker installs the allowance checker. A nil checker disables
+// configured allowance admission without changing existing circuits or blocks.
+func (e *Engine) SetLimitChecker(checker LimitChecker) { e.limits = checker }
+
+// SetLimitObserver installs classified-limit observation.
+func (e *Engine) SetLimitObserver(observer LimitObserver) { e.limitObserver = observer }
+
+// SetLimitFailureResolver installs classified-limit refinement.
+func (e *Engine) SetLimitFailureResolver(resolver LimitFailureResolver) { e.limitFailure = resolver }
+
+// blockedByLimit reports the earliest reset when the candidate's configured
+// account allowance is exhausted. A remote candidate is never checked against
+// the host's account.
+func (e *Engine) blockedByLimit(ctx context.Context, candidate Candidate, sessionID string, now time.Time) (time.Time, bool) {
+	if e == nil || e.limits == nil || candidate.RemoteExecution {
+		return time.Time{}, false
+	}
+	verdict, err := e.limits.CheckLimit(ctx, candidate, sessionID, now)
+	if err != nil || verdict.Reason == "" || !verdict.RetryAt.After(now) {
+		return time.Time{}, false
+	}
+	return verdict.RetryAt, true
+}
+
+func (e *Engine) resolveLimitFailure(
+	ctx context.Context,
+	candidate Candidate,
+	failure *routingerr.Error,
+) *routingerr.Error {
+	if e == nil || e.limitFailure == nil || failure == nil {
+		return failure
+	}
+	if resolved := e.limitFailure.ResolveLimitFailure(ctx, candidate, failure); resolved != nil {
+		return resolved
+	}
+	return failure
+}
+
+func (e *Engine) observeLimitFailure(
+	ctx context.Context,
+	profile Profile,
+	candidateID string,
+	failure *routingerr.Error,
+) {
+	if e == nil || e.limitObserver == nil || failure == nil {
+		return
+	}
+	candidate, ok := candidateByID(profile, candidateID)
+	if !ok {
+		return
+	}
+	e.limitObserver.ObserveLimit(ctx, candidate, failure, e.now())
+}

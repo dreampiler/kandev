@@ -36,6 +36,7 @@ var mutatingSettingsRoutes = []struct {
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/duplicate"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/mcp-config"},
 	{http.MethodPost, "/api/v1/agent-profiles/profile-1/account-block/release"},
+	{http.MethodPut, "/api/v1/provider-limits/opencode-go"},
 }
 
 func settingsRouterAs(t *testing.T, identity authn.Identity) *gin.Engine {

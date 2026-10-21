@@ -61,14 +61,17 @@ func WithEngineLogger(log *zap.Logger) EngineOption {
 }
 
 type Engine struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	circuits    *CircuitRegistry
-	states      map[string]RouteState
-	persistence Persistence
-	loader      StateLoader
-	probes      map[string]ProbeLease
-	logger      *zap.Logger
+	mu            sync.Mutex
+	now           func() time.Time
+	circuits      *CircuitRegistry
+	states        map[string]RouteState
+	persistence   Persistence
+	loader        StateLoader
+	probes        map[string]ProbeLease
+	logger        *zap.Logger
+	limits        LimitChecker
+	limitObserver LimitObserver
+	limitFailure  LimitFailureResolver
 	// retryClaims identifies retry launches owned by this process. A durable
 	// "retrying" state can survive a restart without its in-memory owner, so
 	// manual recovery may reclaim it only when this map does not contain the
@@ -176,9 +179,16 @@ func (e *Engine) selectContext(
 	if err != nil {
 		return RouteDecision{}, err
 	}
+	var limitRetryAt time.Time
 	for candidate, err := range plan.rows {
 		if err != nil {
 			return RouteDecision{}, err
+		}
+		if deadline, blocked := e.blockedByLimit(ctx, candidate, sessionID, now); blocked {
+			if limitRetryAt.IsZero() || deadline.Before(limitRetryAt) {
+				limitRetryAt = deadline
+			}
+			continue
 		}
 		if !e.candidateSelectable(candidate, sessionID, generation, excludeProfileID, preferredProfileID, now) {
 			continue
@@ -226,10 +236,10 @@ func (e *Engine) selectContext(
 		PolicyStateJSON:  carryFailedRouteRetry(state.PolicyStateJSON, e.orderedPolicyState("", plan.chain)),
 		UpdatedAt:        now,
 	}
-	return e.persistNoEligibleDecision(ctx, expectedGeneration, nextState)
+	return e.persistNoEligibleDecision(ctx, expectedGeneration, nextState, limitRetryAt)
 }
 
-func (e *Engine) persistNoEligibleDecision(ctx context.Context, expectedGeneration int64, nextState RouteState) (RouteDecision, error) {
+func (e *Engine) persistNoEligibleDecision(ctx context.Context, expectedGeneration int64, nextState RouteState, retryAt time.Time) (RouteDecision, error) {
 	if err := e.persistNoEligible(ctx, expectedGeneration, nextState); err != nil {
 		delete(e.states, nextState.SessionID)
 		return RouteDecision{}, err
@@ -237,6 +247,7 @@ func (e *Engine) persistNoEligibleDecision(ctx context.Context, expectedGenerati
 	e.states[nextState.SessionID] = nextState
 	return RouteDecision{}, &NoEligibleCandidateError{
 		SessionID: nextState.SessionID, LogicalProfile: nextState.LogicalProfileID, Generation: nextState.Generation,
+		RetryAt: retryAt,
 	}
 }
 
@@ -260,6 +271,9 @@ const probeLeaseDuration = 30 * time.Second
 
 func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, generation int64, excludeProfileID, preferredProfileID string, now time.Time) bool {
 	if !candidate.Enabled || candidate.ID == excludeProfileID {
+		return false
+	}
+	if candidate.SuspendedUntil.After(now) {
 		return false
 	}
 	if e.orderedTiers && normalizedCandidateUsage(candidate.Usage, now).Limited {
@@ -437,7 +451,11 @@ func (e *Engine) ApplyFailureContext(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
 		return RouteDecision{}, err
 	}
+	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
+		failure = e.resolveLimitFailure(ctx, candidate, failure)
+	}
 	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	e.observeLimitFailure(ctx, profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
 		return e.applyPolicyFailure(ctx, sessionID, profile, expectedGeneration, currentCandidateID, candidate, failure)
@@ -1461,7 +1479,12 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		if candidate.ID != candidateID || candidate.BindingKey == "" {
 			continue
 		}
-		e.circuits.OpenFailure(candidate.BindingKey, FailureOpen{
+		key := candidate.BindingKey
+		if candidate.ModelKey != "" &&
+			(failure.Code == routingerr.CodeRateLimited || failure.Code == routingerr.CodeQuotaLimited) {
+			key = candidate.ModelKey
+		}
+		e.circuits.OpenFailure(key, FailureOpen{
 			Code: failure.Code, Now: e.now(),
 			ResetHint: failure.ResetHint, ResetHintInferred: failure.ResetHintInferred,
 		})

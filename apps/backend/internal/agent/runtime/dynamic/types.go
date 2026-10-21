@@ -43,10 +43,26 @@ var (
 )
 
 type Candidate struct {
-	UsagePolicy   *usage.ExecutionUsagePolicy `json:"-"`
-	ID            string
-	Enabled       bool
-	BindingKey    string
+	UsagePolicy *usage.ExecutionUsagePolicy `json:"-"`
+	ID          string
+	Enabled     bool
+	BindingKey  string
+	// ModelID is the concrete provider model this candidate launches. Provider
+	// allowances scoped to one model must not score another model's candidate.
+	ModelID string
+	// ModelKey identifies this candidate's model on its account. It is set only
+	// for providers that meter each model separately, and usage-limit failures
+	// pause this key instead of the whole binding.
+	ModelKey string
+	// SuspendedUntil is an operator-entered provider block covering this
+	// candidate. The candidate is not selectable before it.
+	SuspendedUntil time.Time
+	// RemoteExecution marks a candidate whose agent authenticates against a
+	// different account than the backend host. Host credentials cannot describe
+	// its usage.
+	RemoteExecution bool
+	// CatalogFree records that the provider publishes the model at zero cost.
+	CatalogFree   bool
 	Rules         map[string]Action
 	Policies      routingpolicy.Document
 	Usage         CandidateUsage `json:"-"`
@@ -328,6 +344,9 @@ type NoEligibleCandidateError struct {
 	SessionID      string
 	LogicalProfile string
 	Generation     int64
+	// RetryAt is the earliest exhausted allowance reset when the only reason
+	// no candidate was eligible was a provider limit.
+	RetryAt time.Time
 }
 
 func (e *NoEligibleCandidateError) Error() string {

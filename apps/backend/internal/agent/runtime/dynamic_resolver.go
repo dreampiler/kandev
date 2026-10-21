@@ -54,6 +54,7 @@ type ProfileExecutionResolver struct {
 	nativeAdmission            *nativeRouteAdmission
 	candidateUsageReader       CandidateExecutionUsageReader
 	nativeCandidateUsageReader NativeCandidateExecutionUsageReader
+	providerLimits             ProviderLimitReader
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -921,7 +922,10 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			}
 		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
-		case r.bindingResolver != nil:
+		default:
+			candidate.ModelID = concrete.Model
+		}
+		if candidate.Enabled && r.bindingResolver != nil && concrete != nil {
 			binding := profileCredentialBindingDescriptor(concrete)
 			candidate.BindingKey = dynamic.ResourceKey(
 				dynamic.ScopeCredential,
@@ -930,6 +934,7 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
+	r.applyResourceLimits(ctx, profile.Candidates)
 	return profile, nil
 }
 

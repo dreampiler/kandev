@@ -459,7 +459,9 @@ func (r *Repository) LoadRouteState(ctx context.Context, sessionID string) (*dyn
 // ListPendingRouteStates returns only states whose durable policy deadline can
 // be reconciled automatically. States marked retrying are intentionally not
 // returned after restart because dispatch may already have crossed the
-// process boundary and must remain a manual recovery decision.
+// process boundary and must remain a manual recovery decision. A waiting state
+// is returned only when it waits for suspended resources, because only that
+// wait has a deadline after which a fresh selection can succeed.
 func (r *Repository) ListPendingRouteStates(ctx context.Context) ([]dynamicruntime.RouteState, error) {
 	return r.listRouteStatesInStatus(ctx, "retry_wait", "waiting_for_reset")
 }
@@ -562,6 +564,9 @@ func (r *Repository) SaveCircuit(ctx context.Context, snapshot dynamicruntime.Ci
 	return err
 }
 
+// LoadCircuits returns every circuit that is not plainly healthy. A closed
+// circuit that still carries strikes is included, so a restart does not reset
+// the suspension ladder of a resource that never produced output again.
 func (r *Repository) LoadCircuits(ctx context.Context) ([]dynamicruntime.CircuitSnapshot, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT resource_key, state, until_at, code, probe_until, failure_count

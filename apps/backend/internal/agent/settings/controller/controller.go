@@ -77,6 +77,7 @@ type Controller struct {
 	accountBlockReleaser        AccountBlockReleaser
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
+	providerLimits              ProviderLimitService
 	sessionChecker              SessionChecker
 	watcherDeps                 WatcherDependencyChecker
 	routingTierDeps             RoutingTierDependencyChecker
