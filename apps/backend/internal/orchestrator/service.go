@@ -737,6 +737,14 @@ type passthroughDispatchToken struct {
 }
 
 // Service is the main orchestrator service
+// dynamicRecoveryTimer is the single per-session dynamic recovery timer and
+// the route generation it was armed for. A timer armed for a stale generation
+// never replaces a newer one.
+type dynamicRecoveryTimer struct {
+	timer      *time.Timer
+	generation int64
+}
+
 type Service struct {
 	config        ServiceConfig
 	logger        *logger.Logger
@@ -956,7 +964,7 @@ type Service struct {
 	dynamicRecoveryMu     sync.Mutex
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
-	dynamicRecoveryTimers map[string]*time.Timer
+	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -1865,7 +1873,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		dynamicRecoveryTimers:        make(map[string]*dynamicRecoveryTimer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,

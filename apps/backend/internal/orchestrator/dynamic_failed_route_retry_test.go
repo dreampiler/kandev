@@ -296,6 +296,21 @@ func TestFailedRouteAutoRetry_DefersWhileTurnIsActive(t *testing.T) {
 	}
 }
 
+func TestDynamicRecoveryTimer_StaleGenerationKeepsNewerTimer(t *testing.T) {
+	f := newFailedRouteFixture(t, "fr-timer-generation", failedRouteSettings{autoRetry: true, max: 1})
+	generation := f.exhaustWithRateLimit()
+	if got := f.armedGeneration(); got != generation {
+		t.Fatalf("armed generation = %d, want %d", got, generation)
+	}
+	f.svc.armFailedRouteAutoRetry(f.session, dynamicruntime.PendingFailedRouteRetry{
+		Generation: generation - 1,
+		Due:        f.now.Add(time.Minute),
+	})
+	if got := f.armedGeneration(); got != generation {
+		t.Fatalf("a stale generation replaced the armed timer: got %d, want %d", got, generation)
+	}
+}
+
 func TestFailedRouteAutoRetry_DefersWhileSessionNotSettled(t *testing.T) {
 	f := newFailedRouteFixture(t, "fr-not-settled", failedRouteSettings{autoRetry: true, max: 1})
 	generation := f.exhaustWithRateLimit()

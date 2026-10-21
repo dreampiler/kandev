@@ -210,6 +210,18 @@ func (f *failedRouteFixture) armed() bool {
 	return f.svc.dynamicRecoveryTimers[f.session] != nil
 }
 
+// armedGeneration reports the route generation of the session's recovery
+// timer, or zero when no timer is armed.
+func (f *failedRouteFixture) armedGeneration() int64 {
+	f.svc.dynamicRecoveryMu.Lock()
+	defer f.svc.dynamicRecoveryMu.Unlock()
+	entry := f.svc.dynamicRecoveryTimers[f.session]
+	if entry == nil {
+		return 0
+	}
+	return entry.generation
+}
+
 func (f *failedRouteFixture) requestCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

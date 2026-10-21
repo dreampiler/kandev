@@ -138,7 +138,7 @@ func (s *Service) failedRouteAutoRetryTarget(
 
 func (s *Service) armFailedRouteAutoRetry(sessionID string, pending dynamicruntime.PendingFailedRouteRetry) {
 	generation := pending.Generation
-	s.armDynamicRecoveryTimer(sessionID, pending.Due, func(ctx context.Context) {
+	s.armDynamicRecoveryTimer(sessionID, generation, pending.Due, func(ctx context.Context) {
 		s.runFailedRouteAutoRetry(ctx, sessionID, generation)
 	})
 }
