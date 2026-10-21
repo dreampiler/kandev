@@ -91,6 +91,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # Configured provider allowances and classified limit observations. Off in
+  # every shipped profile until an installation opts in.
+  KANDEV_FEATURES_PROVIDER_USAGE_LIMITS:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
   # Native Codex app-server is separate from Codex ACP and remains opt-in.
   KANDEV_FEATURES_CODEX_APP_SERVER:
     prod: "false"

@@ -202,6 +202,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.providerUsageLimits",
+			EnvVar:      "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS",
+			Kind:        KindFeature,
+			Label:       "Provider usage limits",
+			Description: "Enables configured provider allowances, classified limit observations, and usage-aware candidate eligibility.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskMedium,
+			RiskDescription: "Unknown allowances stay unknown and only observed limits affect admission. Disabling retains stored observations. " +
+				"Configured limits can defer a candidate at a new turn without changing its order.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:             keyCodexAppServer,
 			EnvVar:          envCodexAppServer,
 			Kind:            KindFeature,

@@ -44,8 +44,20 @@ type Candidate struct {
 	ID         string
 	Enabled    bool
 	BindingKey string
-	Rules      map[string]Action
-	Policies   routingpolicy.Document
+	// ModelID is the concrete provider model this candidate launches.
+	ModelID string
+	// ModelKey identifies this candidate's model on its account for
+	// model-scoped limit suspension.
+	ModelKey string
+	// SuspendedUntil is an operator-entered provider block.
+	SuspendedUntil time.Time
+	// RemoteExecution marks a candidate that authenticates against a different
+	// account than the backend host.
+	RemoteExecution bool
+	// CatalogFree records that the provider publishes the model at zero cost.
+	CatalogFree bool
+	Rules       map[string]Action
+	Policies    routingpolicy.Document
 }
 
 type Profile struct {
@@ -310,6 +322,9 @@ type NoEligibleCandidateError struct {
 	SessionID      string
 	LogicalProfile string
 	Generation     int64
+	// RetryAt is the earliest exhausted allowance reset when the only reason no
+	// candidate was eligible was a provider limit.
+	RetryAt time.Time
 }
 
 func (e *NoEligibleCandidateError) Error() string {

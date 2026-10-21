@@ -542,6 +542,11 @@ type FeaturesConfig struct {
 	// embedded profile until the complete feature is ready.
 	DynamicAgentRouting bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
 
+	// ProviderUsageLimits gates configured provider allowances, classified
+	// limit observations, and usage-aware candidate eligibility. Off in every
+	// embedded profile until an installation opts in.
+	ProviderUsageLimits bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
+
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
 	// foreground handoff while background work remains live. It is off in every

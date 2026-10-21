@@ -39,6 +39,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
+		r.initUsageLimitObservationsSchema,
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
@@ -355,6 +356,14 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			until_at TIMESTAMP,
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_provider_limits (
+			provider TEXT PRIMARY KEY,
+			monthly_reset_at TIMESTAMP,
+			monthly_reset_timezone TEXT NOT NULL DEFAULT '',
+			block_until TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL
 		);
 

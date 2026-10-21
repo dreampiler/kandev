@@ -1529,6 +1529,25 @@ func startGatewayAndServe(
 		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 	}
 
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))
+	if cfg.Features.ProviderUsageLimits {
+		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
+		usageAdapter.tierLimits = tierLimits
+		providerLimits.tiers = tierLimits
+		limiter := newTierLimitAdapter(usageAdapter)
+		services.DynamicProfileResolver.SetLimitChecker(limiter)
+		services.DynamicProfileResolver.SetLimitObserver(limiter)
+		services.DynamicProfileResolver.SetLimitFailureResolver(limiter)
+		services.DynamicProfileResolver.SetProviderLimitReader(repos.Task)
+		if subscription, err := tierLimits.Subscribe(eventBus); err != nil {
+			log.Warn("provider limit request observation unavailable", zap.Error(err))
+		} else {
+			addCleanup(func() error { return subscription.Unsubscribe() })
+		}
+	}
+	agentSettingsController.SetProviderLimitService(providerLimits)
+
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)
 	startup.AfterReady(ctx, func() { services.Task.StartSessionReconciliationLoop(ctx) })
