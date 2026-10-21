@@ -35,7 +35,8 @@ func (r devPassSettingsRepo) ListAgentProfiles(context.Context, string) ([]*sett
 }
 
 type devPassTierStore struct {
-	owner agentusage.AccountTierConfig
+	owner    agentusage.AccountTierConfig
+	requests int64
 }
 
 func (s devPassTierStore) LoadAccountTierConfig(context.Context, string) (agentusage.AccountTierConfig, agentusage.AccountTierConfig, error) {
@@ -50,8 +51,8 @@ func (devPassTierStore) SaveAccountTierLearned(context.Context, string, agentusa
 func (devPassTierStore) CountLimitActiveTurns(context.Context, []string, string) (int64, error) {
 	return 0, nil
 }
-func (devPassTierStore) GetManualWindowUsageForProfiles(context.Context, []string, time.Time, time.Time) (sqliterepo.ManualWindowUsage, error) {
-	return sqliterepo.ManualWindowUsage{}, nil
+func (s devPassTierStore) GetManualWindowUsageForProfiles(context.Context, []string, time.Time, time.Time) (sqliterepo.ManualWindowUsage, error) {
+	return sqliterepo.ManualWindowUsage{EventCount: s.requests}, nil
 }
 func (devPassTierStore) InsertUsageLimitObservation(context.Context, sqliterepo.UsageLimitObservation) error {
 	return nil
@@ -61,6 +62,10 @@ func (devPassTierStore) ListUsageLimitObservationsSince(context.Context, time.Ti
 }
 
 func newDevPassService(owner agentusage.AccountTierConfig) *providerTierLimitService {
+	return newDevPassServiceWithUsage(owner, 0)
+}
+
+func newDevPassServiceWithUsage(owner agentusage.AccountTierConfig, requests int64) *providerTierLimitService {
 	profile := &settingsmodels.AgentProfile{
 		ID: "devpass", Name: "DevPass", AgentID: "agent-1",
 		Model: "llmgateway/claude-sonnet", Enabled: true,
@@ -68,7 +73,7 @@ func newDevPassService(owner agentusage.AccountTierConfig) *providerTierLimitSer
 	agent := &settingsmodels.Agent{ID: "agent-1", Name: openCodeACPAgentID}
 	repo := devPassSettingsRepo{profile: profile, agent: agent}
 	usage := newUsageProviderAdapter(repo, agentregistry.NewRegistry(nil))
-	return newProviderTierLimitService(usage, devPassTierStore{owner: owner})
+	return newProviderTierLimitService(usage, devPassTierStore{owner: owner, requests: requests})
 }
 
 func TestDevPassNeedsAnExplicitProfileTierMapping(t *testing.T) {
@@ -100,5 +105,19 @@ func TestLLMGatewayWithoutMappingKeepsThePaidDefault(t *testing.T) {
 	}
 	if c.defaults.RequestsPerMinute == nil || *c.defaults.RequestsPerMinute != 600 {
 		t.Fatalf("unmapped defaults = %#v, want the paid default", c.defaults)
+	}
+}
+
+func TestDevPassEffectiveLimitAdmitsAtOneHundredTwenty(t *testing.T) {
+	owner := agentusage.AccountTierConfig{ProfileTiers: map[string]agentusage.BillingTier{
+		"devpass": agentusage.TierSubscription,
+	}}
+	service := newDevPassServiceWithUsage(owner, 120)
+	verdict, err := service.Check(context.Background(), "devpass", "", time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verdict.Reason != "limit_minute" {
+		t.Fatalf("reason = %q, want limit_minute from the effective subscription limit", verdict.Reason)
 	}
 }

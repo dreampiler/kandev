@@ -46,3 +46,10 @@ Implemented: default-off `features.providerUsageLimits`; `GET/PUT /api/v1/provid
 Verification: `go build ./internal/...`; focused tests in `agent/usage`, `agent/runtime/dynamic`, `task/repository/sqlite`, `backendapp`, `agent/settings/handlers`, `runtimeflags`, and `profiles` passed; `lint-go-changed` reported 0 issues; web Vitest 9 cases, `tsc --noEmit`, changed-file ESLint, and `i18n:ratchet` passed; spec validate/lint passed.
 
 Required values: OpenRouter 1000/day at 00:00 UTC and LLM Gateway free models 20/minute are measured installation defaults; DevPass 120/minute with 50 concurrent turns is applied after the profile is mapped to Subscription in profile tier mapping (readback required because the base has no DevPass plan observation). Auxiliary observation is not wired: the OpenRouter key-counter minute/daily split and Go/DevPass response-header measurement remain follow-ups. Claim-time recheck and resource-wait restart scheduling are not part of this change; selection-time skip is the implemented behavior. The repository-wide `i18n:check` still reports the base line's orphan catalog entries and is not used as a pass signal.
+
+Readback on the installed card (operator-owned settings writes are outside this change):
+
+- The DevPass profile is mapped to Subscription (record who and when).
+- The same account's Subscription effective values are 120/minute and 50 turns, with default/measured provenance.
+- Credit-key profiles on the same account remain paid.
+- No artificial limit exhaustion: the admission effect is accepted only when a real in-use skip is observed.
