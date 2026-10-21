@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // exhaustWithRateLimit fails candidate a with a rate limit whose reset is
@@ -256,5 +258,63 @@ func TestFailedRouteAutoRetry_MidTurnFailoverActsFirst(t *testing.T) {
 	f.fire(pending.Generation)
 	if got := f.requestCount(); got != 2 || f.requests[1].Action != RouteActionRetry {
 		t.Fatalf("route actions = %#v, want the automatic retry second", f.requests)
+	}
+}
+
+// failedRouteActiveTurnService reports one active turn for the fixture. All
+// other TurnService methods are unused by this path.
+type failedRouteActiveTurnService struct {
+	TurnService
+	active *models.Turn
+}
+
+func (s *failedRouteActiveTurnService) GetActiveTurn(context.Context, string) (*models.Turn, error) {
+	return s.active, nil
+}
+
+func TestFailedRouteAutoRetry_DefersWhileTurnIsActive(t *testing.T) {
+	f := newFailedRouteFixture(t, "fr-active-turn", failedRouteSettings{autoRetry: true, max: 1})
+	generation := f.exhaustWithRateLimit()
+	pending, scheduled := f.pending()
+	if !scheduled {
+		t.Fatal("the exhausted route did not schedule an automatic retry")
+	}
+	turns := &failedRouteActiveTurnService{active: &models.Turn{ID: "turn-active"}}
+	f.svc.SetTurnService(turns)
+	f.advance(pending.Due)
+	f.fire(generation)
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("route actions = %d, want none while the turn is still active", got)
+	}
+	if !f.armed() {
+		t.Fatal("the automatic retry was dropped instead of staying armed while the turn is active")
+	}
+	turns.active = nil
+	f.fire(generation)
+	if got := f.requestCount(); got != 1 {
+		t.Fatalf("route actions = %d, want the deferred automatic retry once the turn settles", got)
+	}
+}
+
+func TestFailedRouteAutoRetry_DefersWhileSessionNotSettled(t *testing.T) {
+	f := newFailedRouteFixture(t, "fr-not-settled", failedRouteSettings{autoRetry: true, max: 1})
+	generation := f.exhaustWithRateLimit()
+	pending, scheduled := f.pending()
+	if !scheduled {
+		t.Fatal("the exhausted route did not schedule an automatic retry")
+	}
+	f.updateSession(func(session *models.TaskSession) { session.State = models.TaskSessionStateRunning })
+	f.advance(pending.Due)
+	f.fire(generation)
+	if got := f.requestCount(); got != 0 {
+		t.Fatalf("route actions = %d, want none before the session settles", got)
+	}
+	if !f.armed() {
+		t.Fatal("the automatic retry was dropped instead of staying armed until the session settles")
+	}
+	f.updateSession(func(session *models.TaskSession) { session.State = models.TaskSessionStateWaitingForInput })
+	f.fire(generation)
+	if got := f.requestCount(); got != 1 {
+		t.Fatalf("route actions = %d, want the deferred automatic retry after settlement", got)
 	}
 }
