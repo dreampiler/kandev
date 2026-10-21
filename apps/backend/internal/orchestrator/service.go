@@ -965,6 +965,10 @@ type Service struct {
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
 	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
+	// failedRouteRetryDeferrals records the generation whose automatic retry
+	// deferral was already logged at Info, so a turn that keeps the retry
+	// waiting does not repeat that line every minute.
+	failedRouteRetryDeferrals map[string]int64
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and

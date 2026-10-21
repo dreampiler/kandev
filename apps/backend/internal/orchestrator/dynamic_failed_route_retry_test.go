@@ -311,6 +311,49 @@ func TestDynamicRecoveryTimer_StaleGenerationKeepsNewerTimer(t *testing.T) {
 	}
 }
 
+func TestFailedRouteAutoRetry_TerminalSessionIsNotRearmed(t *testing.T) {
+	f := newFailedRouteFixture(t, "fr-terminal", failedRouteSettings{autoRetry: true, max: 1})
+	generation := f.exhaustWithRateLimit()
+	pending, scheduled := f.pending()
+	if !scheduled {
+		t.Fatal("the exhausted route did not schedule an automatic retry")
+	}
+	f.updateSession(func(session *models.TaskSession) { session.State = models.TaskSessionStateCompleted })
+	turns := &failedRouteActiveTurnService{active: &models.Turn{ID: "turn-terminal"}}
+	f.svc.SetTurnService(turns)
+	f.advance(pending.Due)
+	f.fire(generation)
+	if f.armed() || f.requestCount() != 0 {
+		t.Fatalf("terminal session with an active turn: armed=%v actions=%d, want neither", f.armed(), f.requestCount())
+	}
+	turns.active = nil
+	f.fire(generation)
+	if f.armed() || f.requestCount() != 0 {
+		t.Fatalf("terminal session: armed=%v actions=%d, want neither", f.armed(), f.requestCount())
+	}
+	if _, stillPending := f.pending(); !stillPending {
+		t.Fatal("the durable schedule should remain for a later explicit recovery")
+	}
+}
+
+func TestFailedRouteAutoRetry_StaleGenerationIsNotRearmed(t *testing.T) {
+	f := newFailedRouteFixture(t, "fr-stale-defer", failedRouteSettings{autoRetry: true, max: 1})
+	generation := f.exhaustWithRateLimit()
+	f.svc.removeDynamicPolicyRecoveryTimer(f.session)
+	if f.svc.deferFailedRouteAutoRetry(f.ctx, f.session, generation+1) {
+		t.Fatal("a deferral for another generation re-armed the retry")
+	}
+	if f.armed() {
+		t.Fatal("a stale generation armed a timer")
+	}
+	if !f.svc.deferFailedRouteAutoRetry(f.ctx, f.session, generation) {
+		t.Fatal("the matching generation did not re-arm the retry")
+	}
+	if got := f.armedGeneration(); got != generation {
+		t.Fatalf("armed generation = %d, want %d", got, generation)
+	}
+}
+
 func TestFailedRouteAutoRetry_DefersWhileSessionNotSettled(t *testing.T) {
 	f := newFailedRouteFixture(t, "fr-not-settled", failedRouteSettings{autoRetry: true, max: 1})
 	generation := f.exhaustWithRateLimit()
