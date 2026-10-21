@@ -58,3 +58,21 @@ func TestFreeModelQuotaLimitDoesNotUseTheMonthlyReset(t *testing.T) {
 		t.Fatalf("free model got a reset hint: %#v", resolved)
 	}
 }
+
+func TestProviderDailyHintDoesNotNarrowPaidOrAccountModels(t *testing.T) {
+	adapter := newTierLimitAdapter(&usageProviderAdapter{tierLimits: &providerTierLimitService{}}, nil)
+	reset := time.Now().Add(24 * time.Hour)
+	failure := &routingerr.Error{Code: routingerr.CodeQuotaLimited, RawExcerpt: "daily limit reached", ResetHint: &reset}
+	_, paidScope := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
+		ID: "paid", ModelID: "llmgateway/claude-sonnet",
+	}, failure)
+	if paidScope != dynamicruntime.SuspensionBinding {
+		t.Fatalf("paid scope = %v, want binding", paidScope)
+	}
+	_, freeScope := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
+		ID: "free", ModelID: "opencode/step-5-preview-free",
+	}, failure)
+	if freeScope != dynamicruntime.SuspensionModel {
+		t.Fatalf("free scope = %v, want model", freeScope)
+	}
+}

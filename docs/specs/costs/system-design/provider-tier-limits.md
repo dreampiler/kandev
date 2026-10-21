@@ -44,7 +44,7 @@ Extend `usage_limit_observations` through idempotent migrations with tier/dimens
 
 Claude and Codex usage clients remain measurement sources. OpenRouter 1,000/day and LLM Gateway free 20 RPM are installation defaults with measured provenance, so their display, edit, and admission effects do not depend on a usage client. DevPass 120 RPM and 50 concurrent turns are the Subscription-tier defaults; because this base has no DevPass plan observation, the owner maps the DevPass profile to Subscription once in profile tier mapping, and the card shows that mapping. OpenRouter key-counter refresh and Go/DevPass response-header measurement are auxiliary observation methods and are not wired in this port. Learned, owner, and catalog-default values still work from classified observations. `dynamicLimitCalendar` preserves the operator-entered monthly reset and the existing retry ladder; a paid-model quota failure without a provider reset uses that monthly reset as its retry hint.
 
-The OpenRouter key-counter refresh after a free rate error is an auxiliary observation method and is not wired in this port. Missing or unavailable evidence leaves the existing retry ladder unchanged.
+The OpenRouter key-counter refresh after a free rate error is an auxiliary observation method and is not wired in this port. When it is wired, a free-model daily exhaustion must be model-scoped so a paid OpenRouter model on the same credential binding is not blocked until 00:00 UTC. Missing or unavailable evidence leaves the existing retry ladder unchanged.
 
 ## Account, model, and group scopes
 

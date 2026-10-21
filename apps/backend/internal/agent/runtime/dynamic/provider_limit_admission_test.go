@@ -162,3 +162,19 @@ func TestProviderReportedResetKeepsTheBindingSuspension(t *testing.T) {
 		t.Fatal("a provider-reported account reset no longer suspended the binding")
 	}
 }
+
+func TestOpenNarrowScopesDoNotAdmitThroughOneKey(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	engine := NewEngine(WithClock(func() time.Time { return now }))
+	engine.SetLimitChecker(stubLimits{})
+	shared := ResourceKey(ScopeProfile, "shared")
+	candidate := Candidate{ID: "a", Enabled: true, BindingKey: shared, ModelID: "opencode-go/kimi-k2"}
+	providerKey := ResourceKey(ScopeProvider, shared+"|opencode-go")
+	modelKey := ResourceKey(ScopeModel, shared+"|opencode-go/kimi-k2")
+	expired := now.Add(-time.Second)
+	engine.circuits.Open(providerKey, expired, routingerr.CodeQuotaLimited)
+	engine.circuits.Open(modelKey, expired, routingerr.CodeQuotaLimited)
+	if engine.candidateSelectable(candidate, "s", 1, "", "", now) {
+		t.Fatal("a candidate was admitted through one narrow key while another was open")
+	}
+}

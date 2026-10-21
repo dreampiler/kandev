@@ -12,6 +12,9 @@ import (
 
 const limitDimensionUnknown = "unknown"
 
+// When the OpenRouter key-counter client is wired, a free-model daily
+// exhaustion must be model-scoped so a paid OpenRouter model on the same
+// credential binding is not blocked until 00:00 UTC.
 func (s *providerTierLimitService) resolveFailure(ctx context.Context, candidate dynamicruntime.Candidate, failure *routingerr.Error) *routingerr.Error {
 	if candidate.RemoteExecution || dynamicruntime.ProviderOf(candidate.ModelID) != "openrouter" || failure.Code != routingerr.CodeRateLimited {
 		return failure

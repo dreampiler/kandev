@@ -54,7 +54,8 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		// The OpenRouter key counter separates a minute block from the
 		// account's daily free allowance; both are account/provider scope.
 		scope = dynamicruntime.SuspensionProvider
-	} else if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit {
+	} else if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit &&
+		(dynamicruntime.IsFreeModel(candidate.ModelID) || dynamicruntime.ModelScoped(candidate.ModelID)) {
 		scope = dynamicruntime.SuspensionModel
 	}
 	// A classified quota limit on a paid model without the provider's own

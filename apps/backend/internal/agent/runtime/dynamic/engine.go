@@ -273,6 +273,13 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 			if !ok {
 				return false
 			}
+			if otherOpen := otherSuspensionKeyOpen(e.circuits, limitSuspensionKeys(candidate), key, now); otherOpen {
+				// Another narrow scope is still open. Close the expired probe
+				// so the next selection can probe that scope instead of
+				// admitting the candidate through the first key alone.
+				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
+				return false
+			}
 			if candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now) {
 				// The narrow suspension expired, but the credential binding is
 				// still open. Close the exhausted narrow probe and let the
@@ -1454,6 +1461,17 @@ func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, u
 		}
 		e.circuits.Open(key, until, code)
 		return true
+	}
+	return false
+}
+
+// otherSuspensionKeyOpen reports whether a narrow key other than the probed one
+// is still open.
+func otherSuspensionKeyOpen(registry *CircuitRegistry, keys []string, probed string, now time.Time) bool {
+	for _, key := range keys {
+		if key != probed && registry.IsOpen(key, now) {
+			return true
+		}
 	}
 	return false
 }
