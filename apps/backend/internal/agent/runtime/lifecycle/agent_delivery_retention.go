@@ -42,7 +42,8 @@ func authenticatedDeliveryReplayCursor(
 			return 0, fmt.Errorf("%w: %s", ErrAgentDeliveryHistoryGap, models.AgentDeliveryHistoryGapDetails(status.StreamID, 1, int64(status.Stream.FirstRetained-1)))
 		}
 		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) ||
-			canReplaySuccessorSetupEvents(ctx, execution, repository, status) {
+			canReplaySuccessorSetupEvents(ctx, execution, repository, status) ||
+			canReplaySilentRestoreSetup(ctx, execution, repository, status) {
 			return 0, nil
 		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing
@@ -64,7 +65,7 @@ func validateAuthenticatedDeliveryDescriptor(execution *AgentExecution, status *
 	if expectedStreamID == "" {
 		expectedStreamID = execution.SessionID
 	}
-	if status == nil || !status.Durable || status.Version != journal.CurrentVersion ||
+	if status == nil || !status.Durable || !journal.SupportsDeliveryVersion(status.Version) ||
 		status.SessionID != execution.SessionID || status.IncarnationID != execution.DeliveryIncarnationID ||
 		status.HarnessGeneration != execution.DeliveryHarnessGeneration || status.StreamID != expectedStreamID {
 		return fmt.Errorf("authenticated delivery descriptor mismatch: %w", ErrDurableAdoptionIdentityMismatch)
