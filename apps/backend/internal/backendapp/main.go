@@ -1769,6 +1769,7 @@ func constructOfficeServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
 		agentRegistry, log, services, lifecycleMgr, cfg.Office.JWTSigningKey,
 	)
+	services.OfficeSvcs.Dashboard.SetControlCapacitySource(orchestratorSvc)
 	wireOfficeSvcsDependencies(services, repos, eventBus, orchestratorSvc, agentRegistry)
 
 	// System skill sync. Upserts every embedded SKILL.md (the ones written

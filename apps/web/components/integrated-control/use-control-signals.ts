@@ -11,6 +11,7 @@ import { useControlInbox } from "./control-inbox-provider";
 import { buildAttention } from "./control-attention";
 import {
   capacityWaitingTotal,
+  sharedCapacityWaiting as pickSharedCapacityWaiting,
   sumFigures,
   workspaceFigures,
   workspaceStatus,
@@ -47,6 +48,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
     }
     const known = ids.filter((id) => figures[id]);
     const total = sumFigures(known.map((id) => figures[id]!));
+    const sharedWaiting = pickSharedCapacityWaiting((dashboards.data ?? []).map((row) => row.data));
     const allTasks: NativeTask[] = (taskReads.data ?? []).flatMap((row) => row.data?.tasks ?? []);
     const events = (historyReads.data ?? [])
       .flatMap((row) => (row.data ? nativeEvents(row.data) : []))
@@ -76,6 +78,7 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
       complete: known.length === ids.length,
       total,
       waiting,
+      sharedWaiting,
       statusById,
       tasks: allTasks,
       events,

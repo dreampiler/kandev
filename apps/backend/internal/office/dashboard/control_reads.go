@@ -8,8 +8,44 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/system/sessioncapacity"
 	"go.uber.org/zap"
 )
+
+// ControlCapacitySource is the admission owner's read-only observation. The
+// optional seam keeps the control dashboard free of launch or admission work.
+type ControlCapacitySource interface {
+	SessionCapacityObservation(context.Context) sessioncapacity.Observation
+}
+
+// SetControlCapacitySource wires the installation-wide shared-capacity
+// observation used by the control dashboard aggregate.
+func (s *DashboardService) SetControlCapacitySource(source ControlCapacitySource) {
+	if s != nil {
+		s.controlCapacity = source
+	}
+}
+
+// controlCapacityWaiting projects the waiter observation into the aggregate's
+// two figures. Grade counts a grade-limit refusal, including both-limit
+// refusals; Total counts every refusal. A nil source omits the field.
+func (s *DashboardService) controlCapacityWaiting(ctx context.Context) *sqlite.ControlWaiting {
+	if s == nil || s.controlCapacity == nil {
+		return nil
+	}
+	waiting := s.controlCapacity.SessionCapacityObservation(ctx).Waiting
+	if !waiting.Known {
+		return &sqlite.ControlWaiting{}
+	}
+	total, grade := 0, 0
+	for reason, count := range waiting.Counts {
+		total += count
+		if reason == sessioncapacity.WaitingReasonGradeLimit || reason == sessioncapacity.WaitingReasonBothLimits {
+			grade += count
+		}
+	}
+	return &sqlite.ControlWaiting{Known: true, Grade: grade, Total: total}
+}
 
 type controlReadRepository interface {
 	ListControlTasks(context.Context, string, string, string, int, time.Time) (*sqlite.ControlTaskList, error)
@@ -41,7 +77,12 @@ func (h *Handler) controlRead(c *gin.Context, section string) bool {
 	case "activity":
 		data, err = reader.ReadControlHistory(ctx, c.Param("wsId"), now)
 	case "dashboard":
-		data, err = reader.ReadControlMetrics(ctx, c.Param("wsId"), now)
+		var metrics *sqlite.ControlMetrics
+		metrics, err = reader.ReadControlMetrics(ctx, c.Param("wsId"), now)
+		if err == nil {
+			metrics.SharedCapacityWaiting = h.svc.controlCapacityWaiting(ctx)
+		}
+		data = metrics
 	case "tasks":
 		data, err = h.controlTasks(c, ctx, reader, now)
 	}

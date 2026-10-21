@@ -1,5 +1,11 @@
-import type { NativeDashboard, NativeTask } from "@/lib/types/control-native";
+import type {
+  NativeDashboard,
+  NativeSharedCapacityWaiting,
+  NativeTask,
+} from "@/lib/types/control-native";
 import type { SessionCapacityObservation } from "@/lib/types/system";
+
+const GRADE_WAIT_REASONS = ["ceiling_grade_limit", "ceiling_both_limits"] as const;
 
 /** Task states the board counts as work in progress. */
 export const ACTIVE_TASK_STATES = ["IN_PROGRESS", "REVIEW", "SCHEDULING"] as const;
@@ -10,6 +16,7 @@ export type WorkspaceFigures = {
   inProgress: number;
   running: number;
   waitingInput: number;
+  wipWaiting: number;
   queued: number;
   completed24h: number;
   moves24h: number;
@@ -22,6 +29,7 @@ export function workspaceFigures(data: NativeDashboard): WorkspaceFigures {
     inProgress: ACTIVE_TASK_STATES.reduce((sum, state) => sum + (data.tasks[state] ?? 0), 0),
     running: data.sessions.RUNNING ?? 0,
     waitingInput: data.waiting_input_tasks,
+    wipWaiting: data.wip_waiting_tasks,
     queued: data.queued_messages,
     completed24h: data.completed_tasks_24h,
     moves24h: data.transitions_24h,
@@ -34,6 +42,7 @@ export function sumFigures(rows: WorkspaceFigures[]): WorkspaceFigures {
     inProgress: 0,
     running: 0,
     waitingInput: 0,
+    wipWaiting: 0,
     queued: 0,
     completed24h: 0,
     moves24h: 0,
@@ -43,6 +52,37 @@ export function sumFigures(rows: WorkspaceFigures[]): WorkspaceFigures {
     for (const key of Object.keys(total) as (keyof WorkspaceFigures)[]) total[key] += row[key];
   }
   return total;
+}
+
+/**
+ * The installation-wide shared-capacity figure. Every workspace response
+ * carries the same snapshot, so this picks the first one and never sums.
+ */
+export function sharedCapacityWaiting(
+  rows: ReadonlyArray<NativeDashboard | undefined>,
+): NativeDashboard["shared_capacity_waiting"] | undefined {
+  for (const row of rows) {
+    if (row?.shared_capacity_waiting) return row.shared_capacity_waiting;
+  }
+  return undefined;
+}
+
+/**
+ * Waiters refused by a grade limit, from the aggregate snapshot when present or
+ * the observation's reason counts otherwise. Unknown is never read as zero.
+ */
+export function capacityGradeWaiting(
+  observation: SessionCapacityObservation | undefined,
+  known: boolean,
+  sharedWaiting?: NativeSharedCapacityWaiting,
+): number | null {
+  if (sharedWaiting) return sharedWaiting.known && known ? sharedWaiting.grade : null;
+  if (!known || observation?.waiting?.known !== true) return null;
+  const counts = observation.waiting.counts;
+  if (!counts) return null;
+  const values = GRADE_WAIT_REASONS.map((reason) => counts[reason]);
+  if (!values.every((value) => Number.isSafeInteger(value) && value >= 0)) return null;
+  return values.reduce((sum, value) => sum + value, 0);
 }
 
 /**

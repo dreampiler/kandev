@@ -10,7 +10,7 @@ import { ControlStatusPill } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
 import { ATTENTION_SIGNALS, sortBySignal, taskSignal, type TaskSignal } from "./control-signals";
 import { relativeTime, shortId } from "./overview-format";
-import { useControlSignals } from "./use-control-signals";
+import type { ControlSignals } from "./use-control-signals";
 
 type BoardFilter = "all" | "attention" | "running" | "waiting" | "failed" | "noSession";
 const FILTERS: BoardFilter[] = ["all", "attention", "running", "waiting", "failed", "noSession"];
@@ -32,10 +32,9 @@ function matches(filter: BoardFilter, signal: TaskSignal) {
 type Row = { task: NativeTask; signal: TaskSignal };
 
 /** Every unarchived task in one table, ranked so the rows that need a person come first. */
-export function ControlTaskBoard() {
+export function ControlTaskBoard({ signals }: { signals: ControlSignals }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  const signals = useControlSignals();
   const [filter, setFilter] = useState<BoardFilter>("all");
   const names = Object.fromEntries(
     (control?.data?.workspaces ?? []).map((workspace) => [workspace.id, workspace.name]),

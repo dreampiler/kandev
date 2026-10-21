@@ -46,3 +46,49 @@ describe("capacity response and source clocks", () => {
     },
   );
 });
+
+describe("capacity waiting figures", () => {
+  it("shows the aggregate grade figure and the summed board WIP figure", () => {
+    render(
+      <ControlCapacitySnapshot
+        observation={observation}
+        wipWaiting={3}
+        sharedWaiting={{ known: true, grade: 5, total: 7 }}
+      />,
+    );
+    expect(screen.getByText("Waiting by grade and reason")).toBeTruthy();
+    expect(screen.getByTestId("control-capacity-waiting-grade").textContent).toBe("5");
+    expect(screen.getByTestId("control-capacity-waiting-wip").textContent).toBe("3");
+  });
+
+  it("falls back to the observation grade reasons when the aggregate omits them", () => {
+    const observed: SessionCapacityObservation = {
+      ...observation,
+      waiting: {
+        known: true,
+        counts: {
+          ceiling_total_limit: 1,
+          ceiling_grade_limit: 2,
+          ceiling_both_limits: 1,
+          ceiling_needs_configuration: 0,
+          ceiling_unknown_population: 0,
+        },
+      },
+    };
+    render(<ControlCapacitySnapshot observation={observed} wipWaiting={0} />);
+    expect(screen.getByTestId("control-capacity-waiting-grade").textContent).toBe("3");
+    expect(screen.getByTestId("control-capacity-waiting-wip").textContent).toBe("0");
+  });
+
+  it("keeps unknown waiting separate from a measured zero", () => {
+    render(
+      <ControlCapacitySnapshot
+        observation={observation}
+        wipWaiting={null}
+        sharedWaiting={{ known: false, grade: 0, total: 0 }}
+      />,
+    );
+    expect(screen.getByTestId("control-capacity-waiting-grade").textContent).toBe("Unknown");
+    expect(screen.getByTestId("control-capacity-waiting-wip").textContent).toBe("Unknown");
+  });
+});

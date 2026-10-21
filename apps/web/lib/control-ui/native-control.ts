@@ -59,6 +59,9 @@ export function nativeHistory(v: unknown, id: string): v is NativeHistory {
     )
   );
 }
+const sharedCapacityWaiting = (v: unknown) =>
+  nativeRecord(v) && typeof v.known === "boolean" && count(v.grade) && count(v.total);
+
 export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
   if (
     !nativeRecord(v) ||
@@ -69,9 +72,14 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
     return false;
   return (
     [v.tasks, v.sessions].every((m) => nativeRecord(m) && Object.values(m).every(count)) &&
-    [v.waiting_input_tasks, v.queued_messages, v.transitions_24h, v.completed_tasks_24h].every(
-      count,
-    )
+    [
+      v.waiting_input_tasks,
+      v.wip_waiting_tasks,
+      v.queued_messages,
+      v.transitions_24h,
+      v.completed_tasks_24h,
+    ].every(count) &&
+    (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting))
   );
 }
 export function nativeTasks(

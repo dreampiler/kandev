@@ -113,6 +113,7 @@ describe("native control views", () => {
           tasks: { IN_PROGRESS: 2 },
           sessions: { RUNNING: 3, FAILED: 1, WAITING_FOR_INPUT: 7 },
           waiting_input_tasks: 2,
+          wip_waiting_tasks: 0,
           queued_messages: 0,
           transitions_24h: 4,
           completed_tasks_24h: 1,

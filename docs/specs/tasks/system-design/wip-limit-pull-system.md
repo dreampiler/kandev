@@ -469,3 +469,13 @@ destination step admits the task`, with `task_id`, `session_id`,
 `from_step_id`, `to_step_id`, `wip_limit`, and `reason=wip_limit_reached`.
 Queue promotion still owns the later entry behavior; this change does not alter
 admission, promotion order, or session state.
+
+The control dashboard aggregate
+(`GET /api/v1/office/workspaces/:wsId/dashboard?view=control`) reports
+`wip_waiting_tasks`: unarchived, non-ephemeral, non-automation tasks whose
+`queued_for_step_id` names their current step and whose `wip_admitted` is
+false. That is the same queued band promotion reads, with config-mode tasks
+excluded. The count is read-only; no deferral row, reason column, or table is
+stored. The same response carries `shared_capacity_waiting` from the
+session-capacity observation so the integrated control can show grade-ceiling
+waiters beside board WIP waiters.

@@ -36,16 +36,7 @@ export function IntegratedControlDashboard({
       {view === "inbox" && <ControlInbox />}
       {view === "history" && <ControlHistory workspaceId={workspaceId} />}
       {view === "workspaces" && <WorkspacesView workspaceId={workspaceId} />}
-      {view === "activity" && (
-        <>
-          <ControlCapacityLine
-            observation={control.data.capacity}
-            lastConfirmed={control.data.lastConfirmedCapacity}
-          />
-          <ControlTaskBoard />
-          {rows.length > 0 && <CoordinatorFacts view={view} rows={rows} />}
-        </>
-      )}
+      {view === "activity" && <ControlActivityView rows={rows} />}
       {view === "providers" && <ControlProviderUsage workspaceId={workspaceId} />}
       {workspaces.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -53,6 +44,24 @@ export function IntegratedControlDashboard({
         </p>
       )}
     </div>
+  );
+}
+
+/** Capacity waits and the task board share one recorded-dashboard read. */
+function ControlActivityView({ rows }: { rows: FactRows }) {
+  const control = useIntegratedControl();
+  const signals = useControlSignals();
+  return (
+    <>
+      <ControlCapacityLine
+        observation={control?.data?.capacity}
+        lastConfirmed={control?.data?.lastConfirmedCapacity}
+        wipWaiting={signals.total.wipWaiting}
+        sharedWaiting={signals.sharedWaiting}
+      />
+      <ControlTaskBoard signals={signals} />
+      {rows.length > 0 && <CoordinatorFacts view="activity" rows={rows} />}
+    </>
   );
 }
 

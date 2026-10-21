@@ -25,6 +25,16 @@ type WaitingObservation struct {
 	Counts map[string]int `json:"counts,omitempty"`
 }
 
+// Waiting reason keys are part of the observation contract: the admission
+// owner writes them and every dashboard reads the same population.
+const (
+	WaitingReasonTotalLimit         = "ceiling_total_limit"
+	WaitingReasonGradeLimit         = "ceiling_grade_limit"
+	WaitingReasonBothLimits         = "ceiling_both_limits"
+	WaitingReasonNeedsConfiguration = "ceiling_needs_configuration"
+	WaitingReasonUnknownPopulation  = "ceiling_unknown_population"
+)
+
 // ReadObservation is optional for older targets and does not change settings.
 func (s *Service) ReadObservation(ctx context.Context) *Observation {
 	source, ok := s.target.(interface {

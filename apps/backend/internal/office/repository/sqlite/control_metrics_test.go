@@ -27,6 +27,8 @@ func ensureControlMetricTables(t *testing.T, ctx context.Context, exec func(cont
 			occurred_at TIMESTAMP NOT NULL
 		)`,
 		`ALTER TABLE workflow_steps ADD COLUMN complete_task_on_enter INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`,
 	}
 	for _, s := range stmts {
 		if err := exec(ctx, s); err != nil {
@@ -84,5 +86,42 @@ func TestReadControlMetrics_WaitingInputCountsLiveTasksByPrimarySession(t *testi
 	// The per-state session map stays a raw recorded count over unarchived tasks.
 	if got.Sessions["WAITING_FOR_INPUT"] != 6 {
 		t.Fatalf("Sessions[WAITING_FOR_INPUT] = %d, want 6", got.Sessions["WAITING_FOR_INPUT"])
+	}
+}
+
+func TestReadControlMetrics_CountsTasksQueuedAtAWipLimitedStep(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+	exec := func(ctx context.Context, q string, args ...any) error {
+		_, err := repo.ExecRaw(ctx, q, args...)
+		return err
+	}
+	ensureControlMetricTables(t, ctx, exec)
+	if err := exec(ctx, `
+		INSERT INTO tasks (id, workspace_id, title, state, is_ephemeral, origin, metadata,
+			archived_at, workflow_step_id, queued_for_step_id, wip_admitted) VALUES
+			('t-wip-a',       'ws-1', 'a',      'IN_PROGRESS', 0, 'manual',        '{}',                     NULL,             'step-wip', 'step-wip', 0),
+			('t-wip-b',       'ws-1', 'b',      'REVIEW',      0, 'manual',        '{}',                     NULL,             'step-wip', 'step-wip', 0),
+			('t-admitted',    'ws-1', 'ok',     'IN_PROGRESS', 0, 'manual',        '{}',                     NULL,             'step-wip', 'step-wip', 1),
+			('t-archived',    'ws-1', 'arch',   'IN_PROGRESS', 0, 'manual',        '{}',                     CURRENT_TIMESTAMP, 'step-wip', 'step-wip', 0),
+			('t-eph',         'ws-1', 'eph',    'IN_PROGRESS', 1, 'manual',        '{}',                     NULL,             'step-wip', 'step-wip', 0),
+			('t-automation',  'ws-1', 'auto',   'IN_PROGRESS', 0, 'automation_run','{}',                     NULL,             'step-wip', 'step-wip', 0),
+			('t-config',      'ws-1', 'config', 'IN_PROGRESS', 0, 'manual',        '{"config_mode":true}',   NULL,             'step-wip', 'step-wip', 0),
+			('t-other-ws',    'ws-2', 'other',  'IN_PROGRESS', 0, 'manual',        '{}',                     NULL,             'step-wip', 'step-wip', 0),
+			('t-mismatch',    'ws-1', 'moved',  'IN_PROGRESS', 0, 'manual',        '{}',                     NULL,             'step-b',   'step-wip', 0),
+			('t-no-dest',     'ws-1', 'free',   'IN_PROGRESS', 0, 'manual',        '{}',                     NULL,             'step-wip', '',         0)
+	`); err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+
+	got, err := repo.ReadControlMetrics(ctx, "ws-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ReadControlMetrics: %v", err)
+	}
+	// Only t-wip-a and t-wip-b are waiting for their destination step to admit
+	// them: admitted, archived, ephemeral, automation, config-mode, foreign and
+	// mismatched rows are not WIP waiters.
+	if got.WipWaitingTasks != 2 {
+		t.Fatalf("WipWaitingTasks = %d, want 2", got.WipWaitingTasks)
 	}
 }

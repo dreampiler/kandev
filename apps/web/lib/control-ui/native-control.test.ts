@@ -61,14 +61,39 @@ describe("task3 native control contracts", () => {
       tasks: {},
       sessions: {},
       waiting_input_tasks: 0,
+      wip_waiting_tasks: 0,
       queued_messages: 0,
       transitions_24h: 0,
       completed_tasks_24h: 0,
     };
     expect(nativeDashboard(data, "w")).toBe(true);
     expect(nativeDashboard({ ...data, waiting_input_tasks: undefined }, "w")).toBe(false);
+    expect(nativeDashboard({ ...data, wip_waiting_tasks: undefined }, "w")).toBe(false);
     expect(nativeDashboard({ ...data, sessions: { RUNNING: -1 } }, "w")).toBe(false);
     expect(nativeDashboard({ workspace_id: "w", agents: [] }, "w")).toBe(false);
+  });
+  it("accepts the aggregate waiting figures and rejects malformed shared counts", () => {
+    const data = {
+      ...window,
+      basis: "recorded_task_session_queue_transition_state",
+      inference_state: "unknown",
+      tasks: {},
+      sessions: {},
+      waiting_input_tasks: 0,
+      wip_waiting_tasks: 2,
+      shared_capacity_waiting: { known: true, grade: 1, total: 3 },
+      queued_messages: 0,
+      transitions_24h: 0,
+      completed_tasks_24h: 0,
+    };
+    expect(nativeDashboard(data, "w")).toBe(true);
+    expect(nativeDashboard({ ...data, shared_capacity_waiting: {} }, "w")).toBe(false);
+    expect(
+      nativeDashboard(
+        { ...data, shared_capacity_waiting: { known: true, grade: -1, total: 3 } },
+        "w",
+      ),
+    ).toBe(false);
   });
 });
 
