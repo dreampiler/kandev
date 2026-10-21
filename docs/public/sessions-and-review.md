@@ -66,6 +66,11 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
+If the runtime is already gone, stopping a session that is waiting for input or
+has finished closes its stale open turn and preserves its session state. A
+session that is still launching can return a stop error; retry after the launch
+has settled.
+
 When a turn, startup, or resume fails:
 
 - For a supported ACP provider's classified temporary capacity, overload, or rate-limit error in an interactive task session with a concrete agent profile, Kandev records a failed turn and keeps the same runtime available when it can confirm that runtime is still usable. It retries only when it can establish that the prompt produced no assistant output or tool activity; otherwise, it does not replay the prompt. You can send another message or choose a supported model in the same session, and retry feedback reports only attempts that started. Office and automation tasks, dynamic routes, utility sessions, and passthrough sessions keep their existing failure handling.

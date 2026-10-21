@@ -4682,10 +4682,13 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		}
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
-	if s.claimForcedExecutionCleanup(sessionID, executionID) {
+	claim, claimed := s.claimForcedExecutionCleanupWithToken(sessionID, executionID)
+	if claimed {
 		if err := s.stopPromptUnreadyExecution(ctx, sessionID, executionID, cause); err != nil {
+			s.executionTeardownClaims.CompareAndDelete(terminalExecutionKey(sessionID, executionID), claim)
 			return err
 		}
+		s.completeExecutionTeardownClaim(sessionID, executionID, claim)
 	} else if claim, ok := s.executionTeardownClaimFor(sessionID, executionID); !ok || !claim.cleanupCompleted {
 		// Another lifecycle path owns this execution's teardown and has not
 		// finished it. A completed exact claim means it is already stopped.

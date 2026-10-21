@@ -20,7 +20,8 @@ stop.
 ## Scope
 
 In scope: `apps/backend/internal/orchestrator/task_operations.go` and the new
-`session_stop_settle.go`, with their permanent test.
+`session_stop_settle.go`, with their permanent tests, including
+`session_stop_settle_review_test.go` and `session_stop_settle_lock_order_test.go`.
 
 Excluded: live execution stops, forced cleanup arbitration, the synchronous
 stop variant, and background work settlement.
@@ -29,6 +30,11 @@ stop variant, and background work settlement.
 
 Reuse the exact teardown claim and its `cleanupCompleted` marker, and the
 expected-turn settlement used by cancellation.
+Serialize execution-less settlement with the existing session lifecycle and
+prompt admission boundaries, recheck runtime absence, and retain exact cleanup
+tokens through successful completion or retryable failure.
+Settlement refuses contention on either admission lock so existing inverse-order
+launch callers can proceed.
 
 ## Work orders
 
