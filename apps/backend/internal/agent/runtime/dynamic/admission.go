@@ -27,11 +27,25 @@ type LimitObserver interface {
 	ObserveLimit(context.Context, Candidate, *routingerr.Error, time.Time)
 }
 
+// LimitSuspension names the scope a limit-created long reset suspends.
+// Provider-reported reset hints keep the upstream binding-wide behavior.
+type LimitSuspension int
+
+const (
+	// SuspensionBinding is the upstream binding-wide behavior.
+	SuspensionBinding LimitSuspension = iota
+	// SuspensionProvider covers one provider on one credential binding.
+	SuspensionProvider
+	// SuspensionModel covers one model on one credential binding.
+	SuspensionModel
+)
+
 // LimitFailureResolver refines a classified limit failure with account evidence
 // (for example a provider key counter that separates a minute block from the
-// daily reset). A nil result keeps the original failure.
+// daily reset) and reports the suspension scope its hint belongs to. A nil
+// result keeps the original failure.
 type LimitFailureResolver interface {
-	ResolveLimitFailure(context.Context, Candidate, *routingerr.Error) *routingerr.Error
+	ResolveLimitFailure(context.Context, Candidate, *routingerr.Error) (*routingerr.Error, LimitSuspension)
 }
 
 // SetLimitChecker installs the allowance checker. A nil checker disables
@@ -62,14 +76,15 @@ func (e *Engine) resolveLimitFailure(
 	ctx context.Context,
 	candidate Candidate,
 	failure *routingerr.Error,
-) *routingerr.Error {
+) (*routingerr.Error, LimitSuspension) {
 	if e == nil || e.limitFailure == nil || failure == nil {
-		return failure
+		return failure, SuspensionBinding
 	}
-	if resolved := e.limitFailure.ResolveLimitFailure(ctx, candidate, failure); resolved != nil {
-		return resolved
+	resolved, scope := e.limitFailure.ResolveLimitFailure(ctx, candidate, failure)
+	if resolved == nil {
+		return failure, scope
 	}
-	return failure
+	return resolved, scope
 }
 
 func (e *Engine) observeLimitFailure(

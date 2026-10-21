@@ -31,11 +31,14 @@ func TestQuotaLimitWithoutProviderResetUsesTheMonthlyReset(t *testing.T) {
 	calendar.timeout = 0
 	adapter := newTierLimitAdapter(&usageProviderAdapter{tierLimits: &providerTierLimitService{}}, calendar)
 	failure := &routingerr.Error{Code: routingerr.CodeQuotaLimited}
-	resolved := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
+	resolved, scope := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
 		ID: "go-kimi", ModelID: "opencode-go/kimi-k2",
 	}, failure)
 	if resolved == nil || resolved.ResetHint == nil {
 		t.Fatalf("resolved = %#v, want the monthly reset hint", resolved)
+	}
+	if scope != dynamicruntime.SuspensionProvider {
+		t.Fatalf("scope = %v, want provider", scope)
 	}
 	want := time.Date(2026, 10, 30, 5, 0, 0, 0, time.UTC)
 	if !resolved.ResetHint.Equal(want) || !resolved.ResetHint.After(now) {
@@ -48,7 +51,7 @@ func TestFreeModelQuotaLimitDoesNotUseTheMonthlyReset(t *testing.T) {
 	calendar := newDynamicLimitCalendar(noObservedUsage{}, monthlyResetProviderLimits{anchor: anchor})
 	calendar.timeout = 0
 	adapter := newTierLimitAdapter(&usageProviderAdapter{tierLimits: &providerTierLimitService{}}, calendar)
-	resolved := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
+	resolved, _ := adapter.ResolveLimitFailure(context.Background(), dynamicruntime.Candidate{
 		ID: "zen-free", ModelID: "opencode/step-5-preview-free",
 	}, &routingerr.Error{Code: routingerr.CodeQuotaLimited})
 	if resolved == nil || resolved.ResetHint != nil {

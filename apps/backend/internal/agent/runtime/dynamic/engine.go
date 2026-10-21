@@ -265,9 +265,19 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 		return false
 	}
 	if e.limits != nil {
-		if key := limitSuspensionKey(candidate); key != "" && e.circuits.IsOpen(key, now) {
+		for _, key := range limitSuspensionKeys(candidate) {
+			if !e.circuits.IsOpen(key, now) {
+				continue
+			}
 			lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
 			if !ok {
+				return false
+			}
+			if candidate.BindingKey != "" && e.circuits.IsOpen(candidate.BindingKey, now) {
+				// The narrow suspension expired, but the credential binding is
+				// still open. Close the exhausted narrow probe and let the
+				// binding probe path decide.
+				e.circuits.ReleaseProbe(lease, true, circuitBackoff)
 				return false
 			}
 			e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
@@ -440,10 +450,11 @@ func (e *Engine) ApplyFailureContext(
 	if err := e.requireCurrentFailureRoute(ctx, sessionID, expectedGeneration, currentCandidateID); err != nil {
 		return RouteDecision{}, err
 	}
+	scope := SuspensionBinding
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok {
-		failure = e.resolveLimitFailure(ctx, candidate, failure)
+		failure, scope = e.resolveLimitFailure(ctx, candidate, failure)
 	}
-	e.openCircuitForFailure(profile, currentCandidateID, failure)
+	e.openCircuitForFailure(profile, currentCandidateID, failure, scope)
 	e.observeLimitFailure(ctx, profile, currentCandidateID, failure)
 	e.releaseProbeForFailure(sessionID, expectedGeneration, currentCandidateID)
 	if candidate, ok := candidateByID(profile, currentCandidateID); ok && candidate.Policies.Version != 0 {
@@ -1391,7 +1402,7 @@ func (e *Engine) releaseProbeForFailure(sessionID string, generation int64, cand
 	e.ReleaseProbe(RouteDecision{SessionID: sessionID, Generation: generation, ExecutionProfileID: candidateID}, false)
 }
 
-func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error) {
+func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, failure *routingerr.Error, scope LimitSuspension) {
 	if failure == nil || e.circuits == nil {
 		return
 	}
@@ -1412,15 +1423,9 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 		}
 		until := e.now().Add(circuitBackoff)
 		longReset := failure.ResetHint != nil && failure.ResetHint.After(until)
-		if e.limits != nil && longReset && candidate.ModelID != "" {
-			if key := limitSuspensionKey(candidate); key != "" {
-				// A provider reset longer than the ordinary backoff suspends
-				// only the failing model on this credential binding. The binding
-				// keeps its short circuit so sibling models stay selectable.
-				e.circuits.Open(key, *failure.ResetHint, failure.Code)
-				e.circuits.Open(candidate.BindingKey, until, failure.Code)
-				return
-			}
+		if e.limits != nil && longReset && candidate.ModelID != "" &&
+			e.openNarrowCircuit(candidate, scope, *failure.ResetHint, failure.Code) {
+			return
 		}
 		if longReset {
 			until = *failure.ResetHint
@@ -1430,13 +1435,41 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 	}
 }
 
-// limitSuspensionKey scopes a provider-reset suspension to one model on one
-// credential binding. It is only consulted when provider limits are enabled.
-func limitSuspensionKey(candidate Candidate) string {
-	if candidate.ModelID == "" {
-		return ""
+// openNarrowCircuit opens a provider- or model-scoped long suspension when the
+// limit feature created the reset hint. It returns false for the upstream
+// binding-wide scope.
+func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, until time.Time, code routingerr.Code) bool {
+	switch scope {
+	case SuspensionProvider:
+		key := ResourceKey(ScopeProvider, candidate.BindingKey+"|"+ProviderOf(candidate.ModelID))
+		if key == "" {
+			return false
+		}
+		e.circuits.Open(key, until, code)
+		return true
+	case SuspensionModel:
+		key := ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
+		if key == "" {
+			return false
+		}
+		e.circuits.Open(key, until, code)
+		return true
 	}
-	return ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
+	return false
+}
+
+// limitSuspensionKeys returns the narrow circuit keys a limit-created long
+// reset may have opened. They are only consulted when provider limits are on.
+func limitSuspensionKeys(candidate Candidate) []string {
+	if candidate.ModelID == "" {
+		return nil
+	}
+	keys := make([]string, 0, 2)
+	if provider := ProviderOf(candidate.ModelID); provider != "" {
+		keys = append(keys, ResourceKey(ScopeProvider, candidate.BindingKey+"|"+provider))
+	}
+	keys = append(keys, ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID))
+	return keys
 }
 
 const circuitBackoff = time.Minute

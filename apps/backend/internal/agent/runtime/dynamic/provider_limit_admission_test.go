@@ -129,7 +129,7 @@ func TestMonthlyResetSuspendsOnlyTheFailingModel(t *testing.T) {
 		{ID: "b", Enabled: true, BindingKey: shared, ModelID: "opencode/step-5-preview-free"},
 	}}
 	reset := now.Add(30 * 24 * time.Hour)
-	engine.openCircuitForFailure(profile, "a", &routingerr.Error{Code: routingerr.CodeQuotaLimited, ResetHint: &reset})
+	engine.openCircuitForFailure(profile, "a", &routingerr.Error{Code: routingerr.CodeQuotaLimited, ResetHint: &reset}, SuspensionProvider)
 
 	later := now.Add(2 * time.Minute)
 	clock = later
@@ -139,7 +139,26 @@ func TestMonthlyResetSuspendsOnlyTheFailingModel(t *testing.T) {
 	if !engine.candidateSelectable(profile.Candidates[1], "s2", 1, "", "", later) {
 		t.Fatal("a sibling model on the same binding was blocked until the monthly reset")
 	}
-	if !engine.circuits.IsOpen(limitSuspensionKey(profile.Candidates[0]), later) {
+	if !engine.circuits.IsOpen(ResourceKey(ScopeProvider, shared+"|opencode-go"), later) {
 		t.Fatal("the failing model's long suspension was not recorded")
+	}
+}
+
+func TestProviderReportedResetKeepsTheBindingSuspension(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	clock := now
+	engine := NewEngine(WithClock(func() time.Time { return clock }))
+	engine.SetLimitChecker(stubLimits{})
+	shared := ResourceKey(ScopeProfile, "shared")
+	profile := Profile{ID: "p", Version: 1, Candidates: []Candidate{
+		{ID: "a", Enabled: true, BindingKey: shared, ModelID: "anthropic/claude-sonnet"},
+		{ID: "b", Enabled: true, BindingKey: shared, ModelID: "anthropic/claude-haiku"},
+	}}
+	reset := now.Add(5 * time.Hour)
+	engine.openCircuitForFailure(profile, "a", &routingerr.Error{Code: routingerr.CodeQuotaLimited, ResetHint: &reset}, SuspensionBinding)
+
+	clock = now.Add(2 * time.Minute)
+	if engine.candidateSelectable(profile.Candidates[1], "s1", 1, "", "", clock) {
+		t.Fatal("a provider-reported account reset no longer suspended the binding")
 	}
 }

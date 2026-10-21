@@ -41,27 +41,35 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	ctx context.Context,
 	candidate dynamicruntime.Candidate,
 	failure *routingerr.Error,
-) *routingerr.Error {
+) (*routingerr.Error, dynamicruntime.LimitSuspension) {
 	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
-		return failure
+		return failure, dynamicruntime.SuspensionBinding
 	}
 	resolved := a.usage.tierLimits.resolveFailure(ctx, candidate, failure)
 	if resolved == nil {
 		resolved = failure
 	}
+	scope := dynamicruntime.SuspensionBinding
+	if resolved != failure {
+		// The OpenRouter key counter separates a minute block from the
+		// account's daily free allowance; both are account/provider scope.
+		scope = dynamicruntime.SuspensionProvider
+	} else if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit {
+		scope = dynamicruntime.SuspensionModel
+	}
 	// A classified quota limit on a paid model without the provider's own
-	// reset uses the operator-entered monthly reset, so the suspension the
-	// router stores actually waits for it.
+	// reset uses the operator-entered monthly reset. The monthly allowance is
+	// provider-scoped.
 	if resolved.Code == routingerr.CodeQuotaLimited && resolved.ResetHint == nil &&
 		a.calendar != nil && !dynamicruntime.IsFreeModel(candidate.ModelID) {
 		now := time.Now()
 		if reset, ok := a.calendar.MonthlyReset(ctx, candidate, now); ok && reset.After(now) {
 			copy := *resolved
 			copy.ResetHint = &reset
-			return &copy
+			return &copy, dynamicruntime.SuspensionProvider
 		}
 	}
-	return resolved
+	return resolved, scope
 }
 
 // ObserveLimit records the classified limit and learns an undisclosed
