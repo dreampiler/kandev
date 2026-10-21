@@ -438,7 +438,7 @@ type DashboardService struct {
 	runEvents             RunEventAppender                // optional; nil means a refused agent comment read is not recorded on its run
 	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
 	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
-	controlCapacity       ControlCapacitySource           // optional; nil omits shared_capacity_waiting from the control dashboard
+	controlCapacity       *controlCapacityCache           // optional; nil omits shared_capacity_waiting from the control dashboard
 }
 
 // SetRoutingProvider wires the provider-routing seam used by the

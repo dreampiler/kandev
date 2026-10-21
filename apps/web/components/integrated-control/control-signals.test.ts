@@ -5,6 +5,7 @@ import {
   capacityGradeWaiting,
   sharedCapacityWaiting,
   sumFigures,
+  wipWaitingFigure,
   workspaceFigures,
 } from "./control-signals";
 
@@ -44,6 +45,12 @@ describe("control waiting figures", () => {
     expect(sharedCapacityWaiting([first, second])).toEqual({ known: true, grade: 2, total: 3 });
     expect(sharedCapacityWaiting([undefined, first])).toEqual({ known: true, grade: 2, total: 3 });
     expect(sharedCapacityWaiting([undefined])).toBeUndefined();
+  });
+
+  it("reads a partial workspace sum as unknown, not as a smaller WIP waiting count", () => {
+    expect(wipWaitingFigure(true, { wipWaiting: 3 })).toBe(3);
+    expect(wipWaitingFigure(false, { wipWaiting: 3 })).toBeNull();
+    expect(wipWaitingFigure(true, { wipWaiting: 0 })).toBe(0);
   });
 
   it("counts grade-limit and both-limit waiters and keeps unknown separate", () => {

@@ -6,6 +6,7 @@ import { ControlTaskBoard } from "./control-task-board";
 import { ControlOverview } from "./control-overview";
 import { ControlInbox } from "./control-inbox";
 import { ControlWorkspaceCompare } from "./control-workspace-compare";
+import { wipWaitingFigure } from "./control-signals";
 import { useControlSignals } from "./use-control-signals";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
@@ -56,7 +57,7 @@ function ControlActivityView({ rows }: { rows: FactRows }) {
       <ControlCapacityLine
         observation={control?.data?.capacity}
         lastConfirmed={control?.data?.lastConfirmedCapacity}
-        wipWaiting={signals.total.wipWaiting}
+        wipWaiting={wipWaitingFigure(signals.complete, signals.total)}
         sharedWaiting={signals.sharedWaiting}
       />
       <ControlTaskBoard signals={signals} />

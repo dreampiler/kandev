@@ -68,6 +68,17 @@ export function sharedCapacityWaiting(
 }
 
 /**
+ * The board WIP figure is only complete when every workspace dashboard read
+ * succeeded; a partial sum reads as unknown instead of a smaller number.
+ */
+export function wipWaitingFigure(
+  complete: boolean,
+  total: Pick<WorkspaceFigures, "wipWaiting">,
+): number | null {
+  return complete ? total.wipWaiting : null;
+}
+
+/**
  * Waiters refused by a grade limit, from the aggregate snapshot when present or
  * the observation's reason counts otherwise. Unknown is never read as zero.
  */
