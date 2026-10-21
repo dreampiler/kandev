@@ -16,17 +16,11 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-func modelFailureConsumerClient(t *testing.T, kind string) (*agentctl.Client, *mockAgentServer, <-chan struct{}) {
+func modelFailureConsumerClient(t *testing.T, kind string) (*agentctl.Client, *mockAgentServer) {
 	t.Helper()
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
 	var client *agentctl.Client
-	dispatched := make(chan struct{})
-	mock.afterResponse = func(msg ws.Message) {
-		if msg.Action == "agent.prompt" {
-			close(dispatched)
-		}
-	}
 	mock.handler = func(msg ws.Message) *ws.Message {
 		switch msg.Action {
 		case "agent.session.set_model":
@@ -51,12 +45,16 @@ func modelFailureConsumerClient(t *testing.T, kind string) (*agentctl.Client, *m
 		return mock.defaultHandler(msg)
 	}
 	client = createTestClient(t, mock.server.URL)
-	t.Cleanup(func() { client.Close() })
-	if err := client.StreamUpdates(context.Background(), nil, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	waitForWSConnected(t, mock)
-	return client, mock, dispatched
+	disconnected := connectAgentStream(t, mock, client)
+	t.Cleanup(func() {
+		client.Close()
+		select {
+		case <-disconnected:
+		case <-time.After(5 * time.Second):
+			t.Error("agent stream did not finish draining during cleanup")
+		}
+	})
+	return client, mock
 }
 
 func TestStartModelConsumersPreserveProviderReplyCause(t *testing.T) {
@@ -67,7 +65,7 @@ func TestStartModelConsumersPreserveProviderReplyCause(t *testing.T) {
 				name = "provider reply"
 			}
 			t.Run(path+"/"+name, func(t *testing.T) {
-				client, mock, _ := modelFailureConsumerClient(t, name)
+				client, mock := modelFailureConsumerClient(t, name)
 				execution := &AgentExecution{ID: "execution", SessionID: "session", agentctl: client, WorkspacePath: "/workspace"}
 				execution.SetModelState(modelState("saved-model"))
 				log := newSessionTestLogger()
@@ -163,8 +161,15 @@ func assertModelFailureConsumerCause(t *testing.T, execution *AgentExecution, er
 }
 
 func TestStartModelStartupSuccessDispatchesPrompt(t *testing.T) {
-	client, _, dispatched := modelFailureConsumerClient(t, "success")
+	client, _ := modelFailureConsumerClient(t, "success")
 	execution := &AgentExecution{ID: "execution", SessionID: "session", agentctl: client, WorkspacePath: "/workspace", promptDoneCh: make(chan PromptCompletionSignal, 1)}
+	dispatched := make(chan struct{})
+	execution.setInitialPromptDispatchCallbacks(nil, func() {
+		execution.promptDoneCh <- PromptCompletionSignal{
+			StopReason: "test-complete", PromptGeneration: execution.promptGenerationSnapshot(),
+		}
+		close(dispatched)
+	}, nil)
 	if err := initializeModelFailureSession(t, execution, false); err != nil {
 		t.Fatal(err)
 	}
