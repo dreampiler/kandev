@@ -51,18 +51,29 @@ Prompts support pasted, dropped, or selected attachments. A prompt can contain a
 
 ## Manage session state
 
-Right-click an agent tab on desktop to manage it. Available actions depend on its current state.
+Right-click an agent tab on desktop to manage it. On phones, open **Sessions**, then select the session row's **Session actions** button. Available actions depend on the session's current state.
 
 | Action             | Effect                                                                                                                                                                     |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Rename**         | Changes the session's display name                                                                                                                                         |
 | **Set as Primary** | Makes a stoppable session the task's primary target                                                                                                                        |
 | **Stop**           | Cancels the active agent turn for this session                                                                                                                             |
+| **Restart session** | Stops and resumes the same active session. Keeps its history and workspace without sending a prompt. |
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
+
+Restart is available while a session is starting, running, or waiting for input. Stopping the primary session can make another active session primary, as with a normal Stop. If Stop fails, Kandev does not attempt Resume. If Resume fails, the conversation remains available for recovery. A lost connection between the two actions can leave the session stopped.
+
+Restart keeps the selected conversation open throughout the attempt. If you select another conversation
+while restart is pending, Kandev keeps your later selection.
+
+While a session restarts, you can edit its draft, but you cannot send it.
+**Restarting session...** appears above the composer until the restart requests
+finish. Other sessions remain usable. Sending becomes available under the normal
+readiness rules. If restart requires recovery, use the recovery actions first.
 
 Stopping a session is not deletion. Resume needs the executor's session record. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can require a fresh session.
 
@@ -602,7 +613,7 @@ During review you can:
 - discard a file or revert a supported diff block after confirmation;
 - attach a pending comment to a changed line.
 
-Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
+Reviewed state is stored per session. Kandev also stores the diff hash: if the file changes after you review it, the file becomes stale and unreviewed. By default, manually scrolling past a file marks it reviewed; file-selection jumps in Review do not. Clear a reviewed checkbox to leave that file unreviewed at your current reading position. Scrolling back to the file and then past it again marks it reviewed again. Use the review toolbar to disable **Auto-mark reviewed on scroll**. Review does not embed walkthrough steps in its diff list; follow a saved walkthrough from its launcher and file editor.
 
 **Whole-file feedback:** Select **Comment on file** in a file header, or in its file actions menu on a phone. Add feedback without selecting lines, including for deleted, renamed, or non-text files. Saved comments appear above the diff, where you can edit or delete them. File comments join line comments in **Fix comments** and the chat composer.
 

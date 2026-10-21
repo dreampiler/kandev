@@ -1247,10 +1247,7 @@ func (s *Service) handleSessionLaunchFailure(
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-// Returns whether the session itself was durably transitioned to FAILED — a
-// caller that is about to force-stop the process on the strength of that
-// transition (stopNeverStartedExecution) must not do so when this reports
-// false, or it kills the process while the session row still claims RUNNING.
+// Returns whether the session itself was durably transitioned to FAILED.
 func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
@@ -1452,6 +1449,7 @@ func (s *Service) StartTaskWithLaunchContext(
 // some callers supply. Keeping them in one struct avoids growing startTask's
 // already long positional parameter list for every new orthogonal concern.
 type startTaskOptions struct {
+	reusePreparedPrimary bool
 	// ProfileExplicit marks a non-empty profile selected through an explicit
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// this new session.
@@ -1884,6 +1882,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if !promoted {
 			selectedExplicitSession = nil
 		}
+	}
+	if sessionID == "" && opts.reusePreparedPrimary && !isOfficeTask && explicitStartRoute == nil {
+		var releasePrepared func()
+		sessionID, releasePrepared, err = s.claimPreparedDependencyPrimary(ctx, task.ID, agentProfileID, executorID, executorProfileID)
+		if err != nil {
+			return nil, err
+		}
+		defer releasePrepared()
 	}
 	if sessionID == "" {
 		if explicitStartRoute != nil {

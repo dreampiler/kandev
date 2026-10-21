@@ -188,6 +188,10 @@ export type FileEditorState = {
   hasRemoteUpdate?: boolean;
   remoteContent?: string;
   remoteOriginalHash?: string;
+  /** Last changed workspace observation; transient and never persisted. */
+  workspaceSnapshot?: { content: string; hash: string };
+  /** Last workspace snapshot accepted as baseline; warnings do not replace it. */
+  acceptedWorkspaceSnapshot?: { content: string; hash: string };
   renderedPreview?: boolean;
 };
 
