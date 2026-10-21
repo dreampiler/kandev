@@ -117,3 +117,29 @@ func TestRateLimitedFailureSuspendsTheCredentialBinding(t *testing.T) {
 		t.Fatal("a rate-limited failure created an unused model-key circuit")
 	}
 }
+
+func TestMonthlyResetSuspendsOnlyTheFailingModel(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	clock := now
+	engine := NewEngine(WithClock(func() time.Time { return clock }))
+	engine.SetLimitChecker(stubLimits{})
+	shared := ResourceKey(ScopeProfile, "shared")
+	profile := Profile{ID: "p", Version: 1, Candidates: []Candidate{
+		{ID: "a", Enabled: true, BindingKey: shared, ModelID: "opencode-go/kimi-k2"},
+		{ID: "b", Enabled: true, BindingKey: shared, ModelID: "opencode/step-5-preview-free"},
+	}}
+	reset := now.Add(30 * 24 * time.Hour)
+	engine.openCircuitForFailure(profile, "a", &routingerr.Error{Code: routingerr.CodeQuotaLimited, ResetHint: &reset})
+
+	later := now.Add(2 * time.Minute)
+	clock = later
+	if engine.candidateSelectable(profile.Candidates[0], "s1", 1, "", "", later) {
+		t.Fatal("the quota-limited model stayed selectable before its reset")
+	}
+	if !engine.candidateSelectable(profile.Candidates[1], "s2", 1, "", "", later) {
+		t.Fatal("a sibling model on the same binding was blocked until the monthly reset")
+	}
+	if !engine.circuits.IsOpen(limitSuspensionKey(profile.Candidates[0]), later) {
+		t.Fatal("the failing model's long suspension was not recorded")
+	}
+}

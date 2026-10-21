@@ -827,7 +827,7 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 		default:
 			candidate.ModelID = concrete.Model
 		}
-		if candidate.Enabled && r.bindingResolver != nil && concrete != nil {
+		if r.bindingResolver != nil && concrete != nil {
 			binding := profileCredentialBindingDescriptor(concrete)
 			candidate.BindingKey = dynamic.ResourceKey(
 				dynamic.ScopeCredential,

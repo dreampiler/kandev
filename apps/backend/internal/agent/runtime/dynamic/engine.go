@@ -264,6 +264,16 @@ func (e *Engine) candidateSelectable(candidate Candidate, sessionID string, gene
 	if e.circuits.IsHeld(accountBlockKey(candidate.ID)) {
 		return false
 	}
+	if e.limits != nil {
+		if key := limitSuspensionKey(candidate); key != "" && e.circuits.IsOpen(key, now) {
+			lease, ok := e.circuits.AcquireProbe(key, probeLeaseDuration)
+			if !ok {
+				return false
+			}
+			e.probes[probeKey(sessionID, generation, candidate.ID)] = lease
+			return true
+		}
+	}
 	if candidate.BindingKey == "" || !e.circuits.IsOpen(candidate.BindingKey, now) {
 		return true
 	}
@@ -1401,12 +1411,32 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 			continue
 		}
 		until := e.now().Add(circuitBackoff)
-		if failure.ResetHint != nil && failure.ResetHint.After(until) {
+		longReset := failure.ResetHint != nil && failure.ResetHint.After(until)
+		if e.limits != nil && longReset && candidate.ModelID != "" {
+			if key := limitSuspensionKey(candidate); key != "" {
+				// A provider reset longer than the ordinary backoff suspends
+				// only the failing model on this credential binding. The binding
+				// keeps its short circuit so sibling models stay selectable.
+				e.circuits.Open(key, *failure.ResetHint, failure.Code)
+				e.circuits.Open(candidate.BindingKey, until, failure.Code)
+				return
+			}
+		}
+		if longReset {
 			until = *failure.ResetHint
 		}
 		e.circuits.Open(candidate.BindingKey, until, failure.Code)
 		return
 	}
+}
+
+// limitSuspensionKey scopes a provider-reset suspension to one model on one
+// credential binding. It is only consulted when provider limits are enabled.
+func limitSuspensionKey(candidate Candidate) string {
+	if candidate.ModelID == "" {
+		return ""
+	}
+	return ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID)
 }
 
 const circuitBackoff = time.Minute

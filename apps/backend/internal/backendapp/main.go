@@ -1545,8 +1545,8 @@ func startGatewayAndServe(
 		} else {
 			addCleanup(func() error { return subscription.Unsubscribe() })
 		}
+		agentSettingsController.SetProviderLimitService(providerLimits)
 	}
-	agentSettingsController.SetProviderLimitService(providerLimits)
 
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })
 	services.Task.SetStallDetectionThreshold(cfg.Tasks.StallDetectionThreshold)

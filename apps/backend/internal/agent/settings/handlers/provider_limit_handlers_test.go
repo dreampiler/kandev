@@ -94,4 +94,11 @@ func TestProviderLimitRoutesReportUnwiredService(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("unwired list = %d", response.Code)
 	}
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/provider-limits/opencode-go", strings.NewReader(`{}`))
+	updateRequest.Header.Set(httpmw.InterimSettingsInterlockHeader, "test-interlock")
+	update := httptest.NewRecorder()
+	router.ServeHTTP(update, updateRequest)
+	if update.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unwired update = %d", update.Code)
+	}
 }
