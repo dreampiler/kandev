@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-10-20
+updated: 2026-10-21
 owners:
   - Kandev
 ---
@@ -105,7 +105,7 @@ Preserve the
 Criterion .35 narrows .22; see the
 [transport package](../../../plans/start-model-transport-failure/plan.md).
 
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.35:** A startup model call that fails because the agent stream or transport is gone shall return that failure unchanged, not an application failure naming a model. A provider error reply shall still be an application failure.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.35:** Fail-closed startup model branches shall pass typed agent-stream loss, cancellation, and deadlines through unchanged. Opaque replies shall remain application failures; wording alone shall not establish disconnection. Auto-fallback remains unchanged.
 
 ## Session error history amendment
 

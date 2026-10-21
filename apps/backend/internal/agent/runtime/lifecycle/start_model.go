@@ -2,9 +2,11 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -157,13 +159,12 @@ func providerDefaultDecision(state *CachedModelState, policy StartModelPolicy, r
 	return decision
 }
 
-// isStartModelTransportError reports whether a SetModel failure belongs to the
-// caller's context or the ACP transport rather than to model selection:
-// cancellation, a deadline, or a stream that is already gone because the agent
-// is stopping or its connection dropped. Such a failure is returned unchanged so
-// it is not recorded as a model the provider refused.
+// isStartModelTransportError recognizes caller cancellation and typed loss of
+// the backend's agent stream. Opaque ACP replies cannot attest transport loss:
+// their messages can describe a provider-side model application failure.
 func isStartModelTransportError(err error) bool {
-	return isTransportDeadErr(err) || isAgentStreamNotConnectedErr(err)
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, agentctl.ErrAgentStreamNotConnected)
 }
 
 // applyStartModelPolicy applies the profile model only when the executor's
