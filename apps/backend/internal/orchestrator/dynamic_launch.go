@@ -493,7 +493,7 @@ func (s *Service) launchPreparedSessionWithDynamicFallbackWithContinuation(
 	if err != nil {
 		return nil, err
 	}
-	decision, dynamic, err := s.dynamicLaunchDecision(ctx, session)
+	decision, dynamic, err := s.dynamicLaunchDecision(ctx, session, options.TurnID != "")
 	if err != nil {
 		return nil, err
 	}
@@ -726,9 +726,13 @@ func dynamicRepositorySummary(task *v1.Task) string {
 	return strings.Join(repositories, "\n")
 }
 
+// dynamicLaunchDecision resolves the durable route for a launch. newUserTurn
+// restricts the keep-off comparison to a launch that owns a new user turn, so a
+// prepared resume or recovery relaunch never moves an admitted context.
 func (s *Service) dynamicLaunchDecision(
 	ctx context.Context,
 	session *models.TaskSession,
+	newUserTurn bool,
 ) (dynamicruntime.RouteDecision, bool, error) {
 	decision := dynamicruntime.RouteDecision{
 		SessionID:          session.ID,
@@ -768,12 +772,56 @@ func (s *Service) dynamicLaunchDecision(
 		}
 		return decision, true, nil
 	}
+	if newUserTurn && !s.profileExecutionResolver.KeepModelWhileRunning(ctx, session.AgentProfileID) {
+		return s.reevaluatedDynamicLaunchDecision(ctx, session, *state, decision)
+	}
 	resolved, err := s.profileExecutionResolver.ResolveExisting(
 		ctx, session.ID, session.AgentProfileID, state.ExecutionProfileID,
 		state.Generation, state.ProfileVersion, "durable_route_state",
 	)
 	if err != nil {
 		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if session.ExecutionProfileID == resolved.ExecutionProfileID &&
+		session.RouteGeneration == resolved.Generation {
+		return resolved.Decision, true, nil
+	}
+	observed := *session
+	applyResolvedExecution(session, resolved)
+	changed, err := s.PersistDynamicRouteSelection(ctx, &observed, session)
+	if err != nil {
+		return dynamicruntime.RouteDecision{}, false, fmt.Errorf("persist dynamic route attribution: %w", err)
+	}
+	if !changed {
+		return dynamicruntime.RouteDecision{}, false, dynamicruntime.ErrStaleGeneration
+	}
+	return resolved.Decision, true, nil
+}
+
+// reevaluatedDynamicLaunchDecision runs the profile's keep-off comparison once
+// at a new turn's launch boundary. A failed comparison keeps the durable route
+// the session already had, and nothing here interrupts an admitted turn.
+func (s *Service) reevaluatedDynamicLaunchDecision(
+	ctx context.Context,
+	session *models.TaskSession,
+	state dynamicruntime.RouteState,
+	decision dynamicruntime.RouteDecision,
+) (dynamicruntime.RouteDecision, bool, error) {
+	reevaluated, err := s.profileExecutionResolver.ReevaluateForNewTurn(
+		ctx, session.ID, session.AgentProfileID, state.Generation,
+	)
+	if errors.Is(err, dynamicruntime.ErrNoEligibleCandidate) {
+		return dynamicruntime.RouteDecision{}, false, err
+	}
+	if err != nil {
+		return decision, true, nil
+	}
+	resolved, err := s.profileExecutionResolver.ResolveExisting(
+		ctx, session.ID, session.AgentProfileID, reevaluated.ExecutionProfileID,
+		reevaluated.Generation, reevaluated.ProfileVersion, "keep_model_reevaluated",
+	)
+	if err != nil {
+		return decision, true, nil
 	}
 	if session.ExecutionProfileID == resolved.ExecutionProfileID &&
 		session.RouteGeneration == resolved.Generation {

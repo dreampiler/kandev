@@ -141,6 +141,7 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE TABLE IF NOT EXISTS dynamic_agent_profiles (
 		profile_id TEXT PRIMARY KEY,
 		version INTEGER NOT NULL DEFAULT 1,
+		keep_model_while_running INTEGER NOT NULL DEFAULT 1,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (profile_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
@@ -173,6 +174,12 @@ func (r *sqliteRepository) initSchema() error {
 	}
 
 	r.migrate.Apply("agents.tui_config", `ALTER TABLE agents ADD COLUMN tui_config TEXT DEFAULT NULL`)
+	// A fresh database carries the column inline, so this replays as a
+	// duplicate-column no-op; a legacy database is upgraded with default true.
+	if err := r.migrate.Apply("dynamic_agent_profiles.keep_model_while_running",
+		`ALTER TABLE dynamic_agent_profiles ADD COLUMN keep_model_while_running INTEGER NOT NULL DEFAULT 1`); err != nil {
+		return err
+	}
 	r.migrate.Apply("agent_profiles.mode", `ALTER TABLE agent_profiles ADD COLUMN mode TEXT DEFAULT NULL`)
 	r.migrate.Apply("agent_profiles.migrated_from", `ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
 	// Rows where cli_flags IS NULL are backfilled on first read - see scanAgentProfile.
@@ -777,6 +784,16 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 
 var _ DynamicProfileRepository = (*sqliteRepository)(nil)
 
+// keepModelWhileRunningValue resolves the stored continuity preference. An
+// omitted value keeps the documented default of on, both for a fresh insert
+// and for a caller that only replaces the route document.
+func keepModelWhileRunningValue(profile *models.DynamicAgentProfile) int {
+	if profile == nil || profile.KeepModelWhileRunning == nil {
+		return 1
+	}
+	return dialect.BoolToInt(*profile.KeepModelWhileRunning)
+}
+
 // CreateDynamicAgentProfile writes the dynamic document and its ordered route
 // rows in one transaction. The parent agent_profiles row is created by the
 // controller first; this transaction is the optimistic-routing document's
@@ -803,9 +820,10 @@ func (r *sqliteRepository) CreateDynamicAgentProfile(
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		INSERT INTO dynamic_agent_profiles (profile_id, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`), profile.ProfileID, profile.Version, profile.CreatedAt, profile.UpdatedAt); err != nil {
+		INSERT INTO dynamic_agent_profiles (profile_id, version, keep_model_while_running, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), profile.ProfileID, profile.Version, keepModelWhileRunningValue(profile),
+		profile.CreatedAt, profile.UpdatedAt); err != nil {
 		return err
 	}
 	if err := insertDynamicRoutes(ctx, tx, profile.ProfileID, routes); err != nil {
@@ -833,12 +851,15 @@ func (r *sqliteRepository) GetDynamicAgentProfile(
 	profileID string,
 ) (*models.DynamicAgentProfile, []models.DynamicAgentRoute, error) {
 	profile := &models.DynamicAgentProfile{}
+	var keepModel int
 	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT profile_id, version, created_at, updated_at
+		SELECT profile_id, version, keep_model_while_running, created_at, updated_at
 		FROM dynamic_agent_profiles WHERE profile_id = ?
-	`), profileID).Scan(&profile.ProfileID, &profile.Version, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
+	`), profileID).Scan(&profile.ProfileID, &profile.Version, &keepModel, &profile.CreatedAt, &profile.UpdatedAt); err != nil {
 		return nil, nil, err
 	}
+	keepModelEnabled := keepModel != 0
+	profile.KeepModelWhileRunning = &keepModelEnabled
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT dynamic_profile_id, position, execution_profile_id, enabled, rules_json
 		FROM dynamic_agent_routes WHERE dynamic_profile_id = ? ORDER BY position ASC
@@ -896,9 +917,9 @@ func (r *sqliteRepository) updateDynamicAgentProfileTx(
 	now := time.Now().UTC()
 	result, err := execer.ExecContext(ctx, execer.Rebind(`
 		UPDATE dynamic_agent_profiles
-		SET version = version + 1, updated_at = ?
+		SET version = version + 1, keep_model_while_running = ?, updated_at = ?
 		WHERE profile_id = ? AND version = ?
-	`), now, profile.ProfileID, expectedVersion)
+	`), keepModelWhileRunningValue(profile), now, profile.ProfileID, expectedVersion)
 	if err != nil {
 		return err
 	}
