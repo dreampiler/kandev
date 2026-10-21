@@ -16,12 +16,12 @@ Excluded: route reordering, model choice, idle-timeout changes, production write
 - `AC-COSTS-TIER-LIMITS-001.1`, `AC-COSTS-TIER-LIMITS-001.2`, `AC-COSTS-TIER-LIMITS-001.3`, `AC-COSTS-TIER-LIMITS-001.4`, `AC-COSTS-TIER-LIMITS-001.5`, `AC-COSTS-TIER-LIMITS-001.6`.
 - [System design](../../specs/costs/system-design/provider-tier-limits.md).
 
-AC-001.5 and the Go/DevPass part of AC-001.4 require provider usage clients that are not present on this base. They are follow-ups and are not claimed complete by this work order. The implemented admission check runs at selection inside the engine mutex; claim-time recheck and resource-wait restart scheduling are follow-ups.
+The approved OpenRouter 1000/day and LLM Gateway/DevPass 20/min and 120/min values are implemented as measured installation defaults (catalog plus owner metadata), so their display, edit, and admission effects do not depend on a usage client. The OpenRouter key-counter split and Go/DevPass response-header measurement are auxiliary observation methods and are not wired in this port. The implemented admission check runs at selection inside the engine mutex; claim-time recheck and resource-wait restart scheduling are follow-ups.
 
 ## Acceptance
 
 1. Account/tier budgets persist, display sources, and change admission without changing order or interrupting running work.
-2. Classified observations learn unknown limits from the recorded ledger. Unavailable evidence preserves the existing retry ladder. Exact OpenRouter key-counter evidence and Go/DevPass clients are follow-ups.
+2. Classified observations learn unknown limits from the recorded ledger. Unavailable evidence preserves the existing retry ladder. The approved OpenRouter 1000/day and LLM Gateway/DevPass 20/min and 120/min values are measured installation defaults; auxiliary key-counter and response-header refresh is not wired.
 3. Desktop and phone edit/save the same settings through the normal settings entry point.
 
 ## ASCII UI preview
@@ -45,4 +45,4 @@ Implemented: default-off `features.providerUsageLimits`; `GET/PUT /api/v1/provid
 
 Verification: `go build ./internal/...`; focused tests in `agent/usage`, `agent/runtime/dynamic`, `task/repository/sqlite`, `backendapp`, `agent/settings/handlers`, `runtimeflags`, and `profiles` passed; `lint-go-changed` reported 0 issues; web Vitest 9 cases, `tsc --noEmit`, changed-file ESLint, and `i18n:ratchet` passed; spec validate/lint passed.
 
-Follow-ups, not claimed complete: OpenRouter key-counter minute/daily split (AC-001.5) and Go/DevPass provider usage clients (Go/DevPass part of AC-001.4). OpenCode ACP has no usage client on this base, so their exact provider-window measurement is not implemented. Claim-time recheck and resource-wait restart scheduling are also follow-ups; selection-time skip is the implemented behavior. The repository-wide `i18n:check` still reports the base line's orphan catalog entries and is not used as a pass signal.
+Required values are covered by measured installation defaults: OpenRouter 1000/day at 00:00 UTC, LLM Gateway free models 20/minute, and DevPass 120/minute with 50 concurrent turns. Auxiliary observation is not wired: the OpenRouter key-counter minute/daily split and Go/DevPass response-header measurement remain follow-ups. Claim-time recheck and resource-wait restart scheduling are also follow-ups; selection-time skip is the implemented behavior. The repository-wide `i18n:check` still reports the base line's orphan catalog entries and is not used as a pass signal.

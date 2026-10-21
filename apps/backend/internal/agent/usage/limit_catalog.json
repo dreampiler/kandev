@@ -3,18 +3,12 @@
     {
       "providers": ["openrouter"],
       "tier": "free",
-      "provenance": { "requests_per_minute": "published", "requests_per_day": "published" }
-    },
-    {
-      "providers": ["openrouter"],
-      "tier": "free",
-      "purchased_credits": true,
-      "provenance": { "requests_per_day": "measured" }
+      "provenance": { "requests_per_minute": "published", "requests_per_day": "measured" }
     },
     {
       "providers": ["llmgateway"],
       "tier": "free",
-      "provenance": { "requests_per_minute": "published", "requests_per_window": "published" }
+      "provenance": { "requests_per_minute": "measured" }
     },
     {
       "providers": ["llmgateway"],

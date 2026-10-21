@@ -129,23 +129,20 @@ func DefaultTierLimits(provider string, tier BillingTier, plan string, purchased
 	switch strings.ToLower(provider) {
 	case "openrouter":
 		if tier == TierFree {
+			// The installation's measured free-model allowance. It does not
+			// require a credential read: the owner can override it, and an
+			// unknown account remains visibly derived rather than guessed at.
 			limits.RequestsPerMinute = limitNumber(20)
-			limits.RequestsPerDay = limitNumber(50)
+			limits.RequestsPerDay = limitNumber(1000)
 			limits.DailyReset = defaultDailyReset
-			if purchasedCredits {
-				limits.RequestsPerDay = limitNumber(1000)
-			}
 		}
 	case "llmgateway":
 		switch tier {
 		case TierFree:
+			// Confirmed-credit installation default; free models are metered
+			// per model at 20/minute.
 			limits.RequestsPerModel = true
-			if purchasedCredits {
-				limits.RequestsPerMinute = limitNumber(20)
-			} else {
-				limits.RequestsPerWindow = limitNumber(5)
-				limits.RequestWindowSeconds = 600
-			}
+			limits.RequestsPerMinute = limitNumber(20)
 		case TierSubscription:
 			limits.RequestsPerMinute = limitNumber(120)
 			limits.MaxConcurrentTurns = limitNumber(50)

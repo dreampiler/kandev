@@ -81,3 +81,22 @@ func TestProviderTierResetUsesTheOwnerTimeZone(t *testing.T) {
 		t.Fatal("invalid owner reset must be rejected")
 	}
 }
+
+func TestApprovedInstallationDefaultsDoNotRequireAUsageClient(t *testing.T) {
+	openRouter := DefaultTierLimits("openrouter", TierFree, "", false)
+	if openRouter.RequestsPerDay == nil || *openRouter.RequestsPerDay != 1000 ||
+		openRouter.DailyReset != "00:00 UTC" || openRouter.Provenance["requests_per_day"] != ProvenanceMeasured {
+		t.Fatalf("openrouter free defaults = %#v", openRouter)
+	}
+	gateway := DefaultTierLimits("llmgateway", TierFree, "", false)
+	if gateway.RequestsPerMinute == nil || *gateway.RequestsPerMinute != 20 ||
+		gateway.RequestsPerWindow != nil || !gateway.RequestsPerModel ||
+		gateway.Provenance["requests_per_minute"] != ProvenanceMeasured {
+		t.Fatalf("llmgateway free defaults = %#v", gateway)
+	}
+	devPass := DefaultTierLimits("llmgateway", TierSubscription, "devpass", false)
+	if devPass.RequestsPerMinute == nil || *devPass.RequestsPerMinute != 120 ||
+		devPass.MaxConcurrentTurns == nil || *devPass.MaxConcurrentTurns != 50 {
+		t.Fatalf("devpass defaults = %#v", devPass)
+	}
+}
