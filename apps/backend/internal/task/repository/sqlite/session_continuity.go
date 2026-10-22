@@ -196,6 +196,9 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
 		return false, err
 	}
+	if err := r.resolveContinuedNativeMissingFencesTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot
@@ -265,7 +268,7 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
-	if outcome == "context_continued" {
+	if outcome == contextContinuationOutcome {
 		return r.completeContextContinuationAttempt(ctx, id, completedAt)
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`

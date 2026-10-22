@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const contextContinuationOutcome = "context_continued"
+
 const resolvedContextContinuationNoticeQuery = `SELECT EXISTS (
  SELECT 1 FROM harness_session_generations g JOIN task_sessions ts ON ts.id = g.session_id
  JOIN session_recovery_blocks b ON b.session_id = g.session_id AND b.incarnation_id = g.incarnation_id AND b.expected_generation = g.generation
@@ -28,7 +30,7 @@ const resolvedContextContinuationNoticeQuery = `SELECT EXISTS (
 // Context continuation retires only the predecessor's presentation. Its unknown
 // submission and the carried admission fence remain authoritative and unchanged.
 func (r *Repository) retireContextContinuationNoticeTx(ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64) error {
-	if generation.CreationReason != "context_continued" || generation.Generation != expectedGeneration+1 ||
+	if generation.CreationReason != contextContinuationOutcome || generation.Generation != expectedGeneration+1 ||
 		generation.PredecessorGeneration != expectedGeneration || generation.NativeSessionID == "" {
 		return nil
 	}
@@ -68,6 +70,23 @@ func contextContinuationNoticeMatches(recovery models.AgentDeliveryRecovery, ses
 		recovery.SubmissionID != "" && recovery.StreamID != "" && recovery.Revision > 0 && recovery.HistoryGap == nil &&
 		(recovery.Phase == models.AgentDeliveryRecoveryUncertain || recovery.Phase == models.AgentDeliveryRecoveryReconnecting ||
 			recovery.Phase == models.AgentDeliveryRecoveryContinued)
+}
+
+// The committed replacement addresses only unbound interactive native-state loss
+// from its source generation. Delivery and independent recovery fences remain.
+func (r *Repository) resolveContinuedNativeMissingFencesTx(ctx context.Context, tx *sql.Tx, generation *models.HarnessSessionGeneration, expectedGeneration int64) error {
+	if expectedGeneration < 1 || generation.CreationReason != contextContinuationOutcome || generation.Generation != expectedGeneration+1 ||
+		generation.PredecessorGeneration != expectedGeneration || generation.NativeSessionID == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE session_recovery_blocks
+ SET state = 'resolved', authorized_action = 'continue_from_history', updated_at = ?, resolved_at = ?
+ WHERE session_id = ? AND incarnation_id = ? AND expected_generation = ? AND state = 'open'
+ AND reason = 'native_state_missing' AND consumer_reference = 'interactive'
+ AND delivery_submission_id = '' AND delivery_stream_id = '' AND delivery_sequence = 0
+ AND delivery_turn_id = '' AND delivery_outcome = ''`), generation.CommittedAt, generation.CommittedAt,
+		generation.SessionID, generation.IncarnationID, expectedGeneration)
+	return err
 }
 
 // Authenticated native retirement needs an exact resolved source fence or a
