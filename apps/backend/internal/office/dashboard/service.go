@@ -460,6 +460,7 @@ type DashboardService struct {
 	buildVersion          string                          // running binary version shown on the overview's server-start row
 	overview              *overviewCache                  // lazily created by overviewCacheOrInit
 	overviewOnce          sync.Once
+	humanDoneCompleter    TaskHumanDoneCompleter
 	finalStepMover        TaskFinalStepMover // optional; nil keeps the in_review redirect for human Done on a non-final step
 }
 
