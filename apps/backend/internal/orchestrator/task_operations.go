@@ -7239,13 +7239,16 @@ func (s *Service) runPromptTurn(
 		}
 		submissionID = normalizeDeliverySubmissionID(options.deliverySubmissionID)
 	}
+	preparedSession := *session
+	var admissionObserved atomic.Bool
 	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
-		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
+		dispatchOnly, options, submissionID, validateAdmission, onDispatched, &admissionObserved,
 	)
 	return s.finishPromptExecutorDispatch(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 		rollback, options, foregroundDispatch, releaseDispatchGuard, result, execErr, dispatchOutcome, resumeAttempt, delivery,
+		measuredQuotaDispatch{session: &preparedSession, admissionObserved: admissionObserved.Load()},
 	)
 }
 
@@ -7584,8 +7587,14 @@ func (s *Service) finishPromptExecutorDispatch(
 	foregroundDispatch *foregroundDispatch, releaseDispatchGuard func(),
 	result *executor.PromptResult, execErr error, dispatchOutcome *promptDispatchOutcome,
 	resumeAttempt *resumeAttempt, delivery *agentDeliverySubmissionRuntime,
+	measured ...measuredQuotaDispatch,
 ) (*PromptResult, error) {
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
+	if len(measured) > 0 && delivery == nil && !dispatchAccepted && publicationErr == nil {
+		if handled, routeErr := s.routeMeasuredQuotaRefusal(ctx, measured[0], rollback, options, resumeAttempt, foregroundDispatch, releaseDispatchGuard, execErr); handled {
+			return nil, errors.Join(execErr, routeErr)
+		}
+	}
 	if options.retireInitialSubmissionReplay && !dispatchAccepted {
 		restoreCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), promptFailureCleanupTimeout)
 		if err := s.restoreInitialSubmissionReplayAfterRejectedPrompt(
