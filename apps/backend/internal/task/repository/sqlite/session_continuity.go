@@ -193,6 +193,9 @@ func (r *Repository) CommitHarnessSessionGeneration(ctx context.Context, generat
 	if err := insertGenerationTx(ctx, tx, r.db.Rebind, generation); err != nil {
 		return false, err
 	}
+	if err := r.retireContextContinuationNoticeTx(ctx, tx, generation, expectedGeneration); err != nil {
+		return false, err
+	}
 	// A context continuation publishes a replacement generation while the
 	// operator's recovery block is still the admission fence. Move that fence
 	// with the generation in the same transaction so a successful commit cannot

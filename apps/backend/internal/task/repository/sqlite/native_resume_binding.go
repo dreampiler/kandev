@@ -193,6 +193,13 @@ func (r *Repository) restoreAuthenticatedNativeNoticeTx(ctx context.Context, tx 
 	if recovery.HistoryGap != nil || recovery.SessionID != proof.SessionID || recovery.IncarnationID != proof.IncarnationID {
 		return false, nil
 	}
+	if recovery.HarnessGeneration < proof.HarnessGeneration {
+		resolved, err := r.hasResolvedContextContinuationNoticeTx(ctx, tx.Tx, recovery, proof)
+		if err != nil || !resolved {
+			return false, err
+		}
+		return true, r.writeContinuedRecoveryNoticeTx(ctx, tx.Tx, metadata, metadataRaw, recovery, completedAt)
+	}
 	if recovery.Phase == models.AgentDeliveryRecoveryRestored {
 		resolved, err := r.hasResolvedNativeResumeRecoveryTx(ctx, tx, recovery)
 		if err != nil || resolved {

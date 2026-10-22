@@ -331,6 +331,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	if info == nil {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
+	if info.SessionID != sessionID {
+		return nil, fmt.Errorf("workspace info does not match the requested session")
+	}
 
 	// Resolve taskID from provider when caller doesn't have it (e.g., GetOrEnsureExecution)
 	if taskID == "" {
@@ -342,19 +345,9 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		return nil, err
 	}
 
-	if info.TaskEnvironmentID != "" {
-		if execution, exists := m.executionStore.GetByTaskEnvironmentID(info.TaskEnvironmentID); exists {
-			if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
-				return nil, err
-			}
-			m.logger.Info("reusing existing execution for task environment",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.String("task_environment_id", info.TaskEnvironmentID),
-				zap.String("execution_id", execution.ID))
-			return execution, nil
-		}
-	}
+	// Session-scoped access needs a controller owned by this exact session.
+	// Another session may share the environment, but its conversation and
+	// teardown ownership must not be borrowed through the workspace route.
 
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
