@@ -100,6 +100,11 @@ func (e *Engine) prepareOrderedPlan(ctx context.Context, state RouteState, profi
 		return orderedPlan{}, err
 	}
 	chain, continuing := retainedSelectionChain(state, profile.ID, generation)
+	if startsFreshManualWaitingRetry(state, excluded, preferred, reason) {
+		// A new manual cycle keeps prior immutable attempts as history; it does
+		// not claim successful output or release any provider/recovery guard.
+		chain, continuing = retainedSelectionChain(RouteState{}, profile.ID, generation)
+	}
 	current := state.ExecutionProfileID
 	if current == "" {
 		current = chain.LastCandidateID
@@ -128,6 +133,11 @@ func retainedSelectionChain(state RouteState, profileID string, generation int64
 	chain = *previous
 	chain.TriedCandidateIDs = append([]string(nil), previous.TriedCandidateIDs...)
 	return chain, true
+}
+
+func startsFreshManualWaitingRetry(state RouteState, excluded, preferred, reason string) bool {
+	return reason == "manual_retry" && state.Status == routeStatusWaiting &&
+		state.ExecutionProfileID == "" && excluded == "" && preferred == ""
 }
 
 // Traverse lazily so an unreached round-robin tier cannot block an earlier
