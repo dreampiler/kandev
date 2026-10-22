@@ -6923,10 +6923,14 @@ func (s *Service) persistAutoStartPrompt(
 	snapshot := s.workflowStartPromptInputSnapshot(
 		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
 	)
+	var identity *messagequeue.QueueSessionIdentity
+	if admission := workflowAutoStartAdmissionFromContext(ctx, taskID, sessionID); admission != nil {
+		identity = &admission.identity
+	}
 	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
 		userMessageRecorded, references, handoffText,
-		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), identity, nil,
 	)
 }
 
@@ -6993,6 +6997,8 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 			ctx, *identity, *entry, prompt, "", messagequeue.QueuedByWorkflow,
 			planMode, toQueuedAttachments(attachments), meta,
 		)
+	} else if identity != nil {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSession(ctx, *identity, prompt, "", messagequeue.QueuedByWorkflow, planMode, toQueuedAttachments(attachments), meta)
 	} else {
 		queued, err = s.messageQueue.QueueMessageWithMetadata(
 			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
