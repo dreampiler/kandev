@@ -103,13 +103,25 @@ func (s *Service) deferAgentFailureUntilSessionVerdict(
 		stopPendingTimer(previous.(*pendingAgentFailure))
 	}
 	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, data.SessionID)
-	if err != nil || classifySessionVerdict(state, errorMessage) != sessionVerdictPending {
-		// A recorded verdict (or an unreadable session) keeps the immediate
-		// failure path. Another taker already owns the failure otherwise.
+	verdict := sessionVerdictPending
+	if err == nil {
+		verdict = classifySessionVerdict(state, errorMessage)
+	}
+	if err != nil || verdict == sessionVerdictFailed {
+		// An unreadable session fails closed, and a recorded failure keeps the
+		// immediate failure path. Another taker already owns the failure
+		// otherwise.
 		if s.agentErrorVerdict.pending.CompareAndDelete(data.SessionID, pending) {
 			stopPendingTimer(pending)
 			return false
 		}
+		return true
+	}
+	if verdict == sessionVerdictSuperseded {
+		// A clean park or terminal successor verdict is already recorded, so
+		// this failure belongs to a predecessor turn and must be consumed
+		// instead of failing the successor's run.
+		s.takePendingAgentFailure(ctx, data.SessionID, pending, sessionVerdictSuperseded)
 		return true
 	}
 	s.logger.Info("deferring Office run failure until the session records its verdict",
@@ -140,25 +152,37 @@ func (s *Service) resolvePendingAgentFailure(ctx context.Context, data TaskSessi
 }
 
 // recheckPendingAgentFailure reads the session again when no state event
-// arrived in time. A still-live session keeps the run claimed for its
-// current execution; a recorded failure applies the deferred failure.
+// arrived in time. A still-live or already-superseded session keeps the run
+// claimed for its current execution; a recorded failure applies the deferred
+// failure. An unreadable session fails closed: a read error is not evidence of
+// a successor, so the failure is applied rather than silently discarded.
 func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID string, pending *pendingAgentFailure) {
 	state, errorMessage, err := s.repo.GetTaskSessionState(ctx, sessionID)
-	verdict := sessionVerdictSuperseded
-	if err == nil && classifySessionVerdict(state, errorMessage) == sessionVerdictFailed {
-		verdict = sessionVerdictFailed
+	verdict := sessionVerdictFailed
+	if err == nil && classifySessionVerdict(state, errorMessage) != sessionVerdictFailed {
+		verdict = sessionVerdictSuperseded
 	}
 	s.takePendingAgentFailure(ctx, sessionID, pending, verdict)
 }
 
 // dropPendingAgentFailure discards a parked failure once the session's run
-// completed through a successor.
-func (s *Service) dropPendingAgentFailure(sessionID string) {
+// completed through a successor. The pending entry is keyed by session, but a
+// completed event names one run: only that run may consume the entry, so a
+// delayed completion for a finished run cannot erase the next run's failure.
+func (s *Service) dropPendingAgentFailure(sessionID, runID string) {
 	if sessionID == "" {
 		return
 	}
-	if value, loaded := s.agentErrorVerdict.pending.LoadAndDelete(sessionID); loaded {
-		stopPendingTimer(value.(*pendingAgentFailure))
+	value, loaded := s.agentErrorVerdict.pending.Load(sessionID)
+	if !loaded {
+		return
+	}
+	pending := value.(*pendingAgentFailure)
+	if runID != "" && pending.runID != runID {
+		return
+	}
+	if s.agentErrorVerdict.pending.CompareAndDelete(sessionID, pending) {
+		stopPendingTimer(pending)
 	}
 }
 

@@ -26,7 +26,6 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/runs/dedupkeys"
-	runmodels "github.com/kandev/kandev/internal/runs/models"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
@@ -470,10 +469,13 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
-	s.dropPendingAgentFailure(data.SessionID)
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// A stale/duplicate completion still consumes only the parked
+			// failure that belongs to the completing run; another run's
+			// failure on the same reused session must survive.
+			s.dropPendingAgentFailure(data.SessionID, data.RunID)
 			if exactRunSessionEvent(data) {
 				return nil
 			}
@@ -489,13 +491,14 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
+	s.dropPendingAgentFailure(data.SessionID, run.ID)
 	return s.completeClaimedTaskRun(ctx, run, *data)
 }
 
 // completeClaimedTaskRun finishes a claimed task run whose agent turn ended
 // without error and applies the completion side effects once. It is shared
 // by the lifecycle completion events and the parked-session settlement.
-func (s *Service) completeClaimedTaskRun(ctx context.Context, run *runmodels.Run, data AgentLifecycleData) error {
+func (s *Service) completeClaimedTaskRun(ctx context.Context, run *runsmodels.Run, data AgentLifecycleData) error {
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -890,7 +893,7 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 
 // failClaimedTaskRun applies the terminal Office failure path to a claimed
 // task run and dispatches the workflow's on_agent_error trigger.
-func (s *Service) failClaimedTaskRun(ctx context.Context, run *runmodels.Run, data AgentLifecycleData) error {
+func (s *Service) failClaimedTaskRun(ctx context.Context, run *runsmodels.Run, data AgentLifecycleData) error {
 	// Office failure path: terminal for every error except a classified-
 	// transient failure, which HandleAgentFailure itself retries a
 	// bounded number of times before it counts toward auto-pause

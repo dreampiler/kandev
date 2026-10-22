@@ -62,6 +62,13 @@ func newParkedRunFixtureForTask(t *testing.T, projectID string) parkedRunFixture
 
 func (f parkedRunFixture) publishSessionState(t *testing.T, sessionID, oldState, newState, errorMessage string) {
 	t.Helper()
+	f.publishSessionStateAt(t, sessionID, oldState, newState, errorMessage, time.Now().UTC())
+}
+
+func (f parkedRunFixture) publishSessionStateAt(
+	t *testing.T, sessionID, oldState, newState, errorMessage string, updatedAt time.Time,
+) {
+	t.Helper()
 	event := bus.NewEvent(events.TaskSessionStateChanged, "test", map[string]interface{}{
 		"task_id":          "task-parked",
 		"session_id":       sessionID,
@@ -69,6 +76,7 @@ func (f parkedRunFixture) publishSessionState(t *testing.T, sessionID, oldState,
 		"new_state":        newState,
 		"error_message":    errorMessage,
 		"agent_profile_id": f.agent.ID,
+		"updated_at":       updatedAt.Format(time.RFC3339Nano),
 	})
 	if err := f.eb.Publish(context.Background(), events.TaskSessionStateChanged, event); err != nil {
 		t.Fatalf("publish session state: %v", err)
@@ -109,6 +117,21 @@ func TestParkedLaunchedSessionSettlesClaimedRun(t *testing.T) {
 	}
 	if !free {
 		t.Fatal("task checkout is still held after the run settled")
+	}
+}
+
+// A park recorded before the run was claimed belongs to the previous turn:
+// Office reuses a session across runs, and the delayed park handler may run
+// after the successor run was already claimed. Settling the successor with the
+// old turn's park would finish work the park never observed.
+func TestParkedSessionSettlementIgnoresParkRecordedBeforeRunClaim(t *testing.T) {
+	f := newParkedRunFixture(t)
+
+	f.publishSessionStateAt(t, "session-launched", "RUNNING", "WAITING_FOR_INPUT", "",
+		time.Now().UTC().Add(-2*time.Minute))
+
+	if got := f.runStatus(t); got != service.RunStatusClaimed {
+		t.Fatalf("run status = %q, want claimed: the park predates the run claim", got)
 	}
 }
 

@@ -148,6 +148,39 @@ func TestAgentErrorSessionVerdict_DisabledKeepsImmediateFailure(t *testing.T) {
 	}
 }
 
+// A clean park already recorded the successor's verdict when the failure is
+// handled, so the old failure is consumed instead of failing the recovered run.
+func TestAgentErrorSessionVerdict_CleanParkConsumesFailure(t *testing.T) {
+	f := newVerdictFixture(t, true, "WAITING_FOR_INPUT")
+
+	f.failExecution(t)
+
+	if got := f.runStatus(t); got != service.RunStatusClaimed {
+		t.Fatalf("run status = %q, want claimed: the clean park supersedes the old failure", got)
+	}
+}
+
+// Office reuses a session across runs. A delayed completion for an older run
+// must not erase the failure parked for the run that currently owns the
+// session, otherwise the failure verdict has nothing left to apply.
+func TestAgentErrorSessionVerdict_StaleCompletionKeepsParkedFailure(t *testing.T) {
+	f := newVerdictFixture(t, true, "RUNNING")
+
+	f.failExecution(t)
+	f.publish(t, events.AgentCompleted, map[string]interface{}{
+		"task_id":          verdictTaskID,
+		"session_id":       verdictSessionID,
+		"agent_profile_id": verdictAgentID,
+		"run_id":           "run-predecessor",
+	})
+
+	f.sessionState(t, "RUNNING", "FAILED", "AI_APICallError: Go usage limit exceeded")
+
+	if got := f.runStatus(t); got != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want failed: the parked failure survived the predecessor completion", got)
+	}
+}
+
 // A failure verdict written without a state event (or one missed while the
 // failure was parked) is still applied by the bounded re-check.
 func TestAgentErrorSessionVerdict_RecheckAppliesMissedFailureVerdict(t *testing.T) {

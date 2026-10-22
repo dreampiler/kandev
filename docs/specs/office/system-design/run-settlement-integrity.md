@@ -40,9 +40,13 @@ routing owns its failover decision; this design only waits for its outcome.
 ## Data and contracts
 
 - Park settlement reads `task_id`, `session_id`, `old_state`, `new_state`,
-  `error_message`, and `agent_profile_id` from `task_session.state_changed`.
+  `error_message`, `agent_profile_id`, and the committed `updated_at` from
+  `task_session.state_changed`.
 - The run is matched with `GetClaimedRunByTaskAndAgent` and settles only when
-  `runs.session_id` equals the event's session.
+  `runs.session_id` equals the event's session and the run was already claimed
+  when the park was recorded (`runs.claimed_at` is not after the park's
+  `updated_at`). A run claimed after the park belongs to the next turn on the
+  reused session and must not be finished by the previous turn's park.
 - The guard reads `task_sessions.state` and `task_sessions.error_message`
   through `GetTaskSessionState`.
 - The flag is `FeaturesConfig.OfficeAgentErrorSessionVerdict`, registered in
@@ -70,11 +74,15 @@ later `AgentStopped` is a no-op on the finished run.
 `StopAgent`. It skips both, and still claims the completion, when the session
 is `STARTING`, is `RUNNING` while the completion snapshot was not, holds an
 agent execution other than the snapshot's, or is running a turn other than the
-one that just completed. A relaunch that reuses the live execution keeps the
-execution id and can leave the session `RUNNING`, so its new turn is the signal
-that the session moved on. The guard narrows, but does not fully close, the
-window between the reload and `StopAgent`: it is a mitigation, not full mutual
-exclusion, and a relaunch that lands inside that window can still be stopped.
+one that just completed. The IDLE flip is a compare-and-set against the
+completion snapshot's state, and ownership is reloaded once more immediately
+before `StopAgent`. A relaunch that lands after the first reload therefore
+either wins the state compare-and-set or is observed by the final reload, and
+the stale completion stops without touching the successor's execution. A
+relaunch that reuses the live execution keeps the execution id and can leave
+the session `RUNNING`, so its new turn is the signal that the session moved on.
+The remaining window is the final reload-to-stop gap: a relaunch that lands
+inside it is not observed by this handler.
 
 ### Inheritance resolution
 
@@ -116,7 +124,9 @@ records a verdict. `sync.Map.CompareAndDelete` decides the taker.
 
 - A missing or unreadable session at failure time applies the failure at once.
 - The re-check (default two minutes) applies only a recorded failure verdict; a
-  still-live session keeps the run claimed for its current execution.
+  still-live session keeps the run claimed for its current execution. A re-check
+  read error is not evidence of a successor, so it applies the failure instead
+  of discarding it.
 - A parked failure does not survive a restart; the run stays claimed until
   stale-claim recovery requeues it.
 
@@ -131,6 +141,8 @@ No new trust boundary. Events and rows are internal.
 ## Observability
 
 - Park settlement logs `settling Office run after its launched session parked`.
+- A park older than the claimed run logs
+  `ignoring park event for a run claimed after it was recorded`.
 - A skipped late teardown logs
   `office turn complete — session relaunched, skipping stale teardown`.
 - The guard appends `agent_error.deferred` and `agent_error.superseded` run

@@ -13,7 +13,6 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/office/models"
-	runmodels "github.com/kandev/kandev/internal/runs/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
@@ -65,7 +64,7 @@ func (s *Service) HandleRunFailure(
 // recordInheritancePending makes a launch that waits for its parent's
 // workspace visible on its first deferral without escalating it: a warn run
 // event and a run-scoped activity entry both carry the refusal reason.
-func (s *Service) recordInheritancePending(ctx context.Context, run *runmodels.Run, runErr error) {
+func (s *Service) recordInheritancePending(ctx context.Context, run *runsmodels.Run, runErr error) {
 	reason := runErr.Error()
 	s.AppendRunEvent(ctx, run.ID, "workspace.inheritance_pending", "warn", map[string]interface{}{
 		runEventFieldErrorMessage: reason,

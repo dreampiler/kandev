@@ -362,3 +362,61 @@ func TestHandleOfficeTurnComplete_SkipsTeardownAfterRelaunch(t *testing.T) {
 		})
 	}
 }
+
+// relaunchAfterIdleRepo simulates a successor relaunch landing after the stale
+// completion flipped the session to IDLE but before it stops the execution. The
+// successor reuses the session, so only the execution identity and the running
+// state reveal it.
+type relaunchAfterIdleRepo struct {
+	sessionExecutorStore
+	relaunched bool
+}
+
+func (r *relaunchAfterIdleRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	session, err := r.sessionExecutorStore.GetTaskSession(ctx, id)
+	if err != nil || session == nil || session.State != models.TaskSessionStateIdle || r.relaunched {
+		return session, err
+	}
+	r.relaunched = true
+	if _, _, flipErr := r.UpdateTaskSessionStateIfCurrent(
+		ctx, id, models.TaskSessionStateIdle, models.TaskSessionStateRunning, "",
+	); flipErr != nil {
+		return session, flipErr
+	}
+	if upsertErr := r.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: id, SessionID: id, TaskID: session.TaskID,
+		AgentExecutionID: "exec-successor", Status: "ready",
+	}); upsertErr != nil {
+		return session, upsertErr
+	}
+	return r.sessionExecutorStore.GetTaskSession(ctx, id)
+}
+
+// The final ownership reload runs after the IDLE flip and before StopAgent. A
+// successor that relaunched in that window must keep its execution.
+func TestHandleOfficeTurnComplete_FinalOwnershipReloadSkipsStopAfterRelaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeSession(t, repo, "t-race", "s-race", "exec-race")
+	mgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
+	svc.repo = &relaunchAfterIdleRepo{sessionExecutorStore: repo}
+
+	session, err := repo.GetTaskSession(ctx, "s-race")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if !svc.handleOfficeTurnComplete(ctx, "t-race", "s-race", session, "", "") {
+		t.Fatal("an Office completion must stay claimed even when its teardown is skipped")
+	}
+	if len(mgr.stopAgentArgs) != 0 {
+		t.Fatalf("stale teardown stopped the relaunched execution: %+v", mgr.stopAgentArgs)
+	}
+	got, err := repo.GetTaskSession(ctx, "s-race")
+	if err != nil {
+		t.Fatalf("re-read session: %v", err)
+	}
+	if got.State != models.TaskSessionStateRunning {
+		t.Fatalf("state = %q, want RUNNING for the relaunched successor", got.State)
+	}
+}

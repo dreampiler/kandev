@@ -3686,8 +3686,30 @@ func (s *Service) handleOfficeTurnComplete(
 		zap.String("agent_profile_id", session.AgentProfileID))
 
 	// State flip first so the workflow handler doesn't ping-pong on the
-	// AgentStopped → handleAgentCompleted path.
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, session)
+	// AgentStopped → handleAgentCompleted path. The flip is a compare-and-set
+	// against the completion snapshot's state: a successor that moved the
+	// session out of that state wins, and this stale completion stops here.
+	// An already-IDLE session is this turn's own earlier teardown, so the
+	// execution stop below still runs.
+	if _, changed := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, nil, session,
+	); !changed {
+		current, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || current == nil || current.State != models.TaskSessionStateIdle {
+			s.logger.Info("office turn complete — session moved on, skipping stale teardown",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return true
+		}
+	}
+
+	// Re-check ownership immediately before the irreversible stop. The window
+	// between the reload above and this point is where a successor relaunch
+	// that reuses the live execution lands; its new turn or execution must
+	// keep the process alive.
+	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
+		return true
+	}
 
 	if s.agentManager != nil && session.AgentExecutionID != "" {
 		// Tears down the agent subprocess + executor backend + agentctl
