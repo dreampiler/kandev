@@ -165,6 +165,15 @@ func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID stri
 	s.takePendingAgentFailure(ctx, sessionID, pending, verdict)
 }
 
+// hasPendingAgentFailure reports whether a failure is parked for the session.
+func (s *Service) hasPendingAgentFailure(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	_, ok := s.agentErrorVerdict.pending.Load(sessionID)
+	return ok
+}
+
 // dropPendingAgentFailure discards a parked failure once the session's run
 // completed through a successor. The pending entry is keyed by session, but a
 // completed event names one run: only that run may consume the entry. A

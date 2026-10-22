@@ -469,6 +469,18 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	if data.TaskID == "" {
 		return s.handleTasklessAgentCompleted(ctx, data)
 	}
+	if data.RunID == "" && s.hasPendingAgentFailure(data.SessionID) {
+		// A completion without an event run identity would resolve through
+		// the task-and-agent fallback, which cannot prove it belongs to the
+		// run that currently owns the reused session. While a failure is
+		// parked, completing the run that fallback happens to resolve would
+		// finish a successor before its own verdict. Leave it to that
+		// verdict (the state handler or the bounded re-check).
+		s.logger.Info("ignoring legacy completion while a session verdict is pending",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return nil
+	}
 	run, err := s.resolveLifecycleRun(ctx, *data)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
