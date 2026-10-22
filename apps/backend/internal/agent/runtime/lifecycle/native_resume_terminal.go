@@ -16,6 +16,10 @@ func nativeResumeSQLRows(ctx context.Context, execution *AgentExecution, status 
 	if err != nil {
 		return nil, err
 	}
+	rows, err = contextContinuedNativeResumeHistory(ctx, execution, status, repository, peer, rows)
+	if err != nil {
+		return nil, err
+	}
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		seen[row.ID] = true

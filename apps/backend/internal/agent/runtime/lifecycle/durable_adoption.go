@@ -282,7 +282,7 @@ func (m *Manager) restoreRecoveredSubmission(
 	if err != nil {
 		return err
 	}
-	activeBackend, err = acknowledgedNativeResumeHistory(ctx, execution, status, peerReader, activeBackend)
+	activeBackend, err = acknowledgedNativeResumeHistory(ctx, execution, status, peerReader, activeBackend, delivery)
 	if err != nil {
 		return err
 	}

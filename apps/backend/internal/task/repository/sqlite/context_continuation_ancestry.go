@@ -14,6 +14,10 @@ func (r *Repository) hasCompletedContextAncestryTx(ctx context.Context, tx *sql.
 	if target <= recovery.HarnessGeneration || !contextContinuationNoticeMatches(recovery, recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration) {
 		return false, nil
 	}
+	return r.hasConsumedContextAncestryTx(ctx, tx, recovery.SessionID, recovery.IncarnationID, recovery.SubmissionID, recovery.HarnessGeneration, target)
+}
+
+func (r *Repository) hasConsumedContextAncestryTx(ctx context.Context, tx *sql.Tx, sessionID, incarnationID, submissionID string, source, target int64) (bool, error) {
 	var sourceOwned bool
 	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT EXISTS (
  SELECT 1 FROM task_sessions ts JOIN harness_session_generations source ON source.session_id = ts.id AND source.incarnation_id = ts.queue_incarnation_id
@@ -21,7 +25,7 @@ func (r *Repository) hasCompletedContextAncestryTx(ctx context.Context, tx *sql.
  WHERE ts.id = ? AND source.incarnation_id = ? AND source.generation = ? AND source.native_session_id <> ''
  AND s.id = ? AND s.state IN ('dispatching', 'interrupted_unknown')
  AND ? = (SELECT MAX(generation) FROM harness_session_generations WHERE session_id = ts.id AND incarnation_id = source.incarnation_id)
- )`), recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, recovery.SubmissionID, target).Scan(&sourceOwned)
+ )`), sessionID, incarnationID, source, submissionID, target).Scan(&sourceOwned)
 	if err != nil || !sourceOwned {
 		return false, err
 	}
@@ -34,8 +38,8 @@ func (r *Repository) hasCompletedContextAncestryTx(ctx context.Context, tx *sql.
  AND s.session_id = g.session_id AND s.target_generation = g.generation AND s.status = 'consumed')
  THEN 0 ELSE 1 END), 0)
  FROM harness_session_generations g WHERE g.session_id = ? AND g.incarnation_id = ? AND g.generation > ? AND g.generation <= ?`),
-		recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration, target).Scan(&count, &invalid)
-	return count == target-recovery.HarnessGeneration && invalid == 0, err
+		sessionID, incarnationID, source, target).Scan(&count, &invalid)
+	return count == target-source && invalid == 0, err
 }
 
 func (r *Repository) completeContextContinuationAttempt(ctx context.Context, id string, completedAt time.Time) error {
