@@ -2225,11 +2225,11 @@ func (e *Executor) prepareResumeRepositorySettings(
 	if err != nil {
 		return "", nil, nil, err
 	}
-	req.McpProviders = deriveMCPProviders(allRepos)
-	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
+	repositoryID, allRepos, err := e.applyResumeRepositoryContext(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
 		return "", nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	applyResumeRepositoryFlags(req, allRepos)
 	pinDirtyCloneRelocationToSelectedWorktrees(ctx, req, session, existingEnv)
 	if err := e.admitResumeWorkspaceInventory(ctx, task, session, req, existingEnv, allRepos, options); err != nil {
