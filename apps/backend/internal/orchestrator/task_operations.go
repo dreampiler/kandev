@@ -10345,14 +10345,8 @@ func (s *Service) drainQueuedMessageForPromptableSessionLockedForIdentity(ctx co
 	if s.resumeAttemptStore().holdsInitialPromptForSession(identity.SessionID) {
 		return false, nil
 	}
-	queuedMsg, ok, autoRun, err := s.messageQueue.ReserveQueuedWithAutoRunForSession(ctx, identity)
-	if err != nil {
-		return false, err
-	}
-	if !autoRun {
-		return false, nil
-	}
-	return s.dispatchTakenQueuedMessageForSession(ctx, identity, queuedMsg, ok), nil
+	dispatched, _, err := s.reserveAndDispatchQueueHead(ctx, identity)
+	return dispatched, err
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
@@ -11640,6 +11634,7 @@ func (s *Service) cancelAgentWhileUnlocked(
 }
 
 func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string, prepared cancelAgentPreparation) error {
+	s.markChildTurnCancelled(ctx, sessionID, prepared)
 	continuation, _ := ctx.Value(continuationCancelContextKey{}).(*transientRetryEntry)
 	requireWaiting := prepared.completionEligible || continuation != nil
 	session := prepared.session

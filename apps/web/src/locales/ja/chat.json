@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_other": "自動復旧の期限が {{count}} 回の試行後に終了しました。新しいメッセージを送信できます。",
   "retainedTurnRecoveryRestartBody": "Kandev の再起動後、自動復旧が停止しました。新しいメッセージを送信できます。",
   "capacityRetryWindowEnding": "自動復旧は {{countdown}} 後に終了します。",
-  "retainedTurnRecoveryWindowExpiredBody_one": "自動復旧の期限が {{count}} 回の試行後に終了しました。新しいメッセージを送信できます。"
+  "retainedTurnRecoveryWindowExpiredBody_one": "自動復旧の期限が {{count}} 回の試行後に終了しました。新しいメッセージを送信できます。",
+  "childStallAlertCause": "原因: {{cause}}",
+  "childStallAlertStep": "ステップ: {{step}}",
+  "childStallAlertsLabel": "子タスク停止アラート",
+  "childStallAlertTitle": "子タスクの確認が必要",
+  "childStallAlertTurn": "ターン: {{turn}}",
+  "childStallCauseExecutionError": "実行エラー",
+  "childStallCauseInputRequired": "入力待ち",
+  "childStallCauseMissingCompletionSignal": "完了シグナルなし",
+  "childStallCauseQuota": "使用量の上限"
 }

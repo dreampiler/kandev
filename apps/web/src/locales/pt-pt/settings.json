@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "Memória de agente em utilização",
   "workspaceRuntimeFootprintUnavailable": "Não foi possível ler a medição atual.",
   "workspaceRuntimeFootprintUnavailableMetric": "Não reportado nesta plataforma",
-  "workspaceRuntimeFootprintUnmeasured": "Sem medição atual. O uso de memória é desconhecido, não zero."
+  "workspaceRuntimeFootprintUnmeasured": "Sem medição atual. O uso de memória é desconhecido, não zero.",
+  "notificationEventChildStallUndeliverable": "Subtarefa parada, tarefa principal indisponível",
+  "notificationEventChildStallUndeliverableDescription": "Notificar quando uma subtarefa parar e a tarefa principal não puder receber o alerta."
 }

@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -78,6 +79,7 @@ type Client struct {
 	// session/load responses and by asynchronous session_models events. Lifecycle
 	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
+	updateStage           atomic.Pointer[updateStreamStage]
 
 	// durableDelivery records the agentctl transport capability returned during
 	// initialize. It is separate from ACP capabilities because it describes the
@@ -394,6 +396,7 @@ func (c *Client) retireUpdatesStreamDial(attempt *updatesStreamDial) {
 func (c *Client) completeUpdatesStreamDial(
 	attempt *updatesStreamDial,
 	conn *websocket.Conn,
+	stages ...*updateStreamStage,
 ) (context.CancelFunc, error) {
 	stopStream := context.AfterFunc(attempt.streamCtx, func() { _ = conn.Close() })
 	c.mu.Lock()
@@ -430,6 +433,9 @@ func (c *Client) completeUpdatesStreamDial(
 	attempt.retired = true
 	c.updatesDial = nil
 	c.agentStreamConn = conn
+	if len(stages) > 0 {
+		c.updateStage.Store(stages[0])
+	}
 	streamCancel := attempt.streamCancel
 	dialCancel := attempt.cancel
 	c.mu.Unlock()

@@ -15,6 +15,9 @@ type ControlEvent struct {
 	State       string    `json:"state,omitempty" db:"state"`
 	OccurredAt  time.Time `json:"occurred_at" db:"occurred_at"`
 	SourceTotal int       `json:"-" db:"source_total"`
+	Provider    string    `json:"provider,omitempty" db:"provider"`
+	Repository  string    `json:"repository,omitempty" db:"repository"`
+	Number      int64     `json:"number,omitempty" db:"number"`
 }
 
 type ControlCoverage struct {
@@ -45,7 +48,6 @@ func controlHistorySources() []controlHistorySource {
 		{"session_finish", `'session-end:'||s.id AS id,'session_finished' AS kind,t.id AS task_id,s.id AS session_id,t.title,s.completed_at AS occurred_at`, "task_sessions s JOIN tasks t ON t.id=s.task_id", controlTaskScope, "s.completed_at"},
 		{"office_activity", `'activity:'||a.id AS id,a.action AS kind,CASE WHEN a.target_type='task' THEN a.target_id ELSE '' END AS task_id,COALESCE(a.session_id,'') AS session_id,'' AS title,a.created_at AS occurred_at`, "office_activity_log a", "a.workspace_id=?", "a.created_at"},
 		{"automation_run", `'automation:'||r.id AS id,'automation_run_created' AS kind,COALESCE(t.id,'') AS task_id,COALESCE(s.id,'') AS session_id,COALESCE(r.display_title,'') AS title,r.status AS state,r.created_at AS occurred_at`, "automation_runs r JOIN automations a ON a.id=r.automation_id LEFT JOIN tasks t ON t.id=r.task_id AND t.workspace_id=a.workspace_id LEFT JOIN task_sessions s ON s.id=r.session_id AND s.task_id=t.id", "a.workspace_id=?", "r.created_at"},
-		{"github_merge", `'github:'||g.id AS id,'github_merged' AS kind,t.id AS task_id,'' AS session_id,g.pr_title AS title,g.merged_at AS occurred_at`, "github_task_prs g JOIN tasks t ON t.id=g.task_id AND t.workspace_id=g.workspace_id", controlTaskScope, "g.merged_at"},
 	}
 }
 
@@ -70,7 +72,15 @@ func (r *Repository) ReadControlHistory(ctx context.Context, wsID string, now ti
 		out.Sources[source.name] = ControlCoverage{State: "known", Total: &total, Returned: len(rows), Truncated: total > len(rows)}
 		out.Events = append(out.Events, rows...)
 	}
-	for _, family := range []string{"server_start", "plugin_merge", "circuit_history"} {
+	if err := r.appendControlMergeHistory(ctx, out); err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		for _, family := range []string{"github_merge", "plugin_merge"} {
+			out.Sources[family] = ControlCoverage{State: "unavailable", Reason: "source_read_failed"}
+		}
+	}
+	for _, family := range []string{"server_start", "circuit_history"} {
 		out.Sources[family] = ControlCoverage{State: "unavailable", Reason: "not_projected"}
 	}
 	sort.Slice(out.Events, func(i, j int) bool {

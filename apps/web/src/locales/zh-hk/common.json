@@ -563,5 +563,7 @@
   "conversationSearch_query_too_short": "請使用至少 3 個字符搜尋對話。",
   "conversationSearch_query_too_long": "搜尋對話時請最多使用 200 個字符。",
   "conversationSearch_query_too_broad": "請使用至少 3 個連續的字母、漢字或數字。",
-  "conversationSearch_title": "命令面板"
+  "conversationSearch_title": "命令面板",
+  "notificationChildStallBody": "子任務已停滯，但父任務無法接收提醒。",
+  "notificationChildStallTitle": "子任務需要處理"
 }

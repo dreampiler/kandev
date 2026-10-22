@@ -272,7 +272,9 @@ type Manager struct {
 	userInputRequestHandler adapter.UserInputRequestHandler
 
 	// Agent event notifications (protocol-agnostic)
-	updatesCh chan adapter.AgentEvent
+	updatesCh        chan adapter.AgentEvent
+	adapterStageSeen atomic.Uint64
+	adapterStageAt   atomic.Int64
 
 	// Pending permission requests waiting for user response
 	pendingPermissions       map[string]*PendingPermission
@@ -2512,6 +2514,8 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			m.adapterStageAt.Store(time.Now().UnixNano())
+			m.adapterStageSeen.Add(1)
 			update.DeliverySubmissionID = m.deliverySubmissionIDForEvent(update)
 			persisted, err := m.persistDeliveryEvent(update)
 			if err != nil {

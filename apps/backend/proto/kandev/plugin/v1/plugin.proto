@@ -64,6 +64,9 @@ service Plugin {
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 service Host {
+  // Report observations to Host-owned records; these do not mutate a remote forge.
+  rpc ReportTaskChangeRequest(ReportTaskChangeRequestRequest) returns (ReportTaskChangeRequestResponse);
+  rpc RemoveTaskChangeRequest(RemoveTaskChangeRequestRequest) returns (RemoveTaskChangeRequestResponse);
   rpc GetCapabilityContext(GetCapabilityContextRequest) returns (GetCapabilityContextResponse);
   rpc UpdateTaskExact(UpdateTaskExactRequest) returns (UpdateTaskExactResponse);
   rpc CreateTaskExact(CreateTaskExactRequest) returns (CreateTaskExactResponse);
@@ -2652,5 +2655,49 @@ message ListPendingTaskTransitionsExactRequest { string request_id = 1; string w
 message ListPendingTaskTransitionsExactResponse { repeated PendingTaskTransition items = 1; ExactReadPageInfo page_info = 2; }
 message ListChangeRequestEvidenceExactRequest { string request_id = 1; string workspace_id = 2; repeated string task_ids = 3; ExactReadPage page = 4; }
 message ListChangeRequestEvidenceExactResponse { repeated ChangeRequestEvidence items = 1; ExactReadPageInfo page_info = 2; }
+
+message ReportTaskChangeRequestRequest {
+  string workspace_id = 1;
+  string task_id = 2;
+  string provider_id = 3;
+  string provider_host = 4;
+  string repository_id = 5;
+  int64 number = 6;
+  string url = 7;
+  string title = 8;
+  string state = 9;
+  string head_branch = 10;
+  string base_branch = 11;
+  string created_at = 12;
+  string merged_at = 13;
+  string closed_at = 14;
+}
+message TaskChangeRequest {
+  string id = 1;
+  string workspace_id = 2;
+  string task_id = 3;
+  string provider_id = 4;
+  string provider_host = 5;
+  string repository_id = 6;
+  int64 number = 7;
+  string url = 8;
+  string title = 9;
+  string state = 10;
+  string head_branch = 11;
+  string base_branch = 12;
+  string created_at = 13;
+  string merged_at = 14;
+  string closed_at = 15;
+  string resource_version = 16;
+}
+message ReportTaskChangeRequestResponse { TaskChangeRequest change_request = 1; }
+message RemoveTaskChangeRequestRequest {
+  string workspace_id = 1;
+  string provider_id = 2;
+  string provider_host = 3;
+  string repository_id = 4;
+  int64 number = 5;
+}
+message RemoveTaskChangeRequestResponse {}
 message ListTaskUsageExactRequest { string request_id = 1; string workspace_id = 2; repeated string task_ids = 3; ExactReadPage page = 4; }
 message ListTaskUsageExactResponse { repeated TaskUsageObservation items = 1; ExactReadPageInfo page_info = 2; }

@@ -69,6 +69,28 @@ Completion or a successor generation invalidates the old acceptance snapshot.
 
 ## Progress clock
 
+### Delivery-stage observation
+
+The existing first-stall diagnostic also observes adapter enqueue, successful
+agent-event transport writes, backend reads and completed handlers. Agentctl
+sends bounded counters and ages as `agent.stream.stage` control metadata every
+ten seconds on the current stream. These frames do not enter turn dispatch,
+advance a journal cursor, prove acceptance, or reset inactivity. A stale or
+unavailable heartbeat leaves upstream ages unknown.
+
+`agentctl/update_stage.go` retains the installed dial generation's snapshot;
+an older reader cannot replace its successor's observation. The durable writer
+counts replayed and live agent events only after a successful write, preserving
+commit-before-publish and ordered replay. MCP responses and heartbeat writes
+do not count as agent events. The legacy writer observes its live-event loop.
+
+`lifecycle/update_stream_stage.go` uses a nonblocking client-owner read at the
+first stall, before synchronous event publication. It records only execution
+identity, generation, connectivity, counters and ages. This read neither waits
+behind a stopping client nor changes recovery or prompt settlement. Current
+authenticated durable reconciliation remains the reattachment owner; older
+generic reattachment and accepted-queue replay helpers are not restored.
+
 Retain the one-minute watchdog and five-minute threshold. Dispatch arms the
 clock. Genuine content, reasoning, tool calls/updates, plans, permission requests,
 terminal completion, and delivered same-turn user input retain their existing

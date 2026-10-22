@@ -61,6 +61,7 @@ describe("task3 native control contracts", () => {
       tasks: {},
       sessions: {},
       waiting_input_tasks: 0,
+      wip_waiting_tasks: 0,
       queued_messages: 0,
       transitions_24h: 0,
       completed_tasks_24h: 0,

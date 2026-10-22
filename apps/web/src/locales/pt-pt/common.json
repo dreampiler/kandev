@@ -563,5 +563,7 @@
   "conversationSearch_query_too_short": "Use pelo menos 3 caracteres para pesquisar conversas.",
   "conversationSearch_query_too_long": "Use no máximo 200 caracteres para pesquisar conversas.",
   "conversationSearch_query_too_broad": "Use pelo menos 3 letras ou algarismos consecutivos.",
-  "conversationSearch_title": "Paleta de comandos"
+  "conversationSearch_title": "Paleta de comandos",
+  "notificationChildStallBody": "Uma subtarefa parou e a tarefa principal não pode receber o alerta.",
+  "notificationChildStallTitle": "Subtarefa precisa de atenção"
 }

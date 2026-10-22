@@ -358,3 +358,18 @@ The [Office task guide](office-tasks.md) covers its projects, assignments, deepe
 - **Changed base did not retarget the PR:** the base-update tool changes Kandev's comparison context, not Git history or provider PR metadata.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Sessions and review](sessions-and-review.md), [Automation and MCP](automation-and-mcp.md), [Agents and profiles](agents-and-profiles.md), and [Executors](executors.md).
+
+
+## Child reports and handoff completion
+
+A settled child turn that lacks its step signal can receive a bounded reminder
+before its parent receives an attributed child-stall alert. The alert follows
+the current workflow entry and primary session. Its retry action rechecks the
+recorded delivery state. Ordinary bursts of accepted peer reports can be
+delivered together in order, with each sender identified.
+
+An Office-originated handoff can report terminal completion back to its original
+Office task through the configured collaboration report grant. The report is
+retained as one task comment and uses the existing run queue and pause policy.
+The originating run may already be finished; repeated delivery reuses the report
+and queued wake rather than creating duplicate comments or runs.

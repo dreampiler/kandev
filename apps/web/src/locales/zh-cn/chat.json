@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_other": "自动恢复已在尝试 {{count}} 次后结束。你可以发送另一条消息。",
   "retainedTurnRecoveryRestartBody": "Kandev 重启后，自动恢复已停止。你可以发送另一条消息。",
   "capacityRetryWindowEnding": "自动恢复将在 {{countdown}} 后结束。",
-  "retainedTurnRecoveryWindowExpiredBody_one": "自动恢复已在尝试 {{count}} 次后结束。你可以发送另一条消息。"
+  "retainedTurnRecoveryWindowExpiredBody_one": "自动恢复已在尝试 {{count}} 次后结束。你可以发送另一条消息。",
+  "childStallAlertCause": "原因：{{cause}}",
+  "childStallAlertStep": "步骤：{{step}}",
+  "childStallAlertsLabel": "子任务停滞提醒",
+  "childStallAlertTitle": "子任务需要处理",
+  "childStallAlertTurn": "回合：{{turn}}",
+  "childStallCauseExecutionError": "执行错误",
+  "childStallCauseInputRequired": "需要输入",
+  "childStallCauseMissingCompletionSignal": "缺少完成信号",
+  "childStallCauseQuota": "用量上限"
 }

@@ -33,7 +33,8 @@ const (
 	// Detection only: the event never accompanies a state transition, a
 	// synthesized decision, or a queued run. Payload:
 	// {task_id, workspace_id, session_ids, stalled_for, last_event_at}.
-	TaskStalled = "task.stalled"
+	TaskStalled                 = "task.stalled"
+	TaskChildStallUndeliverable = "task.child_stall_undeliverable"
 )
 
 // Event types for plugin-backed canvas lifecycle changes. Payloads contain

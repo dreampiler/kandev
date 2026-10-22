@@ -325,6 +325,9 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -334,6 +337,8 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 	state.launchQueueObserved = summary.LaunchQueue != nil
 	state.completionGate = cloneCompletionGate(summary.CompletionGate)
 	state.completionGateObserved = summary.CompletionGate != nil
+	state.quotaWait = cloneQuotaWait(summary.QuotaWait)
+	state.quotaWaitObserved = summary.QuotaWait != nil
 	state.taskPending = summary.PendingAction
 	state.lastActivityAt = maxTimePtr(state.lastActivityAt, summary.LastActivityAt)
 	if summary.PrimarySession != nil && summary.PrimarySession.ID != "" {
@@ -432,6 +437,22 @@ func (p *Projector) rebaseProjectionStateFromCurrent(
 	if err := p.restoreCompletionGate(ctx, taskID, state); err != nil {
 		return err
 	}
+	if err := p.restoreQuotaWait(ctx, taskID, state); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *Projector) restoreQuotaWait(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadQuotaWait == nil {
+		return nil
+	}
+	wait, err := p.loadQuotaWait(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load quota wait for task status summary %q: %w", taskID, err)
+	}
+	state.quotaWait = cloneQuotaWait(wait)
+	state.quotaWaitObserved = true
 	return nil
 }
 
@@ -467,6 +488,20 @@ func isLaunchQueueRefreshEvent(eventType string) bool {
 func isCompletionGateRefreshEvent(eventType string) bool {
 	switch eventType {
 	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.GitHubTaskPRUpdated:
+		return true
+	default:
+		return false
+	}
+}
+
+// isQuotaWaitRefreshEvent names the sources that can install or clear a limit
+// wait. A routing decision is recorded while a session is dispatched or torn
+// down, so the session lifecycle events bracket it; the refresh reads the
+// durable route row rather than trusting the event to carry the new deadline.
+func isQuotaWaitRefreshEvent(eventType string) bool {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged,
+		events.TaskSessionStateChanged, events.SessionRemoved:
 		return true
 	default:
 		return false

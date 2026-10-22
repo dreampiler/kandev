@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_one": "Àũţōḿàţĩć ŕēćōvēŕŷ ŵĩńďōŵ ēńďēď àƒţēŕ {{count}} àţţēḿƥţ. Ŷōũ ćàń śēńď àńōţĥēŕ ḿēśśàĝē.",
   "retainedTurnRecoveryWindowExpiredBody_other": "Àũţōḿàţĩć ŕēćōvēŕŷ ŵĩńďōŵ ēńďēď àƒţēŕ {{count}} àţţēḿƥţś. Ŷōũ ćàń śēńď àńōţĥēŕ ḿēśśàĝē.",
   "retainedTurnRecoveryRestartBody": "Àũţōḿàţĩć ŕēćōvēŕŷ śţōƥƥēď àƒţēŕ Ķàńďēv ŕēśţàŕţēď. Ŷōũ ćàń śēńď àńōţĥēŕ ḿēśśàĝē.",
-  "capacityRetryWindowEnding": "Ŕēćōvēŕŷ ŵĩńďōŵ ēńďś ĩń {{countdown}}."
+  "capacityRetryWindowEnding": "Ŕēćōvēŕŷ ŵĩńďōŵ ēńďś ĩń {{countdown}}.",
+  "childStallAlertCause": "Ćàũśē: {{cause}}",
+  "childStallAlertStep": "Śţēƥ: {{step}}",
+  "childStallAlertsLabel": "Ćĥĩĺď śţàĺĺ àĺēŕţś",
+  "childStallAlertTitle": "Ćĥĩĺď ńēēďś àţţēńţĩōń",
+  "childStallAlertTurn": "Ţũŕń: {{turn}}",
+  "childStallCauseExecutionError": "Ēxēćũţĩōń ēŕŕōŕ",
+  "childStallCauseInputRequired": "Ĩńƥũţ ŕēqũĩŕēď",
+  "childStallCauseMissingCompletionSignal": "Ńō ćōḿƥĺēţĩōń śĩĝńàĺ",
+  "childStallCauseQuota": "Ũśàĝē ĺĩḿĩţ"
 }

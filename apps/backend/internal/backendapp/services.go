@@ -672,6 +672,7 @@ func initPluginsWiring(
 		pluginsSvc.SetKandevVersion(version)
 		taskSvc.SetExecutorProviderCatalog(pluginsSvc)
 		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
+		pluginsSvc.SetTaskChangeRequestAuthorizer(pluginChangeRequestAuthorizer(taskSvc))
 		pluginsSvc.SetWorkspaceAdminWriter(pluginsWorkspaceAdminAdapter{tasks: taskSvc, workflows: workflowSvc, agents: agentSettingsController})
 		// Wire the managed agent conversation service for the agent_conversation
 		// Host capability. Wired here (not at boot time in main.go) because the

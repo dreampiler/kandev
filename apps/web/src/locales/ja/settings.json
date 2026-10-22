@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "使用中のエージェントメモリ",
   "workspaceRuntimeFootprintUnavailable": "現在の測定値を読み取れませんでした。",
   "workspaceRuntimeFootprintUnavailableMetric": "このプラットフォームでは報告されません",
-  "workspaceRuntimeFootprintUnmeasured": "現在の測定値がありません。メモリ使用量はゼロではなく不明です。"
+  "workspaceRuntimeFootprintUnmeasured": "現在の測定値がありません。メモリ使用量はゼロではなく不明です。",
+  "notificationEventChildStallUndeliverable": "子タスクの停止（親が受信不可）",
+  "notificationEventChildStallUndeliverableDescription": "子タスクが停止し、親タスクが通知を受け取れないときに通知。"
 }

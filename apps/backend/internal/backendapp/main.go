@@ -1238,6 +1238,7 @@ func startGatewayAndServe(
 	hostUtilityMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
 	lifecycleMgr.SetPreparedExecutionUsageReader(hostUtilityMgr.PreviewPreparedExecutionUsage)
 	sharedInferenceOwner := wireSharedInferenceCapacity(orchestratorSvc, repos.SystemSettings, log.Zap(), lifecycleMgr, hostUtilityMgr)
+	sharedInferenceOwner.settler = repos.Task
 	nativeUsageOwner := wireNativeRouteCapacity(services.DynamicProfileResolver, orchestratorSvc, sharedInferenceOwner, repos.Task, repos.Utility)
 	if cfg.Features.ProviderUsageLimits && nativeUsageOwner != nil {
 		nativeUsageOwner.sessionUsage = lifecycleMgr.PreviewInferenceProfileUsage
@@ -1504,6 +1505,7 @@ func startGatewayAndServe(
 		return false
 	}
 	log.Info("Orchestrator initialized")
+	startChildStallProducer(ctx, orchestratorSvc, repos.Task, log, addCleanup)
 
 	// ============================================
 	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
@@ -1556,6 +1558,9 @@ func startGatewayAndServe(
 	}
 	if cfg.Features.ProviderUsageLimits {
 		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		allowances.inferencePopulation = sharedInferenceOwner.inferenceProviderPopulation
+		sharedInferenceOwner.provider = allowances
+		sharedInferenceOwner.providerPopulation = lifecycleMgr.InferenceProviderPopulation
 		agentSettingsController.SetProfileUsageProvider(allowances)
 		lifecycleMgr.SetProviderTurnAdmission(allowances)
 		if officeUsageEnabled {
@@ -1825,6 +1830,7 @@ func constructOfficeServices(
 
 	services.Office.SetPricingLookup(pricingLookup)
 	services.Office.SetAgentErrorSessionVerdict(cfg.Features.OfficeAgentErrorSessionVerdict)
+	services.Office.SetHandoffCompletionPolicy(newOfficeHandoffCompletionPolicy(cfg.Features.WorkspaceCollaboration, repos.Task, repos.Office))
 	orchestratorSvc.SetModelInfoLookup(pricingLookup)
 
 	// ADR 0005 Wave E: plug the runtime-tier skill deployer into the

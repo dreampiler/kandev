@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_one": "Automatic recovery window ended after {{count}} attempt. You can send another message.",
   "retainedTurnRecoveryWindowExpiredBody_other": "Automatic recovery window ended after {{count}} attempts. You can send another message.",
   "retainedTurnRecoveryRestartBody": "Automatic recovery stopped after Kandev restarted. You can send another message.",
-  "capacityRetryWindowEnding": "Recovery window ends in {{countdown}}."
+  "capacityRetryWindowEnding": "Recovery window ends in {{countdown}}.",
+  "childStallAlertCause": "Cause: {{cause}}",
+  "childStallAlertStep": "Step: {{step}}",
+  "childStallAlertsLabel": "Child stall alerts",
+  "childStallAlertTitle": "Child needs attention",
+  "childStallAlertTurn": "Turn: {{turn}}",
+  "childStallCauseExecutionError": "Execution error",
+  "childStallCauseInputRequired": "Input required",
+  "childStallCauseMissingCompletionSignal": "No completion signal",
+  "childStallCauseQuota": "Usage limit"
 }

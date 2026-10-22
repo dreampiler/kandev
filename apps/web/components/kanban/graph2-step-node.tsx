@@ -9,7 +9,8 @@ import {
   IconHelpCircle,
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { getTaskStateIcon, isTaskInFlight } from "@/lib/ui/state-icons";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
@@ -151,6 +152,34 @@ function MoveButton({
   );
 }
 
+function currentTaskStatus(
+  task: Task,
+  pendingInput: Pick<ReturnType<typeof useTaskPendingInput>, "clarification" | "permission">,
+) {
+  const waitReason = resolveWaitReason({
+    primarySessionState: task.primarySessionState,
+    wipAdmitted: task.wipAdmitted,
+    queuedForStepId: task.queuedForStepId,
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
+  });
+  return {
+    running: isRunningState(task.state) && (!waitReason || isTaskInFlight(task.foregroundActivity)),
+    icon: getTaskStateIcon(task.state, "h-3 w-3", {
+      hasPendingClarification: pendingInput.clarification,
+      foregroundActivity: task.foregroundActivity,
+      hasPendingPermission: pendingInput.permission,
+      interrupted: task.interrupted,
+      autoStartFailed: task.autoStartFailed,
+      workspaceOrphaned: task.workspaceOrphaned,
+      parkedOnBackgroundWork: task.parkedOnBackgroundWork,
+      waitReason,
+      launchQueue: task.statusSummary?.launch_queue,
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 export function Graph2StepNode({
   step,
   phase,
@@ -182,7 +211,7 @@ export function Graph2StepNode({
   if (phase === "future") return <FutureNode step={step} />;
 
   // Current phase
-  const running = isRunningState(task.state);
+  const { running, icon } = currentTaskStatus(task, pendingInput);
 
   const showMoveControls = isHovered || isFocused;
 
@@ -225,16 +254,7 @@ export function Graph2StepNode({
         )}
       >
         <div className="flex items-center gap-1.5 w-full">
-          <div className="shrink-0">
-            {getTaskStateIcon(task.state, "h-3 w-3", {
-              hasPendingClarification: pendingInput.clarification,
-              foregroundActivity: task.foregroundActivity,
-              hasPendingPermission: pendingInput.permission,
-              interrupted: task.interrupted,
-              autoStartFailed: task.autoStartFailed,
-              workspaceOrphaned: task.workspaceOrphaned,
-            })}
-          </div>
+          <div className="shrink-0">{icon}</div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
         </div>
       </button>

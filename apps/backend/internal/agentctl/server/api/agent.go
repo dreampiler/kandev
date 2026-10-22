@@ -383,23 +383,33 @@ func (s *Server) runAgentStreamWriterWithReplay(ctx context.Context, conn *webso
 }
 
 func (s *Server) runAgentStreamWriterLoop(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error) {
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	stage := &updateStreamWriteStage{}
+	agentWrite := stage.wrap(writeMessage)
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			if err := s.writeUpdateStreamStageHeartbeat(writeMessage, stage.sent, stage.lastSent); err != nil {
+				s.logger.Debug("failed to write update stream stage heartbeat", zap.Error(err))
+				return
+			}
 		case notification, ok := <-updatesCh:
 			if !ok {
 				return
 			}
 			if deliveryStreamID != "" && notification.DeliveryStreamID == deliveryStreamID && notification.DeliverySequence > 0 {
 				var stop bool
-				after, stop = s.writeDurableAgentStreamEvent(ctx, after, deliveryStreamID, notification, writeMessage)
+				after, stop = s.writeDurableAgentStreamEvent(ctx, after, deliveryStreamID, notification, agentWrite)
 				if stop {
 					return
 				}
 				continue
 			}
-			if !s.writeAgentStreamNotification(notification, writeMessage, false) {
+			if !s.writeAgentStreamNotification(notification, agentWrite, false) {
 				return
 			}
 		case mcpReq, ok := <-mcpRequestCh:
@@ -422,11 +432,17 @@ type durableAgentStreamWriter struct {
 	mcpRequestCh     <-chan *ws.Message
 	wakeups          <-chan struct{}
 	writeMessage     func([]byte) error
+	heartbeat        <-chan time.Time
+	stage            *updateStreamWriteStage
 }
 
 // run treats the journal as truth. The bounded wake remains buffered while a
 // page is written, so a racing commit cannot be lost between drain and wait.
 func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draining bool) {
+	heartbeat := time.NewTicker(10 * time.Second)
+	defer heartbeat.Stop()
+	w.heartbeat = heartbeat.C
+	w.stage = &updateStreamWriteStage{}
 	deliveryJournal, err := w.server.procMgr.DeliveryJournal()
 	if err != nil {
 		w.server.logAgentStreamReplayFailure(err, w.deliveryStreamID, after, after)
@@ -439,7 +455,7 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 			}
 			continue
 		}
-		if !w.serviceMCP() || !w.serviceUpdate() {
+		if !w.serviceHeartbeat() || !w.serviceMCP() || !w.serviceUpdate() {
 			return
 		}
 		next, caughtUp, err := w.drainPage(ctx, deliveryJournal, after)
@@ -456,6 +472,8 @@ func (w *durableAgentStreamWriter) run(ctx context.Context, after uint64, draini
 
 func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *bool) bool {
 	select {
+	case <-w.heartbeat:
+		return w.writeHeartbeat()
 	case <-ctx.Done():
 		return false
 	case _, ok := <-w.wakeups:
@@ -471,7 +489,7 @@ func (w *durableAgentStreamWriter) waitForInput(ctx context.Context, draining *b
 			*draining = true
 			return true
 		}
-		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+		return w.writeNotification(notification, false)
 	case mcpReq, ok := <-w.mcpRequestCh:
 		if !ok {
 			w.mcpRequestCh = nil
@@ -510,7 +528,7 @@ func (w *durableAgentStreamWriter) serviceUpdate() bool {
 		if notification.DeliveryStreamID == w.deliveryStreamID && notification.DeliverySequence > 0 {
 			return true
 		}
-		return w.server.writeAgentStreamNotification(notification, w.writeMessage, false)
+		return w.writeNotification(notification, false)
 	default:
 		return true
 	}
@@ -524,7 +542,7 @@ func (w *durableAgentStreamWriter) drainPage(
 	next, highWater, eventCount, err := w.server.replayAgentStreamPage(
 		ctx, deliveryJournal, w.deliveryStreamID, after,
 		func(notification adapter.AgentEvent) error {
-			if !w.server.writeAgentStreamNotification(notification, w.writeMessage, true) {
+			if !w.writeNotification(notification, true) {
 				return errAgentStreamReplayStopped
 			}
 			return nil

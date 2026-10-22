@@ -9,6 +9,7 @@ import { taskPRInfoFromSummary } from "./task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
 import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
 import type { TaskColor } from "@/lib/task-colors";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 
 export type SidebarItemContext = {
   repositorySlugById: Map<string, string | undefined>;
@@ -120,6 +121,14 @@ function sidebarStatus(
     issueInfo: issueInfoForTask(task),
     queuedCount: summary?.queued_prompt_count,
     launchQueue: summary?.launch_queue,
+    quotaWait: summary?.quota_wait,
+    waitReason: resolveWaitReason({
+      primarySessionState: sessionStatus.sessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: summary?.launch_queue,
+      quotaWait: summary?.quota_wait,
+    }),
     wipQueue: context.wipQueueByTaskId?.get(task.id),
   };
 }

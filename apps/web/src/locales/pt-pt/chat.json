@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_one": "O período de recuperação automática terminou após {{count}} tentativa. Pode enviar outra mensagem.",
   "retainedTurnRecoveryWindowExpiredBody_other": "O período de recuperação automática terminou após {{count}} tentativas. Pode enviar outra mensagem.",
   "retainedTurnRecoveryRestartBody": "A recuperação automática parou após o reinício do Kandev. Pode enviar outra mensagem.",
-  "capacityRetryWindowEnding": "A recuperação termina dentro de {{countdown}}."
+  "capacityRetryWindowEnding": "A recuperação termina dentro de {{countdown}}.",
+  "childStallAlertCause": "Causa: {{cause}}",
+  "childStallAlertStep": "Passo: {{step}}",
+  "childStallAlertsLabel": "Alertas de subtarefas paradas",
+  "childStallAlertTitle": "Subtarefa precisa de atenção",
+  "childStallAlertTurn": "Turno: {{turn}}",
+  "childStallCauseExecutionError": "Erro de execução",
+  "childStallCauseInputRequired": "Entrada necessária",
+  "childStallCauseMissingCompletionSignal": "Sem sinal de conclusão",
+  "childStallCauseQuota": "Limite de utilização"
 }

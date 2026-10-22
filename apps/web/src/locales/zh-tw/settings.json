@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "正在使用的代理程式記憶體",
   "workspaceRuntimeFootprintUnavailable": "無法讀取目前測量值。",
   "workspaceRuntimeFootprintUnavailableMetric": "此平臺不提供",
-  "workspaceRuntimeFootprintUnmeasured": "沒有目前測量值。記憶體用量未知，並非為零。"
+  "workspaceRuntimeFootprintUnmeasured": "沒有目前測量值。記憶體用量未知，並非為零。",
+  "notificationEventChildStallUndeliverable": "子任務停滯（父任務無法接收）",
+  "notificationEventChildStallUndeliverableDescription": "子任務停滯且父任務無法接收提醒時通知。"
 }

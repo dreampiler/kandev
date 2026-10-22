@@ -761,6 +761,8 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
+	Host_ReportTaskChangeRequest_FullMethodName                    = "/kandev.plugin.v1.Host/ReportTaskChangeRequest"
+	Host_RemoveTaskChangeRequest_FullMethodName                    = "/kandev.plugin.v1.Host/RemoveTaskChangeRequest"
 	Host_GetCapabilityContext_FullMethodName                       = "/kandev.plugin.v1.Host/GetCapabilityContext"
 	Host_UpdateTaskExact_FullMethodName                            = "/kandev.plugin.v1.Host/UpdateTaskExact"
 	Host_CreateTaskExact_FullMethodName                            = "/kandev.plugin.v1.Host/CreateTaskExact"
@@ -892,6 +894,9 @@ const (
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 type HostClient interface {
+	// Report observations to Host-owned records; these do not mutate a remote forge.
+	ReportTaskChangeRequest(ctx context.Context, in *ReportTaskChangeRequestRequest, opts ...grpc.CallOption) (*ReportTaskChangeRequestResponse, error)
+	RemoveTaskChangeRequest(ctx context.Context, in *RemoveTaskChangeRequestRequest, opts ...grpc.CallOption) (*RemoveTaskChangeRequestResponse, error)
 	GetCapabilityContext(ctx context.Context, in *GetCapabilityContextRequest, opts ...grpc.CallOption) (*GetCapabilityContextResponse, error)
 	UpdateTaskExact(ctx context.Context, in *UpdateTaskExactRequest, opts ...grpc.CallOption) (*UpdateTaskExactResponse, error)
 	CreateTaskExact(ctx context.Context, in *CreateTaskExactRequest, opts ...grpc.CallOption) (*CreateTaskExactResponse, error)
@@ -1076,6 +1081,26 @@ type hostClient struct {
 
 func NewHostClient(cc grpc.ClientConnInterface) HostClient {
 	return &hostClient{cc}
+}
+
+func (c *hostClient) ReportTaskChangeRequest(ctx context.Context, in *ReportTaskChangeRequestRequest, opts ...grpc.CallOption) (*ReportTaskChangeRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReportTaskChangeRequestResponse)
+	err := c.cc.Invoke(ctx, Host_ReportTaskChangeRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) RemoveTaskChangeRequest(ctx context.Context, in *RemoveTaskChangeRequestRequest, opts ...grpc.CallOption) (*RemoveTaskChangeRequestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveTaskChangeRequestResponse)
+	err := c.cc.Invoke(ctx, Host_RemoveTaskChangeRequest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *hostClient) GetCapabilityContext(ctx context.Context, in *GetCapabilityContextRequest, opts ...grpc.CallOption) (*GetCapabilityContextResponse, error) {
@@ -2143,6 +2168,9 @@ func (c *hostClient) CancelClarification(ctx context.Context, in *CancelClarific
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
 type HostServer interface {
+	// Report observations to Host-owned records; these do not mutate a remote forge.
+	ReportTaskChangeRequest(context.Context, *ReportTaskChangeRequestRequest) (*ReportTaskChangeRequestResponse, error)
+	RemoveTaskChangeRequest(context.Context, *RemoveTaskChangeRequestRequest) (*RemoveTaskChangeRequestResponse, error)
 	GetCapabilityContext(context.Context, *GetCapabilityContextRequest) (*GetCapabilityContextResponse, error)
 	UpdateTaskExact(context.Context, *UpdateTaskExactRequest) (*UpdateTaskExactResponse, error)
 	CreateTaskExact(context.Context, *CreateTaskExactRequest) (*CreateTaskExactResponse, error)
@@ -2329,6 +2357,12 @@ type HostServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHostServer struct{}
 
+func (UnimplementedHostServer) ReportTaskChangeRequest(context.Context, *ReportTaskChangeRequestRequest) (*ReportTaskChangeRequestResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReportTaskChangeRequest not implemented")
+}
+func (UnimplementedHostServer) RemoveTaskChangeRequest(context.Context, *RemoveTaskChangeRequestRequest) (*RemoveTaskChangeRequestResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RemoveTaskChangeRequest not implemented")
+}
 func (UnimplementedHostServer) GetCapabilityContext(context.Context, *GetCapabilityContextRequest) (*GetCapabilityContextResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetCapabilityContext not implemented")
 }
@@ -2657,6 +2691,42 @@ func RegisterHostServer(s grpc.ServiceRegistrar, srv HostServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&Host_ServiceDesc, srv)
+}
+
+func _Host_ReportTaskChangeRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReportTaskChangeRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ReportTaskChangeRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ReportTaskChangeRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ReportTaskChangeRequest(ctx, req.(*ReportTaskChangeRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_RemoveTaskChangeRequest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveTaskChangeRequestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).RemoveTaskChangeRequest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_RemoveTaskChangeRequest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).RemoveTaskChangeRequest(ctx, req.(*RemoveTaskChangeRequestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Host_GetCapabilityContext_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -4513,6 +4583,14 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "kandev.plugin.v1.Host",
 	HandlerType: (*HostServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ReportTaskChangeRequest",
+			Handler:    _Host_ReportTaskChangeRequest_Handler,
+		},
+		{
+			MethodName: "RemoveTaskChangeRequest",
+			Handler:    _Host_RemoveTaskChangeRequest_Handler,
+		},
 		{
 			MethodName: "GetCapabilityContext",
 			Handler:    _Host_GetCapabilityContext_Handler,

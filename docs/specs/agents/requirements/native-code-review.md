@@ -9,9 +9,8 @@ owners:
 
 ## Overview
 
-Native review brings advisory findings to the working diff before a pull request,
-including GitLab, Azure DevOps, and local-only work. Findings reuse Kandev's
-anchored Changes/Review surface, reviewed hashes, and stale detection.
+Native review adds advisory GitLab, Azure DevOps and local-only findings before
+pull requests, reusing anchored Changes/Review, reviewed hashes and stale detection.
 
 ## Requirements
 
@@ -37,7 +36,7 @@ Kandev, including local-only and non-GitHub work.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.13:** When review clear, snapshot replacement, or supersession removes or replaces the locally action-owned finding before completion, that local completion shall not recreate or overwrite it. Ordinary snapshot replacement, unrelated finding updates, and updates for previously unseen findings shall retain their existing behavior.
 - **AC-AGENTS-NATIVE-CODE-REVIEW-001.14:** Admission shall settle abandoned native runs, preserving live-worker, agent and entry ownership ([design](../system-design/native-code-review-recovery.md)).
 
-The local action publication design is [defined here](../system-design/native-code-review-action-publication.md).
+The local action publication design is [defined here](../system-design/native-code-review-action-publication.md). Local review sources are [defined here](../system-design/native-code-review-local-source.md).
 
 ## Migrated source detail
 

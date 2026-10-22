@@ -192,5 +192,14 @@
   "retainedTurnRecoveryWindowExpiredBody_other": "자동 복구 시간이 {{count}}회 시도 후 종료되었습니다. 새 메시지를 보낼 수 있습니다.",
   "retainedTurnRecoveryRestartBody": "Kandev가 다시 시작되어 자동 복구가 중지되었습니다. 새 메시지를 보낼 수 있습니다.",
   "capacityRetryWindowEnding": "자동 복구가 {{countdown}} 후 종료됩니다.",
-  "retainedTurnRecoveryWindowExpiredBody_one": "자동 복구 시간이 {{count}}회 시도 후 종료되었습니다. 새 메시지를 보낼 수 있습니다."
+  "retainedTurnRecoveryWindowExpiredBody_one": "자동 복구 시간이 {{count}}회 시도 후 종료되었습니다. 새 메시지를 보낼 수 있습니다.",
+  "childStallAlertCause": "원인: {{cause}}",
+  "childStallAlertStep": "단계: {{step}}",
+  "childStallAlertsLabel": "하위 작업 멈춤 알림",
+  "childStallAlertTitle": "하위 작업 확인 필요",
+  "childStallAlertTurn": "턴: {{turn}}",
+  "childStallCauseExecutionError": "실행 오류",
+  "childStallCauseInputRequired": "입력 필요",
+  "childStallCauseMissingCompletionSignal": "완료 신호 없음",
+  "childStallCauseQuota": "사용 한도"
 }

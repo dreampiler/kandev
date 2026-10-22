@@ -444,6 +444,10 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin agent conversations: %w", err)
 	}
+	if err := s.clearTaskChangeRequests(ctx, rec.InstallationID); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return err
+	}
 	if rec.InstallationID != "" {
 		if managed := s.managedAgentConversationDeps(); managed != nil {
 			if err := managed.DetachManagedForInstallation(ctx, rec.InstallationID); err != nil {

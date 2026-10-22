@@ -17,6 +17,7 @@ func (l reviewProfileLookup) NativeRouteOwnersEnabled() bool {
 }
 
 func (l reviewProfileLookup) resolveReviewerExecution(ctx context.Context, profileID, runID string) (agentruntime.ProfileExecution, error) {
+	ctx = reviewExecutionContext(ctx)
 	if native, ok := l.execution.(nativeReviewExecutionResolver); ok && native.NativeRouteOwnersEnabled() {
 		if runID == "" {
 			return native.PreviewExecutionDetails(ctx, profileID)

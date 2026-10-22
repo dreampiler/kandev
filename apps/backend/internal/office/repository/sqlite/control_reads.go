@@ -34,7 +34,8 @@ type ControlTaskList struct {
 }
 
 const controlTaskFrom = ` FROM tasks t LEFT JOIN workflow_steps w ON w.id=t.workflow_step_id `
-const controlTaskScope = `t.workspace_id=? AND t.is_ephemeral=0 AND ` + notAutomationOriginT
+const controlTaskVisibility = `t.is_ephemeral=0 AND ` + notAutomationOriginT
+const controlTaskScope = `t.workspace_id=? AND ` + controlTaskVisibility
 const controlPrimarySession = `(SELECT s.id FROM task_sessions s WHERE s.task_id=t.id AND s.is_primary=1 ORDER BY s.started_at DESC,s.id DESC LIMIT 1)`
 const controlRunning = `(SELECT COUNT(*) FROM task_sessions s WHERE s.task_id=t.id AND s.state='RUNNING')`
 const controlQueued = `(SELECT COUNT(*) FROM queued_messages q WHERE q.task_id=t.id)`

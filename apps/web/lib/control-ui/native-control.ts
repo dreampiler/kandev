@@ -53,9 +53,10 @@ export function nativeHistory(v: unknown, id: string): v is NativeHistory {
         time(e.occurred_at)! >= start &&
         time(e.occurred_at)! <= end &&
         time(e.occurred_at) !== null &&
-        ["task_id", "session_id", "title", "state"].every(
+        ["task_id", "session_id", "title", "state", "provider", "repository"].every(
           (key) => e[key] === undefined || typeof e[key] === "string",
-        ),
+        ) &&
+        (e.number === undefined || (count(e.number) && Number(e.number) > 0)),
     )
   );
 }
@@ -79,7 +80,10 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
       v.transitions_24h,
       v.completed_tasks_24h,
     ].every(count) &&
-    (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting))
+    (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting)) &&
+    (v.merged_change_requests_24h === undefined ||
+      v.merged_change_requests_24h === null ||
+      count(v.merged_change_requests_24h))
   );
 }
 export function nativeTasks(
@@ -148,6 +152,7 @@ const KINDS: Record<string, string> = {
   task_moved: "step_move",
   automation_run_created: "automation_run",
   github_merged: "pr_merged",
+  plugin_merged: "pr_merged",
 };
 export function nativeEvents(data: NativeHistory): OverviewEvent[] {
   return data.events.map(
@@ -161,6 +166,11 @@ export function nativeEvents(data: NativeHistory): OverviewEvent[] {
         session_id: e.session_id,
         title: e.title,
         recorded_state: e.state,
+        detail: e.provider
+          ? [e.provider, e.repository, e.number ? `#${e.number}` : undefined]
+              .filter(Boolean)
+              .join(" ")
+          : undefined,
       }) as OverviewEvent,
   );
 }

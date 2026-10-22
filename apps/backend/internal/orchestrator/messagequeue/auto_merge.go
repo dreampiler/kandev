@@ -18,6 +18,9 @@ type autoMergedValues struct {
 }
 
 func buildAutoMergedEntry(target, source *QueuedMessage) (*autoMergedValues, bool) {
+	if IsChildStallAlert(target) || IsChildStallAlert(source) {
+		return buildChildStallMergedEntry(target, source)
+	}
 	if !autoMergeAllowed(target, source) || !autoMetadataEquivalent(target.Metadata, source.Metadata) {
 		return nil, false
 	}

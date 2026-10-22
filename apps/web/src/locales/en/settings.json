@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "Agent memory in use",
   "workspaceRuntimeFootprintUnavailable": "The current measurement could not be read.",
   "workspaceRuntimeFootprintUnavailableMetric": "Not reported on this platform",
-  "workspaceRuntimeFootprintUnmeasured": "No current measurement. Memory use is unknown, not zero."
+  "workspaceRuntimeFootprintUnmeasured": "No current measurement. Memory use is unknown, not zero.",
+  "notificationEventChildStallUndeliverable": "Child stalled, parent unavailable",
+  "notificationEventChildStallUndeliverableDescription": "Notify when a child task stalls and its parent task cannot receive the alert."
 }

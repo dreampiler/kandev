@@ -12,6 +12,40 @@ func sameHeldInference(a, b sessioncapacity.InferenceBinding) bool {
 	return a.Key == b.Key && a.InstanceID == b.InstanceID && a.OwnerID == b.OwnerID && a.AttemptID == b.AttemptID && a.PreparationID == b.PreparationID
 }
 
+// Claim applicability is retained before acquisition can outlive its caller.
+func (b *sharedInferenceConsumer) recordInferenceProvider(ctx context.Context, binding sessioncapacity.InferenceBinding, key, provider string, claim bool) error {
+	b.refreshMu.Lock()
+	defer b.refreshMu.Unlock()
+	return b.capacity.UpdateInferenceCapacity(ctx, func(active map[string]sessioncapacity.InferenceBinding) error {
+		held, ok := active[binding.Key]
+		if !ok || !sameHeldInference(held, binding) || held.TerminalState != "" || held.SettlementKind != inferenceSettlementNone || held.ProviderKey != "" {
+			return fmt.Errorf("inference provider admission owner changed")
+		}
+		held.State = inferenceBindingStateActive
+		held.ProviderFamilies = provider
+		if claim {
+			held.SettlementKind, held.ProviderKey, held.ProviderKnown = inferenceSettlementProvider, key, true
+		}
+		active[binding.Key] = held
+		return nil
+	})
+}
+
+func (b *sharedInferenceConsumer) clearUnmeteredInferenceProvider(ctx context.Context, binding sessioncapacity.InferenceBinding, key, provider string) error {
+	b.refreshMu.Lock()
+	defer b.refreshMu.Unlock()
+	return b.capacity.UpdateInferenceCapacity(ctx, func(active map[string]sessioncapacity.InferenceBinding) error {
+		held, ok := active[binding.Key]
+		if !ok || !sameHeldInference(held, binding) || held.TerminalState != "" || held.SettlementKind != inferenceSettlementProvider || held.ProviderKey != key || !held.ProviderKnown {
+			return fmt.Errorf("inference unmetered owner changed")
+		}
+		held.SettlementKind, held.ProviderKey, held.ProviderKnown = inferenceSettlementNone, "", false
+		held.ProviderFamilies = provider
+		active[binding.Key] = held
+		return nil
+	})
+}
+
 func matchesInferenceProof(held sessioncapacity.InferenceBinding, status *utility.AttemptStatus) bool {
 	return definitelySettledInference(status) && status.InstanceID == held.InstanceID && status.OwnerID == held.OwnerID && status.AttemptID == held.AttemptID && status.PreparationID == held.PreparationID
 }

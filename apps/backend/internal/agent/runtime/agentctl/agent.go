@@ -563,7 +563,9 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
 
-	cancel, err := c.completeUpdatesStreamDial(attempt, conn)
+	stage := newUpdateStreamStage()
+	stage.connected.Store(true)
+	cancel, err := c.completeUpdatesStreamDial(attempt, conn, stage)
 	if err != nil {
 		return fmt.Errorf("failed to connect to updates stream: %w", err)
 	}
@@ -579,7 +581,7 @@ func (c *Client) StreamUpdatesFrom(ctx context.Context, handler func(AgentEvent)
 
 	go func() {
 		defer cancel()
-		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage)
+		c.readUpdatesStream(streamCtx, conn, handler, mcpHandler, onDisconnect, writeMessage, stage)
 	}()
 
 	return nil
@@ -623,15 +625,21 @@ func (c *Client) readUpdatesStream(
 	mcpHandler MCPHandler,
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
+	stages ...*updateStreamStage,
 ) {
+	stage := newUpdateStreamStage()
+	if len(stages) > 0 && stages[0] != nil {
+		stage = stages[0]
+	}
 	// Ordered, single-worker dispatch preserves per-stream event ordering while
 	// decoupling handler execution from response-frame delivery.
 	events := newAgentEventQueue()
 	workerDone := make(chan struct{})
-	go c.dispatchAgentEvents(handler, events, workerDone)
+	go c.dispatchAgentEvents(handler, events, workerDone, stage)
 
 	var lastErr error
 	defer func() {
+		stage.connected.Store(false)
 		// Clean up this connection's pending requests BEFORE draining the worker. On a
 		// connection drop mid-cancel, a worker handler
 		// (orchestrator.handleAgentReady) can block acquiring the per-session
@@ -692,6 +700,9 @@ func (c *Client) readUpdatesStream(
 		// Try to parse as ws.Message to check message type
 		var wsMsg ws.Message
 		if err := json.Unmarshal(message, &wsMsg); err == nil {
+			if c.consumeUpdateStreamMetadata(stage, wsMsg) {
+				continue
+			}
 			// Check if this is a response/error to a pending request
 			if (wsMsg.Type == ws.MessageTypeResponse || wsMsg.Type == ws.MessageTypeError) && c.resolvePendingRequest(&wsMsg) {
 				continue
@@ -730,6 +741,7 @@ func (c *Client) readUpdatesStream(
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		stage.recordRead()
 		// Hand off to the ordered worker rather than running handler inline.
 		// A full bounded queue closes the stream so retained events can be
 		// replayed instead of growing process memory without limit.
@@ -744,7 +756,11 @@ func (c *Client) readUpdatesStream(
 // pushed onto the queue, preserving arrival order. It is the single consumer of
 // the queue; readUpdatesStream closes the queue on teardown and waits on
 // workerDone so an in-flight handler finishes before disconnect is signaled.
-func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}) {
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}, stages ...*updateStreamStage) {
+	stage := newUpdateStreamStage()
+	if len(stages) > 0 && stages[0] != nil {
+		stage = stages[0]
+	}
 	defer close(done)
 	for {
 		event, ok := events.dequeue()
@@ -752,6 +768,7 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 			return
 		}
 		handler(event)
+		stage.recordHandled()
 	}
 }
 

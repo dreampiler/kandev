@@ -55,6 +55,7 @@ type Service struct {
 	automationRevoker                     func(string) error
 	capabilityApprovalWorkspaceAuthorizer func(context.Context, string) error
 	humanInteractionResponseAuthorizer    func(context.Context, string) error
+	taskChangeRequestAuthorizer           func(context.Context, string, string) error
 	mu                                    sync.Mutex
 	approvalEffectMu                      sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and

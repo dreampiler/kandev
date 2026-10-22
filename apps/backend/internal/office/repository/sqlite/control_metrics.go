@@ -29,19 +29,20 @@ type ControlWaiting struct {
 // limit admits them. SharedCapacityWaiting is installation-wide and identical
 // across workspace responses: clients read it once and never sum it.
 type ControlMetrics struct {
-	WorkspaceID           string          `json:"workspace_id"`
-	GeneratedAt           time.Time       `json:"generated_at"`
-	Since                 time.Time       `json:"since"`
-	Basis                 string          `json:"basis"`
-	InferenceState        string          `json:"inference_state"`
-	Tasks                 map[string]int  `json:"tasks"`
-	Sessions              map[string]int  `json:"sessions"`
-	WaitingInputTasks     int             `json:"waiting_input_tasks"`
-	WipWaitingTasks       int             `json:"wip_waiting_tasks"`
-	SharedCapacityWaiting *ControlWaiting `json:"shared_capacity_waiting,omitempty"`
-	QueuedMessages        int             `json:"queued_messages"`
-	Transitions24h        int             `json:"transitions_24h"`
-	CompletedTasks24h     int             `json:"completed_tasks_24h"`
+	WorkspaceID             string          `json:"workspace_id"`
+	GeneratedAt             time.Time       `json:"generated_at"`
+	Since                   time.Time       `json:"since"`
+	Basis                   string          `json:"basis"`
+	InferenceState          string          `json:"inference_state"`
+	Tasks                   map[string]int  `json:"tasks"`
+	Sessions                map[string]int  `json:"sessions"`
+	WaitingInputTasks       int             `json:"waiting_input_tasks"`
+	WipWaitingTasks         int             `json:"wip_waiting_tasks"`
+	SharedCapacityWaiting   *ControlWaiting `json:"shared_capacity_waiting,omitempty"`
+	QueuedMessages          int             `json:"queued_messages"`
+	Transitions24h          int             `json:"transitions_24h"`
+	CompletedTasks24h       int             `json:"completed_tasks_24h"`
+	MergedChangeRequests24h *int            `json:"merged_change_requests_24h"`
 }
 
 func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now time.Time) (*ControlMetrics, error) {
@@ -71,6 +72,7 @@ func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now ti
 			return nil, err
 		}
 	}
+	out.MergedChangeRequests24h = r.controlMergedCount(ctx, wsID, out.Since, now)
 	return out, nil
 }
 

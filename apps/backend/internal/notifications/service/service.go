@@ -24,6 +24,7 @@ const (
 	EventTaskSessionClarificationAsked = "session.clarification_requested"
 	EventOfficeInboxItem               = "office.inbox_item"
 	EventSystemUpdateAvailable         = "system.update_available"
+	EventTaskChildStallUndeliverable   = "session.child_stall_undeliverable"
 	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
 )
 
@@ -89,7 +90,7 @@ func (s *Service) AppriseAvailable() bool {
 }
 
 func (s *Service) AvailableEvents() []string {
-	return []string{EventTaskSessionTurnFinished, EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable}
+	return []string{EventTaskSessionTurnFinished, EventTaskSessionClarificationAsked, EventOfficeInboxItem, EventSystemUpdateAvailable, EventTaskChildStallUndeliverable}
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
@@ -205,6 +206,10 @@ func (s *Service) HandleTaskTurnFinished(ctx context.Context, taskID, sessionID,
 
 func (s *Service) HandleClarificationRequested(ctx context.Context, taskID, sessionID, pendingID string) {
 	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionClarificationAsked, nil)
+}
+
+func (s *Service) HandleChildStallUndeliverable(ctx context.Context, taskID, sessionID, occurrenceID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, occurrenceID, EventTaskChildStallUndeliverable, nil)
 }
 
 func (s *Service) HandleUpdateAvailable(ctx context.Context, version, releaseURL string) {
@@ -465,6 +470,12 @@ func (s *Service) buildSemanticMessage(ctx context.Context, taskID, eventType st
 }
 
 func semanticMessageCopy(eventType, taskTitle string) (string, string) {
+	if eventType == EventTaskChildStallUndeliverable {
+		if taskTitle == "" {
+			return "Child task needs attention", "A child task stalled and its parent task cannot receive the alert."
+		}
+		return "Child task needs attention", fmt.Sprintf("\"%s\" stalled and its parent task cannot receive the alert.", taskTitle)
+	}
 	if eventType == EventSystemUpdateAvailable {
 		return "Kandev update available", fmt.Sprintf("Kandev %s is available. Open Settings > System > Updates to review it.", taskTitle)
 	}
@@ -511,6 +522,7 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 			EventTaskSessionClarificationAsked,
 			EventOfficeInboxItem,
 			EventSystemUpdateAvailable,
+			EventTaskChildStallUndeliverable,
 		}); err != nil {
 			return err
 		}
@@ -543,6 +555,7 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 		EventTaskSessionClarificationAsked,
 		EventOfficeInboxItem,
 		EventSystemUpdateAvailable,
+		EventTaskChildStallUndeliverable,
 	})
 }
 
@@ -582,6 +595,7 @@ func (s *Service) validateEvents(events []string) error {
 		EventTaskSessionClarificationAsked: {},
 		EventOfficeInboxItem:               {},
 		EventSystemUpdateAvailable:         {},
+		EventTaskChildStallUndeliverable:   {},
 	}
 	for _, event := range events {
 		if _, ok := allowed[event]; !ok {

@@ -49,16 +49,17 @@ func buildReviewComponents(p routeParams) reviewComponents {
 	if p.services.DynamicProfileResolver != nil {
 		execution = p.services.DynamicProfileResolver
 	}
+	profileLookup := reviewProfileLookup{profiles: p.agentSettingsRepo, execution: execution}
 	resolver := review.NewResolver(
-		reviewProfileLookup{profiles: p.agentSettingsRepo, execution: execution},
+		profileLookup,
 		reviewUtilityLookup{agents: p.services.Utility},
 		reviewDefaultsLookup{settings: p.services.User},
 	)
 	runner := review.NewRunner(review.RunnerDeps{
 		Store:            service,
 		Resolver:         resolver,
-		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo}),
-		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service},
+		Changes:          handlers.NewReviewChangeSource(p.lifecycleMgr, reviewSessionReader{repo: p.taskRepo, workspaces: p.lifecycleMgr}),
+		Inference:        reviewInference{session: p.lifecycleMgr, host: p.hostUtilityMgr, profiles: execution, runs: service, originProfiles: profileLookup},
 		InferenceContext: reviewInferenceContext(p.taskRepo),
 		Prompts:          review.NewTemplatePromptBuilder(reviewTemplateSource{agents: p.services.Utility, engine: utilitytemplate.NewEngine()}),
 		TaskContext:      reviewTaskContext{tasks: p.taskSvc},
@@ -71,7 +72,8 @@ func buildReviewComponents(p routeParams) reviewComponents {
 // reviewSessionReader supplies the base commit and branch a cumulative diff is
 // computed against, mirroring sessionReaderAdapter in gateway.go.
 type reviewSessionReader struct {
-	repo reviewSessionGetter
+	repo       reviewSessionGetter
+	workspaces reviewWorkspaceInspector
 }
 
 type reviewSessionGetter interface {
@@ -143,6 +145,9 @@ func (l reviewProfileLookup) reviewerProfile(ctx context.Context, profileID, run
 	if l.execution != nil {
 		execution, err := l.resolveReviewerExecution(ctx, profileID, runID)
 		if err != nil {
+			if errors.Is(err, agentruntime.ErrExecutionCandidateExcluded) {
+				return review.ReviewerProfile{}, false, fmt.Errorf("%w: %w", review.ErrNoDistinctReviewer, err)
+			}
 			return review.ReviewerProfile{}, false, err
 		}
 		profile = execution.Profile
@@ -261,10 +266,11 @@ func (s reviewTemplateSource) ResolveTemplate(_ context.Context, template string
 // when that session has no live execution — a review must still work on a task
 // whose agent is not currently running.
 type reviewInference struct {
-	session  sessionInferenceRunner
-	host     *hostutility.Manager
-	profiles reviewExecutionResolver
-	runs     reviewCandidateWriter
+	session        sessionInferenceRunner
+	host           *hostutility.Manager
+	profiles       reviewExecutionResolver
+	runs           reviewCandidateWriter
+	originProfiles reviewOriginProfileLookup
 }
 
 type sessionInferenceRunner interface {
@@ -276,9 +282,13 @@ type sessionProfileInferenceRunner interface {
 }
 
 func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdentity, sessionID, prompt string) (*review.PromptResult, error) {
+	ctx = reviewExecutionContext(ctx)
 	prepared := reviewPromptRoute(identity)
 	recordedProfileID := prepared.ExecutionProfileID
 	response, err := utilityservice.ExecuteProfilePrompt(ctx, r.profiles, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+		if err := r.validateReviewExecution(attempt, id, prepared.AgentCLI, prepared.Model); err != nil {
+			return nil, err
+		}
 		if id != recordedProfileID {
 			if err := r.recordNativeReviewCandidate(attempt, prepared); err != nil {
 				return nil, err
@@ -327,6 +337,9 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 	}
 	if r.host == nil {
 		return nil, fmt.Errorf("no inference executor is configured")
+	}
+	if err := r.validateReviewExecution(ctx, identity.ProfileID, identity.AgentID, identity.Model); err != nil {
+		return nil, err
 	}
 	var result *hostutility.PromptResult
 	var err error

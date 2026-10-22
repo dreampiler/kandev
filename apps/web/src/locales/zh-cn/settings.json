@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "正在使用的智能体内存",
   "workspaceRuntimeFootprintUnavailable": "无法读取当前测量值。",
   "workspaceRuntimeFootprintUnavailableMetric": "此平台不提供",
-  "workspaceRuntimeFootprintUnmeasured": "没有当前测量值。内存用量未知，并非为零。"
+  "workspaceRuntimeFootprintUnmeasured": "没有当前测量值。内存用量未知，并非为零。",
+  "notificationEventChildStallUndeliverable": "子任务停滞（父任务无法接收）",
+  "notificationEventChildStallUndeliverableDescription": "子任务停滞且父任务无法接收提醒时通知。"
 }

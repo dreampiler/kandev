@@ -63,7 +63,10 @@ func (s *Store) initSchema() error {
 			UNIQUE (plugin_id, scope, scope_id, state_key)
 		);
 	`)
-	return err
+	if err != nil {
+		return err
+	}
+	return s.initChangeRequestSchema()
 }
 
 // Get returns the value stored for the given plugin/scope/scopeID/key.

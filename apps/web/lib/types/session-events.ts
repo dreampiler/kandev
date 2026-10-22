@@ -302,6 +302,10 @@ export type SessionBackendMessageMap = {
     "session.clarification_requested",
     TaskSessionNotificationPayload
   >;
+  "session.child_stall_undeliverable": BackendMessage<
+    "session.child_stall_undeliverable",
+    TaskSessionNotificationPayload
+  >;
   "session.agentctl_starting": BackendMessage<
     "session.agentctl_starting",
     TaskSessionAgentctlPayload

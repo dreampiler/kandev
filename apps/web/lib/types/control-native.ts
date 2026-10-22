@@ -12,6 +12,9 @@ export type NativeEvent = {
   session_id?: string;
   title?: string;
   state?: string;
+  provider?: string;
+  repository?: string;
+  number?: number;
   occurred_at: string;
 };
 export type NativeHistory = {
@@ -50,6 +53,8 @@ export type NativeDashboard = {
   queued_messages: number;
   transitions_24h: number;
   completed_tasks_24h: number;
+  /** Null when either recorded merge source is unavailable. */
+  merged_change_requests_24h?: number | null;
 };
 export type NativeTask = {
   task_id: string;

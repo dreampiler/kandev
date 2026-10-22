@@ -27,14 +27,16 @@ type inferenceClientSource interface {
 }
 
 type sharedInferenceConsumer struct {
-	flowLogger       *zap.Logger
-	populationLogger *zap.Logger
-	capacity         *orchestrator.Service
-	settler          inferenceClaimSettler
-	sources          []inferenceClientSource
-	refreshMu        sync.Mutex
-	workerMu         sync.Mutex
-	workers          map[string]inferenceWorker
+	flowLogger         *zap.Logger
+	populationLogger   *zap.Logger
+	capacity           *orchestrator.Service
+	settler            inferenceClaimSettler
+	provider           *providerTurnAllowances
+	providerPopulation func() []agentruntime.ProviderTurnRequest
+	sources            []inferenceClientSource
+	refreshMu          sync.Mutex
+	workerMu           sync.Mutex
+	workers            map[string]inferenceWorker
 }
 
 func inferenceBindingKey(owner, attempt string) string { return "inference:" + owner + ":" + attempt }
@@ -47,12 +49,7 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if req == nil || b.capacity == nil {
 		return nil, &agentruntime.InferenceCapacityError{Reason: "owner_unavailable"}
 	}
-	request := *req
-	if identity.CallID != "" {
-		request.CallID = identity.CallID
-	} else if request.CallID == "" {
-		request.CallID = uuid.NewString()
-	}
+	request := inferenceRequestWithCallID(req, identity)
 	b.refreshMu.Lock()
 	prepared, err := client.PrepareInferenceCapacityAttempt(ctx, request.CallID)
 	if err == nil {
@@ -76,6 +73,10 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	if err := b.waitInferenceCapacity(ctx, client, binding, identity); err != nil {
 		return nil, err
 	}
+	if err := b.admitInferenceProvider(ctx, client, binding, &request); err != nil {
+		b.cancelAndSettle(client, binding)
+		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
+	}
 	if err := b.validateInferenceSettlement(ctx, binding); err != nil {
 		b.cancelAndSettle(client, binding)
 		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
@@ -89,6 +90,16 @@ func (b *sharedInferenceConsumer) Execute(ctx context.Context, client *agentrunt
 	response, err := client.InferencePrompt(ctx, &request)
 	b.logInferenceResult(ctx, binding, started, response, err)
 	return b.finishInferencePrompt(client, binding, response, err)
+}
+
+func inferenceRequestWithCallID(req *utility.PromptRequest, identity agentruntime.InferenceIdentity) utility.PromptRequest {
+	request := *req
+	if identity.CallID != "" {
+		request.CallID = identity.CallID
+	} else if request.CallID == "" {
+		request.CallID = uuid.NewString()
+	}
+	return request
 }
 
 func (b *sharedInferenceConsumer) newBinding(ctx context.Context, prepared *utility.AttemptStatus, identity agentruntime.InferenceIdentity, req *utility.PromptRequest) sessioncapacity.InferenceBinding {
@@ -267,6 +278,9 @@ func (b *sharedInferenceConsumer) executeLegacyInference(ctx context.Context, cl
 	}
 	binding := b.newBinding(ctx, prepared, identity, req)
 	binding.State = inferenceStateUnknown
+	if err := b.admitLegacyInferenceProvider(ctx, binding, req); err != nil {
+		return nil, &agentruntime.InferenceCapacityError{Reason: "provider_allowance", Cause: err}
+	}
 	b.refreshMu.Lock()
 	_, _, _ = b.capacity.ReserveInferenceCapacity(ctx, binding)
 	b.refreshMu.Unlock()

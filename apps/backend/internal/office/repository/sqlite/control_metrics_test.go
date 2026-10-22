@@ -11,6 +11,8 @@ import (
 func ensureControlMetricTables(t *testing.T, ctx context.Context, exec func(context.Context, string, ...any) error) {
 	t.Helper()
 	stmts := []string{
+		`ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT`,
+		`ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 0`,
 		`CREATE TABLE IF NOT EXISTS task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,

@@ -928,5 +928,7 @@
   "workspaceRuntimeFootprintTitle": "사용 중인 에이전트 메모리",
   "workspaceRuntimeFootprintUnavailable": "현재 측정값을 읽지 못했습니다.",
   "workspaceRuntimeFootprintUnavailableMetric": "이 플랫폼에서는 제공되지 않음",
-  "workspaceRuntimeFootprintUnmeasured": "현재 측정값이 없습니다. 메모리 사용량은 0이 아니라 알 수 없습니다."
+  "workspaceRuntimeFootprintUnmeasured": "현재 측정값이 없습니다. 메모리 사용량은 0이 아니라 알 수 없습니다.",
+  "notificationEventChildStallUndeliverable": "하위 작업 멈춤 (상위 수신 불가)",
+  "notificationEventChildStallUndeliverableDescription": "하위 작업이 멈췄는데 상위 작업이 알림을 받을 수 없을 때 알립니다."
 }

@@ -1547,6 +1547,7 @@ func (sm *SessionManager) waitForPromptDone(
 				snapshot.diagnostic.ElapsedMillis = elapsed.Milliseconds()
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.Any("stall", snapshot.diagnostic))
+				sm.logUpdateStreamStage(execution, promptGeneration)
 				if sm.eventPublisher != nil {
 					sm.eventPublisher.PublishAgentStalled(
 						ctx,

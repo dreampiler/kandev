@@ -1,6 +1,7 @@
 import { IconUsersGroup } from "@tabler/icons-react";
 import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
 import type { Task } from "@/components/kanban-card";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 
 // Status markers that mask the launch spinner and gate the "resting" no-affordance
 // case. Bundled together so renderTaskStatusIcon's own branching stays under the
@@ -11,6 +12,7 @@ type StatusMaskFlags = {
   showAutoStartFailed: boolean;
   parkedOnBackgroundWork: boolean;
   showWorkspaceOrphaned: boolean;
+  waitReason: boolean;
 };
 
 function hasNoStatusAffordance(
@@ -25,7 +27,8 @@ function hasNoStatusAffordance(
     !flags.showInterrupted &&
     !flags.showAutoStartFailed &&
     !flags.parkedOnBackgroundWork &&
-    !flags.showWorkspaceOrphaned
+    !flags.showWorkspaceOrphaned &&
+    !flags.waitReason
   );
 }
 
@@ -50,6 +53,7 @@ function resolveForegroundActivity(
     !flags.showAutoStartFailed &&
     !flags.parkedOnBackgroundWork &&
     !flags.showWorkspaceOrphaned &&
+    !flags.waitReason &&
     task.foregroundActivity !== "background";
   return shouldForceGenerating ? "generating" : task.foregroundActivity;
 }
@@ -71,6 +75,13 @@ export function renderTaskStatusIcon(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ) {
+  const waitReason = resolveWaitReason({
+    primarySessionState: task.primarySessionState,
+    wipAdmitted: task.wipAdmitted,
+    queuedForStepId: task.queuedForStepId,
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
+  });
   const flags: StatusMaskFlags = {
     needsMe:
       shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
@@ -79,6 +90,7 @@ export function renderTaskStatusIcon(
     showAutoStartFailed: !!task.autoStartFailed,
     parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
     showWorkspaceOrphaned: !!task.workspaceOrphaned,
+    waitReason: waitReason !== null,
   };
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
@@ -92,6 +104,9 @@ export function renderTaskStatusIcon(
     autoStartFailed: flags.showAutoStartFailed,
     parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
     workspaceOrphaned: flags.showWorkspaceOrphaned,
+    waitReason,
+    launchQueue: task.statusSummary?.launch_queue,
+    quotaWait: task.statusSummary?.quota_wait,
   });
 }
 

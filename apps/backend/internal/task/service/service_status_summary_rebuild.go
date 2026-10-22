@@ -227,6 +227,13 @@ func (s *Service) rebuildMissingSummaries(
 	if len(missing) == 0 {
 		return summaries
 	}
+	quotaWaits, quotaErr := s.loadSummaryQuotaWaits(ctx, taskIDs(missing))
+	if quotaErr != nil {
+		for _, task := range missing {
+			s.logSummaryRepairFailure(ctx, task.ID, "quota wait", quotaErr)
+		}
+		return summaries
+	}
 	prByTask, prObserved := s.loadSummaryPRs(ctx, taskIDs(missing))
 	if ctx.Err() != nil {
 		return summaries
@@ -273,7 +280,7 @@ func (s *Service) rebuildMissingSummaries(
 		if ctx.Err() != nil {
 			return summaries
 		}
-		s.rebuildMissingSummary(ctx, task, summaries, s.rebuildInput(
+		input := s.rebuildInput(
 			taskLaunchErrorSummary(task),
 			sessionsByTask[task.ID],
 			environmentIDsByTask[task.ID],
@@ -290,7 +297,9 @@ func (s *Service) rebuildMissingSummaries(
 			activityObserved,
 			sessionsByTask != nil,
 			now,
-		))
+		)
+		input.QuotaWait = quotaWaits[task.ID]
+		s.rebuildMissingSummary(ctx, task, summaries, input)
 	}
 	return summaries
 }

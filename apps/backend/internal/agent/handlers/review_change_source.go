@@ -30,6 +30,11 @@ func NewReviewChangeSource(executions ExecutionLookup, sessionReader SessionRead
 // must survive a backend restart, not an operation needing a running agent turn
 // (see the "Execution access" convention in AGENTS.md).
 func (s *ReviewChangeSource) UncommittedFiles(ctx context.Context, sessionID string) (map[string]any, error) {
+	files, err := s.agentctlUncommittedFiles(ctx, sessionID)
+	return s.withLocalFallback(ctx, sessionID, false, files, err)
+}
+
+func (s *ReviewChangeSource) agentctlUncommittedFiles(ctx context.Context, sessionID string) (map[string]any, error) {
 	execution, err := s.execution(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -55,6 +60,11 @@ func (s *ReviewChangeSource) UncommittedFiles(ctx context.Context, sessionID str
 // reported as an empty map rather than an error so uncommitted work alone is
 // still reviewable.
 func (s *ReviewChangeSource) CommittedFiles(ctx context.Context, sessionID string) (map[string]any, error) {
+	files, err := s.agentctlCommittedFiles(ctx, sessionID)
+	return s.withLocalFallback(ctx, sessionID, true, files, err)
+}
+
+func (s *ReviewChangeSource) agentctlCommittedFiles(ctx context.Context, sessionID string) (map[string]any, error) {
 	execution, err := s.execution(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -73,6 +83,11 @@ func (s *ReviewChangeSource) CommittedFiles(ctx context.Context, sessionID strin
 	if baseCommit == "" {
 		status, statusErr := client.GetGitStatusWithDetails(ctx)
 		if statusErr != nil || status == nil || status.BaseCommit == "" {
+			if statusErr != nil {
+				if _, ok := s.sessionReader.(localReviewReader); ok {
+					return nil, fmt.Errorf("git status for session %s: %w", sessionID, statusErr)
+				}
+			}
 			return nil, nil
 		}
 		baseCommit = status.BaseCommit
@@ -86,6 +101,27 @@ func (s *ReviewChangeSource) CommittedFiles(ctx context.Context, sessionID strin
 		return nil, nil
 	}
 	return result.Files, nil
+}
+
+// localReviewReader is implemented by the backend's durable session adapter.
+// It admits only local executors; remote workspaces must still use agentctl.
+type localReviewReader interface {
+	LocalReviewFiles(ctx context.Context, sessionID string, committed bool) (map[string]any, error)
+}
+
+func (s *ReviewChangeSource) withLocalFallback(ctx context.Context, sessionID string, committed bool, files map[string]any, err error) (map[string]any, error) {
+	if err == nil || ctx.Err() != nil {
+		return files, err
+	}
+	reader, ok := s.sessionReader.(localReviewReader)
+	if !ok {
+		return files, err
+	}
+	local, localErr := reader.LocalReviewFiles(ctx, sessionID, committed)
+	if localErr != nil {
+		return nil, fmt.Errorf("%w; local git fallback: %v", err, localErr)
+	}
+	return local, nil
 }
 
 // execution resolves the session's execution and guarantees a usable agentctl

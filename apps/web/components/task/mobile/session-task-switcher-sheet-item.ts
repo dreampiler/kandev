@@ -13,6 +13,7 @@ import { taskPRInfoFromSummary } from "../task-pr-info";
 import type { SidebarTaskColorAutomation } from "@/lib/task-color-automation-settings";
 import { sidebarTaskColorDisplay } from "@/lib/sidebar/task-color-projection";
 import type { TaskColor } from "@/lib/task-colors";
+import { resolveWaitReason } from "@/lib/ui/waiting-reason";
 
 export type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -96,6 +97,19 @@ function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   };
 }
 
+function sheetWaitStatus(task: KanbanState["tasks"][number], sessionState?: TaskSessionState) {
+  return {
+    quotaWait: task.statusSummary?.quota_wait,
+    waitReason: resolveWaitReason({
+      primarySessionState: sessionState,
+      wipAdmitted: task.wipAdmitted,
+      queuedForStepId: task.queuedForStepId,
+      launchQueue: sheetLaunchQueue(task),
+      quotaWait: task.statusSummary?.quota_wait,
+    }),
+  };
+}
+
 export function toSheetItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
   ctx: SheetItemCtx,
@@ -143,6 +157,7 @@ export function toSheetItem(
     effectiveColorToken: color.effectiveColorToken,
     queuedCount: task.statusSummary?.queued_prompt_count,
     launchQueue: sheetLaunchQueue(task),
+    ...sheetWaitStatus(task, status.sessionState),
     wipQueue: ctx.wipQueueByTaskId?.get(task.id),
   };
 }

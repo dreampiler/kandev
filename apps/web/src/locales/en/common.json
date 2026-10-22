@@ -563,5 +563,7 @@
   "conversationSearch_query_too_short": "Use at least 3 characters to search conversations.",
   "conversationSearch_query_too_long": "Use at most 200 characters to search conversations.",
   "conversationSearch_query_too_broad": "Use at least 3 consecutive letters or digits.",
-  "conversationSearch_title": "Command Palette"
+  "conversationSearch_title": "Command Palette",
+  "notificationChildStallBody": "A child task stalled and its parent task cannot receive the alert.",
+  "notificationChildStallTitle": "Child task needs attention"
 }

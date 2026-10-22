@@ -29,6 +29,9 @@ func (r *ProfileExecutionResolver) PreviewExecutionDetails(ctx context.Context, 
 		return ProfileExecution{}, fmt.Errorf("preview profile family unavailable")
 	}
 	if agent.Name != agents.DynamicAgentID {
+		if !executionCandidateAllowed(ctx, profile, agent.Name) {
+			return ProfileExecution{}, ErrExecutionCandidateExcluded
+		}
 		return ProfileExecution{LogicalProfileID: profileID, ExecutionProfileID: profile.ID, AgentName: agent.Name, Profile: profile}, nil
 	}
 	config, err := r.loadDynamicProfile(ctx, profileID)

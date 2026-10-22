@@ -19,11 +19,22 @@ import {
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
 import { CompositorSpin } from "@kandev/ui/compositor-spin";
 import { cn } from "@/lib/utils";
+import type {
+  TaskStatusSummaryLaunchQueue,
+  TaskStatusSummaryQuotaWait,
+} from "@/lib/types/task-status-summary";
+import {
+  WaitingReasonTaskIcon,
+  waitReasonClass,
+  waitReasonGlyph,
+  type TaskWaitReason,
+} from "@/lib/ui/waiting-reason";
 
 type IconConfig = {
   Icon: ComponentType<{ className?: string }>;
   className: string;
   animated?: boolean;
+  waitReason?: TaskWaitReason | null;
 };
 
 const STYLE_MUTED = "text-muted-foreground";
@@ -382,6 +393,9 @@ type TaskStateIconOptions = {
   /** True when this task inherits an archived parent's workspace and can no
    *  longer materialize or start. */
   workspaceOrphaned?: boolean;
+  waitReason?: TaskWaitReason | null;
+  launchQueue?: TaskStatusSummaryLaunchQueue | null;
+  quotaWait?: TaskStatusSummaryQuotaWait | null;
 };
 
 // Interrupted (startup reconciliation marker), auto-start-failed (on_enter
@@ -416,6 +430,7 @@ function getPendingOrActiveTaskIcon(
     | "foregroundActivity"
     | "hasPendingPermission"
     | "parkedOnBackgroundWork"
+    | "waitReason"
   >,
 ): IconConfig | undefined {
   const {
@@ -436,7 +451,8 @@ function getPendingOrActiveTaskIcon(
   // remaining life is a positively-sampled background process. Pending-input
   // and any live foregroundActivity (above) still outrank it (AC-34).
   if (parkedOnBackgroundWork) return TASK_PARKED_ICON;
-  if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;
+  if (isWaitingForInputState(state) && !options.waitReason)
+    return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   return undefined;
 }
 
@@ -449,12 +465,14 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     autoStartFailed = false,
     parkedOnBackgroundWork = false,
     workspaceOrphaned = false,
+    waitReason,
   } = options;
   const pendingOrActive = getPendingOrActiveTaskIcon(state, {
     hasPendingClarification,
     foregroundActivity,
     hasPendingPermission,
     parkedOnBackgroundWork,
+    waitReason,
   });
   if (pendingOrActive) return pendingOrActive;
   const markerOverride = getMarkerIconOverride(
@@ -464,6 +482,13 @@ function getTaskStateIconConfig(state?: TaskState, options: TaskStateIconOptions
     workspaceOrphaned,
   );
   if (markerOverride) return markerOverride;
+  if (waitReason && !TERMINAL_TASK_STATES.has(state)) {
+    return {
+      Icon: waitReasonGlyph(waitReason),
+      className: waitReasonClass(waitReason),
+      waitReason,
+    };
+  }
   if (!state) return DEFAULT_TASK_ICON;
   return TASK_STATE_ICONS[state] ?? DEFAULT_TASK_ICON;
 }
@@ -486,6 +511,16 @@ export function getTaskStateIcon(
   options: TaskStateIconOptions = {},
 ) {
   const config = getTaskStateIconConfig(state, options);
+  if (config.waitReason) {
+    return (
+      <WaitingReasonTaskIcon
+        reason={config.waitReason}
+        launchQueue={options.launchQueue}
+        quotaWait={options.quotaWait}
+        className={cn("h-4 w-4 w-auto", className)}
+      />
+    );
+  }
   // The interrupted, auto-start-failed, parked, and workspace-orphaned
   // affordances all carry their own tooltip and accessible label, so they
   // must render through their shared component rather than a bare icon.

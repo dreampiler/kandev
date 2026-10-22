@@ -3748,3 +3748,24 @@ repackaging.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md),
 [Plugin marketplace](plugins-marketplace.md), and [Extending Kandev](extending-kandev.md).
+
+
+## Reporting provider-neutral task change requests
+
+Repository-provider plugins can obtain the optional reporting surface with
+`pluginsdk.HostTaskChangeRequests(host)`. `Report` stores the provider's observed
+change-request identity and state for a task; `Remove` removes that installation's
+matching report. Neither method sends a remote code-host command.
+
+Declare `api_write:tasks` and the repository provider in the active manifest.
+Pass the current Host caller context. Reports use workspace/task, provider/host,
+stable repository identity and change-request number, with optional URL/title,
+branches and RFC3339 timestamps. A merged report needs its actual merged time.
+The Host derives installation ownership and applies current task/workspace and
+collaboration permissions before storage. Disable or uninstall clears that
+installation's projections.
+
+Office control metrics and history include these provider-neutral merge facts.
+Repeated polls preserve stored merge facts; proven duplicates with built-in
+sources are counted once. An unavailable source remains unknown rather than
+becoming a successful empty observation.

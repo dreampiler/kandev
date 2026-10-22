@@ -75,6 +75,7 @@ type RebuildInput struct {
 	// (all sessions). Supplied by the caller; 0 means nothing is queued.
 	QueuedPromptCount      int
 	LaunchQueue            *LaunchQueueSummary
+	QuotaWait              *QuotaWaitSummary
 	CompletionGate         *CompletionGateSummary
 	CompletionGateObserved bool
 	Now                    time.Time
@@ -101,6 +102,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 		prObserved:             input.PRObserved,
 		launchQueueObserved:    true,
 		launchQueue:            cloneLaunchQueue(input.LaunchQueue),
+		quotaWait:              cloneQuotaWait(input.QuotaWait),
 		completionGateObserved: input.CompletionGateObserved,
 		completionGate:         cloneCompletionGate(input.CompletionGate),
 	}
