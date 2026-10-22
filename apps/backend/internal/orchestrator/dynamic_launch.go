@@ -1414,7 +1414,7 @@ func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string
 			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
-	if origin == launchOriginManual && isStartingRouteClaim(session) {
+	if origin == launchOriginManual && isPendingRecoveryRouteClaim(session) {
 		block, err := s.GetOpenSessionRecoveryBlock(ctx, sessionID)
 		if err != nil {
 			return err
