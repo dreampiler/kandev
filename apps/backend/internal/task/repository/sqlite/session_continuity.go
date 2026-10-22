@@ -265,6 +265,9 @@ func (r *Repository) CreateRestoreAttempt(ctx context.Context, attempt *models.R
 }
 
 func (r *Repository) CompleteRestoreAttempt(ctx context.Context, id, outcome string, completedAt time.Time) error {
+	if outcome == "context_continued" {
+		return r.completeContextContinuationAttempt(ctx, id, completedAt)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE session_restore_attempts SET outcome = ?, completed_at = ? WHERE id = ?`), outcome, completedAt, id)
 	if err != nil {

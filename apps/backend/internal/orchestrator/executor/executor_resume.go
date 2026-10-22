@@ -2174,7 +2174,7 @@ func BuildContextContinuation(
 	taskObjective, plan, workspace string, messages []*models.Message,
 ) ContextContinuation {
 	snapshot := lifecycle.BuildContinuationSnapshot(lifecycle.ContinuationSnapshotInput{
-		TaskObjective:     taskObjective,
+		TaskObjective:     explicitContextRecoveryDirective + taskObjective,
 		Plan:              plan,
 		OriginalWorkspace: workspace,
 		Messages:          messages,
@@ -2655,6 +2655,11 @@ func (e *Executor) applyResumeRepoConfig(
 				zap.String("repository_id", repositoryID),
 				zap.Error(err))
 			return "", err
+		}
+		if detachedLocalResumeUsesTaskWorkspace(task, session, req, existingEnv, allRepos, repository) {
+			req.RepositoryID = ""
+			req.Branch = ""
+			return "", nil
 		}
 		// A persisted session repository may legitimately be absent from the
 		// current task attachment set. Resolve that one exceptional repository,

@@ -70,17 +70,20 @@ func contextContinuationNoticeMatches(recovery models.AgentDeliveryRecovery, ses
 			recovery.Phase == models.AgentDeliveryRecoveryContinued)
 }
 
-// Authenticated native retirement may cross a context generation only after the
-// exact predecessor fence was explicitly resolved by that continuation.
+// Authenticated native retirement needs an exact resolved source fence or a
+// complete authorized continuation ancestry before crossing historical generations.
 func (r *Repository) hasResolvedContextContinuationNoticeTx(ctx context.Context, tx *sql.Tx, recovery models.AgentDeliveryRecovery, proof *models.NativeResumeDeliveryEvidence) (bool, error) {
-	if !contextContinuationNoticeMatches(recovery, proof.SessionID, proof.IncarnationID, proof.HarnessGeneration-1) ||
+	if recovery.HarnessGeneration >= proof.HarnessGeneration || !contextContinuationNoticeMatches(recovery, proof.SessionID, proof.IncarnationID, recovery.HarnessGeneration) ||
 		!nativeResumeProofCoversNotice(proof, recovery) {
 		return false, nil
 	}
 	var valid bool
 	err := tx.QueryRowContext(ctx, r.db.Rebind(resolvedContextContinuationNoticeQuery), proof.SessionID, proof.IncarnationID,
 		proof.HarnessGeneration, recovery.HarnessGeneration, recovery.SubmissionID, recovery.StreamID).Scan(&valid)
-	return valid, err
+	if err != nil || valid {
+		return valid, err
+	}
+	return r.hasCompletedContextAncestryTx(ctx, tx, recovery, proof.HarnessGeneration)
 }
 
 // HasResolvedContextContinuationRecovery verifies the historical notice without
@@ -90,10 +93,22 @@ func (r *Repository) HasResolvedContextContinuationRecovery(ctx context.Context,
 		!contextContinuationNoticeMatches(recovery, recovery.SessionID, recovery.IncarnationID, recovery.HarnessGeneration) {
 		return false, nil
 	}
+	tx, err := r.ro.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var target int64
+	if err := tx.QueryRowContext(ctx, r.ro.Rebind(`SELECT COALESCE(MAX(generation), 0) FROM harness_session_generations WHERE session_id = ? AND incarnation_id = ?`), recovery.SessionID, recovery.IncarnationID).Scan(&target); err != nil {
+		return false, err
+	}
 	var valid bool
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(resolvedContextContinuationNoticeQuery), recovery.SessionID, recovery.IncarnationID,
-		recovery.HarnessGeneration+1, recovery.HarnessGeneration, recovery.SubmissionID, recovery.StreamID).Scan(&valid)
-	return valid, err
+	err = tx.QueryRowContext(ctx, r.ro.Rebind(resolvedContextContinuationNoticeQuery), recovery.SessionID, recovery.IncarnationID,
+		target, recovery.HarnessGeneration, recovery.SubmissionID, recovery.StreamID).Scan(&valid)
+	if err != nil || valid {
+		return valid, err
+	}
+	return r.hasCompletedContextAncestryTx(ctx, tx, recovery, target)
 }
 
 func (r *Repository) writeContinuedRecoveryNoticeTx(ctx context.Context, tx *sql.Tx, metadata map[string]json.RawMessage, previous sql.NullString, recovery models.AgentDeliveryRecovery, completedAt time.Time) error {
