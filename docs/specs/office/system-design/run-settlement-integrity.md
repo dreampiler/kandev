@@ -115,8 +115,10 @@ entry has one taker: the state handler, the bounded re-check timer, a later
 AgentCompleted for the same run, or the immediate path when the session already
 records a verdict. Only the event's own run identity may consume an entry: a
 completion without a run identity (legacy task-and-agent fallback) or one
-naming another run leaves it parked. `sync.Map.CompareAndDelete` decides the
-taker.
+naming another run leaves it parked. While an entry is parked, a completion
+without a run identity is ignored entirely: the fallback cannot identify the
+completing run, so the run it resolves is settled only by the session verdict.
+`sync.Map.CompareAndDelete` decides the taker.
 
 | Session state | Verdict |
 | --- | --- |
