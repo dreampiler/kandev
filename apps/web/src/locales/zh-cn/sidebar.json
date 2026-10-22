@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "待回答: {{answerable}} · 之前的轮次: {{earlier}} · 恢复: {{recovery}}",
   "controlSummary.attention.openInbox": "打开收件箱",
   "controlSummary.attention.questionSubject_one": "{{count}} 项等待你处理",
-  "controlSummary.attention.questionSubject_other": "{{count}} 项等待你处理"
+  "controlSummary.attention.questionSubject_other": "{{count}} 项等待你处理",
+  "integratedControl.noCoordinators": "没有可显示的协调器",
+  "integratedControl.unavailable": "不可用",
+  "integratedControl.executorProfile": "执行器配置"
 }

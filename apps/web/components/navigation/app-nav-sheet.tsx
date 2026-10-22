@@ -1,5 +1,7 @@
 "use client";
 
+import { MobileTaskSearchAction } from "./mobile-task-search-action";
+
 import { useArchivedTaskState } from "@/components/task/task-archived-context";
 import { useOptionalPortForwardingVisibility } from "@/components/task/port-forwarding-visibility-provider";
 
@@ -50,6 +52,10 @@ export function AppNavSheet(props: AppNavSheetProps) {
   const controls = useAppNavDialogs(close, onOpenTaskViews);
   const renderedPageNav = typeof pageNav === "function" ? pageNav(close) : pageNav;
   const currentPage = listingPageForPath(pathname);
+  const closeMenu = (focus = false) => {
+    restoreFocus.current = focus;
+    close();
+  };
 
   return (
     <>
@@ -78,6 +84,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
           onClick={(event) => closeMenuOnLinkClick(event, close)}
         >
           <AppNavigationMode close={close}>
+            {isMobile && <MobileTaskSearchAction closeMenu={closeMenu} />}
             {!isMobile && renderedPageNav}
             <AppNavSections
               onNavigate={close}
@@ -88,10 +95,7 @@ export function AppNavSheet(props: AppNavSheetProps) {
                   isMobile={isMobile}
                   workspaceId={workspace?.id}
                   returnFocusRef={opener}
-                  closeMenu={(focus = false) => {
-                    restoreFocus.current = focus;
-                    close();
-                  }}
+                  closeMenu={closeMenu}
                 />
               }
               taskNavigation={
@@ -138,7 +142,11 @@ export function AppNavSheet(props: AppNavSheetProps) {
 
 function AppNavigationMode({ close, children }: { close: () => void; children: ReactNode }) {
   const control = useIntegratedControl();
-  return control?.active ? <IntegratedControlNavigation onNavigate={close} /> : children;
+  return control?.active ? (
+    <IntegratedControlNavigation scrollable={false} onNavigate={close} />
+  ) : (
+    children
+  );
 }
 
 function NavigationMetrics({ open }: { open: boolean }) {

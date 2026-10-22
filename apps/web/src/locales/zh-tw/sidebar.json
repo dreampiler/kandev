@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "待回答: {{answerable}} · 先前的輪次: {{earlier}} · 復原: {{recovery}}",
   "controlSummary.attention.openInbox": "開啟收件匣",
   "controlSummary.attention.questionSubject_one": "{{count}} 個項目等待你處理",
-  "controlSummary.attention.questionSubject_other": "{{count}} 個項目等待你處理"
+  "controlSummary.attention.questionSubject_other": "{{count}} 個項目等待你處理",
+  "integratedControl.noCoordinators": "沒有可顯示的協調器",
+  "integratedControl.unavailable": "無法使用",
+  "integratedControl.executorProfile": "執行器設定檔"
 }

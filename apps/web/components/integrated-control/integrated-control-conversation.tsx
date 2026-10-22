@@ -14,11 +14,11 @@ import { ControlConversationHeader } from "./control-conversation-header";
 export function IntegratedControlConversation({
   workspace,
   coordinator,
-  taskId,
+  taskId = coordinator?.conversation_task_id ?? undefined,
 }: {
   workspace: ControlWorkspace;
   coordinator?: Coordinator;
-  taskId: string;
+  taskId?: string;
 }) {
   const { t } = useTranslation();
   if (coordinator && !hasScope(workspace.scopes, SCOPE.workspaceManage)) {
@@ -28,6 +28,7 @@ export function IntegratedControlConversation({
       </p>
     );
   }
+  if (!taskId) return <p className="p-6">{t("sidebar:integratedControl.noConversation")}</p>;
   return (
     <ExistingConversation
       key={taskId}

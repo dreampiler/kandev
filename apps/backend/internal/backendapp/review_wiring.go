@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/handlers"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/review"
@@ -139,7 +140,7 @@ func (l reviewProfileLookup) reviewerProfile(ctx context.Context, profileID, run
 		return review.ReviewerProfile{}, false, nil
 	}
 	var route *review.ReviewerRoute
-	if l.NativeRouteOwnersEnabled() {
+	if l.execution != nil {
 		execution, err := l.resolveReviewerExecution(ctx, profileID, runID)
 		if err != nil {
 			return review.ReviewerProfile{}, false, err
@@ -286,6 +287,7 @@ func (r reviewInference) Run(ctx context.Context, identity review.ReviewerIdenti
 		}
 		concrete := identity
 		concrete.ProfileID = id
+		concrete.AgentID, concrete.Model = prepared.AgentCLI, prepared.Model
 		return r.runConcrete(attempt, concrete, sessionID, prompt)
 	})
 	if identity.Route != nil {
@@ -319,7 +321,7 @@ func (r reviewInference) runConcrete(ctx context.Context, identity review.Review
 		if reviewResponseFinal(resp, err) {
 			return resp, err
 		}
-		if reviewSessionErrorFinal(err, r.host != nil) {
+		if reviewSessionErrorFinal(err, r.host != nil, identity.AgentID) {
 			return resp, err
 		}
 	}
@@ -361,8 +363,17 @@ func reviewResponseFinal(response *agentctlutil.PromptResponse, err error) bool 
 	return response != nil && (response.Response != "" || (err == nil && (response.Success || response.Error != "")))
 }
 
-func reviewSessionErrorFinal(err error, hasHost bool) bool {
-	return err != nil && (!hasHost || agentruntime.IsInferenceCapacityError(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
+func reviewSessionErrorFinal(err error, hasHost bool, provider string) bool {
+	if err == nil {
+		return false
+	}
+	if !hasHost || agentruntime.IsInferenceCapacityError(err) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	// Classified provider failures belong to the shared candidate policy.
+	// A host retry of that candidate would bypass its saved retry/skip decision.
+	failure := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: provider, Stderr: err.Error()})
+	return failure.FallbackAllowed
 }
 
 func reviewerRoute(execution agentruntime.ProfileExecution) *review.ReviewerRoute {

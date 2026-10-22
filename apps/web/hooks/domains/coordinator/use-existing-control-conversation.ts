@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchTask } from "@/lib/api/domains/kanban-api";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import type { Task } from "@/lib/types/http";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { stateReadScopeIdentity } from "@/lib/state/shared-resource-reads";
 
 function matchesOriginalConversation(
@@ -34,8 +34,9 @@ export function useExistingControlConversation(
   coordinatorId: string | undefined,
   taskId: string,
 ) {
+  const store = useAppStoreApi();
   const identity = useAppStore(stateReadScopeIdentity);
-  const key = `${identity}:${workspaceId}:${coordinatorId ?? ""}:${taskId}`;
+  const key = JSON.stringify([identity, workspaceId, coordinatorId, taskId]);
   const [result, setResult] = useState<{ key: string; task: Task | null; error: boolean }>();
   useEffect(() => {
     let active = true;
@@ -43,18 +44,19 @@ export function useExistingControlConversation(
     setResult(undefined);
     fetchTask(taskId, { cache: "no-store", init: { signal: controller.signal } })
       .then((task) => {
-        if (!active) return;
+        if (!active || stateReadScopeIdentity(store.getState()) !== identity) return;
         const matches = matchesOriginalConversation(task, workspaceId, taskId, coordinatorId);
         setResult({ key, task: matches ? task : null, error: !matches });
       })
       .catch(() => {
-        if (active) setResult({ key, task: null, error: true });
+        if (active && stateReadScopeIdentity(store.getState()) === identity)
+          setResult({ key, task: null, error: true });
       });
     return () => {
       active = false;
       controller.abort();
     };
-  }, [workspaceId, coordinatorId, taskId, key]);
+  }, [workspaceId, coordinatorId, taskId, key, identity, store]);
   const current = result?.key === key ? result : undefined;
   const sessions = useTaskSessions(current?.task?.id ?? null);
   return { task: current?.task, taskError: current?.error, taskLoading: !current, ...sessions };

@@ -922,10 +922,6 @@ func freshSessionModelCatalogReady(state *CachedModelState) bool {
 	return state != nil && (len(state.Models) > 0 || len(state.ConfigOptions) > 0 || state.ConfigOptionsSettled)
 }
 
-func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
-	return m.captureSessionRuntimeConfigForReset(ctx, execution).Model
-}
-
 func (m *Manager) captureSessionRuntimeConfigForReset(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -1359,6 +1355,7 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		}
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.cancelStartupRecovery()
 	execution.remoteInstanceLifecycleMu.Lock()
 	defer execution.remoteInstanceLifecycleMu.Unlock()
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
@@ -1418,7 +1415,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	// Try to gracefully stop via agentctl first, then always close connections.
 	// A retained runtime gets a bounded non-cancelled opportunity to
 	// stop the failed process before its environment is preserved for another retry.
+	if reason != StopReasonBackendShutdown {
+		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+	}
 	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
+	// Backend shutdown retains interrupted delivery outcomes. Its terminal
+	// checkpoint follows confirmed process termination, before runtime cleanup.
+	if reason == StopReasonBackendShutdown && !backendForce && !agentStopFailed {
+		m.preserveTurnChangesBeforeStop(stopCtx, execution, reason)
+	}
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
@@ -2080,8 +2085,9 @@ const agentStartupLivenessGrace = 75 * time.Second
 //   - Passthrough process ID is set but process is not alive
 //   - Agent is in any other state (stopped, failed, etc.)
 //
-// An unavailable agentctl client, interactive runner, or status endpoint is
-// returned as an error rather than as a false result.
+// An unavailable agentctl client or interactive runner is returned as an error.
+// Status failures remain errors unless the owning runtime confirms that its
+// agentctl process is absent.
 func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID string) (bool, error) {
 	// First check if we have an execution tracked for this session
 	execution, exists := m.GetExecutionBySessionID(sessionID)
@@ -2119,6 +2125,9 @@ func (m *Manager) ProbeAgentRunningForSession(ctx context.Context, sessionID str
 
 	status, err := client.GetStatus(ctx)
 	if err != nil {
+		if m.confirmAgentctlAbsent(ctx, execution) {
+			return false, nil
+		}
 		m.logger.Debug("failed to get agentctl status",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
@@ -2165,6 +2174,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !exists {
 		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
 	}
+	return m.recoverAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) recoverAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	if execution.PassthroughProcessID != "" || execution.IsPassthrough {
 		releaseClient()
@@ -2193,14 +2206,13 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	}
 	if client.HasAgentStream() {
 		releaseClient()
-		if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
-			execution.FailureCode != durableDeliveryReconnectingFailureCode &&
-			execution.isSessionInitialized() && execution.ACPSessionID != "" {
-			return m.restoreRecoveredFailedExecution(ctx, execution)
-		}
-		return nil
+		return m.restoreExecutionAfterStreamRecovery(ctx, execution)
 	}
 	releaseClient()
+	return m.reconnectAgentPromptStream(ctx, execution)
+}
+
+func (m *Manager) reconnectAgentPromptStream(ctx context.Context, execution *AgentExecution) error {
 	if m.streamManager == nil {
 		return fmt.Errorf("stream manager is not configured")
 	}
@@ -2214,7 +2226,7 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	client, releaseClient = execution.AcquireAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
 	if client == nil {
 		return fmt.Errorf("agentctl client is unavailable")
 	}
@@ -2223,6 +2235,10 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if !hasAgentStream {
 		return fmt.Errorf("agent stream not connected")
 	}
+	return m.restoreExecutionAfterStreamRecovery(ctx, execution)
+}
+
+func (m *Manager) restoreExecutionAfterStreamRecovery(ctx context.Context, execution *AgentExecution) error {
 	if execution.Status == v1.AgentStatusFailed && execution.FailureCode != durableDeliveryUncertainFailureCode &&
 		execution.FailureCode != durableDeliveryReconnectingFailureCode &&
 		execution.isSessionInitialized() && execution.ACPSessionID != "" {

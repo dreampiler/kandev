@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/kandev/kandev/internal/agent/usage"
 	"strings"
+
+	"github.com/kandev/kandev/internal/agent/usage"
 )
 
 // ReviewerIdentity is the (agent CLI, model, mode) triple a review pass runs as.
@@ -270,8 +271,7 @@ func (r *Resolver) resolveFromDefaults(ctx context.Context) (ReviewerIdentity, e
 }
 
 func (r *Resolver) resolveBoundProfile(ctx context.Context, id, source string) (ReviewerIdentity, error) {
-	lookup, ok := r.Profiles.(runProfileLookup)
-	if !ok || !lookup.NativeRouteOwnersEnabled() {
+	if r.Profiles == nil {
 		return ReviewerIdentity{ProfileID: id, Source: source}, nil
 	}
 	identity, err := r.resolveProfile(ctx, id, false)

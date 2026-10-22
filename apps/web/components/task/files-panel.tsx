@@ -37,7 +37,7 @@ function TaskSourceDialog({
   opener,
   openerRef,
 }: TaskSourceDialogProps) {
-  if (!activeTask || !(activeTask.repositoryId ?? activeTask.repositories?.length)) return null;
+  if (!activeTask) return null;
   return (
     <AddWorkspaceSourcesDialog
       open={open}
@@ -100,7 +100,6 @@ function useFilesPanelSourceDialog(activeSessionId: string | null) {
 }
 
 const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
-  const { t } = useTranslation();
   // Readiness and recovery belong to the selected session even when its
   // environment and retained file tree are shared with another conversation.
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -129,10 +128,6 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
     addSourcesButtonRef,
     addSourcesDisabledReason,
   } = sourceDialog;
-  const hasRepository = Boolean(activeTask?.repositoryId ?? activeTask?.repositories?.length);
-  const resolvedAddSourcesDisabledReason = hasRepository
-    ? addSourcesDisabledReason
-    : t("task:taskNeedsRepositoryForSources");
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
   );
@@ -174,15 +169,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onRenameFile={renameFile}
             onDownloadFile={downloadFile}
             activeFilePath={activeTreePath}
-            onAddSources={
-              hasRepository
-                ? (opener) => {
-                    setAddSourcesOpener(opener);
-                    setAddSourcesOpen(true);
-                  }
-                : undefined
-            }
-            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
+            onAddSources={(opener) => {
+              setAddSourcesOpener(opener);
+              setAddSourcesOpen(true);
+            }}
+            addSourcesDisabledReason={addSourcesDisabledReason}
             addSourcesButtonRef={addSourcesButtonRef}
           />
         ) : (

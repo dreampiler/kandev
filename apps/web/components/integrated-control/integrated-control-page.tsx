@@ -4,7 +4,7 @@ import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import { AppNavSheet } from "@/components/navigation/app-nav-sheet";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { controlView } from "@/lib/navigation/integrated-control";
+import { CONTROL_VIEW_LABEL_KEYS, controlView } from "@/lib/navigation/integrated-control";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { IntegratedControlConversation } from "./integrated-control-conversation";
@@ -53,7 +53,7 @@ export function IntegratedControlPage() {
         {isMobile && <AppNavSheet />}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold">
-            {t("sidebar:integratedControl.title")} / {t(`sidebar:integratedControl.views.${view}`)}
+            {t("sidebar:integratedControl.title")} / {t(CONTROL_VIEW_LABEL_KEYS[view])}
           </h1>
           {workspace && coordinator && (
             <p className="truncate text-xs text-muted-foreground">
@@ -65,6 +65,7 @@ export function IntegratedControlPage() {
         <Button
           variant="ghost"
           size="sm"
+          className="max-md:min-h-11"
           onClick={() => void control.refresh()}
           data-testid="control-refresh"
         >

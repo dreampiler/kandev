@@ -70,6 +70,11 @@ function useChangesPanelStoreData() {
   const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const hasCommitData = useAppStore((state) => {
+    if (!activeSessionId) return false;
+    const envKey = state.environmentIdBySessionId[activeSessionId] ?? activeSessionId;
+    return state.sessionCommits.byEnvironmentId[envKey] !== undefined;
+  });
   const baseBranch = useAppStore((state) =>
     activeSessionId ? state.taskSessions.items[activeSessionId]?.base_branch : undefined,
   );
@@ -86,6 +91,7 @@ function useChangesPanelStoreData() {
   return {
     activeTaskId,
     activeSessionId,
+    hasCommitData,
     baseBranch,
     gitCredentialDisplay,
   };
@@ -98,6 +104,7 @@ export type ChangesPanelBodyProps = {
   hasUnstaged: boolean;
   hasStaged: boolean;
   hasCommits: boolean;
+  commitsInitialLoading: boolean;
   hasPRFiles: boolean;
   hasPRCommits: boolean;
   relation: RemoteContributionRelation;
@@ -430,7 +437,7 @@ function useChangesPanelGitPresentation({
 }
 
 export function useChangesPanelData() {
-  const { activeTaskId, activeSessionId, baseBranch, gitCredentialDisplay } =
+  const { activeTaskId, activeSessionId, hasCommitData, baseBranch, gitCredentialDisplay } =
     useChangesPanelStoreData();
   const changesContext = useChangesPanelContextIdentity();
   const inlineCommitDetails = useChangesInlineCommitDetails(changesContext);
@@ -491,6 +498,7 @@ export function useChangesPanelData() {
     refreshStatus,
     git,
     gitStatusPresentation,
+    commitsInitialLoading: !hasCommitData && git.commitsLoading,
     ...gitPresentation,
     baseBranchByRepo,
     gitHandlers,

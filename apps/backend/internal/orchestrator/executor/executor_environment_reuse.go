@@ -23,6 +23,12 @@ const (
 // lifecycle preparer can touch the workspace. It intentionally consults the
 // durable environment inventory rather than a sibling session projection.
 func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment) error {
+	return e.validateReuseEnvironmentInventoryWithIdentity(ctx, req, env, true)
+}
+
+func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
+	ctx context.Context, req *LaunchAgentRequest, env *models.TaskEnvironment, preserveCanonicalIdentity bool,
+) error {
 	if !req.WorkspaceReuseRequired || env == nil || env.ID == "" || e.repo == nil {
 		return nil
 	}
@@ -42,8 +48,13 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// Reuse setup below consumes this same inventory, avoiding a second query
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
-	if adoptCheckoutBranchCanonicalSlots(req, rows) && len(req.Repositories) == 0 {
-		spec, _ := topLevelLaunchRepoSpec(req)
+	adoptCheckoutBranchCanonicalSlots(req, rows)
+	if preserveCanonicalIdentity {
+		pinCanonicalWorktreeIdentities(req, env)
+	}
+	if len(req.Repositories) > 0 {
+		specs = req.Repositories
+	} else if spec, ok := topLevelLaunchRepoSpec(req); ok {
 		specs = []RepoSpec{spec}
 	}
 	for _, spec := range specs {
@@ -199,6 +210,9 @@ func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvi
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
+		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath {
+			continue
+		}
 		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
 			continue
 		}
@@ -332,6 +346,9 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 	if env.TaskDirName != "" && req.UseWorktree {
 		req.TaskDirName = env.TaskDirName
 	}
+	if env.WorkspaceLayout != "" {
+		req.WorkspaceLayout = env.WorkspaceLayout
+	}
 	// SSH uses the remote task directory as an environment-scoped attachment
 	// handle. It is distinct from the per-session agentctl directory and must
 	// therefore be forwarded for a sibling session without adopting its
@@ -428,6 +445,7 @@ func (e *Executor) reuseExistingRepositoryWorktrees(ctx context.Context, req *La
 	if !req.UseWorktree {
 		return
 	}
+	pinCanonicalWorktreeIdentities(req, env)
 	repoSpecs := req.Repositories
 	usingTopLevelRepo := false
 	if len(repoSpecs) == 0 {
@@ -570,6 +588,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RemoteRefState:             req.RemoteRefState,
 		CopyFiles:                  req.CopyFiles,
 		BranchIdentitySlug:         branchIdentity,
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 	}, true
 }
 

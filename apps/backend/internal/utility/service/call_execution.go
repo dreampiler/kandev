@@ -40,14 +40,6 @@ func (s *Service) SetCallExecutionAttribution(ctx context.Context, callID, profi
 	return s.repo.UpdateCall(ctx, call)
 }
 
-func (s *Service) ResumePendingRoute(ctx context.Context, routeID string, generation int64) (agentruntime.ProfileExecution, error) {
-	resumer, ok := s.executionResolver.(profileRouteResumer)
-	if !ok {
-		return agentruntime.ProfileExecution{}, ErrExecutionRouting
-	}
-	return resumer.ResumePendingRoute(ctx, routeID, generation)
-}
-
 // ReleaseNativeRoute removes only an unused early capacity alias.
 func (s *Service) ReleaseNativeRoute(id string) {
 	if release, ok := s.executionResolver.(interface{ ReleaseNativeRoute(string) }); ok {

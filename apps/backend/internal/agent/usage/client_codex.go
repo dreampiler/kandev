@@ -86,23 +86,23 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 	}
 
 	selected := auth.Tokens
-	status, body, err := c.getUsage(ctx, selected)
+	body, statusErr, err := c.getUsage(ctx, selected)
 	if err != nil {
 		return nil, err
 	}
-	if status == http.StatusUnauthorized && auth.Tokens.RefreshToken != "" {
+	if statusErr != nil && statusErr.StatusCode() == http.StatusUnauthorized && auth.Tokens.RefreshToken != "" {
 		refreshed, refreshErr := c.refreshTokens(ctx, auth.Tokens)
 		if refreshErr != nil {
 			return nil, fmt.Errorf("codex usage: refresh token: %w", refreshErr)
 		}
 		selected = refreshed
-		status, body, err = c.getUsage(ctx, selected)
+		body, statusErr, err = c.getUsage(ctx, selected)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if status != http.StatusOK {
-		return nil, fmt.Errorf("codex usage: unexpected status %d: %s", status, body)
+	if statusErr != nil {
+		return nil, statusErr
 	}
 	result, err := parseCodexUsage(body, time.Now())
 	if result != nil {
@@ -111,10 +111,12 @@ func (c *CodexUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, erro
 	return result, err
 }
 
-func (c *CodexUsageClient) getUsage(ctx context.Context, tokens *codexAuthTokens) (int, []byte, error) {
+// getUsage returns the response body for an OK response and nil otherwise, so
+// the caller reads a non-OK status from statusErr rather than from a magic code.
+func (c *CodexUsageClient) getUsage(ctx context.Context, tokens *codexAuthTokens) ([]byte, *statusError, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.usageURL, nil)
 	if err != nil {
-		return 0, nil, fmt.Errorf("codex usage: build request: %w", err)
+		return nil, nil, fmt.Errorf("codex usage: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
 	if tokens.AccountID != "" {
@@ -123,15 +125,18 @@ func (c *CodexUsageClient) getUsage(ctx context.Context, tokens *codexAuthTokens
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("codex usage: http: %w", err)
+		return nil, nil, fmt.Errorf("codex usage: http: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return 0, nil, fmt.Errorf("codex usage: read body: %w", err)
+		return nil, nil, fmt.Errorf("codex usage: read body: %w", err)
 	}
-	return resp.StatusCode, body, nil
+	if resp.StatusCode != http.StatusOK {
+		return nil, newStatusError("codex", resp.StatusCode, resp.Header, body), nil
+	}
+	return body, nil, nil
 }
 
 func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {

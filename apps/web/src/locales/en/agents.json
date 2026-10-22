@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "Observed at",
   "nativeUsage.limited": "Measured allowance exhausted",
   "nativeUsage.reset": "Reset",
-  "nativeUsage.bindingChanged": "The execution account changed. Start with the intended account before continuing."
+  "nativeUsage.bindingChanged": "The execution account changed. Start with the intended account before continuing.",
+  "sessionRuntimeManaged": "Session runtime: Managed by Kandev",
+  "sessionRuntimeNative": "Session runtime: Native CLI",
+  "sessionRuntimeHarness": "Session runtime: Harness-owned CLI",
+  "sessionRuntimeCustom": "Session runtime: Custom command",
+  "sessionRuntimeUnknown": "Session runtime: Unknown",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "Unknown version",
+  "sessionRuntimeNewSessions": "For new sessions",
+  "runtimeDiagnostics": "Diagnostics",
+  "runtimeDetectedLocalCLI": "Detected local CLI: {{path}}",
+  "runtimeLocalCLIVersion": "Local CLI: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "Local CLI: {{name}}, version unknown ({{reason}})"
 }

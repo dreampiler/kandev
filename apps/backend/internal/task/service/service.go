@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/fsdiagnostics"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -108,7 +109,9 @@ type WorktreeBatchCleanerWithOptions interface {
 
 // DeleteTaskOptions controls destructive task deletion behavior.
 type DeleteTaskOptions struct {
-	DiscardWorktreeChanges bool
+	AllowUnverifiedWorkspaceChanges bool
+	WorkspaceCleanup                models.WorkspaceCleanupMode
+	DiscardWorktreeChanges          bool
 }
 
 // WorktreeArchiveBatchCleaner removes archived task worktrees without deleting
@@ -446,6 +449,7 @@ type Repos struct {
 	Messages                      repository.MessageRepository
 	Attachments                   repository.AttachmentRepository
 	Turns                         repository.TurnRepository
+	TurnChanges                   repository.TurnChangesRepository
 	Sessions                      repository.SessionRepository
 	GitSnapshots                  repository.GitSnapshotRepository
 	RepoEntities                  repository.RepositoryEntityRepository
@@ -472,6 +476,7 @@ type Repos struct {
 type Service struct {
 	workspaceCollaboration          WorkspaceCollaborationBoundary
 	workspaceCollaborationStore     WorkspaceCollaborationStore
+	executorIdentityResolver        func(context.Context, string) (authn.Identity, bool)
 	workspaces                      repository.WorkspaceRepository
 	userDirectory                   UserDirectory
 	unitPlacer                      UnitPlacer
@@ -484,6 +489,7 @@ type Service struct {
 	messages                        repository.MessageRepository
 	attachments                     repository.AttachmentRepository
 	turns                           repository.TurnRepository
+	turnChanges                     repository.TurnChangesRepository
 	sessions                        repository.SessionRepository
 	gitSnapshots                    repository.GitSnapshotRepository
 	repoEntities                    repository.RepositoryEntityRepository
@@ -553,6 +559,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	executorSaveObserver            ExecutorSaveObserver
 	workspaceBootstrapper           WorkspaceBootstrapper
+	workspaceCloner                 WorkspaceClonePersistence
 	workflowStepGetter              WorkflowStepGetter
 	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
@@ -646,6 +653,9 @@ type Service struct {
 	cleanupWorkerMu                       sync.Mutex
 	archiveReclaimBackfillMu              sync.Mutex
 	archiveReclaimBackfillAfterWorktreeID string
+	archiveReclaimWakeCutoff              time.Time
+	archiveReclaimWakeAfterID             string
+	archiveReclaimWakeDone                bool
 	cleanupWorkerCancel                   context.CancelFunc
 	cleanupWorkerWG                       sync.WaitGroup
 	cleanupWorkerWake                     chan struct{}
@@ -817,6 +827,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		messages:                      repos.Messages,
 		attachments:                   repos.Attachments,
 		turns:                         repos.Turns,
+		turnChanges:                   repos.TurnChanges,
 		sessions:                      repos.Sessions,
 		gitSnapshots:                  repos.GitSnapshots,
 		repoEntities:                  repos.RepoEntities,

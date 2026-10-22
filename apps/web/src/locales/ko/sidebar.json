@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "답변 대기: {{answerable}} · 이전 턴: {{earlier}} · 복구: {{recovery}}",
   "controlSummary.attention.openInbox": "수신함 열기",
   "controlSummary.attention.questionSubject_one": "응답을 기다리는 항목 {{count}}개",
-  "controlSummary.attention.questionSubject_other": "응답을 기다리는 항목 {{count}}개"
+  "controlSummary.attention.questionSubject_other": "응답을 기다리는 항목 {{count}}개",
+  "integratedControl.noCoordinators": "표시할 코디네이터 없음",
+  "integratedControl.unavailable": "사용 불가",
+  "integratedControl.executorProfile": "실행기 프로필"
 }

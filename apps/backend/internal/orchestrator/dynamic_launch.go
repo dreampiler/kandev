@@ -1238,7 +1238,7 @@ func (s *Service) runDetachedDynamicSuccessorLaunchWithClaim(
 		return
 	}
 	ctx = withUnclassifiedFallbackLaunchClaim(ctx, claim)
-	ctx = withCancelInFlightGuardHeld(ctx)
+	ctx = withCancelInFlightGuardHeldForSession(ctx, data.SessionID)
 	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
 	case dynamicRelaunchSucceeded:
 		return

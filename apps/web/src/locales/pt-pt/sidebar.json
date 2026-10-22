@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "Por responder: {{answerable}} · Turnos anteriores: {{earlier}} · Recuperação: {{recovery}}",
   "controlSummary.attention.openInbox": "Abrir caixa de entrada",
   "controlSummary.attention.questionSubject_one": "{{count}} item à sua espera",
-  "controlSummary.attention.questionSubject_other": "{{count}} itens à sua espera"
+  "controlSummary.attention.questionSubject_other": "{{count}} itens à sua espera",
+  "integratedControl.noCoordinators": "Sem coordenadores para apresentar",
+  "integratedControl.unavailable": "Indisponível",
+  "integratedControl.executorProfile": "Perfil do executor"
 }

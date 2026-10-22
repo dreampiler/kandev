@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "Observado em",
   "nativeUsage.limited": "Quota observada esgotada",
   "nativeUsage.reset": "Reposição",
-  "nativeUsage.bindingChanged": "A conta da execução mudou. Inicie com a conta pretendida antes de continuar."
+  "nativeUsage.bindingChanged": "A conta da execução mudou. Inicie com a conta pretendida antes de continuar.",
+  "sessionRuntimeManaged": "Runtime da sessão: Gerido pelo Kandev",
+  "sessionRuntimeNative": "Runtime da sessão: CLI nativa",
+  "sessionRuntimeHarness": "Runtime da sessão: CLI gerida pelo harness",
+  "sessionRuntimeCustom": "Runtime da sessão: Comando personalizado",
+  "sessionRuntimeUnknown": "Runtime da sessão: Desconhecido",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "Versão desconhecida",
+  "sessionRuntimeNewSessions": "Para novas sessões",
+  "runtimeDiagnostics": "Diagnóstico",
+  "runtimeDetectedLocalCLI": "CLI local detetada: {{path}}",
+  "runtimeLocalCLIVersion": "CLI local: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "CLI local: {{name}}, versão desconhecida ({{reason}})"
 }

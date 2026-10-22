@@ -11,6 +11,7 @@ import Link from "@/components/routing/app-link";
 import { usePathname } from "@/lib/routing/client-router";
 import {
   CONTROL_VIEWS,
+  CONTROL_VIEW_LABEL_KEYS,
   controlHref,
   controlView,
   type ControlView,
@@ -39,9 +40,11 @@ const icons: Record<ControlView, typeof IconActivity> = {
 
 export function IntegratedControlNavigation({
   collapsed = false,
+  scrollable = true,
   onNavigate,
 }: {
   collapsed?: boolean;
+  scrollable?: boolean;
   onNavigate?: () => void;
 }) {
   const { t } = useTranslation();
@@ -50,13 +53,16 @@ export function IntegratedControlNavigation({
   if (!control?.active) return null;
   return (
     <div
-      className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-2"
+      className={cn(
+        "flex min-h-0 flex-col gap-3 p-2",
+        scrollable ? "flex-1 overflow-y-auto" : "flex-none",
+      )}
       data-testid="integrated-control-navigation"
     >
       <div className="flex flex-col gap-1">
         {CONTROL_VIEWS.map((item) => {
           const Icon = icons[item];
-          const label = t(`sidebar:integratedControl.views.${item}`);
+          const label = t(CONTROL_VIEW_LABEL_KEYS[item]);
           return (
             <Link
               key={item}
@@ -66,7 +72,7 @@ export function IntegratedControlNavigation({
               aria-current={view === item ? "page" : undefined}
               onNavigated={onNavigate}
               className={cn(
-                "flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm [@media(pointer:coarse)]:min-h-11",
+                "flex min-h-7 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
                 view === item ? "bg-accent font-medium" : "hover:bg-muted",
               )}
               data-testid={`control-nav-${item}`}
@@ -142,7 +148,7 @@ function ControlWorkspaceEntry({
       <Link
         href={controlHref("workspaces", workspace.id)}
         onNavigated={onNavigate}
-        className="flex min-h-7 cursor-pointer items-center rounded-md px-2 py-1.5 text-sm font-medium hover:bg-muted [@media(pointer:coarse)]:min-h-11"
+        className="flex min-h-7 cursor-pointer items-center rounded-md px-2 py-1.5 text-sm font-medium hover:bg-muted max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
       >
         <span className="truncate">{workspace.name}</span>
       </Link>

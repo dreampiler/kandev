@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -247,6 +248,9 @@ func (h *Handlers) httpExecutePrompt(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, dto.ExecutePromptResponse{Error: "failed to create call record"})
 		return
 	}
+	ctx = agentruntime.WithInferenceIdentity(ctx, agentruntime.InferenceIdentity{
+		SessionID: req.SessionID, LogicalProfileID: prepared.AgentProfileID, CallID: callID, OwnerKind: "utility",
+	})
 
 	ctx, err = h.controller.CallInferenceContext(ctx, callID)
 	if err != nil {
@@ -374,7 +378,7 @@ func (h *Handlers) executeSessionProfilePrompt(
 	prepared *service.PromptRequest, callID string,
 ) (*agentctlutil.PromptResponse, error) {
 	initial := prepared.ExecutionProfileID
-	return h.controller.ExecuteProfilePrompt(ctx, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
+	response, err := h.controller.ExecuteProfilePrompt(ctx, prepared, func(attempt context.Context, id string) (*agentctlutil.PromptResponse, error) {
 		if id != initial {
 			if err := h.controller.SetCallExecutionAttribution(attempt, callID, id, prepared.Model); err != nil {
 				return nil, err
@@ -382,6 +386,12 @@ func (h *Handlers) executeSessionProfilePrompt(
 		}
 		return executor.ExecuteInferenceProfilePrompt(attempt, sessionID, id, prepared.ResolvedPrompt)
 	})
+	if err == nil && response != nil && response.Success && prepared.ExecutionProfileID != initial {
+		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+			h.logger.Warn("failed to update utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
+		}
+	}
+	return response, err
 }
 
 func (h *Handlers) executeSessionlessProfilePrompt(
@@ -404,6 +414,11 @@ func (h *Handlers) executeSessionlessProfilePrompt(
 	})
 	if response == nil {
 		return nil, err
+	}
+	if err == nil && response.Success && prepared.ExecutionProfileID != initial {
+		if saveErr := h.controller.SetCallExecutionProfile(ctx, callID, prepared.ExecutionProfileID); saveErr != nil {
+			h.logger.Warn("failed to update sessionless utility route attribution", zap.Error(saveErr), zap.String("call_id", callID))
+		}
 	}
 	return &hostutility.PromptResult{Response: response.Response, Model: response.Model,
 		PromptTokens: response.PromptTokens, ResponseTokens: response.ResponseTokens, DurationMs: response.DurationMs}, err

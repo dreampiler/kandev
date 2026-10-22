@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "To answer: {{answerable}} · Earlier turns: {{earlier}} · Recovery: {{recovery}}",
   "controlSummary.attention.openInbox": "Open inbox",
   "controlSummary.attention.questionSubject_one": "{{count}} item waiting for you",
-  "controlSummary.attention.questionSubject_other": "{{count}} items waiting for you"
+  "controlSummary.attention.questionSubject_other": "{{count}} items waiting for you",
+  "integratedControl.noCoordinators": "No coordinators to display",
+  "integratedControl.unavailable": "Unavailable",
+  "integratedControl.executorProfile": "Executor profile"
 }

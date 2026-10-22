@@ -1,6 +1,6 @@
 import { fetchSessionCapacityObservation } from "@/lib/api/domains/session-capacity-api";
 import type { SessionCapacityObservation } from "@/lib/types/system";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { readJourneyWorkspaces } from "@/hooks/journey-metadata-resources";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -90,10 +90,21 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState<ControlRefreshFailure | null>(null);
   const scheduler = useRef<ControlRefreshScheduler | null>(null);
+  const committedOwner = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    committedOwner.current = owner;
+    return () => {
+      committedOwner.current = null;
+      scheduler.current?.dispose();
+    };
+  }, [owner]);
   const read = useCallback(
     async (signal: AbortSignal): Promise<ControlRefreshOutcome> => {
       const current = () =>
-        !signal.aborted && stateReadScopeIdentity(store.getState()) === identity;
+        !signal.aborted &&
+        committedOwner.current === owner &&
+        stateReadScopeIdentity(store.getState()) === identity;
+      if (!enabled || !current()) return "ok";
       setLoading(true);
       try {
         const result = await readJourneyWorkspaces(store, { signal, refresh: true });
@@ -101,7 +112,6 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         const workspaces = result.workspaces
           .map(mapWorkspaceItem)
           .filter((item) => hasScope(item.scopes, SCOPE.workspaceRead));
-        store.getState().setWorkspaces(result.workspaces.map(mapWorkspaceItem));
         const details = await readControlDetails(workspaces, coordinatorEnabled, signal);
         if (!current()) return "ok";
         setSnapshot((previous) => ({
@@ -129,7 +139,7 @@ export function useIntegratedControlData(enabled: boolean, coordinatorEnabled: b
         if (current()) setLoading(false);
       }
     },
-    [coordinatorEnabled, store, identity, owner],
+    [enabled, coordinatorEnabled, store, identity, owner],
   );
 
   useEffect(() => {

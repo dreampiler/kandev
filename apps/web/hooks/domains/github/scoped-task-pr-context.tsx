@@ -52,11 +52,16 @@ function useScopedTaskPRs(taskId: string, workspaceId: string): ScopedTaskPRs {
   const ws = useWebSocketClient();
   const [snapshot, setSnapshot] = useState<{ key: string; prs: TaskPR[] }>();
   const request = useRef<AbortController | null>(null);
-  const currentKey = useRef(key);
+  const currentKey = useRef<string | null>(null);
   useLayoutEffect(() => {
     currentKey.current = key;
+    return () => {
+      currentKey.current = null;
+      request.current?.abort();
+    };
   }, [key]);
   const read = useCallback(async () => {
+    if (currentKey.current !== key || stateReadScopeIdentity(store.getState()) !== identity) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -115,6 +120,7 @@ function useScopedTaskPRs(taskId: string, workspaceId: string): ScopedTaskPRs {
       request.current?.abort();
       await deleteTaskPR(associationId, workspaceId);
       if (currentKey.current === key && stateReadScopeIdentity(store.getState()) === identity) {
+        request.current?.abort();
         setSnapshot((previous) =>
           previous?.key === key
             ? { key, prs: previous.prs.filter((pr) => pr.id !== associationId) }

@@ -30,3 +30,7 @@ export function useTaskWorkspaceId(
   if (owner) return owner.taskId === taskId ? owner.workspaceId : null;
   return fallbackWorkspaceId !== undefined ? fallbackWorkspaceId : activeWorkspaceId;
 }
+
+export function useEmbeddedTaskWorkspace(): TaskWorkspace | null {
+  return useContext(Context);
+}

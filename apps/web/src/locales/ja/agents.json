@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "観測時刻",
   "nativeUsage.limited": "観測された利用枠を使い切りました",
   "nativeUsage.reset": "リセット",
-  "nativeUsage.bindingChanged": "実行アカウントが変わりました。続行する前に対象のアカウントで開始してください。"
+  "nativeUsage.bindingChanged": "実行アカウントが変わりました。続行する前に対象のアカウントで開始してください。",
+  "sessionRuntimeManaged": "セッションランタイム：Kandev が管理",
+  "sessionRuntimeNative": "セッションランタイム：ネイティブ CLI",
+  "sessionRuntimeHarness": "セッションランタイム：ハーネス管理の CLI",
+  "sessionRuntimeCustom": "セッションランタイム：カスタムコマンド",
+  "sessionRuntimeUnknown": "セッションランタイム：不明",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "バージョン不明",
+  "sessionRuntimeNewSessions": "新しいセッションに適用",
+  "runtimeDiagnostics": "診断情報",
+  "runtimeDetectedLocalCLI": "検出されたローカル CLI：{{path}}",
+  "runtimeLocalCLIVersion": "ローカル CLI：{{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "ローカル CLI：{{name}}、バージョン不明（{{reason}}）"
 }

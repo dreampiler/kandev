@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "觀測時間",
   "nativeUsage.limited": "觀測額度已用盡",
   "nativeUsage.reset": "重設",
-  "nativeUsage.bindingChanged": "執行帳戶已變更。請使用預期帳戶啟動後再繼續。"
+  "nativeUsage.bindingChanged": "執行帳戶已變更。請使用預期帳戶啟動後再繼續。",
+  "sessionRuntimeManaged": "工作階段執行時：由 Kandev 管理",
+  "sessionRuntimeNative": "工作階段執行時：原生 CLI",
+  "sessionRuntimeHarness": "工作階段執行時：由執行框架管理的 CLI",
+  "sessionRuntimeCustom": "工作階段執行時：自訂命令",
+  "sessionRuntimeUnknown": "工作階段執行時：未知",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "版本未知",
+  "sessionRuntimeNewSessions": "用於新工作階段",
+  "runtimeDiagnostics": "診斷資訊",
+  "runtimeDetectedLocalCLI": "檢測到本地 CLI：{{path}}",
+  "runtimeLocalCLIVersion": "本地 CLI：{{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）"
 }

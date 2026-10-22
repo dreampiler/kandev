@@ -122,12 +122,16 @@ portable credentials. No provider or account fallback is injected on failure.
 
 ### Claude Code and Codex CLI version and model discovery
 
-For Claude and Codex, the agent card shows the installed vendor CLI's version
-next to the detected path (for example "Claude Code 2.1.220" or "Codex CLI
-0.155.1"), or a muted "version unknown" line with a short reason when the
-version command fails or times out. Reinstalling or upgrading through the
-card's install action re-detects the version automatically, without a
-backend restart.
+Agent cards show the **Session runtime** selected for new structured sessions. For a
+runtime managed by Kandev, the card names the npm package and selected version.
+A native CLI or custom command is identified separately; unavailable identity or
+version information is shown as unknown. This label does not confirm authentication
+or a successful launch, and does not describe existing sessions or passthrough commands.
+
+Expand **Diagnostics** to see the detected local CLI path. For Claude and Codex,
+this also shows the installed vendor CLI version, or an unknown version with the
+reason discovery failed. This local installation may differ from the session runtime.
+The card's install action refreshes discovery without a backend restart.
 
 The profile editor's Start model dropdown includes suggestions from the host CLI. The Codex
 CLI publishes a model list (`codex app-server`), so its dropdown shows that
@@ -538,6 +542,14 @@ provider signals become known; an ambiguous new signal fails closed. A future
 classifier may improve catalogue coverage, but no model is called to classify
 errors today.
 
+Native code review uses the same saved candidate policy for classified provider
+failures and keeps its selected candidate across prompt batches in one review
+run. Each prompt batch permits at most eight candidate dispatch attempts. Partial
+output, cancellation,
+and inference admission refusals stop automatic fallback. A request deadline
+without confirmed child termination also stops the review, even while its parent
+budget remains active; automatic recovery from that deadline is not available.
+
 Dynamic profiles also have an API-only option for repeated, safe unclassified
 failures. It is off by default and is not exposed in the profile editor. In a
 candidate's `policies` object, set `unclassified` to:
@@ -703,6 +715,25 @@ classification and a bounded, sanitized stderr tail while their response stays
 generic. A line cut off at the beginning of the retained tail is omitted to
 avoid exposing part of a credential.
 
+### Handle a quiet agent turn
+
+After five minutes without turn output, Chat shows **Still waiting for the
+agent.** or identifies the tool it is waiting on. The turn stays active.
+Silence alone does not mean the agent failed or that it is safe to repeat the
+instruction.
+
+Select **Cancel turn** to request cancellation. The control stays disabled and
+shows a progress indicator until the request settles, including after a page reload.
+When cancellation is confirmed, you can continue the conversation. If Kandev
+cannot confirm the outcome, delivery remains blocked and Chat shows the
+existing recovery controls. Kandev does not automatically replay the instruction.
+
+Select **Resume** to check the saved conversation. If received events are still
+being applied, Resume can wait up to 10 seconds. Its control stays busy during
+the check. If the wait expires or the evidence cannot be verified, delivery
+stays blocked. You can try Resume again after the connection or storage issue
+is resolved.
+
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
@@ -771,6 +802,8 @@ Kandev has two secret scopes:
 - **Workspace** secrets belong to one workspace and can be selected by that workspace's repositories. They are not available to shared agent or executor profiles.
 
 The General page manages Global secrets. Manage Workspace secrets from **Settings > Workspaces > _workspace_ > Secrets**. Agent and executor profile selectors intentionally show Global secrets only; a Workspace reference saved through an older or direct API path is rejected when the profile is saved or launched.
+
+To rotate a secret, choose **Edit**, change the name or value, and save. The edit form replaces that secret’s row, hiding any previously revealed value. After saving, choose **Reveal** to fetch the current value. These controls are also available on phones. Saving does not change the environment of an already-running process or an open terminal. To use the new value in a task, stop its sessions, preserve uncommitted work, use **Reset Environment**, and launch a new session; a restart or warm resume can retain the old environment snapshot. For Sprites, verify the old sandbox was destroyed.
 
 Copy or move a secret between scopes from the **Copy/Move** action on any secret row. The dialog picks Copy or Move, chooses a destination (Global or another workspace), and lets you edit the target name; it is pre-filled as `<name> (from Global)` or `<name> (from <workspace name>)` so copied secrets keep their origin visible. Moving removes the original after the copy is safely in place, and the value is transferred server-side between encrypted rows. It is never shown or copied through the browser. A target name that already exists in the destination blocks the action until you rename it.
 

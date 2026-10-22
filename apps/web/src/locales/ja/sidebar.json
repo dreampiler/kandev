@@ -369,5 +369,8 @@
   "controlSummary.attention.reasonQuestion": "回答待ち: {{answerable}} · 以前のターン: {{earlier}} · 復旧: {{recovery}}",
   "controlSummary.attention.openInbox": "受信箱を開く",
   "controlSummary.attention.questionSubject_one": "対応待ちの項目 {{count}} 件",
-  "controlSummary.attention.questionSubject_other": "対応待ちの項目 {{count}} 件"
+  "controlSummary.attention.questionSubject_other": "対応待ちの項目 {{count}} 件",
+  "integratedControl.noCoordinators": "表示するコーディネーターなし",
+  "integratedControl.unavailable": "利用不可",
+  "integratedControl.executorProfile": "エグゼキュータープロファイル"
 }

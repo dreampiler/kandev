@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "观测时间",
   "nativeUsage.limited": "观测到的额度已用尽",
   "nativeUsage.reset": "重置",
-  "nativeUsage.bindingChanged": "执行账户已更改。请使用预期账户启动后再继续。"
+  "nativeUsage.bindingChanged": "执行账户已更改。请使用预期账户启动后再继续。",
+  "sessionRuntimeManaged": "会话运行时：由 Kandev 管理",
+  "sessionRuntimeNative": "会话运行时：原生 CLI",
+  "sessionRuntimeHarness": "会话运行时：由运行框架管理的 CLI",
+  "sessionRuntimeCustom": "会话运行时：自定义命令",
+  "sessionRuntimeUnknown": "会话运行时：未知",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "版本未知",
+  "sessionRuntimeNewSessions": "用于新会话",
+  "runtimeDiagnostics": "诊断信息",
+  "runtimeDetectedLocalCLI": "检测到本地 CLI：{{path}}",
+  "runtimeLocalCLIVersion": "本地 CLI：{{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "本地 CLI：{{name}}，版本未知（{{reason}}）"
 }

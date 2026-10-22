@@ -303,5 +303,18 @@
   "unansweredInboxEnabledDescription": "As respostas são enviadas como novas mensagens para a tarefa e uma pergunta repetida substitui a cópia mais antiga. Estas perguntas nunca bloqueiam um agente nem um passo do fluxo de trabalho.",
   "unansweredRetentionDays": "Fechar após (dias)",
   "unansweredRetentionDescription": "As perguntas sem resposta mais antigas do que isto fecham automaticamente. Intervalo permitido: 1 a 90 dias.",
-  "unansweredRetentionInvalid": "Introduza um número inteiro de 1 a 90."
+  "unansweredRetentionInvalid": "Introduza um número inteiro de 1 a 90.",
+  "clone": "Clonar",
+  "cloneWorkspace": "Clonar espaço de trabalho",
+  "cloneWorkspaceNamed": "Clonar {{name}}",
+  "cloneNameSuggestion": "{{name}} (cópia)",
+  "cloneDescription": "Copiar definições, repositórios, fluxos de trabalho, ligação ao GitHub e consultas de {{name}}. As tarefas, sessões, membros, segredos dos repositórios e outras integrações são excluídos. O início de sessão pessoal no GitHub mantém-se separado.",
+  "cloningWorkspace": "A clonar espaço de trabalho...",
+  "cloneSuccess": "Espaço de trabalho clonado",
+  "cloneUncertain": "A resposta foi interrompida. Verifique a lista de espaços de trabalho antes de tentar novamente; a cópia pode já existir.",
+  "cloneForbidden": "Não tem permissão para copiar este espaço de trabalho ou a sua ligação ao GitHub.",
+  "cloneSourceMissing": "O espaço de trabalho de origem já não está disponível.",
+  "cloneConfigurationUnsupported": "Este espaço de trabalho tem definições geridas, predefinições indisponíveis ou referências em fluxos de trabalho que não podem ser clonadas.",
+  "cloneFailed": "Não foi possível clonar o espaço de trabalho. Tente novamente.",
+  "workspaceActionsNamed": "Ações de {{name}}"
 }

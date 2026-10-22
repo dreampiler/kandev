@@ -10,6 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
+const inferenceBindingStateActive = "active"
+
 type inferenceObservation struct {
 	status utility.AttemptStatus
 	ref    agentruntime.InferenceClientRef
@@ -192,7 +194,7 @@ func (b *sharedInferenceConsumer) reconcileHeldInference(ctx context.Context, bi
 			known = false
 			held.State = inferenceStateUnknown
 		} else if status.State != utility.AttemptPrepared {
-			held.State = "active"
+			held.State = inferenceBindingStateActive
 		}
 		bindings[key] = held
 	}

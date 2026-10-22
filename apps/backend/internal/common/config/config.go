@@ -504,6 +504,8 @@ type OfficeConfig struct {
 //
 // See docs/decisions/0007-runtime-feature-flags.md for the pattern and rollout policy.
 type FeaturesConfig struct {
+	// IntegratedControl gates the cross-workspace navigation and existing-conversation surface.
+	IntegratedControl bool `mapstructure:"integrated_control" json:"integratedControl"`
 
 	// LSPBrowserContinuity gates runtime-owned language-server leases that stay
 	// connected across browser attachment loss. Off in every embedded profile.
@@ -542,7 +544,6 @@ type FeaturesConfig struct {
 	DynamicProfileTiers    bool `mapstructure:"dynamic_profile_tiers" json:"dynamicProfileTiers"`
 	ProviderUsageLimits    bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 	WorkspaceCollaboration bool `mapstructure:"workspace_collaboration" json:"workspaceCollaboration"`
-	IntegratedControl      bool `mapstructure:"integrated_control" json:"integratedControl"`
 
 	// DynamicCircuitBackoffEscalation lengthens the dynamic routing circuit
 	// backoff for repeated qualifying failures of one resource instead of

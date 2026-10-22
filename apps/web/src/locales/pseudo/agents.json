@@ -464,5 +464,17 @@
   "nativeUsage.observedAt": "Ōƀśēŕvēď àţ",
   "nativeUsage.limited": "Ḿēàśũŕēď àĺĺōŵàńćē ēxĥàũśţēď",
   "nativeUsage.reset": "Ŕēśēţ",
-  "nativeUsage.bindingChanged": "Ţĥē ēxēćũţĩōń àććōũńţ ćĥàńĝēď. Śţàŕţ ŵĩţĥ ţĥē ĩńţēńďēď àććōũńţ ƀēƒōŕē ćōńţĩńũĩńĝ."
+  "nativeUsage.bindingChanged": "Ţĥē ēxēćũţĩōń àććōũńţ ćĥàńĝēď. Śţàŕţ ŵĩţĥ ţĥē ĩńţēńďēď àććōũńţ ƀēƒōŕē ćōńţĩńũĩńĝ.",
+  "sessionRuntimeManaged": "Śēśśĩōń ŕũńţĩḿē: Ḿàńàĝēď ƀŷ Ķàńďēv",
+  "sessionRuntimeNative": "Śēśśĩōń ŕũńţĩḿē: Ńàţĩvē ĆĹĨ",
+  "sessionRuntimeHarness": "Śēśśĩōń ŕũńţĩḿē: Ĥàŕńēśś-ōŵńēď ĆĹĨ",
+  "sessionRuntimeCustom": "Śēśśĩōń ŕũńţĩḿē: Ćũśţōḿ ćōḿḿàńď",
+  "sessionRuntimeUnknown": "Śēśśĩōń ŕũńţĩḿē: Ũńķńōŵń",
+  "sessionRuntimePackage": "{{package}} · {{version}}",
+  "sessionRuntimeVersionUnknown": "Ũńķńōŵń vēŕśĩōń",
+  "sessionRuntimeNewSessions": "Ƒōŕ ńēŵ śēśśĩōńś",
+  "runtimeDiagnostics": "Ďĩàĝńōśţĩćś",
+  "runtimeDetectedLocalCLI": "Ďēţēćţēď ĺōćàĺ ĆĹĨ: {{path}}",
+  "runtimeLocalCLIVersion": "Ĺōćàĺ ĆĹĨ: {{name}} {{version}}",
+  "runtimeLocalCLIVersionUnknown": "Ĺōćàĺ ĆĹĨ: {{name}}, vēŕśĩōń ũńķńōŵń ({{reason}})"
 }
