@@ -1169,7 +1169,8 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 }
 
 // currentAgentCtlClient returns the unpinned client snapshot. Callers must
-// already hold agentctlLifecycleMu or be implementing the scoped lease.
+// already hold agentctlLifecycleMu, agentctlSourceMu (at least a TryRLock),
+// or be implementing the scoped lease.
 func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 	if ae == nil {
 		return nil
@@ -1216,10 +1217,9 @@ func (ae *AgentExecution) withAgentCtlClient(client *agentctl.Client, callback f
 }
 
 // publishAgentctlURL records the URL that reads must fall back to while a
-// client replacement or detach holds agentctlSourceMu's write side. Writers call
-// it before taking the lock: persistence reads the URL from another goroutine
-// and must still report a real endpoint instead of blanking
-// executors_running.agentctl_url.
+// client replacement or detach holds agentctlSourceMu's write side. Detach
+// retains the installed URL until the client is cleared, so persistence cannot
+// blank a still-installed endpoint while a workspace callback delays detach.
 func (ae *AgentExecution) publishAgentctlURL(url string) {
 	if ae == nil {
 		return
@@ -1247,11 +1247,16 @@ func (ae *AgentExecution) detachAgentctlClient() {
 	if ae == nil {
 		return
 	}
-	ae.publishAgentctlURL("")
+	url := ""
+	if client := ae.currentAgentCtlClient(); client != nil {
+		url = client.BaseURL()
+	}
+	ae.publishAgentctlURL(url)
 	ae.agentctlSourceMu.Lock()
 	defer ae.agentctlSourceMu.Unlock()
 	ae.agentctl = nil
 	ae.agentctlOverride.Store(nil)
+	ae.publishAgentctlURL("")
 }
 
 // MarkAgentctlReady records that agentctl passed its startup health check.

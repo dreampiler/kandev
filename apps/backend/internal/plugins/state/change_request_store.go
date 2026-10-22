@@ -67,8 +67,20 @@ func (s *Store) ChangeRequests() *ChangeRequestStore {
 }
 
 func (s *Store) initChangeRequestSchema() error {
-	_, err := s.db.Exec(dialect.RenderSchema(s.db.DriverName(), changeRequestSchema))
-	return err
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !dialect.IsPostgres(s.db.DriverName()) {
+		if err := migrateLegacyChangeRequests(tx); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(dialect.RenderSchema(s.db.DriverName(), changeRequestSchema)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 const changeRequestColumns = `id, installation_id, workspace_id, task_id, provider_id, provider_host,
@@ -82,27 +94,36 @@ func (s *ChangeRequestStore) ReportChangeRequest(ctx context.Context, row Change
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = now
 	}
-	var reported ChangeRequestRecord
-	err := s.db.GetContext(ctx, &reported, s.db.Rebind(`
+	mergedAt := changeRequestKnownTimestamp(s.db.DriverName(), "merged_at")
+	closedAt := changeRequestKnownTimestamp(s.db.DriverName(), "closed_at")
+	reported, err := scanChangeRequest(s.db.QueryRowxContext(ctx, s.db.Rebind(`
  INSERT INTO plugin_task_change_requests (`+changeRequestColumns+`)
  SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
  WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ? AND archived_at IS NULL)
  ON CONFLICT (installation_id, workspace_id, provider_id, provider_host, repository_id, number)
  DO UPDATE SET task_id=excluded.task_id, url=excluded.url, title=excluded.title,
- state=CASE WHEN plugin_task_change_requests.merged_at IS NOT NULL THEN 'merged' ELSE excluded.state END,
+ state=CASE WHEN `+mergedAt+` IS NOT NULL THEN 'merged' ELSE excluded.state END,
  head_branch=excluded.head_branch, base_branch=excluded.base_branch,
  created_at=CASE WHEN ? THEN excluded.created_at ELSE plugin_task_change_requests.created_at END,
- merged_at=COALESCE(plugin_task_change_requests.merged_at, excluded.merged_at),
- closed_at=COALESCE(excluded.closed_at, plugin_task_change_requests.closed_at),
+ merged_at=COALESCE(`+mergedAt+`, excluded.merged_at),
+ closed_at=COALESCE(excluded.closed_at, `+closedAt+`),
  updated_at=excluded.updated_at
  RETURNING `+changeRequestColumns),
 		uuid.NewString(), row.InstallationID, row.WorkspaceID, row.TaskID, row.ProviderID, row.ProviderHost,
 		row.RepositoryID, row.Number, row.URL, row.Title, row.State, row.HeadBranch, row.BaseBranch,
-		row.CreatedAt, row.MergedAt, row.ClosedAt, now, row.TaskID, row.WorkspaceID, createdProvided)
+		row.CreatedAt, row.MergedAt, row.ClosedAt, now, row.TaskID, row.WorkspaceID, createdProvided))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ChangeRequestRecord{}, ErrChangeRequestTargetChanged
 	}
 	return reported, err
+}
+
+func changeRequestKnownTimestamp(driver, column string) string {
+	qualified := "plugin_task_change_requests." + column
+	if dialect.IsPostgres(driver) {
+		return qualified
+	}
+	return "NULLIF(" + qualified + ",'')"
 }
 
 // RemoveChangeRequest is idempotent and cannot remove another installation's row.
