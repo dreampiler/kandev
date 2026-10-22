@@ -72,7 +72,7 @@ func TestAgentctlURLDoesNotWaitBehindPendingLifecycleWriter(t *testing.T) {
 }
 
 // A replacement publishes its URL before it takes the client source write side,
-// and a detach publishes an empty URL the same way. Persistence reads the URL
+// and detach keeps the installed URL until the client is cleared. Persistence reads the URL
 // from another goroutine, so it must still report a real endpoint while the
 // write side is held; otherwise the executors_running upsert blanks
 // agentctl_url for a live execution.

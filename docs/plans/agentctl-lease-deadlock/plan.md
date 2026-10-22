@@ -39,8 +39,9 @@ lease semantics of client replacement or detach.
   client under a try-locked source read.
 - A replacement or detach publishes its URL with an atomic before taking the
   source write side, and a read that cannot take the read side returns that
-  value. Persistence therefore never blanks `executors_running.agentctl_url`
-  for a live execution.
+  value. Detach retains the installed URL until it clears the client under
+  the source lock, then publishes empty. Persistence therefore never blanks
+  `executors_running.agentctl_url` for a live execution.
 - `restoreRecoveredFailedExecution` releases the lease right after
   `GetStatus`, before marking the execution ready.
 
@@ -51,5 +52,6 @@ lease semantics of client replacement or detach.
 ## Changed-path coverage
 
 The work order owns the lifecycle files above, the new
-`agentctl_url_lease_test.go`, and the new agentctl client lease requirement
+`agentctl_url_lease_test.go`, `agentctl_url_persistence_test.go`,
+`agentctl_recovery_lease_test.go`, and the new agentctl client lease requirement
 and system design.

@@ -28,9 +28,14 @@ agentctl client lease, and release the lease in
 - `AgentctlURL`: nil-safe; atomic override first, then the source client under
   `TryRLock`. A read that cannot take the read side returns the URL that the
   replacement or detach published before taking the write side, so an empty URL
-  means no client is set.
+  means no client is set. Detach publishes the installed URL before waiting
+  for callbacks and publishes empty only after clearing the client.
 - `restoreRecoveredFailedExecution`: release the lease after `GetStatus` and
   on the nil-client path, not by `defer`.
+- Regression coverage in `agentctl_url_persistence_test.go` for the persisted
+  URL during and after a callback-delayed detach, and
+  `agentctl_recovery_lease_test.go` for release before readiness persistence
+  and release on unsuccessful status verification.
 
 ## Out of scope
 
@@ -40,5 +45,5 @@ before taking the source write side.
 
 ## Verification
 
-- `go test ./internal/agent/runtime/lifecycle/ -run '^TestAgentctlURL' -count=1`
-  (pure unit test, no process is started)
+- `go test -trimpath ./internal/agent/runtime/lifecycle/ -run '^(TestAgentctlURL|TestRecoverAgentPromptStreamReleasesLeaseBeforePersistence|TestRestoreRecoveredFailedExecutionReleasesLeaseOnErrors)' -count=1`
+  (unit and isolated SQLite/HTTP consumer checks; no agent process is started)

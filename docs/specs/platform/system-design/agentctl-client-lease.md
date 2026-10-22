@@ -34,8 +34,9 @@ A replacement or detach holds the source write side, which would make
 `TryRLock` fail for a persistence read running on another goroutine. Both
 writers therefore publish the URL they are moving to or from with an atomic
 before they take the lock: a replacement publishes the incoming client's URL and
-a detach publishes the empty string. A read that cannot take the read side
-returns that published value instead of blanking
+a detach publishes the installed client URL before waiting, then publishes the
+empty string after clearing both client lookup tiers under the source lock.
+A read that cannot take the read side returns that published value instead of blanking
 `executors_running.agentctl_url` and `last_seen_at` for a live execution; an
 empty URL therefore only appears when no client is set. Persistence still does
 not fall back to the prior row's URL for an empty read, because an empty URL is
@@ -58,4 +59,9 @@ Lifecycle unit tests hold a read lease, queue a writer, and require
 `AgentctlURL` to return the client URL without waiting, plus the override and
 empty-client cases. One test holds the source write side while a replacement
 publishes its URL and requires the read to keep that URL, so the executors
-upsert cannot blank a live endpoint. No process is started.
+upsert cannot blank a live endpoint. A workspace callback/detach regression
+uses the real SQLite repository to verify that an installed endpoint survives a
+pending detach and clears after detach finishes. A recovery-consumer test
+checks lease availability before readiness persistence, with separate status
+error, stopped-process, cancellation, and missing-client cases. No agent process
+is started.
