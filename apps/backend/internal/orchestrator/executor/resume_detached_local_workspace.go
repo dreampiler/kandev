@@ -6,7 +6,7 @@ import (
 )
 
 // A detached local repository preference is historical, not a current task
-// attachment. Explicit recovery uses the already-owned task workspace without
+// attachment. Resume uses the already-owned task workspace without
 // recreating its deleted repository inventory or changing the stored preference.
 func detachedLocalResumeUsesTaskWorkspace(
 	task *v1.Task,
@@ -25,7 +25,9 @@ func detachedLocalResumeUsesTaskWorkspace(
 }
 
 func localExistingWorkspaceResume(req *LaunchAgentRequest, env *models.TaskEnvironment) bool {
-	if req == nil || env == nil || req.RecoveryAction == "" || !req.WorkspaceReuseRequired ||
+	// Ordinary cold resume and explicit recovery share persisted workspace
+	// ownership. Recovery fences are checked independently before prompt admission.
+	if req == nil || env == nil || !req.WorkspaceReuseRequired ||
 		req.UseWorktree || env.ID == "" || env.WorkspacePath == "" {
 		return false
 	}

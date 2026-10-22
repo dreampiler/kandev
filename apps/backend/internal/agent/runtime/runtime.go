@@ -34,6 +34,7 @@ type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
+type WorkspaceInfo = lifecycle.WorkspaceInfo
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type DeliveryRecordEvidenceRequest = lifecycle.DeliveryRecordEvidenceRequest
