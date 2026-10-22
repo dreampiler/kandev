@@ -79,7 +79,7 @@ var providerRules = map[string][]rule{
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),
 	},
 	"opencode-acp": {
-		mustRule("opencode.stderr.usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.usage_limit.v1", `(?im)^\s*(?:(?:AI_APICallError|Error|Internal\s+error|API\s+Error):\s*)?\b(?:free|\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 		// OpenCode Go reports its subscription limit through the ACP prompt
 		// error without a reset time. A correlated period usage-limit notice,
 		// when present, matches the rule above first and keeps its reset hint.
