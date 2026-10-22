@@ -1168,7 +1168,8 @@ func (e *AgentExecution) setPromptTurnID(turnID string) {
 }
 
 // currentAgentCtlClient returns the unpinned client snapshot. Callers must
-// already hold agentctlLifecycleMu or be implementing the scoped lease.
+// already hold agentctlLifecycleMu, agentctlSourceMu (at least a TryRLock),
+// or be implementing the scoped lease.
 func (ae *AgentExecution) currentAgentCtlClient() *agentctl.Client {
 	if ae == nil {
 		return nil
