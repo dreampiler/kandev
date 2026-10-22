@@ -269,6 +269,11 @@ type LaunchSessionRequest struct {
 	// ActivationSource distinguishes passive task opening from an explicit
 	// launch action. An omitted value preserves the existing behavior.
 	ActivationSource LaunchActivationSource `json:"activation_source,omitempty"`
+	// Automatic marks a launch an agent requested through Kandev MCP tools
+	// rather than a direct user action, so the session ceiling admits it as
+	// automatic instead of as a manual override. It is set only by server-side
+	// handlers and is not part of the wire request.
+	Automatic bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -905,7 +910,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin, reusePreparedPrimary: req.reusePreparedPrimary},
+		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin, Origin: agentLaunchOrigin(req), reusePreparedPrimary: req.reusePreparedPrimary},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -966,7 +971,7 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 	}
 	autoStart := req.AutoStart || req.ActivationSource == LaunchActivationSourceSessionOpen
 	parkingStamp := s.captureWorkflowParkingStamp(ctx, req.SessionID)
-	options := startCreatedSessionOptions{}
+	options := startCreatedSessionOptions{origin: agentLaunchOrigin(req)}
 	if !req.NoInitialPrompt {
 		beforeAdmission, accepted, callbackErr := s.initialSubmissionDispatchCallbacks(
 			ctx, req.TaskID, req.SessionID, req.Prompt, req.PlanMode, req.Attachments,
@@ -1117,10 +1122,20 @@ func (s *Service) sessionOpenRecoveryWaitingResponse(
 }
 
 func launchOriginForActivation(req *LaunchSessionRequest) launchOrigin {
-	if req != nil && req.ActivationSource == LaunchActivationSourceSessionOpen {
+	if req != nil && (req.Automatic || req.ActivationSource == LaunchActivationSourceSessionOpen) {
 		return launchOriginAutomatic
 	}
 	return originFromAutoStart(req != nil && req.AutoStart)
+}
+
+// agentLaunchOrigin is the admission origin an agent-requested launch carries
+// into startTask or startCreatedSession. Empty keeps their autoStart-derived
+// origin.
+func agentLaunchOrigin(req *LaunchSessionRequest) launchOrigin {
+	if req != nil && req.Automatic {
+		return launchOriginAutomatic
+	}
+	return ""
 }
 
 func (s *Service) deferredLaunchResponse(

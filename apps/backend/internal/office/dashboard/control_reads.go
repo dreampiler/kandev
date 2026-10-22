@@ -41,7 +41,12 @@ func (h *Handler) controlRead(c *gin.Context, section string) bool {
 	case "activity":
 		data, err = reader.ReadControlHistory(ctx, c.Param("wsId"), now)
 	case "dashboard":
-		data, err = reader.ReadControlMetrics(ctx, c.Param("wsId"), now)
+		var metrics *sqlite.ControlMetrics
+		metrics, err = reader.ReadControlMetrics(ctx, c.Param("wsId"), now)
+		if err == nil {
+			metrics.SharedCapacityWaiting = h.svc.controlCapacityWaiting(ctx)
+		}
+		data = metrics
 	case "tasks":
 		data, err = h.controlTasks(c, ctx, reader, now)
 	}

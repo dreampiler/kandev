@@ -134,7 +134,8 @@ export type LaunchQueueCapacityCause = {
  * the capacity sample the payload already carries. A grade refusal names the
  * full grade and its usage when exactly one grade is full; otherwise it says
  * the grade limit without numbers. When both limits refused, the narrower
- * grade limit is the one named.
+ * grade limit is the one named, or the overall limit when the sample shows it
+ * reached and no single grade can be named.
  */
 export function launchQueueCapacityCause(
   view: LaunchQueueViewModel,
@@ -144,12 +145,19 @@ export function launchQueueCapacityCause(
     const full = (view.capacity?.grades ?? []).filter(
       (row) => row.inUse !== null && row.limit !== null && row.inUse >= row.limit,
     );
-    if (full.length !== 1) return { key: "task:launchQueueCauseGradeUnmeasured" };
-    const [row] = full;
-    return {
-      key: "task:launchQueueCauseGrade",
-      values: { grade: row.grade, inUse: row.inUse!, limit: row.limit! },
-    };
+    if (full.length === 1) {
+      const [row] = full;
+      return {
+        key: "task:launchQueueCauseGrade",
+        values: { grade: row.grade, inUse: row.inUse!, limit: row.limit! },
+      };
+    }
+    if (reason === "ceiling_both_limits" && capacityAtLimit(view.capacity))
+      return {
+        key: "task:launchQueueCauseTotal",
+        values: { inUse: view.capacity!.inUse, limit: view.capacity!.limit },
+      };
+    return { key: "task:launchQueueCauseGradeUnmeasured" };
   }
   if (reason === "ceiling_total_limit" && view.capacity)
     return {
@@ -157,4 +165,9 @@ export function launchQueueCapacityCause(
       values: { inUse: view.capacity.inUse, limit: view.capacity.limit },
     };
   return null;
+}
+
+/** A recorded overall limit is full; a limit of zero is not a denominator. */
+function capacityAtLimit(capacity: LaunchQueueViewModel["capacity"]): boolean {
+  return Boolean(capacity && capacity.limit > 0 && capacity.inUse >= capacity.limit);
 }

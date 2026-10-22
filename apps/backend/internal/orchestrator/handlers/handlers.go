@@ -742,9 +742,11 @@ func (h *Handlers) wsGetTaskSessionStatus(ctx context.Context, msg *ws.Message) 
 }
 
 type wsSessionActionRequest struct {
-	SessionID string `json:"session_id"`
-	Reason    string `json:"reason,omitempty"`
-	Force     bool   `json:"force,omitempty"`
+	AwaitTerminal       bool   `json:"await_terminal,omitempty"`
+	ExpectedExecutionID string `json:"expected_execution_id,omitempty"`
+	SessionID           string `json:"session_id"`
+	Reason              string `json:"reason,omitempty"`
+	Force               bool   `json:"force,omitempty"`
 }
 
 // parseSessionAction parses a session-scoped action request, returning an error message on failure.
@@ -771,6 +773,16 @@ func (h *Handlers) wsStopSession(ctx context.Context, msg *ws.Message) (*ws.Mess
 	if reason == "" {
 		reason = "stopped via API"
 	}
+	if req.AwaitTerminal {
+		if req.Force || req.ExpectedExecutionID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "awaited stop requires expected_execution_id and force=false", nil)
+		}
+		result, err := h.service.StopSessionAwaited(ctx, req.SessionID, req.ExpectedExecutionID, reason)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Awaited stop incomplete: "+err.Error(), map[string]any{"stop_result": result})
+		}
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
 	if err := h.service.StopSession(ctx, req.SessionID, reason, req.Force); err != nil {
 		h.logger.Error("failed to stop session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to stop session: "+err.Error(), nil)
@@ -791,13 +803,14 @@ func (h *Handlers) wsDeleteSession(ctx context.Context, msg *ws.Message) (*ws.Me
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }
 
-// wsSetPrimarySession marks a session as the task's primary session.
+// wsSetPrimarySession marks a session as the task's primary session. It is the
+// explicit user promotion, so it goes through PromotePrimarySession.
 func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	req, errResp := h.parseSessionAction(msg)
 	if errResp != nil {
 		return errResp, nil
 	}
-	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
+	if err := h.service.PromotePrimarySession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
 	}

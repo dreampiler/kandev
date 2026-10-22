@@ -30,11 +30,22 @@ import (
 // until a turn completes successfully, and stops when the same candidate fails
 // with the same code again. Every declined or stopped case keeps today's
 // recovery surface. The schedule, the attempt count, and the failures survive
-// a restart; the timer is re-armed from them.
+// a restart; the timer is re-armed from them. A run that cannot act yet (an
+// active turn or a session that has not settled) re-arms the same schedule
+// instead of dropping it, so the retry still fires once the turn ends. A
+// terminal session, or one whose logical profile changed, stops the schedule.
+// A retry that never runs because the turn never settles is a turn-settlement
+// problem rather than something this loop can fix.
 
 // failedRouteAutoRetryMinDelay is the shortest wait before an automatic
 // failed-route retry, even when no candidate circuit is open.
 const failedRouteAutoRetryMinDelay = time.Minute
+
+// failedRouteAutoRetryDeferredDelay is how long a run that cannot act yet (an
+// active turn or a session that has not settled) waits before the schedule is
+// re-armed. The durable schedule is left untouched, so the next run still
+// checks the original due time.
+const failedRouteAutoRetryDeferredDelay = time.Minute
 
 type dynamicRecoveryRouteLister interface {
 	ListRecoveryRouteStates(context.Context) ([]dynamicruntime.RouteState, error)
@@ -130,7 +141,7 @@ func (s *Service) failedRouteAutoRetryTarget(
 
 func (s *Service) armFailedRouteAutoRetry(sessionID string, pending dynamicruntime.PendingFailedRouteRetry) {
 	generation := pending.Generation
-	s.armDynamicRecoveryTimer(sessionID, pending.Due, func(ctx context.Context) {
+	s.armDynamicRecoveryTimer(sessionID, generation, pending.Due, func(ctx context.Context) {
 		s.runFailedRouteAutoRetry(ctx, sessionID, generation)
 	})
 }
@@ -162,7 +173,7 @@ func (s *Service) restoreFailedRouteAutoRetries(ctx context.Context) {
 // is busy or settled differently, or a workspace that turned the setting off
 // leaves the recovery surface as it is.
 func (s *Service) runFailedRouteAutoRetry(ctx context.Context, sessionID string, generation int64) {
-	s.removeDynamicPolicyRecoveryTimer(sessionID)
+	s.removeDynamicPolicyRecoveryTimer(sessionID, generation)
 	if !s.dynamicPolicyRecoveryActive(ctx) {
 		return
 	}
@@ -177,6 +188,10 @@ func (s *Service) runFailedRouteAutoRetry(ctx context.Context, sessionID string,
 		return s.claimFailedRouteAutoRetry(ctx, sessionID, generation)
 	})
 	if err != nil {
+		if errors.Is(err, ErrRouteActionActiveTurn) {
+			s.deferFailedRouteAutoRetryLogged(ctx, sessionID, generation)
+			return
+		}
 		s.logger.Info("automatic failed-route retry did not run; route left for manual recovery",
 			zap.String("session_id", sessionID), zap.Int64("route_generation", generation), zap.Error(err))
 		return
@@ -190,11 +205,15 @@ func (s *Service) runFailedRouteAutoRetry(ctx context.Context, sessionID string,
 
 // claimFailedRouteAutoRetry admits the retry under the route-action lock: the
 // session must be settled and waiting for input, and the durable schedule of
-// generation must still be due and unconsumed. A schedule that is not due
-// yet is re-armed instead.
+// generation must still be due and unconsumed. A session that has not settled
+// yet is re-armed; a terminal session stops the schedule instead of repeating.
 func (s *Service) claimFailedRouteAutoRetry(ctx context.Context, sessionID string, generation int64) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil || session.State != models.TaskSessionStateWaitingForInput {
+	if err != nil || session == nil {
+		return false
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		s.deferFailedRouteAutoRetryLogged(ctx, sessionID, generation)
 		return false
 	}
 	pending, err := s.profileExecutionResolver.ClaimFailedRouteRetry(ctx, sessionID, generation)
@@ -202,7 +221,65 @@ func (s *Service) claimFailedRouteAutoRetry(ctx context.Context, sessionID strin
 		s.armFailedRouteAutoRetry(sessionID, pending)
 		return false
 	}
+	if err == nil {
+		s.clearFailedRouteRetryDeferral(sessionID)
+	}
 	return err == nil
+}
+
+func (s *Service) deferFailedRouteAutoRetryLogged(ctx context.Context, sessionID string, generation int64) {
+	if !s.deferFailedRouteAutoRetry(ctx, sessionID, generation) {
+		return
+	}
+	if s.noteFailedRouteRetryDeferral(sessionID, generation) {
+		s.logger.Info("automatic failed-route retry deferred until the session can take it",
+			zap.String("session_id", sessionID), zap.Int64("route_generation", generation))
+		return
+	}
+	s.logger.Debug("automatic failed-route retry is still deferred",
+		zap.String("session_id", sessionID), zap.Int64("route_generation", generation))
+}
+
+// deferFailedRouteAutoRetry re-arms the retry recorded for generation after a
+// run that could not act yet. It reuses failedRouteAutoRetryTarget, so a
+// terminal session, a session whose profile changed, or a route that is no
+// longer in manual recovery stops the schedule instead of repeating it. Only a
+// schedule still pending for the same generation is re-armed.
+func (s *Service) deferFailedRouteAutoRetry(ctx context.Context, sessionID string, generation int64) bool {
+	state, _, ok := s.failedRouteAutoRetryTarget(ctx, sessionID)
+	if !ok || state.Generation != generation {
+		return false
+	}
+	if _, pending := dynamicruntime.FailedRouteRetryPending(*state); !pending {
+		return false
+	}
+	s.armFailedRouteAutoRetry(sessionID, dynamicruntime.PendingFailedRouteRetry{
+		Generation: generation,
+		Due:        time.Now().UTC().Add(failedRouteAutoRetryDeferredDelay),
+	})
+	return true
+}
+
+// noteFailedRouteRetryDeferral reports whether this is the first deferral of
+// the generation, so an unchanged turn that keeps the retry waiting logs once
+// at Info and then at Debug.
+func (s *Service) noteFailedRouteRetryDeferral(sessionID string, generation int64) bool {
+	s.dynamicRecoveryMu.Lock()
+	defer s.dynamicRecoveryMu.Unlock()
+	if s.failedRouteRetryDeferrals == nil {
+		s.failedRouteRetryDeferrals = make(map[string]int64)
+	}
+	if s.failedRouteRetryDeferrals[sessionID] == generation {
+		return false
+	}
+	s.failedRouteRetryDeferrals[sessionID] = generation
+	return true
+}
+
+func (s *Service) clearFailedRouteRetryDeferral(sessionID string) {
+	s.dynamicRecoveryMu.Lock()
+	defer s.dynamicRecoveryMu.Unlock()
+	delete(s.failedRouteRetryDeferrals, sessionID)
 }
 
 // resetFailedRouteAutoRetryChain ends a session's automatic retry chain after
@@ -215,5 +292,7 @@ func (s *Service) resetFailedRouteAutoRetryChain(ctx context.Context, session *m
 		!errors.Is(err, dynamicruntime.ErrStaleGeneration) {
 		s.logger.Warn("failed to reset automatic failed-route retry chain",
 			zap.String("session_id", session.ID), zap.Error(err))
+		return
 	}
+	s.clearFailedRouteRetryDeferral(session.ID)
 }

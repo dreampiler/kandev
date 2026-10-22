@@ -761,6 +761,9 @@ type startCreatedSessionOptions struct {
 	// ceilingEntryBinding is carried by a replay and checked at both the
 	// admission boundary and immediately before runtime dispatch.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// origin overrides the autoStart-derived admission origin, for example
+	// for an agent-requested start. It round-trips through the replay payload.
+	origin launchOrigin
 }
 
 //nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
@@ -776,8 +779,12 @@ func (s *Service) startCreatedSession(
 	if retryLaunchInContext(ctx) == nil && s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain
 	}
+	origin := options.origin
+	if origin == "" {
+		origin = originFromAutoStart(autoStart)
+	}
 	manualTaskID := ""
-	if !autoStart && retryLaunchInContext(ctx) == nil {
+	if origin == launchOriginManual && retryLaunchInContext(ctx) == nil {
 		manualTaskID = taskID
 	}
 	ctx = models.WithExplicitManualCreation(ctx, manualTaskID)
@@ -834,7 +841,7 @@ func (s *Service) startCreatedSession(
 
 	startPayload := seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options)
 	startPayload = s.enrichCeilingLaunchPayload(ctx, taskID, sessionID, startPayload)
-	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, originFromAutoStart(autoStart)), startPayload)
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, ceilingClaimedReplayOrigin(ctx, taskID, origin), startPayload)
 	if err != nil {
 		return nil, err
 	}
@@ -874,6 +881,9 @@ func (s *Service) startCreatedSession(
 		if err := s.profileExecutionResolver.ValidateProfile(ctx, effectiveProfileID); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.refuseMaterializedRouteProfileChange(ctx, session, effectiveProfileID); err != nil {
+		return nil, err
 	}
 
 	// If the workflow step overrode the profile, update the session record in DB
@@ -6154,10 +6164,7 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	}
 
 	previous := s.terminalPrimaryBeforeSwitch(ctx, sessionID)
-	s.primarySwitchMu.Lock()
-	err := s.repo.SetSessionPrimary(ctx, sessionID)
-	s.primarySwitchMu.Unlock()
-	if err != nil {
+	if err := s.setSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)

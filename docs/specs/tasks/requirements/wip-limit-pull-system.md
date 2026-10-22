@@ -49,3 +49,17 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   the source and destination steps, the destination WIP limit, and the reason
   `wip_limit_reached`, so a queued arrival is distinguishable from entry
   behavior that never ran.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.11:** An admitted task keeps its WIP
+  slot until it leaves the step, is archived, or is deleted, whatever its
+  session state. A workspace may opt in, per workspace and off by default, to
+  stop counting an admitted `IN_PROGRESS` or `FAILED` task whose sessions are
+  all terminal (or that has none) once a configurable grace (default 10
+  minutes, positive whole minutes) has passed since its last task or session
+  change. The released task is not moved, re-stated, or un-admitted; it counts
+  again as soon as it has a live session. After the grace, the next queued or
+  feeder task is pulled without another task move or a restart.
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.12:** For any workflow step the caller
+  can read, Kandev shall list each admitted task with whether it counts toward
+  the step's WIP limit and why (live session, no live session, release grace
+  pending with its release time, or released), and the number counted shall
+  equal the number admission uses.

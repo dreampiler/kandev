@@ -672,6 +672,7 @@
       "task_creation_authorizations",
       "task_environment_checkout_adoptions",
       "task_environment_kubernetes",
+      "task_message_send_operations",
       "task_workflow_session_bindings",
       "workspace_collaboration_grants",
       "task_message_shell_output",

@@ -16,6 +16,7 @@ import type { Coordinator } from "@/lib/api/domains/coordinator-api";
 import type { ControlConversationLists } from "@/hooks/domains/coordinator/control-conversation-lists";
 import { ControlLastRefresh } from "./control-read-state";
 import { ControlRefreshBanner } from "./control-refresh-banner";
+import { ControlDbBadge } from "./control-db-badge";
 
 function originalControlTask(
   lists: ControlConversationLists | undefined | false,
@@ -61,6 +62,7 @@ export function IntegratedControlPage() {
             </p>
           )}
         </div>
+        <ControlDbBadge />
         <ControlLastRefresh />
         <Button
           variant="ghost"

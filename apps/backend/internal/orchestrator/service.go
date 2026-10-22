@@ -75,6 +75,13 @@ type ServiceConfig struct {
 	// SessionMemoryGuardEnabled holds launches that would add an agent process
 	// while the host is low on available memory or above its commit ceiling.
 	SessionMemoryGuardEnabled bool
+	// ResumeQueueAfterSilentRestore re-enables Auto-run that a successful
+	// silent restart restore paused.
+	ResumeQueueAfterSilentRestore bool
+	// ReplacedSessionReclaim stops the execution of a session the user
+	// replaced as primary (PromotePrimarySession), once that session has
+	// settled.
+	ReplacedSessionReclaim bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -744,6 +751,14 @@ type passthroughDispatchToken struct {
 }
 
 // Service is the main orchestrator service
+// dynamicRecoveryTimer is the single per-session dynamic recovery timer and
+// the route generation it was armed for. A timer armed for a stale generation
+// never replaces a newer one.
+type dynamicRecoveryTimer struct {
+	timer      *time.Timer
+	generation int64
+}
+
 type Service struct {
 	autonomousExecutorContext func(context.Context, string, string) (context.Context, error)
 	config                    ServiceConfig
@@ -965,7 +980,11 @@ type Service struct {
 	dynamicRecoveryMu     sync.Mutex
 	dynamicRecoveryCtx    context.Context
 	dynamicRecoveryCancel context.CancelFunc
-	dynamicRecoveryTimers map[string]*time.Timer
+	dynamicRecoveryTimers map[string]*dynamicRecoveryTimer
+	// failedRouteRetryDeferrals records the generation whose automatic retry
+	// deferral was already logged at Info, so a turn that keeps the retry
+	// waiting does not repeat that line every minute.
+	failedRouteRetryDeferrals map[string]int64
 
 	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
 	// an agent resolves a prompt-first task title. It is optional for tests and
@@ -1255,10 +1274,12 @@ type Service struct {
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
 
-	idleParkingMu         sync.Mutex
-	idleParkingCandidates map[idleParkingCandidateKey]time.Time
-	idleParkingFocusAt    map[string]time.Time
-	idleParkingInFlight   map[idleParkingCandidateKey]struct{}
+	idleParkingMu           sync.Mutex
+	replacedSessionReclaims sync.Map // map[sessionID]replacedSessionReclaim
+	primarySessionReclaimMu sync.Mutex
+	idleParkingCandidates   map[idleParkingCandidateKey]time.Time
+	idleParkingFocusAt      map[string]time.Time
+	idleParkingInFlight     map[idleParkingCandidateKey]struct{}
 
 	// lspLeases pins an execution while a browser-independent language-server
 	// lease owns its task-host stream. The gateway is wired through this narrow
@@ -1882,7 +1903,7 @@ func NewService(
 		taskLaunchRecoveryRepo:       taskLaunchRecoveryRepo,
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
-		dynamicRecoveryTimers:        make(map[string]*time.Timer),
+		dynamicRecoveryTimers:        make(map[string]*dynamicRecoveryTimer),
 		reservedPromptCallbacks:      newReservedPromptCallbackOwner(),
 		sendNowCtx:                   sendNowCtx,
 		sendNowCancel:                sendNowCancel,

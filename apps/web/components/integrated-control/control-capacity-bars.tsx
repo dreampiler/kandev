@@ -1,8 +1,9 @@
 import { useTranslation } from "react-i18next";
+import type { NativeSharedCapacityWaiting } from "@/lib/types/control-native";
 import type { SessionCapacityObservation } from "@/lib/types/system";
 import { useControlCapacityFreshness } from "@/hooks/domains/coordinator/use-control-capacity-freshness";
 import { ControlCapacitySnapshot } from "./control-capacity-snapshot";
-import { capacityWaitingTotal } from "./control-signals";
+import { capacityGradeWaiting, capacityWaitingTotal } from "./control-signals";
 
 const count = (value: unknown): number | null =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -49,15 +50,21 @@ export function ControlCapacityBars({ observation }: { observation?: SessionCapa
 export function ControlCapacityLine({
   observation,
   lastConfirmed,
+  wipWaiting,
+  sharedWaiting,
 }: {
   observation?: SessionCapacityObservation;
   lastConfirmed?: SessionCapacityObservation;
+  wipWaiting?: number | null;
+  sharedWaiting?: NativeSharedCapacityWaiting;
 }) {
   const { t } = useTranslation();
   const { known } = useControlCapacityFreshness(observation);
   const unknown = t("common:unknown");
   const used = known ? count(observation?.in_use) : null;
   const waiting = known ? capacityWaitingTotal(observation) : null;
+  const wip = count(wipWaiting);
+  const grade = capacityGradeWaiting(observation, known, sharedWaiting);
   return (
     <section className="space-y-2 rounded-lg border p-3" data-testid="control-capacity-line">
       <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
@@ -71,6 +78,14 @@ export function ControlCapacityLine({
         <span className="tabular-nums">
           {t("sidebar:controlSummary.capacityWaiting", { waiting: waiting ?? unknown })}
         </span>
+        <span className="tabular-nums">
+          {t("sidebar:integratedControl.waitingWip")}: {wip ?? unknown}
+        </span>
+        {observation?.policy === "all" && (
+          <span className="tabular-nums">
+            {t("sidebar:integratedControl.waitingGrade")}: {grade ?? unknown}
+          </span>
+        )}
       </p>
       <ControlCapacityBars observation={observation} />
       <details className="text-xs">
@@ -78,7 +93,12 @@ export function ControlCapacityLine({
           {t("sidebar:controlSummary.capacityDetails")}
         </summary>
         <div className="pt-2">
-          <ControlCapacitySnapshot observation={observation} lastConfirmed={lastConfirmed} />
+          <ControlCapacitySnapshot
+            observation={observation}
+            lastConfirmed={lastConfirmed}
+            wipWaiting={wipWaiting}
+            sharedWaiting={sharedWaiting}
+          />
         </div>
       </details>
     </section>

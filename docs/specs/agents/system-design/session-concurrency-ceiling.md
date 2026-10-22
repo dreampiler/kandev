@@ -162,7 +162,14 @@ launch request
 ```
 
 Manual origins bypass refusal and write a manual-override audit entry. Automatic
-origins never become manual during replay. Task focus that resumes an
+origins never become manual during replay. A server-only `Automatic` marker on
+`LaunchSessionRequest` identifies a start an agent requested through Kandev MCP
+(the create-task auto-start, including its prepare and initial prompt start).
+`launchOriginForActivation` and `agentLaunchOrigin` turn it into the automatic
+origin for `startTask` and `startCreatedSession`; the `start_created` payload
+records it in `origin` so replay keeps the class instead of re-deriving it from
+`auto_start`. As for other automatic origins, the launch carries no explicit
+manual creation authority. Task focus that resumes an
 idle-suspended session is passive inspection, like opening a conversation, so it
 uses the automatic origin. Its deferred record keeps the completed-session
 permission and the idle-suspension check, so a parked completed session stays a

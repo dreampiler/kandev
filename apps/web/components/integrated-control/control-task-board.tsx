@@ -9,8 +9,15 @@ import { ControlFilterChips } from "./control-filter-chips";
 import { ControlStatusPill } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
 import { ATTENTION_SIGNALS, sortBySignal, taskSignal, type TaskSignal } from "./control-signals";
+import {
+  stageCounts,
+  TASK_STAGES,
+  taskStage,
+  taskStageTotal,
+  type TaskStage,
+} from "./control-stages";
 import { relativeTime, shortId } from "./overview-format";
-import { useControlSignals } from "./use-control-signals";
+import type { ControlSignals } from "./use-control-signals";
 
 type BoardFilter = "all" | "attention" | "running" | "waiting" | "failed" | "noSession";
 const FILTERS: BoardFilter[] = ["all", "attention", "running", "waiting", "failed", "noSession"];
@@ -22,6 +29,15 @@ const FILTER_LABELS: Record<BoardFilter, string> = {
   failed: "sidebar:controlSummary.state.failed",
   noSession: "sidebar:controlSummary.state.noSession",
 };
+const STAGE_LABELS: Record<TaskStage, string> = {
+  startable: "sidebar:controlSummary.stage.startable",
+  running: "sidebar:controlSummary.stage.running",
+  review: "sidebar:controlSummary.stage.review",
+  held: "sidebar:controlSummary.stage.held",
+  completed: "sidebar:controlSummary.stage.completed",
+};
+
+type StageFilter = TaskStage | "all";
 
 function matches(filter: BoardFilter, signal: TaskSignal) {
   if (filter === "all") return true;
@@ -32,11 +48,11 @@ function matches(filter: BoardFilter, signal: TaskSignal) {
 type Row = { task: NativeTask; signal: TaskSignal };
 
 /** Every unarchived task in one table, ranked so the rows that need a person come first. */
-export function ControlTaskBoard() {
+export function ControlTaskBoard({ signals }: { signals: ControlSignals }) {
   const { t } = useTranslation();
   const control = useIntegratedControl();
-  const signals = useControlSignals();
   const [filter, setFilter] = useState<BoardFilter>("all");
+  const [stage, setStage] = useState<StageFilter>("all");
   const names = Object.fromEntries(
     (control?.data?.workspaces ?? []).map((workspace) => [workspace.id, workspace.name]),
   );
@@ -56,7 +72,10 @@ export function ControlTaskBoard() {
   const counts = Object.fromEntries(
     FILTERS.map((value) => [value, rows.filter((row) => matches(value, row.signal)).length]),
   ) as Record<BoardFilter, number>;
-  const visible = rows.filter((row) => matches(filter, row.signal));
+  const stages = stageCounts(signals.tasks);
+  const visible = rows.filter(
+    (row) => matches(filter, row.signal) && (stage === "all" || taskStage(row.task) === stage),
+  );
   const failures = signals.taskReads.data?.filter((row) => row.status !== "ready") ?? [];
   return (
     <section className="space-y-2" data-testid="control-task-board">
@@ -73,6 +92,19 @@ export function ControlTaskBoard() {
           testId="control-task-filter"
         />
       </div>
+      <ControlFilterChips
+        chips={[
+          { value: "all", label: t("office:all"), count: taskStageTotal(stages) },
+          ...TASK_STAGES.map((value) => ({
+            value,
+            label: t(STAGE_LABELS[value]),
+            count: stages[value],
+          })),
+        ]}
+        selected={stage}
+        onSelect={setStage}
+        testId="control-task-stage"
+      />
       {signals.taskReads.status !== "ready" && <ControlReadState {...signals.taskReads} />}
       {failures.map((row) => (
         <div key={row.id} className="flex items-center text-xs text-muted-foreground">

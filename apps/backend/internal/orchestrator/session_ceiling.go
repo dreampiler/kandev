@@ -45,7 +45,7 @@ const (
 const (
 	ceilingReasonRefused           = "ceiling"
 	ceilingReasonManualOverride    = "ceiling_manual_override"
-	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
+	ceilingReasonUnknownPopulation = sessioncapacity.WaitingReasonUnknownPopulation
 	ceilingReasonSuperseded        = "ceiling_superseded"
 	ceilingReasonDeferWriteFailed  = "ceiling_defer_write_failed"
 	// ceilingReasonDroppedTaskIneligible covers AC-17b(a)-(d): the task is

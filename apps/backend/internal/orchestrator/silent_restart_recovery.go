@@ -368,9 +368,10 @@ func (s *Service) rotateDeadSilentRestoreCandidate(
 	return s.rotateSilentRestoreCandidate(ctx, store, attemptID, checkpoint, running, inputs)
 }
 
-// pauseSilentRestoreQueue keeps queued work from racing the restore. The
-// returned resume re-enables Auto-run only if this restore paused it; call it
-// once the restore has succeeded. It only flips the policy: the queue drains
+// pauseSilentRestoreQueue keeps queued work from racing the restore. With
+// features.resumeQueueAfterSilentRestore on, the returned resume re-enables
+// Auto-run only if this restore paused it; call it once the restore has
+// succeeded. With the flag off the queue stays paused for the user. It only flips the policy: the queue drains
 // on the next drain pass, outside the restore's locks. A failed restore keeps
 // the queue paused for the operator's recovery decision.
 func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID string) (func(), error) {
@@ -393,7 +394,7 @@ func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID
 		return noop, nil
 	}
 	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
-	if !wasAutoRun {
+	if !s.config.ResumeQueueAfterSilentRestore || !wasAutoRun {
 		return noop, nil
 	}
 	return func() {

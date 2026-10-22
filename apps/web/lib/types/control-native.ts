@@ -23,6 +23,13 @@ export type NativeHistory = {
   sources: Record<string, NativeCoverage>;
   events: NativeEvent[];
 };
+export type NativeSharedCapacityWaiting = {
+  known: boolean;
+  /** Waiters refused by a grade limit, including both-limit refusals. */
+  grade: number;
+  /** Every shared-capacity refusal. */
+  total: number;
+};
 export type NativeDashboard = {
   workspace_id: string;
   generated_at: string;
@@ -33,6 +40,13 @@ export type NativeDashboard = {
   sessions: Record<string, number>;
   /** Unarchived, unfinished tasks whose primary session waits for input. */
   waiting_input_tasks: number;
+  /** Unarchived tasks queued until a WIP-limited destination step admits them. */
+  wip_waiting_tasks: number;
+  /**
+   * Installation-wide shared-capacity waiters. Identical across workspace
+   * responses: read it once, never sum it.
+   */
+  shared_capacity_waiting?: NativeSharedCapacityWaiting;
   queued_messages: number;
   transitions_24h: number;
   completed_tasks_24h: number;

@@ -9,6 +9,7 @@ const FAILURE_KEYS = {
   disconnected: "sidebar:controlRefresh.bannerDisconnected",
   error: "sidebar:controlRefresh.bannerError",
   denied: "sidebar:integratedControl.readDenied",
+  unsupported: "sidebar:controlRefresh.bannerUnsupported",
 } as const;
 
 /** Whether any workspace's coordinator, conversation or task list failed to read. */

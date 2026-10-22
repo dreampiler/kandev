@@ -605,6 +605,10 @@ type FeaturesConfig struct {
 	// effect together with Coordinator, CoordinatorPhase2 and CoordinatorPhase3.
 	CoordinatorPhase31 bool `mapstructure:"coordinator_phase31" json:"coordinatorPhase31"`
 
+	// ResumeQueueAfterSilentRestore turns Auto-run back on after a successful
+	// silent restart restore that paused it. Off in every shipped profile.
+	ResumeQueueAfterSilentRestore bool `mapstructure:"resume_queue_after_silent_restore" json:"resumeQueueAfterSilentRestore"`
+
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
@@ -614,6 +618,10 @@ type FeaturesConfig struct {
 	// the host is low on available memory or above its commit ceiling. Off in
 	// every shipped profile; launches otherwise follow only the session ceiling.
 	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
+	// ReplacedSessionReclaim stops the execution of a session the user replaced
+	// as primary, once it settles. Off in every shipped profile; replaced
+	// sessions otherwise keep running.
+	ReplacedSessionReclaim bool `mapstructure:"replaced_session_reclaim" json:"replacedSessionReclaim"`
 
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.

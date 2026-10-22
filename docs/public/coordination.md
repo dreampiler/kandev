@@ -195,6 +195,17 @@ Use `get_task_conversation_kandev` to read a primary or explicit session convers
 
 Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents, for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
 
+### Set direct children's processing order
+
+In task-mode MCP, use `reorder_child_tasks_kandev(ordered_task_ids=[...], placement="in_place")`
+to choose the order of your direct children in the same workspace, workflow step
+and admitted or queued band. The default `in_place` permutes their current slots;
+`front` puts the named children first and preserves the remaining relative order.
+The board and normal queued admission use the persisted positions. A membership
+change triggers one refresh and retry; another conflict returns an error. The
+response includes the step, band, revision, task IDs and positions. Use ordering
+for scheduling and `blocked_by` only for a real input dependency.
+
 ## Wait for child tasks
 
 On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once when every active direct child is `COMPLETED`, `FAILED`, or `CANCELLED` and the parent has an active session.

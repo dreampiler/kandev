@@ -1207,6 +1207,8 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "send-operation-readback", enabled: kanban, register: func(s *Server) { s.registerGetTaskMessageOperationTool() }},
+		{name: "child-task-ordering", enabled: kanban, register: func(s *Server) { s.registerReorderChildTasksTool() }},
 		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
 			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
@@ -1445,21 +1447,22 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("archive_task_kandev", s.archiveTaskHandler()),
 	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Use delivery_mode="report" with an explicit session_id to append a status report without waking or queueing the target; workspace collaboration must be enabled and the calling conversation must have the native task-write scope and report grant. A report cannot answer a pending question. Returns "queued", "sent", "started", or "reported".`),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
-			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
-			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
-			mcp.WithString("delivery_mode",
-				mcp.Enum("queued", "interrupt", "report"),
-				mcp.DefaultString("queued"),
-				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
-			),
-			mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
+	messageTaskTool := mcp.NewTool("message_task_kandev",
+		mcp.WithDescription(`Send a prompt to an existing Kandev task session, not a native subagent. Use delivery_mode="queued" (default) for information that can wait, or delivery_mode="interrupt" for urgent replacement work on a running direct child; non-parent interrupts fail and if cancellation is unsafe, the prompt remains queued. Halt-only work uses stop_task_kandev. The primary session is used by default; if it is terminal, Kandev tries the newest session that can accept messages, or names spawn_session_kandev when none can. Pass reply_to_question_id for an autopilot child question. Use delivery_mode="report" with an explicit session_id to append a status report without waking or queueing the target; workspace collaboration must be enabled and the calling conversation must have the native task-write scope and report grant. A report cannot answer a pending question. Returns "queued", "sent", "started", or "reported".`),
+		mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
+		mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
+		mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
+		mcp.WithString("delivery_mode",
+			mcp.Enum("queued", "interrupt", "report"),
+			mcp.DefaultString("queued"),
+			mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
 		),
-		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+		mcp.WithString("reply_to_question_id", mcp.Description("Optional question ID from an autopilot child. When set, the direct parent answer is recorded against that pending question and the delivery is idempotent.")),
 	)
+	if s.profile.Surface == mcpprofile.SurfaceKanbanTask {
+		mcp.WithString("operation_id", mcp.Description("Optional identity for one queued/interrupt logical send. Reusing the same value reads its stored outcome without another dispatch; a different target, question or request conflicts. After a timeout, use get_task_message_operation_kandev. Not supported for status reports."))(&messageTaskTool)
+	}
+	s.mcpServer.AddTool(messageTaskTool, s.wrapHandler("message_task_kandev", s.messageTaskHandler()))
 	s.mcpServer.AddTool(
 		mcp.NewTool("stop_task_kandev",
 			mcp.WithDescription(`Stop all live sessions on a direct child task. Only its direct parent may call this halt-only tool; self, sibling, parent, grandparent, unrelated, and cross-workspace requests fail. It does not send a prompt or start a replacement turn; use message_task_kandev with delivery_mode="interrupt" to stop and steer. Accepted sessions become CANCELLED and teardown runs asynchronously; an eligible active task moves to REVIEW. If nothing is running, returns status="not_running" without changing state. Worktrees, commits, records, descendants, and queued messages are preserved. CANCELLED sessions cannot be resumed; use spawn_session_kandev with a new prompt to restart in the same workspace.`),

@@ -316,5 +316,11 @@
   "cloneSourceMissing": "源工作区已不可用。",
   "cloneConfigurationUnsupported": "此工作区包含无法克隆的受管理设置、不可用的默认配置或工作流引用。",
   "cloneFailed": "无法克隆工作区，请重试。",
-  "workspaceActionsNamed": "{{name}}的操作"
+  "workspaceActionsNamed": "{{name}}的操作",
+  "wipReleaseTitle": "释放无活动会话占用的 WIP 名额",
+  "wipReleaseDescription": "开启后，处于进行中或失败状态且没有活动智能体会话的任务，在宽限期结束后不再计入其工作流步骤的 WIP 上限，以便排队中的下一个任务可以开始。任务的列和状态保持不变，一旦会话启动便会重新计入。默认关闭：此类任务会一直占用名额，直到离开该步骤。",
+  "wipReleaseEnabled": "释放没有活动会话的任务所占名额",
+  "wipReleaseGraceMinutes": "宽限期（分钟）",
+  "wipReleaseGraceHint": "自任务或会话最后一次活动起经过此时间后释放名额。",
+  "wipReleaseGraceMustBePositive": "请输入大于零的整数分钟数。"
 }

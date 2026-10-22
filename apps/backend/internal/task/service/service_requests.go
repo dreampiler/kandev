@@ -246,6 +246,8 @@ type UpdateWorkflowRequest struct {
 	// RequireExplicitAgentProfile opts this workflow into rejecting task
 	// creation when the caller supplies no explicit agent profile selection.
 	RequireExplicitAgentProfile *bool `json:"require_explicit_agent_profile,omitempty"`
+	// Hidden archives (true) or restores (false) the workflow; nil keeps it.
+	Hidden *bool `json:"hidden,omitempty"`
 }
 
 // CreateWorkspaceRequest contains the data for creating a new workspace
@@ -278,6 +280,10 @@ type UpdateWorkspaceRequest struct {
 	// Unanswered-clarification inbox settings; nil keeps the stored value.
 	ClarificationUnansweredInboxEnabled  *bool `json:"clarification_unanswered_inbox_enabled,omitempty"`
 	ClarificationUnansweredRetentionDays *int  `json:"clarification_unanswered_retention_days,omitempty"`
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes set
+	// the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool `json:"wip_sessionless_release_enabled,omitempty"`
+	WIPSessionlessReleaseGraceMinutes *int  `json:"wip_sessionless_release_grace_minutes,omitempty"`
 	// Visibility is "private" or "org". Unknown values normalize to private:
 	// unrecognized input must never widen access.
 	Visibility *string `json:"visibility,omitempty"`

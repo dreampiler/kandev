@@ -2,10 +2,12 @@ import { ControlProviderUsage } from "./control-provider-usage";
 import { ControlHistory } from "./control-history";
 import { ControlWorkspaces } from "./control-workspaces";
 import { ControlCapacityLine } from "./control-capacity-bars";
+import { ControlBlockerChips } from "./control-blocker-chips";
 import { ControlTaskBoard } from "./control-task-board";
 import { ControlOverview } from "./control-overview";
 import { ControlInbox } from "./control-inbox";
 import { ControlWorkspaceCompare } from "./control-workspace-compare";
+import { wipWaitingFigure } from "./control-signals";
 import { useControlSignals } from "./use-control-signals";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
@@ -36,16 +38,7 @@ export function IntegratedControlDashboard({
       {view === "inbox" && <ControlInbox />}
       {view === "history" && <ControlHistory workspaceId={workspaceId} />}
       {view === "workspaces" && <WorkspacesView workspaceId={workspaceId} />}
-      {view === "activity" && (
-        <>
-          <ControlCapacityLine
-            observation={control.data.capacity}
-            lastConfirmed={control.data.lastConfirmedCapacity}
-          />
-          <ControlTaskBoard />
-          {rows.length > 0 && <CoordinatorFacts view={view} rows={rows} />}
-        </>
-      )}
+      {view === "activity" && <ControlActivityView rows={rows} />}
       {view === "providers" && <ControlProviderUsage workspaceId={workspaceId} />}
       {workspaces.length === 0 && (
         <p className="text-sm text-muted-foreground">
@@ -53,6 +46,25 @@ export function IntegratedControlDashboard({
         </p>
       )}
     </div>
+  );
+}
+
+/** Capacity waits and the task board share one recorded-dashboard read. */
+function ControlActivityView({ rows }: { rows: FactRows }) {
+  const control = useIntegratedControl();
+  const signals = useControlSignals();
+  return (
+    <>
+      <ControlCapacityLine
+        observation={control?.data?.capacity}
+        lastConfirmed={control?.data?.lastConfirmedCapacity}
+        wipWaiting={wipWaitingFigure(signals.complete, signals.total)}
+        sharedWaiting={signals.sharedWaiting}
+      />
+      <ControlBlockerChips />
+      <ControlTaskBoard signals={signals} />
+      {rows.length > 0 && <CoordinatorFacts view="activity" rows={rows} />}
+    </>
   );
 }
 

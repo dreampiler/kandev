@@ -29,11 +29,13 @@ export type DynamicAgentProfileEditorDraft = {
   candidates: DynamicAgentCandidate[];
   profileEnabled: boolean;
   dynamicVersion: number;
+  keepModelWhileRunning: boolean;
   currentProfile: AgentProfile;
   savedProfile: AgentProfile;
   hasExternalConflict: boolean;
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
+  updateKeepModelWhileRunning: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
   moveCandidate: (index: number, direction: -1 | 1) => void;
   removeCandidate: (index: number) => void;
@@ -69,8 +71,9 @@ export function dynamicDraftRevision(
   name: string,
   candidates: DynamicAgentCandidate[],
   enabled: boolean,
+  keepModelWhileRunning = true,
 ): string {
-  return JSON.stringify({ name, candidates, enabled });
+  return JSON.stringify({ name, candidates, enabled, keepModelWhileRunning });
 }
 
 // eslint-disable-next-line max-lines-per-function -- coordinates one draft and its candidate mutations.
@@ -85,6 +88,9 @@ export function useDynamicAgentProfileEditorDraft({
   );
   const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
+  const [keepModelWhileRunning, setKeepModelWhileRunning] = useState(
+    profile.dynamic?.keepModelWhileRunning !== false,
+  );
   const [savedProfile, setSavedProfile] = useState(profile);
   const [hasExternalConflict, setHasExternalConflict] = useState(false);
   const previousProfileRef = useRef(profile);
@@ -96,7 +102,7 @@ export function useDynamicAgentProfileEditorDraft({
     ...profile,
     name,
     enabled: profileEnabled,
-    dynamic: { version: dynamicVersion, candidates },
+    dynamic: { version: dynamicVersion, candidates, keepModelWhileRunning },
   };
   savedProfileRef.current = savedProfile;
   currentProfileRef.current = currentProfile;
@@ -105,11 +111,16 @@ export function useDynamicAgentProfileEditorDraft({
     nextName: string,
     nextCandidates: DynamicAgentCandidate[],
     nextEnabled = profileEnabled,
+    nextKeepModel = keepModelWhileRunning,
   ) => {
     onDraftChange?.({
       name: nextName,
       enabled: nextEnabled,
-      dynamic: { version: dynamicVersion, candidates: nextCandidates },
+      dynamic: {
+        version: dynamicVersion,
+        candidates: nextCandidates,
+        keepModelWhileRunning: nextKeepModel,
+      },
     });
   };
 
@@ -121,6 +132,11 @@ export function useDynamicAgentProfileEditorDraft({
   const updateProfileEnabled = (enabled: boolean) => {
     setProfileEnabled(enabled);
     notifyDraft(name, candidates, enabled);
+  };
+
+  const updateKeepModelWhileRunning = (enabled: boolean) => {
+    setKeepModelWhileRunning(enabled);
+    notifyDraft(name, candidates, profileEnabled, enabled);
   };
 
   const addCandidate = (executionProfileId: string) => {
@@ -256,6 +272,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
     setHasExternalConflict(false);
     submittedProfileRef.current = null;
   };
@@ -265,6 +282,7 @@ export function useDynamicAgentProfileEditorDraft({
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setKeepModelWhileRunning(nextProfile.dynamic?.keepModelWhileRunning !== false);
   }, []);
 
   const markProfileSubmitted = useCallback((submitted: AgentProfile | null) => {
@@ -316,11 +334,13 @@ export function useDynamicAgentProfileEditorDraft({
     candidates,
     profileEnabled,
     dynamicVersion,
+    keepModelWhileRunning,
     currentProfile,
     savedProfile,
     hasExternalConflict,
     updateName,
     updateProfileEnabled,
+    updateKeepModelWhileRunning,
     addCandidate,
     moveCandidate,
     removeCandidate,

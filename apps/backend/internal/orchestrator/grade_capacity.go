@@ -11,10 +11,10 @@ import (
 )
 
 const (
-	ceilingReasonNeedsConfiguration = "ceiling_needs_configuration"
-	ceilingReasonGradeLimit         = "ceiling_grade_limit"
-	ceilingReasonTotalLimit         = "ceiling_total_limit"
-	ceilingReasonBothLimits         = "ceiling_both_limits"
+	ceilingReasonNeedsConfiguration = sessioncapacity.WaitingReasonNeedsConfiguration
+	ceilingReasonGradeLimit         = sessioncapacity.WaitingReasonGradeLimit
+	ceilingReasonTotalLimit         = sessioncapacity.WaitingReasonTotalLimit
+	ceilingReasonBothLimits         = sessioncapacity.WaitingReasonBothLimits
 )
 
 type admittedExecutionLister interface {

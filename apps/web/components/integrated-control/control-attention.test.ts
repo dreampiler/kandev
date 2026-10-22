@@ -15,6 +15,7 @@ const figures = (over: Partial<WorkspaceFigures> = {}): WorkspaceFigures => ({
   running: 0,
   waitingInput: 0,
   queued: 0,
+  wipWaiting: 0,
   completed24h: 0,
   moves24h: 0,
   failedSessions: 0,

@@ -75,6 +75,20 @@ return to an earlier conversation.
   the new primary has an open recovery block or an `action_required` dynamic
   route. A live previous primary always keeps its queue. This fork runs the
   hand-off without the upstream `features.terminalPrimaryQueueHandoff` flag.
+- **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.6:** When the
+  `features.replacedSessionReclaim` flag is on and a session loses the primary
+  role because the user explicitly promoted another session, Kandev shall stop
+  that session's agent execution once its active turn and known pending work
+  settle, without changing its session state, so its conversation stays
+  resumable in `WAITING_FOR_INPUT` or `IDLE`. It shall stop only the execution
+  the session held at replacement, and never a session that became primary
+  again, a session still starting or running or in a terminal state, an Office
+  or coordinator owner, a parked workflow session, an archived task, or a
+  session that cannot auto-resume. Automatic promotion, session deletion, and
+  workflow profile switches (including their queue transfer) shall have no
+  effect on the old session's runtime. The flag is off in every shipped
+  profile; with it off, replaced sessions keep running until idle suspension or
+  a manual stop.
 
 ## Out of scope
 

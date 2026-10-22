@@ -2,8 +2,10 @@ import Link from "@/components/routing/app-link";
 import { controlHref } from "@/lib/navigation/integrated-control";
 import { useTranslation } from "react-i18next";
 import { formatDateTime } from "@/lib/i18n/formats";
+import type { NativeSharedCapacityWaiting } from "@/lib/types/control-native";
 import type { SessionCapacityObservation } from "@/lib/types/system";
 import { ControlCapacityReadState } from "./control-capacity-read-state";
+import { capacityGradeWaiting } from "./control-signals";
 import { useControlCapacityFreshness } from "@/hooks/domains/coordinator/use-control-capacity-freshness";
 
 const WAIT_LABELS = {
@@ -13,6 +15,8 @@ const WAIT_LABELS = {
   ceiling_needs_configuration: "sidebar:integratedControl.capacityWaitingConfiguration",
   ceiling_unknown_population: "sidebar:integratedControl.capacityWaitingUnknown",
 } as const;
+
+const UNKNOWN_KEY = "common:unknown";
 
 function observedCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -31,12 +35,16 @@ function freshnessKey(known: boolean, stale: boolean) {
 export function ControlCapacitySnapshot({
   observation,
   lastConfirmed,
+  wipWaiting,
+  sharedWaiting,
 }: {
   observation?: SessionCapacityObservation;
   lastConfirmed?: SessionCapacityObservation;
+  wipWaiting?: number | null;
+  sharedWaiting?: NativeSharedCapacityWaiting;
 }) {
   const { t } = useTranslation();
-  const unknown = t("common:unknown");
+  const unknown = t(UNKNOWN_KEY);
   const { validTime, known, stale } = useControlCapacityFreshness(observation);
   return (
     <section className="space-y-3 rounded-lg border p-4" data-testid="control-capacity-snapshot">
@@ -93,6 +101,12 @@ export function ControlCapacitySnapshot({
           {observation.policy === "all" && (
             <CapacityGrades observation={observation} known={known} />
           )}
+          <CapacityWaitingSummary
+            observation={observation}
+            known={known}
+            wipWaiting={wipWaiting}
+            sharedWaiting={sharedWaiting}
+          />
           {observation.policy === "all" && (
             <CapacityWaitCounts observation={observation} validTime={validTime} />
           )}
@@ -110,7 +124,7 @@ function CapacityGrades({
   known: boolean;
 }) {
   const { t } = useTranslation();
-  const unknown = t("common:unknown");
+  const unknown = t(UNKNOWN_KEY);
   const grades = [
     ...new Set([
       ...Object.keys(observation.grade_limits ?? {}),
@@ -153,7 +167,7 @@ function CapacityWaitCounts({
   validTime: boolean;
 }) {
   const { t } = useTranslation();
-  const unknown = t("common:unknown");
+  const unknown = t(UNKNOWN_KEY);
   const counts = observation.waiting?.counts;
   const known =
     validTime &&
@@ -171,6 +185,42 @@ function CapacityWaitCounts({
             </dd>
           </div>
         ))}
+      </dl>
+    </div>
+  );
+}
+
+/** The two waiting figures the control aggregate adds: grade ceiling and board WIP. */
+function CapacityWaitingSummary({
+  observation,
+  known,
+  wipWaiting,
+  sharedWaiting,
+}: {
+  observation: SessionCapacityObservation;
+  known: boolean;
+  wipWaiting?: number | null;
+  sharedWaiting?: NativeSharedCapacityWaiting;
+}) {
+  const { t } = useTranslation();
+  const unknown = t(UNKNOWN_KEY);
+  const grade = capacityGradeWaiting(observation, known, sharedWaiting);
+  return (
+    <div data-testid="control-capacity-waiting-summary">
+      <h3 className="text-sm font-medium">{t("sidebar:integratedControl.waitingTitle")}</h3>
+      <dl className="grid gap-1 text-sm">
+        <div className="flex justify-between gap-3">
+          <dt>{t("sidebar:integratedControl.waitingGrade")}</dt>
+          <dd className="tabular-nums" data-testid="control-capacity-waiting-grade">
+            {grade ?? unknown}
+          </dd>
+        </div>
+        <div className="flex justify-between gap-3">
+          <dt>{t("sidebar:integratedControl.waitingWip")}</dt>
+          <dd className="tabular-nums" data-testid="control-capacity-waiting-wip">
+            {observedCount(wipWaiting) ? wipWaiting : unknown}
+          </dd>
+        </div>
       </dl>
     </div>
   );

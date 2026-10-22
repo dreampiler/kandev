@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatNumber } from "@/lib/i18n/formats";
 import { useIntegratedControl } from "./integrated-control-provider";
+import { useControlCapacityFreshness } from "@/hooks/domains/coordinator/use-control-capacity-freshness";
 import { ControlCapacityBars } from "./control-capacity-bars";
 import { toneSurfaceClass, toneTextClass } from "./control-status-pill";
 import type { WorkspaceFigures } from "./control-signals";
@@ -114,6 +115,7 @@ export function ControlKpis({
 }) {
   const { t } = useTranslation();
   const capacity = useIntegratedControl()?.data?.capacity;
+  const { known: capacityKnown } = useControlCapacityFreshness(capacity);
   const stalled = overallStalled(signals);
   const { total } = signals;
   const note = (text: string) =>
@@ -142,6 +144,12 @@ export function ControlKpis({
         testId="control-kpi-capacity"
       >
         <ControlCapacityBars observation={capacity} />
+        {capacityKnown && signals.waiting !== null && (
+          // The recorded wait counts are keyed by rejection reason, not by grade.
+          <p className="truncate text-xs text-muted-foreground">
+            {t("sidebar:controlSummary.capacityWaiting", { waiting: signals.waiting })}
+          </p>
+        )}
       </Kpi>
       <Kpi
         label={t("sidebar:controlSummary.kpi.inProgress")}

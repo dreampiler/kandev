@@ -299,7 +299,8 @@ func (m *ControlServer) handleDeleteInstance(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":            "instance stopped successfully",
-		"inference_attempts": inst.FinalInferenceSnapshot(),
+		"message":              "instance stopped successfully",
+		"inference_attempts":   inst.FinalInferenceSnapshot(),
+		"managed_process_stop": inst.FinalManagedStopReceipt(),
 	})
 }

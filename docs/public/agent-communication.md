@@ -48,6 +48,14 @@ By default, the message goes to the task's primary session. To target another se
 - `spawn_session_kandev` returns `{task_id, session_id, state, agent_profile_id}`. Pass its `session_id` to `message_task_kandev`.
 - The returned `agent_profile_id` is the effective profile after workflow resolution. A pinned step profile wins, then the workflow default. Without a workflow profile, an explicit profile wins before normal inheritance rules.
 
+With `features.replacedSessionReclaim` on, when you make another session the
+primary, Kandev stops the previous primary's agent process within about 30
+seconds, after its active turn and known pending work settle. The conversation
+stays waiting for input and resumes when you message it again. Automatic
+promotion and workflow step switches do not stop anything. Office and
+coordinator owners and parked workflow sessions keep their existing lifecycle
+rules.
+
 Delivery behaviour depends on the target session's state at the moment of the call:
 
 | Target session state | What happens | Return value |
@@ -68,6 +76,25 @@ If the interrupt cannot dispatch immediately, the message stays safely queued fo
 normal turn-completion drain. This mode is intentionally restricted to the target task's
 direct parent; any other sender that requests `interrupt` receives a hard error instead
 of being silently downgraded to `queued`.
+
+### Reading back a send after a timeout
+
+On the kanban task surface, give one queued or interrupt send an `operation_id`.
+Reuse that same identity for the same target, prompt, mode, requested session and
+parent-question reply. A replay reads the retained receipt without dispatching
+another message. Different request values return `operation_id_conflict`.
+Status reports keep their existing append-only path and do not accept this field.
+
+Use `get_task_message_operation_kandev` with that identity after a timeout. The
+server scopes the read to its own calling task and session; the result never
+contains the stored prompt. A committed record names the accepted dispatch and
+its message or queue-entry ID. `queued` is acceptance into the queue, not proof
+that the provider replied. Pending and `failed/outcome_unknown` both mean **do
+not resend**. Only a definite `dispatch_rejected` sets `retry_safe=true`.
+
+Records are retained for seven days. A missing retained record does not prove
+that no historical delivery occurred and does not authorize automatic replay.
+This readback does not replace native provider-delivery ACK or recovery evidence.
 
 ## Receiving and replying
 

@@ -1,0 +1,35 @@
+---
+created: 2026-10-20
+status: done
+requirements:
+  - REQ-PLATFORM-SILENT-RESTORE-QUEUE-RESUME-001
+system_design:
+  - ../../specs/platform/system-design/silent-restore-queue-resume.md
+legacy_specs: []
+---
+
+# Implementation Plan: Opt-in queue resume after silent restart restore
+
+## Overview
+
+A successful silent restart restore leaves the Auto-run pause it set, so queued
+messages stop after every backend restart. An opt-in flag returns Auto-run to
+its earlier state once the restore succeeds.
+
+## Scope
+
+In scope: `features.resumeQueueAfterSilentRestore` (config, runtime flag
+registry, profiles, orchestrator service config, public configuration table)
+and the resume function returned by `pauseSilentRestoreQueue`.
+
+Excluded: any change with the flag off, dispatch inside the restore, and the
+cancel-path pause.
+
+## Work orders
+
+- [x] [Task 01: Resume the queue a successful silent restore paused](task-01-silent-restore-queue-resume.md)
+
+## Changed-path coverage
+
+The work order owns the orchestrator, config, runtime flag, profile and public
+docs changes, the permanent tests, and the new requirement and design.

@@ -293,6 +293,13 @@ require the current exclusive probe lease.
   selections and do not rewrite recorded decisions.
 - Turn-level execution profile, provider, model, and route-generation badges are
   immutable and survive reload even when the current route or profile changes.
+- The session's logical profile and its materialized route stay paired.
+  `startCreatedSession` calls `refuseMaterializedRouteProfileChange` before it
+  persists a changed profile: when `LoadRouteState` returns a positive
+  generation for a different logical profile, the start fails with
+  `ErrMaterializedRouteProfileChange` and nothing is written. A different
+  dynamic profile is reached through a new session (the workflow
+  profile-switch path), not by relabelling this one.
 
 ## Scenarios
 

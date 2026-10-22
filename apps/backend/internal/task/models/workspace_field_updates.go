@@ -21,4 +21,8 @@ type WorkspaceFieldUpdate struct {
 
 	ClarificationUnansweredInboxEnabled  *bool
 	ClarificationUnansweredRetentionDays *int
+	// WIPSessionlessReleaseEnabled and WIPSessionlessReleaseGraceMinutes
+	// carry the opt-in sessionless WIP slot release policy.
+	WIPSessionlessReleaseEnabled      *bool
+	WIPSessionlessReleaseGraceMinutes *int
 }
