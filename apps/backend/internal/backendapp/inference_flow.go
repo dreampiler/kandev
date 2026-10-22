@@ -11,6 +11,8 @@ import (
 	"github.com/kandev/kandev/internal/system/sessioncapacity"
 )
 
+const inferenceFlowOutcomeFailed = "failed"
+
 func (b *sharedInferenceConsumer) logInferenceFlow(ctx context.Context, binding sessioncapacity.InferenceBinding, stage, outcome, reason string, duration int64) {
 	logger.EmitExecutionFlow(b.flowLogger, ctx, logger.ExecutionFlow{Stage: stage, Outcome: outcome, Reason: reason, DurationMS: duration, TaskID: binding.TaskID, SessionID: binding.SessionID, ExecutionID: binding.InstanceID, ParentExecutionID: binding.ParentExecutionID, AttemptID: binding.AttemptID, OwnerID: binding.OwnerID, ReservationID: binding.Key, ProfileID: binding.ExecutionProfileID, Model: binding.Model, Grade: binding.Grade})
 }
@@ -18,7 +20,7 @@ func (b *sharedInferenceConsumer) logInferenceFlow(ctx context.Context, binding 
 func (b *sharedInferenceConsumer) finishInferenceFlow(ctx context.Context, binding sessioncapacity.InferenceBinding, started time.Time, response *utility.PromptResponse, err error) {
 	outcome, reason := "completed", ""
 	if err != nil || response == nil || !response.Success {
-		outcome, reason = "failed", "inference_request_failed"
+		outcome, reason = inferenceFlowOutcomeFailed, "inference_request_failed"
 	}
 	var capacityErr *agentruntime.InferenceCapacityError
 	if errors.As(err, &capacityErr) {
@@ -30,7 +32,7 @@ func (b *sharedInferenceConsumer) finishInferenceFlow(ctx context.Context, bindi
 func (b *sharedInferenceConsumer) logInferenceResult(ctx context.Context, binding sessioncapacity.InferenceBinding, started time.Time, response *utility.PromptResponse, err error) {
 	outcome := "returned"
 	if err != nil || response == nil || !response.Success {
-		outcome = "failed"
+		outcome = inferenceFlowOutcomeFailed
 	}
 	b.logInferenceFlow(ctx, binding, "inference", outcome, "", time.Since(started).Milliseconds())
 }

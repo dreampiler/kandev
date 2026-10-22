@@ -1622,7 +1622,7 @@ func storageAction() apiAction {
 		if err != nil {
 			return nil, err
 		}
-		artifact := &storagepkg.TemporaryArtifact{ID: id, Kind: storagepkg.TemporaryArtifactKindImproveBundle, Path: "/tmp/" + id, MarkerToken: id + "-marker", State: storagepkg.TemporaryArtifactStateActive, OwnerPID: 1, Metadata: json.RawMessage(`{}`)}
+		artifact := &storagepkg.TemporaryArtifact{ID: id, Kind: storagepkg.TemporaryArtifactKindImproveBundle, Path: filepath.Join(os.TempDir(), id), MarkerToken: id + "-marker", State: storagepkg.TemporaryArtifactStateActive, OwnerPID: 1, Metadata: json.RawMessage(`{}`)}
 		if err := store.(*storagepkg.Store).CreateTemporaryArtifact(s.Context, artifact); err != nil {
 			return nil, err
 		}
@@ -1668,7 +1668,7 @@ func storageAction() apiAction {
 		if err != nil {
 			return err
 		}
-		if err := store.(*storagepkg.Store).CreateTemporaryArtifact(s.Context, &storagepkg.TemporaryArtifact{ID: id, Kind: storagepkg.TemporaryArtifactKindImproveBundle, Path: "/tmp/duplicate", MarkerToken: "duplicate", State: storagepkg.TemporaryArtifactStateActive}); err == nil {
+		if err := store.(*storagepkg.Store).CreateTemporaryArtifact(s.Context, &storagepkg.TemporaryArtifact{ID: id, Kind: storagepkg.TemporaryArtifactKindImproveBundle, Path: filepath.Join(os.TempDir(), "duplicate"), MarkerToken: "duplicate", State: storagepkg.TemporaryArtifactStateActive}); err == nil {
 			return fmt.Errorf("duplicate temporary artifact succeeded")
 		}
 		return nil

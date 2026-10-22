@@ -704,6 +704,7 @@ func startAgentInfrastructure(
 		return false
 	}
 	lifecycleMgr.SetAgentDeliveryRepository(repos.Task)
+	lifecycleMgr.SetProviderTurnSettlement(repos.Task)
 
 	// ============================================
 	// WORKTREE MANAGER
@@ -870,6 +871,10 @@ func startAgentInfrastructure(
 	})
 	if services.DynamicProfileResolver != nil {
 		agentSettingsController.SetAccountBlockReleaser(services.DynamicProfileResolver)
+		agentSettingsController.SetRoutingCircuitReader(newRoutingCircuitReader(services.DynamicProfileResolver))
+		if cfg.Features.DynamicProfileTiers {
+			agentSettingsController.SetDynamicTierPreviewer(services.DynamicProfileResolver)
+		}
 	}
 	// An enabled automation is a standing instruction to launch against a
 	// profile. Nothing is running, so it never reaches the active-session list,
@@ -1542,16 +1547,37 @@ func startGatewayAndServe(
 		return restoreQuiesceErr
 	}
 
-	// Wire subscription usage provider into the office agents service so the
-	// /agents/:id/utilization endpoint can fetch live utilization data.
-	// Skipped when the Office feature flag is off (services.OfficeSvcs is nil).
-	if services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil {
-		if cfg.Features.ProviderUsageLimits {
+	// Settings snapshots and allowance/tier admission share a cache. Office
+	// uses execution-bound observations while usage limits are enabled.
+	usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
+	officeUsageEnabled := services.OfficeSvcs != nil && services.OfficeSvcs.Agents != nil
+	if officeUsageEnabled && !cfg.Features.ProviderUsageLimits {
+		services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
+	}
+	if cfg.Features.ProviderUsageLimits {
+		allowances := &providerTurnAllowances{profileUsageSnapshot: newProfileUsageSnapshot(usageAdapter), claims: repos.Task}
+		agentSettingsController.SetProfileUsageProvider(allowances)
+		lifecycleMgr.SetProviderTurnAdmission(allowances)
+		if officeUsageEnabled {
 			services.OfficeSvcs.Agents.SetUsageProvider(&nativeUsageProviderAdapter{read: lifecycleMgr.ReadOfficeProfileExecutionUsage})
-		} else {
-			usageAdapter := newUsageProviderAdapter(repos.AgentSettings, agentRegistry)
-			services.OfficeSvcs.Agents.SetUsageProvider(usageAdapter)
 		}
+	}
+	providerLimits := newProviderLimitService(repos.Task, repos.AgentSettings, newDynamicLimitCalendar(usageAdapter, repos.Task))
+	if cfg.Features.ProviderUsageLimits {
+		tierLimits := newProviderTierLimitService(usageAdapter, repos.Task)
+		usageAdapter.tierLimits = tierLimits
+		providerLimits.tiers = tierLimits
+		limiter := newTierLimitAdapter(usageAdapter, providerLimits.calendar)
+		services.DynamicProfileResolver.SetLimitChecker(limiter)
+		services.DynamicProfileResolver.SetLimitObserver(limiter)
+		services.DynamicProfileResolver.SetLimitFailureResolver(limiter)
+		services.DynamicProfileResolver.SetProviderLimitReader(repos.Task)
+		if subscription, err := tierLimits.Subscribe(eventBus); err != nil {
+			log.Warn("provider limit request observation unavailable", zap.Error(err))
+		} else {
+			addCleanup(func() error { return subscription.Unsubscribe() })
+		}
+		agentSettingsController.SetProviderLimitService(providerLimits)
 	}
 
 	startup.AfterReady(ctx, func() { services.Task.StartAutoArchiveLoop(ctx) })

@@ -47,7 +47,14 @@ return to an earlier conversation.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.2:** When the primary session stops
   or is deleted, an automatic promotion shall prefer a nonterminal session that
   uses the current step's effective profile and shall rank a parked session
-  last. Within a rank, running, then other active, then idle sessions win.
+  below the others. A session with an open recovery block for its current
+  incarnation and generation, or whose dynamic route is `action_required`,
+  shall not inherit the role after a stop; when it is the only remaining active
+  session, the stopped primary keeps the role. After a deletion, such a session
+  shall rank last and remain the fallback. Within a rank, running, then other
+  active, then idle sessions win. A FAILED written by the rollback of a resume
+  attempt that still owns the primary session shall not start an automatic
+  promotion.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.3:** An automatic promotion shall
   never select a terminal session. After a stop, it shall still require an
   active session. After a deletion, it may select any nonterminal session. When
@@ -55,11 +62,24 @@ return to an earlier conversation.
   become primary.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.4:** An automatic promotion shall
   not move queued messages between sessions or change an explicit session
-  selection.
+  selection, except under the terminal-primary hand-off of
+  AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5.
+- **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5:** When the primary role moves off
+  a session in a terminal state, the messages still queued on that session
+  shall move to the new primary through the existing queue transfer and drain
+  only when the new primary's Auto-run allows it. The hand-off shall keep the
+  new primary's Auto-run setting and deliver to the session that holds the
+  primary role when the messages move. The messages shall keep their session
+  target when a resume attempt still owns the previous primary, when the
+  previous primary is no longer terminal when the messages would move, or when
+  the new primary has an open recovery block or an `action_required` dynamic
+  route. A live previous primary always keeps its queue. This fork runs the
+  hand-off without the upstream `features.terminalPrimaryQueueHandoff` flag.
 
 ## Out of scope
 
-- Moving queued messages to the new primary session. Ordinary Send keeps its
+- Moving queued messages to the new primary session outside
+  AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5. Ordinary Send keeps its
   session target under the
   [plan comment decision](../../../decisions/2026-09-02-task-owned-plan-comments.md).
 - Workflow recipient selection, which

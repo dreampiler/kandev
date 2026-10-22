@@ -29,7 +29,7 @@ func Capture(pid int) (Identity, error) {
 	}
 	identity := Identity{PID: pid, BirthToken: fmt.Sprintf("windows:%d", creationTime)}
 	if pid == os.Getpid() {
-		name := os.Getenv(WindowsJobNameEnv)
+		name := takenWindowsJobName()
 		if processInWindowsOwnedJob(process, name) {
 			identity.WindowsJobName = name
 		}
@@ -75,7 +75,7 @@ func TerminateOwnedSession(ctx context.Context, identity Identity, _ time.Durati
 		return nil
 	}
 	state, err := Inspect(identity)
-	if err != nil || state != StateExited {
+	if err != nil || !windowsOriginalOwnerGone(state) {
 		return fmt.Errorf("refusing containment while the original owner is not confirmed exited: %w", ErrUnverifiableIdentity)
 	}
 	job, err := openWindowsOwnedJob(identity.WindowsJobName, windowsJobQuery|windowsJobTerminate)
@@ -157,7 +157,7 @@ func windowsOwnedSessionTerminated(
 	if state == StateAlive {
 		return false, nil
 	}
-	if state != StateExited || !validWindowsJobName(identity.WindowsJobName) {
+	if !windowsOriginalOwnerGone(state) || !validWindowsJobName(identity.WindowsJobName) {
 		return false, ErrUnverifiableIdentity
 	}
 	active, err := activeProcesses(identity.WindowsJobName)
@@ -166,6 +166,15 @@ func windowsOwnedSessionTerminated(
 		return true, nil
 	}
 	return err == nil && active == 0, err
+}
+
+// windowsOriginalOwnerGone reports whether Inspect proved that the original
+// owner process no longer runs. StateReused also proves it: the PID now belongs
+// to a process with a different creation time. The recorded job name, not the
+// PID, then decides whether any of the owner's tree is still running, because
+// the named job contains only the original owner and its descendants.
+func windowsOriginalOwnerGone(state State) bool {
+	return state == StateExited || state == StateReused
 }
 
 func validWindowsJobName(name string) bool {

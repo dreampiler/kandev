@@ -915,5 +915,18 @@
   "sidebarMoveDownEntry": "Mover {{name}} para baixo",
   "sidebarResizeNavigation": "Redimensionar navegação da barra lateral",
   "sidebarExpandNavigation": "Expandir navegação da barra lateral",
-  "sidebarCollapseNavigation": "Restaurar navegação reduzida"
+  "sidebarCollapseNavigation": "Restaurar navegação reduzida",
+  "workspaceRuntimeFootprintCommitted": "Commit",
+  "workspaceRuntimeFootprintDescription": "O que as sessões de agente ativas deste espaço de trabalho gastam atualmente nesta máquina.",
+  "workspaceRuntimeFootprintEmpty": "Este espaço de trabalho não tem sessões de agente ativas.",
+  "workspaceRuntimeFootprintLoading": "A ler a medição atual",
+  "workspaceRuntimeFootprintPartial": "Não foi possível medir alguns processos, por isso estes totais são um limite inferior.",
+  "workspaceRuntimeFootprintProcesses": "Processos",
+  "workspaceRuntimeFootprintResident": "Residente",
+  "workspaceRuntimeFootprintRowSummary": "{{processes}} processos, {{resident}} residente",
+  "workspaceRuntimeFootprintRuntimes": "Sessões ativas",
+  "workspaceRuntimeFootprintTitle": "Memória de agente em utilização",
+  "workspaceRuntimeFootprintUnavailable": "Não foi possível ler a medição atual.",
+  "workspaceRuntimeFootprintUnavailableMetric": "Não reportado nesta plataforma",
+  "workspaceRuntimeFootprintUnmeasured": "Sem medição atual. O uso de memória é desconhecido, não zero."
 }

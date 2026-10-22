@@ -1580,10 +1580,7 @@ func (s *Service) recordQueuedUserMessageWithPromptContent(
 		metaMap = make(map[string]interface{})
 	}
 	metaMap[plancomments.MetadataClientMessageFingerprint] = fingerprint
-	messageID := uuid.NewSHA1(
-		uuid.NameSpaceOID,
-		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
-	).String()
+	messageID := queuedTranscriptMessageID(queuedMsg, sourceIDs)
 	if err := s.messageCreator.CreateUserMessageIdempotent(
 		ctx, messageID, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap,
 	); err != nil {
@@ -2289,6 +2286,21 @@ func (s *Service) finishQueuedMessageExecution(
 		}
 		return
 	}
+	if errors.Is(err, ErrResumeAttemptCancelled) {
+		if userMessageRecorded {
+			markQueuedUserMessageRecorded(queuedMsg)
+		}
+		s.logger.Info("resume attempt cancelled before delivery; restoring queued message",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		if exactReservation {
+			s.restoreQueuedMessageForSession(ctx, reservation.identity, queuedMsg)
+		} else {
+			s.restoreQueuedMessage(ctx, queuedMsg)
+		}
+		return
+	}
 	if err != nil {
 		s.handleQueuedMessageExecutionError(
 			ctx, callerSessionID, queuedMsg, reservation, lifecyclePrompt, userMessageRecorded, err,
@@ -2369,11 +2381,11 @@ func (s *Service) handleQueuedMessageExecutionError(
 	}
 
 	// TODO: Implement dead letter queue for failed queued messages
-	// Currently, failed messages are lost. Consider:
+	// Currently, failed messages are dropped. Consider:
 	// 1. Retry mechanism with exponential backoff
 	// 2. Persist failed messages to database for manual recovery
 	// 3. Notification to user about failed queue execution
-	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+	s.logger.Warn("queued message execution failed - message dropped (no retry/dead letter queue)",
 		zap.String("session_id", callerSessionID),
 		zap.String("queue_id", queuedMsg.ID),
 		zap.Int("content_length", len(queuedMsg.Content)))
@@ -2587,6 +2599,15 @@ func (s *Service) restoreQueuedMessageForSession(
 		zap.String("queue_id", restored.ID),
 		zap.Int64("position", restored.Position))
 	s.publishQueueStatusEventForIdentity(ctx, identity)
+}
+
+// queuedTranscriptMessageID is the deterministic transcript row ID a queued
+// dispatch records for its user message.
+func queuedTranscriptMessageID(queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) string {
+	return uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("kandev:queued-transcript:"+queuedMsg.TaskID+":"+queuedMsg.SessionID+":"+strings.Join(sourceIDs, ",")),
+	).String()
 }
 
 func markQueuedUserMessageRecorded(queuedMsg *messagequeue.QueuedMessage) {
@@ -4181,13 +4202,13 @@ func (s *Service) persistRecoveryStatusMessage(
 	return nil
 }
 
-// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
-// diagnostic to the specialized recovery surface. Generic prose and provider
-// diagnostics from other agents retain the existing error card.
+// applyProviderQuotaMetadata promotes a validated provider quota diagnostic to
+// the specialized recovery surface, whichever agent reported it: OpenCode's
+// terminal stderr projection, an agent's own usage-limit message, and a
+// correlated terminal ACP prompt error all name the same exhausted capacity.
+// Generic prose and non-quota provider diagnostics retain the error card.
 func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
-	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
-		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
-		!data.ProviderError.Valid() {
+	if data.ProviderError == nil || !data.ProviderError.Valid() {
 		return false
 	}
 	classified := routingerr.Classify(data.ProviderError.RoutingInput(routingerr.PhaseStreaming, data.AgentID, data.ProviderError.Message))
@@ -4196,7 +4217,7 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 	}
 
 	meta["failure_kind"] = "provider_quota_limited"
-	meta["provider_name"] = "OpenCode"
+	meta["provider_name"] = quotaProviderDisplayName(data.AgentID)
 	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
 		meta["model_id"] = modelID
 	}
@@ -4207,6 +4228,29 @@ func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentE
 		meta["error_output"] = details
 	}
 	return true
+}
+
+// quotaProviderDisplayName renders the agent that reported the quota failure.
+// The value is an allowlisted agent identity, never free provider prose.
+func quotaProviderDisplayName(agentID string) string {
+	switch agentID {
+	case "opencode-acp":
+		return "OpenCode"
+	case "antigravity-acp":
+		return "Antigravity"
+	case "claude-acp":
+		return "Claude"
+	case "codex-acp":
+		return "Codex"
+	case "cursor-acp":
+		return "Cursor"
+	case "copilot-acp":
+		return "Copilot"
+	case "grok-acp":
+		return "Grok"
+	default:
+		return ""
+	}
 }
 
 // applyRecoverableFailureDetail populates the collapsed technical-details

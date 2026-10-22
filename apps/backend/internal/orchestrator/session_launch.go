@@ -1356,6 +1356,7 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
+	WorkspaceOnly  bool
 	IdempotencyKey string
 	SettingsPolicy executor.ResumeSettingsPolicy
 	ErrorStamp     string
@@ -1395,6 +1396,9 @@ func (s *Service) RecoverSessionWithOptions(
 	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
+	}
+	if options.WorkspaceOnly {
+		return s.recoverInventoryMetadataOnly(ctx, taskID, sessionID, action, options.IdempotencyKey)
 	}
 	if s.automationOwnsRetrySession(ctx, taskID, sessionID) {
 		return nil, automation.ErrRetryLaunchUncertain

@@ -43,7 +43,8 @@ func authenticatedDeliveryReplayCursor(
 		}
 		if canReplayFreshBootstrapEvents(ctx, execution, repository, status) ||
 			canReplayContinuationSetupEvents(ctx, execution, repository, status) ||
-			canReplaySilentRestoreSetup(ctx, execution, repository, status) {
+			canReplaySilentRestoreSetup(ctx, execution, repository, status) ||
+			canReplaySuccessorSetupEvents(ctx, execution, repository, status) {
 			return 0, nil
 		}
 		return 0, repoerrors.ErrAgentDeliveryCheckpointMissing

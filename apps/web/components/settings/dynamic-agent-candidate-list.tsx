@@ -13,14 +13,22 @@ import {
   isDynamicErrorPolicyValid,
   DynamicPolicyEditor,
 } from "@/components/settings/dynamic-agent-policy-editor";
+import {
+  isDynamicUnclassifiedPolicyValid,
+  DynamicUnclassifiedPolicyEditor,
+  DynamicUnclassifiedPolicySummary,
+} from "@/components/settings/dynamic-agent-unclassified-policy-editor";
+import { DynamicUnclassifiedBulkApply } from "@/components/settings/dynamic-agent-unclassified-bulk-apply";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
   DynamicAgentCandidate,
   DynamicErrorClass,
   DynamicErrorPolicy,
+  DynamicUnclassifiedPolicy,
 } from "@/lib/types/agent-profile";
 import { settingsActionClassName, settingsControlClassName } from "./settings-control";
+import { DynamicTierSelectionControls } from "./dynamic-tier-selection-controls";
 
 type DynamicAgentCandidateListProps = {
   candidates: DynamicAgentCandidate[];
@@ -37,6 +45,8 @@ type DynamicAgentCandidateListProps = {
     errorClass: DynamicErrorClass,
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
+  updateCandidateUnclassified: (index: number, patch: Partial<DynamicUnclassifiedPolicy>) => void;
+  applyUnclassifiedToAllCandidates: () => void;
 };
 
 function candidateLabel(candidate: DynamicAgentCandidate, profiles: AgentProfile[]): string {
@@ -58,6 +68,8 @@ export function DynamicAgentCandidateList({
   toggleJoin,
   updateCandidate,
   updateCandidatePolicy,
+  updateCandidateUnclassified,
+  applyUnclassifiedToAllCandidates,
 }: DynamicAgentCandidateListProps) {
   const { t } = useTranslation();
   const tiersEnabled = useAppStore((state) => state.features?.dynamicProfileTiers ?? false);
@@ -69,22 +81,32 @@ export function DynamicAgentCandidateList({
         <div>
           <h3 className="text-sm font-medium">{t("agents:dynamicCandidates")}</h3>
           <p className="text-xs text-muted-foreground">
-            {t("agents:dynamicCandidatesDescription")} {t("agents:candidatePriorityHelp")}
+            {t(
+              tiersEnabled
+                ? "agents:dynamicTierCandidatesDescription"
+                : "agents:dynamicCandidatesDescription",
+            )}{" "}
+            {t("agents:candidatePriorityHelp")}
           </p>
         </div>
-        <AgentProfilePicker
-          profiles={availableProfileOptions}
-          value=""
-          onValueChange={(value) => {
-            if (value) addCandidate(value);
-          }}
-          testId="add-dynamic-candidate"
-          placeholder={t("agents:addDynamicCandidate")}
-          searchPlaceholder={t("agents:searchDynamicCandidates")}
-          emptyMessage={t("agents:noDynamicCandidatesFound")}
-          ariaLabel={t("agents:addDynamicCandidate")}
-          triggerClassName={settingsControlClassName("w-full sm:w-auto")}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <AgentProfilePicker
+            profiles={availableProfileOptions}
+            value=""
+            onValueChange={(value) => {
+              if (value) addCandidate(value);
+            }}
+            testId="add-dynamic-candidate"
+            placeholder={t("agents:addDynamicCandidate")}
+            searchPlaceholder={t("agents:searchDynamicCandidates")}
+            emptyMessage={t("agents:noDynamicCandidatesFound")}
+            ariaLabel={t("agents:addDynamicCandidate")}
+            triggerClassName={settingsControlClassName("w-full sm:w-auto")}
+          />
+          {candidates.length > 0 && (
+            <DynamicUnclassifiedBulkApply onApply={applyUnclassifiedToAllCandidates} />
+          )}
+        </div>
       </div>
 
       {candidates.length === 0 ? (
@@ -171,9 +193,17 @@ export function DynamicAgentCandidateList({
                   }
                 />
               )}
+              {tiersEnabled && (
+                <DynamicTierSelectionControls
+                  candidate={candidate}
+                  head={false}
+                  onChange={(next) => updateCandidate(index, next)}
+                />
+              )}
               <CandidatePolicies
                 candidate={candidate}
                 onChange={(errorClass, patch) => updateCandidatePolicy(index, errorClass, patch)}
+                onUnclassifiedChange={(patch) => updateCandidateUnclassified(index, patch)}
               />
             </li>
           ))}
@@ -212,21 +242,25 @@ function CandidatePolicySummary({ candidate }: { candidate: DynamicAgentCandidat
 function CandidatePolicies({
   candidate,
   onChange,
+  onUnclassifiedChange,
 }: {
   candidate: DynamicAgentCandidate;
   onChange: (errorClass: DynamicErrorClass, patch: Partial<DynamicErrorPolicy>) => void;
+  onUnclassifiedChange: (patch: Partial<DynamicUnclassifiedPolicy>) => void;
 }) {
   return (
     <details
       open={
         !isDynamicErrorPolicyValid(candidate.policies.transient) ||
         !isDynamicErrorPolicyValid(candidate.policies.hard) ||
+        !isDynamicUnclassifiedPolicyValid(candidate.policies.unclassified) ||
         undefined
       }
       className="rounded-md border p-3"
     >
       <summary className="cursor-pointer text-sm">
         <CandidatePolicySummary candidate={candidate} />
+        <DynamicUnclassifiedPolicySummary policy={candidate.policies.unclassified} />
       </summary>
       <div className="mt-3 grid min-w-0 gap-4 md:grid-cols-2">
         <DynamicPolicyEditor
@@ -238,6 +272,12 @@ function CandidatePolicies({
           errorClass="hard"
           policy={candidate.policies.hard}
           onChange={(patch) => onChange("hard", patch)}
+        />
+      </div>
+      <div className="mt-4">
+        <DynamicUnclassifiedPolicyEditor
+          policy={candidate.policies.unclassified}
+          onChange={onUnclassifiedChange}
         />
       </div>
     </details>

@@ -51,6 +51,15 @@ type Candidate struct {
 	Policies      routingpolicy.Document
 	Usage         CandidateUsage `json:"-"`
 	SelectionJSON json.RawMessage
+	// ModelID is the concrete provider model this candidate launches.
+	ModelID string
+	// SuspendedUntil is an operator-entered provider block.
+	SuspendedUntil time.Time
+	// RemoteExecution marks a candidate that authenticates against a different
+	// account than the backend host.
+	RemoteExecution bool
+	// CatalogFree records that the provider publishes the model at zero cost.
+	CatalogFree bool
 }
 
 type Profile struct {

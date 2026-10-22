@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { ControlModelActivity } from "./control-model-activity";
 import { ControlModelBlocks } from "./control-model-blocks";
+import { ControlProviderCircuits } from "./control-provider-circuits";
 import { ControlCachedUsage } from "./control-cached-usage";
 import Link from "@/components/routing/app-link";
 
@@ -29,6 +30,7 @@ export function ControlProviderUsage({ workspaceId }: { workspaceId?: string }) 
         </p>
       )}
       <ControlModelBlocks workspaceId={workspaceId} />
+      <ControlProviderCircuits workspaceId={workspaceId} />
     </section>
   );
 }

@@ -16,7 +16,10 @@ zero session references does not mean the task has relinquished its workspace.
 ## Decision
 
 Use the existing task-environment model as the only workspace ownership graph.
-`task_environments.task_id` owns the environment, and one
+`task_environments.task_id` owns the environment. At most one active environment
+(`retired_at IS NULL`) is canonical per task; retired environments preserve their
+original ownership and history and are never reused. Retired repository rows do
+not establish an additional active checkout owner. One
 `task_environment_repos` row owns each materialized repository worktree. A
 session refers to the workspace only through
 `task_sessions.task_environment_id`; no session-to-worktree table is needed.

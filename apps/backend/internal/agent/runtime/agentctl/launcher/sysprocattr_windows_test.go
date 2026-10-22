@@ -6,10 +6,12 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
 
 func TestBuildSysProcAttrHidesConsoleWindow(t *testing.T) {
+	t.Cleanup(winproc.SetConsoleWindowProbeForTest(true))
 	attr := buildSysProcAttr(false)
 	if attr == nil {
 		t.Fatal("buildSysProcAttr returned nil")
@@ -26,6 +28,7 @@ func TestBuildSysProcAttrHidesConsoleWindow(t *testing.T) {
 }
 
 func TestBuildSysProcAttrStartsSuspendedForJobAssignment(t *testing.T) {
+	t.Cleanup(winproc.SetConsoleWindowProbeForTest(true))
 	attr := buildSysProcAttr(false)
 	want := uint32(windows.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED)
 	if attr.CreationFlags != want {

@@ -75,9 +75,12 @@ type Controller struct {
 	nativeUsageReader           func(context.Context, string) ([]usage.ProfileExecutionUsage, error)
 	repo                        store.Repository
 	accountBlockReleaser        AccountBlockReleaser
+	routingCircuitReader        RoutingCircuitReader
+	profileUsage                ProfileUsageProvider
 	discovery                   *discovery.Registry
 	agentRegistry               *registry.Registry
 	sessionChecker              SessionChecker
+	providerLimits              ProviderLimitService
 	watcherDeps                 WatcherDependencyChecker
 	routingTierDeps             RoutingTierDependencyChecker
 	automationDeps              AutomationDependencyChecker
@@ -108,6 +111,7 @@ type Controller struct {
 	runtimeUpdatePassMu         sync.Mutex
 	dynamicAgentRoutingEnabled  bool
 	dynamicProfileTiersEnabled  bool
+	dynamicTierPreviewer        DynamicTierPreviewer
 
 	hostCLIMu         sync.Mutex
 	hostCLIRunner     hostcli.Runner

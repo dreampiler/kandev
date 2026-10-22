@@ -36,6 +36,7 @@ func CandidateUsageFromReport(report *usage.ExecutionUsageReport, model string, 
 			Bucket:    UsageBucket{Provider: current.Provider, OrganizationRef: current.OrganizationRef, AccountRef: current.AccountRef, Window: window.Label, Model: window.Model},
 			FetchedAt: current.FetchedAt, Known: true, RemainingPct: metrics.RemainingPct,
 			ConsumptionRateKnown: metrics.ConsumptionRateKnown, ConsumptionPctPerHour: metrics.ConsumptionPctPerHour,
+			ResetAtKnown: metrics.ResetAtKnown, ResetAt: metrics.ResetAt,
 		}
 	}
 	result.Limited = limited.Limited

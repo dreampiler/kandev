@@ -544,6 +544,11 @@ func (s *Service) launchConcretePreparedSession(
 	sessionID string,
 	options executor.LaunchOptions,
 ) (*executor.TaskExecution, error) {
+	// A fixed profile whose resource circuit is open must not be launched,
+	// even though it is not routed through dynamic selection.
+	if err := s.admitFixedProfileDispatch(ctx, sessionID, s.fixedLaunchProfileID(ctx, sessionID, options.AgentProfileID)); err != nil {
+		return nil, err
+	}
 	if task != nil {
 		if err := s.admitCeilingDispatch(ctx, task.ID); err != nil {
 			return nil, err
@@ -657,12 +662,21 @@ func (s *Service) addDynamicConversation(ctx context.Context, sessionID string, 
 	}
 	conversation := make([]string, 0, len(messages))
 	toolSummary := make([]string, 0)
+	held, err := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load held transcript ids for dynamic continuation: %w", err)
+	}
 	for _, message := range messages {
 		if message == nil || strings.TrimSpace(message.Content) == "" {
 			continue
 		}
 		content := strings.TrimSpace(message.Content)
 		if message.AuthorType == models.MessageAuthorUser {
+			if _, queued := held[message.ID]; queued {
+				// Still owned by the queue, which delivers it after the
+				// successor starts; the continuation must not carry it too.
+				continue
+			}
 			input.UserMessages = append(input.UserMessages, content)
 			continue
 		}
@@ -845,6 +859,9 @@ func (s *Service) routeDynamicAgentFailureWithEvidence(
 			return dynamicFailureRouteResult{}
 		}
 	}
+	// A fixed profile has no route to advance, but its classified failure
+	// still records the resource circuit that gates its next dispatch.
+	s.recordFixedProfileFailure(ctx, data, classified)
 	session, ok := s.dynamicFailureSession(ctx, data)
 	if !ok {
 		return dynamicFailureRouteResult{}
@@ -1735,7 +1752,7 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	launchMode := dynamicRelaunchLaunchModeCreated
 	if officeErr != nil || isOfficeTask {
 		launchMode = dynamicRelaunchLaunchModePrepared
-	} else if origin == launchOriginManual {
+	} else if origin == launchOriginManual && s.dynamicRelaunchHasResumeSource(ctx, data.SessionID) {
 		launchMode = dynamicRelaunchLaunchModePrompt
 	}
 	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
@@ -1754,7 +1771,21 @@ func (s *Service) prepareDynamicRelaunchAfterFailure(
 	return task, session, prompt, launchMode, true
 }
 
+// stopDynamicRelaunchPredecessor stops the execution a relaunch replaces and
+// reports whether the successor may launch. An absent predecessor counts as
+// stopped. Callers pass the execution handle recorded on the session or in the
+// failed event, so an empty value means no execution was recorded; the restart
+// orphan sweep can leave that shape, and there is nothing to stop in that case.
+// A runtime that confirms the execution is not found is absent too.
+// Every other stop error keeps the relaunch from launching over an unresolved
+// teardown. executor.StopExecution also wraps a genuine teardown failure in
+// ErrExecutionNotFound, so only the bare sentinel (returned when there is no
+// execution to address) counts as absence.
 func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	if agentExecutionID == "" {
+		s.logger.Debug("dynamic fallback predecessor has no recorded execution")
+		return true
+	}
 	if s.lspLeases != nil {
 		s.lspLeases.StopLSPLeasesForExecution(agentExecutionID)
 	}
@@ -1762,7 +1793,8 @@ func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecu
 	if err == nil {
 		return true
 	}
-	if errors.Is(err, agentruntime.ErrNotFound) {
+	//nolint:errorlint // Identity match: a wrapped ErrExecutionNotFound carries a genuine stop failure.
+	if errors.Is(err, agentruntime.ErrNotFound) || err == executor.ErrExecutionNotFound {
 		s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
 		return true
 	}
@@ -1933,10 +1965,22 @@ func (s *Service) dynamicRelaunchPrompt(ctx context.Context, sessionID string) (
 	if err != nil {
 		return capturedPrompt{}, false
 	}
+	held, heldErr := s.queuedTranscriptMessageIDs(ctx, sessionID)
+	if heldErr != nil {
+		s.logger.Warn("skip dynamic relaunch prompt; held transcript ids are unreadable",
+			zap.String("session_id", sessionID),
+			zap.Error(heldErr))
+		return capturedPrompt{}, false
+	}
 	for index := len(messages) - 1; index >= 0; index-- {
 		message := messages[index]
 		if message == nil || message.AuthorType != models.MessageAuthorUser ||
 			strings.TrimSpace(message.Content) == "" {
+			continue
+		}
+		if _, queued := held[message.ID]; queued {
+			// The queue still owns this message and delivers it once the
+			// relaunched session settles; replaying it here would send it twice.
 			continue
 		}
 		return capturedPrompt{text: message.Content}, true

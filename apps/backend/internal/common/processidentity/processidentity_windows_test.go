@@ -82,7 +82,7 @@ func TestWindowsOwnedSessionMockProcessTable(t *testing.T) {
 		{name: "empty owned job", state: StateExited, jobName: name, wantTerminated: true, wantJobRead: true},
 		{name: "orphan in owned job", state: StateExited, jobName: name, active: 1, wantJobRead: true},
 		{name: "closed kill-on-close job", state: StateExited, jobName: name, jobErr: windows.ERROR_FILE_NOT_FOUND, wantTerminated: true, wantJobRead: true},
-		{name: "PID reused", state: StateReused, jobName: name, wantErr: true},
+		{name: "PID reused", state: StateReused, jobName: name, wantTerminated: true, wantJobRead: true},
 		{name: "unknown process", state: StateUnknown, jobName: name, wantErr: true},
 		{name: "legacy unknown job", state: StateExited, wantErr: true},
 		{name: "foreign job", state: StateExited, jobName: "foreign", wantErr: true},
@@ -165,6 +165,7 @@ func TestWindowsOwnedJobHelper(t *testing.T) {
 		defer timer.Stop()
 		<-timer.C
 	case "root":
+		TakeWindowsJobNameFromEnv()
 		identity, err := Capture(os.Getpid())
 		require.NoError(t, err)
 		child := exec.Command(os.Args[0], "-test.run=^TestWindowsOwnedJobHelper$")

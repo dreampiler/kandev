@@ -1243,6 +1243,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkflowID:             body.WorkflowID,
 		WorkflowStepID:         body.WorkflowStepID,
 		WorkflowAgentOverrides: body.WorkflowAgentOverrides,
+		ExplicitAgentProfileID: strings.TrimSpace(body.AgentProfileID),
 		AssigneeAgentProfileID: assigneeAgentProfileID,
 		// This is untrusted browser input, unlike the internal callers
 		// (agent-created subtasks, onboarding, routines) that also populate
@@ -2222,7 +2223,8 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 				responseKeySuccess: false, responseKeyPending: true, "task_id": taskID,
 			})
 		default:
-			handleNotFound(c, h.logger, err, "task not deleted")
+			handleNotFound(c, h.logger, err, "task not deleted",
+				zap.String("task_id", taskID), zap.Bool("cascade", cascade))
 		}
 		return
 	}

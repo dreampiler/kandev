@@ -39,6 +39,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepTransitionsSchema,
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
+		r.initUsageLimitObservationsSchema,
 		r.initAttachmentsSchema,
 		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
@@ -55,6 +56,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureDefaultExecutorsAndEnvironments,
 		func() error { return r.runMigrations(ctx) },
 		r.initWorkspaceCollaborationSchema,
+		r.initProviderTurnAllowancesSchema,
 		r.hideBuiltinWorkflows,
 		r.healBuiltinWorkflowStepFlags,
 		r.healBuiltinWorkflowStepParticipantSeats,
@@ -357,6 +359,14 @@ func (r *Repository) initDynamicRoutingSchema() error {
 			code TEXT NOT NULL DEFAULT '',
 			probe_until TIMESTAMP,
 			failure_count INTEGER NOT NULL DEFAULT 0,
+			updated_at TIMESTAMP NOT NULL
+		);
+
+		CREATE TABLE IF NOT EXISTS dynamic_provider_limits (
+			provider TEXT PRIMARY KEY,
+			monthly_reset_at TIMESTAMP,
+			monthly_reset_timezone TEXT NOT NULL DEFAULT '',
+			block_until TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL
 		);
 
@@ -715,6 +725,7 @@ const infraSchemaDDL = `
 		name TEXT NOT NULL,
 		description TEXT DEFAULT '',
 		prompt TEXT NOT NULL DEFAULT '',
+		require_explicit_agent_profile INTEGER NOT NULL DEFAULT 0,
 		hidden INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL

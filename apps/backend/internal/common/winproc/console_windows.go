@@ -41,3 +41,14 @@ func NoConsoleWindowFlag() uint32 {
 	}
 	return windows.CREATE_NO_WINDOW
 }
+
+// SetConsoleWindowProbeForTest makes NoConsoleWindowFlag behave as if this
+// process had (present) or lacked a console window, and returns a function
+// that restores the real probe. Tests in other packages use it so that their
+// creation-flag assertions do not depend on whether the test runner itself
+// has a console window. It is not safe for concurrent use with parallel tests.
+func SetConsoleWindowProbeForTest(present bool) (restore func()) {
+	previous := hasConsoleWindow
+	hasConsoleWindow = func() bool { return present }
+	return func() { hasConsoleWindow = previous }
+}

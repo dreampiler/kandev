@@ -8,12 +8,14 @@ import { settingsControlClassName } from "./settings-control";
 
 type TierPolicy = NonNullable<DynamicAgentSelection["tier"]>;
 type Option = { value: string; label: string };
-const modes = ["order", "headroom", "consumption_rate", "round_robin"] as const;
+const modes = ["order", "headroom", "consumption_rate", "round_robin", "cost", "random"] as const;
 const modeKeys = [
   "orderedTierModeOrder",
   "orderedTierModeHeadroom",
   "orderedTierModeRate",
   "orderedTierModeRoundRobin",
+  "tierModeCost",
+  "tierModeRandom",
 ] as const;
 
 function TierField({

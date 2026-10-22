@@ -37,6 +37,7 @@
 # go here as `KANDEV_FEATURES_<NAME>` — the backend's config package
 # maps them to `features.<name>` Viper keys automatically.
 features:
+  # Provider usage snapshots and optional shared native turn allowances.
   KANDEV_FEATURES_PROVIDER_USAGE_LIMITS:
     prod: "false"
     dev: "false"
@@ -105,6 +106,13 @@ features:
   # Escalating dynamic routing circuit backoff for repeated candidate failures.
   # Off in every shipped profile; disabled keeps the fixed one-minute backoff.
   KANDEV_FEATURES_DYNAMIC_CIRCUIT_BACKOFF_ESCALATION:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
+  # Holding launches under host memory pressure is opt-in. Thresholds come from
+  # KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB and KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT.
+  KANDEV_FEATURES_SESSION_MEMORY_GUARD:
     prod: "false"
     dev:  "false"
     e2e:  "false"

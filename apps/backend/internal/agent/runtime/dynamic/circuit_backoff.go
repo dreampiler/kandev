@@ -80,7 +80,7 @@ func (r *CircuitRegistry) OpenFailure(key string, failure FailureOpen) {
 		if failure.ResetHint != nil && failure.ResetHint.After(until) {
 			until = *failure.ResetHint
 		}
-		r.circuits[key] = circuit{state: CircuitOpen, until: until, code: failure.Code}
+		r.circuits[key] = circuit{state: CircuitOpen, until: until, code: failure.Code, updatedAt: now.UTC()}
 		_ = r.persistSnapshotLocked(key)
 		return
 	}
@@ -96,7 +96,10 @@ func (r *CircuitRegistry) OpenFailure(key string, failure FailureOpen) {
 	if sameIncident && previous.until.After(until) {
 		until = previous.until
 	}
-	r.circuits[key] = circuit{state: CircuitOpen, until: until.UTC(), code: failure.Code, failures: failures}
+	r.circuits[key] = circuit{
+		state: CircuitOpen, until: until.UTC(), code: failure.Code,
+		failures: failures, updatedAt: now.UTC(),
+	}
 	_ = r.persistSnapshotLocked(key)
 }
 
@@ -128,6 +131,7 @@ func (r *CircuitRegistry) ResetFailures(key string) bool {
 	}
 	r.flushPendingLocked(key)
 	entry.failures = 0
+	entry.updatedAt = r.now().UTC()
 	r.circuits[key] = entry
 	_ = r.persistSnapshotLocked(key)
 	return true

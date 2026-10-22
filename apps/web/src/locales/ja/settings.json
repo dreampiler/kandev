@@ -915,5 +915,18 @@
   "sidebarMoveDownEntry": "{{name}}を下に移動",
   "sidebarResizeNavigation": "サイドバーのナビゲーションの高さを変更",
   "sidebarExpandNavigation": "サイドバーのナビゲーションを展開",
-  "sidebarCollapseNavigation": "縮小したナビゲーションに戻す"
+  "sidebarCollapseNavigation": "縮小したナビゲーションに戻す",
+  "workspaceRuntimeFootprintCommitted": "コミット",
+  "workspaceRuntimeFootprintDescription": "このワークスペースの実行中エージェントセッションがこのマシンで現在消費している量です。",
+  "workspaceRuntimeFootprintEmpty": "このワークスペースに実行中のエージェントセッションはありません。",
+  "workspaceRuntimeFootprintLoading": "現在の測定値を読み込んでいます",
+  "workspaceRuntimeFootprintPartial": "一部のプロセスを測定できなかったため、これらの合計は下限値です。",
+  "workspaceRuntimeFootprintProcesses": "プロセス",
+  "workspaceRuntimeFootprintResident": "常駐",
+  "workspaceRuntimeFootprintRowSummary": "プロセス {{processes}} 件、常駐 {{resident}}",
+  "workspaceRuntimeFootprintRuntimes": "実行中セッション",
+  "workspaceRuntimeFootprintTitle": "使用中のエージェントメモリ",
+  "workspaceRuntimeFootprintUnavailable": "現在の測定値を読み取れませんでした。",
+  "workspaceRuntimeFootprintUnavailableMetric": "このプラットフォームでは報告されません",
+  "workspaceRuntimeFootprintUnmeasured": "現在の測定値がありません。メモリ使用量はゼロではなく不明です。"
 }

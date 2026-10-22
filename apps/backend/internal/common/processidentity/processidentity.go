@@ -5,6 +5,8 @@ package processidentity
 import (
 	"errors"
 	"fmt"
+	"os"
+	"sync"
 )
 
 var ErrUnverifiableIdentity = errors.New("process identity is incomplete or unsupported")
@@ -13,7 +15,42 @@ var ErrUnverifiableIdentity = errors.New("process identity is incomplete or unsu
 const WindowsJobNamePrefix = `Local\kandev-agentctl-`
 
 // WindowsJobNameEnv carries the launcher-owned job to its suspended child.
+// The child takes it with TakeWindowsJobNameFromEnv at startup, which removes
+// it from the environment so the child's descendants never inherit it.
 const WindowsJobNameEnv = "KANDEV_INTERNAL_WINDOWS_JOB_NAME"
+
+var ownWindowsJobName struct {
+	sync.Mutex
+	name  string
+	taken bool
+}
+
+// TakeWindowsJobNameFromEnv reads the job name the launcher passed to this
+// process, removes it from the process environment, and keeps it for Capture
+// of this process. agentctl calls it first at startup, before it starts any
+// process, so agents, scripts and nested agentctl processes do not inherit the
+// outer job name and cannot record the outer job as their own. Only the first
+// call that finds the variable is kept.
+func TakeWindowsJobNameFromEnv() {
+	name, ok := os.LookupEnv(WindowsJobNameEnv)
+	if !ok {
+		return
+	}
+	_ = os.Unsetenv(WindowsJobNameEnv)
+	ownWindowsJobName.Lock()
+	defer ownWindowsJobName.Unlock()
+	if !ownWindowsJobName.taken {
+		ownWindowsJobName.name = name
+		ownWindowsJobName.taken = true
+	}
+}
+
+// takenWindowsJobName returns the job name taken at startup, or empty.
+func takenWindowsJobName() string {
+	ownWindowsJobName.Lock()
+	defer ownWindowsJobName.Unlock()
+	return ownWindowsJobName.name
+}
 
 type State string
 

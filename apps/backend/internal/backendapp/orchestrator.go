@@ -101,6 +101,7 @@ func provideOrchestrator(
 	serviceCfg.ClaudeMidTurnSteering =
 		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	serviceCfg.CodexAppServerEnabled = cfg != nil && cfg.Features.CodexAppServer
+	serviceCfg.SessionMemoryGuardEnabled = cfg != nil && cfg.Features.SessionMemoryGuard
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -816,6 +817,7 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
+		ParentID:       req.ParentID,
 		Title:          req.Title,
 		Description:    req.Description,
 		Metadata:       req.Metadata,
@@ -823,9 +825,10 @@ func (a *reviewTaskCreatorAdapter) CreateReviewTask(ctx context.Context, req *or
 		IsEphemeral:    req.IsEphemeral,
 		Origin:         req.Origin,
 
-		AutomationStartOwned: req.AutomationStartOwned,
-		AutomationStartOwner: req.AutomationStartOwner,
-		ExternalID:           req.ExternalID,
+		AutomationStartOwned:   req.AutomationStartOwned,
+		AutomationStartOwner:   req.AutomationStartOwner,
+		ExplicitAgentProfileID: req.AgentProfileID,
+		ExternalID:             req.ExternalID,
 	})
 	if err != nil {
 		return nil, err

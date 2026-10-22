@@ -1268,10 +1268,11 @@ func (e *Executor) persistSessionFullRowIfCurrentState(
 		)
 	}
 	return fmt.Errorf(
-		"session %s state changed from %s to %s before runtime persistence",
+		"session %s state changed from %s to %s before runtime persistence: %w",
 		session.ID,
 		expected,
 		current.State,
+		ErrSessionStateChangedBeforeStart,
 	)
 }
 
@@ -1889,6 +1890,9 @@ func (e *Executor) validateInheritedEnvironmentOwner(
 	task *v1.Task,
 	env *models.TaskEnvironment,
 ) error {
+	if env.IsRetired() {
+		return fmt.Errorf("%w: task environment is retained as inactive history", models.ErrWorkspaceReuseUnsafe)
+	}
 	if env == nil || env.TaskID == "" || (task != nil && env.TaskID == task.ID) {
 		return nil
 	}

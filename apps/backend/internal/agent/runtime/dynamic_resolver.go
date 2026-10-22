@@ -50,6 +50,7 @@ type ProfileExecutionResolver struct {
 	dynamic                    store.DynamicProfileRepository
 	engine                     *dynamic.Engine
 	bindingResolver            *dynamic.CredentialBindingResolver
+	providerLimits             ProviderLimitReader
 	enabled                    atomic.Bool
 	nativeAdmission            *nativeRouteAdmission
 	candidateUsageReader       CandidateExecutionUsageReader
@@ -303,6 +304,16 @@ func (r *ProfileExecutionResolver) ReleaseAccountBlock(_ context.Context, execut
 		return false, nil
 	}
 	return r.engine.ReleaseAccountBlock(executionProfileID)
+}
+
+// CircuitSnapshots exposes the live routing circuits to read-only surfaces.
+// An unconfigured resolver reports an empty list rather than an error: the
+// read says what the router is acting on, and an inert router acts on nothing.
+func (r *ProfileExecutionResolver) CircuitSnapshots() []dynamic.CircuitSnapshot {
+	if r == nil {
+		return []dynamic.CircuitSnapshot{}
+	}
+	return r.engine.CircuitSnapshots()
 }
 
 // RouteAfterUnclassifiedFailure validates the logical profile and applies the
@@ -890,8 +901,12 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	if err != nil {
 		return dynamic.Profile{}, fmt.Errorf("load dynamic profile %s: %w", profileID, err)
 	}
+	return r.dynamicProfileFromRoutes(ctx, profileID, config.Version, routes)
+}
+
+func (r *ProfileExecutionResolver) dynamicProfileFromRoutes(ctx context.Context, profileID string, version int64, routes []agentsettingsmodels.DynamicAgentRoute) (dynamic.Profile, error) {
 	profile := dynamic.Profile{
-		ID: profileID, Version: config.Version,
+		ID: profileID, Version: version,
 		Candidates: make([]dynamic.Candidate, 0, len(routes)),
 	}
 	for _, route := range routes {
@@ -899,20 +914,8 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			ID: route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
-		if route.RulesJSON != "" {
-			var selection struct {
-				Selection json.RawMessage `json:"selection"`
-			}
-			if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
-				return dynamic.Profile{}, err
-			}
-			candidate.SelectionJSON = selection.Selection
-			policy, legacyRules, policyErr := decodeDynamicRoutePolicy(route.RulesJSON)
-			if policyErr != nil {
-				return dynamic.Profile{}, fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, policyErr)
-			}
-			candidate.Policies = policy
-			candidate.Rules = legacyRules
+		if err := populateDynamicCandidatePolicy(&candidate, route); err != nil {
+			return dynamic.Profile{}, err
 		}
 		concrete, profileErr := r.profiles.GetAgentProfile(ctx, route.ExecutionProfileID)
 		switch {
@@ -924,7 +927,10 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 			}
 		case concrete == nil || concrete.DeletedAt != nil || !concrete.Enabled:
 			candidate.Enabled = false
-		case r.bindingResolver != nil:
+		default:
+			candidate.ModelID = concrete.Model
+		}
+		if r.bindingResolver != nil && concrete != nil && concrete.DeletedAt == nil && concrete.Enabled {
 			binding := profileCredentialBindingDescriptor(concrete)
 			candidate.BindingKey = dynamic.ResourceKey(
 				dynamic.ScopeCredential,
@@ -933,7 +939,28 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 		}
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
+	r.applyResourceLimits(ctx, profile.Candidates)
 	return profile, nil
+}
+
+func populateDynamicCandidatePolicy(candidate *dynamic.Candidate, route agentsettingsmodels.DynamicAgentRoute) error {
+	if route.RulesJSON == "" {
+		return nil
+	}
+	var selection struct {
+		Selection json.RawMessage `json:"selection"`
+	}
+	if err := json.Unmarshal([]byte(route.RulesJSON), &selection); err != nil {
+		return err
+	}
+	candidate.SelectionJSON = selection.Selection
+	policy, legacyRules, err := decodeDynamicRoutePolicy(route.RulesJSON)
+	if err != nil {
+		return fmt.Errorf("decode dynamic route %s: %w", route.ExecutionProfileID, err)
+	}
+	candidate.Policies = policy
+	candidate.Rules = legacyRules
+	return nil
 }
 
 func decodeDynamicRoutePolicy(raw string) (routingpolicy.Document, map[string]dynamic.Action, error) {

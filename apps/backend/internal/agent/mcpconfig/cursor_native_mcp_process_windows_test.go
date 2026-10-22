@@ -8,10 +8,12 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
 
 func TestPrepareNativeMCPProcessHidesConsoleWindow(t *testing.T) {
+	t.Cleanup(winproc.SetConsoleWindowProbeForTest(true))
 	cmd := exec.Command(os.Args[0], "mcp", "list")
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.BELOW_NORMAL_PRIORITY_CLASS}
 	if err := prepareNativeMCPProcess(cmd); err != nil {

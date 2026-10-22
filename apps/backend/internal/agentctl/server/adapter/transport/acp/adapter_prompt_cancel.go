@@ -30,7 +30,7 @@ func newPromptTurnState(
 		rpcDone:          make(chan struct{}),
 		abortCh:          make(chan struct{}),
 		handoffCh:        make(chan struct{}),
-		providerErrorCh:  make(chan openCodeStderrDiagnostic, 1),
+		providerErrorCh:  make(chan providerNoticeDiagnostic, 1),
 		promptGeneration: promptGeneration,
 		allowHandoff:     allowHandoff,
 	}

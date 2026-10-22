@@ -60,6 +60,24 @@ Before the change the same machine opened a Windows Terminal window for every
 agent that agentctl started from a detached backend. When the starting process
 has a console window, the flag is zero and helpers keep attaching to it.
 
+This reverses the earlier decision in
+[the background process console plan](../../../plans/windows-background-process-console/plan.md)
+to avoid `CREATE_NO_WINDOW`, for the four paths above only. That decision rested
+on the documented statement that `CREATE_NO_WINDOW` starts a console program
+without a console handle, so default descendants could open their own visible
+console. The probe above observed a console for both the flagged child and its
+default-flag grandchild, so that risk did not occur on the tested machine.
+Managed Git commands keep the earlier `HideWindow`-only behavior.
+
+The inheritance applies to processes that a flagged helper starts itself with
+default console flags. It does not make kandev-started helpers share one
+console. A `CREATE_NO_WINDOW` console has no window, so agentctl started from a
+console-less backend itself reports no console window, and every agent, script,
+utility or MCP command that agentctl starts through these paths gets its own
+windowless console instead of sharing agentctl's hidden console as before.
+Commands that agentctl starts without process attributes, such as `taskkill`
+and `tasklist`, still inherit agentctl's windowless console.
+
 When the backend already has a console, the helper attaches to that console.
 `HideWindow` does not hide the shared console window. This preserves terminal
 visibility for a backend started from a terminal.
@@ -92,11 +110,29 @@ Go's `os.Process.Signal` supports only `os.Kill` and returns `EWINDOWS` for
 kill.
 
 Graceful `taskkill` without `/F` remains the first stop attempt for process
-groups that use it. A hidden console remains attached to the helper, unlike a
-`CREATE_NO_WINDOW` process, which has no console window or console handle. A
-helper can still ignore or fail to handle a close request, so owners must keep
-their existing wait, Job Object, and forced-termination paths. The detached
-parent regression test checks that the managed helper and its default console
+groups that use it. Without `/F`, `taskkill` asks the process to close through
+a window. A helper started with `HideWindow` from a console window keeps a
+hidden console window. A helper started with `CREATE_NO_WINDOW` has a console
+but no window, so for these helpers the graceful `taskkill` is expected to fail
+with "can only be terminated forcefully" or have no effect. This has not been
+measured. The agentctl stop path already handles both outcomes: it first waits
+for the agent to exit after stdin closes, then on a `taskkill` error or after
+`processGroupTerminateGrace` it force-kills the process tree, and the Job
+Object stays the final cleanup. The expected effect is that the `WM_CLOSE`
+step is lost for helpers that do not exit from stdin close, and those helpers
+are force-killed after the grace period instead of closing on request. The
+cooperative backend shutdown signal does not cover this path; it is between
+the launcher and the backend only.
+
+A graceful replacement would send `CTRL_BREAK_EVENT` to the helper's process
+group with `GenerateConsoleCtrlEvent`. That call only reaches processes on the
+caller's console, so agentctl would have to attach to each helper's console in
+turn, or helpers would have to share agentctl's windowless console instead of
+receiving `CREATE_NO_WINDOW`. Both change console ownership and need process
+tests on Windows, so they are left as a follow-up. A helper can still ignore
+or fail to handle a close request in any case, so owners must keep their
+existing wait, Job Object, and forced-termination paths. The detached parent
+regression test checks that a managed Git command and its default console
 descendant use the same hidden console window; it does not claim that every
 helper exits gracefully.
 

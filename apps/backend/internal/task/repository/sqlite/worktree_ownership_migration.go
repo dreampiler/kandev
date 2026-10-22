@@ -54,6 +54,7 @@ func finalTaskEnvironmentsDDL(tableName string) string {
 			container_control_auth_token_secret_id TEXT DEFAULT '',
 			sandbox_id TEXT DEFAULT '',
 			task_dir_name TEXT DEFAULT '',
+			retired_at TIMESTAMP,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
@@ -124,6 +125,9 @@ func (r *Repository) normalizeTaskWorktreeOwnership() error {
 	defer func() { _ = tx.Rollback() }()
 
 	if err := r.cutoverAcquireLocks(tx); err != nil {
+		return err
+	}
+	if err := r.cutoverRejectRetiredHistory(tx); err != nil {
 		return err
 	}
 
@@ -282,4 +286,21 @@ func (r *Repository) columnExists(tx *sqlx.Tx, table, column string) (bool, erro
 		return false, fmt.Errorf("probe column %s.%s: %w", table, column, err)
 	}
 	return exists, nil
+}
+
+// Retired final-shaped ownership must not pass through a legacy normalizer
+// that elects one environment per task and discards the other identities.
+func (r *Repository) cutoverRejectRetiredHistory(tx *sqlx.Tx) error {
+	has, err := r.columnExists(tx, "task_environments", "retired_at")
+	if err != nil || !has {
+		return err
+	}
+	var count int
+	if err := tx.QueryRowContext(r.migrationContext(), `SELECT COUNT(*) FROM task_environments WHERE retired_at IS NOT NULL`).Scan(&count); err != nil {
+		return err
+	}
+	if count != 0 {
+		return fmt.Errorf("cutover: retained environment history requires explicit preservation")
+	}
+	return nil
 }

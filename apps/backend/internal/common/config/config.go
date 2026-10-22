@@ -542,7 +542,6 @@ type FeaturesConfig struct {
 	// embedded profile until the complete feature is ready.
 	DynamicAgentRouting    bool `mapstructure:"dynamic_agent_routing" json:"dynamicAgentRouting"`
 	DynamicProfileTiers    bool `mapstructure:"dynamic_profile_tiers" json:"dynamicProfileTiers"`
-	ProviderUsageLimits    bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 	WorkspaceCollaboration bool `mapstructure:"workspace_collaboration" json:"workspaceCollaboration"`
 
 	// DynamicCircuitBackoffEscalation lengthens the dynamic routing circuit
@@ -550,6 +549,11 @@ type FeaturesConfig struct {
 	// re-probing it every minute. Disabled, every open uses the fixed backoff.
 	// Off in every embedded profile.
 	DynamicCircuitBackoffEscalation bool `mapstructure:"dynamic_circuit_backoff_escalation" json:"dynamicCircuitBackoffEscalation"`
+
+	// ProviderUsageLimits gates configured provider allowances, classified
+	// limit observations, and usage-aware candidate eligibility. Off in every
+	// embedded profile until an installation opts in.
+	ProviderUsageLimits bool `mapstructure:"provider_usage_limits" json:"providerUsageLimits"`
 
 	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
 	// claude-acp session accept a successor prompt after an adapter-attested
@@ -605,6 +609,11 @@ type FeaturesConfig struct {
 	// off in every shipped profile and requires a restart because its protocol
 	// adapter and profile catalogue are composed at startup.
 	CodexAppServer bool `mapstructure:"codex_app_server" json:"codexAppServer"`
+
+	// SessionMemoryGuard holds launches that would add an agent process while
+	// the host is low on available memory or above its commit ceiling. Off in
+	// every shipped profile; launches otherwise follow only the session ceiling.
+	SessionMemoryGuard bool `mapstructure:"session_memory_guard" json:"sessionMemoryGuard"`
 
 	// AgentBackgroundWork enables normalized background work tracking,
 	// interactive controls, and subagent observation.

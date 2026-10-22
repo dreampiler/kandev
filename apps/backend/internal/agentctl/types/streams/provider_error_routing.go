@@ -15,6 +15,7 @@ func (e *ProviderError) RoutingInput(phase routingerr.Phase, agentID, message st
 		in.Stderr = e.Message
 	}
 	in.ResetHint, in.OccurredAt = e.ResetAt, e.OccurredAt
+	in.ResetHintDerivationDisabled = e.Source == ProviderErrorSourceAgentMessage && e.ResetAt == nil
 	if e.Valid() {
 		in.HTTPStatus, in.ACPCode = e.HTTPStatus, e.RPCCode
 		in.ErrorKind, in.ProviderCode = e.ErrorKind, e.ProviderCode

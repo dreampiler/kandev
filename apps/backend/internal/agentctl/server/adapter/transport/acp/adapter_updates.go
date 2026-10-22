@@ -199,6 +199,7 @@ func (a *Adapter) handleACPUpdate(
 	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		a.observeUsageLimitNotice(promptGeneration, event)
 		if a.observesResponseAttemptReset(promptGeneration, event) {
 			leadingEvent = &AgentEvent{
 				Type:             streams.EventTypeResponseAttemptReset,
@@ -764,12 +765,18 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
-		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// The catalogue-derived gate can reject only text with no rule evidence.
+		// Uncovered/custom rules and structured inputs retain full classification.
+		var classified *routingerr.Error
+		diagnostic := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text}
+		if routingerr.MayClassify(diagnostic) {
+			classified = routingerr.Classify(diagnostic)
+		}
 		// Only an assistant chunk may carry the diagnostic-candidate marker: the
 		// downstream clearing rule only reads an unmarked assistant/thought
 		// chunk, so a marked user chunk would never be cleared by the ordinary-
 		// output path.
-		event.ProviderDiagnosticCandidate = role == "assistant" &&
+		event.ProviderDiagnosticCandidate = role == "assistant" && classified != nil &&
 			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}

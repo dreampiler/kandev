@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
@@ -47,6 +48,7 @@ func TestWindowsSetManagedProcGroupStartsSuspended(t *testing.T) {
 }
 
 func TestWindowsProcGroupsHideConsoleWindow(t *testing.T) {
+	t.Cleanup(commonwinproc.SetConsoleWindowProbeForTest(true))
 	for name, configure := range map[string]func(*exec.Cmd){
 		"setProcGroup":        setProcGroup,
 		"setManagedProcGroup": setManagedProcGroup,

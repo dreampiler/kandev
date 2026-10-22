@@ -12,6 +12,11 @@ type WindowMetrics struct {
 	RemainingPct          float64
 	ConsumptionRateKnown  bool
 	ConsumptionPctPerHour float64
+	// ResetAt is the provider reset time that observedWindow already proved is
+	// explicit and still in the future. A reset with no such proof stays zero
+	// and ResetAtKnown false.
+	ResetAt      time.Time
+	ResetAtKnown bool
 }
 
 // SnapshotPair reads at most two distinct successful samples without fetching.
@@ -54,6 +59,7 @@ func WindowMetricsForLabel(current, previous *ProviderUsage, label string, now t
 		return result
 	}
 	result.Known, result.RemainingPct = true, 100-window.UtilizationPct
+	result.ResetAt, result.ResetAtKnown = window.ResetAt, true
 	if !comparableAccountSamples(current, previous) {
 		return result
 	}

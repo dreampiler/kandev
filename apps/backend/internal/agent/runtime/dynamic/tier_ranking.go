@@ -2,10 +2,22 @@ package dynamic
 
 import (
 	"context"
+	"encoding/json"
+	"math/rand/v2"
+	"sort"
 	"time"
 )
 
-const tierModeRoundRobin = "round_robin"
+const (
+	tierModeRoundRobin = "round_robin"
+	tierModeCost       = "cost"
+	tierModeRandom     = "random"
+)
+
+// WithTierRandomPick supplies a deterministic picker without exposing a wire seed.
+func WithTierRandomPick(pick func(int) int) EngineOption {
+	return func(e *Engine) { e.tierPick = pick }
+}
 
 type rankedTierRow struct {
 	candidate Candidate
@@ -24,6 +36,7 @@ type TierPreviewEntry struct {
 	CandidateID           string   `json:"candidate_id"`
 	Tier                  int      `json:"tier"`
 	Mode                  string   `json:"mode"`
+	CostClass             string   `json:"cost_class"`
 	Eligible              bool     `json:"eligible"`
 	Reason                string   `json:"reason,omitempty"`
 	Selected              bool     `json:"selected"`
@@ -31,6 +44,40 @@ type TierPreviewEntry struct {
 	RemainingPct          *float64 `json:"remaining_pct,omitempty"`
 	ConsumptionRateKnown  bool     `json:"consumption_rate_known"`
 	ConsumptionPctPerHour *float64 `json:"consumption_pct_per_hour,omitempty"`
+	// resetAt is the proved reset behind the remaining reading. It is kept
+	// internal because the preview's public shape is unchanged by this work.
+	resetAt      time.Time
+	resetAtKnown bool
+}
+
+func candidateCost(candidate Candidate) string {
+	var selection struct {
+		Model struct {
+			Cost string `json:"cost"`
+		} `json:"model"`
+	}
+	if json.Unmarshal(candidate.SelectionJSON, &selection) != nil {
+		return "unknown"
+	}
+	switch selection.Model.Cost {
+	case "free", "subscription", "metered":
+		return selection.Model.Cost
+	default:
+		return "unknown"
+	}
+}
+
+func configuredCostRank(cost string) int {
+	switch cost {
+	case "free":
+		return 0
+	case "subscription":
+		return 1
+	case "metered":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func tierEligibilityReason(candidate Candidate, excluded map[string]bool, preferred string, unavailable map[string]string) string {
@@ -59,13 +106,44 @@ func rankTierRows(tier orderedTier, number int, excluded map[string]bool, prefer
 	rows := make([]rankedTierRow, 0, len(tier.rows))
 	for _, candidate := range tier.rows {
 		reason := tierEligibilityReason(candidate, excluded, preferred, unavailable)
-		rows = append(rows, rankedTierRow{candidate: candidate, entry: TierPreviewEntry{CandidateID: candidate.ID, Tier: number, Mode: tier.mode, Eligible: reason == "", Reason: reason}})
+		rows = append(rows, rankedTierRow{candidate: candidate, entry: TierPreviewEntry{CandidateID: candidate.ID, Tier: number, Mode: tier.mode, CostClass: candidateCost(candidate), Eligible: reason == "", Reason: reason}})
 	}
 	applyTierUsage(rows, now)
+	if tier.mode == tierModeCost {
+		sort.SliceStable(rows, func(i, j int) bool {
+			return configuredCostRank(rows[i].entry.CostClass) < configuredCostRank(rows[j].entry.CostClass)
+		})
+		return rows
+	}
 	if tier.mode == tierModeRoundRobin {
 		return rotateRoundRobinRows(rows, history)
 	}
-	return rankUsageRows(rows, tier.mode)
+	return rankUsageRows(rows, tier.mode, now)
+}
+
+// Random selection samples eligible untried rows only. Observation logs keep
+// their stored order; the actual traversal and read-only preview draw once.
+func promoteRandomTierRow(rows []rankedTierRow, pick func(int) int) {
+	var eligible []int
+	for index, row := range rows {
+		if row.entry.Eligible {
+			eligible = append(eligible, index)
+		}
+	}
+	if len(eligible) < 2 {
+		return
+	}
+	if pick == nil {
+		pick = rand.IntN
+	}
+	index := pick(len(eligible))
+	if index < 0 || index >= len(eligible) {
+		index = 0
+	}
+	position := eligible[index]
+	chosen := rows[position]
+	copy(rows[1:position+1], rows[:position])
+	rows[0] = chosen
 }
 
 // Observe an expired circuit's probe availability; only candidateSelectable
@@ -132,7 +210,11 @@ func (e *Engine) PreviewTiersContext(ctx context.Context, profile Profile) (Tier
 			}
 			loaded = true
 		}
-		preview.appendTierRows(rankTierRows(tier, index+1, nil, "", unavailable, history, preview.ObservedAt), unreached)
+		rows := rankTierRows(tier, index+1, nil, "", unavailable, history, preview.ObservedAt)
+		if tier.mode == tierModeRandom {
+			promoteRandomTierRow(rows, e.tierPick)
+		}
+		preview.appendTierRows(rows, unreached)
 	}
 	preview.State = "no_candidates"
 	if len(preview.Considered) > 0 {

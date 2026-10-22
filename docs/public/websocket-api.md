@@ -304,7 +304,19 @@ The action succeeds only when Kandev proves one unmatched canonical slot, one se
 
 The response can include `workspace_inventory_recovery_receipt`. Its `result_code` is `repaired` for the first successful write or `deduplicated` when the same task, idempotency key, and request identity were already recorded. The receipt contains hashes and server identifiers but no host checkout path. Reusing a key for a different derived request returns a conflict.
 
-Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a user-owned local repository, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
+For an existing registered worktree belonging to a local repository, add
+`"workspace_only": true` to repair metadata without starting an agent. This
+explicit option requires a terminal session, exactly one attached local
+repository, matching task/environment ownership, reciprocal Git registration,
+and no active writer, including the target session. The server records and
+checks task-entry, session-state, and dynamic-route-generation evidence. A
+changed entry or generation conflicts. The response has
+`activation_disposition: "not_started"` and `activation_reason: "metadata_only"`.
+An ordinary workflow retry is a separate operation with its usual admission
+checks. Automatic local-source repair remains unsupported, and external Git
+clean/process filters still require manual recovery.
+
+Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a local repository without the explicit metadata-only option, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
 
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
 

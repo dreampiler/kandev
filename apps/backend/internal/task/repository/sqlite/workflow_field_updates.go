@@ -16,6 +16,14 @@ import (
 // UpdateWorkflowFields writes only supplied columns and returns the row observed
 // by that statement. Unrelated columns never enter the assignment list.
 func (r *Repository) UpdateWorkflowFields(ctx context.Context, id string, update models.WorkflowFieldUpdate) (*models.Workflow, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensurePromptSourceMutable(ctx, tx, id); err != nil {
+		return nil, err
+	}
 	assignments := []string{"updated_at = ?"}
 	args := []any{time.Now().UTC()}
 	appendString := func(column string, value *string) {
@@ -28,6 +36,10 @@ func (r *Repository) UpdateWorkflowFields(ctx context.Context, id string, update
 	appendString("description", update.Description)
 	appendString("prompt", update.Prompt)
 	appendString("agent_profile_id", update.AgentProfileID)
+	if update.RequireExplicitAgentProfile != nil {
+		assignments = append(assignments, "require_explicit_agent_profile = ?")
+		args = append(args, dialect.BoolToInt(*update.RequireExplicitAgentProfile))
+	}
 	if update.Hidden != nil {
 		assignments = append(assignments, "hidden = ?")
 		args = append(args, dialect.BoolToInt(*update.Hidden))
@@ -39,11 +51,14 @@ func (r *Repository) UpdateWorkflowFields(ctx context.Context, id string, update
 	appendString("source_path", update.SourcePath)
 	args = append(args, id)
 	query := "UPDATE workflows SET " + strings.Join(assignments, ", ") + " WHERE id = ? RETURNING " + workflowSelectColumns
-	workflow, err := scanWorkflowRow(r.db.QueryRowContext(ctx, r.db.Rebind(query), args...))
+	workflow, err := scanWorkflowRow(tx.QueryRowContext(ctx, tx.Rebind(query), args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", repoerrors.ErrWorkflowNotFound, id)
 	}
 	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return workflow, nil

@@ -2065,8 +2065,18 @@ func (s *Service) publishTaskSessionStateChanged(
 
 // maybePromotePrimary promotes the next best active session to primary when the
 // current primary session enters a terminal state (COMPLETED, FAILED, CANCELLED).
+//
+// A FAILED written while a resume attempt still owns the session is that
+// attempt's rollback: the user is restoring this session, so it keeps the role
+// rather than handing it, and with it the task's prompts, to another session.
 func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState) {
 	if !isTerminalSessionState(newState) {
+		return
+	}
+	if newState == models.TaskSessionStateFailed && s.resumeAttemptInFlight(sessionID) {
+		s.logger.Info("kept primary session after resume rollback",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
 		return
 	}
 
@@ -2088,8 +2098,10 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 
 	// Only an active session can inherit the role after a stop. The shared
 	// selector prefers the current step's profile and ranks a parked session
-	// last; a parked session remains eligible when no better active session exists.
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true)
+	// last; it also skips a session that awaits a recovery action, so a blocked
+	// session never takes the role. When no other active session exists, the
+	// stopped session keeps the role and the task waits for the operator.
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, sessionID, true, true)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary session",
@@ -2136,6 +2148,17 @@ func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID stri
 // lost the primary role before the transfer was admitted.
 var errTerminalQueueReceiverChanged = errors.New("terminal queue hand-off receiver is no longer primary")
 
+// errTerminalQueueReceiverAwaitsRecovery aborts a hand-off whose receiver has
+// an open recovery block or an action_required dynamic route. The messages
+// keep their session target rather than wait behind an operator decision on a
+// session the user did not address.
+var errTerminalQueueReceiverAwaitsRecovery = errors.New("terminal queue hand-off receiver awaits a recovery action")
+
+// errTerminalQueueSourceNotRetired aborts a hand-off whose source became
+// nonterminal, or came under a resume attempt, after the transfer was
+// scheduled. The source is being restored, so its messages still belong to it.
+var errTerminalQueueSourceNotRetired = errors.New("terminal queue hand-off source is no longer retired")
+
 // terminalQueueHandOffAttempts bounds re-resolving the receiver when the
 // primary role keeps moving while a hand-off waits for admission.
 const terminalQueueHandOffAttempts = 5
@@ -2172,12 +2195,7 @@ func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromS
 		if errors.Is(err, errTerminalQueueReceiverChanged) {
 			continue
 		}
-		if err != nil {
-			s.logger.Warn("failed to hand off queued messages from terminal session",
-				zap.String("task_id", taskID),
-				zap.String("from_session_id", fromSessionID),
-				zap.String("to_session_id", toSessionID),
-				zap.Error(err))
+		if s.terminalQueueHandOffAborted(err, taskID, fromSessionID, toSessionID) {
 			return
 		}
 		if ctx.Err() != nil {
@@ -2194,11 +2212,36 @@ func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromS
 		zap.String("from_session_id", fromSessionID))
 }
 
+// terminalQueueHandOffAborted reports whether a failed transfer must stop the
+// hand-off without retrying, and logs the reason. A receiver that awaits a
+// recovery action or a source a resume attempt owns keeps the messages on
+// their session; any other failure is reported and left for the next event.
+func (s *Service) terminalQueueHandOffAborted(err error, taskID, fromSessionID, toSessionID string) bool {
+	fields := []zap.Field{
+		zap.String("task_id", taskID),
+		zap.String("from_session_id", fromSessionID),
+		zap.String("to_session_id", toSessionID),
+	}
+	switch {
+	case errors.Is(err, errTerminalQueueSourceNotRetired):
+		s.logger.Info("kept queued messages on terminal session; a resume attempt owns it", fields...)
+		return true
+	case errors.Is(err, errTerminalQueueReceiverAwaitsRecovery):
+		s.logger.Info("kept queued messages on terminal session; new primary awaits a recovery action", fields...)
+		return true
+	case err != nil:
+		s.logger.Warn("failed to hand off queued messages from terminal session", append(fields, zap.Error(err))...)
+		return true
+	}
+	return false
+}
+
 // transferTerminalSessionQueue moves a terminal session's queue to the
 // primary. The receiver keeps its own Auto-run: the retired source's setting
 // is not combined into it, and a change the user made before the transfer was
-// admitted is kept. Inside the admission it confirms toSessionID still holds
-// the primary role and keeps primary switches out until the transfer commits.
+// admitted is kept. Inside the admission it confirms the source is still
+// retired and toSessionID still holds the primary role, and keeps primary
+// switches out until the transfer commits.
 func (s *Service) transferTerminalSessionQueue(ctx context.Context, taskID, fromSessionID, toSessionID string) error {
 	prepareAttachments, rollbackAttachments := s.queuedAttachmentTransferCallbacks(taskID, fromSessionID, toSessionID)
 	fenced := false
@@ -2218,8 +2261,14 @@ func (s *Service) transferTerminalSessionQueue(ctx context.Context, taskID, from
 				s.primarySwitchMu.RLock()
 				fenced = true
 			}
+			if !s.terminalQueueSourceRetired(admittedCtx, fromSessionID) {
+				return errTerminalQueueSourceNotRetired
+			}
 			if s.currentPrimarySessionID(admittedCtx, taskID) != toSessionID {
 				return errTerminalQueueReceiverChanged
+			}
+			if s.terminalQueueReceiverAwaitsRecovery(admittedCtx, toSessionID) {
+				return errTerminalQueueReceiverAwaitsRecovery
 			}
 			attachmentsPrepared = true
 			return prepareAttachments(admittedCtx, attachmentIDs)
@@ -2762,10 +2811,11 @@ func (s *Service) persistFullTaskSessionIfCurrent(
 		)
 	}
 	return fmt.Errorf(
-		"session %s state changed from %s to %s before full-row persistence",
+		"session %s state changed from %s to %s before full-row persistence: %w",
 		session.ID,
 		expected,
 		latest.State,
+		executor.ErrSessionStateChangedBeforeStart,
 	)
 }
 

@@ -485,6 +485,38 @@ interactive credential flow when a secret is required.
 
 Model and mode choices are probed from the locally installed CLI. Opening a saved concrete profile probes its saved environment, CLI flags, and command prefix. If you edit any of these launch settings, select **Refresh models** before you choose a model. Kandev probes the current draft without saving it or sending a prompt. A secret reference is resolved on the Kandev host and its value is not sent back to the browser. Probe status can report **auth required**, **not installed**, **not configured**, **unsupported**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
+### View provider usage
+
+Enable **Provider usage and limits** in **Settings > System > Feature Toggles**
+and restart Kandev to show usage beside profiles on **Settings > Agents**. The
+toggle is off by default. Select **Refresh** for another reading; this view does
+not poll in the background.
+
+Profiles sharing a supported local account show the same account usage. The
+view labels a default local account or local proxy explicitly; it does not
+measure a different account selected by a remote executor. Missing credentials,
+unsupported bindings and unavailable readings remain unknown. Free OpenCode
+models and services without a usage API do not inherit a paid usage window.
+A measured zero is shown as zero. A reading alone does not enforce a limit.
+
+The same feature also applies explicitly configured shared **Kandev-turn**
+allowances to task and Office prompts. No allowance is configured by default.
+The current settings API is
+`GET/PATCH /api/v1/agent-profiles/:id/turn-allowance`; editing requires native
+organization configuration permission. Optional settings are
+`concurrent_turns`, `turns_per_window` with `window_seconds`, `reset_anchor` and
+`block_until`. Omitted fields keep saved values, null removes an override, and
+zero disables that numeric dimension. Profiles using the same supported local
+credential share the allowance. Unknown potentially matching credential
+bindings stop configured admission; unrelated known provider families retain
+their own behavior.
+
+One Kandev turn can contain multiple provider requests. These allowances are
+not provider HTTP-request, token or USD budgets. Separate utility/review
+inference children, model/group limits, remote accounts and a native allowance
+editor remain subsequent work. Disabling the feature retains saved settings
+and admitted claims.
+
 ### Use an OpenAI-compatible provider
 
 Open the **Provider** section in a profile that supports this feature. Select
@@ -521,6 +553,33 @@ and list dynamic profiles. The card is hidden, and dynamic profiles cannot be
 selected for new work, when dynamic routing is disabled. A new profile starts
 with its name and candidates; enable or disable it later from the profile
 editor.
+
+**Candidate tiers and selection preview.**
+
+Enable **Dynamic profile tiers** in **Settings > System > Feature Toggles** and
+restart Kandev, with dynamic routing enabled. The independent toggle is off by
+default. In the dynamic profile editor, select **=** between adjacent candidates
+to join or split their tier. Move and remove controls retain candidate identity
+and saved selection metadata.
+
+Each tier head offers saved order, configured cost or random selection, plus
+same-tier-next or next-tier failure direction. Configure each candidate's cost
+class separately: free sorts before subscription, then metered, then unknown;
+equal classes keep saved row order. This is configured classification, not an
+estimate of provider prices or a change to billing identity. Random chooses
+among eligible candidates in that tier. Tier order always takes precedence.
+Existing
+failure policies still decide retries, waits and whether to continue; fallback
+does not return to an earlier tier or an already tried candidate in the same
+failure chain. A verified successful turn ends that chain. Turning tiers off
+restores flat routing while retaining the saved groups.
+
+Use **Preview new selection** to inspect the current saved or unsaved draft.
+Preview does not save, claim a runtime slot or start an agent. Its random result
+is a sample, not a reservation of the next choice; active sessions are unchanged.
+Round-robin, usage-pace ranking and keep-model reevaluation remain later
+increments. Their stored metadata is retained, and unsupported modes are not
+silently executed as saved order.
 
 Each candidate has a policy for two shared provider-error classes:
 
@@ -648,12 +707,19 @@ in this request:
 
 ```js
 const profileId = "replace-with-execution-profile-id";
-const boot = await (await fetch("/api/v1/app-state", { credentials: "same-origin" })).json();
-const response = await fetch(`/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`, {
-  method: "POST",
-  credentials: "same-origin",
-  headers: { "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken },
-});
+const boot = await (
+  await fetch("/api/v1/app-state", { credentials: "same-origin" })
+).json();
+const response = await fetch(
+  `/api/v1/agent-profiles/${encodeURIComponent(profileId)}/account-block/release`,
+  {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      "X-Kandev-Interim-Settings-Interlock": boot.interimSettingsInterlockToken,
+    },
+  },
+);
 console.log(response.status, await response.json());
 ```
 
@@ -733,6 +799,100 @@ being applied, Resume can wait up to 10 seconds. Its control stays busy during
 the check. If the wait expires or the evidence cannot be verified, delivery
 stays blocked. You can try Resume again after the connection or storage issue
 is resolved.
+
+#### Provider usage limits
+
+When a candidate hits a usage limit, Kandev pauses the resource that ran out
+and uses it again after the reset:
+
+- OpenCode Go and free models pause only the model that hit its limit, so
+  sibling models and free models stay available.
+- An OpenCode Go limit without a reset time pauses the model for 2 hours, up to
+  three times, then 24 hours, then until the next monthly reset. The count
+  starts over once the model produces output again.
+- A reset reported by the provider, either in the error or in its usage data,
+  is used instead.
+- A limit reported after the attempt already produced output still pauses the
+  model, while that attempt waits for manual recovery.
+- When every candidate is paused, the session waits and Kandev retries it at the
+  earliest reset, including after a restart.
+
+The **Provider limits** card in **Settings > Agents**, also shown on the page of
+a profile whose model has a provider prefix, sets a provider's monthly reset
+when the provider does not report one, and can block every paid model of a
+provider until a time you saw on its console. The current-choice preview shows
+whether a paused candidate is still waiting, being retried, or expired and
+retried on the next selection.
+
+### Configure provider account limits
+
+With dynamic routing enabled, open **Settings > Agents > Provider limits**.
+Each account has separate **Free**, **Subscription**, and **Paid** editors.
+Desktop shows three columns; phones show one tier at a time. Set a profile's
+tier when its provider or plan metadata cannot distinguish subscription from
+pay-as-you-go billing.
+
+Configure concurrent turns and requests per minute for each tier. Free accounts
+also support daily requests and an `HH:MM timezone` reset, such as `00:00 UTC`.
+The short request window preserves limits such as five requests per ten minutes
+per model. Subscriptions support rolling five-hour, weekly, and monthly budgets
+in provider percentages, tokens, or USD. Paid accounts support daily and monthly
+spend caps. Reset rules can follow the provider, a rolling window, the UTC
+calendar, or an owner-entered ISO timestamp and time zone.
+
+Each field shows its default, learned value, and owner override. A blank field
+inherits the derived value; zero disables that admission limit. Clearing account
+overrides restores derived limits without deleting observations. Existing
+provider-wide manual blocks, monthly-reset fallbacks, and owner-release controls
+remain available in the same settings section.
+
+The Free editor's daily requests are the account-wide allowance. Below it,
+**Model and group limits** lists daily request limits for one model or for a
+shared group of models with one combined allowance. Each limit shows today's
+count, its reset, its default, learned, and owner values, and whether the
+default is published, measured, approximate, or read from a provider counter.
+Select one of the account's free models to add a model limit, or several to add
+a shared group limit. A model with both a model limit and a group limit must fit
+both. When a provider reports a per-model daily limit, Kandev replaces that
+model's or group's learned value with the requests it counted in the scope so
+far, including a lower value after a provider reduction. Learning never raises a
+limit beyond what admission already allowed, so enter an owner value when a
+provider raises an allowance. When models without a configured limit hit their
+daily limit within the same minute, Kandev records a provisional shared group
+for them with their combined count. The card marks it provisional; enter 0 to
+disable it if the models were unrelated.
+
+| Provider           | Free defaults                                                                                                                                                                                                                          | Subscription defaults                                                                                                                                        | Paid defaults                                                         |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| OpenRouter         | 20 requests/minute; key counter reports 50 or 1000/day; midnight UTC                                                                                                                                                                   | No published defaults                                                                                                                                        | Owner configured                                                      |
+| LLM Gateway        | Zero credits: 5/10 minutes/model. Purchased credits: 20/minute/model                                                                                                                                                                   | DevPass: 120/minute, 50 concurrent turns; reported usage windows                                                                                             | Tier 0: 600/minute, 100 concurrent turns, $25 UTC day, $250 UTC month |
+| OpenCode Zen       | Midnight UTC. Measured model limits: `nemotron-3-ultra-free` and `step-5-preview-free` 1000/day, `longcat-2.5-preview-free` about 120/day; `big-pickle`, `muse-spark-1.3-contributor-free`, and `space-bunny-free` share about 500/day | No published defaults                                                                                                                                        | Owner configured                                                      |
+| OpenCode Go        | Unknown                                                                                                                                                                                                                                | Reported percentages. Enter `go` only for the base plan's $12/5h, $30/week, $60/month reference. Unknown plans, including Go Plus, keep dollar budgets unset | Owner configured                                                      |
+| Claude/Codex       | Unknown                                                                                                                                                                                                                                | Existing reported five-hour and weekly percentages and resets                                                                                                | Owner configured                                                      |
+| Antigravity/Gemini | Plan dependent                                                                                                                                                                                                                         | Reported plan quotas where available; owner tier override otherwise                                                                                          | Owner configured                                                      |
+
+Gateway concurrency numbers describe model requests; Kandev's configurable
+concurrency limit counts admitted task turns. These are different quantities.
+Request counts combine recorded usage events and distinct assistant/response
+boundaries from the existing agent stream. Summary-only transports, missing
+events, and CLI tool loops make these estimates; they can undercount or
+overcount actual HTTP requests. Recorded token and cost totals omit usage
+outside Kandev. The OpenRouter daily key counter and reported subscription
+percentages are provider measurements.
+
+On a classified limit error, Kandev records requests, turns, tokens, and cost in
+the account's five-hour, daily, weekly, and monthly windows. Unknown allowances
+learn from these observations, with a 5% admission reserve on learned values.
+Owner overrides and published limits retain their own values. If a subscription
+notice does not identify its exhausted window, Kandev marks a provisional
+five-hour token budget as an estimate; it does not infer a weekly or monthly
+allowance, and the existing unknown-window retry ladder still applies.
+
+Limits change candidate availability during admission. They preserve the saved
+candidate order and selection mode, defer when every candidate lacks capacity,
+and let running turns continue. They do not throttle individual HTTP calls
+inside a running agent. A classified limit error still records the observed
+usage, and an unavailable observation leaves the ordinary retry ladder unchanged.
 
 ### Monitor capability and subscription status
 

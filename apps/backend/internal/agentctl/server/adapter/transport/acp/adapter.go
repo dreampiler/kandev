@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
@@ -369,12 +370,15 @@ type promptTurnState struct {
 	rpcDone                     chan struct{}
 	abortCh                     chan struct{}
 	handoffCh                   chan struct{}
-	providerErrorCh             chan openCodeStderrDiagnostic
+	providerErrorCh             chan providerNoticeDiagnostic
 	promptGeneration            uint64
 	evidenceMu                  sync.Mutex
 	codexSystemError            bool
 	codexCapacity               bool
 	codexUsageLimit             *streams.ProviderError
+	quotaNoticeText             string
+	quotaNoticeClassified       string
+	quotaNoticeClass            *routingerr.Error
 	cursorRetriableMsg          string
 	cursorRetriableComplete     bool
 	cursorRetriableAt           time.Time
@@ -443,6 +447,56 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError
+}
+
+// quotaNoticeBufferBytes bounds the accumulated assistant text kept per turn.
+// A usage-limit notice is a short fixed sentence, so the buffer only has to
+// outlast a provider that streams it in several blocks.
+const quotaNoticeBufferBytes = 1024
+
+// appendQuotaNoticeText accumulates this turn's assistant text and returns the
+// buffer. A notice split across message chunks must classify once its parts
+// have all arrived, so classification reads the buffer rather than the single
+// chunk that triggered it.
+func (t *promptTurnState) appendQuotaNoticeText(text string) string {
+	if t == nil || text == "" {
+		return ""
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if len(t.quotaNoticeText) < quotaNoticeBufferBytes {
+		t.quotaNoticeText += text
+		if len(t.quotaNoticeText) > quotaNoticeBufferBytes {
+			t.quotaNoticeText = t.quotaNoticeText[:quotaNoticeBufferBytes]
+		}
+	}
+	return t.quotaNoticeText
+}
+
+// quotaNoticeClassification classifies this turn's quota-notice buffer once per
+// distinct buffer value. The buffer saturates at quotaNoticeBufferBytes early in
+// any real turn, so without this every later chunk of the turn re-runs the whole
+// provider rule engine over byte-identical input. The second result is false when
+// no classification is warranted, so the caller must not classify again itself.
+func (t *promptTurnState) quotaNoticeClassification(buffer, providerID string) (*routingerr.Error, bool) {
+	if t == nil || buffer == "" {
+		return nil, false
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	if t.quotaNoticeClassified == buffer {
+		return t.quotaNoticeClass, t.quotaNoticeClass != nil
+	}
+	t.quotaNoticeClassified = buffer
+	t.quotaNoticeClass = nil
+	input := routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: providerID, Stderr: buffer}
+	if !routingerr.MayClassify(input) {
+		return nil, false
+	}
+	// The buffer is the agent's own prose; only a notice the output opens with
+	// is the provider speaking, so the anchored notice classifier reads it.
+	t.quotaNoticeClass = routingerr.ClassifyAgentNotice(input)
+	return t.quotaNoticeClass, t.quotaNoticeClass != nil
 }
 
 func (t *promptTurnState) setCursorRetriable(msg string, complete bool) {

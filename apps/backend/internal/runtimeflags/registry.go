@@ -38,6 +38,8 @@ type runtimeFlagIdentity struct {
 
 const (
 	keyCodexAppServer                             = "features.codexAppServer"
+	keySessionMemoryGuard                         = "features.sessionMemoryGuard"
+	envSessionMemoryGuard                         = "KANDEV_FEATURES_SESSION_MEMORY_GUARD"
 	envCodexAppServer                             = "KANDEV_FEATURES_CODEX_APP_SERVER"
 	retiredAppStatusBarKey                        = "features.appStatusBar"
 	retiredAppStatusBarEnvVar                     = "KANDEV_FEATURES_APP_STATUS_BAR"
@@ -63,9 +65,9 @@ var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{
 			Key: "features.providerUsageLimits", EnvVar: "KANDEV_FEATURES_PROVIDER_USAGE_LIMITS", Kind: KindFeature,
-			Label: "Provider usage limits", Description: "Enables account-bound usage observations, block and reset controls, and usage-aware candidate eligibility.",
+			Label: "Provider usage limits", Description: "Enables account-bound usage snapshots, configured account/model/group allowances, block and reset controls, and usage-aware candidate eligibility.",
 			Stability: StabilityExperimental, RiskLevel: RiskMedium,
-			RiskDescription: "Unavailable observations remain unknown. Only proved execution bindings may affect configured admission; disabling retains stored observations.", RestartRequired: true, Mutable: true,
+			RiskDescription: "Unavailable observations and allowances remain unknown. Proved execution bindings and configured limits can defer a candidate at a new turn without changing its order. Disabling retains stored observations.", RestartRequired: true, Mutable: true,
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.ProviderUsageLimits },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.ProviderUsageLimits = value },
@@ -94,7 +96,7 @@ var registrations = []runtimeFlagRegistration{
 		definition: RuntimeFlagDefinition{
 			Key: "features.dynamicProfileTiers", EnvVar: "KANDEV_FEATURES_DYNAMIC_PROFILE_TIERS",
 			Kind: KindFeature, Label: "Dynamic profile tiers",
-			Description: "Enables adjacent ordered and round-robin candidate tiers, read-only preview and durable no-revisit fallback chains.",
+			Description: "Enables adjacent ordered, cost, random and round-robin candidate tiers, read-only preview and durable no-revisit fallback chains.",
 			Stability:   StabilityExperimental, RiskLevel: RiskMedium,
 			RiskDescription: "Changes candidate traversal when enabled. Round-robin uses committed task/session selections within one backend; transient utility routes have no durable RR progress in this increment. Other saved modes remain preserved.",
 			RestartRequired: true, Mutable: true,
@@ -260,6 +262,22 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.CodexAppServer },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.CodexAppServer = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:             keySessionMemoryGuard,
+			EnvVar:          envSessionMemoryGuard,
+			Kind:            KindFeature,
+			Label:           "Hold launches under host memory pressure",
+			Description:     "Holds new automatic agent session launches while host available memory is below KANDEV_SESSION_MEMORY_MIN_AVAILABLE_MB (default 8192) or commit charge is above KANDEV_SESSION_MEMORY_MAX_COMMIT_PERCENT (default 75), and replays them when pressure clears. Manual starts, resumes, and prompts are never held. Lower the floor on hosts with 16 GiB or less.",
+			Stability:       StabilityExperimental,
+			RiskLevel:       RiskLow,
+			RiskDescription: "Automatic launches wait in the launch queue while the host is short of memory. Manual starts, resumes, prompts into running sessions, dynamic hand-offs, and Office coordinator conversations are never held, and an unreadable host never holds a launch.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.SessionMemoryGuard },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.SessionMemoryGuard = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

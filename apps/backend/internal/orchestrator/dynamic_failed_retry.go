@@ -67,11 +67,14 @@ func (s *Service) checkFailedRouteRuntimeStopped(ctx context.Context, session *m
 
 // Normal cleanup preserves stopped rows for conversation and workspace resume.
 // This predicate observes that history without deleting it or settling claims.
+// last_seen_at is not required: a launch that failed before agentctl reported
+// an endpoint or PID persists its terminal row without one, and liveness has
+// already been probed by the caller.
 func failedRouteHasStoppedLocalHistory(session *models.TaskSession, row *models.ExecutorRunning) bool {
 	return row != nil && row.SessionID == session.ID && row.TaskID == session.TaskID &&
 		row.AgentExecutionID != "" && row.AgentExecutionID == session.AgentExecutionID &&
 		row.Runtime == runtimekind.RuntimeStandalone &&
 		(row.ExecutorID == models.ExecutorIDLocal || row.ExecutorID == models.ExecutorIDWorktree) &&
 		row.Status == models.ExecutorRunningStatusStopped && row.LocalPID == 0 && row.PID == 0 &&
-		row.LastSeenAt != nil && !row.LastSeenAt.IsZero() && !row.UpdatedAt.IsZero()
+		!row.UpdatedAt.IsZero()
 }

@@ -1869,6 +1869,13 @@ type Workflow struct {
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
+	// RequireExplicitAgentProfile opts this workflow into rejecting task
+	// creation when the caller supplies neither an explicit agent_profile_id
+	// nor a valid workflow_agent_overrides selection. It is an opt-in create
+	// policy, independent of whether the destination step pins a profile, and
+	// defaults false so existing workflows, Office flows, and recovery paths
+	// keep their current fallback resolution.
+	RequireExplicitAgentProfile bool `json:"require_explicit_agent_profile,omitempty"`
 	// Source records where the workflow definition came from ("manual" or
 	// "github"). SourcePath is the repo-relative file path the definition
 	// was synced from; empty for manual workflows.
@@ -2254,6 +2261,22 @@ type Message struct {
 	// referenced by PayloadDigest. Zero when PayloadDigest is empty.
 	PayloadSize int64 `json:"-"`
 }
+
+// ClarificationAnsweredBy records which channel carried a clarification
+// response. It is persisted on each bundle message's "answered_by" metadata so
+// a resolution reconstructed from durable rows reports the same channel as the
+// live response. The zero value means no channel was recorded, which is the
+// case for every response resolved before the marker existed.
+type ClarificationAnsweredBy struct {
+	Channel string `json:"channel,omitempty"`
+	Ref     string `json:"ref,omitempty"`
+}
+
+// ClarificationAnsweredByResponseKey is the responses-map key that carries the
+// bundle-wide answer-channel marker through CompleteActiveClarificationBundle.
+// It is not a question ID: empty question IDs are invalid, so the key cannot
+// collide with a real per-question answer.
+const ClarificationAnsweredByResponseKey = ""
 
 // ToAPI converts internal Message to API type.
 // Only true system-injected content (wrapped in <kandev-system> tags) is stripped
@@ -3092,8 +3115,16 @@ type TaskEnvironment struct {
 	// repository slot. Populated by repository getters.
 	Repos []*TaskEnvironmentRepo `json:"repos,omitempty"`
 
+	// RetiredAt retains inactive ownership and history; retired environments are never canonical or reused.
+	RetiredAt *time.Time `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// IsRetired reports whether an environment is retained as inactive history.
+func (te *TaskEnvironment) IsRetired() bool {
+	return te != nil && te.RetiredAt != nil
 }
 
 // RepoFor returns the per-repo environment row for repositoryID, or nil if not present.

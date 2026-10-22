@@ -22,6 +22,7 @@ import (
 	client "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	agentruntime "github.com/kandev/kandev/internal/agentruntime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -30,11 +31,15 @@ import (
 type ExecutionOwnerKind = lifecycle.ExecutionOwnerKind
 type ExecutionOwner = lifecycle.ExecutionOwner
 type OwnerAdmission = lifecycle.OwnerAdmission
+type ProviderTurnRequest = lifecycle.ProviderTurnRequest
+type ProviderTurnAdmission = lifecycle.ProviderTurnAdmission
 type LaunchRequest = lifecycle.LaunchRequest
 type RouteOverride = lifecycle.RouteOverride
 type AgentStreamEventPayload = lifecycle.AgentStreamEventPayload
 type AgentExecution = lifecycle.AgentExecution
 type WorkspaceInfo = lifecycle.WorkspaceInfo
+type RuntimeFootprintSnapshot = agentruntime.RuntimeFootprintSnapshot
+type SessionRuntimeFootprint = agentruntime.SessionRuntimeFootprint
 type CachedModeState = lifecycle.CachedModeState
 type IdleSuspensionIdentity = lifecycle.IdleSuspensionIdentity
 type DeliveryRecordEvidenceRequest = lifecycle.DeliveryRecordEvidenceRequest

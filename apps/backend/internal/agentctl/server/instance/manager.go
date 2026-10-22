@@ -625,6 +625,24 @@ func (m *Manager) ListInstances() []*InstanceInfo {
 	return result
 }
 
+// ListInstanceFootprints copies owner handles before observing processes.
+func (m *Manager) ListInstanceFootprints(ctx context.Context) ([]RuntimeFootprint, error) {
+	m.mu.RLock()
+	instances := make([]*Instance, 0, len(m.instances))
+	for _, inst := range m.instances {
+		instances = append(instances, inst)
+	}
+	m.mu.RUnlock()
+	rows := make([]RuntimeFootprint, 0, len(instances))
+	for _, inst := range instances {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rows = append(rows, inst.Footprint())
+	}
+	return rows, ctx.Err()
+}
+
 // InferenceInventory closes unreserved starts before returning the current list.
 // Publication takes the same mutex and applies the mode to future instances.
 func (m *Manager) InferenceInventory(required bool) ([]*InstanceInfo, error) {

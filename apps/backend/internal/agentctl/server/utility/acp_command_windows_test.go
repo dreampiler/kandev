@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	commonwinproc "github.com/kandev/kandev/internal/common/winproc"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/windows"
 )
@@ -29,6 +30,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestWindowsACPCommandProcAttrHidesConsoleWindow(t *testing.T) {
+	t.Cleanup(commonwinproc.SetConsoleWindowProbeForTest(true))
 	cmd := exec.Command("cmd.exe")
 	setACPCommandProcAttr(cmd)
 

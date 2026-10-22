@@ -19,7 +19,8 @@ const (
 
 var openCodeResetPattern = regexp.MustCompile(`(?i)\bresets?\s+in\s+(?:(\d+)\s*(?:days?|d)\b)?\s*(?:(\d+)\s*(?:hours?|hrs?|h)\b)?\s*(?:(\d+)\s*(?:minutes?|mins?|m|min)\b)?`)
 
-type openCodeStderrDiagnostic struct {
+// providerNoticeDiagnostic is correlated with one in-flight prompt turn.
+type providerNoticeDiagnostic struct {
 	SessionID     string
 	ProviderError streams.ProviderError
 }
@@ -28,6 +29,9 @@ type providerPromptError struct {
 	ProviderError streams.ProviderError
 	cause         error
 }
+
+// Existing stderr callers retain their private type name.
+type openCodeStderrDiagnostic = providerNoticeDiagnostic
 
 func (e *providerPromptError) Error() string {
 	if e == nil || e.ProviderError.Message == "" {
@@ -227,17 +231,17 @@ func (a *Adapter) SanitizeStderrLine(line string) (string, bool) {
 	return diagnostic.ProviderError.Message, true
 }
 
-func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
+func parseOpenCodeStderrLine(line string) (providerNoticeDiagnostic, bool) {
 	fields, ok := parseOpenCodeLogFields(line)
 	if !ok || fields["level"] != "ERROR" || fields["message"] != "stream error" {
-		return openCodeStderrDiagnostic{}, false
+		return providerNoticeDiagnostic{}, false
 	}
 	if strings.EqualFold(fields["small"], "true") || strings.EqualFold(fields["agent"], "title") {
-		return openCodeStderrDiagnostic{}, false
+		return providerNoticeDiagnostic{}, false
 	}
 	sessionID := fields["session.id"]
 	if !safeOpenCodeIdentifier(sessionID, "ses_") {
-		return openCodeStderrDiagnostic{}, false
+		return providerNoticeDiagnostic{}, false
 	}
 	// Capture the allowlisted remediation URL before sanitization. OpenCode may
 	// carry it in a dedicated `action_url` field or inline in the provider
@@ -250,11 +254,11 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	rawMessage := fields["error.error"]
 	message := streams.SanitizeProviderMessage(rawMessage)
 	if message == "" {
-		return openCodeStderrDiagnostic{}, false
+		return providerNoticeDiagnostic{}, false
 	}
 	occurredAt, err := time.Parse(time.RFC3339Nano, fields["timestamp"])
 	if err != nil {
-		return openCodeStderrDiagnostic{}, false
+		return providerNoticeDiagnostic{}, false
 	}
 
 	providerError := streams.ProviderError{
@@ -269,7 +273,7 @@ func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	if resetAt := openCodeResetAt(message, occurredAt); resetAt != nil {
 		providerError.ResetAt = resetAt
 	}
-	return openCodeStderrDiagnostic{SessionID: sessionID, ProviderError: providerError}, true
+	return providerNoticeDiagnostic{SessionID: sessionID, ProviderError: providerError}, true
 }
 
 func parseOpenCodeLogFields(line string) (map[string]string, bool) {

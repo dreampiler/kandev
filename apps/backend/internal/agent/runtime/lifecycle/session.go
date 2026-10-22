@@ -66,6 +66,8 @@ func (e *PendingDispatchedPromptTimeoutError) Error() string {
 type SessionManager struct {
 	providerUsageLimits      bool
 	executorAdmission        func(context.Context, string, string, string) (context.Context, error)
+	providerTurnAdmission    ProviderTurnAdmission
+	providerTurnSettler      ProviderTurnSettlement
 	logger                   *logger.Logger
 	eventPublisher           *EventPublisher
 	streamManager            *StreamManager
@@ -2350,7 +2352,10 @@ func (sm *SessionManager) callAgentctlPrompt(
 	if client == nil {
 		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
 	}
-	var err error
+	newClaim, err := sm.admitProviderTurn(ctx, execution, promptGeneration, submissionID)
+	if err != nil {
+		return err
+	}
 	if steer {
 		if submissionID != "" {
 			err = client.PromptSteerWithSubmissionID(ctx, prompt, attachments, promptGeneration, submissionID)
@@ -2368,6 +2373,9 @@ func (sm *SessionManager) callAgentctlPrompt(
 		acknowledgedID := client.LastDeliverySubmissionID()
 		activeID := deliverySubmissionIdentityForPrompt(submissionID, acknowledgedID)
 		execution.setDeliverySubmissionID(activeID)
+	}
+	if newClaim && agentctl.PromptDefinitelyUnsent(err) {
+		sm.finishProviderTurn(execution.ID, promptGeneration, true)
 	}
 	return err
 }

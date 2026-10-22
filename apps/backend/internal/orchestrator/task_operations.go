@@ -1112,7 +1112,8 @@ func (s *Service) startCreatedSession(
 		if errors.Is(err, ErrSessionRecoveryRequired) {
 			return nil, err
 		}
-		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
+		if errors.Is(err, executor.ErrExecutionAlreadyRunning) ||
+			errors.Is(err, executor.ErrSessionStateChangedBeforeStart) {
 			if initialTurnCreated {
 				s.completeTurnIfCurrent(ctx, sessionID, initialTurnID)
 			}
@@ -6126,13 +6127,15 @@ func (s *Service) quiesceSessionExecutionBeforeDeletion(
 
 // promoteNextPrimaryAfterRemoval picks the best remaining session as primary
 // after a session is deleted. Any nonterminal session is eligible; the shared
-// selector prefers the current step's profile and ranks a parked session last.
+// selector prefers the current step's profile, ranks a parked session last, and
+// keeps a session that awaits a recovery action as the final fallback so the
+// task still has a primary.
 func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, deletedSessionID string) {
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
 	if err != nil || len(sessions) == 0 {
 		return
 	}
-	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false)
+	candidate := s.bestPrimarySessionCandidate(ctx, taskID, sessions, deletedSessionID, false, false)
 	if candidate != "" {
 		if err := s.SetPrimarySession(ctx, candidate); err != nil {
 			s.logger.Warn("failed to auto-promote primary after delete",
@@ -6165,7 +6168,9 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 }
 
 // terminalPrimaryBeforeSwitch returns the current primary when the role is
-// about to move off a session that can no longer accept prompts.
+// about to move off a session that can no longer accept prompts. A FAILED
+// session that a resume attempt still owns is being restored, so it keeps its
+// queue.
 func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID string) *models.TaskSession {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
@@ -6177,6 +6182,9 @@ func (s *Service) terminalPrimaryBeforeSwitch(ctx context.Context, sessionID str
 	}
 	for _, previous := range sessions {
 		if previous.IsPrimary && previous.ID != sessionID && isTerminalSessionState(previous.State) {
+			if s.resumeAttemptInFlight(previous.ID) {
+				return nil
+			}
 			return previous
 		}
 	}
@@ -7027,6 +7035,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	session, foregroundClaim, err := s.prepareSessionAndForegroundClaimForPrompt(ctx, taskID, sessionID, options)
 	if err != nil {
 		return nil, err
+	}
+
+	// A fixed profile whose resource circuit is open must not receive a new
+	// provider request, even into an execution that is still alive. Dynamic
+	// sessions are gated by their own selection.
+	if !s.isDynamicPromptSession(session) {
+		if err := s.admitFixedProfileDispatch(ctx, sessionID, fixedSessionProfileID(session)); err != nil {
+			s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+			return nil, err
+		}
 	}
 
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.

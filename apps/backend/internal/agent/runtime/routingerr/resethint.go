@@ -21,6 +21,24 @@ var resetClockHintPattern = regexp.MustCompile(
 	`(?i)\bresets\s+(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s+\(([^()\r\n]+)\)`,
 )
 
+// relativeResetHintPattern captures a provider retry time stated as a duration
+// from the notice itself ("Your limit will reset in 1 hour, 28 minutes"). Some
+// providers state no date, zone, or wall clock at all, so only the elapsed
+// time is known; it is anchored to the observation instant and therefore never
+// ambiguous across backend and provider locations. The unit list may appear in
+// any subset and may be separated by commas, spaces or "and". Capture the
+// complete phrase so an unsupported suffix cannot become a shorter deadline.
+var relativeResetHintPattern = regexp.MustCompile(
+	`(?i)\bresets?\s+in\s+([^\r\n.!?;]+)`,
+)
+
+// relativeDurationUnitPattern splits a captured duration list into value/unit
+// pairs. Longer unit spellings precede their prefixes so "minutes" is not read
+// as "m" followed by trailing text.
+var relativeDurationUnitPattern = regexp.MustCompile(
+	`(?i)(\d{1,4})\s*(days?|hours?|hrs?|minutes?|mins?|min|seconds?|secs?)\b`,
+)
+
 var monthNames = [...]string{
 	"january", "february", "march", "april", "may", "june",
 	"july", "august", "september", "october", "november", "december",
@@ -146,6 +164,63 @@ func parseIANAResetLocation(raw string) (*time.Location, bool) {
 		return nil, false
 	}
 	return location, true
+}
+
+// parseRelativeResetHintAt resolves a duration-stated reset notice against the
+// observation instant. It reports nil when the notice states no duration, when
+// the duration is zero, or when the notice carries a unit this parser does not
+// read — a partially understood duration must never become a circuit deadline.
+func parseRelativeResetHintAt(text string, now time.Time) *time.Time {
+	match := relativeResetHintPattern.FindStringSubmatch(text)
+	if match == nil {
+		return nil
+	}
+	duration := strings.TrimSpace(match[1])
+	units := relativeDurationUnitPattern.FindAllStringSubmatchIndex(duration, -1)
+	if len(units) == 0 {
+		return nil
+	}
+	var total time.Duration
+	position := 0
+	for _, unit := range units {
+		separator := strings.Join(strings.Fields(duration[position:unit[0]]), " ")
+		if !relativeResetSeparatorValid(separator, position == 0) {
+			return nil
+		}
+		value, ok := parseIntInRange(duration[unit[2]:unit[3]], 0, 999)
+		if !ok {
+			return nil
+		}
+		name := strings.ToLower(duration[unit[4]:unit[5]])
+		switch {
+		case strings.HasPrefix(name, "d"):
+			total += time.Duration(value) * 24 * time.Hour
+		case strings.HasPrefix(name, "h"):
+			total += time.Duration(value) * time.Hour
+		case strings.HasPrefix(name, "s"):
+			total += time.Duration(value) * time.Second
+		default:
+			total += time.Duration(value) * time.Minute
+		}
+		position = unit[1]
+	}
+	if total <= 0 || strings.TrimSpace(duration[position:]) != "" {
+		return nil
+	}
+	reset := now.Add(total)
+	return &reset
+}
+
+func relativeResetSeparatorValid(separator string, initial bool) bool {
+	if initial {
+		return separator == ""
+	}
+	switch strings.ToLower(separator) {
+	case "", ",", "and", ", and":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseResetHintParts(text string) (resetHintParts, bool) {

@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001
 created: 2026-08-08
-updated: 2026-08-30
+updated: 2026-10-15
 owners:
   - cfl
 ---
@@ -450,6 +450,39 @@ remain the authorization boundary for physical cleanup.
   reconciled, **WHEN** the new binary starts, **THEN** startup fails closed, the
   transaction rolls back, and the verified pre-upgrade backup remains the
   recovery source.
+
+## Duplicate environment healing after the ownership cutover
+
+The task-unique invariant applies only to active environments (`retired_at IS NULL`).
+Retired environments retain their original IDs, task ownership, repository and
+checkout identities, session references and snapshots. Canonical task selection,
+empty-session backfill and new/shared session binding never select retired rows;
+exact-ID history reads retain them. Launch/resume rejects retired reuse, and
+ordinary updates cannot reactivate historical rows. A legacy cutover that still
+has retired history aborts without normalizing or discarding it.
+
+A newer active environment timestamp
+alone does not authorize deleting an older environment's canonical repository
+inventory or Git snapshot history. Before duplicate environment deletion, the
+same transaction transfers repository rows only when the server-stored worktree
+executor/profile/generation and workspace identity agree with the ready winner.
+An empty legacy workspace path requires exactly one repository path matching the
+winner. Row IDs, worktree/branch/source fields and lifecycle timestamps survive.
+An incoming inventory is transferred only into an empty target. Any existing
+winner row, including one transferred from an earlier loser in the transaction,
+stops healing and rolls back all earlier changes. Different branch slots do not
+prove different physical checkouts. Slot conflicts also roll back; no
+conflict-ignore or filesystem/Git operation occurs.
+
+Environment-owned Git snapshots retain their IDs and payloads while their owner
+reference follows the canonical environment. Only sessions actually referencing
+deleted environment IDs are relinked, including borrowers; unrelated or already
+dangling references are not guessed from task membership. Empty duplicate rows
+retain the existing healing behavior. Active recovery claims, immutable receipts,
+recovery artifacts/operations, checkout adoptions, Kubernetes state, and resource
+handles that cannot be safely rebound stop startup without deleting those rows.
+PostgreSQL uses the existing ownership-cutover advisory lock and exclusive locks;
+mixed-version writers must still be stopped under the upgrade contract.
 
 ## Out of Scope
 

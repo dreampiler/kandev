@@ -226,10 +226,10 @@ func TestValidateOutcome_L16_BundleUnanswerableByAnyOutcome(t *testing.T) {
 // not the order the caller supplied them.
 func TestNormalizeAnswered_OrdersByBundleQuestionOrder(t *testing.T) {
 	questions := twoQuestionBundle()
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q2", CustomText: "second"},
 		{QuestionID: "q1", CustomText: "first"},
-	}, fixedNow())
+	}}, fixedNow())
 	if len(resp.Answers) != 2 {
 		t.Fatalf("expected 2 answers, got %d", len(resp.Answers))
 	}
@@ -245,9 +245,9 @@ func TestNormalizeAnswered_OrdersAndDedupsSelectedOptions(t *testing.T) {
 	questions := []Question{
 		{ID: "q1", Options: []Option{{ID: "opt-a"}, {ID: "opt-b"}, {ID: "opt-c"}}},
 	}
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q1", SelectedOptions: []string{"opt-c", "opt-a", "opt-c", "opt-b", "opt-a"}},
-	}, fixedNow())
+	}}, fixedNow())
 	got := resp.Answers[0].SelectedOptions
 	want := []string{"opt-a", "opt-b", "opt-c"}
 	if len(got) != len(want) {
@@ -265,9 +265,9 @@ func TestNormalizeAnswered_OrdersAndDedupsSelectedOptions(t *testing.T) {
 // transformation.
 func TestNormalizeAnswered_TrimsWhitespace(t *testing.T) {
 	questions := []Question{{ID: "q1"}}
-	resp := normalizeAnswered("pending-1", questions, []Answer{
+	resp := normalizeAnswered("pending-1", questions, Outcome{Answers: []Answer{
 		{QuestionID: "q1", CustomText: "  padded  inside stays  "},
-	}, fixedNow())
+	}}, fixedNow())
 	if got, want := resp.Answers[0].CustomText, "padded  inside stays"; got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}

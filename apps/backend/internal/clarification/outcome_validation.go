@@ -14,10 +14,14 @@ import (
 // Rejected or a non-empty Answers submission applies; N8a additionally
 // forbids combining Rejected with a non-empty Answers. A cancel (A9) does
 // not go through ResolveBundle at all, so it has no representation here.
+// AnsweredBy is the E5 answer-channel marker: callers that resolved the
+// bundle through another channel (for example a Slack thread) record it
+// here, and it is carried onto the built Response unchanged.
 type Outcome struct {
 	Answers      []Answer
 	Rejected     bool
 	RejectReason string
+	AnsweredBy   AnsweredBy
 }
 
 // answerTextRuneCap is N8b's shared limit on both an answer's custom_text
@@ -146,7 +150,8 @@ func validateSelectedOptions(i int, a Answer, q Question) error {
 }
 
 // buildOutcomeResponse computes the resolution's status and its M6/N3a
-// response payload from a validated outcome.
+// response payload from a validated outcome. AnsweredBy rides along
+// unchanged on both the answered and the rejected path.
 func buildOutcomeResponse(pendingID string, questions []Question, o Outcome, now time.Time) (string, *Response) {
 	if o.Rejected {
 		return string(StatusRejected), &Response{
@@ -154,18 +159,19 @@ func buildOutcomeResponse(pendingID string, questions []Question, o Outcome, now
 			Answers:      []Answer{},
 			Rejected:     true,
 			RejectReason: strings.TrimSpace(o.RejectReason),
+			AnsweredBy:   o.AnsweredBy,
 			RespondedAt:  now,
 		}
 	}
-	return string(StatusAnswered), normalizeAnswered(pendingID, questions, o.Answers, now)
+	return string(StatusAnswered), normalizeAnswered(pendingID, questions, o, now)
 }
 
 // normalizeAnswered builds the N3a-normalized Response for an answered
 // outcome: answers ordered by the bundle's own question order (rule 1), not
 // the caller's submission order.
-func normalizeAnswered(pendingID string, questions []Question, answers []Answer, now time.Time) *Response {
-	byID := make(map[string]Answer, len(answers))
-	for _, a := range answers {
+func normalizeAnswered(pendingID string, questions []Question, o Outcome, now time.Time) *Response {
+	byID := make(map[string]Answer, len(o.Answers))
+	for _, a := range o.Answers {
 		byID[a.QuestionID] = a
 	}
 	out := make([]Answer, 0, len(questions))
@@ -181,6 +187,7 @@ func normalizeAnswered(pendingID string, questions []Question, answers []Answer,
 		Answers:      out,
 		Rejected:     false,
 		RejectReason: "", // M6: discarded even if the caller supplied one
+		AnsweredBy:   o.AnsweredBy,
 		RespondedAt:  now,
 	}
 }

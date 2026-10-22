@@ -36,7 +36,10 @@ const (
 // human-readable message.
 const errorDetailKeyErrorCode = "error_code"
 
-func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
+// handleNotFound maps a service error to an HTTP response. logFields are
+// added to the error log of an unmapped (500) failure so the caller can name
+// the request it was serving.
+func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string, logFields ...zap.Field) {
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
 		return
@@ -78,11 +81,17 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusConflict, taskErrorBody(err))
 		return
 	}
+	var childConflictErr *service.TaskDeleteChildWorkspaceConflictError
+	if errors.As(err, &childConflictErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if isValidationError(err) {
 		c.JSON(http.StatusBadRequest, taskErrorBody(err))
 		return
 	}
-	log.Error("request failed", append(cleanupInspectionFields(err), zap.Error(err))...)
+	fields := append(append([]zap.Field{}, logFields...), cleanupInspectionFields(err)...)
+	log.Error("request failed", append(fields, zap.Error(err))...)
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "request failed"})
 }
 
@@ -117,7 +126,24 @@ func taskErrorDetails(err error) map[string]interface{} {
 			"dirty_worktrees":       dirtyWorktreeErr.DirtyWorktrees,
 		}
 	}
+	if details, ok := taskDeleteChildConflictDetails(err); ok {
+		return details
+	}
 	return nil
+}
+
+// taskDeleteChildConflictDetails is the machine-readable body shared by the
+// HTTP and WebSocket delete responses for a child that changed concurrently.
+func taskDeleteChildConflictDetails(err error) (map[string]interface{}, bool) {
+	var conflict *service.TaskDeleteChildWorkspaceConflictError
+	if !errors.As(err, &conflict) {
+		return nil, false
+	}
+	return map[string]interface{}{
+		errorDetailKeyErrorCode: service.TaskDeleteChildWorkspaceConflictErrorCode,
+		"child_task_id":         conflict.ChildID,
+		"reason":                string(conflict.Reason),
+	}, true
 }
 
 func repositorySelectionHTTPStatus(err error) (int, bool) {
@@ -294,6 +320,9 @@ func isValidationError(err error) bool {
 		return true
 	}
 	if errors.Is(err, service.ErrTaskTitleTooLong) {
+		return true
+	}
+	if errors.Is(err, service.ErrExplicitAgentProfileRequired) {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) || errors.Is(err, service.ErrReservedMetadata) {

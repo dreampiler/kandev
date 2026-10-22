@@ -142,10 +142,12 @@ function renderConfig(overrides: Partial<ComponentProps<typeof ConfigSection>> =
     <ConfigSection
       workspaceId={WORKSPACE_ID}
       workflowId=""
+      parentTaskId=""
       agentProfileId=""
       executorProfileId=""
       repositorySelections={[]}
       onWorkflowChange={() => {}}
+      onParentChange={() => {}}
       onAgentProfileChange={() => {}}
       onExecutorProfileChange={() => {}}
       onRepositoriesChange={() => {}}

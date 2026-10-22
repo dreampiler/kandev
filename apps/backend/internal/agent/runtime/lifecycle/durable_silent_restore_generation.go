@@ -91,7 +91,7 @@ func successorGenerationPending(execution *AgentExecution, current *models.Harne
 }
 
 func replacementGenerationPending(execution *AgentExecution, current *models.HarnessSessionGeneration) bool {
-	return execution != nil && current != nil && execution.ReplacesNativeConversation &&
+	return execution != nil && current != nil && execution.replacesPredecessorGeneration() &&
 		current.SessionID == execution.SessionID && current.IncarnationID == execution.DeliveryIncarnationID &&
 		uint64(current.Generation)+1 == execution.DeliveryHarnessGeneration
 }

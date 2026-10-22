@@ -915,5 +915,18 @@
   "sidebarMoveDownEntry": "下移{{name}}",
   "sidebarResizeNavigation": "调整侧边栏导航高度",
   "sidebarExpandNavigation": "展开侧边栏导航",
-  "sidebarCollapseNavigation": "恢复收起的导航"
+  "sidebarCollapseNavigation": "恢复收起的导航",
+  "workspaceRuntimeFootprintCommitted": "提交内存",
+  "workspaceRuntimeFootprintDescription": "此工作区当前运行的智能体会话在本机占用的内存。",
+  "workspaceRuntimeFootprintEmpty": "此工作区没有正在运行的智能体会话。",
+  "workspaceRuntimeFootprintLoading": "正在读取当前测量值",
+  "workspaceRuntimeFootprintPartial": "部分进程无法测量，因此这些合计值是下限。",
+  "workspaceRuntimeFootprintProcesses": "进程",
+  "workspaceRuntimeFootprintResident": "常驻内存",
+  "workspaceRuntimeFootprintRowSummary": "{{processes}} 个进程，常驻 {{resident}}",
+  "workspaceRuntimeFootprintRuntimes": "运行中的会话",
+  "workspaceRuntimeFootprintTitle": "正在使用的智能体内存",
+  "workspaceRuntimeFootprintUnavailable": "无法读取当前测量值。",
+  "workspaceRuntimeFootprintUnavailableMetric": "此平台不提供",
+  "workspaceRuntimeFootprintUnmeasured": "没有当前测量值。内存用量未知，并非为零。"
 }

@@ -4,6 +4,27 @@ package routingerr
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
 var providerNeutralRules = []rule{
+	// Some providers announce an exhausted quota as an ordinary assistant
+	// message and then never settle the prompt, so the notice is the only
+	// failure signal. The high-confidence rule is anchored to the whole text and
+	// requires the provider's own notice wording, because a rule that ends a
+	// live turn on the bare phrase "usage limit reached" would also match an
+	// agent quoting or explaining that phrase — and an ACP terminal error
+	// carrying only that string must stay a generic failure. The loose rule
+	// keeps such prose classifiable for diagnostics, but at a confidence that
+	// never ends a turn.
+	mustRule(
+		"provider.quota_notice.v1",
+		`(?is)^\s*(?:usage\s+limit\s+reached[.!]?\s*)?you have reached your current quota for this period\.\s*your limit will reset in\s+\d`,
+		CodeQuotaLimited,
+		ConfHigh,
+	),
+	mustRule(
+		"provider.quota_notice_prose.v1",
+		`(?i)\breached\s+your\s+current\s+quota\s+for\s+this\s+period\b`,
+		CodeQuotaLimited,
+		ConfMedium,
+	),
 	// A gateway that restricted an account rejects every request with 403 and
 	// an account-restriction code or message. The envelope must open the line,
 	// optionally inside a labeled JSON message, so an agent quoting the error
@@ -27,6 +48,30 @@ var providerNeutralRules = []rule{
 		"provider.network_unavailable.v1",
 		`(?i)(?:\b(?:ECONNRESET|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|ETIMEDOUT|ENOTFOUND)\b|network\s+is\s+unreachable|no\s+route\s+to\s+host|connection\s+(?:reset|refused|timed\s+out)|temporary\s+failure\s+in\s+name\s+resolution|i/o\s+timeout|failed\s+to\s+fetch)`,
 		CodeNetworkUnavailable,
+		ConfHigh,
+	),
+	// An AI-SDK error envelope carries the provider's own classification in a
+	// structured "error_type" field. The underscore-joined "provider_unavailable"
+	// never matches the space-separated prose in provider.unavailable.v1. The
+	// error label is required: an assistant chunk is classified on its own, so a
+	// bare JSON object that merely carries the field is not a provider
+	// diagnostic. It sits before the generic rule so the structured signal
+	// outranks bare prose. The line may open with the "Agent encountered an
+	// error:" status prefix.
+	mustRule(
+		"provider.structured_error_type.v1",
+		`(?im)^\s*(?:Agent\s+encountered\s+an\s+error:\s*)?(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)\{[^\n]*"error_type"\s*:\s*"provider_unavailable"`,
+		CodeProviderUnavailable,
+		ConfHigh,
+	),
+	// A model rejects a request whose input exceeds its context window. The code
+	// stays agent_runtime_error so the repeated-unclassified-failure route can
+	// still try a candidate with a larger context window; naming the rule only
+	// removes the failure from the anonymous phase default.
+	mustRule(
+		"provider.context_length_exceeded.v1",
+		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
+		CodeAgentRuntime,
 		ConfHigh,
 	),
 	mustRule(
