@@ -3676,8 +3676,30 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 
+	teardown := func() {
+		s.teardownOfficeTurn(ctx, taskID, sessionID, session, completionTurnID)
+	}
+	// The relaunch that this teardown must not stop takes the executor's
+	// per-session launch/stop lock. Running the ownership decision and the
+	// teardown inside that same lock serializes them.
+	if s.executor != nil {
+		s.executor.WithSessionOwnership(sessionID, teardown)
+	} else {
+		teardown()
+	}
+	return true
+}
+
+// teardownOfficeTurn flips a completed Office turn's session to IDLE and stops
+// the execution that turn owned. It runs while the executor's per-session
+// launch/stop lock is held, so a successor relaunch cannot start between the
+// ownership read and the stop; a relaunch that already holds the lock is
+// observed here and keeps its execution.
+func (s *Service) teardownOfficeTurn(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, completionTurnID string,
+) {
 	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
-		return true
+		return
 	}
 
 	s.logger.Info("office turn complete — IDLE + tearing down execution",
@@ -3699,16 +3721,8 @@ func (s *Service) handleOfficeTurnComplete(
 			s.logger.Info("office turn complete — session moved on, skipping stale teardown",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
-			return true
+			return
 		}
-	}
-
-	// Re-check ownership immediately before the irreversible stop. The window
-	// between the reload above and this point is where a successor relaunch
-	// that reuses the live execution lands; its new turn or execution must
-	// keep the process alive.
-	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
-		return true
 	}
 
 	if s.agentManager != nil && session.AgentExecutionID != "" {
@@ -3722,7 +3736,6 @@ func (s *Service) handleOfficeTurnComplete(
 				zap.Error(err))
 		}
 	}
-	return true
 }
 
 // officeSessionRelaunchedSince reloads the session right before the Office

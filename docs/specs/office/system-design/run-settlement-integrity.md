@@ -51,6 +51,8 @@ routing owns its failover decision; this design only waits for its outcome.
   through `GetTaskSessionState`.
 - The flag is `FeaturesConfig.OfficeAgentErrorSessionVerdict`, registered in
   `runtimeflags/registry.go` and set off in every profile.
+- Office teardown and session launch/resume/stop serialize on the executor's
+  per-session lock (`Executor.WithSessionOwnership`).
 
 ## Control flow
 
@@ -70,19 +72,18 @@ before the Office IDLE teardown. The park is the one signal every turn
 produces, so it settles the run and releases the agent ceiling; the teardown's
 later `AgentStopped` is a no-op on the finished run.
 
-`handleOfficeTurnComplete` reloads the session before the IDLE flip and
-`StopAgent`. It skips both, and still claims the completion, when the session
-is `STARTING`, is `RUNNING` while the completion snapshot was not, holds an
-agent execution other than the snapshot's, or is running a turn other than the
-one that just completed. The IDLE flip is a compare-and-set against the
-completion snapshot's state, and ownership is reloaded once more immediately
-before `StopAgent`. A relaunch that lands after the first reload therefore
-either wins the state compare-and-set or is observed by the final reload, and
-the stale completion stops without touching the successor's execution. A
-relaunch that reuses the live execution keeps the execution id and can leave
-the session `RUNNING`, so its new turn is the signal that the session moved on.
-The remaining window is the final reload-to-stop gap: a relaunch that lands
-inside it is not observed by this handler.
+`handleOfficeTurnComplete` decides ownership and runs the IDLE flip and
+`StopAgent` while holding the executor's per-session launch/stop lock, the same
+lock `LaunchPreparedSession`, resume, and session stop take. A successor
+relaunch therefore cannot start between the ownership read and the stop; if it
+already owns the lock, the completion waits, then observes the successor and
+returns without touching its execution. The guard skips both actions, and still
+claims the completion, when the session is `STARTING`, is `RUNNING` while the
+completion snapshot was not, holds an agent execution other than the snapshot's,
+or is running a turn other than the one that just completed. A relaunch that
+reuses the live execution keeps the execution id and can leave the session
+`RUNNING`, so its new turn is the signal that the session moved on. The IDLE
+flip remains a compare-and-set against the completion snapshot's state.
 
 ### Inheritance resolution
 
