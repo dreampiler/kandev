@@ -210,6 +210,14 @@ launches keep one matching saved-prompt expansion in the stored message and
 agent prompt. A queued workflow prompt resolves references when it drains, and
 its recovery launch uses that same definition.
 
+Skill content can reference saved prompts too, so shared rules live in one
+saved prompt instead of being copied into every skill. When Kandev delivers a
+skill to an agent as `SKILL.md`, the file keeps your text, including each
+`@name`, and appends the current content of each referenced prompt in a block
+at the end. This applies to Office and Kanban launches on every executor.
+Editing the saved prompt changes what the next launch delivers. The stored
+skill, the skill editor, and config export keep only the `@name` text.
+
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 Kandev seeds these built-ins:
@@ -285,6 +293,12 @@ availability is unknown. The repository picker is also unavailable in that case.
 For an idle, non-archived task with a prepared workspace, **Files → + → Add repositories or folders** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Local sources stay linked to the established workspace root; remote executors clone repository sources in their executor workspace and require a cloneable origin for local Git rows. Host folders are unavailable remotely, while **Upload folder** remains a separate copy flow when supported. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. In a multi-repository workspace, active checkout roots use their repository names. Search results and chat attachments can show those names while retaining the checkout's canonical file path. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+
+In the desktop file editor, an agent change detected while you have local edits
+keeps your text and offers **Reload** to use the detected agent version. If a
+save is still finishing, its receipt does not dismiss a newer detected version.
+A successful save records the text submitted; typing made afterward stays unsaved.
+Choose **Reload** only when you want to replace the current text with that version.
 
 Files and workspace search omit only recovery artifacts that Kandev has registered for that workspace. A similarly named user file remains visible. A repository label changes display text only; file open, search, and chat-context actions continue to use the canonical path.
 

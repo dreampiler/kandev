@@ -2492,7 +2492,8 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		}
 		launchResp, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
-			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
+			reusePreparedPrimary: launchIntent == IntentStart && models.HasStartWhenUnblockedIntent(task),
+			ExecutorID:           intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
 			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
 			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
 		})
@@ -6922,10 +6923,14 @@ func (s *Service) persistAutoStartPrompt(
 	snapshot := s.workflowStartPromptInputSnapshot(
 		ctx, sessionID, prompt, planMode, attachments, references, handoffText,
 	)
+	var identity *messagequeue.QueueSessionIdentity
+	if admission := workflowAutoStartAdmissionFromContext(ctx, taskID, sessionID); admission != nil {
+		identity = &admission.identity
+	}
 	return s.persistAutoStartPromptWithAdmission(
 		ctx, taskID, sessionID, prompt, planMode, attachments, origin,
 		userMessageRecorded, references, handoffText,
-		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), nil, nil,
+		snapshot.dispatchInputPresentPtr(), snapshot.configModePtr(), identity, nil,
 	)
 }
 
@@ -6992,6 +6997,8 @@ func (s *Service) persistAutoStartPromptWithAdmission(
 			ctx, *identity, *entry, prompt, "", messagequeue.QueuedByWorkflow,
 			planMode, toQueuedAttachments(attachments), meta,
 		)
+	} else if identity != nil {
+		queued, err = s.messageQueue.QueueMessageWithMetadataForSession(ctx, *identity, prompt, "", messagequeue.QueuedByWorkflow, planMode, toQueuedAttachments(attachments), meta)
 	} else {
 		queued, err = s.messageQueue.QueueMessageWithMetadata(
 			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
