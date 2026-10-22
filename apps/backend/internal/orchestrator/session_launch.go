@@ -1494,6 +1494,18 @@ func (s *Service) RecoverSessionWithOptions(
 		return nil, normalizeRecoverSessionError(err)
 	}
 
+	continuationSucceeded := false
+	if checkpoint != nil {
+		claimed, claimErr := s.claimContextContinuationRoute(launchCtx, session)
+		if claimErr != nil {
+			settleErr := s.finishContinuationCheckpoint(context.WithoutCancel(ctx), checkpoint, models.ContinuitySnapshotUncertain)
+			return nil, errors.Join(claimErr, settleErr)
+		}
+		if claimed {
+			defer s.releaseAbandonedContextContinuationRoute(ctx, sessionID, session.RouteGeneration, &continuationSucceeded)
+		}
+	}
+
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
@@ -1564,6 +1576,7 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := s.resolveSessionRecoveryBlock(ctx, sessionID, action); err != nil {
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationSucceeded = true
 	return resp, nil
 }
 
