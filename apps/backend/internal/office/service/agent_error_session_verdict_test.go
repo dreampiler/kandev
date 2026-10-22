@@ -181,6 +181,26 @@ func TestAgentErrorSessionVerdict_StaleCompletionKeepsParkedFailure(t *testing.T
 	}
 }
 
+// A completion event without a run identity cannot prove which run it names.
+// It must leave the parked failure of the run that currently owns the reused
+// session, so that run's later failure verdict still applies.
+func TestAgentErrorSessionVerdict_LegacyCompletionWithoutRunIdentityKeepsParkedFailure(t *testing.T) {
+	f := newVerdictFixture(t, true, "RUNNING")
+
+	f.failExecution(t)
+	f.publish(t, events.AgentCompleted, map[string]interface{}{
+		"task_id":          verdictTaskID,
+		"session_id":       verdictSessionID,
+		"agent_profile_id": "agent-legacy-without-run",
+	})
+
+	f.sessionState(t, "RUNNING", "FAILED", "AI_APICallError: Go usage limit exceeded")
+
+	if got := f.runStatus(t); got != service.RunStatusFailed {
+		t.Fatalf("run status = %q, want failed: a completion without run identity must not consume the parked failure", got)
+	}
+}
+
 // A failure verdict written without a state event (or one missed while the
 // failure was parked) is still applied by the bounded re-check.
 func TestAgentErrorSessionVerdict_RecheckAppliesMissedFailureVerdict(t *testing.T) {

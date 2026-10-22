@@ -167,10 +167,12 @@ func (s *Service) recheckPendingAgentFailure(ctx context.Context, sessionID stri
 
 // dropPendingAgentFailure discards a parked failure once the session's run
 // completed through a successor. The pending entry is keyed by session, but a
-// completed event names one run: only that run may consume the entry, so a
-// delayed completion for a finished run cannot erase the next run's failure.
+// completed event names one run: only that run may consume the entry. A
+// completion without a trustworthy run identity (legacy task+agent fallback)
+// leaves the entry parked, so a delayed completion for a finished run cannot
+// erase the next run's failure.
 func (s *Service) dropPendingAgentFailure(sessionID, runID string) {
-	if sessionID == "" {
+	if sessionID == "" || runID == "" {
 		return
 	}
 	value, loaded := s.agentErrorVerdict.pending.Load(sessionID)
@@ -178,7 +180,7 @@ func (s *Service) dropPendingAgentFailure(sessionID, runID string) {
 		return
 	}
 	pending := value.(*pendingAgentFailure)
-	if runID != "" && pending.runID != runID {
+	if pending.runID != runID {
 		return
 	}
 	if s.agentErrorVerdict.pending.CompareAndDelete(sessionID, pending) {

@@ -491,7 +491,10 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
-	s.dropPendingAgentFailure(data.SessionID, run.ID)
+	// Only the event's own run identity may consume the parked failure. The
+	// task-and-agent fallback used for legacy events does not prove which run
+	// completed, so it leaves another run's parked failure in place.
+	s.dropPendingAgentFailure(data.SessionID, data.RunID)
 	return s.completeClaimedTaskRun(ctx, run, *data)
 }
 
