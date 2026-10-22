@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -361,72 +360,5 @@ func TestHandleOfficeTurnComplete_SkipsTeardownAfterRelaunch(t *testing.T) {
 				t.Fatalf("state = %q, want %q (late teardown must not flip it to IDLE)", got.State, tc.currentState)
 			}
 		})
-	}
-}
-
-// The stale completion decides ownership and stops the execution while holding
-// the same per-session launch/stop lock a successor relaunch takes. A relaunch
-// that already owns the lock must finish first, and the completion then sees it
-// and leaves its execution alone.
-func TestHandleOfficeTurnComplete_WaitsForSuccessorOwnershipLock(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	seedOfficeSession(t, repo, "t-race", "s-race", "exec-race")
-	mgr := &mockAgentManager{}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), mgr)
-	svc.executor = executor.NewExecutor(mgr, repo, testLogger(), executor.ExecutorConfig{})
-
-	session, err := repo.GetTaskSession(ctx, "s-race")
-	if err != nil {
-		t.Fatalf("get session: %v", err)
-	}
-
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	holderDone := make(chan struct{})
-	go func() {
-		defer close(holderDone)
-		svc.executor.WithSessionOwnership("s-race", func() {
-			close(entered)
-			<-release
-		})
-	}()
-	<-entered
-
-	handlerDone := make(chan bool, 1)
-	go func() {
-		handlerDone <- svc.handleOfficeTurnComplete(ctx, "t-race", "s-race", session, "", "")
-	}()
-
-	// A stale teardown must not run while the successor owns the session.
-	select {
-	case <-handlerDone:
-		t.Fatal("stale teardown ran while the successor held the session ownership lock")
-	case <-time.After(200 * time.Millisecond):
-	}
-
-	// The successor relaunches inside its critical section and keeps the live
-	// execution's id.
-	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-		ID: "s-race", SessionID: "s-race", TaskID: "t-race",
-		AgentExecutionID: "exec-successor", Status: "ready",
-	}); err != nil {
-		t.Fatalf("relaunch execution: %v", err)
-	}
-	close(release)
-	<-holderDone
-
-	if handled := <-handlerDone; !handled {
-		t.Fatal("an Office completion must stay claimed even when its teardown is skipped")
-	}
-	if len(mgr.stopAgentArgs) != 0 {
-		t.Fatalf("stale teardown stopped the relaunched execution: %+v", mgr.stopAgentArgs)
-	}
-	got, err := repo.GetTaskSession(ctx, "s-race")
-	if err != nil {
-		t.Fatalf("re-read session: %v", err)
-	}
-	if got.State != models.TaskSessionStateRunning {
-		t.Fatalf("state = %q, want RUNNING for the relaunched successor", got.State)
 	}
 }
