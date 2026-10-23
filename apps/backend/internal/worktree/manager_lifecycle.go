@@ -141,6 +141,12 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		return wt, err
 	}
+	if wt, handled, err := m.tryReuseRetainedTaskCheckout(ctx, req); handled {
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+		}
+		return wt, err
+	}
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
 		return nil, err
 	}
