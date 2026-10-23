@@ -29,7 +29,7 @@ func (s *Service) finishAlreadyResumedRestartRecovery(ctx context.Context, input
 	if err != nil {
 		return false, err
 	}
-	resumeQueue, err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID)
+	resumeQueue, err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID, inputs.block.ID)
 	if err != nil {
 		return false, err
 	}

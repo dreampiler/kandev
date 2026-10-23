@@ -20,10 +20,12 @@ its earlier state once the restore succeeds.
 
 In scope: `features.resumeQueueAfterSilentRestore` (config, runtime flag
 registry, profiles, orchestrator service config, public configuration table)
-and the resume function returned by `pauseSilentRestoreQueue`.
+and recovery-owned queue pause/resume through the existing restore and queue
+admission paths.
 
-Excluded: any change with the flag off, dispatch inside the restore, and the
-cancel-path pause.
+Excluded: any change with the flag off, dispatch while restore locks are held,
+and the cancel-path pause. The opt-in completion uses the existing owned queue
+drain after those locks release; it adds no scheduler or timer.
 
 ## Work orders
 

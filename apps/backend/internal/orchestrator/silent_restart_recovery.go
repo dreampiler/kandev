@@ -16,6 +16,7 @@ import (
 	runtimekind "github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/processidentity"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
@@ -108,7 +109,17 @@ func (s *Service) resetSilentRestoreRecovery() {
 }
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
-	s.runAutomaticExecutionPolicyPass(ctx)
+	if s.config.AutoRetryUnsentRequests {
+		s.recoverAutomaticUnsentClaims(ctx)
+	}
+	if s.config.AutoStartPendingWork || s.config.AutoContinueFromHistory {
+		automaticDone := make(chan struct{})
+		go func() {
+			defer close(automaticDone)
+			s.runAutomaticExecutionPolicyPass(ctx)
+		}()
+		defer func() { <-automaticDone }()
+	}
 	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
@@ -117,9 +128,9 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			s.logger.Warn("could not list silent restart recovery candidates", zap.Error(err))
 			break
 		}
-		jobs := make([]*restartRestoreJob, 0, len(candidates))
+		jobs := make([]*restartRestoreWork, 0, len(candidates))
 		for _, candidate := range candidates {
-			jobs = append(jobs, queue.submit(candidate, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
+			jobs = append(jobs, queue.submitWork(candidate, restartRestoreNative, func(opCtx context.Context, candidate models.SilentRestoreCandidate) error {
 				err := s.restoreSilentRestartCandidate(opCtx, store, candidate)
 				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 					s.logger.Debug("silent restart recovery candidate remains pending", zap.String("session_id", candidate.SessionID), zap.Error(err))
@@ -129,10 +140,8 @@ func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskre
 			after = candidate.SessionID
 		}
 		// Drain this bounded metadata page before retaining another backlog page.
-		for _, job := range jobs {
-			select {
-			case <-job.done:
-			case <-ctx.Done():
+		for _, work := range jobs {
+			if !queue.waitForWork(ctx, work) {
 				return
 			}
 		}
@@ -269,7 +278,7 @@ func (s *Service) startSilentRestoreCandidate(
 		return nil
 	}
 	defer reservation.releaseIfNotConsumed()
-	resumeQueue, err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID)
+	_, err = s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID, inputs.block.ID)
 	if err != nil {
 		return err
 	}
@@ -310,7 +319,6 @@ func (s *Service) startSilentRestoreCandidate(
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
 	}
-	resumeQueue()
 	return nil
 }
 
@@ -369,13 +377,9 @@ func (s *Service) rotateDeadSilentRestoreCandidate(
 	return s.rotateSilentRestoreCandidate(ctx, store, attemptID, checkpoint, running, inputs)
 }
 
-// pauseSilentRestoreQueue keeps queued work from racing the restore. With
-// features.resumeQueueAfterSilentRestore on, the returned resume re-enables
-// Auto-run only if this restore paused it; call it once the restore has
-// succeeded. With the flag off the queue stays paused for the user. It only flips the policy: the queue drains
-// on the next drain pass, outside the restore's locks. A failed restore keeps
-// the queue paused for the operator's recovery decision.
-func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID string) (func(), error) {
+// pauseSilentRestoreQueue keeps queued work from racing recovery. The returned
+// callback may restore only this recovery's pause after its durable commit.
+func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID, ownerID string) (func(), error) {
 	noop := func() {}
 	if s.messageQueue == nil {
 		return noop, nil
@@ -384,10 +388,12 @@ func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID
 	if err != nil {
 		return noop, fmt.Errorf("resolve queue identity before silent restore: %w", err)
 	}
-	// PauseAutoRunIfPending reports true whenever rows are pending, even when
-	// Auto-run was already off, so remember whether this restore turned it off.
-	wasAutoRun := s.messageQueue.GetStatus(ctx, sessionID).AutoRun
-	paused, err := s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
+	var paused bool
+	if s.config.ResumeQueueAfterSilentRestore {
+		paused, err = s.messageQueue.PauseAutoRunForRecovery(ctx, identity, ownerID)
+	} else {
+		paused, err = s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
+	}
 	if err != nil {
 		return noop, fmt.Errorf("pause queued work before silent restore: %w", err)
 	}
@@ -395,18 +401,11 @@ func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID
 		return noop, nil
 	}
 	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
-	if !s.config.ResumeQueueAfterSilentRestore || !wasAutoRun {
+	if !s.config.ResumeQueueAfterSilentRestore {
 		return noop, nil
 	}
 	return func() {
-		resumeCtx := context.WithoutCancel(ctx)
-		if err := s.messageQueue.SetAutoRunForSession(resumeCtx, identity, true); err != nil {
-			s.logger.Warn("failed to resume queue after silent restore",
-				zap.String("session_id", sessionID), zap.Error(err))
-			return
-		}
-		s.publishTaskQueueStatusEvent(resumeCtx, taskID, sessionID)
-		s.signalCeilingSweep()
+		s.resumeSilentRestoreQueue(context.WithoutCancel(ctx), identity, ownerID)
 	}, nil
 }
 
@@ -654,6 +653,10 @@ func (s *Service) finishLaunchedSilentRestoreCandidateLocked(
 		return errors.New("silent restart recovery checkpoint changed before commit")
 	}
 	if err == nil {
+		s.resumeSilentRestoreQueue(ownerCtx, messagequeue.QueueSessionIdentity{
+			TaskID: inputs.task.ID, SessionID: inputs.session.ID,
+			SessionIncarnationID: inputs.session.QueueIncarnationID,
+		}, inputs.block.ID)
 		if session, readErr := s.repo.GetTaskSession(ownerCtx, inputs.session.ID); readErr == nil && session != nil {
 			s.publishTaskSessionStateChanged(ownerCtx, session.TaskID, session.ID, session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
 		}

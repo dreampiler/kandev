@@ -32,9 +32,6 @@ func automaticHistoryAttempt(ctx context.Context) string {
 
 // Scheduling, cancellation and worker limits belong to the restart pass.
 func (s *Service) runAutomaticExecutionPolicyPass(ctx context.Context) {
-	if s.config.AutoRetryUnsentRequests {
-		s.recoverAutomaticUnsentClaims(ctx)
-	}
 	if !s.config.AutoStartPendingWork && !s.config.AutoContinueFromHistory {
 		return
 	}
@@ -42,6 +39,7 @@ func (s *Service) runAutomaticExecutionPolicyPass(ctx context.Context) {
 	if !ok {
 		return
 	}
+	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
 		candidates, err := reader.ListAutomaticExecutionCandidates(ctx, after, silentRestoreCandidateLimit)
@@ -50,13 +48,9 @@ func (s *Service) runAutomaticExecutionPolicyPass(ctx context.Context) {
 			return
 		}
 		for _, candidate := range candidates {
-			job := s.restartRestoreScheduler(ctx).submit(candidate, func(opCtx context.Context, current models.SilentRestoreCandidate) error {
-				return s.applyAutomaticExecutionPolicy(opCtx, current)
-			})
-			select {
-			case <-ctx.Done():
+			work := queue.submitWork(candidate, restartRestoreAutomatic, s.applyAutomaticExecutionPolicy)
+			if !queue.waitForWork(ctx, work) {
 				return
-			case <-job.done:
 			}
 			after = candidate.SessionID
 		}
