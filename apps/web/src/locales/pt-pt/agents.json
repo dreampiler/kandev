@@ -1,4 +1,5 @@
 {
+  "providerUsageStale": "A atualização falhou. São apresentados os valores da leitura anterior.",
   "providerUsageTitle": "Utilização do fornecedor",
   "providerUsageHostDefault": "Conta local predefinida",
   "providerUsageUnavailable": "A utilização do fornecedor não está disponível. O valor é desconhecido.",

@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -120,4 +122,19 @@ func (m *Manager) completeProviderExecution(ctx context.Context, execution strin
 		return nil
 	}
 	return settler.CompleteProviderExecution(ctx, execution)
+}
+
+// Local delivery failures can finish the UI prompt without confirming a remote turn.
+func (m *Manager) settleConfirmedProviderCompletion(execution *AgentExecution, event *agentctl.AgentEvent, confirmed, claimed bool) {
+	if !confirmed || event.PromptGeneration == 0 {
+		return
+	}
+	if !claimed {
+		snapshot, exists := m.executionStore.promptLifecycleSnapshot(execution.ID)
+		if !exists || snapshot.execution != execution || snapshot.generation != event.PromptGeneration ||
+			snapshot.completedGeneration != event.PromptGeneration {
+			return
+		}
+	}
+	m.sessionManager.finishProviderTurn(execution.ID, event.PromptGeneration, false)
 }

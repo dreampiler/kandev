@@ -199,6 +199,7 @@ func (s *profileUsageSnapshot) read(ctx context.Context, b snapshotBinding, entr
 		entry.State, entry.Reason = "unavailable", "no_reading"
 		return entry
 	}
+	entry.Stale = reading.Stale
 	entry.Plan = reading.Plan
 	if !reading.FetchedAt.IsZero() {
 		fetchedAt := reading.FetchedAt

@@ -1,4 +1,5 @@
 {
+  "providerUsageStale": "刷新失敗，正在顯示上次讀取的值。",
   "providerUsageTitle": "提供者用量",
   "providerUsageHostDefault": "預設本地帳戶",
   "providerUsageUnavailable": "無法擷取提供者用量，實際用量未知。",

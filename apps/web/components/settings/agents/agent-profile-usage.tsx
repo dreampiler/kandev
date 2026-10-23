@@ -83,6 +83,7 @@ function UsageReading({ usage }: { usage?: AgentProfileUsage }) {
         <div>{state}</div>
       ) : (
         <>
+          {usage.stale && <div role="status">{t("agents:providerUsageStale")}</div>}
           <div>
             {usage.source === "proxy"
               ? t("agents:providerUsageProxy")

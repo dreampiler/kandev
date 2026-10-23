@@ -102,3 +102,19 @@ mock-agentctl checks for shared accounts, idempotence, unknown bindings, unsent
 refunds, completion and disabled settlement. No permanent test or operating
 activation is introduced. The later inference-child population hook belongs to
 the separately preserved inference integration and is not imported here.
+
+
+## Local delivery failure settlement follow-up
+
+A locally synthesized initial-prompt error no longer proves remote completion.
+Existing error/UI handling stays intact while provider concurrency is retained.
+The trusted remote completion path also accepts matching settlement after that
+local finalization without publishing another terminal UI event. Confirmed stop
+and the existing confirmed-unsent refund retain their own boundaries.
+
+Disposable actual WebSocket receipt-without-acknowledgment plus real SQLite
+concurrent-turn policy reproduced early claim settlement and a second task
+starting at a limit of one. The candidate passed both remote-completion and
+confirmed-stop variants under the race detector. The stale provider-read issue
+is covered by the native snapshot work order; no live provider or operating
+configuration is changed.

@@ -41,6 +41,10 @@ override, so this snapshot does not claim to measure that execution's account.
 Explicit loopback proxies use `local_proxy`; unresolved bindings stay unknown.
 Go windows retain their paid-model scope and explicit provider exhaustion.
 Existing provider fetch behavior, fetch coalescing and cache TTL remain unchanged.
+A preserved reading carries the existing shared cache's stale flag through the
+snapshot DTO. The profile row keeps its measured windows and original read time
+visible alongside a localized failed-refresh notice; it never relabels an earlier
+reading as a newly successful refresh.
 
 Provider windows carry internal observation metadata, excluded from the existing
 Office JSON. The snapshot accepts a percentage only when the provider reported
@@ -98,6 +102,13 @@ pre-write rejection refunds it; response loss/write ambiguity retains it. Valida
 completion returns concurrency without refunding period use. Confirmed stop also
 ends concurrency; survivable detach does not. No expiry guesses that an uncertain
 remote effect did not happen.
+Local initial-prompt failures keep their existing lifecycle/UI effects but are
+not remote terminal evidence for provider claims. Only the trusted stream path
+settles a numbered completion. A later matching remote terminal frame may settle
+its still-retained claim even when that local failure already finalized the UI
+prompt; execution and generation must still match. This does not replay terminal
+UI publication or refund period use. Confirmed-unsent refunds remain at dispatch
+and cannot release a predecessor's ambiguous claim.
 
 Actual execution locality and effective credential environment must match the
 supported host binding. A potentially limited provider with unknown binding is

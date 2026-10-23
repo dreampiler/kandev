@@ -1,4 +1,5 @@
 {
+  "providerUsageStale": "Refresh failed. Showing the previous reading.",
   "providerUsageTitle": "Provider usage",
   "providerUsageHostDefault": "Default local account",
   "providerUsageUnavailable": "Provider usage is unavailable. The amount is unknown.",

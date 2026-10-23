@@ -63,3 +63,13 @@ Verification uses fake HTTP responses and isolated credentials created by the
 fixture, never an installed credential or live provider. Exact port results are
 recorded with the implementation handoff; historical tests are not presented as
 new executions on the current branch.
+
+
+## Stale shared-cache refresh follow-up
+
+The snapshot now carries the existing cache stale marker through the DTO and
+client type. A localized failed-refresh notice is shown with the unchanged real
+windows and original fetched-at time. Cache policy, polling and Office behavior
+are unchanged. Disposable real cache failure/DTO and English/Korean DOM checks
+passed, including a prior measured zero, retained timestamp, fresh-reading notice
+removal, refresh action, and feature-off/dynamic rows. No permanent cases added.
