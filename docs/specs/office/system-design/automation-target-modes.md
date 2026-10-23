@@ -112,6 +112,14 @@ An update that disables the automation without changing its parent can proceed
 when that saved parent is stale. A changed parent or an enabling update still
 uses canonical admission.
 
+Dispatch checks the parent when preparation is about to create a new task.
+Committed retry adoption first resolves the recorded task/operation identity; it
+does not require that task's original parent to survive. A no-cascade deletion
+may already have reparented the retained child to root. Adoption binds that same
+child and never reattaches the deleted parent or creates a successor. Future
+continuation selection still uses the existing parent/revision compare-and-set,
+and ordinary continuation reuse still compares its current parent.
+
 The existing parent relation read includes hidden automation-run children whose
 stored `parent_id` names that parent in the same workspace. This does not change
 board visibility or the ordinary child lists used for readiness and hierarchy

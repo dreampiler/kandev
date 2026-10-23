@@ -560,10 +560,6 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		s.recoverAmbiguousRetry(ctx, a, evt, retryOperation)
 		return
 	}
-	if err := s.validateAutomationParent(ctx, a); err != nil {
-		s.recordFailedRun(ctx, evt, err.Error())
-		return
-	}
 	// Initial deliveries use the quoted agent interpolation path. Retry
 	// attempts use the immutable bounded prompt snapshot.
 	prompt := automation.InterpolateAgentPrompt(a.Prompt, evt.TriggerType, evt.TriggerData)
@@ -984,6 +980,10 @@ func (s *Service) prepareAutomationTask(
 		// run's own row. Highest-precedence, short-circuiting token.
 		reasons.Repository = repositoryContinuationReused
 		return task, continuationSession, action, reasons, nil
+	}
+
+	if err := s.validateAutomationParent(ctx, a); err != nil {
+		return nil, nil, action, reasons, err
 	}
 
 	repositories, repoReason := s.resolveAutomationRepository(ctx, a, evt)

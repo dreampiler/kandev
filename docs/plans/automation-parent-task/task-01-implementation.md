@@ -81,3 +81,29 @@ Clearing the picker removes future parent assignment. Desktop and phone keep the
 ```
 
 This sketch records the affected structure; spacing is illustrative. It does not add a new control or approval requirement.
+
+
+## Committed retry adoption after parent removal
+
+Parent validation belongs to the branch that will create a new task, after
+existing continuation/committed-task resolution. The retained task's original
+parent can have been deleted without cascade; its historical committed task
+identity still governs retry adoption. The child is neither recreated nor
+reattached, and immutable retry snapshots plus future continuation CAS remain.
+
+A disposable fixture uses real SQLite scoped child reparenting and parent
+deletion, then the existing committed retry-operation fixture. The original
+source fails adoption when the captured snapshot includes the deleted parent;
+the fresh-creation refusal control passes. This is task-repository and dispatcher
+proof, not a new full live-provider or complete durable-ledger E2E run.
+
+The corrected immutable-parent baseline failed committed adoption (0.320s),
+while refusal of fresh creation with the removed parent passed. The candidate
+passed both variants and three existing adoption/ambiguous-lookup controls
+under race (1.503s). The first fixture attempt omitted the newly captured parent
+field and was corrected before treating its result as product evidence.
+
+Ten additional existing retry controls passed under race (1.599s), including
+real retry-store ledger, transient lookup/binding failures, foreign identity,
+retry fences and post-dispatch preservation. No already-passing candidate
+cases were repeated.
