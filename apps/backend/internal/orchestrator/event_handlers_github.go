@@ -140,6 +140,11 @@ type ReviewTaskRequest struct {
 	// automation dispatch (see models.MetaKeyAutomationStartOwned).
 	AutomationStartOwned bool
 	AutomationStartOwner string
+	// AgentProfileID is the caller's explicit agent-profile selection, carried
+	// through the internal create request so a workflow that requires an
+	// explicit profile (require_explicit_agent_profile) recognizes it instead
+	// of rejecting the create. It is not read from Metadata.
+	AgentProfileID string
 	// ExternalID is the stable provider identity for retry task creation.
 	ExternalID string
 }
