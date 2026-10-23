@@ -2196,16 +2196,22 @@ func (s *Service) ReserveQueuedForDeliveryWithAutoRunForSession(
 // SetAutoRun persists automatic-drain policy through the queue admission gate.
 func (s *Service) SetAutoRun(ctx context.Context, sessionID string, enabled bool) error {
 	return s.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		if err := s.repo.SetAutoRun(admittedCtx, sessionID, enabled); err != nil {
+			return err
+		}
 		s.revokeRecoveryPause(sessionID)
-		return s.repo.SetAutoRun(admittedCtx, sessionID, enabled)
+		return nil
 	})
 }
 
 // SetAutoRunForSession persists automatic-drain policy only for the exact session incarnation.
 func (s *Service) SetAutoRunForSession(ctx context.Context, identity QueueSessionIdentity, enabled bool) error {
 	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		if err := s.repo.SetAutoRunForSession(admittedCtx, identity, enabled); err != nil {
+			return err
+		}
 		s.revokeRecoveryPause(identity.SessionID)
-		return s.repo.SetAutoRunForSession(admittedCtx, identity, enabled)
+		return nil
 	})
 }
 

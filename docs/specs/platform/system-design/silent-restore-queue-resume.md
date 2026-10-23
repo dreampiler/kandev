@@ -28,11 +28,13 @@ slot. Repeated pauses for that same recovery retain the original ownership;
 an already-paused user queue grants none. A policy read failure returns an
 error without using the display status API's compatibility fallback.
 
-Explicit Auto-run writes and ordinary conditional pauses revoke recovery
+Successful explicit Auto-run writes and ordinary conditional pauses revoke recovery
 ownership under the same admission gate, including an explicit OFF write while
 already paused. Resumption checks both owner and identity, reads policy without
-a fallback, and enables it within that gate. A failed or pending restore keeps
-the pause. Ownership is not persisted or inferred after a backend restart.
+a fallback, and enables it within that gate. Rejected stale-identity writes do
+not revoke the current owner; a failed resume write retains its owner for an
+existing caller's subsequent attempt. A failed or pending restore keeps the
+pause. Ownership is not persisted or inferred after a backend restart.
 
 Only the durable commit path resumes a launched candidate. The launch return
 value cannot prove native readiness or a committed checkpoint. Already-resumed
@@ -65,3 +67,8 @@ probe was also checked through dispatch completion before fixture cleanup.
 Existing selected silent recovery, ordinary dispatch recovery and Auto-run tests
 passed in the orchestrator and messagequeue packages. The probes are temporary;
 this follow-up adds no standing test or CI job.
+
+Final review also reproduced ownership being revoked by a rejected stale
+incarnation write and being lost on a failed resume write. Both failed cases
+passed after ownership updates moved behind successful repository writes in the
+same admission. A successful same-value OFF write still revoked ownership.

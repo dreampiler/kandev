@@ -49,13 +49,14 @@ func (s *Service) ResumeAutoRunAfterRecovery(ctx context.Context, identity Queue
 		if err != nil {
 			return err
 		}
-		s.recoveryPauses.Delete(identity.SessionID)
 		if snapshot.AutoRun {
+			s.recoveryPauses.Delete(identity.SessionID)
 			return nil
 		}
 		if err := s.repo.SetAutoRunForSession(admittedCtx, identity, true); err != nil {
 			return err
 		}
+		s.recoveryPauses.Delete(identity.SessionID)
 		resumed = true
 		return nil
 	})
