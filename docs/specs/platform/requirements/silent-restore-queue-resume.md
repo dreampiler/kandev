@@ -33,10 +33,19 @@ keeps flowing after a successful restore; nothing else changes.
 - **AC-PLATFORM-SILENT-RESTORE-QUEUE-RESUME-001.2:** With the flag on, Auto-run
   stays paused while the restore runs, and after the restore succeeds it is
   re-enabled only if it was on before the restore paused it. The restore itself
-  still sends no prompt and drains nothing; queued messages are delivered by
-  the next ordinary drain pass.
+  still sends no prompt and drains nothing inside its locks; after a durable
+  restore commit, it schedules the existing ordinary drain outside those locks.
 - **AC-PLATFORM-SILENT-RESTORE-QUEUE-RESUME-001.3:** A pause the user set before
-  the restore, and the pause of a failed restore, shall remain.
+  or during the restore, and the pause of a failed or not-yet-committed restore,
+  shall remain. An unreadable policy cannot authorize automatic resumption.
+
+## Scope exclusions
+
+This setting does not start pending tasks, retry unsent requests, restore
+archived history, resolve independent recovery blocks, or change manual queue
+controls. It adds no timer or new automatic-drain scheduler. Recovery pause
+ownership is process-local: a later process cannot infer ownership from a saved
+OFF policy and leaves it paused.
 
 ## Design and delivery
 

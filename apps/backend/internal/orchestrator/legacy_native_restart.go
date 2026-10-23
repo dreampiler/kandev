@@ -30,7 +30,7 @@ func (s *Service) resumeLegacyNativeRestart(ctx context.Context, session *models
 	if !legacyNativeRestartEvidenceMatches(latest, selected, block) || !sameRestartDescriptor(evidence.Descriptor, latest.Descriptor) || *evidence.ControlIdentity != *latest.ControlIdentity {
 		return false, errors.New("legacy native restart evidence changed")
 	}
-	resumeQueue, err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID)
+	resumeQueue, err := s.pauseSilentRestoreQueue(ctx, session.TaskID, session.ID, block.ID)
 	if err != nil {
 		return false, err
 	}

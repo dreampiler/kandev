@@ -31,3 +31,11 @@ The existing `TestRestartRecoveryRestoresNativeConversationWithoutPrompt`
 checks restore behavior with the flag off. Registry/profile and frontend
 feature-contract checks cover the default-off configuration wiring. No new
 standing test file is part of this port.
+
+The 2026-10-23 follow-up reproduced six failure cases against the published
+implementation, then passed nine focused recovery/queue probes using real
+SQLite state. The existing selected orchestrator and messagequeue tests passed.
+The ordinary dispatch probe additionally waited for the existing execution
+completion hook before fixture cleanup. See the design's validation section for
+the tested policy, commit and drain boundaries. Temporary overlays were removed
+after validation.
