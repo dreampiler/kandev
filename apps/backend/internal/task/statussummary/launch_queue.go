@@ -152,7 +152,7 @@ func launchQueueCapacity(
 				Policy:             observation.Policy,
 				GradeInUse:         maps.Clone(observation.GradeInUse),
 				GradeLimits:        maps.Clone(observation.GradeLimits),
-				NeedsConfiguration: observation.NeedsConfiguration,
+				NeedsConfiguration: observation.NeedsConfiguration || (observation.Policy == "all" && deferral.ReasonCode == "ceiling_needs_configuration"),
 				InUse:              observation.InUse,
 				Limit:              observation.Limit,
 				ObservedAt:         observation.ObservedAt.UTC(),

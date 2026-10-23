@@ -87,31 +87,26 @@ func (c *sessionCeilingController) observeGradeLocked(population *gradedPopulati
 
 func (c *sessionCeilingController) admitAllLocked(ctx context.Context, req admissionRequest, handoff bool) admissionDecision {
 	d := admissionDecision{ceiling: c.ceiling}
-	maximum, configured := c.requestedGradeLimitLocked(req)
-	if !configured {
-		d.reasonCode = ceilingReasonNeedsConfiguration
-		return d
-	}
-	if !req.gradeKnown {
-		d.reasonCode = ceilingReasonUnknownPopulation
-		return d
-	}
 	p, err := c.readGradedPopulationLocked(ctx, req.grade)
 	d.population = p.total
 	d.populationKnown = err == nil && !p.unknown
-	if p.missing {
-		d.reasonCode = ceilingReasonNeedsConfiguration
-		return d
-	}
-	if !d.populationKnown {
-		d.reasonCode = ceilingReasonUnknownPopulation
-		return d
-	}
+	// Existing ownership does not consume another slot when configuration changes.
 	if selected, ok := c.reserveSelectedStartLocked(req, p); ok {
+		selected.populationKnown = d.populationKnown
 		return selected
 	}
 	if existing, owned := c.existingGradedAdmissionLocked(req, p, handoff); owned {
+		existing.populationKnown = d.populationKnown
 		return c.persistAdmissionGradeLocked(ctx, req, existing)
+	}
+	maximum, configured := c.requestedGradeLimitLocked(req)
+	if !configured || (req.gradeKnown && p.missing) {
+		d.reasonCode = ceilingReasonNeedsConfiguration
+		return d
+	}
+	if !req.gradeKnown || !d.populationKnown {
+		d.reasonCode = ceilingReasonUnknownPopulation
+		return d
 	}
 	totalFull, gradeFull := p.total >= c.ceiling, p.grade >= maximum
 	switch {
