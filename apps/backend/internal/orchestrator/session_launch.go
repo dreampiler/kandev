@@ -1562,6 +1562,12 @@ func (s *Service) RecoverSessionWithOptions(
 		DeferRecoveryResolution:          checkpoint != nil || action == recoveryActionResume,
 		InitialPromptSubmission:          initialSubmission,
 	})
+	if err == nil && action == recoveryActionResume && resp != nil && resp.ActivationDisposition == activationDispositionQueued {
+		// Capacity admission accepted the request, not the native resume. The
+		// durable replay owns acknowledgement after an execution is ready.
+		resp.InProgress = true
+		return resp, nil
+	}
 	if err == nil && action == recoveryActionResume {
 		err = s.acknowledgeNativeResumeDelivery(launchCtx, sessionID)
 	}
