@@ -2069,11 +2069,8 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 	if !isTerminalSessionState(newState) {
 		return
 	}
-	if newState == models.TaskSessionStateFailed {
-		failed, err := s.repo.GetTaskSession(ctx, sessionID)
-		if err == nil && failed != nil && nativeBootstrapRecoveryReason(failed) != "" {
-			return
-		}
+	if newState == models.TaskSessionStateFailed && s.preservePrimaryForAutomaticHistory(ctx, taskID, sessionID) {
+		return
 	}
 
 	// Check whether the stopped session is actually the primary
