@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { settingsControlClassName } from "@/components/settings/settings-control";
@@ -52,19 +52,45 @@ export function AutomationParentPicker({
   testId?: string;
 }) {
   const { t, i18n } = useTranslation();
-  const { candidates, loading } = useAutomationParentCandidates(workspaceId);
+  const [search, setSearch] = useState({ workspaceId, query: "" });
+  const query = search.workspaceId === workspaceId ? search.query : "";
+  const [selection, setSelection] = useState<{ workspaceId: string; task?: OfficeTask }>({
+    workspaceId,
+  });
+  const { candidates, loading } = useAutomationParentCandidates(workspaceId, query);
+  const selectedTask =
+    selection.workspaceId === workspaceId && selection.task?.id === value
+      ? selection.task
+      : undefined;
   const noParentLabel = t("task:noParent");
   const options = useMemo(
-    () => buildOptions(candidates, value, noParentLabel),
+    () =>
+      buildOptions(
+        selectedTask && !candidates.some((task) => task.id === selectedTask.id)
+          ? [...candidates, selectedTask]
+          : candidates,
+        value,
+        noParentLabel,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- i18n.language is the locale trigger
-    [candidates, value, noParentLabel, i18n.language],
+    [candidates, selectedTask, value, noParentLabel, i18n.language],
   );
 
   return (
     <Combobox
       options={options}
       value={value || NO_PARENT}
-      onValueChange={(next) => onChange(next === NO_PARENT ? "" : next)}
+      onValueChange={(next) => {
+        const id = next === NO_PARENT ? "" : next;
+        setSelection({ workspaceId, task: candidates.find((task) => task.id === id) });
+        onChange(id);
+      }}
+      onOpenChange={(open) => {
+        const task = candidates.find((candidate) => candidate.id === value);
+        if (open && task) setSelection({ workspaceId, task });
+      }}
+      searchValue={query}
+      onSearchValueChange={(next) => setSearch({ workspaceId, query: next })}
       placeholder={noParentLabel}
       searchPlaceholder={t("task:searchTasks")}
       emptyMessage={t("task:noTasksFound")}

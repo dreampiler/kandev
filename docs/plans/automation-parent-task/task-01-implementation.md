@@ -45,6 +45,28 @@ Validation: 25 existing frontend tests and changed-file ESLint passed. Focused G
 
 Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
 
+### Review follow-up
+
+The original PR head reproduced stale-parent disable refusal, older firing writes
+after parent change/clear/ABA or a newer binding, and reuse of a task belonging
+to another parent. The same temporary fixtures exercise the real task-preparation
+entrypoint and SQLite store. The fixes retain immutable older firings while
+protecting only the current continuation selection. Existing unscoped setter
+calls, parent validation on changed selections/enabling, and task history remain.
+
+An actual picker fixture reproduced typed input never reaching workspace search
+on the original source. The candidate selects a task beyond the first 50 results,
+retains its selected label, and rejects late workspace responses. The shared
+command subtree is factored to retain the existing function-size limit.
+
+Candidate checks passed: automation 0.090s and orchestrator 0.425s including the
+focused existing continuation/retry selections; two temporary UI cases plus four
+existing Combobox cases; changed-file ESLint; full web typecheck. The first
+typecheck exhausted the process's default 4 GiB Node heap; the unchanged command
+passed with process-local 8 GiB and measured 30 GB available RAM. No global
+settings, runtime automation or CI limits changed. No standing tests were added.
+Normal commit hooks and final source identity are recorded in the source handoff.
+
 ## ASCII UI preview
 
 UI-01: Existing affected surface, after this change.

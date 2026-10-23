@@ -25,6 +25,11 @@ Changing ordinary board filtering, rewriting old tasks/history, and exporting in
 
 Reuse the completed focused implementation checks recorded below and the existing documentation-coverage evaluator. Only remaining review fixes require their affected checks to run again.
 
+The review follow-up covers stale-parent disable, current continuation binding
+under older firings, parent-compatible reuse, and typed server search. It reuses
+the current revision and claim/store paths and adds no runtime scheduler, schema,
+automation activation or permanent test suite.
+
 ## ASCII UI preview
 
 UI-01: Existing affected surface, after this change.
