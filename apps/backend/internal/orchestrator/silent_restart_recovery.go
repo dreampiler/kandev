@@ -268,7 +268,8 @@ func (s *Service) startSilentRestoreCandidate(
 		return nil
 	}
 	defer reservation.releaseIfNotConsumed()
-	if err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID); err != nil {
+	resumeQueue, err := s.pauseSilentRestoreQueue(ownerCtx, inputs.task.ID, inputs.session.ID)
+	if err != nil {
 		return err
 	}
 	callback := func(callbackCtx context.Context, executionID string) error {
@@ -308,6 +309,7 @@ func (s *Service) startSilentRestoreCandidate(
 	if execution == nil {
 		return errors.New("silent restart restore was not admitted")
 	}
+	resumeQueue()
 	return nil
 }
 
@@ -366,22 +368,45 @@ func (s *Service) rotateDeadSilentRestoreCandidate(
 	return s.rotateSilentRestoreCandidate(ctx, store, attemptID, checkpoint, running, inputs)
 }
 
-func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID string) error {
+// pauseSilentRestoreQueue keeps queued work from racing the restore. With
+// features.resumeQueueAfterSilentRestore on, the returned resume re-enables
+// Auto-run only if this restore paused it; call it once the restore has
+// succeeded. With the flag off the queue stays paused for the user. It only flips the policy: the queue drains
+// on the next drain pass, outside the restore's locks. A failed restore keeps
+// the queue paused for the operator's recovery decision.
+func (s *Service) pauseSilentRestoreQueue(ctx context.Context, taskID, sessionID string) (func(), error) {
+	noop := func() {}
 	if s.messageQueue == nil {
-		return nil
+		return noop, nil
 	}
 	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, taskID, sessionID)
 	if err != nil {
-		return fmt.Errorf("resolve queue identity before silent restore: %w", err)
+		return noop, fmt.Errorf("resolve queue identity before silent restore: %w", err)
 	}
+	// PauseAutoRunIfPending reports true whenever rows are pending, even when
+	// Auto-run was already off, so remember whether this restore turned it off.
+	wasAutoRun := s.messageQueue.GetStatus(ctx, sessionID).AutoRun
 	paused, err := s.messageQueue.PauseAutoRunIfPendingForSession(ctx, identity)
 	if err != nil {
-		return fmt.Errorf("pause queued work before silent restore: %w", err)
+		return noop, fmt.Errorf("pause queued work before silent restore: %w", err)
 	}
-	if paused {
-		s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
+	if !paused {
+		return noop, nil
 	}
-	return nil
+	s.publishTaskQueueStatusEvent(ctx, taskID, sessionID)
+	if !s.config.ResumeQueueAfterSilentRestore || !wasAutoRun {
+		return noop, nil
+	}
+	return func() {
+		resumeCtx := context.WithoutCancel(ctx)
+		if err := s.messageQueue.SetAutoRunForSession(resumeCtx, identity, true); err != nil {
+			s.logger.Warn("failed to resume queue after silent restore",
+				zap.String("session_id", sessionID), zap.Error(err))
+			return
+		}
+		s.publishTaskQueueStatusEvent(resumeCtx, taskID, sessionID)
+		s.signalCeilingSweep()
+	}, nil
 }
 
 func (s *Service) removeProvenDeadSourceExecution(
