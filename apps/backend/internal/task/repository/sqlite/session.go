@@ -687,14 +687,7 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	`), session.TaskID).Scan(&envID, &status, &materializationSessionID, &claimUpdatedAt)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if candidate.ID == "" {
-			candidate.ID = uuid.New().String()
-		}
-		candidate.Status = models.TaskEnvironmentStatusCreating
-		candidate.MaterializationSessionID = session.ID
-		candidate.CreatedAt = r.nowUTC()
-		candidate.UpdatedAt = candidate.CreatedAt
-		if err := r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate); err != nil {
+		if err := r.reserveInitialWorkspaceEnvironmentTx(ctx, tx, candidate, session.ID); err != nil {
 			return err
 		}
 		session.TaskEnvironmentID = candidate.ID

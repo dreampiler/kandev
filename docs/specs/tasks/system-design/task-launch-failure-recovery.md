@@ -524,7 +524,9 @@ bindings. Canonical lookup, uniqueness, and startup healing select active rows
 only; by-ID reads retain history. Root election checks all active/retained names
 under the task lock. The request uses that saved root and environment ID, so
 physical inventory and existing ready publication have the same owner. An
-already-retired retry joins the active reservation or elects one if absent.
+already-retired retry joins or reserves a replacement; failed successors
+use that consumer guard. Retired-only starts reserve fresh roots. Cached or
+explicit-ID worktrees must match a specified environment; checkouts remain.
 Existing materialization failure release applies to its reserved row. This path
 does not reset files, mutate an inherited owner, or settle historical outcomes.
 

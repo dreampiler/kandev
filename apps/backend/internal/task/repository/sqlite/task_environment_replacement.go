@@ -119,6 +119,28 @@ func (r *Repository) bindFailedWorkspaceEnvironmentTx(ctx context.Context, tx *s
 	return candidate.ID, nil
 }
 
+// Keep ordinary first creation's naming path, but reserve a fresh root when
+// retained history exists and no active owner remains.
+func (r *Repository) reserveInitialWorkspaceEnvironmentTx(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment, sessionID string) error {
+	var retained bool
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT EXISTS (
+		SELECT 1 FROM task_environments WHERE task_id = ? AND retired_at IS NOT NULL
+	)`), candidate.TaskID).Scan(&retained); err != nil {
+		return err
+	}
+	if retained {
+		return r.reserveFreshEnvironmentTx(ctx, tx, candidate, sessionID)
+	}
+	if candidate.ID == "" {
+		candidate.ID = uuid.New().String()
+	}
+	candidate.Status = models.TaskEnvironmentStatusCreating
+	candidate.MaterializationSessionID = sessionID
+	candidate.CreatedAt = r.nowUTC()
+	candidate.UpdatedAt = candidate.CreatedAt
+	return r.insertCreatingWorkspaceEnvironment(ctx, tx, candidate)
+}
+
 // A reservation chooses its root while holding the task writer lock, against
 // every recorded root, including retired rows and prior retries of this session.
 func (r *Repository) reserveFreshEnvironmentTx(ctx context.Context, tx *sqlx.Tx, candidate *models.TaskEnvironment, sessionID string) error {
@@ -262,10 +284,10 @@ func (r *Repository) electReplacementEnvironmentTx(ctx context.Context, tx *sqlx
 	if err != nil {
 		return nil, err
 	}
-	return r.adoptReplacementReservationTx(ctx, tx, active, sessionID)
+	return r.adoptReplacementReservationTx(ctx, tx, active, candidate, sessionID)
 }
 
-func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx.Tx, active *models.TaskEnvironment, sessionID string) (*models.TaskEnvironment, error) {
+func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx.Tx, active, candidate *models.TaskEnvironment, sessionID string) (*models.TaskEnvironment, error) {
 	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, active.ID); err != nil {
 		return nil, err
 	}
@@ -277,10 +299,11 @@ func (r *Repository) adoptReplacementReservationTx(ctx context.Context, tx *sqlx
 			return active, nil
 		}
 	case models.TaskEnvironmentStatusFailed:
-		if err := r.reelectFailedWorkspaceMaterializationTx(ctx, tx, active.ID, sessionID); err != nil {
+		selectedID, err := r.bindFailedWorkspaceEnvironmentTx(ctx, tx, active.ID, sessionID, candidate)
+		if err != nil {
 			return nil, err
 		}
-		return active, nil
+		return r.replacementEnvironmentIdentityTx(ctx, tx, selectedID)
 	}
 	return nil, &models.WorkspacePreparingError{EnvironmentID: active.ID, Reason: "retry after replacement materialization completes"}
 }
