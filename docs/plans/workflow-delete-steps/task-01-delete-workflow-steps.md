@@ -118,3 +118,19 @@ exemption in another package; its registry and criteria were left unchanged.
 The existing documentation coverage evaluator returned covered with no errors.
 No upgrade fixture, manifest, standing test or operating database was changed.
 Temporary checks are removed after delivery.
+
+## Review follow-up: concurrent PostgreSQL startup
+
+The PostgreSQL read-then-write migration now takes the existing transaction-scoped
+advisory-lock pattern before reading its marker. Concurrent starters must observe
+the first committed marker before deciding whether cleanup is still needed.
+The lock, cleanup and marker share transaction ownership; SQLite keeps its
+existing serialization. Production comments describe only this invariant.
+
+The disposable existing SQLite migration case passed with race detection
+(1.490s), and the existing whole-internal SQL guard passed. The conditional
+PostgreSQL multi-connection holder/marker case was skipped because the existing
+DSN is unset; no real PostgreSQL concurrency pass is claimed. The source was
+reviewed against the existing dialect and transaction-lock pattern, with the lock
+before the first marker read. No standing test, new setting or operating DB
+write is added; the temporary cases are removed after delivery.
