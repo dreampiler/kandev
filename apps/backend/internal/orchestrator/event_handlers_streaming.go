@@ -2079,6 +2079,12 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 			zap.String("session_id", sessionID))
 		return
 	}
+	if newState == models.TaskSessionStateFailed {
+		failed, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err == nil && failed != nil && nativeBootstrapRecoveryReason(failed) != "" {
+			return
+		}
+	}
 
 	// Check whether the stopped session is actually the primary
 	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
