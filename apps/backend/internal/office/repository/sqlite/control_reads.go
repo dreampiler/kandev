@@ -145,25 +145,31 @@ func (r *Repository) appendControlHolds(ctx context.Context, out *ControlTaskLis
 // optional queue source leaves the policy unknown without discarding task facts.
 func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *ControlTaskList, wsID string) error {
 	rows := []struct {
-		TaskID string `db:"task_id"`
-		Paused int    `db:"paused"`
-		Auto   int    `db:"auto_run"`
+		TaskID      string `db:"task_id"`
+		Paused      int    `db:"paused"`
+		Auto        int    `db:"auto_run"`
+		PolicyKnown int    `db:"policy_known"`
 	}{}
 	query := `SELECT q.task_id,
 	 SUM(CASE WHEN COALESCE(p.auto_run,1)=0 THEN 1 ELSE 0 END) AS paused,
-	 SUM(CASE WHEN COALESCE(p.auto_run,1)<>0 THEN 1 ELSE 0 END) AS auto_run
+	 SUM(CASE WHEN COALESCE(p.auto_run,1)<>0 THEN 1 ELSE 0 END) AS auto_run,
+	 MIN(CASE WHEN s.id IS NULL THEN 0 ELSE 1 END) AS policy_known
 	 FROM queued_messages q JOIN tasks t ON t.id=q.task_id
-	 LEFT JOIN queue_session_state p ON p.session_id=q.session_id
+	 LEFT JOIN task_sessions s ON s.id=q.session_id AND s.task_id=q.task_id
+	 LEFT JOIN queue_session_state p ON p.session_id=s.id AND p.session_incarnation_id=s.queue_incarnation_id
 	 WHERE ` + controlTaskScope + ` GROUP BY q.task_id`
 	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), wsID); err != nil {
 		return ctx.Err()
 	}
-	byTask := make(map[string][2]int, len(rows))
+	byTask := make(map[string][3]int, len(rows))
 	for _, row := range rows {
-		byTask[row.TaskID] = [2]int{row.Paused, row.Auto}
+		byTask[row.TaskID] = [3]int{row.Paused, row.Auto, row.PolicyKnown}
 	}
 	for i := range out.Tasks {
-		counts := byTask[out.Tasks[i].ID]
+		counts, exists := byTask[out.Tasks[i].ID]
+		if exists && counts[2] == 0 {
+			continue
+		}
 		out.Tasks[i].QueuedPausedMessages = &counts[0]
 		out.Tasks[i].QueuedAutoRunMessages = &counts[1]
 	}
