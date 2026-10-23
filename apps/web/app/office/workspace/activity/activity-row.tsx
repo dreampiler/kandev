@@ -189,7 +189,7 @@ export function ActivityRow({ entry }: Props) {
       {href && (
         <Link
           href={href}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center px-2 text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer sm:min-h-0 sm:min-w-0 sm:px-0"
+          className="inline-flex min-h-7 items-center justify-center text-xs text-muted-foreground hover:text-foreground shrink-0 cursor-pointer max-md:min-h-11 max-md:min-w-11 max-md:px-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11 [@media(pointer:coarse)]:px-2"
         >
           {t("office:run")}
         </Link>

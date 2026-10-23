@@ -1,5 +1,15 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@kandev/ui/table";
 import Link from "@/components/routing/app-link";
 import type { WorkspaceAggregateEntry } from "@/lib/api/domains/office-extended-api";
 import type { ControlAggregateRead } from "@/hooks/domains/coordinator/use-control-aggregate";
@@ -220,6 +230,57 @@ const COLUMNS: ReadonlyArray<{
   },
 ];
 
+function useWorkspaceCompareTable(entries: WorkspaceAggregateEntry[]) {
+  const { t } = useTranslation();
+  const columns = useMemo<ColumnDef<WorkspaceAggregateEntry>[]>(
+    () => [
+      {
+        accessorKey: "name",
+        size: 192,
+        header: t("sidebar:integratedControl.aggregate.workspace"),
+        cell: ({ row }) => (
+          <Link className={LINK_CLASS} href={officeHref("/office", row.original.workspace_id)}>
+            {row.original.name}
+          </Link>
+        ),
+      },
+      {
+        id: "status",
+        size: 112,
+        accessorFn: aggregateStatus,
+        header: t("sidebar:integratedControl.aggregate.status"),
+        cell: ({ getValue }) => {
+          const status = getValue<AggregateWorkspaceStatus>();
+          return (
+            <span className={`rounded border px-2 py-0.5 text-xs ${STATUS_CLASS[status]}`}>
+              {t(STATUS_LABEL_KEYS[status])}
+            </span>
+          );
+        },
+      },
+      ...COLUMNS.map((column) => ({
+        accessorKey: column.field,
+        size: 80,
+        header: t(column.label),
+      })),
+    ],
+    [t],
+  );
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table's API is designed this way
+  return useReactTable({
+    data: entries,
+    columns,
+    getRowId: (entry) => entry.workspace_id,
+    getCoreRowModel: getCoreRowModel(),
+  });
+}
+
+function compareCellClass(value: unknown, index: number): string {
+  if (index === 0) return "truncate px-4 py-2";
+  if (index === 1) return "px-2 py-2";
+  return numberCellClass(value, "px-2 py-2");
+}
+
 function ControlWorkspaceCompare({
   entries,
   totals,
@@ -228,6 +289,7 @@ function ControlWorkspaceCompare({
   totals: AggregateTotals;
 }) {
   const { t } = useTranslation();
+  const table = useWorkspaceCompareTable(entries);
   return (
     <section className="rounded-lg border" data-testid="control-workspace-compare">
       <h2 className="border-b px-4 py-3 font-medium">
@@ -238,83 +300,58 @@ function ControlWorkspaceCompare({
           {t("sidebar:integratedControl.aggregate.compareEmpty")}
         </p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[44rem] table-fixed text-sm">
-            <colgroup>
-              <col className="w-48" />
-              <col className="w-28" />
+        <Table className="min-w-[44rem] table-fixed text-sm">
+          <colgroup>
+            {table.getAllLeafColumns().map((column) => (
+              <col key={column.id} style={{ width: column.getSize() }} />
+            ))}
+          </colgroup>
+          <TableHeader className="text-left text-xs text-muted-foreground">
+            {table.getHeaderGroups().map((group) => (
+              <TableRow key={group.id}>
+                {group.headers.map((header) => (
+                  <TableHead
+                    key={header.id}
+                    className={`py-2 font-medium whitespace-normal ${header.column.id === "name" ? "px-4" : "px-2"} ${header.index > 1 ? "text-right" : ""}`}
+                    scope="col"
+                  >
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
+                ))}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody className="divide-y">
+            {table.getRowModel().rows.map((row) => (
+              <TableRow
+                key={row.id}
+                data-testid="control-compare-row"
+                data-status={aggregateStatus(row.original)}
+              >
+                {row.getVisibleCells().map((cell, index) => (
+                  <TableCell key={cell.id} className={compareCellClass(cell.getValue(), index)}>
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+          <TableFooter className="bg-transparent">
+            <TableRow data-testid="control-compare-total">
+              <TableCell className="px-4 py-2" colSpan={2}>
+                {t("sidebar:integratedControl.aggregate.total")}
+              </TableCell>
               {COLUMNS.map((column) => (
-                <col key={column.field} className="w-20" />
+                <TableCell
+                  key={column.field}
+                  className={numberCellClass(totals[column.total], "px-2 py-2")}
+                >
+                  {totals[column.total]}
+                </TableCell>
               ))}
-            </colgroup>
-            <thead className="text-left text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">
-                  {t("sidebar:integratedControl.aggregate.workspace")}
-                </th>
-                <th className="px-2 py-2 font-medium">
-                  {t("sidebar:integratedControl.aggregate.status")}
-                </th>
-                {COLUMNS.map((column) => (
-                  <th
-                    key={column.field}
-                    className="px-2 py-2 text-right font-medium whitespace-normal"
-                  >
-                    {t(column.label)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {entries.map((entry) => {
-                const status = aggregateStatus(entry);
-                return (
-                  <tr
-                    key={entry.workspace_id}
-                    data-testid="control-compare-row"
-                    data-status={status}
-                  >
-                    <td className="truncate px-4 py-2">
-                      <Link className={LINK_CLASS} href={officeHref("/office", entry.workspace_id)}>
-                        {entry.name}
-                      </Link>
-                    </td>
-                    <td className="px-2 py-2">
-                      <span
-                        className={`rounded border px-2 py-0.5 text-xs ${STATUS_CLASS[status]}`}
-                      >
-                        {t(STATUS_LABEL_KEYS[status])}
-                      </span>
-                    </td>
-                    {COLUMNS.map((column) => (
-                      <td
-                        key={column.field}
-                        className={numberCellClass(entry[column.field], "px-2 py-2")}
-                      >
-                        {entry[column.field]}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-            <tfoot className="border-t font-medium">
-              <tr data-testid="control-compare-total">
-                <td className="px-4 py-2" colSpan={2}>
-                  {t("sidebar:integratedControl.aggregate.total")}
-                </td>
-                {COLUMNS.map((column) => (
-                  <td
-                    key={column.field}
-                    className={numberCellClass(totals[column.total], "px-2 py-2")}
-                  >
-                    {totals[column.total]}
-                  </td>
-                ))}
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+            </TableRow>
+          </TableFooter>
+        </Table>
       )}
     </section>
   );

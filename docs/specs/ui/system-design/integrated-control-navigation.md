@@ -137,6 +137,8 @@ It uses the same scheduler as the workspace snapshot: every 30 seconds while
 visible, on the header Refresh button, and on foreground return, never aborting
 a read in flight. It adds no WebSocket subscription. The comparison table uses
 fixed column widths, right-aligned tabular numbers, and dimmed zeros.
+It uses the shared `@kandev/ui/table` primitives with TanStack Table; the shared
+table container owns horizontal scrolling while the footer retains aggregate totals.
 
 Aggregate failures are handled apart from workspace snapshot failures. A failed
 aggregate refresh keeps the last snapshot, retries on the 5, 10, 20, 40 then 60
@@ -176,3 +178,5 @@ Overview (desktop)
 
 On phones the band facts wrap to two columns, attention rows wrap, and the
 comparison table scrolls inside its own container so the page does not overflow.
+The shared activity Run link keeps a 44px hit area below 768px and with coarse
+pointers, and retains a compact 28px minimum for fine-pointer desktop layouts.
