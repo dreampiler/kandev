@@ -135,10 +135,13 @@ the user is authenticated, and `features.office` is on. It keeps one snapshot
 per authenticated read identity and discards responses from a retired identity.
 It uses the same scheduler as the workspace snapshot: every 30 seconds while
 visible, on the header Refresh button, and on foreground return, never aborting
-a read in flight. It adds no WebSocket subscription. The comparison table uses
-fixed column widths, right-aligned tabular numbers, and dimmed zeros.
-It uses the shared `@kandev/ui/table` primitives with TanStack Table; the shared
-table container owns horizontal scrolling while the footer retains aggregate totals.
+a read in flight. It adds no WebSocket subscription. Workspace comparison stacks
+two tables: task counts and pending approvals first, then working agents.
+Both retain workspace links, status, fixed column widths, right-aligned tabular
+numbers, dimmed zeros, and aggregate totals. Each uses the shared `@kandev/ui/table`
+primitives with TanStack Table and its own horizontal scroll container. The
+Office aggregate counts agents, not runtime sessions; it supplies no native
+workflow-step breakdown or waiting-input session counts to infer or hide.
 
 Aggregate failures are handled apart from workspace snapshot failures. A failed
 aggregate refresh keeps the last snapshot, retries on the 5, 10, 20, 40 then 60
@@ -169,14 +172,21 @@ Overview (desktop)
 | [Approvals] Beta: 2 approvals waiting for a decision    [Open]|
 +--------------------------------------------------------------+
 | Workspace comparison                                          |
-| Workspace  Status  Tasks Open InProg Blocked Done Appr Working |
-| Alpha      Stalled   3    0    2      1      0    0     0     |
-| Beta       Active    1    0    1      0      0    2     1     |
-| Total                4    0    3      1      0    2     1     |
+| Tasks                                                        |
+| Workspace  Status  Tasks Open InProg Blocked Done Approvals    |
+| Alpha      Stalled   3    0    2      1      0    0            |
+| Beta       Active    1    0    1      0      0    2            |
+| Total                4    0    3      1      0    2            |
++--------------------------------------------------------------+
+| Working agents                                               |
+| Workspace  Status  Working agents                            |
+| Alpha      Stalled   0                                       |
+| Beta       Active    1                                       |
+| Total                1                                       |
 +--------------------------------------------------------------+
 ```
 
 On phones the band facts wrap to two columns, attention rows wrap, and the
-comparison table scrolls inside its own container so the page does not overflow.
+comparison tables scroll inside their own containers so the page does not overflow.
 The shared activity Run link keeps a 44px hit area below 768px and with coarse
 pointers, and retains a compact 28px minimum for fine-pointer desktop layouts.

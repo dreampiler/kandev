@@ -38,7 +38,6 @@ function officeHref(path: string, workspaceId: string): string {
   return `${path}?workspaceId=${encodeURIComponent(workspaceId)}`;
 }
 
-/** Stall band, attention list and workspace comparison fed by the Office aggregate. */
 export function ControlAggregateOverview({
   aggregate,
   controlWorkspaceIds,
@@ -200,11 +199,13 @@ function ControlAggregateAttention({ items }: { items: AggregateAttentionItem[] 
 
 type NumericTotal = Exclude<keyof AggregateTotals, "byStatus" | "workspaces" | "agents">;
 
-const COLUMNS: ReadonlyArray<{
+type CompareColumn = {
   field: keyof WorkspaceAggregateEntry;
   total: NumericTotal;
   label: string;
-}> = [
+};
+
+const TASK_COLUMNS: ReadonlyArray<CompareColumn> = [
   { field: "task_count", total: "tasks", label: "sidebar:integratedControl.aggregate.tasks" },
   { field: "open_tasks", total: "open", label: "sidebar:integratedControl.aggregate.open" },
   {
@@ -223,6 +224,9 @@ const COLUMNS: ReadonlyArray<{
     total: "approvals",
     label: "sidebar:integratedControl.aggregate.approvals",
   },
+];
+
+const AGENT_COLUMNS: ReadonlyArray<CompareColumn> = [
   {
     field: "running_agents",
     total: "runningAgents",
@@ -230,7 +234,10 @@ const COLUMNS: ReadonlyArray<{
   },
 ];
 
-function useWorkspaceCompareTable(entries: WorkspaceAggregateEntry[]) {
+function useWorkspaceCompareTable(
+  entries: WorkspaceAggregateEntry[],
+  figures: ReadonlyArray<CompareColumn>,
+) {
   const { t } = useTranslation();
   const columns = useMemo<ColumnDef<WorkspaceAggregateEntry>[]>(
     () => [
@@ -258,13 +265,13 @@ function useWorkspaceCompareTable(entries: WorkspaceAggregateEntry[]) {
           );
         },
       },
-      ...COLUMNS.map((column) => ({
+      ...figures.map((column) => ({
         accessorKey: column.field,
         size: 80,
         header: t(column.label),
       })),
     ],
-    [t],
+    [t, figures],
   );
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Table's API is designed this way
   return useReactTable({
@@ -289,7 +296,6 @@ function ControlWorkspaceCompare({
   totals: AggregateTotals;
 }) {
   const { t } = useTranslation();
-  const table = useWorkspaceCompareTable(entries);
   return (
     <section className="rounded-lg border" data-testid="control-workspace-compare">
       <h2 className="border-b px-4 py-3 font-medium">
@@ -300,59 +306,90 @@ function ControlWorkspaceCompare({
           {t("sidebar:integratedControl.aggregate.compareEmpty")}
         </p>
       ) : (
-        <Table className="min-w-[44rem] table-fixed text-sm">
-          <colgroup>
-            {table.getAllLeafColumns().map((column) => (
-              <col key={column.id} style={{ width: column.getSize() }} />
-            ))}
-          </colgroup>
-          <TableHeader className="text-left text-xs text-muted-foreground">
-            {table.getHeaderGroups().map((group) => (
-              <TableRow key={group.id}>
-                {group.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    className={`py-2 font-medium whitespace-normal ${header.column.id === "name" ? "px-4" : "px-2"} ${header.index > 1 ? "text-right" : ""}`}
-                    scope="col"
-                  >
-                    {flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
-            ))}
-          </TableHeader>
-          <TableBody className="divide-y">
-            {table.getRowModel().rows.map((row) => (
-              <TableRow
-                key={row.id}
-                data-testid="control-compare-row"
-                data-status={aggregateStatus(row.original)}
-              >
-                {row.getVisibleCells().map((cell, index) => (
-                  <TableCell key={cell.id} className={compareCellClass(cell.getValue(), index)}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))}
-          </TableBody>
-          <TableFooter className="bg-transparent">
-            <TableRow data-testid="control-compare-total">
-              <TableCell className="px-4 py-2" colSpan={2}>
-                {t("sidebar:integratedControl.aggregate.total")}
-              </TableCell>
-              {COLUMNS.map((column) => (
-                <TableCell
-                  key={column.field}
-                  className={numberCellClass(totals[column.total], "px-2 py-2")}
+        <div className="divide-y">
+          <WorkspaceCompareTable entries={entries} totals={totals} kind="tasks" />
+          <WorkspaceCompareTable entries={entries} totals={totals} kind="agents" />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WorkspaceCompareTable({
+  entries,
+  totals,
+  kind,
+}: {
+  entries: WorkspaceAggregateEntry[];
+  totals: AggregateTotals;
+  kind: "tasks" | "agents";
+}) {
+  const { t } = useTranslation();
+  const figures = kind === "tasks" ? TASK_COLUMNS : AGENT_COLUMNS;
+  const table = useWorkspaceCompareTable(entries, figures);
+  return (
+    <div data-testid={`control-compare-${kind}`}>
+      <h3 className="px-4 py-3 text-sm font-medium">
+        {t(
+          kind === "tasks"
+            ? "sidebar:integratedControl.aggregate.tasks"
+            : "sidebar:integratedControl.aggregate.workingAgents",
+        )}
+      </h3>
+      <Table className={`${kind === "tasks" ? "min-w-[49rem]" : "min-w-96"} table-fixed text-sm`}>
+        <colgroup>
+          {table.getAllLeafColumns().map((column) => (
+            <col key={column.id} style={{ width: column.getSize() }} />
+          ))}
+        </colgroup>
+        <TableHeader className="text-left text-xs text-muted-foreground">
+          {table.getHeaderGroups().map((group) => (
+            <TableRow key={group.id}>
+              {group.headers.map((header) => (
+                <TableHead
+                  key={header.id}
+                  className={`py-2 font-medium whitespace-normal ${header.column.id === "name" ? "px-4" : "px-2"} ${header.index > 1 ? "text-right" : ""}`}
+                  scope="col"
                 >
-                  {totals[column.total]}
+                  {flexRender(header.column.columnDef.header, header.getContext())}
+                </TableHead>
+              ))}
+            </TableRow>
+          ))}
+        </TableHeader>
+        <TableBody className="divide-y">
+          {table.getRowModel().rows.map((row) => (
+            <TableRow
+              key={row.id}
+              data-testid={kind === "tasks" ? "control-compare-row" : "control-compare-agent-row"}
+              data-status={aggregateStatus(row.original)}
+            >
+              {row.getVisibleCells().map((cell, index) => (
+                <TableCell key={cell.id} className={compareCellClass(cell.getValue(), index)}>
+                  {flexRender(cell.column.columnDef.cell, cell.getContext())}
                 </TableCell>
               ))}
             </TableRow>
-          </TableFooter>
-        </Table>
-      )}
-    </section>
+          ))}
+        </TableBody>
+        <TableFooter className="bg-transparent">
+          <TableRow
+            data-testid={kind === "tasks" ? "control-compare-total" : "control-compare-agent-total"}
+          >
+            <TableCell className="px-4 py-2" colSpan={2}>
+              {t("sidebar:integratedControl.aggregate.total")}
+            </TableCell>
+            {figures.map((column) => (
+              <TableCell
+                key={column.field}
+                className={numberCellClass(totals[column.total], "px-2 py-2")}
+              >
+                {totals[column.total]}
+              </TableCell>
+            ))}
+          </TableRow>
+        </TableFooter>
+      </Table>
+    </div>
   );
 }
