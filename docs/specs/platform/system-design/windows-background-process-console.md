@@ -13,8 +13,8 @@ Platform owns the Windows process setting that managed console helpers share.
 Each owning package keeps its process lifetime. [Managed Git
 execution](git-subprocess-execution.md) owns Git admission and cleanup, agentctl
 owns agent and script processes, and the agent runtime owns the agentctl
-launch. This design hides newly created console windows while keeping helpers
-attached to a console.
+launch. This design suppresses helper windows and preserves existing console
+attachment where the selected process flags provide one.
 
 ## Requirement mapping
 
@@ -39,23 +39,26 @@ setting to the new console window. The process remains attached to the console
 and can use console APIs. Go's standard-handle setup remains separate, so
 `os/exec` pipes continue to carry input and output.
 
-When a managed helper starts from a backend with no console, the helper gets a
-hidden console. A console descendant started with default flags attaches to
-that same hidden console. This keeps descendants hidden and leaves console
-APIs available. `HideWindow` also supplies an initial show state to a GUI
-program, so the process paths in this design must remain console-helper paths.
+With `HideWindow` alone, a managed helper started from a backend with no console
+gets a hidden console. A console descendant started with default flags attaches
+to that same console. This description does not apply to `CREATE_NO_WINDOW`.
+`HideWindow` also supplies an initial show state to a GUI program, so the
+process paths in this design must remain console-helper paths.
 
 When Windows Terminal is the default terminal application, a new console is
 handed to Windows Terminal, which opens a visible window and does not apply the
 `SW_HIDE` show state. `HideWindow` alone then opens one terminal window per
 helper. For that case `winproc.NoConsoleWindowFlag` adds `CREATE_NO_WINDOW` when
 the starting process has no console window (`GetConsoleWindow` returns null).
-The helper still gets a console without a window, and a descendant started with
-default flags inherits it: on a Windows 11 machine with Windows Terminal as the
-default terminal, a probe started with `DETACHED_PROCESS` started a child with
-these flags and that child started a default-flag grandchild; the child and
-grandchild had a console (`GetConsoleCP` 949, `GetConsoleWindow` null), their
-pipes carried output, and no Windows Terminal or OpenConsole process appeared.
+The [Win32 process creation flags contract](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
+states that `CREATE_NO_WINDOW` leaves the application's console handle unset.
+It is ignored for a non-console application or when combined with
+`CREATE_NEW_CONSOLE` or `DETACHED_PROCESS`. This does not promise a console that
+descendants inherit. In the earlier Windows 11 probe, a detached parent started
+a flagged child and a default-flag grandchild. They returned `GetConsoleCP` 949
+and a null `GetConsoleWindow`, their pipes carried output, and no Windows
+Terminal or OpenConsole process appeared. Those machine-specific observations
+do not establish a console handle or a general console-inheritance guarantee.
 Before the change the same machine opened a Windows Terminal window for every
 agent that agentctl started from a detached backend. When the starting process
 has a console window, the flag is zero and helpers keep attaching to it.
@@ -65,18 +68,15 @@ This reverses the earlier decision in
 to avoid `CREATE_NO_WINDOW`, for the four paths above only. That decision rested
 on the documented statement that `CREATE_NO_WINDOW` starts a console program
 without a console handle, so default descendants could open their own visible
-console. The probe above observed a console for both the flagged child and its
-default-flag grandchild, so that risk did not occur on the tested machine.
-Managed Git commands keep the earlier `HideWindow`-only behavior.
+console. The probe above observed no visible windows on the tested machine; it
+did not disprove the documented console-handle behavior or establish descendant
+console ownership. Managed Git commands keep the earlier `HideWindow`-only behavior.
 
-The inheritance applies to processes that a flagged helper starts itself with
-default console flags. It does not make kandev-started helpers share one
-console. A `CREATE_NO_WINDOW` console has no window, so agentctl started from a
-console-less backend itself reports no console window, and every agent, script,
-utility or MCP command that agentctl starts through these paths gets its own
-windowless console instead of sharing agentctl's hidden console as before.
-Commands that agentctl starts without process attributes, such as `taskkill`
-and `tasklist`, still inherit agentctl's windowless console.
+The four Kandev-controlled helper paths apply the conditional flag independently.
+They do not promise one shared console or a new windowless console per helper.
+Commands started without process attributes, such as `taskkill` and `tasklist`,
+retain their existing launch code; no console inheritance is claimed when their
+parent was started with `CREATE_NO_WINDOW`.
 
 When the backend already has a console, the helper attaches to that console.
 `HideWindow` does not hide the shared console window. This preserves terminal
@@ -103,8 +103,8 @@ process fails, the launcher logs a warning and continues, as before.
 
 `CREATE_NEW_PROCESS_GROUP` continues to disable Ctrl+C for the helper group.
 No Kandev code calls `GenerateConsoleCtrlEvent`. With a detached backend, the
-helper's hidden console is separate from the backend. With a terminal-run
-backend, the helper shares the terminal console as it did before. On Windows,
+helper does not acquire a documented console handle with `CREATE_NO_WINDOW`.
+With a terminal-run backend, the helper shares the terminal console as it did before. On Windows,
 Go's `os.Process.Signal` supports only `os.Kill` and returns `EWINDOWS` for
 `os.Interrupt`, so the agentctl launcher's graceful stop already falls back to
 kill.
@@ -112,8 +112,8 @@ kill.
 Graceful `taskkill` without `/F` remains the first stop attempt for process
 groups that use it. Without `/F`, `taskkill` asks the process to close through
 a window. A helper started with `HideWindow` from a console window keeps a
-hidden console window. A helper started with `CREATE_NO_WINDOW` has a console
-but no window, so for these helpers the graceful `taskkill` is expected to fail
+console window. A helper started with `CREATE_NO_WINDOW` has no documented
+console handle or console window, so graceful `taskkill` is expected to fail
 with "can only be terminated forcefully" or have no effect. This has not been
 measured. The agentctl stop path already handles both outcomes: it first waits
 for the agent to exit after stdin closes, then on a `taskkill` error or after
@@ -127,8 +127,8 @@ the launcher and the backend only.
 A graceful replacement would send `CTRL_BREAK_EVENT` to the helper's process
 group with `GenerateConsoleCtrlEvent`. That call only reaches processes on the
 caller's console, so agentctl would have to attach to each helper's console in
-turn, or helpers would have to share agentctl's windowless console instead of
-receiving `CREATE_NO_WINDOW`. Both change console ownership and need process
+turn, or helpers would need an explicitly allocated shared console instead of
+relying on `CREATE_NO_WINDOW`. Both change console ownership and need process
 tests on Windows, so they are left as a follow-up. A helper can still ignore
 or fail to handle a close request in any case, so owners must keep their
 existing wait, Job Object, and forced-termination paths. The detached parent
@@ -146,8 +146,9 @@ helper exits gracefully.
 - `internal/launcher` supervises processes that have no Job Object. They keep
   the launcher's console, so closing the terminal still delivers the console
   close event to them.
-- Commands started without process attributes inherit the console of the
-  process that starts them. These include `gh`, `glab`, external editor
+- Commands started without process attributes keep Windows' default console
+  behavior, which does not guarantee inheritance from a parent whose console
+  handle is unset. These include `gh`, `glab`, external editor
   launches, plugin processes, and the `taskkill` and `tasklist` calls that
   agentctl and the CLI launcher make.
 

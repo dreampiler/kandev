@@ -60,5 +60,11 @@ The existing stdin-close, grace, forced tree termination and Job Object paths
 remain. The windowless-helper WM_CLOSE/taskkill graceful effect is unmeasured;
 this work does not claim equal console ownership or equal graceful close effects.
 
+Documentation correction: the [Win32 process creation flags contract](https://learn.microsoft.com/en-us/windows/win32/procthread/process-creation-flags)
+leaves the console handle unset for CREATE_NO_WINDOW; it does not promise
+descendant console inheritance. The measured null window handle, captured stdout
+and Job Object results remain valid. This comment/spec correction changes no
+creation flags or execution code and does not require repeating those checks.
+
 - [Plan](plan.md)
 - [System design](../../specs/platform/system-design/windows-background-process-console.md)

@@ -30,11 +30,10 @@ var hasConsoleWindow = func() bool {
 }
 
 // NoConsoleWindowFlag returns CREATE_NO_WINDOW when this process has no
-// console window for a console child to inherit, and zero otherwise. With the
-// flag the child still gets a console that its own descendants inherit, but no
-// window is created, so nothing appears on the desktop. When a console window
-// exists the child keeps inheriting it, which preserves graceful close through
-// that console.
+// console window for a console child to inherit, and zero otherwise. Windows
+// documents that CREATE_NO_WINDOW leaves the console handle unset; it does not
+// promise a console for descendants to inherit. When a console window exists,
+// returning zero preserves the caller's existing console flags.
 func NoConsoleWindowFlag() uint32 {
 	if hasConsoleWindow() {
 		return 0
