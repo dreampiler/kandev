@@ -108,6 +108,7 @@ func (s *Service) resetSilentRestoreRecovery() {
 }
 
 func (s *Service) runSilentRestoreRecoveryPass(ctx context.Context, store taskrepo.SilentRestoreRepository) {
+	s.runAutomaticExecutionPolicyPass(ctx)
 	queue := s.restartRestoreScheduler(ctx)
 	after := ""
 	for ctx.Err() == nil {
