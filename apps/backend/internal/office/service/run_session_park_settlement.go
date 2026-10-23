@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -26,6 +27,10 @@ type TaskSessionStateData struct {
 	NewState       string `json:"new_state"`
 	ErrorMessage   string `json:"error_message"`
 	AgentProfileID string `json:"agent_profile_id"`
+	// UpdatedAt is the committed timestamp of the state write that produced
+	// this event. It orders the park against a run claim: a run claimed after
+	// the park belongs to the next turn, not the turn that parked.
+	UpdatedAt string `json:"updated_at"`
 }
 
 // handleTaskSessionStateChanged settles a claimed task run whose launched
@@ -77,6 +82,18 @@ func (s *Service) settleParkedSessionRun(ctx context.Context, data TaskSessionSt
 	if run.SessionID == "" || run.SessionID != data.SessionID {
 		return nil
 	}
+	if parkPredatesClaim(data.UpdatedAt, run.ClaimedAt) {
+		// A run claimed after this park was recorded belongs to the next
+		// turn on the same Office session. Settling it here would finish
+		// work the old turn never ran.
+		s.logger.Info("ignoring park event for a run claimed after it was recorded",
+			zap.String("run_id", run.ID),
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("park_updated_at", data.UpdatedAt),
+			zap.Time("run_claimed_at", *run.ClaimedAt))
+		return nil
+	}
 	s.logger.Info("settling Office run after its launched session parked",
 		zap.String("run_id", run.ID),
 		zap.String("task_id", data.TaskID),
@@ -87,4 +104,20 @@ func (s *Service) settleParkedSessionRun(ctx context.Context, data TaskSessionSt
 		AgentProfileID: data.AgentProfileID,
 		SessionID:      data.SessionID,
 	})
+}
+
+// parkPredatesClaim reports whether the run was claimed after the park's
+// committed state write. Office sessions are reused across runs, so the park
+// timestamp is the ordering identity that distinguishes the turn that parked
+// from a successor claimed afterwards. An absent or unparseable timestamp
+// leaves the existing settlement behavior unchanged.
+func parkPredatesClaim(parkUpdatedAt string, claimedAt *time.Time) bool {
+	if parkUpdatedAt == "" || claimedAt == nil {
+		return false
+	}
+	parkTime, err := time.Parse(time.RFC3339Nano, parkUpdatedAt)
+	if err != nil {
+		return false
+	}
+	return claimedAt.After(parkTime)
 }

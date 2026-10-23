@@ -72,8 +72,11 @@ are shared with task creation. The workflow menu shows ordered steps and the
 configured start marker. Repository rows use the same paired chips and branch
 search. Profile menus use the same search, logos, labels, and availability
 rules. The optional parent control reuses the shared searchable task picker and
-is scoped to the automation's workspace. Automation code owns no parallel option
-catalog.
+is scoped to the automation's workspace. Typed input reaches the existing search
+endpoint with its bounded limit. Responses are scoped to workspace and query;
+late responses cannot replace the current result. The selected task label stays
+available when another query omits that task. Other Combobox consumers retain
+their existing local filtering. Automation code owns no parallel option catalog.
 
 On phones the existing automation editor remains the primary scroll surface.
 Target and continuity choices use the existing stacked control pattern with
@@ -104,6 +107,15 @@ existing hierarchy admission resolves and validates it, so the feature adds no
 second parent rule. An empty value keeps the firing's task top-level. Because it
 names a task row in this install, `parent_task_id` is excluded from portable
 export like `continuation_task_id`.
+
+An update that disables the automation without changing its parent can proceed
+when that saved parent is stale. A changed parent or an enabling update still
+uses canonical admission.
+
+The existing parent relation read includes hidden automation-run children whose
+stored `parent_id` names that parent in the same workspace. This does not change
+board visibility or the ordinary child lists used for readiness and hierarchy
+admission.
 
 The task model adds a visible automation provenance value, for example
 `automation_task`. Board, sidebar, and normal task queries continue to exclude
@@ -193,7 +205,15 @@ pointers, and cleanup jobs. Import normalizes omitted target fields to the
 compatibility defaults and revalidates executor/workflow combinations.
 
 Changing target mode, repository/base-branch pairs, workflow, agent profile, or
-executor profile rotates the continuation on the next firing.
+executor profile rotates the continuation on the next firing. Changing or clearing
+the parent task also rotates the continuation; the previous task and run history
+are retained.
+Continuation reuse compares the task's parent. A firing writes or clears the
+future continuation only while the existing automation revision, parent and
+previous continuation still match its read. Retry dispatch obtains that revision
+from its existing durable run. A stale conditional write changes no binding and
+does not delete the older firing's task or history. No new revision or schema is
+introduced. Legacy setter calls without a binding keep their existing behavior.
 Name, description, prompt, title template, enabled state, and trigger edits do
 not change the existing task until a firing needs a new or replacement task.
 

@@ -1700,7 +1700,16 @@ func (s *Store) BindRunTask(ctx context.Context, runID, taskID, repositoryReason
 	return nil
 }
 
-func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
+func (s *Store) SetContinuationTaskID(ctx context.Context, automationID, taskID string, binding ...ContinuationBinding) error {
+	if len(binding) > 0 {
+		expected := binding[0]
+		_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+			UPDATE automations SET continuation_task_id = ?, updated_at = ?
+			WHERE id = ? AND parent_task_id = ? AND automation_revision = ? AND continuation_task_id = ?`),
+			taskID, time.Now().UTC(), automationID, expected.ParentTaskID,
+			expected.AutomationRevision, expected.ContinuationTaskID)
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
 		`UPDATE automations SET continuation_task_id = ?, updated_at = ? WHERE id = ?`),
 		taskID, time.Now().UTC(), automationID)

@@ -265,6 +265,14 @@ type Automation struct {
 	RepositoryIDs []string               `json:"repository_ids" db:"-"`
 }
 
+// ContinuationBinding is the saved configuration and runtime binding a firing read.
+// It keeps an older firing from replacing a newer continuation selection.
+type ContinuationBinding struct {
+	ParentTaskID       string
+	AutomationRevision int64
+	ContinuationTaskID string
+}
+
 // AutomationTrigger is a single trigger attached to an automation.
 type AutomationTrigger struct {
 	ID              string          `json:"id" db:"id"`

@@ -170,12 +170,16 @@ task, so a coordinator can find the run's work through task relations.
   query shall list it.
 - **AC-OFFICE-AUTOMATION-TARGETS-004.3:** Parent resolution and hierarchy
   admission shall reuse the existing task-creation parent validation; the
-  feature shall not add a second validation rule.
+  feature shall not add a second validation rule. An unchanged stale parent
+  shall not prevent disabling the automation.
 - **AC-OFFICE-AUTOMATION-TARGETS-004.4:** Retry and continuation firings shall
-  carry the same `parent_task_id`.
+  carry the same `parent_task_id`. Changing or clearing the configured parent
+  resets future continuation; older firings retain their saved parent without
+  replacing the current continuation binding.
 - **AC-OFFICE-AUTOMATION-TARGETS-004.5:** The editor shall offer a searchable,
   workspace-scoped task selector, and the MCP create surface shall accept
-  `parent_task_id`.
+  `parent_task_id`. Typed searches shall reach workspace search so tasks beyond
+  the initial result page remain selectable.
 - **AC-OFFICE-AUTOMATION-TARGETS-004.6:** Portable export shall exclude
   `parent_task_id` because it names a task row in this install and is not
   portable.

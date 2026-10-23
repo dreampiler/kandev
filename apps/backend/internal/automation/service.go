@@ -738,8 +738,12 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if req.ParentTaskID != nil {
 		parentID = *req.ParentTaskID
 	}
-	if err := s.ValidateParentTask(ctx, existing.WorkspaceID, parentID); err != nil {
-		return nil, err
+	unchangedParent := parentID == existing.ParentTaskID
+	disabling := req.Enabled != nil && !*req.Enabled
+	if !disabling || !unchangedParent {
+		if err := s.ValidateParentTask(ctx, existing.WorkspaceID, parentID); err != nil {
+			return nil, err
+		}
 	}
 	profileID := existing.ExecutorProfileID
 	if req.ExecutorProfileID != nil {
@@ -2459,8 +2463,8 @@ func (s *Service) BindRunTask(ctx context.Context, runID, taskID, repositoryReas
 	return s.store.BindRunTask(ctx, runID, taskID, repositoryReason)
 }
 
-func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
-	return s.store.SetContinuationTaskID(ctx, automationID, taskID)
+func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string, binding ...ContinuationBinding) error {
+	return s.store.SetContinuationTaskID(ctx, automationID, taskID, binding...)
 }
 
 func (s *Service) BindRun(ctx context.Context, runID, taskID, sessionID, turnID string, action ThreadAction, reason string) error {
