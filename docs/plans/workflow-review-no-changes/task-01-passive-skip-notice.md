@@ -55,3 +55,21 @@ stopped before collection on temporary outside-project React resolution; only
 that temporary config changed, and the passed Go checks were not repeated.
 Normal hooks must pass before the upstream writer publishes. No permanent
 tests are introduced.
+
+
+## Rejected lifecycle message follow-up
+
+Message persistence failure now invokes the existing unreferenced-turn rollback
+for only a completed turn newly created by that request. Existing explicit turn
+IDs and foreground turns are preserved. The same repository guard retains a
+message that committed before response loss. Cancellation uses bounded cleanup
+without changing the original failure or adding a background retry loop.
+
+Disposable actual SQLite INSERT rejection checks reproduced empty turns in
+ordinary, assigned-ID and idempotent entry points; cancellation reproduced the
+same baseline failure. The formatted candidate passed all selected checks with
+the race detector (task/service 2.459s), including retry, committed response-loss
+and caller-supplied foreground-turn controls. Messages and original foreground
+history were preserved. Full-PR documentation coverage passed. Normal commit
+hooks must pass before publication. No permanent cases, new storage contract,
+schema or operating mutation are added.
