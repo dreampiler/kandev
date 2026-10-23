@@ -23,7 +23,7 @@ export function DynamicUnclassifiedBulkApply({ onApply }: { onApply: () => void 
         <Button
           type="button"
           variant="outline"
-          className="min-h-11"
+          className={settingsActionClassName()}
           data-testid="dynamic-unclassified-apply-all"
         >
           {t("agents:dynamicUnclassifiedApplyAll")}

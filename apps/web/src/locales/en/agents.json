@@ -450,7 +450,7 @@
   "runtimeLocalCLIVersion": "Local CLI: {{name}} {{version}}",
   "runtimeLocalCLIVersionUnknown": "Local CLI: {{name}}, version unknown ({{reason}})",
   "dynamicPolicyUnclassified": "Fall back after repeated unclassified failures",
-  "dynamicPolicyUnclassifiedHelp": "Opt-in recovery for failures that the classifier cannot place in the transient or hard classes. It stays off by default, so unclassified failures keep requiring manual recovery.",
+  "dynamicPolicyUnclassifiedHelp": "Opt-in recovery for failures that the classifier cannot place in the transient or hard classes. It stays off by default, so unclassified failures keep requiring manual recovery. Only verified provider, process-start, or empty-turn failures with no output or effects qualify. A workflow step can disable fallback.",
   "dynamicUnclassifiedApplyAll": "Apply to all candidates",
   "dynamicUnclassifiedApplyAllConfirmAction": "Apply to all",
   "dynamicUnclassifiedApplyAllConfirmDescription": "Set each candidate's unclassified policy to enabled with a threshold of 2. Candidate order, priority groups, model options, and the transient and hard policies stay unchanged.",
@@ -459,7 +459,7 @@
   "dynamicUnclassifiedErrors": "Unclassified failures",
   "dynamicUnclassifiedSummaryOff": "Unclassified fallback: off",
   "dynamicUnclassifiedSummaryOn": "Unclassified fallback: {{threshold}} in a row",
-  "dynamicUnclassifiedSwitchDescription": "Count identical unclassified failures for this candidate and move to the next candidate at the threshold.",
+  "dynamicUnclassifiedSwitchDescription": "Count identical unclassified failures for this candidate and move to the next candidate at the threshold. Only verified provider, process-start, or empty-turn failures with no output or effects qualify. A workflow step can disable fallback.",
   "dynamicUnclassifiedThreshold": "Consecutive unclassified failures",
   "dynamicUnclassifiedThresholdValidation": "Enter a threshold between 2 and 10."
 }
