@@ -98,7 +98,7 @@ func readCommitCharge() (used, limit uint64, ok bool) {
 	}
 	var info performanceInformation
 	info.Cb = uint32(unsafe.Sizeof(info))
-	r1, _, _ := procGetPerformanceInfo.Call(uintptr(unsafe.Pointer(&info)))
+	r1, _, _ := procGetPerformanceInfo.Call(uintptr(unsafe.Pointer(&info)), uintptr(info.Cb))
 	if r1 == 0 || info.PageSize == 0 {
 		return 0, 0, false
 	}
