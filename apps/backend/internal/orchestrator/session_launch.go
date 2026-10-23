@@ -577,6 +577,9 @@ func (s *Service) resolveSessionRecoveryBlock(ctx context.Context, sessionID, ac
 		return fmt.Errorf("resolve session recovery block: block changed or recovery evidence is incomplete")
 	}
 	s.publishAgentDeliveryRecoveryState(ctx, sessionID)
+	if automaticHistoryAttempt(ctx) != "" {
+		return nil
+	}
 	if err := s.restorePendingQueueDispatchesForRecovery(ctx, sessionID); err != nil {
 		return fmt.Errorf("release parked queue work after session recovery: %w", err)
 	}
@@ -1371,6 +1374,8 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 
 // RecoverSessionOptions carries action-specific recovery authority.
 type RecoverSessionOptions struct {
+	// Automatic is server-owned and preserves automatic capacity admission.
+	Automatic      bool
 	WorkspaceOnly  bool
 	IdempotencyKey string
 	SettingsPolicy executor.ResumeSettingsPolicy
@@ -1408,9 +1413,20 @@ func (s *Service) RecoverSessionWithOptions(
 	if err := validateSessionRecoverySettingsPolicyAction(action, options.SettingsPolicy); err != nil {
 		return nil, err
 	}
+	if options.Automatic && ((action != recoveryActionContinueHistory && action != recoveryActionResume) || !s.config.AutoContinueFromHistory || automaticHistoryAttempt(ctx) == "") {
+		return nil, errors.New("automatic history continuation is not authorized by the runtime policy")
+	}
 	session, err := s.loadSessionForRecovery(ctx, taskID, sessionID, options.SettingsPolicy)
 	if err != nil {
 		return nil, err
+	}
+	if options.Automatic && (!session.IsPrimary || session.State == models.TaskSessionStateCompleted || session.State == models.TaskSessionStateCancelled) {
+		return nil, errors.New("automatic history recovery no longer owns the current primary conversation")
+	}
+	if options.Automatic {
+		if busy, busyErr := s.automaticTaskHasOtherExecution(ctx, taskID, sessionID); busy || busyErr != nil {
+			return nil, errors.New("automatic history recovery cannot replace another active task execution")
+		}
 	}
 	if options.WorkspaceOnly {
 		return s.recoverInventoryMetadataOnly(ctx, taskID, sessionID, action, options.IdempotencyKey)
@@ -1531,6 +1547,7 @@ func (s *Service) RecoverSessionWithOptions(
 	}
 
 	resp, err := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+		Automatic:                        options.Automatic,
 		TaskID:                           taskID,
 		SessionID:                        sessionID,
 		Intent:                           IntentResume,
@@ -1579,8 +1596,12 @@ func (s *Service) RecoverSessionWithOptions(
 		}
 		return nil, normalizeRecoverSessionError(err)
 	}
+	continuationOrigin := launchOriginManual
+	if options.Automatic {
+		continuationOrigin = launchOriginAutomatic
+	}
 	if _, err := s.promptTask(
-		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, launchOriginManual,
+		context.WithoutCancel(ctx), taskID, sessionID, continuation.Prompt, "", false, nil, true, continuationOrigin,
 		promptTaskOptions{
 			recoveryAction:             action,
 			preservePromptContext:      true,
@@ -2171,6 +2192,9 @@ func (s *Service) persistContinuationCheckpoint(
 	}
 	now := time.Now().UTC()
 	attemptID := uuid.NewString()
+	if automaticID := automaticHistoryAttempt(ctx); automaticID != "" {
+		attemptID = automaticID
+	}
 	if err := store.CreateRestoreAttempt(ctx, &models.RestoreAttempt{
 		ID:                 attemptID,
 		SessionID:          session.ID,

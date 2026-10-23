@@ -78,6 +78,9 @@ type ServiceConfig struct {
 	// ResumeQueueAfterSilentRestore re-enables Auto-run that a successful
 	// silent restart restore paused.
 	ResumeQueueAfterSilentRestore bool
+	AutoStartPendingWork          bool
+	AutoContinueFromHistory       bool
+	AutoRetryUnsentRequests       bool
 	// ReplacedSessionReclaim stops the execution of a session the user
 	// replaced as primary (PromotePrimarySession), once that session has
 	// settled.

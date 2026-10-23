@@ -519,7 +519,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 	if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
 		return nil, err
 	}
-	return env, nil
+	return m.automaticHistoryEnvironment(env), nil
 }
 
 func (m *Manager) executionEnvironmentSnapshot(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo, recordOverrides bool) (map[string]string, error) {
