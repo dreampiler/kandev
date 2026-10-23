@@ -30,6 +30,7 @@ import type { ControlWorkspace } from "@/hooks/domains/coordinator/use-integrate
 
 type Emphasis = "error" | "delayed" | undefined;
 type Column = { key: keyof WorkspaceFigures; label: string };
+type CompareKind = "tasks" | "sessions";
 
 const STAGE_LABELS: Record<TaskStage, string> = {
   work: "sidebar:controlSummary.stage.work",
@@ -41,11 +42,11 @@ const STAGE_LABELS: Record<TaskStage, string> = {
 
 const SESSION_COLUMNS: Column[] = [
   { key: "running", label: "sidebar:controlSummary.compare.running" },
-  { key: "waitingInput", label: "sidebar:controlSummary.compare.waitingInput" },
   { key: "failedSessions", label: "sidebar:controlSummary.compare.failed" },
 ];
 
-const DAY_COLUMNS: Column[] = [
+const TASK_COLUMNS: Column[] = [
+  { key: "waitingInput", label: "sidebar:controlSummary.compare.waitingInput" },
   { key: "completed24h", label: "sidebar:controlSummary.compare.completed" },
   { key: "moves24h", label: "sidebar:controlSummary.compare.moves" },
 ];
@@ -64,7 +65,6 @@ const COORDINATOR_TONES: Record<WorkspaceCoordinatorState, ControlTone> = {
   none: "idle",
 };
 
-/** Which figures cross an attention rule for this workspace. */
 function emphasis(signals: ControlSignals, id: string, key: keyof WorkspaceFigures): Emphasis {
   const figures = signals.figures[id];
   if (!figures) return undefined;
@@ -91,40 +91,34 @@ function NumberCell({ value, tone }: { value: number | string; tone: Emphasis })
   );
 }
 
-function CompareHeader() {
+function CompareHeader({ kind }: { kind: CompareKind }) {
   const { t } = useTranslation();
   return (
     <TableHeader>
       <TableRow>
-        <TableHead rowSpan={2}>{t("sidebar:controlSummary.column.workspace")}</TableHead>
-        <TableHead rowSpan={2}>{t("sidebar:controlSummary.column.state")}</TableHead>
-        <TableHead colSpan={TASK_STAGES.length} className="text-center">
-          {t("sidebar:controlSummary.compare.taskStages")}
-        </TableHead>
-        <TableHead colSpan={SESSION_COLUMNS.length} className="text-center">
-          {t("sidebar:controlSummary.compare.sessions")}
-        </TableHead>
-        <TableHead rowSpan={2} className="text-right">
-          {t("sidebar:controlSummary.compare.queued")}
-        </TableHead>
-        <TableHead colSpan={DAY_COLUMNS.length} className="text-center">
-          {t("sidebar:controlSummary.compare.last24h")}
-        </TableHead>
-        <TableHead rowSpan={2} className="whitespace-normal text-right">
-          {t("sidebar:integratedControl.coordinators")}
-        </TableHead>
-      </TableRow>
-      <TableRow>
-        {TASK_STAGES.map((stage) => (
-          <TableHead key={stage} className="whitespace-normal text-right">
-            {t(STAGE_LABELS[stage])}
-          </TableHead>
-        ))}
-        {[...SESSION_COLUMNS, ...DAY_COLUMNS].map((column) => (
+        <TableHead>{t("sidebar:controlSummary.column.workspace")}</TableHead>
+        <TableHead>{t("sidebar:controlSummary.column.state")}</TableHead>
+        {kind === "tasks" &&
+          TASK_STAGES.map((stage) => (
+            <TableHead key={stage} className="whitespace-normal text-right">
+              {t(STAGE_LABELS[stage])}
+            </TableHead>
+          ))}
+        {(kind === "tasks" ? TASK_COLUMNS : SESSION_COLUMNS).map((column) => (
           <TableHead key={column.key} className="whitespace-normal text-right">
             {t(column.label)}
           </TableHead>
         ))}
+        {kind === "sessions" && (
+          <>
+            <TableHead className="whitespace-normal text-right">
+              {t("sidebar:controlSummary.compare.queued")}
+            </TableHead>
+            <TableHead className="whitespace-normal text-right">
+              {t("sidebar:integratedControl.coordinators")}
+            </TableHead>
+          </>
+        )}
       </TableRow>
     </TableHeader>
   );
@@ -172,27 +166,41 @@ function StageCells({
   dashboard?: NativeDashboard;
   unknown: string;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      {TASK_STAGES.map((stage) => (
-        <TableCell key={stage} className={numberCellClass(stages?.[stage])}>
-          <div
-            className={
-              stage === "completed" && stages?.completed ? toneTextClass("delayed") : undefined
-            }
-          >
-            {stages ? stages[stage] : unknown}
-          </div>
-          {workflowStepCounts(dashboard, stage).map((step) => (
-            <div
-              key={step.id}
-              className="mt-1 whitespace-normal text-[10px] font-normal text-muted-foreground"
-            >
-              {step.name || unknown}: {step.count}
-            </div>
-          ))}
-        </TableCell>
-      ))}
+      {TASK_STAGES.map((stage) => {
+        const steps = workflowStepCounts(dashboard, stage);
+        const value = stages ? stages[stage] : unknown;
+        const valueClass =
+          stage === "completed" && stages?.completed ? toneTextClass("delayed") : undefined;
+        return (
+          <TableCell key={stage} className={numberCellClass(stages?.[stage])}>
+            {steps.length > 0 ? (
+              <details onClick={(event) => event.stopPropagation()}>
+                <summary
+                  className={`cursor-pointer list-none underline decoration-dotted underline-offset-4 [&::-webkit-details-marker]:hidden ${valueClass ?? ""}`}
+                  aria-label={t("sidebar:controlSummary.compare.stageDetails", {
+                    stage: t(STAGE_LABELS[stage]),
+                    count: value,
+                  })}
+                >
+                  {value}
+                </summary>
+                <ul className="mt-2 space-y-1 whitespace-normal text-xs font-normal text-muted-foreground">
+                  {steps.map((step) => (
+                    <li key={step.id}>
+                      {step.name || unknown}: {step.count}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : (
+              <span className={valueClass}>{value}</span>
+            )}
+          </TableCell>
+        );
+      })}
     </>
   );
 }
@@ -227,10 +235,12 @@ function CompareRow({
   workspace,
   signals,
   control,
+  kind,
 }: {
   workspace: ControlWorkspace;
   signals: ControlSignals;
   control: ReturnType<typeof useIntegratedControl>;
+  kind: CompareKind;
 }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -243,7 +253,7 @@ function CompareRow({
     <TableRow
       className="cursor-pointer"
       onClick={() => router.push(href)}
-      data-testid="control-compare-row"
+      data-testid={`control-compare-${kind}-row`}
     >
       <TableCell className="truncate font-medium">
         <Link href={href} onClick={(event) => event.stopPropagation()}>
@@ -253,37 +263,35 @@ function CompareRow({
       <TableCell>
         {status ? <ControlStatusPill state={status} /> : read && <ControlReadState {...read} />}
       </TableCell>
-      <StageCells
-        stages={signals.stagesById[workspace.id]}
-        dashboard={read?.data}
-        unknown={unknown}
-      />
+      {kind === "tasks" && (
+        <StageCells
+          stages={signals.stagesById[workspace.id]}
+          dashboard={read?.data}
+          unknown={unknown}
+        />
+      )}
       <FigureCells
         signals={signals}
         workspaceId={workspace.id}
         figures={figures}
-        columns={SESSION_COLUMNS}
+        columns={kind === "tasks" ? TASK_COLUMNS : SESSION_COLUMNS}
         unknown={unknown}
       />
-      <NumberCell
-        value={figures ? figures.queued : unknown}
-        tone={emphasis(signals, workspace.id, "queued")}
-      />
-      <FigureCells
-        signals={signals}
-        workspaceId={workspace.id}
-        figures={figures}
-        columns={DAY_COLUMNS}
-        unknown={unknown}
-      />
-      <TableCell data-testid="control-compare-coordinator">
-        <CoordinationCell control={control} workspaceId={workspace.id} />
-      </TableCell>
+      {kind === "sessions" && (
+        <>
+          <NumberCell
+            value={figures ? figures.queued : unknown}
+            tone={emphasis(signals, workspace.id, "queued")}
+          />
+          <TableCell data-testid="control-compare-coordinator">
+            <CoordinationCell control={control} workspaceId={workspace.id} />
+          </TableCell>
+        </>
+      )}
     </TableRow>
   );
 }
 
-/** One row per workspace so the figures read across, not down a column of cards. */
 export function ControlWorkspaceCompare({
   signals,
   workspaceId,
@@ -297,35 +305,54 @@ export function ControlWorkspaceCompare({
     (workspace) => !workspaceId || workspace.id === workspaceId,
   );
   return (
-    <section className="space-y-2" data-testid="control-workspace-compare">
+    <section className="space-y-4" data-testid="control-workspace-compare">
       <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
-      <div className="rounded-lg border">
-        <Table className="min-w-[76rem] table-fixed">
-          <colgroup>
-            <col className="w-44" />
-            <col className="w-24" />
-            {TASK_STAGES.map((stage) => (
-              <col key={stage} className="w-[4.5rem]" />
-            ))}
-            {[...SESSION_COLUMNS, ...DAY_COLUMNS].map((column) => (
-              <col key={column.key} className="w-[4.5rem]" />
-            ))}
-            <col className="w-[4.5rem]" />
-            <col className="w-28" />
-          </colgroup>
-          <CompareHeader />
-          <TableBody>
-            {workspaces.map((workspace) => (
-              <CompareRow
-                key={workspace.id}
-                workspace={workspace}
-                signals={signals}
-                control={control}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      {(["tasks", "sessions"] as const).map((kind) => {
+        const label = t(
+          kind === "tasks"
+            ? "sidebar:controlSummary.compare.taskStages"
+            : "sidebar:controlSummary.compare.sessions",
+        );
+        return (
+          <section key={kind} className="space-y-2" data-testid={`control-compare-${kind}`}>
+            <h3 className="text-sm font-medium">{label}</h3>
+            <div className="rounded-lg border">
+              <Table
+                aria-label={label}
+                className={`${kind === "tasks" ? "min-w-[57.5rem]" : "min-w-[39rem]"} table-fixed`}
+              >
+                <colgroup>
+                  <col className="w-44" />
+                  <col className="w-24" />
+                  {kind === "tasks" &&
+                    TASK_STAGES.map((stage) => <col key={stage} className="w-[4.5rem]" />)}
+                  {(kind === "tasks" ? TASK_COLUMNS : SESSION_COLUMNS).map((column) => (
+                    <col key={column.key} className={kind === "tasks" ? "w-24" : "w-[4.5rem]"} />
+                  ))}
+                  {kind === "sessions" && (
+                    <>
+                      <col className="w-24" />
+                      <col className="w-28" />
+                    </>
+                  )}
+                </colgroup>
+                <CompareHeader kind={kind} />
+                <TableBody>
+                  {workspaces.map((workspace) => (
+                    <CompareRow
+                      key={workspace.id}
+                      workspace={workspace}
+                      signals={signals}
+                      control={control}
+                      kind={kind}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </section>
+        );
+      })}
     </section>
   );
 }

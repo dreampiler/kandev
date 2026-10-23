@@ -359,11 +359,11 @@
   "controlSummary.column.lastChange": "Last change",
   "controlSummary.compare.title": "Workspace comparison",
   "controlSummary.compare.inProgress": "In progress",
-  "controlSummary.compare.running": "Running",
-  "controlSummary.compare.waitingInput": "Waiting for input",
-  "controlSummary.compare.queued": "Unconsumed",
-  "controlSummary.compare.completed": "Done 24h",
-  "controlSummary.compare.moves": "Moves 24h",
+  "controlSummary.compare.running": "Running sessions",
+  "controlSummary.compare.waitingInput": "Tasks waiting for input",
+  "controlSummary.compare.queued": "Unconsumed messages",
+  "controlSummary.compare.completed": "Completed tasks (24h)",
+  "controlSummary.compare.moves": "Step moves (24h)",
   "controlSummary.compare.failed": "Failed sessions",
   "controlSummary.compare.taskStages": "Task stages",
   "controlSummary.compare.sessions": "Sessions",
@@ -433,5 +433,6 @@
   "controlSummary.attention.questionSubject_other": "{{count}} items waiting for you",
   "integratedControl.noCoordinators": "No coordinators to display",
   "integratedControl.unavailable": "Unavailable",
-  "integratedControl.executorProfile": "Executor profile"
+  "integratedControl.executorProfile": "Executor profile",
+  "controlSummary.compare.stageDetails": "{{stage}} {{count}}: workflow step counts"
 }

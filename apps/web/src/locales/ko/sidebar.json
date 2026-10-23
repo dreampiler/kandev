@@ -359,11 +359,11 @@
   "controlSummary.column.lastChange": "마지막 변화",
   "controlSummary.compare.title": "워크스페이스 비교",
   "controlSummary.compare.inProgress": "진행",
-  "controlSummary.compare.running": "실행",
-  "controlSummary.compare.waitingInput": "입력 대기",
-  "controlSummary.compare.queued": "미소비",
-  "controlSummary.compare.completed": "24h 완료",
-  "controlSummary.compare.moves": "24h 칸 이동",
+  "controlSummary.compare.running": "실행 세션",
+  "controlSummary.compare.waitingInput": "입력 대기 작업",
+  "controlSummary.compare.queued": "미소비 메시지",
+  "controlSummary.compare.completed": "24h 완료 작업",
+  "controlSummary.compare.moves": "24h 단계 이동",
   "controlSummary.compare.failed": "실패 세션",
   "controlSummary.compare.taskStages": "작업 단계",
   "controlSummary.compare.sessions": "세션",
@@ -433,5 +433,6 @@
   "controlSummary.attention.questionSubject_other": "응답을 기다리는 항목 {{count}}개",
   "integratedControl.noCoordinators": "표시할 코디네이터 없음",
   "integratedControl.unavailable": "사용 불가",
-  "integratedControl.executorProfile": "실행기 프로필"
+  "integratedControl.executorProfile": "실행기 프로필",
+  "controlSummary.compare.stageDetails": "{{stage}} {{count}}: 단계별 작업 수"
 }
