@@ -25,7 +25,10 @@ these observations.
 The existing authenticated agentctl control server exposes one GET footprint
 read. Its instance manager copies instance pointers before measuring outside its
 map lock. A busy process owner reports an unreadable marker instead of waiting
-for lifecycle activity or blocking teardown.
+for lifecycle activity or blocking teardown. The read takes the startup lock
+before the state lock, both nonblocking, so command/PID publication during
+startup cannot race the observation. Existing ownership remains held while
+walking the process tree; no start or stop is initiated by the read.
 
 ## Current identity
 
@@ -39,8 +42,11 @@ guessed workspace. Remote executors do not acquire host-local attribution.
 ## Workspace and UI projection
 
 The task service uses the existing workspace-read authorization before observing.
-It resolves workspace task ownership with the existing bounded repository read;
-an incomplete inventory is an error rather than a partial workspace total.
+After a complete bounded runtime snapshot, it resolves each distinct measured
+task through the canonical repository GetTask, including Quick Chat and hidden
+automation runs. It filters by the authorized workspace instead of using the
+ordinary task-list visibility filters. Unresolved ownership is an error rather
+than a false measured zero; an incomplete runtime snapshot stays unknown.
 The HTTP route emits only the workspace's rows and byte totals, plus the existing
 installation runtime-count context.
 
@@ -48,7 +54,7 @@ The workspace settings card makes one bounded read when its workspace mounts.
 The hook discards replies for an unmounted or replaced workspace. It registers no
 settings draft or save callback and creates no timer, maintenance observer,
 expvar registry or history. Desktop and narrow screens show the same loading,
-unknown, failed, empty and partial states. The English and Korean copy describe
+unknown, failed, empty and partial states. All seven real locale catalogs and generated pseudo copy describe
 unmeasured use as unknown and partial byte values as lower bounds.
 
 ```text

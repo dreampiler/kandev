@@ -42,7 +42,7 @@ Workspace settings -> Agent memory in use
 ```
 
 The card reads once per mounted workspace and does not participate in form save.
-English and Korean settings copy are in this delivery.
+Seven real locale catalogs and generated pseudo provide the settings copy.
 
 ## Verification
 
@@ -90,3 +90,31 @@ measured by these focused component checks.
 
 - [Plan](plan.md)
 - [System design](../../specs/executors/system-design/agent-runtime-reclamation.md)
+
+
+## Ownership, startup and catalog follow-up
+
+The workspace projection resolves every distinct measured task with GetTask,
+so hidden Quick Chat and automation-run owners are included. Workspace read
+authorization still precedes observation; only that workspace's rows and bytes
+are published. Missing ownership stays an error, not a complete empty reading.
+Incomplete provider readings still remain unknown. The process reader takes
+the startup lock before its existing state lock without waiting; a busy startup
+returns the same unreadable marker and does not change process lifecycle.
+
+The existing locale check reproduced 65 missing real-locale entries and 13
+missing pseudo entries. Only those 13 consumed keys were translated into the
+five missing real catalogs; the existing Chinese glossary/converter and pseudo
+transform produced their corresponding values. The complete key check now
+passes with 548 existing orphan warnings. English/Korean and unrelated catalog
+values are preserved. The settings-section comment now states only its
+read-only/no-draft/no-save invariant.
+
+Disposable real-repository checks reproduced omitted hidden runtimes and a
+false complete empty view for unknown ownership; startup-busy/concurrent
+publication checks also reproduced the missing unreadable marker and an actual
+cmd/Process data race. The candidate passed both packages under race
+(task/service 1.663s; agentctl/server/process 1.114s), including authorization
+before observation, foreign-workspace filtering, partial counts and incomplete
+provider controls. Original physical child measurements above remain historical
+and were not repeated; no new full-app or physical viewport claim is made.
