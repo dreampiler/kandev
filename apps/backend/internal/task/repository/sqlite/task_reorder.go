@@ -44,6 +44,29 @@ const (
 func (r *Repository) ReorderStepTasks(
 	ctx context.Context, stepID, band string, orderedTaskIDs []string,
 ) ([]*models.Task, int64, error) {
+	return r.reorderStepTasks(ctx, stepID, band, orderedTaskIDs, nil)
+}
+
+// ReorderChildStepTasks uses the same transaction with a relation predicate only
+// on the named children; ordinary UI reordering keeps its existing semantics.
+func (r *Repository) ReorderChildStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string, scope models.ChildTaskOrderScope) ([]*models.Task, int64, error) {
+	if scope.ParentTaskID == "" || scope.WorkspaceID == "" || validateReorderIDList(scope.TaskIDs) != nil {
+		return nil, 0, repoerrors.ErrInvalidReorder
+	}
+	guarded := childOrderGuardedIDs(&scope)
+	remaining := len(guarded)
+	for _, id := range orderedTaskIDs {
+		if guarded[id] {
+			remaining--
+		}
+	}
+	if remaining != 0 {
+		return nil, 0, repoerrors.ErrInvalidReorder
+	}
+	return r.reorderStepTasks(ctx, stepID, band, orderedTaskIDs, &scope)
+}
+
+func (r *Repository) reorderStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string, scope *models.ChildTaskOrderScope) ([]*models.Task, int64, error) {
 	if band != ReorderBandAdmitted && band != ReorderBandQueued {
 		return nil, 0, repoerrors.ErrInvalidReorder
 	}
@@ -85,11 +108,8 @@ func (r *Repository) ReorderStepTasks(
 
 	renumbered := renumberReorderedStep(band, orderedNamed, other)
 	r.fireReorderPreWriteHook()
-	for _, task := range renumbered {
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?`),
-			task.Position, r.nowUTC(), task.ID); err != nil {
-			return nil, 0, err
-		}
+	if err := r.writeReorderedStep(ctx, tx, renumbered, scope); err != nil {
+		return nil, 0, err
 	}
 	revision, err := r.bumpStepOrderRevisionInTx(ctx, tx, stepID)
 	if err != nil {
@@ -99,6 +119,43 @@ func (r *Repository) ReorderStepTasks(
 		return nil, 0, err
 	}
 	return renumbered, revision, nil
+}
+
+func (r *Repository) writeReorderedStep(ctx context.Context, tx *sql.Tx, tasks []*models.Task, scope *models.ChildTaskOrderScope) error {
+	guarded := childOrderGuardedIDs(scope)
+	for _, task := range tasks {
+		query := `UPDATE tasks SET position = ?, updated_at = ? WHERE id = ?`
+		args := []any{task.Position, r.nowUTC(), task.ID}
+		if guarded[task.ID] {
+			query += ` AND parent_id = ? AND workspace_id = ?`
+			args = append(args, scope.ParentTaskID, scope.WorkspaceID)
+		}
+		result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+		if err != nil {
+			return err
+		}
+		if guarded[task.ID] {
+			changed, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if changed != 1 {
+				return repoerrors.ErrTaskParentMismatch
+			}
+		}
+	}
+	return nil
+}
+
+func childOrderGuardedIDs(scope *models.ChildTaskOrderScope) map[string]bool {
+	if scope == nil {
+		return nil
+	}
+	ids := make(map[string]bool, len(scope.TaskIDs))
+	for _, id := range scope.TaskIDs {
+		ids[id] = true
+	}
+	return ids
 }
 
 func (r *Repository) fireReorderPreWriteHook() {
