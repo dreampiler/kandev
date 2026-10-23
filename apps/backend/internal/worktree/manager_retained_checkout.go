@@ -199,6 +199,7 @@ func (m *Manager) validateRetainedCheckoutBranch(ctx context.Context, taskID, pa
 
 func retainedCheckoutRecordMatches(row *Worktree, req CreateRequest) bool {
 	return row.TaskID == req.TaskID && retainedCheckoutSlotMatches(row, req) &&
+		(req.TaskEnvironmentID == "" || row.TaskEnvironmentID == req.TaskEnvironmentID) &&
 		(row.Status == "" || row.Status == StatusActive)
 }
 

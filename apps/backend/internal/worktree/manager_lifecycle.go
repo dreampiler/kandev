@@ -144,6 +144,9 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 	if wt, handled, err := m.tryReuseRetainedTaskCheckout(ctx, req); handled {
 		if err == nil {
 			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+			if err == nil {
+				err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+			}
 		}
 		return wt, err
 	}

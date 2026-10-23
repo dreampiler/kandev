@@ -23,6 +23,8 @@ An existing ownership marker is read without adding a new marker. A conflicting
 task identity is rejected; absence alone is not called foreign. The existing
 task worktree inventory identifies any row already owning the assigned path.
 Its task/repository/branch slot must match uniquely, and its ID is retained.
+When the request names an environment, the registered environment must match;
+a mismatch returns the existing typed recovery error without changing the row.
 An unregistered checkout needs an explicit CheckoutBranch; a generated branch
 prefix is never used as ownership or branch evidence.
 
@@ -46,6 +48,8 @@ cache key. No new receipt, owner claim or metadata-repair loop is introduced.
 Reuse does not fetch, create or reset a branch, rerun setup, copy configured
 files, remove an occupant or prune registrations. Existing checkout options
 remain checked through the same gitcheckout.Check used by ordinary reuse.
+After that check succeeds, retained reuse invokes the existing contribution
+destination configuration, including its original remote-conflict errors.
 A different repository/branch, an invalid checkout or a regular main checkout
 is retained and reported as a typed recovery error. Unavailable evidence is
 reported distinctly from a proved mismatch. Managed-main relocation and the
