@@ -164,3 +164,17 @@ original work rather than covered behavior of this increment.
 - [Subscription usage](../requirements/subscription-usage.md): existing Office behavior.
 - [Runtime flags](../../../decisions/0007-runtime-feature-flags.md).
 - [Implementation and evidence](../../../plans/provider-usage-snapshot/plan.md).
+
+## Startup and verified stale-runtime settlement
+
+Composition installs the existing shared usage/allowance adapter after Office
+construction and before required-store readiness, event consumers, deferred
+recovery and scheduling. Admission is immutable during running startup work,
+so the enabled path cannot dispatch through an unwired nil admission pointer.
+
+Stale-execution cleanup also settles claims once the runtime backend confirms
+stop, or an already-retired local owner's termination has been proven. Missing
+backend identity alone is not proof. Settlement is bounded independently of
+caller cancellation; failure is logged without changing the existing runtime
+cleanup result. Graceful survivor detach, restart/map absence and ambiguous
+remote outcomes retain claims. No expiry or absence-based reconciliation is added.

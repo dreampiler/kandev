@@ -118,3 +118,22 @@ starting at a limit of one. The candidate passed both remote-completion and
 confirmed-stop variants under the race detector. The stale provider-read issue
 is covered by the native snapshot work order; no live provider or operating
 configuration is changed.
+
+
+## Startup and stale-cleanup follow-up
+
+Two later review findings concern the original enabled startup ordering and a
+missing verified-stop settlement call. The usage/admission block now precedes
+all startup consumers, and cleanup settles only after actual backend stop or
+retired-owner termination proof. Caller cancellation cannot cancel the bounded
+settlement. This does not infer death from a restart or a missing execution,
+settle graceful detach, expire claims, or gate runtime cleanup on SQL success.
+Source-order inspection confirmed the original assignment followed startup
+consumers and the candidate precedes all five relevant startup sites. After a
+fixture-only correction to the existing StopAgentWithReason API, the actual
+SQLite baseline reproduced retained claims after confirmed stop and cancellation
+after stop. The candidate passed the selected race checks (lifecycle 2.453s),
+including unconfirmed/unknown runtime and survivable-detach controls plus eight
+existing cleanup/stop cases. Full-PR documentation coverage passed against the
+actual PR merge base. Normal hooks must pass before publication; no live provider,
+new standing tests, expiry policy or operating mutation is introduced.

@@ -121,7 +121,9 @@ func (m *Manager) completeProviderExecution(ctx context.Context, execution strin
 	if settler == nil {
 		return nil
 	}
-	return settler.CompleteProviderExecution(ctx, execution)
+	settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return settler.CompleteProviderExecution(settlementCtx, execution)
 }
 
 // Local delivery failures can finish the UI prompt without confirming a remote turn.
