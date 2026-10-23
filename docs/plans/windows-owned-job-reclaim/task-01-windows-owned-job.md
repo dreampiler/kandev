@@ -65,3 +65,16 @@ Linux and macOS containment and every caller of the identity API.
   `TestWindowsNamedJobContainsOrphanAfterLeaderExit` (with its helper
   `TestWindowsOwnedJobHelper`).
 - `GOOS=linux` and `GOOS=darwin` builds of the changed packages.
+
+
+## Windows CI package coverage follow-up
+
+Existing process identity and named-job cases are included in the existing Windows native-suite command. The pure name helper already lives in the untagged processidentity.go; no duplicate extraction or new standing case is needed.
+The native/process suite split, original package targets and flags, permissions,
+runner selection, timeouts and required gate are preserved.
+The process-cohort runner targets only agentctl/server/process and therefore
+does not supply these separate package cases. Three existing Windows workflow-contract
+checks, changed-command selection checks, documentation coverage and whitespace
+validation passed. Runtime Go sources/cases are unchanged and were not rerun
+in this configuration-only follow-up. Hosted native execution still requires
+the upstream workflow's normal approval; it is not claimed as locally executed.
