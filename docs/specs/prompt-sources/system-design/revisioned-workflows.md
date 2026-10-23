@@ -67,7 +67,14 @@ workflow and complete step membership/version snapshots before mutation. Store
 template history, changed workflow fields, changed steps and applied instance
 revision atomically. Recheck assigned and queued tasks before deleting any
 removed step. Preserve existing task/session/history rows and matching step IDs.
-No-drift imports retain timestamps and publish no execution or step actions.
+After commit, imports publish canonical workflow and step lifecycle events for
+definitions that actually changed. The existing task-service workflow publisher
+and `stepevents.Publisher` carry the committed timestamps, start selection and
+task-order revision. Existing UI, step-cache and queue-admission subscribers
+receive the same notifications as ordinary definition edits. Removed and
+demoted start steps are announced before their replacements. Preview, no-drift
+imports and rolled-back transactions publish no events. Source reconciliation
+does not directly replay step actions or dispatch an execution.
 
 ## Source lock and mutation boundaries
 

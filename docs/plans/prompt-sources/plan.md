@@ -14,6 +14,9 @@ storage and sync helpers, preserving task, session and history identity.
    ordinary native creation; preserve attribution on updates.
 5. Enforce source locking at the existing definition mutation boundaries and
    disable the workflow card's existing edit controls for a locked source.
+6. After the complete import transaction commits, publish only the changed
+   workflow and step definitions through their existing lifecycle publishers.
+   Preview, no-op and failed imports publish nothing.
 
 ## Verification boundary
 

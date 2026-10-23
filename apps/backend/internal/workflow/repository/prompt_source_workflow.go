@@ -15,6 +15,9 @@ func (r *Repository) writeSourceWorkflow(ctx context.Context, tx *sqlx.Tx, plan 
 	if plan.ExpectedWorkflow == nil {
 		workflow.CreatedByUserID = taskmodels.ExecutorSourceCreator(ctx)
 		_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO workflows (created_by_user_id, id, workspace_id, name, description, prompt, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at) SELECT ?, ?, ?, ?, ?, ?, '', '', COALESCE(MAX(sort_order),-1)+1, 0, ?, ?, ?, ?, ? FROM workflows WHERE workspace_id = ?`), workflow.CreatedByUserID, workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.Prompt, workflow.Style, workflow.Source, workflow.SourcePath, now, now, workflow.WorkspaceID)
+		if err == nil {
+			workflow.CreatedAt, workflow.UpdatedAt = now, now
+		}
 		return err
 	}
 	old := plan.ExpectedWorkflow
@@ -22,6 +25,9 @@ func (r *Repository) writeSourceWorkflow(ctx context.Context, tx *sqlx.Tx, plan 
 		return nil
 	}
 	_, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE workflows SET name = ?, description = ?, prompt = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?`), workflow.Name, workflow.Description, workflow.Prompt, workflow.Source, workflow.SourcePath, now, workflow.ID)
+	if err == nil {
+		workflow.UpdatedAt = now
+	}
 	return err
 }
 func (r *Repository) writeSourceSteps(ctx context.Context, tx *sqlx.Tx, plan models.PromptSourcePlan, now time.Time) error {
@@ -83,8 +89,11 @@ func (r *Repository) writeSourceStep(ctx context.Context, tx *sqlx.Tx, step, old
 	if old == nil {
 		return r.insertStepRecord(ctx, tx, step, events, target, nil)
 	}
-	_, err = r.writeStepUpdate(ctx, tx, step, &step.IsStartStep, nil, nil, events, target)
-	return err
+	step.IsStartStep, err = r.writeStepUpdate(ctx, tx, step, &step.IsStartStep, nil, nil, events, target)
+	if err != nil {
+		return err
+	}
+	return tx.QueryRowContext(ctx, tx.Rebind(`SELECT order_revision FROM workflow_steps WHERE id = ?`), step.ID).Scan(&step.OrderRevision)
 }
 func (r *Repository) removeSourceStep(ctx context.Context, tx *sqlx.Tx, workflowID, stepID string) error {
 	var count int

@@ -24,6 +24,7 @@ func (s *Service) ImportPromptSources(ctx context.Context, request models.Prompt
 	if err := s.repo.ApplyPromptSources(ctx, plans); err != nil {
 		return nil, err
 	}
+	s.publishPromptSourceChanges(ctx, plans)
 	return sourcePlanResult(plans), nil
 }
 func sourcePlanResult(plans []models.PromptSourcePlan) *models.PromptSourceResult {
