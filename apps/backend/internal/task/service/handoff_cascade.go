@@ -1789,12 +1789,7 @@ func (s *HandoffService) normalizeNoCascadeChildren(
 		if workspace == nil {
 			continue
 		}
-		// No RequireTaskNotArchived: the child list includes archived
-		// children, and an archived inherit_parent child must be normalized
-		// too, or it is promoted to root still inheriting from a parent that
-		// no longer exists and keeps a marker naming it (AC-005.6). That
-		// clause belongs to the stamping paths only (see the clause table in
-		// orphaned-workspace-guarded-metadata-write.md).
+		// Archived inherited children must also be normalized before promotion.
 		guard := models.ObservedWorkspaceGuard(workspace)
 		guard.RequireParentID = child.ParentID
 		updatedWorkspace := cloneTaskMetadata(workspace)

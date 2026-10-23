@@ -56,6 +56,11 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusConflict, gin.H{"code": "task_completion_gate_blocked"})
 		return
 	}
+	var childConflictErr *service.TaskDeleteChildWorkspaceConflictError
+	if errors.As(err, &childConflictErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
+		return
+	}
 	if isNotFound(err) {
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
@@ -78,11 +83,6 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 	}
 	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
 	if errors.As(err, &dirtyWorktreeErr) {
-		c.JSON(http.StatusConflict, taskErrorBody(err))
-		return
-	}
-	var childConflictErr *service.TaskDeleteChildWorkspaceConflictError
-	if errors.As(err, &childConflictErr) {
 		c.JSON(http.StatusConflict, taskErrorBody(err))
 		return
 	}

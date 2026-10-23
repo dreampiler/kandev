@@ -117,3 +117,19 @@ The existing documentation coverage evaluator returned covered with no errors.
 The WebSocket mapping was reviewed against the same typed error/details helper.
 The port adds no permanent test or collection rule; its explicit temporary
 overlays are removed after delivery. Original source results above remain history.
+
+## Review follow-up: compensation error priority
+
+A vanished child can add a not-found error during compensation to its typed
+child-deleted conflict. HTTP and WebSocket classification must retain the typed
+conflict and child details instead of reporting the existing parent missing.
+The change moves that classification before generic not-found while preserving
+authorization, consent, and plain missing-root behavior. Product comments state
+the invariant; the detailed cause remains in this work order.
+
+The disposable baseline reproduced HTTP 404 and WebSocket NOT_FOUND for the
+joined typed conflict (0.085s); plain missing-root controls passed. The candidate
+returned HTTP 409 and WebSocket CONFLICT with the child ID, reason and error
+code. Those four cases and existing classification, delete-authorization and
+client-disconnect controls passed together with race detection (1.142s).
+No standing test is added; temporary checks are removed after delivery.

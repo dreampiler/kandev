@@ -429,15 +429,15 @@ func (h *TaskHandlers) wsDeleteTask(ctx context.Context, msg *ws.Message) (*ws.M
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "task deletion preview is no longer current", nil)
 		case errors.Is(err, service.ErrForbidden):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		case errors.As(err, new(*service.TaskDeleteChildWorkspaceConflictError)):
+			details, _ := taskDeleteChildConflictDetails(err)
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), details)
 		case errors.Is(err, repoerrors.ErrTaskNotFound):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
 		case errors.Is(err, service.ErrKubernetesAdminRequired):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
 		case errors.Is(err, service.ErrActiveTaskSessions):
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task is used by an active agent session", nil)
-		case errors.As(err, new(*service.TaskDeleteChildWorkspaceConflictError)):
-			details, _ := taskDeleteChildConflictDetails(err)
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), details)
 		case isCascadePostCommitError(err):
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", req.ID), zap.Error(err))
