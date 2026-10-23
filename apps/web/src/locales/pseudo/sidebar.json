@@ -419,5 +419,19 @@
   "controlSummary.attention.questionSubject_other": "{{count}} ĩţēḿś ŵàĩţĩńĝ ƒōŕ ŷōũ",
   "integratedControl.noCoordinators": "[!! No coordinators to display !!]",
   "integratedControl.unavailable": "[!! Unavailable !!]",
-  "integratedControl.executorProfile": "[!! Executor profile !!]"
+  "integratedControl.executorProfile": "[!! Executor profile !!]",
+  "controlSummary.stage.work": "Ŵōŕķ śţàĝē",
+  "controlSummary.state.pending": "Ńōţ ŕũńńĩńĝ",
+  "controlSummary.state.paused": "Àũţō-ŕũń ōƒƒ",
+  "controlSummary.state.queued": "Qũēũēď",
+  "controlSummary.strip.waiting": "Ŵōŕķ ĩś ŕēćōŕďēď, ƀũţ ńō śēśśĩōń ĩś ŕũńńĩńĝ. Ćĥēćķ ŵōŕķƒĺōŵ śţēƥś àńď ŕēćōŕďēď ŵàĩţ ŕēàśōńś; ţĥĩś àĺōńē ďōēś ńōţ ēśţàƀĺĩśĥ à śţàĺĺ.",
+  "controlSummary.reason.hold": "Ŕēćōŕďēď ĥōĺď",
+  "controlSummary.reason.approval": "Àƥƥŕōvàĺ śţàĝē",
+  "controlSummary.reason.blocked": "Ţàśķ ĩś ŕēćōŕďēď àś ƀĺōćķēď",
+  "controlSummary.reason.paused": "Śōḿē qũēũēď ḿēśśàĝēś ĥàvē àũţō-ŕũń ōƒƒ",
+  "controlSummary.reason.queued": "Qũēũēď; ďēĺĩvēŕŷ ĩś ƥēńďĩńĝ",
+  "controlSummary.reason.queueUnknown": "Qũēũēď; àũţō-ŕũń ƥōĺĩćŷ ĩś ũńķńōŵń",
+  "controlSummary.reason.waiting": "Śēśśĩōń ĩś ŵàĩţĩńĝ; ţĥĩś ĩś ńōţ ńēćēśśàŕĩĺŷ à ũśēŕ qũēśţĩōń",
+  "controlSummary.reason.failed": "Ƥŕĩḿàŕŷ śēśśĩōń ƒàĩĺēď",
+  "controlSummary.reason.unknown": "Ńō ŕēćōŕďēď ŵàĩţ ŕēàśōń"
 }

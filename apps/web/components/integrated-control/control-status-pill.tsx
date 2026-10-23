@@ -42,6 +42,11 @@ const TONES: Record<PillState, ControlTone> = {
   idle: "idle",
   noSession: "idle",
   other: "idle",
+  held: "info",
+  paused: "info",
+  queued: "info",
+  unknown: "idle",
+  pending: "info",
 };
 
 const LABEL_KEYS: Record<PillState, string> = {
@@ -57,6 +62,11 @@ const LABEL_KEYS: Record<PillState, string> = {
   idle: "sidebar:controlSummary.state.idle",
   noSession: "sidebar:controlSummary.state.noSession",
   other: "sidebar:controlSummary.state.other",
+  held: "sidebar:controlSummary.stage.held",
+  paused: "sidebar:controlSummary.state.paused",
+  queued: "sidebar:controlSummary.state.queued",
+  unknown: "common:unknown",
+  pending: "sidebar:controlSummary.state.pending",
 };
 
 export function pillTone(state: PillState): ControlTone {

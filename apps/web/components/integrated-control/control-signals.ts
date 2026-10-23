@@ -107,23 +107,27 @@ export function capacityWaitingTotal(observation?: SessionCapacityObservation): 
   return values.reduce((sum, value) => sum + value, 0);
 }
 
-export type WorkspaceStatus = "stalled" | "capacity" | "active" | "idle";
+export type WorkspaceStatus = "stalled" | "capacity" | "active" | "idle" | "pending" | "unknown";
 
 /**
- * Stalled: work is in progress, nothing runs, and nothing waits on the
- * capacity ceiling, so the ceiling is not the reason. When the ceiling's
- * waiting counts are unknown the stall cannot be told apart from a capacity
- * wait, so the workspace reads as active rather than as a claimed stall.
+ * Recorded WIP without a running session is not proof of a stall. Holds,
+ * workflow steps without execution actions and paused queues can all wait
+ * legitimately. Installation-wide capacity counts cannot attribute a wait
+ * to this workspace either; an incomplete observation remains unknown.
  */
 export function workspaceStatus(
   figures: WorkspaceFigures,
   waiting: number | null,
+  recordedTasks?: NativeDashboard["tasks"],
 ): WorkspaceStatus {
-  if (figures.inProgress === 0 && figures.running === 0) return "idle";
   if (figures.running > 0) return "active";
-  if (waiting === 0) return "stalled";
-  if (waiting !== null && waiting > 0) return "capacity";
-  return "active";
+  const pending = recordedTasks
+    ? Object.entries(recordedTasks).some(
+        ([state, count]) => count > 0 && !TERMINAL_TASK_STATES.has(state.toUpperCase()),
+      )
+    : figures.inProgress > 0 || figures.queued > 0 || figures.waitingInput > 0;
+  if (!pending) return "idle";
+  return waiting === null ? "unknown" : "pending";
 }
 
 export type TaskSignal =
@@ -132,6 +136,9 @@ export type TaskSignal =
   | "failed"
   | "running"
   | "waiting"
+  | "held"
+  | "paused"
+  | "queued"
   | "noSession"
   | "other";
 
@@ -141,6 +148,9 @@ const SIGNAL_RANK: TaskSignal[] = [
   ...ATTENTION_SIGNALS,
   "running",
   "waiting",
+  "held",
+  "paused",
+  "queued",
   "other",
   "noSession",
 ];
@@ -149,12 +159,52 @@ export function isTerminalTask(task: Pick<NativeTask, "state" | "archived">): bo
   return task.archived || TERMINAL_TASK_STATES.has(task.state.toUpperCase());
 }
 
+export type TaskWaitReason =
+  | "hold"
+  | "approval"
+  | "blocked"
+  | "paused"
+  | "queued"
+  | "queueUnknown"
+  | "waiting"
+  | "failed"
+  | "unknown";
+
+/** Uses recorded fields only, never task/step names, Plan prose or approval guesses. */
+export function taskWaitReason(task: NativeTask): TaskWaitReason | null {
+  if (isTerminalTask(task) || task.running_sessions > 0 || task.session_state === "RUNNING")
+    return null;
+  if (task.session_state === "FAILED") return "failed";
+  if (task.hold_mode || task.stage_type === "hold") return "hold";
+  if (task.stage_type === "approval") return "approval";
+  if (task.state.toUpperCase() === "BLOCKED") return "blocked";
+  if (task.queued_messages > 0) {
+    if ((task.queued_paused_messages ?? 0) > 0) return "paused";
+    return task.queued_auto_run_messages === undefined ? "queueUnknown" : "queued";
+  }
+  if (task.session_state === "WAITING_FOR_INPUT") return "waiting";
+  return "unknown";
+}
+
 /** One task's most urgent signal; `repeating` holds tasks flagged by the move-rate rule. */
+const WAIT_SIGNALS: Partial<Record<TaskWaitReason, TaskSignal>> = {
+  hold: "held",
+  approval: "held",
+  blocked: "held",
+  paused: "paused",
+  queued: "queued",
+  queueUnknown: "queued",
+};
+
 export function taskSignal(task: NativeTask, repeating: ReadonlySet<string>): TaskSignal {
   if (repeating.has(task.task_id) && !isTerminalTask(task)) return "repeat";
-  if (task.queued_messages > 0 && task.running_sessions === 0) return "stalled";
-  if (task.session_state === "FAILED" && !isTerminalTask(task)) return "failed";
   if (task.running_sessions > 0 || task.session_state === "RUNNING") return "running";
+  if (task.session_state === "FAILED" && !isTerminalTask(task)) return "failed";
+  if (!isTerminalTask(task)) {
+    const reason = taskWaitReason(task);
+    const signal = reason && WAIT_SIGNALS[reason];
+    if (signal) return signal;
+  }
   if (task.session_state === "WAITING_FOR_INPUT") return "waiting";
   if (!task.session_id) return "noSession";
   return "other";

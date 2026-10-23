@@ -11,9 +11,13 @@ import type { ControlSignals } from "./use-control-signals";
 
 export const ATTENTION_ANCHOR = "control-attention";
 
-/** Stalled overall: work in progress, nothing running, nothing waiting on the ceiling. */
+/** Only an attributed stall signal can establish a stall, not a WIP/session gap. */
 export function overallStalled(signals: ControlSignals) {
-  return signals.total.inProgress > 0 && signals.total.running === 0 && signals.waiting === 0;
+  return signals.total.running === 0 && Object.values(signals.statusById).includes("stalled");
+}
+
+function hasPendingWork(signals: ControlSignals) {
+  return signals.total.inProgress > 0 && signals.total.running === 0;
 }
 
 /** One sentence that says what state the whole installation is in. */
@@ -39,6 +43,9 @@ export function ControlStatusStrip({ signals }: { signals: ControlSignals }) {
   } else if (attention > 0) {
     tone = "delayed";
     text = t("sidebar:controlSummary.strip.attention", { count: attention });
+  } else if (hasPendingWork(signals)) {
+    tone = "idle";
+    text = t("sidebar:controlSummary.strip.waiting");
   }
   return (
     <div
@@ -56,15 +63,24 @@ export function ControlStatusStrip({ signals }: { signals: ControlSignals }) {
         </span>
       )}
       <p className="min-w-0 flex-1">{text}</p>
+      <StatusNotes signals={signals} />
+    </div>
+  );
+}
+
+function StatusNotes({ signals }: { signals: ControlSignals }) {
+  const { t } = useTranslation();
+  return (
+    <>
       {!signals.loading && !signals.complete && (
         <p className="w-full text-xs">{t("sidebar:controlSummary.strip.partial")}</p>
       )}
-      {!signals.loading && attention > 0 && (
+      {!signals.loading && signals.attention.length > 0 && (
         <a className="text-sm underline underline-offset-4" href={`#${ATTENTION_ANCHOR}`}>
           {t("sidebar:controlSummary.strip.openAttention")}
         </a>
       )}
-    </div>
+    </>
   );
 }
 

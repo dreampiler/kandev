@@ -23,26 +23,37 @@ type ControlWaiting struct {
 	Total int  `json:"total"`
 }
 
+// Workflow classification is separate from the recorded task-state histogram.
+// Custom/unclassified steps keep their identity without guessing from their names.
+type ControlTaskStage struct {
+	State     string `json:"state" db:"state"`
+	StepID    string `json:"step_id" db:"step_id"`
+	StepName  string `json:"step_name" db:"step_name"`
+	StageType string `json:"stage_type" db:"stage_type"`
+	Count     int    `json:"count" db:"count"`
+}
+
 // ControlMetrics reports recorded state. Sessions counts every session per state;
 // WaitingInputTasks counts unfinished tasks whose primary session waits for input.
 // WipWaitingTasks counts tasks queued at their destination step until its WIP
 // limit admits them. SharedCapacityWaiting is installation-wide and identical
 // across workspace responses: clients read it once and never sum it.
 type ControlMetrics struct {
-	WorkspaceID             string          `json:"workspace_id"`
-	GeneratedAt             time.Time       `json:"generated_at"`
-	Since                   time.Time       `json:"since"`
-	Basis                   string          `json:"basis"`
-	InferenceState          string          `json:"inference_state"`
-	Tasks                   map[string]int  `json:"tasks"`
-	Sessions                map[string]int  `json:"sessions"`
-	WaitingInputTasks       int             `json:"waiting_input_tasks"`
-	WipWaitingTasks         int             `json:"wip_waiting_tasks"`
-	SharedCapacityWaiting   *ControlWaiting `json:"shared_capacity_waiting,omitempty"`
-	QueuedMessages          int             `json:"queued_messages"`
-	Transitions24h          int             `json:"transitions_24h"`
-	CompletedTasks24h       int             `json:"completed_tasks_24h"`
-	MergedChangeRequests24h *int            `json:"merged_change_requests_24h"`
+	WorkspaceID             string             `json:"workspace_id"`
+	GeneratedAt             time.Time          `json:"generated_at"`
+	Since                   time.Time          `json:"since"`
+	Basis                   string             `json:"basis"`
+	InferenceState          string             `json:"inference_state"`
+	Tasks                   map[string]int     `json:"tasks"`
+	TaskStages              []ControlTaskStage `json:"task_stages,omitempty"`
+	Sessions                map[string]int     `json:"sessions"`
+	WaitingInputTasks       int                `json:"waiting_input_tasks"`
+	WipWaitingTasks         int                `json:"wip_waiting_tasks"`
+	SharedCapacityWaiting   *ControlWaiting    `json:"shared_capacity_waiting,omitempty"`
+	QueuedMessages          int                `json:"queued_messages"`
+	Transitions24h          int                `json:"transitions_24h"`
+	CompletedTasks24h       int                `json:"completed_tasks_24h"`
+	MergedChangeRequests24h *int               `json:"merged_change_requests_24h"`
 }
 
 func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now time.Time) (*ControlMetrics, error) {
@@ -51,6 +62,16 @@ func (r *Repository) ReadControlMetrics(ctx context.Context, wsID string, now ti
 	out.Tasks, err = r.controlStateCounts(ctx, "SELECT COALESCE(t.state,'') AS state,COUNT(*) AS count FROM tasks t WHERE "+controlTaskScope+" AND t.archived_at IS NULL GROUP BY t.state", wsID)
 	if err != nil {
 		return nil, err
+	}
+	stages := []ControlTaskStage{}
+	stageQuery := `SELECT COALESCE(t.state,'') AS state,COALESCE(w.id,'') AS step_id,
+	 COALESCE(w.name,'') AS step_name,COALESCE(w.stage_type,'') AS stage_type,COUNT(*) AS count` +
+		controlTaskFrom + `WHERE ` + controlTaskScope + ` AND t.archived_at IS NULL
+	 GROUP BY t.state,w.id,w.name,w.stage_type ORDER BY w.id,t.state`
+	if stageErr := r.ro.SelectContext(ctx, &stages, r.ro.Rebind(stageQuery), wsID); stageErr == nil {
+		out.TaskStages = stages
+	} else if ctx.Err() != nil {
+		return nil, ctx.Err()
 	}
 	out.Sessions, err = r.controlStateCounts(ctx, "SELECT s.state,COUNT(*) AS count FROM task_sessions s JOIN tasks t ON t.id=s.task_id WHERE "+controlTaskScope+" AND t.archived_at IS NULL GROUP BY s.state", wsID)
 	if err != nil {

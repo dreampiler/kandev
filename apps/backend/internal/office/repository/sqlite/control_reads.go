@@ -8,19 +8,23 @@ import (
 
 // ControlTask is a scoped projection of recorded state, not an inference signal.
 type ControlTask struct {
-	ID              string    `json:"task_id" db:"id"`
-	WorkspaceID     string    `json:"workspace_id" db:"workspace_id"`
-	Title           string    `json:"title" db:"title"`
-	State           string    `json:"state" db:"state"`
-	StepID          string    `json:"step_id" db:"step_id"`
-	StepName        string    `json:"step_name" db:"step_name"`
-	StageType       string    `json:"stage_type" db:"stage_type"`
-	SessionID       string    `json:"session_id" db:"session_id"`
-	SessionState    string    `json:"session_state" db:"session_state"`
-	Archived        bool      `json:"archived" db:"archived"`
-	RunningSessions int       `json:"running_sessions" db:"running_sessions"`
-	QueuedMessages  int       `json:"queued_messages" db:"queued_messages"`
-	UpdatedAt       time.Time `json:"updated_at" db:"updated_at"`
+	ID              string `json:"task_id" db:"id"`
+	WorkspaceID     string `json:"workspace_id" db:"workspace_id"`
+	Title           string `json:"title" db:"title"`
+	State           string `json:"state" db:"state"`
+	StepID          string `json:"step_id" db:"step_id"`
+	StepName        string `json:"step_name" db:"step_name"`
+	StageType       string `json:"stage_type" db:"stage_type"`
+	SessionID       string `json:"session_id" db:"session_id"`
+	SessionState    string `json:"session_state" db:"session_state"`
+	Archived        bool   `json:"archived" db:"archived"`
+	RunningSessions int    `json:"running_sessions" db:"running_sessions"`
+	QueuedMessages  int    `json:"queued_messages" db:"queued_messages"`
+	// Nil means the queue policy source could not be read, not that auto-run is off.
+	QueuedPausedMessages  *int      `json:"queued_paused_messages,omitempty"`
+	QueuedAutoRunMessages *int      `json:"queued_auto_run_messages,omitempty"`
+	HoldMode              *string   `json:"hold_mode,omitempty"`
+	UpdatedAt             time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type ControlTaskList struct {
@@ -100,5 +104,68 @@ func (r *Repository) ListControlTasks(ctx context.Context, wsID, filter, archive
 		return nil, err
 	}
 	out.Truncated = out.Total > len(out.Tasks)
+	if err = r.appendControlQueuePolicies(ctx, out, wsID); err != nil {
+		return nil, err
+	}
+	if err = r.appendControlHolds(ctx, out, wsID); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// Match the existing GetActiveHoldForMember read, scoped to the task workspace.
+// A read failure leaves hold_mode absent rather than claiming that no hold exists.
+func (r *Repository) appendControlHolds(ctx context.Context, out *ControlTaskList, wsID string) error {
+	rows := []struct {
+		TaskID string `db:"task_id"`
+		Mode   string `db:"mode"`
+	}{}
+	query := `SELECT m.task_id,h.mode FROM office_task_tree_holds h
+	 JOIN office_task_tree_hold_members m ON m.hold_id=h.id JOIN tasks t ON t.id=m.task_id
+	 WHERE ` + controlTaskScope + ` AND h.workspace_id=t.workspace_id AND h.released_at IS NULL
+	 ORDER BY h.created_at DESC,h.id DESC`
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), wsID); err != nil {
+		return ctx.Err()
+	}
+	byTask := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if _, exists := byTask[row.TaskID]; !exists {
+			byTask[row.TaskID] = row.Mode
+		}
+	}
+	for i := range out.Tasks {
+		mode := byTask[out.Tasks[i].ID]
+		out.Tasks[i].HoldMode = &mode
+	}
+	return nil
+}
+
+// Read each queued message's own session policy, including non-primary sessions.
+// An absent policy row defaults ON, as in messagequeue.GetAutoRun. An unavailable
+// optional queue source leaves the policy unknown without discarding task facts.
+func (r *Repository) appendControlQueuePolicies(ctx context.Context, out *ControlTaskList, wsID string) error {
+	rows := []struct {
+		TaskID string `db:"task_id"`
+		Paused int    `db:"paused"`
+		Auto   int    `db:"auto_run"`
+	}{}
+	query := `SELECT q.task_id,
+	 SUM(CASE WHEN COALESCE(p.auto_run,1)=0 THEN 1 ELSE 0 END) AS paused,
+	 SUM(CASE WHEN COALESCE(p.auto_run,1)<>0 THEN 1 ELSE 0 END) AS auto_run
+	 FROM queued_messages q JOIN tasks t ON t.id=q.task_id
+	 LEFT JOIN queue_session_state p ON p.session_id=q.session_id
+	 WHERE ` + controlTaskScope + ` GROUP BY q.task_id`
+	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(query), wsID); err != nil {
+		return ctx.Err()
+	}
+	byTask := make(map[string][2]int, len(rows))
+	for _, row := range rows {
+		byTask[row.TaskID] = [2]int{row.Paused, row.Auto}
+	}
+	for i := range out.Tasks {
+		counts := byTask[out.Tasks[i].ID]
+		out.Tasks[i].QueuedPausedMessages = &counts[0]
+		out.Tasks[i].QueuedAutoRunMessages = &counts[1]
+	}
+	return nil
 }

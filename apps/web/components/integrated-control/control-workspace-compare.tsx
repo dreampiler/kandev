@@ -12,7 +12,13 @@ import {
 } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
 import { numberCellClass } from "./control-table";
-import { TASK_STAGES, type TaskStage, type TaskStageCounts } from "./control-stages";
+import {
+  TASK_STAGES,
+  workflowStepCounts,
+  type TaskStage,
+  type TaskStageCounts,
+} from "./control-stages";
+import type { NativeDashboard } from "@/lib/types/control-native";
 import {
   conversationSessionStates,
   workspaceCoordinatorState,
@@ -26,11 +32,11 @@ type Emphasis = "error" | "delayed" | undefined;
 type Column = { key: keyof WorkspaceFigures; label: string };
 
 const STAGE_LABELS: Record<TaskStage, string> = {
-  startable: "sidebar:controlSummary.stage.startable",
-  running: "sidebar:controlSummary.stage.running",
+  work: "sidebar:controlSummary.stage.work",
   review: "sidebar:controlSummary.stage.review",
   held: "sidebar:controlSummary.stage.held",
   completed: "sidebar:controlSummary.stage.completed",
+  unknown: "common:unknown",
 };
 
 const SESSION_COLUMNS: Column[] = [
@@ -157,15 +163,35 @@ function CoordinationCell({
   );
 }
 
-function StageCells({ stages, unknown }: { stages?: TaskStageCounts; unknown: string }) {
+function StageCells({
+  stages,
+  dashboard,
+  unknown,
+}: {
+  stages?: TaskStageCounts;
+  dashboard?: NativeDashboard;
+  unknown: string;
+}) {
   return (
     <>
       {TASK_STAGES.map((stage) => (
-        <NumberCell
-          key={stage}
-          value={stages ? stages[stage] : unknown}
-          tone={stage === "completed" && stages?.completed ? "delayed" : undefined}
-        />
+        <TableCell key={stage} className={numberCellClass(stages?.[stage])}>
+          <div
+            className={
+              stage === "completed" && stages?.completed ? toneTextClass("delayed") : undefined
+            }
+          >
+            {stages ? stages[stage] : unknown}
+          </div>
+          {workflowStepCounts(dashboard, stage).map((step) => (
+            <div
+              key={step.id}
+              className="mt-1 whitespace-normal text-[10px] font-normal text-muted-foreground"
+            >
+              {step.name || unknown}: {step.count}
+            </div>
+          ))}
+        </TableCell>
       ))}
     </>
   );
@@ -227,7 +253,11 @@ function CompareRow({
       <TableCell>
         {status ? <ControlStatusPill state={status} /> : read && <ControlReadState {...read} />}
       </TableCell>
-      <StageCells stages={signals.stagesById[workspace.id]} unknown={unknown} />
+      <StageCells
+        stages={signals.stagesById[workspace.id]}
+        dashboard={read?.data}
+        unknown={unknown}
+      />
       <FigureCells
         signals={signals}
         workspaceId={workspace.id}

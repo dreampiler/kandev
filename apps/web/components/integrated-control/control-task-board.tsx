@@ -8,7 +8,13 @@ import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlFilterChips } from "./control-filter-chips";
 import { ControlStatusPill } from "./control-status-pill";
 import { ControlReadState } from "./control-read-state";
-import { ATTENTION_SIGNALS, sortBySignal, taskSignal, type TaskSignal } from "./control-signals";
+import {
+  ATTENTION_SIGNALS,
+  sortBySignal,
+  taskSignal,
+  taskWaitReason,
+  type TaskSignal,
+} from "./control-signals";
 import {
   stageCounts,
   TASK_STAGES,
@@ -19,22 +25,44 @@ import {
 import { relativeTime, shortId } from "./overview-format";
 import type { ControlSignals } from "./use-control-signals";
 
-type BoardFilter = "all" | "attention" | "running" | "waiting" | "failed" | "noSession";
-const FILTERS: BoardFilter[] = ["all", "attention", "running", "waiting", "failed", "noSession"];
+type BoardFilter =
+  | "all"
+  | "attention"
+  | "running"
+  | "waiting"
+  | "held"
+  | "paused"
+  | "queued"
+  | "failed"
+  | "noSession";
+const FILTERS: BoardFilter[] = [
+  "all",
+  "attention",
+  "running",
+  "waiting",
+  "held",
+  "paused",
+  "queued",
+  "failed",
+  "noSession",
+];
 const FILTER_LABELS: Record<BoardFilter, string> = {
   all: "office:all",
   attention: "sidebar:controlSummary.board.attention",
   running: "sidebar:controlSummary.state.running",
   waiting: "sidebar:controlSummary.state.waiting",
+  held: "sidebar:controlSummary.stage.held",
+  paused: "sidebar:controlSummary.state.paused",
+  queued: "sidebar:controlSummary.state.queued",
   failed: "sidebar:controlSummary.state.failed",
   noSession: "sidebar:controlSummary.state.noSession",
 };
 const STAGE_LABELS: Record<TaskStage, string> = {
-  startable: "sidebar:controlSummary.stage.startable",
-  running: "sidebar:controlSummary.stage.running",
+  work: "sidebar:controlSummary.stage.work",
   review: "sidebar:controlSummary.stage.review",
   held: "sidebar:controlSummary.stage.held",
   completed: "sidebar:controlSummary.stage.completed",
+  unknown: "common:unknown",
 };
 
 type StageFilter = TaskStage | "all";
@@ -143,6 +171,7 @@ function TaskTable({
             <TableHead>{t("sidebar:controlSummary.column.workspace")}</TableHead>
             <TableHead>{t("sidebar:controlSummary.column.task")}</TableHead>
             <TableHead>{t("sidebar:controlSummary.column.step")}</TableHead>
+            <TableHead>{t("sidebar:controlSummary.column.reason")}</TableHead>
             <TableHead>{t("sidebar:integratedControl.agentProfile")}</TableHead>
             <TableHead>{t("sidebar:controlInspection.session")}</TableHead>
             <TableHead>{t("sidebar:controlSummary.column.lastChange")}</TableHead>
@@ -153,6 +182,7 @@ function TaskTable({
             <TableRow key={task.task_id} data-testid="control-task-row" data-signal={signal}>
               <TableCell>
                 <ControlStatusPill state={signal} />
+                <div className="mt-1 text-xs text-muted-foreground">{task.state}</div>
               </TableCell>
               <TableCell className="whitespace-nowrap">
                 {names[task.workspace_id] ?? task.workspace_id}
@@ -170,6 +200,11 @@ function TaskTable({
               </TableCell>
               <TableCell className="whitespace-nowrap text-muted-foreground">
                 {task.step_name || "-"}
+              </TableCell>
+              <TableCell className="max-w-64 whitespace-normal text-xs text-muted-foreground">
+                {taskWaitReason(task)
+                  ? t(`sidebar:controlSummary.reason.${taskWaitReason(task)}`)
+                  : "-"}
               </TableCell>
               <TableCell className="max-w-40 truncate text-muted-foreground">
                 {profiles.get(task.task_id) ?? "-"}

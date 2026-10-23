@@ -419,5 +419,19 @@
   "controlSummary.attention.questionSubject_other": "{{count}} 個項目等待你處理",
   "integratedControl.noCoordinators": "沒有可顯示的協調器",
   "integratedControl.unavailable": "無法使用",
-  "integratedControl.executorProfile": "執行器設定檔"
+  "integratedControl.executorProfile": "執行器設定檔",
+  "controlSummary.stage.work": "工作階段",
+  "controlSummary.state.pending": "無執行工作階段",
+  "controlSummary.state.paused": "自動執行已關閉",
+  "controlSummary.state.queued": "排隊中",
+  "controlSummary.strip.waiting": "有已記錄的工作，但沒有執行中的工作階段。請檢視工作流程階段和已記錄的等待原因；僅憑此情況無法判定停滯。",
+  "controlSummary.reason.hold": "已記錄的暫緩",
+  "controlSummary.reason.approval": "審批階段",
+  "controlSummary.reason.blocked": "任務已記錄為阻塞",
+  "controlSummary.reason.paused": "部分排隊訊息已關閉自動執行",
+  "controlSummary.reason.queued": "排隊中，等待投遞",
+  "controlSummary.reason.queueUnknown": "排隊中，自動執行策略未知",
+  "controlSummary.reason.waiting": "工作階段正在等待，不一定是在詢問使用者",
+  "controlSummary.reason.failed": "主工作階段失敗",
+  "controlSummary.reason.unknown": "沒有已記錄的等待原因"
 }

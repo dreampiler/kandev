@@ -5,7 +5,7 @@ import {
   useNativeTaskRows,
 } from "@/hooks/domains/coordinator/use-control-native";
 import { nativeEvents } from "@/lib/control-ui/native-control";
-import type { NativeTask } from "@/lib/types/control-native";
+import type { NativeDashboard, NativeTask } from "@/lib/types/control-native";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { useControlInbox } from "./control-inbox-provider";
 import { buildAttention } from "./control-attention";
@@ -18,7 +18,7 @@ import {
   type WorkspaceFigures,
   type WorkspaceStatus,
 } from "./control-signals";
-import { stageCountsFromStates, sumStageCounts, type TaskStageCounts } from "./control-stages";
+import { dashboardStageCounts, sumStageCounts, type TaskStageCounts } from "./control-stages";
 import { repeatedMoves } from "./control-step-moves";
 
 const NO_IDS: string[] = [];
@@ -39,16 +39,21 @@ export function useControlSignals({ tasks = true, history = true } = {}) {
   const inbox = useControlInbox()?.byWorkspace;
   return useMemo(() => {
     const figures: Record<string, WorkspaceFigures | undefined> = {};
-    for (const row of dashboards.data ?? [])
-      if (row.data) figures[row.id] = workspaceFigures(row.data);
+    const recordedStates: Record<string, NativeDashboard["tasks"] | undefined> = {};
+    for (const row of dashboards.data ?? []) {
+      if (row.data) {
+        figures[row.id] = workspaceFigures(row.data);
+        recordedStates[row.id] = row.data.tasks;
+      }
+    }
     const stagesById: Record<string, TaskStageCounts | undefined> = {};
     for (const row of dashboards.data ?? [])
-      if (row.data) stagesById[row.id] = stageCountsFromStates(row.data.tasks);
+      if (row.data) stagesById[row.id] = dashboardStageCounts(row.data);
     const waiting = capacityWaitingTotal(data?.capacity);
     const statusById: Record<string, WorkspaceStatus | undefined> = {};
     for (const id of ids) {
       const row = figures[id];
-      statusById[id] = row ? workspaceStatus(row, waiting) : undefined;
+      statusById[id] = row ? workspaceStatus(row, waiting, recordedStates[id]) : undefined;
     }
     const known = ids.filter((id) => figures[id]);
     const total = sumFigures(known.map((id) => figures[id]!));

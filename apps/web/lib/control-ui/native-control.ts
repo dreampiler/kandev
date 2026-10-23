@@ -80,6 +80,14 @@ export function nativeDashboard(v: unknown, id: string): v is NativeDashboard {
       v.transitions_24h,
       v.completed_tasks_24h,
     ].every(count) &&
+    (v.task_stages === undefined ||
+      (Array.isArray(v.task_stages) &&
+        v.task_stages.every(
+          (row) =>
+            nativeRecord(row) &&
+            texts(row, ["state", "step_id", "step_name", "stage_type"]) &&
+            count(row.count),
+        ))) &&
     (v.shared_capacity_waiting === undefined || sharedCapacityWaiting(v.shared_capacity_waiting)) &&
     (v.merged_change_requests_24h === undefined ||
       v.merged_change_requests_24h === null ||
@@ -123,7 +131,10 @@ export function nativeTasks(
       time(r.updated_at) !== null &&
       typeof r.archived === "boolean" &&
       count(r.running_sessions) &&
-      count(r.queued_messages),
+      count(r.queued_messages) &&
+      (r.hold_mode === undefined || typeof r.hold_mode === "string") &&
+      (r.queued_paused_messages === undefined || count(r.queued_paused_messages)) &&
+      (r.queued_auto_run_messages === undefined || count(r.queued_auto_run_messages)),
   );
 }
 export function nativeLedger(v: unknown, id: string): v is NativeLedger {

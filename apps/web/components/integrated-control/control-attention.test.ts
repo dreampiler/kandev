@@ -68,11 +68,11 @@ describe("workspace figures and status", () => {
       failedSessions: 2,
     });
   });
-  it("calls a stall only when the capacity wait is known to be zero", () => {
+  it("does not infer a stall or attribute shared capacity from recorded WIP alone", () => {
     const stuck = figures({ inProgress: 3 });
-    expect(workspaceStatus(stuck, 0)).toBe("stalled");
-    expect(workspaceStatus(stuck, 2)).toBe("capacity");
-    expect(workspaceStatus(stuck, null)).toBe("active");
+    expect(workspaceStatus(stuck, 0)).toBe("pending");
+    expect(workspaceStatus(stuck, 2)).toBe("pending");
+    expect(workspaceStatus(stuck, null)).toBe("unknown");
     expect(workspaceStatus(figures({ inProgress: 3, running: 1 }), 0)).toBe("active");
     expect(workspaceStatus(figures(), 0)).toBe("idle");
   });
@@ -88,9 +88,9 @@ describe("workspace figures and status", () => {
 
 describe("task signals", () => {
   const none = new Set<string>();
-  it("ranks repeat over stall over failure and leaves finished work alone", () => {
+  it("preserves repeat and failure signals without treating queued messages as a stall", () => {
     expect(taskSignal(task({ queued_messages: 1 }), new Set(["t1"]))).toBe("repeat");
-    expect(taskSignal(task({ queued_messages: 1, session_state: "FAILED" }), none)).toBe("stalled");
+    expect(taskSignal(task({ queued_messages: 1, session_state: "FAILED" }), none)).toBe("failed");
     expect(taskSignal(task({ session_state: "FAILED" }), none)).toBe("failed");
     expect(taskSignal(task({ session_state: "FAILED", state: "COMPLETED" }), none)).toBe("other");
     expect(taskSignal(task({ queued_messages: 2, running_sessions: 1 }), none)).toBe("running");
@@ -115,7 +115,7 @@ describe("task signals", () => {
 });
 
 describe("attention rules", () => {
-  it("raises a workspace stall, a task stall, a failure and a repeat, once per task", () => {
+  it("raises recorded failures and repeats without inventing stalls, once per task", () => {
     const items = buildAttention({
       ...base,
       figures: { w1: figures({ inProgress: 2, queued: 1 }) },
@@ -134,13 +134,8 @@ describe("attention rules", () => {
     });
     expect(
       items.map((item) => `${item.kind}:${item.scope}:${item.task?.task_id ?? item.workspaceId}`),
-    ).toEqual([
-      "repeat:task:loop",
-      "stalled:workspace:w1",
-      "stalled:task:stall",
-      "failed:task:fail",
-    ]);
-    expect(countAttention(items)).toMatchObject({ all: 4, repeat: 1, stalled: 2, failed: 1 });
+    ).toEqual(["repeat:task:loop", "failed:task:fail", "failed:task:stall"]);
+    expect(countAttention(items)).toMatchObject({ all: 3, repeat: 1, stalled: 0, failed: 2 });
   });
   it("does not claim a stall while sessions wait on capacity or the wait is unknown", () => {
     const input = { ...base, figures: { w1: figures({ inProgress: 2 }) } };
