@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/winproc"
 	"golang.org/x/sys/windows"
 )
@@ -175,14 +174,6 @@ func windowsOwnedSessionTerminated(
 // the named job contains only the original owner and its descendants.
 func windowsOriginalOwnerGone(state State) bool {
 	return state == StateExited || state == StateReused
-}
-
-func validWindowsJobName(name string) bool {
-	if !strings.HasPrefix(name, WindowsJobNamePrefix) {
-		return false
-	}
-	_, err := uuid.Parse(strings.TrimPrefix(name, WindowsJobNamePrefix))
-	return err == nil
 }
 
 func openWindowsOwnedJob(name string, access uint32) (windows.Handle, error) {

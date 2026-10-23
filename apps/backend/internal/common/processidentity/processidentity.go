@@ -6,7 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
+
+	"github.com/google/uuid"
 )
 
 var ErrUnverifiableIdentity = errors.New("process identity is incomplete or unsupported")
@@ -18,6 +21,14 @@ const WindowsJobNamePrefix = `Local\kandev-agentctl-`
 // The child takes it with TakeWindowsJobNameFromEnv at startup, which removes
 // it from the environment so the child's descendants never inherit it.
 const WindowsJobNameEnv = "KANDEV_INTERNAL_WINDOWS_JOB_NAME"
+
+func validWindowsJobName(name string) bool {
+	if !strings.HasPrefix(name, WindowsJobNamePrefix) {
+		return false
+	}
+	_, err := uuid.Parse(strings.TrimPrefix(name, WindowsJobNamePrefix))
+	return err == nil
+}
 
 var ownWindowsJobName struct {
 	sync.Mutex
