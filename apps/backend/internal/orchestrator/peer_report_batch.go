@@ -19,6 +19,7 @@ func (s *Service) reserveAndDispatchQueueHead(
 func (s *Service) reserveAndDispatchQueueHeadWithCompletion(
 	ctx context.Context, identity messagequeue.QueueSessionIdentity, completionEffect *models.AgentDeliveryEffect,
 ) (bool, bool, error) {
+	ctx = s.queuedRecoveryContext(ctx, nil)
 	batch, autoRun, err := s.messageQueue.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
 	if err != nil || !autoRun {
 		s.requeuePeerReportBatch(ctx, identity, batch)
@@ -88,6 +89,11 @@ func (s *Service) peerReportBatchStillDispatchable(
 func (s *Service) requeuePeerReportBatch(
 	ctx context.Context, identity messagequeue.QueueSessionIdentity, batch []*messagequeue.QueuedMessage,
 ) {
+	if len(batch) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+	defer cancel()
 	for index := len(batch) - 1; index >= 0; index-- {
 		entry := batch[index]
 		s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: identity}, entry, entry.QueuedBy)

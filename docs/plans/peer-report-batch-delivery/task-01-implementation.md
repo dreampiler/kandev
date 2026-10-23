@@ -75,3 +75,31 @@ sqlguard and conformance modes. The conformance selection is
 -trimpath, -p 2, -count=1 and the unchanged 90-second runtime limit.
 Temporary files are removed after preserving these results. No standing tests,
 CI changes, new protocol/hash checks or operating settings were added.
+
+## Review follow-up: cancellation and replay boundaries
+
+Partial reservations must return to the original FIFO queue even when the
+request is cancelled. Compensation keeps the captured service generation and
+uses the existing bounded recovery window; it must not transfer old claims to a
+restarted service owner. A composed batch is a separate delivery boundary when
+it returns to the queue, so a context-reset retry cannot nest report labels or
+exceed the existing report-count limit.
+
+The disposable baseline reproduced three failing cases: a cancelled partial
+SQLite reservation hid its first report (orchestrator 0.506s), and memory/SQLite
+retries reserved an eight-report combined prompt plus seven new reports
+(messagequeue 0.179s). The stopped-generation control passed before the fix.
+
+The candidate passed those cases with race detection, together with existing
+SQLite compensation/shutdown-admission and FIFO controls (orchestrator 2.083s,
+messagequeue 1.074s). The exact task/session incarnation, original queue order,
+message IDs and pending-claim readback were retained. Temporary cases stay outside automatic collection and are
+removed after delivery; no standing test, schema, setting, new timeout limit or
+operating mutation is introduced.
+
+The first normal commit attempt hit the existing cyclomatic limit (16, maximum
+15). The composed-boundary condition moved into the existing metadata
+separability helper without changing its predicate. Only the affected
+memory/SQLite retry-boundary selection was rerun with race detection and passed
+(1.179s); the earlier unchanged compensation/FIFO results remain valid. The
+complexity criterion was not weakened.
