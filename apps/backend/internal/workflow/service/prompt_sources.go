@@ -41,7 +41,7 @@ func sourcePlanResult(plans []models.PromptSourcePlan) *models.PromptSourceResul
 	}
 	return out
 }
-func (s *Service) planPromptSources(ctx context.Context, request models.PromptSourceImport, validateProfiles bool) ([]models.PromptSourcePlan, error) {
+func (s *Service) planPromptSources(ctx context.Context, request models.PromptSourceImport, validateApply bool) ([]models.PromptSourcePlan, error) {
 	templates, err := validateSourceEnvelope(request)
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func (s *Service) planPromptSources(ctx context.Context, request models.PromptSo
 		if err := s.authorizePromptSourceWrite(ctx, instance.WorkspaceID); err != nil {
 			return nil, err
 		}
-		plan, err := s.planPromptSource(ctx, templates[instance.TemplateID], instance, validateProfiles)
+		plan, err := s.planPromptSource(ctx, templates[instance.TemplateID], instance, validateApply)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +65,7 @@ func (s *Service) planPromptSources(ctx context.Context, request models.PromptSo
 	}
 	return plans, nil
 }
-func (s *Service) planPromptSource(ctx context.Context, template models.PromptSourceTemplate, instance models.PromptSourceInstance, validateProfiles bool) (models.PromptSourcePlan, error) {
+func (s *Service) planPromptSource(ctx context.Context, template models.PromptSourceTemplate, instance models.PromptSourceInstance, validateApply bool) (models.PromptSourcePlan, error) {
 	plan := models.PromptSourcePlan{Template: template}
 	rendered, err := s.prepareSourceInput(ctx, template, instance)
 	if err != nil {
@@ -80,8 +80,8 @@ func (s *Service) planPromptSource(ctx context.Context, template models.PromptSo
 		return plan, err
 	}
 	// Import and its write-authorized preview share this planning path. Diff
-	// passes validateProfiles=false and retains ordinary read visibility.
-	if workflow != nil && validateProfiles {
+	// passes validateApply=false and retains ordinary read visibility.
+	if workflow != nil && validateApply {
 		if err := s.authorizeExecutorMutation(ctx, workflow.ID); err != nil {
 			return plan, err
 		}
@@ -94,12 +94,19 @@ func (s *Service) planPromptSource(ctx context.Context, template models.PromptSo
 			return plan, err
 		}
 	}
-	byName, removed, warning := s.planStepChanges(ctx, workflow, rendered.portable, plan.ExistingSteps)
+	byName, removed, warning := matchStepChanges(workflow, rendered.portable, plan.ExistingSteps)
 	if warning != "" {
 		return plan, fmt.Errorf("%s", warning)
 	}
 	plan.Removed = removed
-	plan.Steps, err = s.sourceDesiredSteps(ctx, workflow.ID, rendered, byName, validateProfiles)
+	if validateApply {
+		for _, step := range removed {
+			if err := s.repo.CheckPromptSourceStepRemoval(ctx, step.ID); err != nil {
+				return plan, err
+			}
+		}
+	}
+	plan.Steps, err = s.sourceDesiredSteps(ctx, workflow.ID, rendered, byName, validateApply)
 	if err != nil {
 		return plan, err
 	}

@@ -11,7 +11,7 @@ requirements:
 
 The workflow service owns source planning and the existing workflow repository
 owns its persistence. Source planning reuses sync's name-based step identity,
-task-preserving removal checks, portable event/session-target conversion and
+portable event/session-target conversion and
 semantic comparison. The repository reuses the existing step insert/update
 serializers. No second workflow engine or task ledger is introduced.
 
@@ -32,7 +32,12 @@ their existing validation. Unrecognized step fields are errors.
 
 An instance supplies `template_id`, `workspace_id`, explicit `source_locked`
 and string `variables`. Only template prompt fields interpolate `{{name}}` in
-one pass; variable text is never evaluated recursively. Missing variables fail.
+one pass; variable text is never evaluated recursively. Missing source variables
+fail. In a step prompt, exact `{{task_prompt}}` is reserved for the existing
+runtime task-description expansion and stays unchanged even when `variables`
+contains that key. Workflow-level source variables keep their existing behavior;
+the native renderer does not expand step-only tokens there. Single-brace native
+tokens are untouched. No new import syntax or whitespace alias is introduced.
 The response returns `instance_id`, `workflow_id`, `applied_revision`, lock,
 variables, timestamp and semantic `changed_fields`. `changed` counts instances.
 Preview explicitly returns `preview=true`, the actually applied revision/IDs
@@ -44,6 +49,9 @@ applied source revision. It returns the same shape without writing. Revision
 identity is workspace scoped: one user's template IDs cannot reserve another
 workspace's source history. The endpoint makes no claim about a newer external
 revision that has not been imported or previewed.
+Semantic step-name comparison is independent of removal readiness: an occupied
+renamed step remains visible as drift, without preventing other visible
+instances from being returned. Import and preview keep their write checks.
 
 ## Import transaction
 
@@ -67,6 +75,10 @@ workflow and complete step membership/version snapshots before mutation. Store
 template history, changed workflow fields, changed steps and applied instance
 revision atomically. Recheck assigned and queued tasks before deleting any
 removed step. Preserve existing task/session/history rows and matching step IDs.
+Preview and apply use the same occupancy predicate, including archived and
+ephemeral assigned rows and queued references. Apply repeats it inside the
+transaction; preview does not reserve or alter the observed tasks. GitHub sync
+retains its existing task-count policy independently of source reconciliation.
 After commit, imports publish canonical workflow and step lifecycle events for
 definitions that actually changed. The existing task-service workflow publisher
 and `stepevents.Publisher` carry the committed timestamps, start selection and

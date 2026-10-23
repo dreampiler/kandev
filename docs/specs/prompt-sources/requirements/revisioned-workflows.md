@@ -34,18 +34,22 @@ workflow sources, so that prompt updates preserve ongoing work and its history.
   timestamps. An explicitly reimported prior revision shall support rollback.
 - **AC-PROMPT-SOURCES-REVISION-001.3:** When a workflow changes, same-named steps
   shall retain their IDs. Existing tasks, sessions and history shall remain.
-  A removed step with assigned or queued tasks shall prevent the import.
+  A removed step with assigned or queued tasks, including archived or ephemeral
+  tasks, shall prevent both preview approval and import.
 - **AC-PROMPT-SOURCES-REVISION-001.4:** When an instance is source locked,
   ordinary definition writes shall be rejected. An explicitly unlocked instance
-  shall permit editing and expose the resulting drift.
+  shall permit editing and expose the resulting drift, including a renamed
+  occupied step whose removal cannot currently be applied.
 - **AC-PROMPT-SOURCES-REVISION-001.5:** When input, revision or observed state
   conflicts, or a write fails, the import shall leave all requested instances
   unchanged. Preview shall perform no persistent writes.
 - **AC-PROMPT-SOURCES-REVISION-001.6:** Import and diff shall follow existing
   workspace visibility rules. Import and preview shall additionally require the
   existing native workflow definition-write permission; visibility alone shall
-  not grant reconciliation. Missing variables, unknown step fields and
+  not grant reconciliation. Missing source variables, unknown step fields and
   unavailable direct profile bindings shall be rejected rather than ignored.
+  The exact native `{{task_prompt}}` placeholder in a step prompt shall remain
+  available for runtime task-description expansion.
 
 ## Out of scope
 

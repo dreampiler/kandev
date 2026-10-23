@@ -96,15 +96,28 @@ func (r *Repository) writeSourceStep(ctx context.Context, tx *sqlx.Tx, step, old
 	return tx.QueryRowContext(ctx, tx.Rebind(`SELECT order_revision FROM workflow_steps WHERE id = ?`), step.ID).Scan(&step.OrderRevision)
 }
 func (r *Repository) removeSourceStep(ctx context.Context, tx *sqlx.Tx, workflowID, stepID string) error {
+	if err := r.checkSourceStepRemoval(ctx, tx, stepID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM workflow_steps WHERE id = ? AND workflow_id = ?`), stepID, workflowID)
+	return err
+}
+
+// CheckPromptSourceStepRemoval gives preview the same occupancy rule as apply.
+// Apply repeats this check in its transaction because preview reserves nothing.
+func (r *Repository) CheckPromptSourceStepRemoval(ctx context.Context, stepID string) error {
+	return r.checkSourceStepRemoval(ctx, r.ro, stepID)
+}
+
+func (r *Repository) checkSourceStepRemoval(ctx context.Context, reader sourceGuardQuery, stepID string) error {
 	var count int
-	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? OR queued_for_step_id = ?`), stepID, stepID).Scan(&count); err != nil {
+	if err := reader.QueryRowContext(ctx, r.db.Rebind(`SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? OR queued_for_step_id = ?`), stepID, stepID).Scan(&count); err != nil {
 		return err
 	}
 	if count > 0 {
 		return fmt.Errorf("%w: removed step still has tasks", models.ErrPromptSourceConflict)
 	}
-	_, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM workflow_steps WHERE id = ? AND workflow_id = ?`), stepID, workflowID)
-	return err
+	return nil
 }
 func sourceStepChanged(fields []string, name string) bool {
 	for _, field := range fields {
