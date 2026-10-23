@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"expvar"
-	"fmt"
 	"regexp"
 	"time"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/constants"
@@ -348,11 +348,9 @@ func messageIDOf(message *models.Message) string {
 	return message.ID
 }
 
-// newSendOperationID mints the row's primary key. It is not a security
-// boundary: the identity the caller owns is (sender pair, operation_id), which
-// the unique index enforces.
-func newSendOperationID(req sendOperationClaimRequest) string {
-	return fmt.Sprintf("sendop-%s-%s-%s", req.SenderTaskID, req.SenderSessionID, req.OperationID)
+// newSendOperationID keeps the row key independent of the caller identity.
+func newSendOperationID(_ sendOperationClaimRequest) string {
+	return "sendop-" + uuid.NewString()
 }
 
 // recordSendOperationMetric counts one claim decision. deliveryStatus is empty

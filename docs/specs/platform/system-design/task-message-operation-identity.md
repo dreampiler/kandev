@@ -53,10 +53,10 @@ New table `task_message_send_operations`:
 
 | Column | Notes |
 | --- | --- |
-| `id` | Primary key. |
+| `id` | Independent UUID row key; existing retained keys are unchanged. |
 | `operation_id` | Caller token, validated for length and charset. |
 | `sender_task_id`, `sender_session_id` | Owning caller; the scoping pair for read and replay. |
-| `target_task_id`, `target_session_id` | Resolved destination. |
+| `target_task_id`, `target_session_id` | Requested task identity and resolved destination session. |
 | `requested_prompt`, `requested_delivery_mode`, `requested_session_id`, `requested_question_id` | The delivery-determining request fields exactly as sent, stored verbatim so a replay is compared against them by value. No derived digest column. |
 | `state` | `pending` to `committed` or `failed`. Closed set. |
 | `delivery_status` | `sent`, `queued`, or `started`; null until committed. |
@@ -67,7 +67,11 @@ New table `task_message_send_operations`:
 `UNIQUE(sender_task_id, sender_session_id, operation_id)` is the identity
 constraint. It follows the `external_id` precedent in
 `internal/task/repository/sqlite/base_migrations.go`: explicit deterministic
-collation, and a unique index. Non-identified sends write no operation row.
+collation, and a unique index. Read and settlement predicates use that same
+byte-wise operation-ID comparison, independent of the column or database default
+collation. Internal UUID row keys do not derive from the request identity, and
+existing retained rows are not rewritten. Non-identified sends write no operation
+row.
 
 Migration discipline follows `apps/backend/AGENTS.md`. A brand-new table needs
 no `ADD COLUMN` step, but replay regression tests plus fresh-DB and same-DB
@@ -84,9 +88,10 @@ Read an existing operation before mutable session or parent-question state.
 This is a pure replay, with exact target, prompt, mode, requested session, and
 question comparison. The trusted principal must match the sender pair.
 
-1. Validate sender attribution, target existence, and delivery-mode syntax.
-   Read an existing operation before mutable session/question checks. A fresh
-   claim follows session selection, interrupt authorization, and question validation.
+1. Validate payload syntax and sender attribution. Read an existing operation
+   using the requested target ID before current target, session or question
+   checks. Only a new send requires current target existence. A fresh claim
+   follows session selection, interrupt authorization and question validation.
 2. If no `operation_id`, continue on today's path, byte-for-byte unchanged
    (AC-001.2).
 3. If `operation_id` is present, attempt an insert-claim of
@@ -238,3 +243,12 @@ contract in `explicit-turn-steering.md` and mirrors the accepted `external_id`
 identity convention; it introduces no new architectural boundary. If
 implementation reveals that agent sends need a cross-cutting identity
 convention shared with other mutating MCP tools, raise an ADR then.
+
+## Workflow-promotion receipt
+
+The native `QueueUserPromptWithReceipt` path returns the accepted queue entry
+ID under the original session admission, WIP wait, initial-brief ownership and
+fast-path drain rules. The original error-only `QueueUserPrompt` remains a
+wrapper. The backend adapter forwards that identity, and the MCP promotion-wait
+path carries it into both the immediate receipt and retained settlement. No new
+queue, schema or dispatch path is introduced.

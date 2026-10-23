@@ -56,3 +56,38 @@ The source files are the existing PR #4720 diff. This work order adds its delive
 Validation: existing message/parent-question/tool-catalog tests and backend wiring build passed. Disposable race-enabled checks exercised actual registered MCP → native scope resolver → dispatcher → real SQLite, lost response after queue acceptance, readback/replay without duplicate delivery, conflicts/forged scope, once-only settlement, reopen and retention. Existing SQLite store/previous-stable upgrade checks passed; live PostgreSQL and provider/process E2E were not run. SQL guard, docs and all normal commit hooks passed. Existing catalog/upgrade expectations were adapted; no standing tests or CI were added.
 
 Documentation-only correction: git diff --check and the existing .github/scripts/pr-docs.cjs validateCoverage entrypoint with the candidate changed paths and the linked candidate documents supplied on stdin. No GitHub status is synthesized locally.
+
+## Review follow-up: identity, retained replay and held delivery
+
+Internal row keys are now independent UUIDs. Operation lookup and settlement use
+the same byte-wise comparison as their existing identity index, preserving
+case-distinct caller IDs without changing the table or retained rows. Sender
+validation and exact recorded-request comparison precede mutable target lookup;
+a deleted target no longer prevents a pure retained replay.
+
+The existing workflow-promotion queue path now returns its accepted queue ID
+through the native service, real backend adapter and MCP settlement. The
+original error-only queue method and its admission, marker and drain behavior
+remain available. Two existing test fixtures only adapt their method sets; no
+standing case is added.
+
+Disposable actual SQLite/MCP checks reproduced all three reported defects
+(handlers 0.801s). A row-key-only repair then exposed the related case-insensitive
+lookup mismatch (0.260s), so the same comparison was corrected in read and
+settlement rather than masking the primary-key error. The fixture changes only
+temporary table collation defaults while retaining the real identity index.
+
+The full candidate passed with race detection: handlers 1.958s and the actual
+native receipt path 1.579s. Retained legacy-row replay, conflicting request,
+foreign principal, fresh missing target, case-distinct settlement isolation and
+queue-ID persistence were checked. The real backend adapter package compiled
+with no selected runtime test; it is not described as an executed adapter test.
+The conditional real PostgreSQL ICU-collation case skipped because the existing
+DSN is unset; live PostgreSQL behavior remains unverified.
+
+Existing narrow legacy dispatch, queue-full, parent-interrupt, WIP, terminal,
+fast-drain and initial-brief ownership controls passed with race detection
+(handlers 2.679s; orchestrator 1.582s). The normal whole-internal SQL guard passed.
+No passing check is repeated without a relevant change. Temporary cases remain
+outside collection and are removed after delivery; no standing test, operating
+setting, model/limit change, fingerprint or new schema is introduced.
