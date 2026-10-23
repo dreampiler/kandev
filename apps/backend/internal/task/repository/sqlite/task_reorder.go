@@ -184,7 +184,11 @@ func (r *Repository) listStepTasksInTx(ctx context.Context, tx *sql.Tx, stepID s
 	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.workflow_step_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		JOIN workflow_steps step ON step.id = t.workflow_step_id
+		JOIN workflows workflow ON workflow.id = step.workflow_id
+		WHERE t.workflow_step_id = ? AND t.workflow_id = workflow.id
+		AND t.workspace_id = workflow.workspace_id
+		AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
 	`), stepID)
 	if err != nil {
 		return nil, err

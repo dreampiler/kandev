@@ -43,6 +43,10 @@ and `tasks` entries with `id`, `title`, and `position` in the new band order.
    remaining IDs in their existing relative order.
 4. The adapter submits the complete band to `ReorderStepTasks`. The repository
    validates membership and commits positions and revision transactionally.
+   Its step snapshot joins the owning workflow and requires both task workflow
+   and workspace to match, agreeing with the service's workflow list. Legacy
+   rows with inconsistent workspace/workflow references cannot create a
+   permanent conflict, enter the returned order or receive position updates.
 5. The service publishes `task.reordered`; existing board consumers and queued
    admission use those positions without a separate frontend or queue model.
 
@@ -58,6 +62,11 @@ A changed relation returns the existing parent-mismatch error and rolls back all
 positions and the revision without publishing an event. Ordinary UI reordering
 uses its existing unrestricted-by-parent path and authorization.
 The automation dispatcher rejects this action as outside its catalog.
+Prompt producers also omit the task-control extension for persisted
+`automation_run` origins, including created-session, new-launch, workflow-entry
+and message pre-wrap paths. A visible `automation_task` retains its normal Kanban
+controls. Fresh-launch provenance reuses the same canonical task lookup as
+Office ownership instead of trusting the scheduler's reduced API DTO.
 
 On `ErrStepChanged`, the adapter reads the band again, revalidates the named
 children, and retries once. Another membership conflict returns `CONFLICT`;
