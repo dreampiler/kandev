@@ -26,6 +26,27 @@ type RefreshTicket = { current: boolean; treeApplied: boolean; stateApplied: boo
 
 export class FolderRefreshes {
   private readonly latest = new Map<string, RefreshTicket>();
+  private readonly hydrationPaths = new Set<string>();
+
+  affectedHydrations(changes: FileBrowserChange[]) {
+    for (const change of changes) {
+      if (change.isDirectory && change.path && isWorkspaceTreePath(change.path))
+        this.hydrationPaths.add(change.path);
+    }
+    return Array.from(this.hydrationPaths).filter((path) =>
+      changes.some((change) => {
+        if (change.operation === "refresh")
+          return isExpandedPathInRefreshScope(path, change.repository_name);
+        return (
+          isWorkspaceTreePath(change.path) &&
+          (change.path === "" ||
+            change.path === path ||
+            change.path.startsWith(`${path}/`) ||
+            path.startsWith(`${change.path}/`))
+        );
+      }),
+    );
+  }
 
   begin(path: string) {
     const previous = this.latest.get(path);
@@ -37,24 +58,34 @@ export class FolderRefreshes {
 
   fail(path: string, ticket: RefreshTicket) {
     ticket.current = false;
-    if (this.latest.get(path) === ticket) this.latest.delete(path);
+    if (this.latest.get(path) === ticket) {
+      this.latest.delete(path);
+      this.hydrationPaths.delete(path);
+    }
   }
 
   invalidate(path: string) {
     const ticket = this.latest.get(path);
-    if (ticket) this.fail(path, ticket);
+    if (ticket) ticket.current = false;
+    this.latest.delete(path);
+    // Keep a moved directory's hydration obligation until its replacement
+    // read publishes, even when invalidation precedes the next refresh.
   }
 
   committed() {
     // Keep queued publication tokens until their updater has committed.
     for (const [path, ticket] of this.latest) {
-      if (ticket.treeApplied && ticket.stateApplied) this.latest.delete(path);
+      if (ticket.treeApplied && ticket.stateApplied) {
+        this.latest.delete(path);
+        this.hydrationPaths.delete(path);
+      }
     }
   }
 
   retire() {
     for (const ticket of this.latest.values()) ticket.current = false;
     this.latest.clear();
+    this.hydrationPaths.clear();
   }
 }
 
@@ -79,7 +110,10 @@ type RefreshContext = {
 
 type ChangedFoldersContext = Pick<RefreshContext, "changes" | "expandedPaths">;
 
-function changedFolders({ changes, expandedPaths }: ChangedFoldersContext) {
+function changedFolders(
+  { changes, expandedPaths }: ChangedFoldersContext,
+  refreshes?: FolderRefreshes,
+) {
   const folders = new Set<string>();
   for (const change of changes) {
     if (change.operation === "refresh") {
@@ -95,11 +129,12 @@ function changedFolders({ changes, expandedPaths }: ChangedFoldersContext) {
         folders.add(change.path);
     }
   }
+  for (const path of refreshes?.affectedHydrations(changes) ?? []) folders.add(path);
   return folders;
 }
 
 export function invalidateFileChanges(ctx: ChangedFoldersContext, refreshes: FolderRefreshes) {
-  for (const path of changedFolders(ctx)) refreshes.invalidate(path);
+  for (const path of changedFolders(ctx, refreshes)) refreshes.invalidate(path);
 }
 
 type FolderUpdate = { path: string; children?: FileTreeNode[]; ticket: RefreshTicket };
@@ -125,7 +160,7 @@ export function applyFileChanges(ctx: RefreshContext) {
     refreshes = new FolderRefreshes(),
   } = ctx;
   if (!isCurrent()) return;
-  const requests = Array.from(changedFolders(ctx), (path) => ({
+  const requests = Array.from(changedFolders(ctx, refreshes), (path) => ({
     path,
     ticket: refreshes.begin(path),
   }));
