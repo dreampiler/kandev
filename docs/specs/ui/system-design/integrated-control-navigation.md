@@ -7,6 +7,7 @@ owners: [kandev]
 requirements:
   - REQ-UI-INTEGRATED-CONTROL-001
   - REQ-UI-INTEGRATED-CONTROL-002
+  - REQ-UI-INTEGRATED-CONTROL-003
 ---
 
 # Integrated control navigation design
@@ -190,3 +191,33 @@ On phones the band facts wrap to two columns, attention rows wrap, and the
 comparison tables scroll inside their own containers so the page does not overflow.
 The shared activity Run link keeps a 44px hit area below 768px and with coarse
 pointers, and retains a compact 28px minimum for fine-pointer desktop layouts.
+
+## Recorded Native comparison
+
+`REQ-UI-INTEGRATED-CONTROL-003` reuses the existing authorized
+`GET /api/v1/office/workspaces/:wsId/dashboard?view=control`. The default GET
+still serves the Office dashboard. A dashboard-only repository interface reads
+`ControlMetrics` through the existing read pool; no route or permission changes.
+Current-state predicates exclude archived, ephemeral and automation-origin tasks.
+Historical transitions retain their original task scope and anchored window. The
+primary-session subquery orders by `started_at DESC,id DESC`, so input-waiting
+tasks count once even when several sessions wait. Recorded state/step groups
+preserve custom step identities; missing step classification is not inferred.
+Queue messages and inclusive, anchored 24-hour transitions retain their own units.
+Completion counts distinct tasks entering a `complete_task_on_enter` step.
+
+`NativeDashboard`, `nativeDashboard` and `readNativeDashboard` carry only these
+recorded fields. The parser rejects a foreign workspace, invalid window/counts
+or an ordinary Office payload. `useNativeDashboards` follows the existing
+route-owned `control.data` revision and authenticated read identity; it adds no
+timer, task/history/ledger read or provider observation. Retained rows are dated
+and shown only for the same resource/identity; denial and contract mismatch
+clear them. Failure remains visible beside the Native comparison.
+
+`ControlNativeComparison` mounts only on the existing feature-gated Overview,
+alongside the unchanged Office comparison. The task table has the original five
+display groups and input-waiting tasks, completed tasks and moves. The session
+table has running/failed sessions and unconsumed messages. Raw step names/counts
+remain in native `details` disclosures; opening them does not navigate the row.
+The existing workspace/coordinator display remains the owner of coordinator
+information; this slice does not infer conversation state or execution health.

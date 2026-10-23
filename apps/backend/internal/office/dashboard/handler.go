@@ -140,6 +140,9 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 // -- Dashboard --
 
 func (h *Handler) getDashboard(c *gin.Context) {
+	if h.controlDashboard(c) {
+		return
+	}
 	wsID := c.Param("wsId")
 	ctx := c.Request.Context()
 

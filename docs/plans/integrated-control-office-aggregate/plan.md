@@ -4,6 +4,7 @@ status: in-progress
 requirements:
   - REQ-OFFICE-WORKSPACE-OVERVIEW-001
   - REQ-UI-INTEGRATED-CONTROL-002
+  - REQ-UI-INTEGRATED-CONTROL-003
 acceptance_criteria:
   - AC-OFFICE-WORKSPACE-OVERVIEW-001.1
   - AC-OFFICE-WORKSPACE-OVERVIEW-001.2
@@ -17,6 +18,11 @@ acceptance_criteria:
   - AC-UI-INTEGRATED-CONTROL-002.4
   - AC-UI-INTEGRATED-CONTROL-002.5
   - AC-UI-INTEGRATED-CONTROL-002.6
+  - AC-UI-INTEGRATED-CONTROL-003.1
+  - AC-UI-INTEGRATED-CONTROL-003.2
+  - AC-UI-INTEGRATED-CONTROL-003.3
+  - AC-UI-INTEGRATED-CONTROL-003.4
+  - AC-UI-INTEGRATED-CONTROL-003.5
 system_design:
   - ../../specs/office/system-design/workspace-overview.md
   - ../../specs/ui/system-design/integrated-control-navigation.md
@@ -40,6 +46,11 @@ The dashboard stays behind the existing `features.integratedControl` flag
 2. [Task 02: Integrated control aggregate dashboard](task-02-control-aggregate-dashboard.md)
 
 Task 02 depends on Task 01's response shape.
+
+Task 02's Native comparison follow-up also ports the recorded dashboard
+projection on the existing workspace GET, together with its dashboard-only
+reader and consumer. It preserves the Office aggregate rather than relabeling
+agents as sessions. It does not depend on capacity/provider/conversation work.
 
 ## Not in this plan
 

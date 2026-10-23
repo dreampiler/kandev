@@ -6,6 +6,7 @@ import { hasScope, SCOPE } from "@/lib/types/team-access";
 import { useIntegratedControl } from "./integrated-control-provider";
 import { ControlAggregateOverview } from "./control-aggregate-overview";
 import { ControlGroupedHistory } from "./control-grouped-history";
+import { ControlNativeComparison } from "./control-native-comparison";
 
 export function IntegratedControlDashboard({ view }: { view: ControlView }) {
   const { t } = useTranslation();
@@ -40,10 +41,13 @@ export function IntegratedControlDashboard({ view }: { view: ControlView }) {
         </div>
       )}
       {view === "overview" && control.officeEnabled && (
-        <ControlAggregateOverview
-          aggregate={control.aggregate}
-          controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
-        />
+        <>
+          <ControlAggregateOverview
+            aggregate={control.aggregate}
+            controlWorkspaceIds={workspaces.map((workspace) => workspace.id)}
+          />
+          <ControlNativeComparison workspaces={workspaces} revision={control.data} />
+        </>
       )}
       {view === "history" && control.officeEnabled && (
         <ControlGroupedHistory aggregate={control.aggregate} />

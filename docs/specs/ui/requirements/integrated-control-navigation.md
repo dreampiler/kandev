@@ -66,3 +66,11 @@ only what that read returns. Execution grades, provider usage limits, inference
 capacity, per-task stall signals (queued messages, failed sessions, repeated step
 moves), and recorded control history are not part of this slice and are not
 inferred from the aggregate.
+
+### REQ-UI-INTEGRATED-CONTROL-003: Recorded Native comparison
+
+- **AC-UI-INTEGRATED-CONTROL-003.1:** With the existing Integrated control and Office features enabled, Overview retains the Office comparison and adds separate Native task-stage and session tables for the authorized workspaces. Native reads opt into the existing workspace dashboard GET with `view=control`; its default payload and authorization remain unchanged.
+- **AC-UI-INTEGRATED-CONTROL-003.2:** Current task, session and queue counts use recorded workspace-scoped, unarchived, non-ephemeral, non-automation tasks. Input-waiting counts unfinished tasks by their deterministic primary session, never all waiting sessions. Session, queued-message, completed-task and transition counts keep their own units and the anchored 24-hour window.
+- **AC-UI-INTEGRATED-CONTROL-003.3:** The five display groups are work, review, held, completed and unknown. Raw workflow-step names/counts remain available through initially collapsed numeric disclosures with pointer and Enter access; no readiness or classification is guessed from names.
+- **AC-UI-INTEGRATED-CONTROL-003.4:** Dashboard-only reads follow the existing authorized snapshot revision without a new timer. Identity/resource changes and denied reads clear old observations; unsupported, loading and failed reads remain distinct from a measured zero. Transient failures may retain the same authorized, dated snapshot.
+- **AC-UI-INTEGRATED-CONTROL-003.5:** Both tables retain original workspace navigation, localized units, right-aligned numbers and independent horizontal scrolling. This slice introduces no execution, recovery, capacity, provider, conversation, task-list, history or ledger actions.
