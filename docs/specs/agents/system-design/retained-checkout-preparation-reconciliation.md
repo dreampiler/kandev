@@ -50,3 +50,10 @@ A different repository/branch, an invalid checkout or a regular main checkout
 is retained and reported as a typed recovery error. Unavailable evidence is
 reported distinctly from a proved mismatch. Managed-main relocation and the
 separate inventory-repair recovery contract are unchanged.
+
+
+## Requirement mapping
+
+| Requirement | Design sections |
+| --- | --- |
+| REQ-AGENTS-RETAINED-CHECKOUT-001 | Assigned-path reuse; Normal registration without checkout cleanup; Preserved outcomes |
