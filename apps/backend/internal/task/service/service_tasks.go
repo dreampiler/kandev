@@ -392,8 +392,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// workflow with validated overrides); every other create keeps the
 	// historical tolerant behavior (warn and continue with an empty step).
 	workflowStepID, resolveErr := s.resolveWorkflowStepE(ctx, req)
-	if err := s.enforceExplicitAgentProfilePolicy(req, workflow, workflowStepID, resolveErr); err != nil {
+	if err := s.enforceExplicitAgentProfilePolicy(ctx, req, workflow, workflowStepID, resolveErr); err != nil {
 		return nil, err
+	}
+	if resolveErr != nil {
+		s.logger.Warn("failed to resolve start step, using empty",
+			zap.String("workflow_id", req.WorkflowID), zap.Error(resolveErr))
 	}
 	if req.RequireAssigneeAgentProfileValidation {
 		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
