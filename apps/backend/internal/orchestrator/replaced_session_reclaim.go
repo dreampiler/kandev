@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -31,28 +32,27 @@ func (s *Service) PromotePrimarySession(ctx context.Context, sessionID string) e
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
-	taskID, previousPrimaryID, err := s.setSessionPrimaryRecordingPrevious(ctx, sessionID)
+	_, _, err := s.setSessionPrimaryRecordingPrevious(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
 	s.publishPrimarySessionUpdate(ctx, "", sessionID)
-	s.registerReplacedSessionReclaim(ctx, taskID, previousPrimaryID, sessionID)
 	return nil
 }
 
-func (s *Service) registerReplacedSessionReclaim(ctx context.Context, taskID, oldID, successorID string) {
+func (s *Service) captureReplacedSessionReclaim(ctx context.Context, taskID, oldID, successorID string) *replacedSessionReclaim {
 	if !s.config.ReplacedSessionReclaim || s.agentManager == nil || s.executor == nil ||
 		oldID == "" || oldID == successorID {
-		return
+		return nil
 	}
 	row, err := s.repo.GetExecutorRunningBySessionID(ctx, oldID)
 	if err != nil || row == nil || row.TaskID != taskID || row.AgentExecutionID == "" ||
 		row.Status == models.ExecutorRunningStatusStopped {
-		return
+		return nil
 	}
-	s.replacedSessionReclaims.Store(oldID, replacedSessionReclaim{
+	return &replacedSessionReclaim{
 		taskID: taskID, successorID: successorID, executionID: row.AgentExecutionID,
-	})
+	}
 }
 
 func (s *Service) reclaimReplacedSessionsOnce(ctx context.Context) {
@@ -79,8 +79,11 @@ func (s *Service) stopReplacedSessionIfSettled(ctx context.Context, sessionID st
 			return nil
 		}
 		defer release()
-		s.primarySessionReclaimMu.Lock()
-		defer s.primarySessionReclaimMu.Unlock()
+		unlock := s.lockPrimarySessionReclaimTask(claim.taskID)
+		defer unlock()
+		if current, ok := s.replacedSessionReclaims.Load(sessionID); !ok || current != claim {
+			return nil
+		}
 		session, err := s.replacedSessionForStop(admittedCtx, sessionID, claim)
 		if err != nil || session == nil {
 			return err
@@ -107,6 +110,7 @@ func (s *Service) replacedSessionForStop(ctx context.Context, sessionID string, 
 	if err != nil {
 		if isTaskSessionNotFound(err) {
 			s.replacedSessionReclaims.CompareAndDelete(sessionID, claim)
+			return nil, nil
 		}
 		return nil, err
 	}
@@ -224,14 +228,31 @@ func (s *Service) primarySessionID(ctx context.Context, taskID string) (string, 
 }
 
 // setSessionPrimaryRecordingPrevious promotes sessionID and returns the task and
-// the primary it replaced. The read and the write share one lock with the
+// the primary it replaced. Capture the exact execution before the promotion;
+// a later runtime rotation cannot become this claim's stop target. The read,
+// write and claim publication share a task-scoped lock with the
 // reclaim's stop decision, so a stop never acts on a session that has just been
 // promoted again.
 func (s *Service) setSessionPrimaryRecordingPrevious(ctx context.Context, sessionID string) (string, string, error) {
-	s.primarySessionReclaimMu.Lock()
-	defer s.primarySessionReclaimMu.Unlock()
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return "", "", err
+	}
+	if session == nil {
+		return "", "", models.ErrTaskSessionNotFound
+	}
+	unlock := s.lockPrimarySessionReclaimTask(session.TaskID)
+	defer unlock()
 	taskID, previousPrimaryID := s.previousPrimaryForReplacement(ctx, sessionID)
-	return taskID, previousPrimaryID, s.repo.SetSessionPrimary(ctx, sessionID)
+	claim := s.captureReplacedSessionReclaim(ctx, taskID, previousPrimaryID, sessionID)
+	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		return taskID, previousPrimaryID, err
+	}
+	s.replacedSessionReclaims.Delete(sessionID)
+	if claim != nil {
+		s.replacedSessionReclaims.Store(previousPrimaryID, *claim)
+	}
+	return taskID, previousPrimaryID, nil
 }
 
 // setSessionPrimary is the SetPrimarySession write. With the reclaim feature on
@@ -241,7 +262,27 @@ func (s *Service) setSessionPrimary(ctx context.Context, sessionID string) error
 	if !s.config.ReplacedSessionReclaim {
 		return s.repo.SetSessionPrimary(ctx, sessionID)
 	}
-	s.primarySessionReclaimMu.Lock()
-	defer s.primarySessionReclaimMu.Unlock()
-	return s.repo.SetSessionPrimary(ctx, sessionID)
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return models.ErrTaskSessionNotFound
+	}
+	unlock := s.lockPrimarySessionReclaimTask(session.TaskID)
+	defer unlock()
+	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
+		return err
+	}
+	s.replacedSessionReclaims.Delete(sessionID)
+	return nil
+}
+
+// Like session lifecycle locks, these locks live for the service lifetime.
+// A slow stop fences promotion only for its own task, never unrelated tasks.
+func (s *Service) lockPrimarySessionReclaimTask(taskID string) func() {
+	value, _ := s.primarySessionReclaimLocks.LoadOrStore(taskID, &sync.Mutex{})
+	lock := value.(*sync.Mutex)
+	lock.Lock()
+	return lock.Unlock
 }
