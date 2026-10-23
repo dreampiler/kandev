@@ -559,6 +559,10 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		s.recoverAmbiguousRetry(ctx, a, evt, retryOperation)
 		return
 	}
+	if err := s.validateAutomationParent(ctx, a); err != nil {
+		s.recordFailedRun(ctx, evt, err.Error())
+		return
+	}
 	// Initial deliveries use the quoted agent interpolation path. Retry
 	// attempts use the immutable bounded prompt snapshot.
 	prompt := automation.InterpolateAgentPrompt(a.Prompt, evt.TriggerType, evt.TriggerData)
@@ -734,6 +738,22 @@ func (s *Service) createAutomationTaskLocked(ctx context.Context, evt *automatio
 		s.acknowledgeRetryEventAfterBinding(ctx, evt)
 	}
 }
+
+type automationParentValidator interface {
+	ValidateParentTask(context.Context, string, string) error
+}
+
+func (s *Service) validateAutomationParent(ctx context.Context, item *automation.Automation) error {
+	if item.ParentTaskID == "" {
+		return nil
+	}
+	validator, ok := s.automationService.(automationParentValidator)
+	if !ok {
+		return errors.New("automation parent task validation is unavailable")
+	}
+	return validator.ValidateParentTask(ctx, item.WorkspaceID, item.ParentTaskID)
+}
+
 func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) *automation.Automation {
 	repositoryIDs := make([]string, 0, len(snapshot.Repositories))
 	for _, repository := range snapshot.Repositories {
@@ -745,6 +765,7 @@ func automationFromRetrySnapshot(snapshot automation.RetryLaunchConfigSnapshot) 
 		Name:               snapshot.Name,
 		WorkflowID:         snapshot.WorkflowID,
 		WorkflowStepID:     snapshot.WorkflowStepID,
+		ParentTaskID:       snapshot.ParentTaskID,
 		AgentProfileID:     snapshot.AgentProfileID,
 		ExecutorProfileID:  snapshot.ExecutorProfileID,
 		Prompt:             snapshot.Prompt,
@@ -977,6 +998,7 @@ func (s *Service) prepareAutomationTask(
 		WorkspaceID:    a.WorkspaceID,
 		WorkflowID:     a.WorkflowID,
 		WorkflowStepID: a.WorkflowStepID,
+		ParentID:       a.ParentTaskID,
 		Title:          title,
 		Description:    prompt,
 		Repositories:   repositories,
