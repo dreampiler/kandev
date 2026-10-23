@@ -58,11 +58,19 @@ export class FolderRefreshes {
   }
 }
 
+export type FileBrowserChange = {
+  path: string;
+  operation?: string;
+  repository_name?: string;
+  /** Local hint from a successfully moved directory, not a file-watch event. */
+  isDirectory?: true;
+};
+
 type RefreshContext = {
   client: ReturnType<typeof getWebSocketClient>;
   sessionId: string;
   expandedPaths: ReadonlySet<string>;
-  changes: Array<{ path: string; operation?: string; repository_name?: string }>;
+  changes: FileBrowserChange[];
   setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
   setLoadState: React.Dispatch<React.SetStateAction<LoadState>>;
   isCurrent?: () => boolean;
@@ -83,7 +91,8 @@ function changedFolders({ changes, expandedPaths }: ChangedFoldersContext) {
       const slash = change.path.lastIndexOf("/");
       const parent = slash === -1 ? "" : change.path.substring(0, slash);
       folders.add(nearestExpandedFolder(parent, expandedPaths));
-      if (change.path === "" || expandedPaths.has(change.path)) folders.add(change.path);
+      if (change.path === "" || change.isDirectory || expandedPaths.has(change.path))
+        folders.add(change.path);
     }
   }
   return folders;
