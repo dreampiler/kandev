@@ -1,5 +1,6 @@
 {
   "agents:agentProtocolTerminal": "\"Terminal\" is the ordinary Portuguese word for the surface; translating it would change nothing.",
+  "agents:providerTierTokens": "Tokens is the established Portuguese computing term for model usage units, also used in the surrounding Portuguese budget descriptions.",
   "coordinator:executorLabel": "\"Executor\" is the ordinary Portuguese word for this technical role; translating it would change nothing.",
   "common:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
   "kanban:menu": "\"Menu\" is the ordinary Portuguese word; translating it would change nothing.",
