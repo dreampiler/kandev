@@ -75,3 +75,19 @@ remount assertions using the existing localized copy, plus the unrelated-status
 control. The outside-project fixture needed shared React package resolution in
 its temporary Vite config; that collection-only failure was not a product
 failure. No runtime task, model call or permanent test was created.
+
+## Rejected message writes
+
+If persistence rejects a message after creating its completed lifecycle turn,
+the service attempts bounded compensation for that newly owned turn only.
+It reuses RollbackReservedTurn and the repository's session-write lock plus
+DeleteTurnIfUnreferenced guard. A committed message reference prevents deletion
+even when its response was lost; a failed ownership/read/delete leaves the
+uncertain row intact and is logged. No blind cascading delete or new schema is
+introduced.
+
+The caller's explicit TurnID and ordinary foreground turns are never candidates.
+Compensation preserves the original write error and uses a bounded context
+independent of caller cancellation. The existing turn-removed publication keeps
+readers in step with a removed empty lifecycle row. Healthy creation/replay,
+manual review and the active session/foreground state keep their prior path.
