@@ -512,6 +512,8 @@ test.describe("Fresh-branch flow", () => {
       const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
+      // Finish the repository popover's focus restoration before opening the executor picker.
+      await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toBeFocused();
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
@@ -596,6 +598,7 @@ test.describe("Fresh-branch flow", () => {
         .filter({ hasText: /worktree/i })
         .first()
         .click();
+      await expect(executorSelector).toBeFocused();
       const branchSelector = testPage.getByTestId("branch-chip-trigger").first();
       await expect(branchSelector).toBeEnabled({ timeout: 5_000 });
       await branchSelector.click();
@@ -604,6 +607,8 @@ test.describe("Fresh-branch flow", () => {
         .first()
         .click();
       await expect(branchSelector).toContainText("develop");
+      // Finish the branch popover's focus restoration before opening the executor picker.
+      await expect(branchSelector).toBeFocused();
 
       await executorSelector.click();
       await testPage
