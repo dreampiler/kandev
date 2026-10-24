@@ -455,6 +455,7 @@ type DashboardService struct {
 	questionLister        AnswerableQuestionLister        // optional; nil omits answerable questions from the overview
 	circuitLister         DynamicCircuitLister            // optional; nil reports dynamic blocks as unknown rather than absent
 	accountLister         ProfileAccountLister            // optional; nil leaves models without a provider account
+	scopeSource           OverviewScopeSource             // optional; nil fixes the overview to the Office scope
 	capacityReader        SessionCapacityReader           // optional; nil leaves the session capacities unreported rather than zero
 	crossWorkspace        CrossWorkspaceSettings          // optional; nil omits cross_workspace_access from settings and rejects updates
 	buildVersion          string                          // running binary version shown on the overview's server-start row
