@@ -426,7 +426,7 @@ const reelectTaskEnvironmentMaterializationSQL = `
 		container_id = '', container_bootstrap_nonce_secret_id = '',
 		container_control_auth_token_secret_id = '', sandbox_id = '',
 		updated_at = ?
-	WHERE id = ? AND status = ? AND COALESCE(materialization_session_id, '') = ?
+	WHERE id = ? AND retired_at IS NULL AND status = ? AND COALESCE(materialization_session_id, '') = ?
 	  AND COALESCE(workspace_path, '') = ''
 	  AND COALESCE(container_id, '') = ''
 	  AND COALESCE(sandbox_id, '') = ''
