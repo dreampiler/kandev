@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -49,6 +50,14 @@ const sendOperationColumns = `id, operation_id, sender_task_id, sender_session_i
 	target_task_id, target_session_id, requested_prompt, requested_delivery_mode,
 	requested_session_id, requested_question_id, state, delivery_status, message_id, queued_entry_id,
 	failure_code, created_at, updated_at, settled_at`
+
+// sendOperationIdentityColumn matches the byte-wise identity-index comparison.
+func (r *Repository) sendOperationIdentityColumn() string {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return `operation_id COLLATE "C"`
+	}
+	return "operation_id COLLATE BINARY"
+}
 
 // isSendOperationUniqueViolation reports whether err is a violation of
 // uniq_task_message_send_operations_identity specifically. On PostgreSQL it
@@ -126,7 +135,7 @@ func (r *Repository) GetSendOperation(
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+sendOperationColumns+`
 		  FROM task_message_send_operations
-		 WHERE sender_task_id = ? AND sender_session_id = ? AND operation_id = ?
+		 WHERE sender_task_id = ? AND sender_session_id = ? AND `+r.sendOperationIdentityColumn()+` = ?
 	`), senderTaskID, senderSessionID, operationID)
 	err := row.Scan(
 		&operation.ID, &operation.OperationID, &operation.SenderTaskID, &operation.SenderSessionID,
@@ -171,7 +180,7 @@ func (r *Repository) SettleSendOperation(
 		       failure_code = ?,
 		       settled_at = ?,
 		       updated_at = ?
-		 WHERE sender_task_id = ? AND sender_session_id = ? AND operation_id = ?
+		 WHERE sender_task_id = ? AND sender_session_id = ? AND `+r.sendOperationIdentityColumn()+` = ?
 		   AND state = ?
 	`),
 		state, targetSessionID, deliveryStatus, messageID, queuedEntryID, failureCode, settledAt, settledAt,
