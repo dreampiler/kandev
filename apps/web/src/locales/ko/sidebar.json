@@ -478,5 +478,11 @@
   "integratedControl.aggregate.historyRepeated_other": "{{count}}회 반복",
   "integratedControl.aggregate.historyScope": "작업공간 전체의 최근 Office 활동을 보여 줍니다. 같은 동작이 연달아 반복되면 한 줄로 묶습니다.",
   "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}: 단계별 작업 수",
-  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: 단계별 작업 수"
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: 단계별 작업 수",
+  "controlSummary.waitReasons.title": "대기 이유",
+  "controlSummary.waitReasons.input": "입력 대기",
+  "controlSummary.waitReasons.blocked": "막힘",
+  "controlSummary.waitReasons.approval": "승인 대기",
+  "controlSummary.waitReasons.hold": "보류",
+  "controlSummary.waitReasons.basis": "기록된 작업 수입니다. 입력 대기와 단계 사유에 같은 작업이 함께 잡힐 수 있어 합계가 아닙니다."
 }

@@ -478,5 +478,11 @@
   "integratedControl.aggregate.historyRepeated_other": "Repetido {{count}} vezes",
   "integratedControl.aggregate.historyScope": "Mostra a atividade mais recente do Office nos seus espaços de trabalho. As repetições consecutivas da mesma ação são agrupadas numa linha.",
   "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}: tarefas por fase do fluxo de trabalho",
-  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: tarefas por fase do fluxo de trabalho"
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: tarefas por fase do fluxo de trabalho",
+  "controlSummary.waitReasons.title": "Motivos de espera",
+  "controlSummary.waitReasons.input": "A aguardar entrada",
+  "controlSummary.waitReasons.blocked": "Bloqueado",
+  "controlSummary.waitReasons.approval": "A aguardar aprovação",
+  "controlSummary.waitReasons.hold": "Em espera",
+  "controlSummary.waitReasons.basis": "Contagens de tarefas registadas. A espera de entrada e um motivo de etapa podem contar a mesma tarefa, pelo que não são um total."
 }

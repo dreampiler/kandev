@@ -478,5 +478,11 @@
   "integratedControl.aggregate.historyRepeated_other": "Repeated {{count}} times",
   "integratedControl.aggregate.historyScope": "Shows the most recent Office activity across your workspaces. Consecutive repeats of the same action are folded into one row.",
   "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}: workflow step counts",
-  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: workflow step counts"
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: workflow step counts",
+  "controlSummary.waitReasons.title": "Waiting reasons",
+  "controlSummary.waitReasons.input": "Waiting for input",
+  "controlSummary.waitReasons.blocked": "Blocked",
+  "controlSummary.waitReasons.approval": "Waiting for approval",
+  "controlSummary.waitReasons.hold": "On hold",
+  "controlSummary.waitReasons.basis": "Recorded task counts. Input wait and a stage reason can count the same task, so these figures are not a total."
 }

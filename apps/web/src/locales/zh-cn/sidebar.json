@@ -478,5 +478,11 @@
   "integratedControl.aggregate.historyRepeated_other": "重复 {{count}} 次",
   "integratedControl.aggregate.historyScope": "显示各工作区最近的 Office 活动。同一操作的连续重复会合并为一行。",
   "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}：各工作流阶段的任务数",
-  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}：各工作流阶段的任务数"
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}：各工作流阶段的任务数",
+  "controlSummary.waitReasons.title": "等待原因",
+  "controlSummary.waitReasons.input": "等待输入",
+  "controlSummary.waitReasons.blocked": "受阻",
+  "controlSummary.waitReasons.approval": "等待批准",
+  "controlSummary.waitReasons.hold": "暂停",
+  "controlSummary.waitReasons.basis": "记录的任务数。输入等待和阶段原因可能计入同一任务，因此不是总计。"
 }

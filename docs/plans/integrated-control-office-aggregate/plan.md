@@ -5,6 +5,7 @@ requirements:
   - REQ-OFFICE-WORKSPACE-OVERVIEW-001
   - REQ-UI-INTEGRATED-CONTROL-002
   - REQ-UI-INTEGRATED-CONTROL-003
+  - REQ-UI-INTEGRATED-CONTROL-004
 acceptance_criteria:
   - AC-OFFICE-WORKSPACE-OVERVIEW-001.1
   - AC-OFFICE-WORKSPACE-OVERVIEW-001.2
@@ -23,6 +24,10 @@ acceptance_criteria:
   - AC-UI-INTEGRATED-CONTROL-003.3
   - AC-UI-INTEGRATED-CONTROL-003.4
   - AC-UI-INTEGRATED-CONTROL-003.5
+  - AC-UI-INTEGRATED-CONTROL-004.1
+  - AC-UI-INTEGRATED-CONTROL-004.2
+  - AC-UI-INTEGRATED-CONTROL-004.3
+  - AC-UI-INTEGRATED-CONTROL-004.4
 system_design:
   - ../../specs/office/system-design/workspace-overview.md
   - ../../specs/ui/system-design/integrated-control-navigation.md
@@ -44,8 +49,10 @@ The dashboard stays behind the existing `features.integratedControl` flag
 
 1. [Task 01: Office workspace aggregate API](task-01-office-workspace-aggregate-api.md)
 2. [Task 02: Integrated control aggregate dashboard](task-02-control-aggregate-dashboard.md)
+3. [Task 03: Recorded waiting reasons](task-03-recorded-waiting-reasons.md)
 
-Task 02 depends on Task 01's response shape.
+Task 02 depends on Task 01's response shape. Task 03 depends on Task 02's
+Native comparison read and adds no new read.
 
 Task 02's Native comparison follow-up also ports the recorded dashboard
 projection on the existing workspace GET, together with its dashboard-only
@@ -58,7 +65,9 @@ Panels that need data the aggregate does not return stay out: execution grade
 and capacity bars, provider usage limits, per-model activity, per-task stall
 signals (queued messages without a running session, failed primary sessions,
 repeated step moves), and recorded control history. Adding any of them needs its
-own read and requirement.
+own read and requirement. Task 03's recorded waiting reasons do not add a read:
+they split the existing Native comparison rows, while capacity and slot waits
+remain out.
 
 ## Verification strategy
 
