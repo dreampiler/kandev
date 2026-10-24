@@ -58,6 +58,8 @@ type Manager struct {
 	cursorInventoryLoader        func(context.Context) (mcpconfig.CursorNativeInventory, error)
 	cursorNativeMCPRunner        mcpconfig.NativeMCPCommandRunner
 	logger                       *logger.Logger
+	mcpResolver                  MCPResolutionProvider
+	mcpStateRepo                 mcpconfig.SessionMCPSelectionStateRepository
 	// dataDir is the kandev root directory. Misnamed for historical reasons:
 	// cmd/kandev/agents.go passes cfg.ResolvedHomeDir() (the kandev root —
 	// typically ~/.kandev) here, not ResolvedDataDir(). Used for:
@@ -372,6 +374,18 @@ func (m *Manager) SetManagedRuntimeSelectionStore(store managedruntime.Selection
 	m.managedRuntimeSelections = store
 }
 
+// SetMCPResolver wires the workspace catalog and additive scope resolver.
+// Leaving it unset preserves legacy profile JSON behavior for compatibility.
+func (m *Manager) SetMCPResolver(resolver MCPResolutionProvider) {
+	m.mcpResolver = resolver
+}
+
+// SetMCPSelectionStateRepository wires durable desired/applied state for
+// task-session MCP reconfiguration. It is optional for embedded managers.
+func (m *Manager) SetMCPSelectionStateRepository(repo mcpconfig.SessionMCPSelectionStateRepository) {
+	m.mcpStateRepo = repo
+}
+
 // SetActivityCoordinator wires the install-wide host-resource activity gate.
 // It is optional so embedded and test configurations retain legacy behavior.
 func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
@@ -578,7 +592,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 			zap.Uint64("prompt_generation", failure.PromptGeneration))
 		return
 	}
-	settled := m.handleErrorEvent(execution, agentctl.AgentEvent{
+	settled := m.handlePromptErrorEvent(execution, agentctl.AgentEvent{
 		Type: toolStatusError,
 		// Preserve the ACP prompt failure. Dynamic profiles classify this exact
 		// provider diagnostic to decide whether a safe pre-result retry or
@@ -588,7 +602,7 @@ func (m *Manager) handleInitialPromptFailure(failure InitialPromptFailure) {
 		SessionID:        failure.SessionID,
 		PromptGeneration: failure.PromptGeneration,
 		TurnID:           failure.TurnID,
-	})
+	}, false)
 	if !settled {
 		m.logger.Debug("ignoring superseded initial prompt delivery failure",
 			zap.String("execution_id", failure.ExecutionID),

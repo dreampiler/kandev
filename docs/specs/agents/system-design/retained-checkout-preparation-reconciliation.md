@@ -4,55 +4,60 @@ system: agents
 requirements:
   - REQ-AGENTS-RETAINED-CHECKOUT-001
 ---
-
 # Retained checkout preparation reconciliation system design
 
-## Purpose and boundaries
+## Assigned-path reuse
 
-This design lets fresh task-environment preparation reconcile a checkout
-already present at the assigned per-task worktree path. The worktree manager
-owns detection and the retirement decision; the existing managed no-follow
-removal owns deletion; the existing task-root ownership marker and the durable
-`task_environment_repos` rows own identity. No new registry, verifier, or
-reconciliation framework is introduced.
+After the normal session/worktree-ID lookup and before materialization refresh,
+Manager.Create checks only the task/repository path derived from its existing
+request and path rules. An absent path follows ordinary preparation. PR heads
+and remote contributions keep their existing materialization contracts.
 
-It runs only on the fresh materialization path of `worktree.Manager.Create`
-(`createInTaskDir` → the plain task-branch add). It never runs for the
-recorded-recreate path (`gitAddWorktreeForRecreateLocked`), the attach-only
-reuse path (`ReuseRequired`), or the existing-branch checkout path; those keep
-their existing admission and removal contracts unchanged.
+The existing target-path reservation covers inspection and registration.
+Existing no-follow path handling and linked-worktree inspection retain their
+roles. Repository membership compares filesystem IDs of the Git common
+directories with os.SameFile; symbolic branch inspection compares the exact
+requested name. No content or commit fingerprint is computed or compared.
 
-## Call path and lock ownership
+An existing ownership marker is read without adding a new marker. A conflicting
+task identity is rejected; absence alone is not called foreign. The existing
+task worktree inventory identifies any row already owning the assigned path.
+Its task/repository/branch slot must match uniquely, and its ID is retained.
+When the request names an environment, the registered environment must match;
+a mismatch returns the existing typed recovery error without changing the row.
+An unregistered checkout needs an explicit CheckoutBranch; a generated branch
+prefix is never used as ownership or branch evidence.
 
-`addFreshWorktreeForBranch` is the single fresh-only entry. For a plain task
-branch it acquires the existing `acquireWorktreeTargetPath` reservation exactly
-once and holds it across occupant reconciliation, eligible retirement, and the
-git add (delegating to the existing `gitAddWorktreeLocked`), so there is no
-nested acquisition of the non-reentrant lock and no inspect/removal/add race.
-Requests that check out an existing branch keep the unchanged
-`addWorktreeForBranch` dispatch.
+## Normal registration without checkout cleanup
 
-## Detection and decision order
+A matching unregistered checkout is represented through buildWorktreeRecord
+and the existing Store.CreateWorktree. The store resolves the session's
+environment and keeps cleanup barriers, recovery claims and repository-slot
+identity checks in its existing transaction. Environment-not-yet-resolved
+handling remains the normal initial-materialization contract: the executor
+registers the returned worktree as part of its subsequent environment write.
 
-Order matters: ownership and live-writer guards run before any retirement
-decision, and no occupant is ever adopted.
+The fresh-checkout persistWorktree cleanup wrapper is not invoked: its error
+compensation removes a newly created directory, while this directory predates
+the request. Registration failure is returned with the retained checkout
+untouched. Successful registration uses the ordinary session/repository/branch
+cache key. No new receipt, owner claim or metadata-repair loop is introduced.
 
-1. `os.Lstat(assignedPath)`: absent → proceed; any other error → preserve and report.
-2. Task-root ownership marker (read-only, before any create/write): `validateExistingWorktreePathOwner` rejects a root owned by another task with `ErrWorktreePathOwnedByAnotherTask`. `prepareTaskWorktreePath` additionally performs a read-only `ReadOwnershipMarker` check (`ensureTaskDirNotOwnedByAnotherTask`) before it creates the task directory or writes the marker, so an occupied foreign root is never rebranded; the marker write itself is guard-validated (`existingMarkerMatches`).
-3. Live-writer guard: any active `task_environment_repos` row for the task whose `worktree_path` equals the assigned path (`GetWorktreesByTaskID`) preserves and reports; a read error preserves and fails closed. Recovery claims for an already-existing environment are owned by the existing recovery-admission machinery, outside this fresh path (a fresh launch may have no bound environment yet).
-4. Structural identity: `inspectLinkedWorktree` must classify `healthy`.
-5. Repository identity: `checkoutMatchesRepositoryIdentity` must match the requested repository.
-6. Cleanliness including ignored entries: `git status --porcelain=v1 --untracked-files=all --ignored=traditional` must be empty. Any ignored entry makes the occupant ineligible, so non-recoverable ignored content is preserved; only content the existing cleanup contract explicitly treats as recoverable is not unique work.
-7. Reflection: `refContains` (ancestry, the existing `verifyHeadAgainstIntegration` proof) OR verified non-ancestor integration where every commit reachable from the occupant HEAD but not from the integration ref is content-equivalent in the base (`git cherry` yields no `+` line, requiring at least one compared commit). An unresolvable ref or an unknown/error comparison is not reflected. `integrationRef` resolves from `IntegrationRef`, then `BaseBranch`, then the fallback base.
-8. Eligible → retire via `removeRecreatedWorktreePath` then `git worktree prune`. Otherwise → `WorktreeRecoveryError{State: "retained_checkout"}` preserving the occupant.
+## Preserved outcomes
 
-## Preserved invariants
+Reuse does not fetch, create or reset a branch, rerun setup, copy configured
+files, remove an occupant or prune registrations. Existing checkout options
+remain checked through the same gitcheckout.Check used by ordinary reuse.
+After that check succeeds, retained reuse invokes the existing contribution
+destination configuration, including its original remote-conflict errors.
+A different repository/branch, an invalid checkout or a regular main checkout
+is retained and reported as a typed recovery error. Unavailable evidence is
+reported distinctly from a proved mismatch. Managed-main relocation and the
+separate inventory-repair recovery contract are unchanged.
 
-- One canonical checkout per repository slot; a live checkout is never shared across branches.
-- `git worktree add` is only reached after ownership, live-writer, and eligibility proofs; a present occupant is never discovered only through git's `already exists` failure.
-- Anything that cannot be proven fully reflected and clean (including ignored entries) is preserved and surfaced, matching the preserve-checkouts decision.
-- The existing same-owner attach/reuse behavior is untouched.
 
-## Related decisions
+## Requirement mapping
 
-- [Preserve checkouts during inventory repair](../../../decisions/2026-09-01-preserve-checkouts-during-inventory-repair.md)
+| Requirement | Design sections |
+| --- | --- |
+| REQ-AGENTS-RETAINED-CHECKOUT-001 | Assigned-path reuse; Normal registration without checkout cleanup; Preserved outcomes |

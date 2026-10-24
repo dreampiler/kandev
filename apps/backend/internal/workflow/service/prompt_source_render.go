@@ -13,9 +13,12 @@ import (
 var sourceVariable = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
 var sourceTemplateID = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
-func renderSourceString(text string, variables map[string]string) (string, error) {
+func renderSourceString(text string, variables map[string]string, nativeStep bool) (string, error) {
 	var missing string
 	result := sourceVariable.ReplaceAllStringFunc(text, func(token string) string {
+		if nativeStep && token == "{{task_prompt}}" {
+			return token
+		}
 		key := sourceVariable.FindStringSubmatch(token)[1]
 		value, ok := variables[key]
 		if !ok {
@@ -41,7 +44,7 @@ type sourceRendered struct {
 func renderSourceTemplate(template models.PromptSourceTemplate, variables map[string]string) (sourceRendered, error) {
 	out := sourceRendered{portable: models.WorkflowPortable{Name: template.Name, Description: template.Description}, extras: make(map[int]sourceStepExtras)}
 	var err error
-	out.portable.Prompt, err = renderSourceString(template.Prompt, variables)
+	out.portable.Prompt, err = renderSourceString(template.Prompt, variables, false)
 	if err != nil {
 		return out, err
 	}
@@ -148,7 +151,7 @@ func renderSourceStep(raw json.RawMessage, variables map[string]string) (models.
 	if extras.StageType != "" && extras.StageType != models.StageTypeWork && extras.StageType != models.StageTypeReview && extras.StageType != models.StageTypeApproval && extras.StageType != models.StageTypeCustom {
 		return step, extras, fmt.Errorf("invalid stage_type for step %q", step.Name)
 	}
-	step.Prompt, err = renderSourceString(step.Prompt, variables)
+	step.Prompt, err = renderSourceString(step.Prompt, variables, true)
 	if err != nil {
 		return step, extras, err
 	}

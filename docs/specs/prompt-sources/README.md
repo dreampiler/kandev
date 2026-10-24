@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: prompt-sources
 specification_version: 1
 migration: complete

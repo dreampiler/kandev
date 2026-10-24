@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/task/retention"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/archivecascade"
@@ -397,8 +398,12 @@ func (s *Service) prepareTaskForCreation(ctx context.Context, req *CreateTaskReq
 	// workflow with validated overrides); every other create keeps the
 	// historical tolerant behavior (warn and continue with an empty step).
 	workflowStepID, resolveErr := s.resolveWorkflowStepE(ctx, req)
-	if err := s.enforceExplicitAgentProfilePolicy(req, workflow, workflowStepID, resolveErr); err != nil {
+	if err := s.enforceExplicitAgentProfilePolicy(ctx, req, workflow, workflowStepID, resolveErr); err != nil {
 		return nil, err
+	}
+	if resolveErr != nil {
+		s.logger.Warn("failed to resolve start step, using empty",
+			zap.String("workflow_id", req.WorkflowID), zap.Error(resolveErr))
 	}
 	if req.RequireAssigneeAgentProfileValidation {
 		if err := s.validateAssigneeTaskIsOffice(ctx, req); err != nil {
@@ -535,6 +540,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		}
 		if err := s.workspacePolicyAttacher.AttachWorkspacePolicy(ctx, task.ID, req.ParentID, *req.WorkspacePolicy); err != nil {
 			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("attach workspace policy: %w", err))
+		}
+	}
+	if s.mcpSelectionWriter != nil && len(req.MCPServerIDs) > 0 {
+		if err := s.mcpSelectionWriter.Replace(ctx, mcpconfig.SelectionScopeTask, task.WorkspaceID, task.ID, req.MCPServerIDs); err != nil {
+			return CreateTaskResult{}, s.rollbackPartialTask(ctx, task.ID, fmt.Errorf("persist MCP selections: %w", err))
 		}
 	}
 
@@ -3315,9 +3325,12 @@ func (s *Service) completeTaskDeletion(ctx context.Context, id string, task *mod
 	s.deleteDependencyEdgesForTask(ctx, id)
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
-	var extra map[string]interface{}
+	extra := map[string]interface{}{}
+	if sessionIDs := taskSessionIDs(sessions); len(sessionIDs) > 0 {
+		extra["mcp_session_ids"] = sessionIDs
+	}
 	if reason != "" {
-		extra = map[string]interface{}{"reason": reason}
+		extra["reason"] = reason
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	s.pullNextTaskOnVacate(ctx, task.WorkflowStepID, task.ID)

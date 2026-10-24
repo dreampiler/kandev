@@ -33,6 +33,8 @@ func turnAllowanceResponse(c *gin.Context, result interface{}, err error) {
 	switch {
 	case errors.Is(err, controller.ErrProviderUsageDisabled):
 		c.JSON(http.StatusNotFound, gin.H{"error": "provider usage limits are disabled"})
+	case errors.Is(err, controller.ErrAgentProfileNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 	case errors.Is(err, agentusage.ErrTurnAllowanceInvalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid turn allowance"})
 	case errors.Is(err, agentusage.ErrTurnAllowanceUnknown):

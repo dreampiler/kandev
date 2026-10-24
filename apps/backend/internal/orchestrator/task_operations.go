@@ -1217,7 +1217,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 	default:
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !configMode,
+			IncludeCoordinatorTaskControls: !configMode && dbTask.Origin != models.TaskOriginAutomationRun,
 			IncludeTaskTitleTool:           !configMode && titleOwner,
 			IncludeCanvasGuidance:          includeCanvasGuidance,
 			Autopilot:                      dbTask.Autopilot,
@@ -1505,6 +1505,9 @@ type startTaskOptions struct {
 	// workflow-entry record. The start path rechecks it immediately before
 	// runtime admission so a stale route cannot dispatch the old payload.
 	ceilingEntryBinding *models.CeilingWorkflowEntryBinding
+	// MCPServerIDs replaces the selections for the task session. Nil means the
+	// caller did not request a session-scoped change.
+	MCPServerIDs []string
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1712,10 +1715,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	launchClaim := s.claimDeferredLaunchForStart(ctx, taskID)
 	defer launchClaim.releaseIfHeld(ctx)
 
-	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	promptTask, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
+	isOfficeTask := promptTask != nil && promptTask.IsFromOffice
 	if isOfficeTask {
 		if err := validateOfficeLaunchEnv(taskID, env); err != nil {
 			return nil, err
@@ -1928,6 +1932,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	}
 	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
+	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	// Session preparation can reuse an Office session that was parked after a
 	// native restore failure. Check at the shared start boundary so autonomous
 	// callers return the typed recovery error to Office instead of dispatching
@@ -2057,6 +2064,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			taskID:                    task.ID,
 			sessionID:                 sessionID,
 			isOfficeTask:              isOfficeTask,
+			automationRun:             promptTask != nil && promptTask.Origin == models.TaskOriginAutomationRun,
 			isPassthrough:             skipKandevMCPWrap,
 			configMode:                configMode,
 			referenceContext:          promptReferenceContext,
@@ -2184,6 +2192,7 @@ type launchPromptContext struct {
 	sessionID                 string
 	isOfficeTask              bool
 	isPassthrough             bool
+	automationRun             bool
 	configMode                bool
 	includeTaskTitleTool      bool
 	includeCanvasGuidance     bool
@@ -2225,7 +2234,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	}
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
-		IncludeCoordinatorTaskControls: !p.configMode,
+		IncludeCoordinatorTaskControls: !p.configMode && !p.automationRun,
 		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 		IncludeCanvasGuidance:          p.includeCanvasGuidance,
 		Autopilot:                      p.autopilot,
@@ -4404,6 +4413,7 @@ func (s *Service) sessionAlreadyPromptReady(ctx context.Context, sessionID strin
 	probeCtx := context.WithoutCancel(ctx)
 	existing, ok := s.executor.GetExecutionBySession(sessionID)
 	return ok && existing != nil &&
+		s.resumeAttemptStore().canPromptWithoutResume(sessionID, existing.AgentExecutionID) &&
 		(s.agentManager == nil || s.agentManager.IsAgentReadyForPrompt(probeCtx, sessionID))
 }
 
@@ -4924,6 +4934,10 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) (wa
 		switch sess.State {
 		case models.TaskSessionStateWaitingForInput:
 			return nil
+		case models.TaskSessionStateStarting:
+			if ready, reconcileErr := s.reconcilePassthroughResumeReady(readyCtx, sessionID); reconcileErr != nil || ready {
+				return reconcileErr
+			}
 		case models.TaskSessionStateFailed:
 			errMsg := sess.ErrorMessage
 			if errMsg == "" {
@@ -7316,7 +7330,8 @@ func (s *Service) runPromptTurn(
 	var admissionObserved atomic.Bool
 	result, delivery, execErr := s.dispatchPreparedPrompt(
 		promptCtx, taskID, session, activityExecutionID, effectivePrompt, attachments,
-		dispatchOnly, options, submissionID, validateAdmission, onDispatched, &admissionObserved,
+		dispatchOnly, options, submissionID, validateAdmission, onDispatched,
+		rollback.dispatchGuard, &admissionObserved,
 	)
 	return s.finishPromptExecutorDispatch(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,

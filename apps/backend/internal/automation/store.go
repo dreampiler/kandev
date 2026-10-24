@@ -978,6 +978,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 
 	_, err = tx.ExecContext(ctx, tx.Rebind(`
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
+			continuation_task_id = CASE WHEN parent_task_id <> ? THEN '' ELSE continuation_task_id END,
 			parent_task_id = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
 			task_mode = ?, managed_owner_installation_id = ?, managed_destination_installation_id = ?,
@@ -988,6 +989,7 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 			retry_policy = ?, automation_revision = automation_revision + 1, updated_at = ?
 		WHERE id = ?`),
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
+		a.ParentTaskID,
 		a.ParentTaskID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		string(a.TaskMode), a.ManagedOwnerInstallationID, a.ManagedDestinationInstallationID,

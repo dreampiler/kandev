@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/startup"
 )
@@ -1846,19 +1847,37 @@ func healDuplicateTaskEnvForTask(ctx context.Context, tx *sqlx.Tx, taskID string
 	return nil
 }
 
-// ensureTaskEnvironmentTaskUniqueIndex adds a UNIQUE index on
-// active task_environments(task_id) so a future race in env creation fails loud
-// instead of producing two active rows. Retired history is excluded. Runs AFTER
-// healDuplicateTaskEnvironments, which collapses any pre-existing duplicates.
+// ensureTaskEnvironmentTaskUniqueIndex upgrades the legacy full unique index
+// once. Retained history does not occupy the task's canonical owner slot.
+// It runs after active duplicate healing.
 func (r *Repository) ensureTaskEnvironmentTaskUniqueIndex() error {
-	if _, err := r.db.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+	definition, err := db.IndexDefinitionContext(r.migrationContext(), r.db, "uniq_task_environments_task_id")
+	if err != nil {
 		return err
 	}
-	_, err := r.db.ExecContext(r.migrationContext(), `
-		CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_active_task_id
-		    ON task_environments(task_id) WHERE retired_at IS NULL
-	`)
-	return err
+	active, err := db.IndexDefinitionContext(r.migrationContext(), r.db, "uniq_task_environments_active_task_id")
+	if err != nil {
+		return err
+	}
+	if strings.Contains(strings.ToLower(definition), "retired_at is null") ||
+		(definition == "" && strings.Contains(strings.ToLower(active), "retired_at is null")) {
+		return nil
+	}
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP INDEX IF EXISTS uniq_task_environments_task_id`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(r.migrationContext(), `
+  CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_environments_active_task_id
+  ON task_environments(task_id) WHERE retired_at IS NULL
+ `); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // healSessionTaskEnvironmentIDs backfills task_sessions.task_environment_id

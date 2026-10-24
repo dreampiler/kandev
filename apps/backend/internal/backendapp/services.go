@@ -291,6 +291,7 @@ func initCoreTaskServices(
 			DesktopRuntime:    strings.EqualFold(strings.TrimSpace(os.Getenv("KANDEV_DESKTOP_RUNTIME")), "true"),
 		},
 	)
+	wirePromptSourceEvents(workflowSvc, taskSvc, eventBus, log)
 	if err := taskSvc.ReconcileWorkspaceRecoveryOperations(ctx); err != nil {
 		return nil, fmt.Errorf("reconcile managed workspace recovery operations: %w", err)
 	}
@@ -1350,9 +1351,10 @@ func (a *githubSecretAdapter) List(ctx context.Context) ([]*github.SecretListIte
 	result := make([]*github.SecretListItem, len(items))
 	for i, item := range items {
 		result[i] = &github.SecretListItem{
-			ID:       item.ID,
-			Name:     item.Name,
-			HasValue: item.HasValue,
+			ID:        item.ID,
+			Name:      item.Name,
+			HasValue:  item.HasValue,
+			UpdatedAt: item.UpdatedAt,
 		}
 	}
 	return result, nil

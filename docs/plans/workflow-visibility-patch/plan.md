@@ -70,3 +70,9 @@ must stay green.
 
 - A built-in workflow hidden by its template could not be shown through this
   path. That is intended: startup reconciliation would revert it.
+
+## Current upstream delivery record
+
+The current PR delivery and its focused evidence are also recorded in
+[Implementation and verification](task-01-implementation.md). The original
+work order, scope and verification results above remain applicable.

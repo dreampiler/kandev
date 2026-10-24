@@ -61,7 +61,7 @@ func hasDeletedInheritedLocalSource(session *models.TaskSession, env *models.Tas
 	}
 	inventory := env.Repos[0]
 	return inheritedLocalSourceMatches(session, repositories[0]) &&
-		inventory.RepositoryID == session.RepositoryID && inventory.TaskEnvironmentID == env.ID && inventory.Status == "deleted" &&
+		inventory.RepositoryID == session.RepositoryID && inventory.TaskEnvironmentID == env.ID && inventory.Status == taskEnvironmentRepoStatusDeleted &&
 		inventory.WorktreeID == "" && inventory.WorktreePath == "" &&
 		inventory.WorktreeSourceClonePath == "" && inventory.WorktreeSourceCommonDir == ""
 }

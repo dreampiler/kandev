@@ -611,6 +611,11 @@ type FeaturesConfig struct {
 	AutoStartPendingWork          bool `mapstructure:"auto_start_pending_work" json:"autoStartPendingWork"`
 	AutoContinueFromHistory       bool `mapstructure:"auto_continue_from_history" json:"autoContinueFromHistory"`
 	AutoRetryUnsentRequests       bool `mapstructure:"auto_retry_unsent_requests" json:"autoRetryUnsentRequests"`
+	// TerminalPrimaryQueueHandoff moves messages still queued on a primary
+	// session that became terminal to the session that takes over the primary
+	// role. Off in every shipped profile; queued messages otherwise keep their
+	// explicit session target.
+	TerminalPrimaryQueueHandoff bool `mapstructure:"terminal_primary_queue_handoff" json:"terminalPrimaryQueueHandoff"`
 
 	// CodexAppServer enables the separate native Codex app-server agent. It is
 	// off in every shipped profile and requires a restart because its protocol

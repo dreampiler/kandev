@@ -199,6 +199,7 @@ type SessionLauncher interface {
 	ResumeTaskSession(ctx context.Context, taskID, sessionID string) (*executor.TaskExecution, error)
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) (orchestrator.ProcessOnTurnStartResult, error)
 	QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error
+	QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error)
 	GetMessageQueue() *messagequeue.Service
 	// CheckQueueAdmissionReadiness rechecks automatic dispatch for the exact
 	// session incarnation admitted by a queue operation.
@@ -885,7 +886,7 @@ type mcpRepositoryInput struct {
 
 // handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
+	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them.
 	var req mcpCreateTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -1120,6 +1121,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		ExecutorProfileID:      launchConfig.ExecutorProfileID,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
+		MCPServerIDs:           req.MCPServerIDs,
 	}
 	result, err := h.taskSvc.CreateTask(createCtx, createReq)
 	if err != nil {
@@ -2954,6 +2956,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
 	}
 
+	operationRequest := sendOperationClaimRequest{
+		SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID,
+		TargetTaskID: req.TaskID, RequestedSession: req.SessionID,
+		RequestedQuestion: req.ReplyToQuestionID, Prompt: req.Prompt,
+		DeliveryMode: req.DeliveryMode, OperationID: req.OperationID,
+	}
+	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
+		return response, nil
+	}
 	// Verify the target task exists before looking up its session, so a bad
 	// task_id (e.g. a truncated UUID prefix) reports "task not found" instead
 	// of the misleading "no primary session" error from the session lookup.
@@ -2971,15 +2982,6 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"failed to look up target task: "+err.Error(), nil)
 	}
 
-	operationRequest := sendOperationClaimRequest{
-		SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID,
-		TargetTaskID: targetTask.ID, RequestedSession: req.SessionID,
-		RequestedQuestion: req.ReplyToQuestionID, Prompt: req.Prompt,
-		DeliveryMode: req.DeliveryMode, OperationID: req.OperationID,
-	}
-	if response := h.readExistingSendOperation(ctx, msg, operationRequest); response != nil {
-		return response, nil
-	}
 	parentReply, err := h.validateParentQuestionReply(ctx, req.ReplyToQuestionID, req.TaskID, senderTask, targetTask)
 	if err != nil {
 		var parentQuestionErr *parentQuestionError
@@ -3898,11 +3900,12 @@ func (h *Handlers) queueTaskMessageUntilWorkflowPromotion(
 	admission orchestrator.PeerMessageStartAdmission,
 ) (taskMessageDispatchResult, error) {
 	releasePeerMessageStartAdmission(admission)
-	if err := h.sessionLauncher.QueueUserPrompt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false); err != nil {
+	queuedEntryID, err := h.sessionLauncher.QueueUserPromptWithReceipt(ctx, taskID, session.ID, prompt, "", false, nil, metadata, false)
+	if err != nil {
 		h.restoreTaskReviewForTaskMessage(ctx, taskID, *reviewRollback)
 		return taskMessageDispatchResult{}, fmt.Errorf("failed to queue prompt until workflow promotion: %w", err)
 	}
-	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID}, nil
+	return taskMessageDispatchResult{status: taskMessageStatusQueued, sessionID: session.ID, queuedEntryID: queuedEntryID}, nil
 }
 
 func (h *Handlers) dispatchPreparedTaskMessageWithReviewRollback(

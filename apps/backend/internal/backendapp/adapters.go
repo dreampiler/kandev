@@ -1088,6 +1088,14 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID string) bool {
+	return a.mgr.IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	return a.mgr.MarkPassthroughRunningWithContext(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
 	return a.mgr.PreparePassthroughRunning(sessionID)
 }
@@ -1578,6 +1586,11 @@ func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, se
 // QueueUserPrompt forwards a prompt that must wait for workflow admission.
 func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) error {
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+}
+
+// QueueUserPromptWithReceipt forwards the accepted workflow queue identity.
+func (w *orchestratorWrapper) QueueUserPromptWithReceipt(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, metadata map[string]interface{}, userMessageRecorded bool) (string, error) {
+	return w.svc.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
 func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {

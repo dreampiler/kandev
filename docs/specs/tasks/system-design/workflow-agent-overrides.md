@@ -3,6 +3,7 @@ status: current
 system: tasks
 requirements:
   - REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-001
+  - REQ-TASKS-WORKFLOW-AGENT-OVERRIDES-002
 ---
 
 # Task workflow agent overrides design

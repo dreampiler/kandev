@@ -479,6 +479,10 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+	// A session MCP selection may have arrived while this turn was active. The
+	// completion path transitions to Ready directly instead of going through
+	// MarkReady, so explicitly retry any deferred idle-session reconfiguration.
+	m.RequestSessionMCPReconfiguration(context.Background(), claim.execution.SessionID)
 }
 
 func completeEventStopReason(event *agentctl.AgentEvent) string {
@@ -613,6 +617,10 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // lease is held by the event dispatcher. Direct test and legacy callers use
 // handleCompleteEvent, which acquires that lease before entering here.
 func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	return m.handleCompleteEventWithSettlementLeased(execution, event, true)
+}
+
+func (m *Manager) handleCompleteEventWithSettlementLeased(execution *AgentExecution, event *agentctl.AgentEvent, confirmed bool) bool {
 	if event.TurnID == "" {
 		// Snapshot before publishing AgentReady. A queued successor may bind a
 		// new turn while the complete stream frame is still crossing the bus.
@@ -628,16 +636,11 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 		return true
 	}
 	claim, claimed := m.claimPromptCompletion(execution, event, isError)
+	m.settleConfirmedProviderCompletion(execution, event, confirmed, claimed)
 	if !claimed {
 		return false
 	}
-	if event.PromptGeneration != 0 {
-		m.sessionManager.finishProviderTurn(execution.ID, event.PromptGeneration, false)
-	}
-	if event.DeliverySubmissionID != "" {
-		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
-		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
-	}
+	clearCompletedPromptSubmission(execution, event)
 	var failureEvidence *PromptAttemptEvidence
 	if isError {
 		evidence := execution.promptAttemptEvidenceSnapshot()
@@ -718,6 +721,13 @@ func (m *Manager) handleCompleteEventLeased(execution *AgentExecution, event *ag
 	return true
 }
 
+func clearCompletedPromptSubmission(execution *AgentExecution, event *agentctl.AgentEvent) {
+	if event.DeliverySubmissionID != "" {
+		execution.clearDeliverySubmissionID(event.DeliverySubmissionID)
+		clearInitialDeliverySubmissionID(execution, event.DeliverySubmissionID)
+	}
+}
+
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
 // and stores the tool call in session history.
 // Returns the (possibly updated) event.
@@ -774,13 +784,17 @@ func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentct
 // The raw error event is not published to the frontend stream; the agent failure
 // path (handleAgentFailed) sets session FAILED with the error message.
 func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	return m.handlePromptErrorEvent(execution, event, true)
+}
+
+func (m *Manager) handlePromptErrorEvent(execution *AgentExecution, event agentctl.AgentEvent, confirmed bool) bool {
 	data := make(map[string]any, len(event.Data)+1)
 	for key, value := range event.Data {
 		data[key] = value
 	}
 	data["is_error"] = true
 	event.Data = data
-	return m.handleCompleteEventLeased(execution, &event)
+	return m.handleCompleteEventWithSettlementLeased(execution, &event, confirmed)
 }
 
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.

@@ -6,26 +6,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kandev/kandev/internal/db/dialect"
+
 	"go.uber.org/zap"
 )
 
-// workflowStepOrphansPrunedMetaKey is the kandev_meta key written once
-// pruneOrphanWorkflowStepsOnce has removed the workflow_steps rows that
-// earlier workflow deletes left behind.
+// workflowStepOrphansPrunedMetaKey records completion of one-time orphan cleanup.
 const workflowStepOrphansPrunedMetaKey = "workflow_steps_orphans_pruned_at"
 
 // pruneOrphanWorkflowStepsOnce deletes workflow_steps rows whose workflow no
 // longer exists, then records workflowStepOrphansPrunedMetaKey so later boots
 // skip it.
 //
-// The rows exist because the task repository initializes before the workflow
-// repository: ensureRunnerProjectionTables creates workflow_steps without the
-// foreign key the workflow repository's DDL declares, so the ON DELETE
-// CASCADE that DeleteWorkflow relied on was never present and every deleted
-// workflow left its steps behind. DeleteWorkflow and
-// DeleteWorkflowsByWorkspace now delete the steps explicitly; this one-time
-// pass removes what was already left. The DELETE is idempotent, so a boot
-// interrupted before the marker commits simply runs it again.
+// The cleanup and marker commit in one transaction. An interrupted transaction
+// leaves the next boot responsible for retrying the cleanup.
 func (r *Repository) pruneOrphanWorkflowStepsOnce() error {
 	ctx := r.migrationContext()
 	// persistence.Provide creates kandev_meta before any repository opens,
@@ -42,6 +36,12 @@ func (r *Repository) pruneOrphanWorkflowStepsOnce() error {
 		return fmt.Errorf("begin workflow step orphan prune: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if dialect.IsPostgres(r.db.DriverName()) {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+			"workflow_step_orphan_migration:"+workflowStepOrphansPrunedMetaKey); err != nil {
+			return fmt.Errorf("lock workflow step orphan prune: %w", err)
+		}
+	}
 	var value string
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`),
 		workflowStepOrphansPrunedMetaKey).Scan(&value)

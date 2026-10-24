@@ -188,6 +188,7 @@ func (s *Service) continueAutomaticHistory(ctx context.Context, session *models.
 	if !admitted {
 		return nil
 	}
+	s.automaticHistoryRetries.attempted(session.ID, time.Now())
 	defer reservation.releaseIfNotConsumed()
 	ctx = context.WithValue(ctx, automaticHistoryAttemptKey{}, attemptID)
 	return s.recoverAutomaticHistory(ctx, session)
@@ -205,10 +206,9 @@ func (s *Service) automaticHistoryAttemptAllowed(ctx context.Context, sessionID,
 	if previous != nil {
 		return false, nil
 	}
-	if !s.idleQueueDrain.due(sessionID, time.Now()) {
+	if !s.automaticHistoryRetries.due(sessionID, time.Now()) {
 		return false, nil
 	}
-	s.idleQueueDrain.attempted(sessionID, time.Now())
 	return true, nil
 }
 

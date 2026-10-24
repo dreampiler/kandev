@@ -100,6 +100,7 @@ type IssueTaskCreator interface {
 
 // IssueTaskRequest contains the data for creating a task from an issue watch event.
 type IssueTaskRequest struct {
+	AgentProfileID string
 	WorkspaceID    string
 	WorkflowID     string
 	WorkflowStepID string
@@ -640,6 +641,7 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 		metadata[models.MetaKeyForkPRRequiresManualStart] = true
 	}
 	return &ReviewTaskRequest{
+		AgentProfileID: evt.AgentProfileID,
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,
@@ -1858,6 +1860,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 	repositories := s.resolveIssueRepository(ctx, evt.WorkspaceID, issue)
 
 	req := &IssueTaskRequest{
+		AgentProfileID: evt.AgentProfileID,
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,

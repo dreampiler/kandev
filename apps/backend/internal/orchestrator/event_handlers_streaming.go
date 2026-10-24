@@ -2131,6 +2131,9 @@ func (s *Service) maybePromotePrimary(ctx context.Context, taskID, sessionID str
 // caller returns rather than inside it. The worker is detached from the
 // request but bound to the service lifetime, so Stop cancels and joins it.
 func (s *Service) scheduleTerminalSessionQueueHandOff(taskID, fromSessionID string) {
+	if !s.config.TerminalPrimaryQueueHandoff {
+		return
+	}
 	s.parkedLoopMu.Lock()
 	if s.parkedLoopStopped || s.parkedLoopCtx == nil {
 		s.parkedLoopMu.Unlock()
@@ -2174,7 +2177,7 @@ const terminalQueueHandOffAttempts = 5
 // resolves it again when the role moved, so a promotion that lands while the
 // transfer waits cannot leave the messages on a session that lost the role.
 func (s *Service) handOffTerminalSessionQueue(ctx context.Context, taskID, fromSessionID string) {
-	if s.messageQueue == nil || fromSessionID == "" {
+	if !s.config.TerminalPrimaryQueueHandoff || s.messageQueue == nil || fromSessionID == "" {
 		return
 	}
 	s.terminalQueueHandOffMu.Lock()
@@ -3881,8 +3884,27 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 
+	teardown := func() {
+		s.teardownOfficeTurn(ctx, taskID, sessionID, session, completionTurnID)
+	}
+	// The relaunch that this teardown must not stop takes the executor's
+	// per-session launch/stop lock. Running the ownership decision and the
+	// teardown inside that same lock serializes them.
+	if s.executor != nil {
+		s.executor.WithSessionOwnership(sessionID, teardown)
+	} else {
+		teardown()
+	}
+	return true
+}
+
+// teardownOfficeTurn stops only the completed turn's still-owned execution
+// while the executor's session launch/stop lock is held.
+func (s *Service) teardownOfficeTurn(
+	ctx context.Context, taskID, sessionID string, session *models.TaskSession, completionTurnID string,
+) {
 	if s.officeSessionRelaunchedSince(ctx, taskID, sessionID, session, completionTurnID) {
-		return true
+		return
 	}
 
 	s.logger.Info("office turn complete — IDLE + tearing down execution",
@@ -3891,8 +3913,22 @@ func (s *Service) handleOfficeTurnComplete(
 		zap.String("agent_profile_id", session.AgentProfileID))
 
 	// State flip first so the workflow handler doesn't ping-pong on the
-	// AgentStopped → handleAgentCompleted path.
-	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, session)
+	// AgentStopped → handleAgentCompleted path. The flip is a compare-and-set
+	// against the completion snapshot's state: a successor that moved the
+	// session out of that state wins, and this stale completion stops here.
+	// An already-IDLE session is this turn's own earlier teardown, so the
+	// execution stop below still runs.
+	if _, changed := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, models.TaskSessionStateIdle, "", false, nil, session,
+	); !changed {
+		current, err := s.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || current == nil || current.State != models.TaskSessionStateIdle {
+			s.logger.Info("office turn complete — session moved on, skipping stale teardown",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return
+		}
+	}
 
 	if s.agentManager != nil && session.AgentExecutionID != "" {
 		// Tears down the agent subprocess + executor backend + agentctl
@@ -3905,7 +3941,6 @@ func (s *Service) handleOfficeTurnComplete(
 				zap.Error(err))
 		}
 	}
-	return true
 }
 
 // officeSessionRelaunchedSince reloads the session right before the Office
@@ -4696,6 +4731,12 @@ func sessionSettingsEventIsStale(
 		return true
 	}
 	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" && rejected == identity.ExecutionID {
+		return true
+	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
 		return true
 	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])

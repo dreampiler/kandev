@@ -39,8 +39,9 @@ type WorkspaceRuntimeFootprintRow struct {
 	LastActivityAt      time.Time `json:"last_activity_at"`
 }
 
-// WorkspaceRuntimeFootprint authorizes and resolves workspace ownership before
-// requesting one bounded observation. It never starts or stops an execution.
+// WorkspaceRuntimeFootprint authorizes the workspace before one bounded
+// observation and resolves each measured task's owner before publishing rows.
+// It never starts or stops an execution.
 func (s *Service) WorkspaceRuntimeFootprint(ctx context.Context, workspaceID string) (*WorkspaceRuntimeFootprint, error) {
 	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
 		return nil, err
@@ -49,14 +50,14 @@ func (s *Service) WorkspaceRuntimeFootprint(ctx context.Context, workspaceID str
 	if s.runtimeFootprintProvider == nil {
 		return view, nil
 	}
-	owned, err := s.workspaceTaskIDs(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
 	snapshot := s.runtimeFootprintProvider.SnapshotRuntimeFootprint(ctx)
 	view.ObservedAt = time.Now().UTC()
 	if !snapshot.Complete {
 		return view, nil
+	}
+	owned, err := s.workspaceTaskIDs(ctx, workspaceID, snapshot.Runtimes)
+	if err != nil {
+		return nil, err
 	}
 	view.Complete = true
 	view.LiveRuntimes = snapshot.LiveRuntimes
@@ -80,19 +81,22 @@ func (s *Service) WorkspaceRuntimeFootprint(ctx context.Context, workspaceID str
 	return view, nil
 }
 
-const workspaceFootprintPageSize = 10000
-
-func (s *Service) workspaceTaskIDs(ctx context.Context, workspaceID string) (map[string]struct{}, error) {
-	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, workspaceFootprintPageSize, "", true, false, false, false)
-	if err != nil {
-		return nil, err
-	}
-	if total > len(tasks) {
-		return nil, fmt.Errorf("workspace footprint task inventory exceeds bounded read")
-	}
-	ids := make(map[string]struct{}, len(tasks))
-	for _, task := range tasks {
-		if task != nil {
+func (s *Service) workspaceTaskIDs(ctx context.Context, workspaceID string, runtimes []agentruntime.SessionRuntimeFootprint) (map[string]struct{}, error) {
+	ids := make(map[string]struct{})
+	resolved := make(map[string]bool)
+	for _, row := range runtimes {
+		if row.TaskID == "" || resolved[row.TaskID] {
+			continue
+		}
+		resolved[row.TaskID] = true
+		task, err := s.tasks.GetTask(ctx, row.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("resolve runtime task ownership: %w", err)
+		}
+		if task == nil {
+			return nil, fmt.Errorf("runtime task ownership is unavailable")
+		}
+		if task.WorkspaceID == workspaceID {
 			ids[task.ID] = struct{}{}
 		}
 	}

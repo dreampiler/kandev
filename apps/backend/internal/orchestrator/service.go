@@ -85,6 +85,9 @@ type ServiceConfig struct {
 	// replaced as primary (PromotePrimarySession), once that session has
 	// settled.
 	ReplacedSessionReclaim bool
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -978,6 +981,11 @@ type Service struct {
 	// boundary used by task and workflow launch paths.
 	profileExecutionResolver *agentruntime.ProfileExecutionResolver
 
+	// mcpSelectionWriter persists task-session MCP selections at the launch
+	// boundary. It is optional so focused orchestrator tests and older callers
+	// retain the legacy runtime path.
+	mcpSelectionWriter MCPSelectionWriter
+
 	// dynamicRecovery owns durable reset/retry deadlines. Only pending states
 	// are scheduled after restart; a retrying state means dispatch may have
 	// crossed the process boundary and remains manual until reconciled.
@@ -1299,8 +1307,9 @@ type Service struct {
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
 	// Nil-safe like idleReaper: callers that don't need it leave it nil and
 	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
-	ceilingSweeper *ceilingSweeper
-	idleQueueDrain idleQueueDrainBackoff
+	ceilingSweeper          *ceilingSweeper
+	idleQueueDrain          idleQueueDrainBackoff
+	automaticHistoryRetries automaticHistoryBackoff
 
 	// launchCredentialReminter re-mints short-lived Office runtime
 	// credentials immediately before a launch that carries Office run
@@ -4439,8 +4448,22 @@ func (s *Service) QueueUserPrompt(
 	metadata map[string]interface{},
 	userMessageRecorded bool,
 ) error {
+	_, err := s.QueueUserPromptWithReceipt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
+	return err
+}
+
+// QueueUserPromptWithReceipt retains the accepted queue identity under the
+// existing workflow admission and fast-path dispatch rules.
+func (s *Service) QueueUserPromptWithReceipt(
+	ctx context.Context,
+	taskID, sessionID, prompt, model string,
+	planMode bool,
+	attachments []v1.MessageAttachment,
+	metadata map[string]interface{},
+	userMessageRecorded bool,
+) (string, error) {
 	if s.messageQueue == nil {
-		return errors.New("message queue is not configured")
+		return "", errors.New("message queue is not configured")
 	}
 	queueMetadata := make(map[string]interface{}, len(metadata)+1)
 	for key, value := range metadata {
@@ -4450,6 +4473,7 @@ func (s *Service) QueueUserPrompt(
 		queueMetadata[metaKeyUserMessageRecorded] = true
 	}
 	deferInitialBriefDrain := false
+	queuedEntryID := ""
 	if err := s.withSessionPromptAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
 		session, err := s.repo.GetTaskSession(admittedCtx, sessionID)
 		if err != nil {
@@ -4458,7 +4482,7 @@ func (s *Service) QueueUserPrompt(
 		if session == nil || isTerminalSessionState(session.State) {
 			return ErrSessionNotPromptable
 		}
-		if _, err := s.messageQueue.QueueMessageWithMetadata(
+		queued, err := s.messageQueue.QueueMessageWithMetadata(
 			admittedCtx,
 			sessionID,
 			taskID,
@@ -4468,20 +4492,22 @@ func (s *Service) QueueUserPrompt(
 			planMode,
 			toQueuedAttachments(attachments),
 			queueMetadata,
-		); err != nil {
+		)
+		if err != nil {
 			return fmt.Errorf("queue user prompt: %w", err)
 		}
+		queuedEntryID = queued.ID
 		deferInitialBriefDrain = s.isInitialTaskBriefDispatchPending(sessionID)
 		return nil
 	}); err != nil {
-		return err
+		return "", err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
 	if deferInitialBriefDrain {
 		// A later first-message contender is already durably queued. Let the
 		// admitted candidate finish its first dispatch. Its turn-tail drain or
 		// CompleteInitialTaskBriefDispatch will deliver this entry in FIFO order.
-		return nil
+		return queuedEntryID, nil
 	}
 
 	// T2: enqueue-side fast-path drain. The user's WIP wait is a
@@ -4498,7 +4524,7 @@ func (s *Service) QueueUserPrompt(
 	// isCancelInFlight / isQueuedDispatchInFlight / isSteerInFlight
 	// in-flight checks (cheaper than the DB read).
 	s.tryFastPathDrainAfterEnqueue(ctx, taskID, sessionID)
-	return nil
+	return queuedEntryID, nil
 }
 
 // MaxQueuedPromptsPerSession exposes the active queue capacity to transaction

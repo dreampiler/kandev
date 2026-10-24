@@ -927,5 +927,8 @@
   "archivedData.schedule": "Kandev の実行中は 24 時間ごとに確認します。",
   "archivedData.firstRun": "初回の実行はバックアップの準備後に開始します。",
   "archivedData.analysisDetails": "分析の詳細",
-  "archivedData.runDetails": "実行の詳細"
+  "archivedData.runDetails": "実行の詳細",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "終了したプライマリセッションのキューを引き継ぐ",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "タスクのプライマリセッションが失敗、キャンセル、または完了したとき、待機中のメッセージを新しいプライマリセッションへ移します。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "キュー内のメッセージが、登録先とは異なるセッションへ配信される場合があります。各メッセージを元のセッションに残すには、無効のままにしてください。"
 }

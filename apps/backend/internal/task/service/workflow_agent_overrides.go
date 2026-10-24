@@ -158,13 +158,13 @@ func (s *Service) validateWorkflowAgentOverrides(ctx context.Context, req *Creat
 
 // ErrExplicitAgentProfileRequired rejects a task creation whose resolved
 // workflow opts into require_explicit_agent_profile when the caller supplied
-// neither an explicit agent_profile_id nor a valid workflow_agent_overrides
-// selection. It is a validation failure, not a server fault.
+// neither an available explicit agent_profile_id nor valid
+// workflow_agent_overrides selection. It is a validation failure, not a server fault.
 var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is required by this workflow")
 
 // enforceExplicitAgentProfilePolicy rejects a create before any task,
 // repository, or session row is written when the resolved workflow requires an
-// explicit agent profile selection and the caller supplied none. Only a
+// usable explicit agent profile selection. Only a
 // caller-provided profile (ExplicitAgentProfileID) or a validated
 // workflow_agent_overrides binding for the task's resolved destination step
 // counts: creator/parent/workflow/workspace fallbacks and stored task
@@ -187,12 +187,12 @@ var ErrExplicitAgentProfileRequired = errors.New("explicit agent profile is requ
 // It runs after validateWorkflowAgentOverrides so normalized overrides are
 // available, and after CreateTask's external_id short-circuit, so a duplicate
 // retry returns the existing task without re-evaluating this policy.
-func (s *Service) enforceExplicitAgentProfilePolicy(req *CreateTaskRequest, workflow *models.Workflow, destinationStepID string, resolveErr error) error {
+func (s *Service) enforceExplicitAgentProfilePolicy(ctx context.Context, req *CreateTaskRequest, workflow *models.Workflow, destinationStepID string, resolveErr error) error {
 	if req.WorkflowID == "" || workflow == nil || !workflow.RequireExplicitAgentProfile {
 		return nil
 	}
 	if strings.TrimSpace(req.ExplicitAgentProfileID) != "" {
-		return nil
+		return s.validateExplicitProfileSelection(ctx, req)
 	}
 	if req.normalizedWorkflowAgentOverrides != nil && len(req.normalizedWorkflowAgentOverrides.Steps) > 0 {
 		if resolveErr != nil {
@@ -206,6 +206,21 @@ func (s *Service) enforceExplicitAgentProfilePolicy(req *CreateTaskRequest, work
 		return ErrExplicitAgentProfileRequired
 	}
 	return ErrExplicitAgentProfileRequired
+}
+
+func (s *Service) validateExplicitProfileSelection(ctx context.Context, req *CreateTaskRequest) error {
+	if s.agentProfiles == nil {
+		return fmt.Errorf("%w: profile validation is unavailable", ErrExplicitAgentProfileRequired)
+	}
+	profile, err := s.agentProfiles.GetAgentProfile(ctx, req.ExplicitAgentProfileID)
+	if err != nil {
+		return fmt.Errorf("%w: could not validate selected profile: %v", ErrExplicitAgentProfileRequired, err)
+	}
+	if profile == nil || !profile.Enabled || profile.DeletedAt != nil ||
+		(profile.WorkspaceID != "" && profile.WorkspaceID != req.WorkspaceID) {
+		return fmt.Errorf("%w: selected profile is unavailable in this workspace", ErrExplicitAgentProfileRequired)
+	}
+	return nil
 }
 
 // ResolveWorkflowAgentOverrideReplacement resolves the replacement profile a

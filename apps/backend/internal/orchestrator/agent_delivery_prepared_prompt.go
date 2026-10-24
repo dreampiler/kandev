@@ -48,6 +48,7 @@ func (s *Service) dispatchPreparedPrompt(
 	ctx context.Context, taskID string, session *models.TaskSession, executionID, prompt string,
 	attachments []v1.MessageAttachment, dispatchOnly bool, options promptTaskOptions, submissionID string,
 	validateAdmission func() error, onDispatched func(),
+	guard *lockedCancelInFlightGuard,
 	admissionObserved ...*atomic.Bool,
 ) (*executor.PromptResult, *agentDeliverySubmissionRuntime, error) {
 	var delivery *agentDeliverySubmissionRuntime
@@ -77,7 +78,8 @@ func (s *Service) dispatchPreparedPrompt(
 	}
 	result, execErr := s.executor.PromptWithAdmissionCallbackAndSubmissionID(
 		ctx, taskID, session.ID, prompt, attachments, dispatchOnly,
-		beforeAdmission, onDispatched, submissionID, session,
+		beforeAdmission, onDispatched, submissionID,
+		s.guardedPassthroughRunning(ctx, session.ID, guard), session,
 	)
 	return result, delivery, execErr
 }

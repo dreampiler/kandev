@@ -927,5 +927,8 @@
   "archivedData.schedule": "Kandev 執行期間每 24 小時檢查一次。",
   "archivedData.firstRun": "首次執行在備份準備完成後開始。",
   "archivedData.analysisDetails": "分析詳情",
-  "archivedData.runDetails": "執行詳情"
+  "archivedData.runDetails": "執行詳情",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "移交已結束主工作階段的佇列",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "任務的主工作階段失敗、取消或完成時，將其排隊訊息移交給新的主工作階段。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "排隊訊息可能會被投遞到與最初目標不同的工作階段。若要讓每條排隊訊息保留在原工作階段中，請保持關閉。"
 }

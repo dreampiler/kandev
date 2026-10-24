@@ -43,7 +43,8 @@ snapshots, and repair of sessions that already failed.
    previous model nor the previous mode; explicit overrides remain.
 2. A workflow step's declared session mode is restored after the switch.
 3. A same-candidate retry keeps its runtime settings.
-4. A late mode event from the previous candidate does not restore its mode.
+4. A late mode or models event from the previous candidate does not restore its
+   mode or model.
 5. A switch against a changed session revision is rejected.
 
 ## Verification

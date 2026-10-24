@@ -9,6 +9,7 @@ import (
 const (
 	MaxPeerReportBatchEntries = 8
 	MaxPeerReportBatchBytes   = 256 * 1024
+	metadataPeerReportBatch   = "peer_report_batch"
 )
 
 // IsOrdinaryPeerReport excludes instructions and deliveries whose individual
@@ -33,6 +34,9 @@ func IsOrdinaryPeerReport(message *QueuedMessage) bool {
 }
 
 func hasBatchSeparableMetadata(message *QueuedMessage) bool {
+	if composed, _ := message.Metadata[metadataPeerReportBatch].(bool); composed {
+		return true
+	}
 	for _, key := range []string{MetadataEntityReferences, MetadataContextFiles} {
 		if value, ok := message.Metadata[key]; ok && value != nil {
 			return true
@@ -62,6 +66,7 @@ func ComposePeerReportBatch(batch []*QueuedMessage) *QueuedMessage {
 	for key, value := range batch[0].Metadata {
 		leader.Metadata[key] = value
 	}
+	leader.Metadata[metadataPeerReportBatch] = true
 	var composed strings.Builder
 	for index, entry := range batch {
 		if index > 0 {

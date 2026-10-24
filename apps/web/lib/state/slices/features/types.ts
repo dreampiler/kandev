@@ -33,6 +33,7 @@ export const defaultFeatureFlags = {
   autoContinueFromHistory: false,
   autoRetryUnsentRequests: false,
   replacedSessionReclaim: false,
+  terminalPrimaryQueueHandoff: false,
   agentBackgroundWork: false,
   officeAgentErrorSessionVerdict: false,
 } as const;

@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // ErrInferenceAgentIDRequired is returned when ExecuteInferencePrompt is called
@@ -121,7 +122,11 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
-	flags, prefix, env, err := utility.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
+	flags, prefix, _, err := utility.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
+	if err != nil {
+		return nil, err
+	}
+	env, err := m.ResolveUtilityProfileEnvironment(ctx, agentName, profile.EnvVars)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +140,7 @@ func (m *Manager) ExecuteInferenceProfilePrompt(ctx context.Context, sessionID, 
 		InferenceConfig: &utility.InferenceConfigDTO{
 			Protocol: cfg.Protocol,
 			Command:  cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath,
-			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix,
+			Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix),
 			ProviderGatewayAuth: gatewayAuth, OperatorDefined: cfg.OperatorDefined,
 		},
 	}, profileID)

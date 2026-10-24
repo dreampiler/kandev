@@ -57,9 +57,10 @@ rule IDs.
 
 ## Context-length producer/consumer follow-up
 
-The results below are the standalone upstream delivery's checks. In this tree,
-the named producer already exists; integration changes only its exact consumer
-and preserves the existing catalogue and other phase behavior.
+The results below are the standalone upstream delivery's checks. This tree
+already has the named producer and exact consumer; current-head integration
+restores only the producer's prompt-send phase fence. Existing provider rules,
+typed-limit precedence and consumer safety conditions remain applicable.
 
 The completed scope and verification above are preserved. Add only the captured
 named context-length rule at prompt-send and its existing exact terminal-

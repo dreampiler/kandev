@@ -62,9 +62,10 @@ return to an earlier conversation.
   become primary.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.4:** An automatic promotion shall
   not move queued messages between sessions or change an explicit session
-  selection, except under the terminal-primary hand-off of
+  selection, except under the opt-in terminal-primary hand-off of
   AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5.
-- **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5:** When the primary role moves off
+- **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.5:** When
+  `features.terminalPrimaryQueueHandoff` is on and the primary role moves off
   a session in a terminal state, the messages still queued on that session
   shall move to the new primary through the existing queue transfer and drain
   only when the new primary's Auto-run allows it. The hand-off shall keep the
@@ -73,8 +74,8 @@ return to an earlier conversation.
   target when a resume attempt still owns the previous primary, when the
   previous primary is no longer terminal when the messages would move, or when
   the new primary has an open recovery block or an `action_required` dynamic
-  route. A live previous primary always keeps its queue. This fork runs the
-  hand-off without the upstream `features.terminalPrimaryQueueHandoff` flag.
+  route. A live previous primary always keeps its queue. The flag is off in
+  every shipped profile; while off, queued messages keep their session target.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.6:** When the
   `features.replacedSessionReclaim` flag is on and a session loses the primary
   role because the user explicitly promoted another session, Kandev shall stop

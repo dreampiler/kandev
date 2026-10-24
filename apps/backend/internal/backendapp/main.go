@@ -681,11 +681,13 @@ func startAgentInfrastructure(
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, err := provideLifecycleManager(
+		ctx,
 		cfg,
 		agentRuntimeAvailability,
 		log,
 		eventBus,
 		repos.AgentSettings,
+		services.Task,
 		agentRegistry,
 		repos.Secrets,
 		services.Task.TaskBaseBranches,
@@ -1231,6 +1233,7 @@ func startGatewayAndServe(
 		return ok
 	})
 	hostUtilityMgr.SetProfileResolver(pluginProfileResolver)
+	hostUtilityMgr.SetProfileEnvironmentResolver(lifecycleMgr.ResolveUtilityProfileEnvironment)
 	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	lifecycleMgr.SetProviderUsageLimitsEnabled(cfg.Features.ProviderUsageLimits)
@@ -2938,6 +2941,7 @@ func buildOfficeFeatureServices(
 		skillSvc, routineSvc, approvalSvc,
 		cfgLoader, cfgWriter,
 	)
+	dashboardSvc.SetWorkspaceLister(services.Task)
 	documentSvc := taskservice.NewDocumentService(taskRepo, log)
 	onboardingSvc := officeonboarding.NewOnboardingService(
 		repo, cfgLoader, cfgWriter, log,

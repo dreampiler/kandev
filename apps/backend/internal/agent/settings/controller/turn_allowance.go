@@ -22,6 +22,9 @@ func (c *Controller) GetProfileTurnAllowance(ctx context.Context, id string) (*d
 	if !ok {
 		return nil, ErrProviderUsageDisabled
 	}
+	if err := c.requireTurnAllowanceProfile(ctx, id); err != nil {
+		return nil, err
+	}
 	return provider.GetProfileTurnAllowance(ctx, id)
 }
 
@@ -30,5 +33,22 @@ func (c *Controller) PatchProfileTurnAllowance(ctx context.Context, id string, p
 	if !ok {
 		return nil, ErrProviderUsageDisabled
 	}
+	if err := c.requireTurnAllowanceProfile(ctx, id); err != nil {
+		return nil, err
+	}
 	return provider.PatchProfileTurnAllowance(ctx, id, patch)
+}
+
+func (c *Controller) requireTurnAllowanceProfile(ctx context.Context, id string) error {
+	profile, err := c.repo.GetAgentProfile(ctx, id)
+	if err != nil {
+		if isProfileNotFoundErr(err) {
+			return ErrAgentProfileNotFound
+		}
+		return err
+	}
+	if profile == nil || profile.DeletedAt != nil || profile.WorkspaceID != "" {
+		return ErrAgentProfileNotFound
+	}
+	return nil
 }
