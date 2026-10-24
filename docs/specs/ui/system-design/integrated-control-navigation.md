@@ -8,6 +8,7 @@ requirements:
   - REQ-UI-INTEGRATED-CONTROL-001
   - REQ-UI-INTEGRATED-CONTROL-002
   - REQ-UI-INTEGRATED-CONTROL-003
+  - REQ-UI-INTEGRATED-CONTROL-004
 ---
 
 # Integrated control navigation design
