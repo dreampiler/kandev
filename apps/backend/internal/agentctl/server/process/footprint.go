@@ -55,6 +55,10 @@ func (m *Manager) ownedFootprint() ProcessFootprint {
 // read-only and never becomes a precondition for teardown: a failed or empty
 // measurement changes nothing about whether a stop proceeds.
 func (m *Manager) OwnedFootprint() ProcessFootprint {
+	if !m.startMu.TryLock() {
+		return ProcessFootprint{UnreadableProcesses: 1}
+	}
+	defer m.startMu.Unlock()
 	if !m.mu.TryLock() {
 		return ProcessFootprint{UnreadableProcesses: 1}
 	}

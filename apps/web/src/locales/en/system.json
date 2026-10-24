@@ -927,5 +927,8 @@
   "archivedData.schedule": "Checks every 24 hours while Kandev is running.",
   "archivedData.firstRun": "First run starts after backup preparation.",
   "archivedData.analysisDetails": "Analysis details",
-  "archivedData.runDetails": "Run details"
+  "archivedData.runDetails": "Run details",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "Hand off queues of finished primary sessions",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "When a task's primary session fails, is cancelled or completes, moves its queued messages to the session that becomes primary.",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "Queued messages can be delivered to a different session than the one they were queued for. Leave it off to keep every queued message on its original session."
 }

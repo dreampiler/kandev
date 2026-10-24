@@ -1,7 +1,7 @@
 ---
 id: "01-reconcile-retained-checkout"
 title: "Reconcile a retained checkout at the fresh task worktree path"
-status: in-progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -22,6 +22,11 @@ system_design:
 ---
 
 # Task 01: Reconcile retained checkout
+
+This historical work order is superseded by
+[the PR #4722 reuse work order](../retained-checkout-preparation/task-01-implementation.md).
+Its retirement behavior and earlier validation describe the previous
+implementation. The current requirement preserves eligible assigned checkouts.
 
 ## Summary
 

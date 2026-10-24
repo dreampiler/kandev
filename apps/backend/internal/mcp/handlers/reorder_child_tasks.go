@@ -31,12 +31,12 @@ const (
 
 // ChildTaskReorderService is the task-service surface reorder_child_tasks_kandev
 // needs. The MCP layer owns the direct-parent authorization; the step reorder
-// itself, its workflow-scope check, and the task.reordered event stay in
-// ReorderStepTasks.
+// itself, its workflow-scope check, and the task.reordered event stay in the
+// shared step reorder path with transactional child-relation checks.
 type ChildTaskReorderService interface {
 	GetTask(ctx context.Context, taskID string) (*models.Task, error)
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
-	ReorderStepTasks(ctx context.Context, stepID, band string, orderedTaskIDs []string) (*service.ReorderStepTasksResult, error)
+	ReorderChildStepTasks(context.Context, string, string, []string, models.ChildTaskOrderScope) (*service.ReorderStepTasksResult, error)
 }
 
 type reorderChildTasksRequest struct {
@@ -207,7 +207,9 @@ func applyChildReorder(
 		if failure != nil {
 			return nil, failure
 		}
-		result, err := reorderer.ReorderStepTasks(ctx, target.stepID, target.band, bandIDs)
+		result, err := reorderer.ReorderChildStepTasks(ctx, target.stepID, target.band, bandIDs, models.ChildTaskOrderScope{
+			ParentTaskID: target.parentID, WorkspaceID: target.workspaceID, TaskIDs: req.OrderedTaskIDs,
+		})
 		if err == nil {
 			return result, nil
 		}
@@ -224,6 +226,8 @@ func applyChildReorder(
 
 func childReorderServiceFailure(err error) *childReorderFailure {
 	switch {
+	case errors.Is(err, repoerrors.ErrTaskParentMismatch):
+		return &childReorderFailure{ws.ErrorCodeForbidden, "a named task is no longer your direct child in this workspace"}
 	case errors.Is(err, repoerrors.ErrStepChanged):
 		return &childReorderFailure{ws.ErrorCodeConflict,
 			"the step's task order changed while reordering; read it again and retry"}

@@ -141,6 +141,15 @@ func (m *Manager) Create(ctx context.Context, req CreateRequest) (*Worktree, err
 		}
 		return wt, err
 	}
+	if wt, handled, err := m.tryReuseRetainedTaskCheckout(ctx, req); handled {
+		if err == nil {
+			err = gitcheckout.Check(wt.Path, req.CheckoutOptions)
+			if err == nil {
+				err = m.configureContributionDestination(ctx, req.RepositoryPath, wt.Path, wt.Branch, req.ContributionDestination)
+			}
+		}
+		return wt, err
+	}
 	if err := m.refreshRepositoryForMaterialization(ctx, &req); err != nil {
 		return nil, err
 	}
@@ -926,7 +935,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		}
 	}
 
-	worktreeID, branchName, err := m.addFreshWorktreeForBranch(ctx, checkoutMode, worktreePath, branchName, startPoint, baseRef)
+	worktreeID, branchName, err := m.addWorktreeForBranch(ctx, checkoutMode, worktreePath, branchName, startPoint, baseRef)
 	if err != nil {
 		return nil, err
 	}

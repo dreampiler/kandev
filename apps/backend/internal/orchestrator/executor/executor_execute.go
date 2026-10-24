@@ -1332,6 +1332,22 @@ func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
 	return val.(*sync.Mutex)
 }
 
+// WithSessionOwnership serializes an ownership check and its action with
+// the session's launch, resume, and stop operations.
+func (e *Executor) WithSessionOwnership(sessionID string, fn func()) {
+	if fn == nil {
+		return
+	}
+	if sessionID == "" {
+		fn()
+		return
+	}
+	lock := e.getSessionLock(sessionID)
+	lock.Lock()
+	defer lock.Unlock()
+	fn()
+}
+
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, executorType string, env map[string]string) map[string]string {
 	result, _ := e.applyPreferredShellEnvWithStatus(ctx, executorType, env)
 	return result

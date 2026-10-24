@@ -11,11 +11,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// enableTerminalPrimaryQueueHandoff starts the service-owned worker lifetime
-// that production Start creates, and joins it when the test ends. The fork
-// runs the hand-off unconditionally, so there is no flag to set.
+// enableTerminalPrimaryQueueHandoff also starts the service-owned worker
+// lifetime that production Start creates, and joins it when the test ends.
 func enableTerminalPrimaryQueueHandoff(t *testing.T, svc *Service) *Service {
 	t.Helper()
+	svc.config.TerminalPrimaryQueueHandoff = true
 	svc.resetParkedSamplingWorkers()
 	t.Cleanup(svc.stopParkedSamplingLoops)
 	return svc
@@ -94,6 +94,24 @@ func TestPrimaryChoiceKeepsQueueOfLiveSession(t *testing.T) {
 
 	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, primaryStoppedID))
 	require.Empty(t, queuedContents(t, svc, "session-next"))
+}
+
+// With the flag off (every shipped profile), queued messages keep their
+// explicit session target.
+func TestPrimaryPromotionKeepsTerminalSessionQueueByDefault(t *testing.T) {
+	svc, repo := newPrimaryPromotionFixture(t, "",
+		&models.TaskSession{ID: "session-live", State: models.TaskSessionStateRunning},
+	)
+	ctx := context.Background()
+	_, err := svc.messageQueue.QueueMessage(ctx, primaryStoppedID, primaryTaskID, "follow-up", "", "user", false, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, primaryStoppedID, models.TaskSessionStateFailed, ""))
+	svc.maybePromotePrimary(ctx, primaryTaskID, primaryStoppedID, models.TaskSessionStateFailed)
+
+	require.Equal(t, "session-live", primarySessionID(t, repo))
+	require.Equal(t, []string{"follow-up"}, queuedContents(t, svc, primaryStoppedID))
+	require.Empty(t, queuedContents(t, svc, "session-live"))
 }
 
 // Promotion runs inside the stopping session's queue admission. A receiver whose

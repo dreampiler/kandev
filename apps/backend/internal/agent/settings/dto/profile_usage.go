@@ -8,6 +8,7 @@ type AgentProfileUsageDTO struct {
 	ProfileID    string                       `json:"profile_id"`
 	ModelID      string                       `json:"model_id"`
 	State        string                       `json:"state"`
+	Stale        bool                         `json:"stale,omitempty"`
 	Reason       string                       `json:"reason,omitempty"`
 	Status       int                          `json:"status,omitempty"`
 	Source       string                       `json:"source"`

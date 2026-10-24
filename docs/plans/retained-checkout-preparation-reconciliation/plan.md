@@ -1,6 +1,6 @@
 ---
 created: 2026-10-13
-status: in-progress
+status: done
 requirements:
   - REQ-AGENTS-RETAINED-CHECKOUT-001
 system_design:
@@ -9,6 +9,12 @@ legacy_specs: []
 ---
 
 # Implementation plan: Retained checkout preparation reconciliation
+
+This historical retirement implementation is superseded by
+[retained checkout reuse](../retained-checkout-preparation/plan.md), integrated
+from PR #4722. Preparation now preserves and reuses an eligible assigned
+checkout through normal registration instead of retiring it. The original
+results below describe the earlier implementation, not the current contract.
 
 ## Overview
 

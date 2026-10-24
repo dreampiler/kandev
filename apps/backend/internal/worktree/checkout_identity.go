@@ -8,18 +8,6 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 )
 
-// checkoutMatchesRepositoryIdentity reports whether the checkout at
-// checkoutPath belongs to the repository at repositoryPath. It compares the
-// filesystem identity of the two Git common directories with os.SameFile, the
-// same evidence validateLocalRepositoryWorkspace uses, so a structurally
-// healthy checkout of an unrelated (or moved/recloned) repository is never
-// reused as this repository's workspace. A missing or unresolvable common
-// directory fails closed.
-func checkoutMatchesRepositoryIdentity(checkoutPath, repositoryPath string) bool {
-	matches, _ := checkoutIdentityMatches(checkoutPath, repositoryPath)
-	return matches
-}
-
 // checkoutIdentityMatches reports whether the checkout at checkoutPath and the
 // checkout or repository at otherPath share a Git common directory. resolved is
 // false when either common directory cannot be resolved, so a caller can fail

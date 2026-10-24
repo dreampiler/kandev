@@ -107,6 +107,7 @@ func provideOrchestrator(
 	serviceCfg.AutoContinueFromHistory = cfg != nil && cfg.Features.AutoContinueFromHistory
 	serviceCfg.AutoRetryUnsentRequests = cfg != nil && cfg.Features.AutoRetryUnsentRequests
 	serviceCfg.ReplacedSessionReclaim = cfg != nil && cfg.Features.ReplacedSessionReclaim
+	serviceCfg.TerminalPrimaryQueueHandoff = cfg != nil && cfg.Features.TerminalPrimaryQueueHandoff
 	sessionCapacityResolution, err := resolveSessionCapacityWithStore(
 		settingsStore, sessionCapacityEnvironment, log,
 	)
@@ -860,13 +861,14 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 		})
 	}
 	result, err := a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
-		WorkspaceID:    req.WorkspaceID,
-		WorkflowID:     req.WorkflowID,
-		WorkflowStepID: req.WorkflowStepID,
-		Title:          req.Title,
-		Description:    req.Description,
-		Metadata:       req.Metadata,
-		Repositories:   repos,
+		WorkspaceID:            req.WorkspaceID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         req.WorkflowStepID,
+		Title:                  req.Title,
+		Description:            req.Description,
+		Metadata:               req.Metadata,
+		Repositories:           repos,
+		ExplicitAgentProfileID: req.AgentProfileID,
 	})
 	if err != nil {
 		return nil, err

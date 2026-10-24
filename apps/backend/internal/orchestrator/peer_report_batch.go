@@ -19,6 +19,7 @@ func (s *Service) reserveAndDispatchQueueHead(
 func (s *Service) reserveAndDispatchQueueHeadWithCompletion(
 	ctx context.Context, identity messagequeue.QueueSessionIdentity, completionEffect *models.AgentDeliveryEffect,
 ) (bool, bool, error) {
+	ctx = s.queuedRecoveryContext(ctx, nil)
 	s.pruneStaleChildStallAlerts(ctx, identity)
 	batch, autoRun, err := s.messageQueue.ReservePeerReportBatchWithAutoRunForSession(ctx, identity)
 	if err != nil || !autoRun {
@@ -29,6 +30,8 @@ func (s *Service) reserveAndDispatchQueueHeadWithCompletion(
 		return false, autoRun, nil
 	}
 	if err := s.settlePeerReportPredecessor(ctx, identity, batch[0], completionEffect); err != nil {
+		s.logger.Warn("failed to settle delivery before queued successor",
+			zap.String("session_id", identity.SessionID), zap.Error(err))
 		s.requeuePeerReportBatch(ctx, identity, batch)
 		return false, true, err
 	}
@@ -87,6 +90,11 @@ func (s *Service) peerReportBatchStillDispatchable(
 func (s *Service) requeuePeerReportBatch(
 	ctx context.Context, identity messagequeue.QueueSessionIdentity, batch []*messagequeue.QueuedMessage,
 ) {
+	if len(batch) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendNowClaimRecoveryTimeout)
+	defer cancel()
 	for index := len(batch) - 1; index >= 0; index-- {
 		entry := batch[index]
 		s.requeueMessageForReservation(ctx, &queuedDispatchReservation{identity: identity}, entry, entry.QueuedBy)

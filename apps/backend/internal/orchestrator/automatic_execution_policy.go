@@ -205,10 +205,10 @@ func (s *Service) automaticHistoryAttemptAllowed(ctx context.Context, sessionID,
 	if previous != nil {
 		return false, nil
 	}
-	if !s.idleQueueDrain.due(sessionID, time.Now()) {
+	if !s.automaticHistoryRetries.due(sessionID, time.Now()) {
 		return false, nil
 	}
-	s.idleQueueDrain.attempted(sessionID, time.Now())
+	s.automaticHistoryRetries.attempted(sessionID, time.Now())
 	return true, nil
 }
 

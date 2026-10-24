@@ -927,5 +927,8 @@
   "archivedData.schedule": "Kandev 运行期间每 24 小时检查一次。",
   "archivedData.firstRun": "首次运行在备份准备完成后开始。",
   "archivedData.analysisDetails": "分析详情",
-  "archivedData.runDetails": "运行详情"
+  "archivedData.runDetails": "运行详情",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.label": "移交已结束主会话的队列",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.description": "任务的主会话失败、取消或完成时，将其排队消息移交给新的主会话。",
+  "featureToggleFlag.features.terminalPrimaryQueueHandoff.riskDescription": "排队消息可能会被投递到与最初目标不同的会话。若要让每条排队消息保留在原会话中，请保持关闭。"
 }

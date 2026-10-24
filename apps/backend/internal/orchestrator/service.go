@@ -85,6 +85,9 @@ type ServiceConfig struct {
 	// replaced as primary (PromotePrimarySession), once that session has
 	// settled.
 	ReplacedSessionReclaim bool
+	// TerminalPrimaryQueueHandoff moves a terminal primary session's queue to
+	// the session that takes over the primary role.
+	TerminalPrimaryQueueHandoff bool
 	// SessionCapacity is the effective instance-wide limit for automatic
 	// session launches. Zero disables the ceiling.
 	SessionCapacity               int
@@ -1304,8 +1307,9 @@ type Service struct {
 	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
 	// Nil-safe like idleReaper: callers that don't need it leave it nil and
 	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
-	ceilingSweeper *ceilingSweeper
-	idleQueueDrain idleQueueDrainBackoff
+	ceilingSweeper          *ceilingSweeper
+	idleQueueDrain          idleQueueDrainBackoff
+	automaticHistoryRetries automaticHistoryBackoff
 
 	// launchCredentialReminter re-mints short-lived Office runtime
 	// credentials immediately before a launch that carries Office run
