@@ -52,6 +52,11 @@ func (c *Client) InferencePrompt(ctx context.Context, req *utility.PromptRequest
 		return nil, fmt.Errorf("inference prompt request is nil")
 	}
 	request := *req
+	if req.InferenceConfig != nil {
+		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
+			return nil, err
+		}
+	}
 	var result utility.PromptResponse
 	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/prompt", "utility prompt", &request, &result); err != nil {
 		failure := &InferenceAttemptError{AttemptID: request.AttemptID, Cause: err}
@@ -92,6 +97,11 @@ func (c *Client) matchesInferenceErrorAttempt(id string, status *utility.Attempt
 // Probe runs an ACP handshake (initialize + session/new) against the agent
 // to discover its capabilities, auth methods, models, and modes.
 func (c *Client) Probe(ctx context.Context, req *utility.ProbeRequest) (*utility.ProbeResponse, error) {
+	if req.InferenceConfig != nil {
+		if err := c.requireLaunchWrapper(ctx, req.InferenceConfig.LaunchWrapper); err != nil {
+			return nil, err
+		}
+	}
 	var result utility.ProbeResponse
 	if err := c.doLongRunningJSON(ctx, "/api/v1/inference/probe", "probe", req, &result); err != nil {
 		return nil, err

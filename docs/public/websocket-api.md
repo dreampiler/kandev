@@ -316,6 +316,10 @@ An ordinary workflow retry is a separate operation with its usual admission
 checks. Automatic local-source repair remains unsupported, and external Git
 clean/process filters still require manual recovery.
 
+After a completed positive repair, ordinary Resume and additional-session launch allow a later branch switch or rename when the recorded current branch matches the same registered Git worktree. Later commits and file edits remain intact, and the original repair receipt remains unchanged. Existing receipts support this check without a migration.
+
+Use ordinary Resume after a branch change. An explicit repair retry with the original key still requires the original request identity. Incomplete or failed repair evidence still blocks admission, and workspace recovery does not clear an independent `unknown_prompt_outcome` block or replay its prompt.
+
 Invalid input returns a validation error. Ambiguous inventory, a path or branch mismatch, a symlinked checkout, a deleted or failed row, a local repository without the explicit metadata-only option, a remote-only executor, revision drift, or a concurrent writer returns a conflict without rematerializing, resetting, cleaning, or deleting the workspace. Resolve those cases manually after preserving the checkout.
 
 Every task-session response includes immutable `queue_incarnation_id`. Kandev generates a new value when a session is created, including when a deleted textual session ID is reused. Queue clients must retain this value with the task and session IDs rather than looking up a replacement after starting an operation.
