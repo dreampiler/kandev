@@ -32,6 +32,7 @@ jobs:
             ci
             test
             release
+            build
           # Require lowercase subject
           subjectPattern: ^[a-z].*$
           subjectPatternError: |

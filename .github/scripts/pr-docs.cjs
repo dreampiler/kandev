@@ -8,12 +8,13 @@ const { GitHeadReader } = require('./pr-docs-git.cjs');
 const POSIX_PATH = path.posix;
 const WORK_ORDER_PATTERN = /^docs\/plans\/[^/]+\/task-\d{2}-[^/]+\.md$/;
 const LOCK_BASENAMES = new Set([
-  'pnpm-lock.yaml',
-  'package-lock.json',
-  'yarn.lock',
-  'go.sum',
-  'Cargo.lock',
-]);
+    'pnpm-lock.yaml',
+    'package-lock.json',
+    'yarn.lock',
+    'go.mod',
+    'go.sum',
+    'Cargo.lock',
+  ]);
 const SCRIPT_TEST_EXTENSIONS = new Set([
   'cjs',
   'cts',
