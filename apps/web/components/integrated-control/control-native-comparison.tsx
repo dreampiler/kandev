@@ -19,6 +19,7 @@ import {
   type TaskStage,
 } from "./control-stages";
 import { numberCellClass } from "./control-table";
+import { ControlWaitReasons } from "./control-wait-reasons-panel";
 
 type NativeRow = { workspace: ControlWorkspace } & ControlRead<NativeDashboard>;
 const UNKNOWN_KEY = "common:unknown";
@@ -244,6 +245,7 @@ export function ControlNativeComparison({
       <h2 className="text-sm font-semibold">{t("sidebar:controlSummary.compare.title")}</h2>
       <NativeComparisonTable rows={rows} kind="tasks" />
       <NativeComparisonTable rows={rows} kind="sessions" />
+      <ControlWaitReasons rows={rows} />
       {rows.map((row) => (
         <ReadState key={row.workspace.id} row={row} />
       ))}

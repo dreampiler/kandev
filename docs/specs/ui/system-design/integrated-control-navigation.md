@@ -221,3 +221,7 @@ table has running/failed sessions and unconsumed messages. Raw step names/counts
 remain in native `details` disclosures; opening them does not navigate the row.
 The existing workspace/coordinator display remains the owner of coordinator
 information; this slice does not infer conversation state or execution health.
+
+## Recorded waiting reasons
+
+`REQ-UI-INTEGRATED-CONTROL-004` reuses the rows `useNativeDashboards` already returned for `REQ-UI-INTEGRATED-CONTROL-003`; it adds no read. `control-wait-reasons.ts` derives four task counts: `waiting_input_tasks`; recorded `BLOCKED` state from `task_stages` (falling back to the state histogram); `stage_type=approval`; and `stage_type=hold`. Terminal states (`COMPLETED`, `CANCELLED`) and `FAILED` are excluded from the stage reasons, and `BLOCKED` takes precedence over the stage reasons, so one task is not counted twice across them. An invalid recorded count makes that reason unknown instead of a partial sum. Input wait and the stage reasons stay independent, so the panel shows no total. Missing stage groups make approval/hold unknown, never zero. `control-wait-reasons-panel.tsx` mounts after the two comparison tables and before the read-state lines, links each workspace to its control workspace view, uses a two-column phone wrap with 44px links, and labels every figure through `sidebar:controlSummary.waitReasons.*`. No capacity or slot wait is inferred; it has no recorded read here.

@@ -268,12 +268,14 @@ function useWorkspaceCompareTable(
           );
         },
       },
-      ...figures.map((column) => ({
-        accessorKey: column.field,
-        size: 80,
-        header: t(column.label),
-        cell: ({ getValue }) => formatNumber(getValue<number>()),
-      })),
+      ...figures.map(
+        (column): ColumnDef<WorkspaceAggregateEntry> => ({
+          accessorKey: column.field,
+          size: 80,
+          header: t(column.label),
+          cell: ({ getValue }) => formatNumber(getValue<number>()),
+        }),
+      ),
     ],
     [t, figures],
   );
