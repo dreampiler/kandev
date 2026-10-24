@@ -80,3 +80,13 @@ Korean, live locale switches and the pseudo fallback, plus the four existing
 aggregate dashboard cases. Zero styling, raw sums and navigation remain intact.
 Normal hooks must pass before publication. Existing Office/Native reads,
 feature flags, history and API responses are unchanged.
+
+Upstream generated-catalog corrections in zh-hk, zh-tw and pseudo are retained
+alongside this PR's added keys. A key-level three-way comparison found no
+competing value changes. This resolves textual merge conflicts without importing
+backend changes or removing either branch's translations.
+
+The full existing locale check also exposed a missing plural contract for the
+Native raw-stage disclosure label. Its count interpolation now has _one/_other
+forms in all catalogs, preserving the current wording and raw-stage data. The
+checker and count semantics are unchanged.
