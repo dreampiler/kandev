@@ -64,3 +64,19 @@ fixtures remain outside regular collection and are removed after delivery.
 - `cd apps/web && pnpm run i18n:check`
 - `cd apps/web && pnpm e2e:run --project chromium tests/coordinator/control-aggregate-dashboard.spec.ts`
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/coordinator/mobile-control-aggregate-dashboard.spec.ts`
+
+## Number formatting follow-up
+
+Office aggregate facts, comparison rows and totals use the existing shared
+formatNumber helper for the active locale, including both numbers in the
+working-agent ratio. The ratio keeps its mathematical slash and existing
+localized label; no new prose, catalog key or alternate counting is introduced.
+Raw values still drive sums, ordering, zero styling and workspace navigation.
+The pseudo locale reuses the helper's existing English numeric fallback.
+
+Disposable UI checks reproduced ungrouped numbers on the original source.
+The candidate passed both disposable UI checks, covering English, Portuguese,
+Korean, live locale switches and the pseudo fallback, plus the four existing
+aggregate dashboard cases. Zero styling, raw sums and navigation remain intact.
+Normal hooks must pass before publication. Existing Office/Native reads,
+feature flags, history and API responses are unchanged.

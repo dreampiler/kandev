@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@kandev/ui/table";
 import Link from "@/components/routing/app-link";
+import { formatNumber } from "@/lib/i18n/formats";
 import type { WorkspaceAggregateEntry } from "@/lib/api/domains/office-extended-api";
 import type { ControlAggregateRead } from "@/hooks/domains/coordinator/use-control-aggregate";
 import {
@@ -105,7 +106,7 @@ function ControlStallBand({ totals }: { totals: AggregateTotals }) {
         />
         <BandFact
           label={t("sidebar:integratedControl.aggregate.workingAgents")}
-          value={`${totals.runningAgents} / ${totals.agents}`}
+          value={`${formatNumber(totals.runningAgents)} / ${formatNumber(totals.agents)}`}
         />
       </dl>
     </section>
@@ -116,7 +117,9 @@ function BandFact({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-xl font-semibold tabular-nums">{value}</dd>
+      <dd className="text-xl font-semibold tabular-nums">
+        {typeof value === "number" ? formatNumber(value) : value}
+      </dd>
     </div>
   );
 }
@@ -269,6 +272,7 @@ function useWorkspaceCompareTable(
         accessorKey: column.field,
         size: 80,
         header: t(column.label),
+        cell: ({ getValue }) => formatNumber(getValue<number>()),
       })),
     ],
     [t, figures],
@@ -384,7 +388,7 @@ function WorkspaceCompareTable({
                 key={column.field}
                 className={numberCellClass(totals[column.total], "px-2 py-2")}
               >
-                {totals[column.total]}
+                {formatNumber(totals[column.total])}
               </TableCell>
             ))}
           </TableRow>
