@@ -4698,6 +4698,12 @@ func sessionSettingsEventIsStale(
 	if rejected, _ := session.Metadata[rejectedRuntimeSettingsExecution].(string); rejected != "" && rejected == identity.ExecutionID {
 		return true
 	}
+	// A dynamic session that switched concrete candidates must not accept
+	// settings reported by the previous candidate's execution.
+	if identity.ExecutionProfileID != "" && session.ExecutionProfileID != "" &&
+		identity.ExecutionProfileID != session.ExecutionProfileID {
+		return true
+	}
 	snapshot, ok := lifecycle.LoadSessionModelsSnapshot(session.Metadata[models.SessionMetaKeyACPModelState])
 	if !ok {
 		return false
