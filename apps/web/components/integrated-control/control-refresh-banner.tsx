@@ -33,14 +33,19 @@ export function ControlRefreshBanner() {
   const failure = control?.failure;
   const data = control?.data;
   if (!failure) {
-    if (!data || !hasPartialControlData(data)) return null;
+    const staleAggregate = Boolean(control?.aggregate.error && control.aggregate.data);
+    if (!staleAggregate && (!data || !hasPartialControlData(data))) return null;
     return (
       <p
         role="status"
         className="shrink-0 border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-800 dark:text-amber-200"
         data-testid="control-refresh-banner"
       >
-        {t("sidebar:integratedControl.partialData")}
+        {t(
+          staleAggregate
+            ? "sidebar:integratedControl.aggregate.staleError"
+            : "sidebar:integratedControl.partialData",
+        )}
       </p>
     );
   }
