@@ -193,16 +193,17 @@ type LaunchSessionRequest struct {
 	// selector-backed choice. It bypasses workflow-step profile resolution for
 	// IntentStart only; IntentStartCreated keeps its existing profile resolution
 	// behavior.
-	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	PlanMode          bool   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string `json:"workflow_step_id,omitempty"`
-	Priority          string `json:"priority,omitempty"`
-	LaunchWorkspace   bool   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool   `json:"skip_message_record,omitempty"`
-	AutoStart         bool   `json:"auto_start,omitempty"`
+	ProfileExplicit   bool     `json:"profile_explicit,omitempty"`
+	ExecutorID        string   `json:"executor_id,omitempty"`
+	ExecutorProfileID string   `json:"executor_profile_id,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	PlanMode          bool     `json:"plan_mode,omitempty"`
+	WorkflowStepID    string   `json:"workflow_step_id,omitempty"`
+	Priority          string   `json:"priority,omitempty"`
+	LaunchWorkspace   bool     `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool     `json:"skip_message_record,omitempty"`
+	AutoStart         bool     `json:"auto_start,omitempty"`
+	MCPServerIDs      []string `json:"mcp_server_ids,omitempty"`
 	// Automatic is server-owned provenance for unattended capacity admission.
 	Automatic bool `json:"-"`
 	// NoAgentLaunch marks a prepare request that must NEVER be upgraded into an
@@ -847,6 +848,9 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, sessionID, req.MCPServerIDs); err != nil {
+		return nil, err
+	}
 	return &LaunchSessionResponse{
 		Success:   true,
 		TaskID:    req.TaskID,
@@ -910,7 +914,12 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, autoStart, req.Attachments,
-		startTaskOptions{ProfileExplicit: req.ProfileExplicit, SpawnOrigin: req.SpawnOrigin, reusePreparedPrimary: req.reusePreparedPrimary},
+		startTaskOptions{
+			ProfileExplicit:      req.ProfileExplicit,
+			SpawnOrigin:          req.SpawnOrigin,
+			MCPServerIDs:         req.MCPServerIDs,
+			reusePreparedPrimary: req.reusePreparedPrimary,
+		},
 	)
 	if errors.Is(err, ErrCeilingLaunchDeferred) {
 		return s.deferredLaunchResponse(ctx, req, "")
@@ -986,6 +995,9 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 		options.skipTaskDescriptionFallback = true
 		options.promptAlreadyComposed = true
 		options.noInitialTurn = true
+	}
+	if err := s.applyMCPServerSelections(ctx, req.TaskID, req.SessionID, req.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	execution, err := s.startCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,

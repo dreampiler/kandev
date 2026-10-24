@@ -16,6 +16,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/common/ports"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -71,7 +72,8 @@ type AgentExecution struct {
 	WorkspaceID                     string
 	// ExecutorType preserves launch locality for features that must only access
 	// the backend user's host filesystem. Empty means locality is unknown.
-	ExecutorType string
+	ExecutorType  string
+	RepositoryIDs []string
 	// AgentProfileID is the concrete profile used by the running CLI. The
 	// historical name is retained inside lifecycle because profile resolution,
 	// MCP, env, and command construction all consume this value.
@@ -106,6 +108,7 @@ type AgentExecution struct {
 	DeliveryReplayCursor uint64
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	LaunchWrapper        launchwrapper.Spec   `json:"-"`
 	AgentArgs            []string             // Structured argv for AgentCommand
 	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
@@ -1955,6 +1958,13 @@ type BootMessageRequest struct {
 // McpConfigProvider returns MCP configuration for a given agent profile ID.
 type McpConfigProvider interface {
 	GetConfigByProfileID(ctx context.Context, profileID string) (*mcpconfig.ProfileConfig, error)
+}
+
+// MCPResolutionProvider is the typed effective-set boundary used when catalog
+// and scope-selection storage is available. Legacy providers remain supported
+// for unimported workspaces and focused test managers.
+type MCPResolutionProvider interface {
+	Resolve(context.Context, mcpconfig.ResolutionContext, mcpconfig.Policy) (*mcpconfig.EffectiveMCPResolution, error)
 }
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation

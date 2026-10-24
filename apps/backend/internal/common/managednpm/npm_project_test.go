@@ -1,4 +1,4 @@
-package managedruntime
+package managednpm
 
 import (
 	"os"
