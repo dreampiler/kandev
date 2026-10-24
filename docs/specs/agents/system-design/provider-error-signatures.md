@@ -74,11 +74,10 @@ rule ID. Rule IDs are unchanged.
 
 ## Context-length producer and consumer
 
-The standalone upstream delivery adds `provider.context_length_exceeded.v1`
-only at prompt-send, using the captured line-opening rejection signature and
-high-confidence runtime-error code. This integration already has that named
-producer in its provider catalogue and retains its existing phase behavior.
-Only the exact consumer below changes here. Existing structured/provider-specific
+The provider-neutral table adds `provider.context_length_exceeded.v1` for a
+line-opening context-window rejection, using the captured signature and
+high-confidence runtime-error code. Its matcher receives the phase and applies
+this one new rule only at prompt-send. Existing structured/provider-specific
 rules retain precedence; other neutral rules keep their matching and phases.
 
 `classifyKanbanFailure` keeps its existing diagnostic/evidence path. Within

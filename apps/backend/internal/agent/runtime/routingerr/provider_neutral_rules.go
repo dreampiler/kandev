@@ -64,10 +64,8 @@ var providerNeutralRules = []rule{
 		CodeProviderUnavailable,
 		ConfHigh,
 	),
-	// A model rejects a request whose input exceeds its context window. The code
-	// stays agent_runtime_error so the repeated-unclassified-failure route can
-	// still try a candidate with a larger context window; naming the rule only
-	// removes the failure from the anonymous phase default.
+	// Context rejection is a prompt result; startup and later phases retain
+	// their existing classification rather than gaining a new recovery route.
 	mustRule(
 		"provider.context_length_exceeded.v1",
 		`(?im)^\s*(?:(?:Internal\s+error|API\s+Error|AI_APICallError|Error):\s*)?(?:this\s+model'?s\s+)?maximum\s+context\s+length\s+is\s+\d+\s+tokens\b`,
@@ -82,11 +80,14 @@ var providerNeutralRules = []rule{
 	),
 }
 
-func matchProviderNeutralRules(text string) (*Error, bool) {
+func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
 		return nil, false
 	}
 	for _, r := range providerNeutralRules {
+		if r.id == "provider.context_length_exceeded.v1" && phase != PhasePromptSend {
+			continue
+		}
 		if r.pattern.MatchString(text) {
 			return &Error{
 				Code:           r.code,

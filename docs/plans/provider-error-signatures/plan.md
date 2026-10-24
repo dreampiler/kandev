@@ -52,8 +52,9 @@ signatures. See [task 01](task-01-match-provider-signatures.md).
 ## Context-length producer/consumer follow-up
 
 The verification below belongs to the standalone upstream delivery. This tree
-already contains the named producer, so integration adopts the exact consumer
-without replacing the existing provider catalogue or changing its other phases.
+already contains the named producer and exact consumer. Current-head integration
+restores the producer's prompt-send phase fence while preserving the existing
+provider catalogue, typed-limit priority and guarded consumer conditions.
 
 The original work above remains implemented. Criterion 001.7 adds only a named
 prompt-send context-length producer and its existing exact pre-result consumer.
