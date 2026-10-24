@@ -703,24 +703,8 @@ func (m *Manager) hydrateRecoveredTaskEnvironmentID(ctx context.Context, executi
 	return nil
 }
 
-// reDeriveRecoveredAgentIdentity implements AC-EXECUTORS-SURVIVAL-002.14's
-// last reconstruction-table row: agent identity, agent and continuation
-// commands and their arguments, and the history setting are re-derived from
-// the restored agent profile and the agent-type registry -- the same
-// computation an ordinary launch performs, never read from the adopted
-// instance, so a compromised or stale instance cannot tell the backend which
-// command to run for the session's next turn.
-//
-// Re-derivation reflects the profile and registry as they stand at recovery,
-// not as they stood before the restart (AC-EXECUTORS-SURVIVAL-002.3): a
-// profile edited or an agent type removed during the outage takes effect
-// exactly as it would on the session's next ordinary turn.
-//
-// getAgentConfigForExecution and buildFreshAgentCommand are the same
-// primitives an in-session context reset uses (manager_interaction.go's
-// prepareAgentRestart), reused as-is: both already consume nothing but
-// execution fields already restored by this point (AgentProfileID,
-// RuntimeName, metadata), with no launch-request-only dependency.
+// reDeriveRecoveredAgentIdentity derives child commands from the authorized
+// profile and registry. A retained wrapper comes from protected process state.
 func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution *AgentExecution) error {
 	agentConfig, err := m.getAgentConfigForExecution(execution)
 	if err != nil {
@@ -739,6 +723,10 @@ func (m *Manager) reDeriveRecoveredAgentIdentity(ctx context.Context, execution 
 	execution.ContinueCommand = commands.continue_
 	execution.AgentArgs = commands.args
 	execution.ContinueArgs = commands.continueArgs
+	execution.LaunchWrapper, err = recoveredLaunchWrapper(ctx, execution, commands.wrapper)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -813,7 +801,7 @@ func (m *Manager) stopUnreconstructableRecoveredInstance(ctx context.Context, ri
 		m.recoveryGuard.Release(ri.SessionID)
 		return
 	}
-	if err := backend.StopInstance(ctx, ri, true); err != nil {
+	if err := m.stopWorkspaceRuntime(ctx, backend, ri, true); err != nil {
 		m.logger.Warn("failed to stop unreconstructable recovered instance",
 			zap.String("instance_id", ri.InstanceID),
 			zap.String("session_id", ri.SessionID),
@@ -1007,7 +995,7 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 	if sessionID == "" || expectedExecutionID == "" {
 		return nil
 	}
-	_, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+	_, err := m.doSerializedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
 		execution, exists := m.executionStore.GetBySessionID(sessionID)
 		if !exists || execution == nil || execution.ID != expectedExecutionID {
 			return nil, nil
@@ -1025,6 +1013,12 @@ func (m *Manager) CleanupStaleExecutionBySessionIDIfCurrent(
 }
 
 func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExecution) error {
+	return m.cleanupStaleExecutionWithCheckpoint(ctx, execution, nil)
+}
+
+func (m *Manager) cleanupStaleExecutionWithCheckpoint(
+	ctx context.Context, execution *AgentExecution, checkpoint func(context.Context) error,
+) error {
 	if execution == nil {
 		return nil
 	}
@@ -1047,6 +1041,11 @@ func (m *Manager) cleanupStaleExecution(ctx context.Context, execution *AgentExe
 	if !retired {
 		if err := m.stopAgentViaBackend(ctx, execution.ID, execution, stopReasonStaleExecutionCleanup, false, false); err != nil {
 			return fmt.Errorf("stop stale runtime %s: %w", execution.ID, err)
+		}
+	}
+	if checkpoint != nil {
+		if err := checkpoint(ctx); err != nil {
+			return fmt.Errorf("checkpoint stopped runtime %s: %w", execution.ID, err)
 		}
 	}
 

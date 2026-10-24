@@ -83,8 +83,9 @@ feature flags, history and API responses are unchanged.
 
 Upstream generated-catalog corrections in zh-hk, zh-tw and pseudo are retained
 alongside this PR's added keys. A key-level three-way comparison found no
-competing value changes. This resolves textual merge conflicts without importing
-backend changes or removing either branch's translations.
+competing value changes. Current upstream is merged normally; the generated
+catalog conflicts retain both branches' values and all added keys. No ownership,
+counting or data-retention behavior is removed to obtain a clean merge.
 
 The full existing locale check also exposed a missing plural contract for the
 Native raw-stage disclosure label. Its count interpolation now has _one/_other

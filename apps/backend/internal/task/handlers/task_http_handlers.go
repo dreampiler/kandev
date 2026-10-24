@@ -1026,6 +1026,7 @@ type httpCreateTaskRequest struct {
 	Repositories           []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position               int                       `json:"position,omitempty"`
 	Metadata               map[string]interface{}    `json:"metadata,omitempty"`
+	MCPServerIDs           []string                  `json:"mcp_server_ids,omitempty"`
 	StartAgent             bool                      `json:"start_agent,omitempty"`
 	PrepareSession         bool                      `json:"prepare_session,omitempty"`
 	AgentProfileID         string                    `json:"agent_profile_id,omitempty"`
@@ -1262,6 +1263,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Repositories:                          convertTaskRepositories(body.Repositories != nil, repos),
 		Position:                              body.Position,
 		Metadata:                              metadata,
+		MCPServerIDs:                          body.MCPServerIDs,
 		DeferredLaunch:                        deferredLaunch,
 		RecordAgentProfileRecentUse:           true,
 		PlanMode:                              body.PlanMode,
@@ -2178,12 +2180,17 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
 	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
-	err := h.service.WithTaskDeleteConfirmation(
-		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, discardWorktreeChanges,
+	mode := models.WorkspaceCleanupMode(c.Query("workspace_cleanup"))
+	options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges, WorkspaceCleanup: mode, AllowUnverifiedWorkspaceChanges: strings.EqualFold(c.Query("allow_unverified_workspace_changes"), "true")}
+	deletedIDs := []string{taskID}
+	err := h.service.WithTaskDeleteConfirmationOptions(
+		deleteCtx, c.GetHeader(taskDeleteConfirmationHeader), taskID, cascade, options,
 		func() error {
-			options := service.DeleteTaskOptions{DiscardWorktreeChanges: discardWorktreeChanges}
 			if h.handoffSvc != nil {
-				_, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				out, err := h.handoffSvc.DeleteTaskTreeWithOptions(deleteCtx, taskID, cascade, options)
+				if out != nil {
+					deletedIDs = out.ArchivedTaskIDs
+				}
 				return err
 			}
 			return h.service.DeleteTaskWithOptions(deleteCtx, taskID, options)
@@ -2191,6 +2198,8 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrTaskDeletePreflightInvalid):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid workspace cleanup options"})
 		case errors.Is(err, service.ErrTaskDeleteConfirmationRequired):
 			c.JSON(http.StatusPreconditionRequired, gin.H{"error": "current task deletion preview is required"})
 		case errors.Is(err, service.ErrTaskDeleteConfirmationIdentity):
@@ -2201,6 +2210,10 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 			errors.Is(err, service.ErrTaskDeleteConfirmationMismatch):
 			c.JSON(http.StatusConflict, gin.H{"error": "task deletion preview is no longer current"})
 		case isCascadePostCommitError(err):
+			if mode == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+				c.JSON(http.StatusOK, h.service.CommittedTaskDeletionResult(deleteCtx, deletedIDs, options))
+				return
+			}
 			h.logger.Warn("task deleted but post-commit housekeeping failed",
 				zap.String("task_id", taskID), zap.Error(err))
 			c.JSON(http.StatusServiceUnavailable, gin.H{
@@ -2209,6 +2222,10 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 		default:
 			handleNotFound(c, h.logger, err, "task not deleted")
 		}
+		return
+	}
+	if mode == models.WorkspaceCleanupRetain || options.AllowUnverifiedWorkspaceChanges {
+		c.JSON(http.StatusOK, h.service.CommittedTaskDeletionResult(deleteCtx, deletedIDs, options))
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})

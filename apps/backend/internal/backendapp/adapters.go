@@ -1041,6 +1041,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) RecoverSilentRestoreCandidateStream(ctx context.Context, sessionID, executionID, nativeID string) error {
+	return a.mgr.RecoverSilentRestoreCandidateStream(ctx, sessionID, executionID, nativeID)
+}
+
 func (a *lifecycleAdapter) RecoverAgentPromptStreamWithIdentity(
 	ctx context.Context,
 	identity lifecycle.AgentDeliveryRecoveryIdentity,
@@ -1084,6 +1088,14 @@ func (a *lifecycleAdapter) MarkPassthroughRunning(sessionID string) error {
 	return a.mgr.MarkPassthroughRunning(sessionID)
 }
 
+func (a *lifecycleAdapter) IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID string) bool {
+	return a.mgr.IsLocalPassthroughReadyForResume(sessionID, executionID, attemptID)
+}
+
+func (a *lifecycleAdapter) MarkPassthroughRunningWithContext(ctx context.Context, sessionID string) error {
+	return a.mgr.MarkPassthroughRunningWithContext(ctx, sessionID)
+}
+
 func (a *lifecycleAdapter) PreparePassthroughRunning(sessionID string) (func(), error) {
 	return a.mgr.PreparePassthroughRunning(sessionID)
 }
@@ -1120,6 +1132,13 @@ func (a *lifecycleAdapter) CleanupStaleExecutionBySessionIDIfCurrent(
 func (a *lifecycleAdapter) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID, sessionID string) error {
 	_, err := a.mgr.EnsureWorkspaceExecutionForSession(ctx, taskID, sessionID)
 	return err
+}
+
+func (a *lifecycleAdapter) CleanupFailedRestoreIfCurrent(
+	ctx context.Context, sessionID, executionID string, updatedAt time.Time,
+	checkpoint func(context.Context) error,
+) error {
+	return a.mgr.CleanupFailedRestoreIfCurrent(ctx, sessionID, executionID, updatedAt, checkpoint)
 }
 
 func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error) {
