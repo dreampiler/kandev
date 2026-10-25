@@ -78,7 +78,7 @@ jobs:
         )
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     environment: opencode-review-trusted
     permissions:
       contents: read
@@ -169,7 +169,7 @@ jobs:
         uses: ./.trusted-actions/setup-opencode
 
       - name: Run OpenCode walkthrough
-        timeout-minutes: 16
+        timeout-minutes: 11
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           TRUSTED_SHA: ${{ github.workflow_sha }}
