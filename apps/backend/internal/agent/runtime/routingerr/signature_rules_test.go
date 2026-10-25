@@ -101,4 +101,21 @@ func TestClassify_ProviderLimitSignaturesStillClassify(t *testing.T) {
 			t.Fatalf("%s %q → %s (%s), want %s", tc.provider, tc.text, got.Code, got.ClassifierRule, tc.want)
 		}
 	}
+	// Also verify PhasePromptSend works for the new rate limit rule
+	promptSendCases := []struct {
+		provider string
+		text     string
+		want     Code
+	}{
+		{"opencode-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
+		{"claude-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
+		{"opencode-acp", "temporarily rate-limited upstream. Please retry shortly", CodeRateLimited},
+		{"claude-acp", "temporarily rate-limited upstream. Please retry shortly", CodeRateLimited},
+	}
+	for _, tc := range promptSendCases {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: tc.provider, Stderr: tc.text})
+		if got.Code != tc.want {
+			t.Fatalf("PhasePromptSend: %s %q → %s (%s), want %s", tc.provider, tc.text, got.Code, got.ClassifierRule, tc.want)
+		}
+	}
 }
