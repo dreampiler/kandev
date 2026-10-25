@@ -69,7 +69,7 @@ export function ProviderTierEditor({
             min={0}
             step="any"
             value={override[field] ?? ""}
-            placeholder={state.effective[field]?.toString() ?? t("agents:providerTierUnknown")}
+            placeholder={t("agents:providerTierUnknown")}
             onChange={(event) =>
               onChange({
                 [field]: event.target.value === "" ? undefined : Number(event.target.value),
@@ -86,6 +86,11 @@ export function ProviderTierEditor({
               ? ` ${t("agents:providerLimitProvenance", { provenance: t(PROVENANCE_LABELS[state.defaults.provenance[field]]) })}`
               : ""}
           </span>
+          {state.effective[field] !== undefined && (
+            <span className="text-xs text-muted-foreground">
+              {t("agents:providerTierEffective")}: {state.effective[field]}
+            </span>
+          )}
         </div>
       ))}
       {tier === "free" ? (
@@ -96,9 +101,14 @@ export function ProviderTierEditor({
               id={`${prefix}-daily-reset`}
               className={settingsControlClassName()}
               value={override.daily_reset ?? ""}
-              placeholder={state.effective.daily_reset || t("agents:providerTierDailyResetExample")}
+              placeholder={t("agents:providerTierDailyResetExample")}
               onChange={(event) => onChange({ daily_reset: event.target.value || undefined })}
             />
+            {state.effective.daily_reset && (
+              <span className="text-xs text-muted-foreground">
+                {t("agents:providerTierEffective")}: {state.effective.daily_reset}
+              </span>
+            )}
           </div>
           <ProviderTierScopes
             prefix={prefix}

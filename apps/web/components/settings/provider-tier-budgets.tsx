@@ -101,7 +101,7 @@ function ProviderBudgetEditor({
         step="any"
         className={settingsControlClassName()}
         value={override?.value ?? ""}
-        placeholder={budget.value?.toString() ?? t("agents:providerTierUnknown")}
+        placeholder={t("agents:providerTierUnknown")}
         onChange={(event) =>
           onChange(
             { value: event.target.value === "" ? undefined : Number(event.target.value) },
@@ -109,6 +109,11 @@ function ProviderBudgetEditor({
           )
         }
       />
+      {budget.value !== undefined && (
+        <span className="text-xs text-muted-foreground">
+          {t("agents:providerTierEffective")}: {budget.value}
+        </span>
+      )}
       <span className="break-words text-xs text-muted-foreground">
         {t("agents:providerTierSources", {
           defaults: defaults?.value ?? t("agents:providerTierUnknown"),
