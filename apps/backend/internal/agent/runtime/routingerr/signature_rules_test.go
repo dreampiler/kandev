@@ -90,6 +90,8 @@ func TestClassify_ProviderLimitSignaturesStillClassify(t *testing.T) {
 		{"copilot-acp", "Error: rate limit exceeded", CodeRateLimited},
 		{"amp-acp", "rate limited: rate limit reached for this account", CodeRateLimited},
 		{"amp-acp", "insufficient_quota", CodeQuotaLimited},
+		{"opencode-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
+		{"claude-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
 	}
 	for _, tc := range cases {
 		got := Classify(Input{Phase: PhaseStreaming, ProviderID: tc.provider, Stderr: tc.text})
