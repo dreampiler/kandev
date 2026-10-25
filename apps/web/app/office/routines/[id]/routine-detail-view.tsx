@@ -28,6 +28,7 @@ import { coerceCatchUpMax } from "../../lib/catch-up-max";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { reconcileCronTrigger, type CronReconcileOutcome } from "./cron-reconcile";
+import { formatDate } from "@/lib/i18n/formats";
 
 // Lift the form state out of the component so the file stays under the
 // 100-line per-function ceiling and the helpers can render typed slices
@@ -469,7 +470,9 @@ function DetailReadOnlyCard({
         </div>
         <div>
           {t("office:nextFire", {
-            when: nextRunAt ? new Date(nextRunAt).toLocaleString() : "-",
+            when: nextRunAt
+              ? formatDate(nextRunAt, { year: "numeric", month: "numeric", day: "numeric" })
+              : "-",
           })}
         </div>
       </CardContent>

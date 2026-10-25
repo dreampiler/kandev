@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // The default cookie port derives from the API base URL. Mock it to a fixed
 // port so scoped-name assertions are deterministic and independent of the
@@ -343,7 +344,7 @@ describe("resolveOfficeWorkspaceId", () => {
 });
 
 describe("structural guard: workspace-cookie lookups stay scoped", () => {
-  const here = path.dirname(new URL(import.meta.url).pathname);
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const read = (file: string) => fs.readFileSync(path.resolve(here, "..", "..", file), "utf8");
 
   // The live consumers of the workspace-cookie families. The Next-style
