@@ -92,6 +92,8 @@ func TestClassify_ProviderLimitSignaturesStillClassify(t *testing.T) {
 		{"amp-acp", "insufficient_quota", CodeQuotaLimited},
 		{"opencode-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
 		{"claude-acp", "temporarily rate limited upstream. Please retry shortly", CodeRateLimited},
+		{"opencode-acp", "temporarily rate-limited upstream. Please retry shortly", CodeRateLimited},
+		{"claude-acp", "temporarily rate-limited upstream. Please retry shortly", CodeRateLimited},
 	}
 	for _, tc := range cases {
 		got := Classify(Input{Phase: PhaseStreaming, ProviderID: tc.provider, Stderr: tc.text})

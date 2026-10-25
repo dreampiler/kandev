@@ -61,7 +61,7 @@ var providerNeutralRules = []rule{
 	),
 	mustRule(
 		"provider.rate_limit.v1",
-		`(?i)temporarily\s+rate\s+limited\s+upstream[^\n]*please\s+retry\s+shortly`,
+		`(?i)temporarily\s+rate[-_\s]limited\s+upstream[^\n]*please\s+retry\s+shortly`,
 		CodeRateLimited,
 		ConfHigh,
 	),
