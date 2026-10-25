@@ -928,7 +928,7 @@
   "workspaceRuntimeFootprintTitle": "Memória utilizada pelos agentes",
   "workspaceRuntimeFootprintUnavailable": "Não foi possível ler a medição atual.",
   "workspaceRuntimeFootprintUnavailableMetric": "Não comunicado nesta plataforma",
-  "workspaceRuntimeFootprintUnmeasured": "Sem medição atual. A utilização de memória é desconhecida, não é zero."
+  "workspaceRuntimeFootprintUnmeasured": "Sem medição atual. A utilização de memória é desconhecida, não é zero.",
   "workspaceMcpServersDescription": "Configure servidores MCP reutilizáveis para os seus agentes.",
   "mcpConfigured": "Configurados",
   "mcpMarketplace": "Marketplace",

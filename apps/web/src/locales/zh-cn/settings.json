@@ -928,7 +928,7 @@
   "workspaceRuntimeFootprintTitle": "代理正在使用的内存",
   "workspaceRuntimeFootprintUnavailable": "无法读取当前测量值。",
   "workspaceRuntimeFootprintUnavailableMetric": "此平台未提供此指标",
-  "workspaceRuntimeFootprintUnmeasured": "没有当前测量值。内存用量未知，并非零。"
+  "workspaceRuntimeFootprintUnmeasured": "没有当前测量值。内存用量未知，并非零。",
   "workspaceMcpServersDescription": "为代理配置可复用的 MCP 服务器。",
   "mcpConfigured": "已配置",
   "mcpMarketplace": "市场",

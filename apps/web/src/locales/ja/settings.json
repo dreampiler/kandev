@@ -928,7 +928,7 @@
   "workspaceRuntimeFootprintTitle": "使用中のエージェントメモリ",
   "workspaceRuntimeFootprintUnavailable": "現在の測定値を読み取れませんでした。",
   "workspaceRuntimeFootprintUnavailableMetric": "このプラットフォームでは報告されません",
-  "workspaceRuntimeFootprintUnmeasured": "現在の測定値がありません。メモリ使用量は不明であり、ゼロではありません。"
+  "workspaceRuntimeFootprintUnmeasured": "現在の測定値がありません。メモリ使用量は不明であり、ゼロではありません。",
   "workspaceMcpServersDescription": "エージェントで再利用できる MCP サーバーを設定します。",
   "mcpConfigured": "設定済み",
   "mcpMarketplace": "マーケットプレイス",

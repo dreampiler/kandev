@@ -928,7 +928,7 @@
   "workspaceRuntimeFootprintTitle": "사용 중인 에이전트 메모리",
   "workspaceRuntimeFootprintUnavailable": "현재 측정값을 읽지 못했습니다.",
   "workspaceRuntimeFootprintUnavailableMetric": "이 플랫폼에서는 제공되지 않음",
-  "workspaceRuntimeFootprintUnmeasured": "현재 측정값이 없습니다. 메모리 사용량은 0이 아니라 알 수 없습니다."
+  "workspaceRuntimeFootprintUnmeasured": "현재 측정값이 없습니다. 메모리 사용량은 0이 아니라 알 수 없습니다.",
   "workspaceMcpServersDescription": "에이전트가 재사용할 MCP 서버를 구성합니다.",
   "mcpConfigured": "구성됨",
   "mcpMarketplace": "마켓플레이스",
