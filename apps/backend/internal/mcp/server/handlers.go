@@ -842,6 +842,16 @@ func (s *Server) askParentQuestionHandler() server.ToolHandlerFunc {
 		if errResult != nil {
 			return errResult, nil
 		}
+		for _, q := range questions {
+			if _, ok := q["images"]; ok {
+				return mcp.NewToolResultError("parent questions do not support images"), nil
+			}
+			for _, option := range q[optionsArg].([]map[string]interface{}) {
+				if _, ok := option["images"]; ok {
+					return mcp.NewToolResultError("parent questions do not support images"), nil
+				}
+			}
+		}
 		payload := map[string]interface{}{
 			"task_id":    s.taskID,
 			"session_id": s.sessionID,
@@ -928,6 +938,9 @@ func parseQuestions(req mcp.CallToolRequest) ([]map[string]interface{}, *mcp.Cal
 			return nil, errResult
 		}
 		questions[i] = q
+	}
+	if err := validateQuestionImagePayloads(questions); err != nil {
+		return nil, mcp.NewToolResultError(err.Error())
 	}
 	return questions, nil
 }
@@ -1068,6 +1081,9 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 			continue
 		}
 		if entry, ok := answersByID[qid]; ok {
+			if label := selectedAnswerLabel(q, entry); label != "" {
+				entry["selected_label"] = label
+			}
 			out[qid] = entry
 			continue
 		}
@@ -1086,6 +1102,28 @@ func extractQuestionAnswers(result map[string]interface{}, questions []map[strin
 
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.NewToolResultStructured(out, string(data))
+}
+
+// selectedAnswerLabel returns the offered label only when the selected ID
+// identifies exactly one option. Missing or ambiguous selections return no label.
+func selectedAnswerLabel(question, answer map[string]interface{}) string {
+	selected, _ := answer["selected_option"].(string)
+	if selected == "" {
+		return ""
+	}
+	options, _ := question[optionsArg].([]map[string]interface{})
+	var label string
+	matches := 0
+	for _, option := range options {
+		if option[optionIDFieldName] == selected {
+			matches++
+			label, _ = option[labelArg].(string)
+		}
+	}
+	if matches != 1 {
+		return ""
+	}
+	return label
 }
 
 // simplifyAnswer normalizes the answer map. Single-choice per question, but
