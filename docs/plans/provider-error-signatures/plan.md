@@ -45,3 +45,12 @@ signatures. See [task 01](task-01-match-provider-signatures.md).
   packages on the base revision.
 - `golangci-lint run ./internal/agent/runtime/routingerr/...`
 - `make -C apps/backend build`
+
+## Opt-in keyword/context follow-up
+
+[Task 02](task-02-keyword-context.md) implements requirement 002 as a separate
+default-off unmatched diagnostic classifier on the current base. Existing typed
+and known rules retain priority. It includes trusted context and existing
+consumer/circuit integration; it does not import the pending literal catalog.
+Verification uses disposable overlays, focused checks, normal hooks and exact
+delta review. No permanent suite, external loader or operator activation is added.

@@ -522,6 +522,16 @@ can retry it.
 > `features.dynamicAgentRouting` under **Settings > System > Feature Toggles**
 > and restart Kandev before creating or using a dynamic profile.
 
+An additional experimental toggle, **Provider keyword and context
+classification** (`features.providerKeywordContext`), recognizes unmatched
+provider diagnostics using structural signals and keyword combinations. It is
+off in all shipped profiles and requires a restart. Existing typed errors,
+known signatures, candidate policies and output/tool safety checks still take
+precedence. New assistant text remains output unless the existing diagnostic
+correlation accepts it; this toggle does not authorize replay after effects.
+Explicit reset hints control suspension expiry. Model-scoped failures do not
+suspend unrelated models; paid-account scope requires an established binding.
+
 Choose the **Dynamic** agent family when you create a profile. Add concrete
 profiles in the order that Kandev must try them. The logical dynamic profile
 stays selected in the task and utility binding, while each launch uses one

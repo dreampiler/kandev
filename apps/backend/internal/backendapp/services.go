@@ -235,6 +235,13 @@ func initCoreTaskServices(
 	if err != nil {
 		return nil, err
 	}
+	dynamicResolver.SetBillingTypeResolver(func(agentName string) string {
+		agent, ok := agentRegistry.Get(agentName)
+		if !ok {
+			return ""
+		}
+		return string(agent.BillingType())
+	})
 	utilitySvc.SetExecutionProfileResolver(dynamicResolver)
 	workflowSvc := workflowservice.NewService(repos.Workflow, log)
 	pendingActionProjectionEpoch, err := repos.Task.NextPendingActionProjectionEpoch(ctx)

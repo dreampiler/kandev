@@ -43,11 +43,13 @@ type ProfileExecution struct {
 // It intentionally returns a route decision rather than launching an agent;
 // the conductor/lifecycle layer owns downstream ACP sessions.
 type ProfileExecutionResolver struct {
-	profiles        store.Repository
-	dynamic         store.DynamicProfileRepository
-	engine          *dynamic.Engine
-	bindingResolver *dynamic.CredentialBindingResolver
-	enabled         atomic.Bool
+	profiles              store.Repository
+	dynamic               store.DynamicProfileRepository
+	engine                *dynamic.Engine
+	bindingResolver       *dynamic.CredentialBindingResolver
+	billingTypeResolver   func(string) string
+	enabled               atomic.Bool
+	keywordContextEnabled atomic.Bool
 }
 
 func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engine, enabled bool) *ProfileExecutionResolver {
@@ -61,6 +63,10 @@ func NewProfileExecutionResolver(profiles store.Repository, engine *dynamic.Engi
 }
 
 func (r *ProfileExecutionResolver) SetEnabled(enabled bool) { r.enabled.Store(enabled) }
+
+func (r *ProfileExecutionResolver) SetKeywordContextEnabled(enabled bool) {
+	r.keywordContextEnabled.Store(enabled)
+}
 
 // Enabled reports the effective dynamic-agent-routing flag value this
 // resolver was constructed or last set with. Callers outside this package
@@ -802,7 +808,8 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 	}
 	for _, route := range routes {
 		candidate := dynamic.Candidate{
-			ID: route.ExecutionProfileID, Enabled: route.Enabled,
+			KeywordContextEnabled: r.keywordContextEnabled.Load(),
+			ID:                    route.ExecutionProfileID, Enabled: route.Enabled,
 			BindingKey: dynamic.ResourceKey(dynamic.ScopeProfile, route.ExecutionProfileID),
 		}
 		if route.RulesJSON != "" {
@@ -830,6 +837,7 @@ func (r *ProfileExecutionResolver) loadDynamicProfile(ctx context.Context, profi
 				r.bindingResolver.Resolve(binding, route.ExecutionProfileID),
 			)
 		}
+		r.populateKeywordCandidate(ctx, concrete, &candidate)
 		profile.Candidates = append(profile.Candidates, candidate)
 	}
 	return profile, nil

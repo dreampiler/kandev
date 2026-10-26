@@ -1,0 +1,70 @@
+---
+status: in_progress
+requirements:
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
+system_design:
+  - ../../specs/agents/system-design/provider-error-signatures.md
+---
+
+# Task 02: Classify unmatched provider diagnostics using context
+
+## Outcome and scope
+
+Add a default-off structural/keyword/context fallback after existing rules and
+before phase defaults. Own keyword/context files, typed flag wiring,
+diagnostic producer/consumer consistency and dynamic circuit integration.
+Preserve explicit candidate policy, all safety guards and model order.
+
+Dependency: consume the accepted literal catalog and empty-turn source once.
+Do not reimplement either, add an external loader, change installed account
+attribution, activate an operator flag or publish from this worktree.
+
+## Acceptance
+
+- OFF equals the prior classifier; ON preserves typed and known-rule results
+  and distinguishes structural, keyword, ambiguity, quote and context cases.
+- Current diagnostic evidence reaches guarded routing/policy and scope/reset/
+  probe consumers. Saved policies and unclassified thresholds win.
+- The exact changed snapshot passes focused checks and normal hooks, receives
+  independent review, then reaches the upstream publication owner.
+
+## Verification
+
+Use excluded disposable Go overlays with existing package runners:
+
+```text
+go test -trimpath -overlay <temporary-overlay.json> ./internal/agent/runtime/routingerr ./internal/agent/runtime/dynamic ./internal/orchestrator -run '^TestPR2' -count=1
+```
+
+Run affected signature, diagnostic, unclassified and circuit controls. Use race
+checks for changed evidence ownership. Verify existing runtime flag/profile/
+frontend feature contracts, changed-Go lint and normal hooks. No whole-backend
+build or unchanged whole-review repetition is required.
+
+## Results
+
+The initial excluded classifier check failed on the old phase default, then
+passed after adding the prefilter. Classifier boundaries, scoped circuits,
+structured HTTP projection and guarded next-candidate selection passed focused
+checks. A reproduced cross-candidate count leak was corrected; additional
+orchestrator race checks passed. Conflicting cross-model observations now keep
+path/model scope. Existing flag contracts, frontend feature data (8 tests),
+typecheck and specification checks passed. Changed-Go lint has not produced a
+verdict; the normal final hook and review sequence remains pending.
+
+The registered agent's existing live billing detector supplies both optional
+account context and the candidate's separate fallback account identity. Focused
+checks confirm that OFF does not consult it, stored profiles remain unchanged,
+and subscription/API-key context uses the same fallback circuit identity.
+The ordinary known-rule binding remains unchanged. Missing models stay
+candidate-scoped, and an OFF consumer retains its legacy circuit duration even
+when an input carries keyword metadata. The terminal
+stream type/identity correction is incorporated from the preceding change.
+Additional real-entrypoint checks preserve known-rule priority over newly
+projected HTTP metadata and correlate repeated failures by semantic group.
+
+No OpenCode Go paid-tier detector exists in the current registered agent; its
+default remains API key. Post-output mid-turn recovery remains refused by the
+existing safety contract. These original limitations remain explicit for owner
+reconciliation. No final review, implementation commit or publication acceptance
+is claimed.
