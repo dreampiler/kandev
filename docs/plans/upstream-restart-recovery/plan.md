@@ -133,7 +133,7 @@ is added.
 
 - [x] [Task 01: Keep queued messages after an expired runtime wait](task-01-requeue-expired-runtime-wait.md)
 - [x] [Task 02: Restart interrupted automatic starts](task-02-restart-interrupted-automatic-starts.md)
-- [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md)
+- [x] [Task 03: Keep one usable primary session](task-03-single-usable-primary-session.md) (recovery-selection follow-up verified)
 - [x] [Task 04: Keep the deferred start on an agentless step](task-04-agentless-step-deferred-start.md)
 
 ## Verification results
@@ -183,3 +183,16 @@ Office-read-error findings with two passing positive controls. This is synthetic
 boundary evidence; real SQL, race, PostgreSQL 16/18, Windows, runtime, and browser
 acceptance remain hosted verification gates. Production hooks and dependency
 installation are prohibited on the shared host for this review.
+
+## Primary recovery-selection follow-up (2026-10-27)
+
+The original four work orders above retain their recorded results. Work order
+03 has one additional correctness increment awaiting verification: exclude a
+recovery-blocked or unreadable session after a stop, retain it as a removal
+fallback, and preserve the primary during a live resume attempt's FAILED
+rollback. Existing current-main recovery and resume-attempt APIs are reused.
+Explicit promotion, queue targets, automatic recovery policy and all schema
+contracts are unchanged. No terminal queue handoff or terminal-session revival
+is included. Disposable source fixtures are prepared outside the repository;
+current-port execution and normal required checks remain with the integrating
+owner. The original validation claims do not cover this follow-up.
