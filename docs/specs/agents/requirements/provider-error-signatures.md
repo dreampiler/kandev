@@ -67,7 +67,7 @@ errors does not take its own healthy account out of rotation.
   opening `free usage limit reached` line without an error-envelope label shall
   classify as a quota limit. This criterion covers only the unlabelled
   provider-specific form.
-- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7:** OpenCode diagnostics opening
+- **AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10:** OpenCode diagnostics opening
   with `Rate limit exceeded: free-models-per-day...` or
   `Rate limit exceeded: limit_rpd/<model>` shall classify as rate limited even
   when sanitization masks the cadence token. The recorded excerpt remains
@@ -85,6 +85,6 @@ errors does not take its own healthy account out of rotation.
 ## Out of scope
 
 - Changing rule order, confidence levels, or classification flags beyond the
-  narrow additions required by AC.1.6–AC.1.9.
+  narrow additions in criteria 001.6, 001.8, 001.9 and 001.10.
 - Changing unrelated provider-neutral rules or any runtime-environment rules.
 - Changing how classified failures suspend candidates or select a successor.

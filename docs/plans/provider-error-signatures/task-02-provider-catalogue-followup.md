@@ -9,7 +9,7 @@ requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
 acceptance_criteria:
   - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.6
-  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7
+  - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.10
   - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.8
   - AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.9
 system_design:
@@ -73,3 +73,6 @@ Normal commit hooks and updated-head hosted CI are separate publication results.
 Combined behavior with unmerged #4601/#4738 source has not been executed and is
 not a prerequisite or pass claim here. Disposable cases remain outside automatic
 repository collection.
+
+The new daily-reason criterion is 001.10. Existing criterion 001.7 in #4738
+continues to mean guarded context-length recovery; it is not redefined here.
