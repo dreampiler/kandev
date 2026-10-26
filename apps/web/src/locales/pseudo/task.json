@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "Ţĥĩś ḾĆƤ śēŕvēŕ ĩś ďĩśàƀĺēď ĩń ţĥē ŵōŕķśƥàćē.",
   "mcpReasonDefinitionMissing": "Ţĥĩś ḾĆƤ śēŕvēŕ ďēƒĩńĩţĩōń ĩś ńō ĺōńĝēŕ àvàĩĺàƀĺē.",
   "mcpReasonSecretResolution": "Ŕēqũĩŕēď ćŕēďēńţĩàĺś ćōũĺď ńōţ ƀē ŕēśōĺvēď.",
-  "mcpTaskSelectionInfo": "Ćĥōōśē ēxţŕà ḾĆƤ śēŕvēŕś ƒōŕ ţĥĩś ţàśķ. Śēŕvēŕś śēĺēćţēď ĩń ĩţś àĝēńţ ƥŕōƒĩĺē ōŕ ŕēƥōśĩţōŕĩēś àŕē ĩńćĺũďēď àũţōḿàţĩćàĺĺŷ."
+  "mcpTaskSelectionInfo": "Ćĥōōśē ēxţŕà ḾĆƤ śēŕvēŕś ƒōŕ ţĥĩś ţàśķ. Śēŕvēŕś śēĺēćţēď ĩń ĩţś àĝēńţ ƥŕōƒĩĺē ōŕ ŕēƥōśĩţōŕĩēś àŕē ĩńćĺũďēď àũţōḿàţĩćàĺĺŷ.",
+  "questionImageCanvas": "Ĩḿàĝē ĩńśƥēćţĩōń",
+  "questionImageInvalid": "Ţĥĩś ĩḿàĝē ĩś ďàḿàĝēď ōŕ ĥàś àń ũńśũƥƥōŕţēď ƒōŕḿàţ.",
+  "questionImageUnavailable": "Ĩḿàĝē ũńàvàĩĺàƀĺē. Ŷōũ ćàń śţĩĺĺ àńśŵēŕ ţĥē qũēśţĩōń.",
+  "questionImageInspect": "Ĩńśƥēćţ ĩḿàĝē",
+  "questionImageTooLarge": "Ţĥĩś ĩḿàĝē ēxćēēďś ţĥē ƥŕēvĩēŵ śĩźē ĺĩḿĩţ.",
+  "questionImageRetry": "Ŕēţŕŷ",
+  "questionImageShow": "Śĥōŵ ĩḿàĝēś",
+  "questionImageLoading": "Ĺōàďĩńĝ ĩḿàĝē…",
+  "questionImageUnsupported": "Ĩḿàĝē ƥŕēvĩēŵ ĩś ńōţ śũƥƥōŕţēď.",
+  "questionImageHide": "Ĥĩďē ĩḿàĝēś",
+  "questionImageNotFound": "Ĩḿàĝē ƒĩĺē ńōţ ƒōũńď.",
+  "questionImageActualSize": "Àćţũàĺ śĩźē",
+  "questionImageFit": "Ƒĩţ"
 }

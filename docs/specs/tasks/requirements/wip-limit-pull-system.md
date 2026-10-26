@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-27
-updated: 2026-10-20
+updated: 2026-10-25
 owners:
   - kandev
 ---
@@ -63,3 +63,8 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   the step's WIP limit and why (live session, no live session, release grace
   pending with its release time, or released), and the number counted shall
   equal the number admission uses.
+
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.13:** Pull-from guidance shall remain
+  readable after a tap on phone and coarse-pointer devices, with a dismissible
+  drawer and a touch target of at least 44 pixels. Desktop focus and hover shall
+  expose the same guidance without changing the selected feeder or draft.

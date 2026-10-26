@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "此 MCP 伺服器已在工作區中停用。",
   "mcpReasonDefinitionMissing": "此 MCP 伺服器定義已不可用。",
   "mcpReasonSecretResolution": "無法解析所需的認證資訊。",
-  "mcpTaskSelectionInfo": "為此任務選擇額外的 MCP 伺服器。代理設定或儲存庫中已選擇的伺服器會自動包含在內。"
+  "mcpTaskSelectionInfo": "為此任務選擇額外的 MCP 伺服器。代理設定或儲存庫中已選擇的伺服器會自動包含在內。",
+  "questionImageCanvas": "影像檢視",
+  "questionImageInvalid": "此影像已損壞或格式不受支援。",
+  "questionImageUnavailable": "影像不可用。您仍可回答問題。",
+  "questionImageInspect": "檢視影像",
+  "questionImageTooLarge": "此影像超過預覽大小限制。",
+  "questionImageRetry": "重試",
+  "questionImageShow": "顯示影像",
+  "questionImageLoading": "正在載入影像…",
+  "questionImageUnsupported": "不支援影像預覽。",
+  "questionImageHide": "隱藏影像",
+  "questionImageNotFound": "未找到影像檔案。",
+  "questionImageActualSize": "實際大小",
+  "questionImageFit": "適應視窗"
 }

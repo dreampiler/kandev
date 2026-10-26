@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "This MCP server is disabled in the workspace.",
   "mcpReasonDefinitionMissing": "This MCP server definition is no longer available.",
   "mcpReasonSecretResolution": "Required credentials could not be resolved.",
-  "mcpTaskSelectionInfo": "Choose extra MCP servers for this task. Servers selected in its agent profile or repositories are included automatically."
+  "mcpTaskSelectionInfo": "Choose extra MCP servers for this task. Servers selected in its agent profile or repositories are included automatically.",
+  "questionImageCanvas": "Image inspection",
+  "questionImageInvalid": "This image is damaged or has an unsupported format.",
+  "questionImageUnavailable": "Image unavailable. You can still answer the question.",
+  "questionImageInspect": "Inspect image",
+  "questionImageTooLarge": "This image exceeds the preview size limit.",
+  "questionImageRetry": "Retry",
+  "questionImageShow": "Show images",
+  "questionImageLoading": "Loading image…",
+  "questionImageUnsupported": "Image preview is not supported.",
+  "questionImageHide": "Hide images",
+  "questionImageNotFound": "Image file not found.",
+  "questionImageActualSize": "Actual size",
+  "questionImageFit": "Fit"
 }

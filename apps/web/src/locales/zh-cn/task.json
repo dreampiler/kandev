@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "此 MCP 服务器已在工作区中禁用。",
   "mcpReasonDefinitionMissing": "此 MCP 服务器定义已不可用。",
   "mcpReasonSecretResolution": "无法解析所需的凭据。",
-  "mcpTaskSelectionInfo": "为此任务选择额外的 MCP 服务器。代理配置或仓库中已选择的服务器会自动包含在内。"
+  "mcpTaskSelectionInfo": "为此任务选择额外的 MCP 服务器。代理配置或仓库中已选择的服务器会自动包含在内。",
+  "questionImageCanvas": "图像查看",
+  "questionImageInvalid": "此图像已损坏或格式不受支持。",
+  "questionImageUnavailable": "图像不可用。您仍可回答问题。",
+  "questionImageInspect": "查看图像",
+  "questionImageTooLarge": "此图像超过预览大小限制。",
+  "questionImageRetry": "重试",
+  "questionImageShow": "显示图像",
+  "questionImageLoading": "正在加载图像…",
+  "questionImageUnsupported": "不支持图像预览。",
+  "questionImageHide": "隐藏图像",
+  "questionImageNotFound": "未找到图像文件。",
+  "questionImageActualSize": "实际大小",
+  "questionImageFit": "适应窗口"
 }

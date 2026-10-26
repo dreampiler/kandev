@@ -442,11 +442,16 @@ func TestCoordinatorRejectsTerminalFromMismatchedOwnership(t *testing.T) {
 			if test.admit {
 				require.NoError(t, coordinator.Admit(context.Background(), mismatched, client))
 			} else {
-				require.NoError(t, coordinator.Finish(context.Background(), Terminal{Admission: mismatched, At: time.Now()}, client))
+				require.ErrorIs(t, coordinator.Finish(context.Background(), Terminal{Admission: mismatched, At: time.Now()}, client), repoerrors.ErrTurnChangeRelationship)
 			}
 			changeSet := store.changeSets[turnChangeSetID(admission.TurnID)]
-			require.NotNil(t, changeSet.TerminalAt)
-			require.Equal(t, models.TurnChangeAvailabilityUnavailable, changeSet.Availability)
+			if test.admit {
+				require.NotNil(t, changeSet.TerminalAt)
+				require.Equal(t, models.TurnChangeAvailabilityUnavailable, changeSet.Availability)
+			} else {
+				require.Nil(t, changeSet.TerminalAt)
+				require.Equal(t, models.TurnChangeAvailabilityPending, changeSet.Availability)
+			}
 			require.Equal(t, 1, client.startCalls)
 			require.Zero(t, client.endCalls, "mismatched ownership must not capture an end endpoint")
 			require.Equal(t, int64(1), policy.calls, "mismatched reuse must not re-resolve policy")
