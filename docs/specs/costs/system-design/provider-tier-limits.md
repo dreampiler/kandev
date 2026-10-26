@@ -17,6 +17,16 @@ requirements:
 
 Costs owns limit facts and budgets. Reuse `usageProviderAdapter` account bindings, the task usage ledger, and `usage_limit_observations`. Keep the existing dynamic route order and failure-circuit policy; this port adds a selection-time allowance check rather than a ranking layer. Internal account keys stay inside the backend; settings uses existing safe account identities.
 
+With limits enabled, OpenCode Go uses its own `opencode-go` account key and
+safe identity, separate from Zen even when both credentials reside in the same
+OpenCode auth file. Account-tier observations and admission group only that
+provider's profiles. Limits-off readers keep their legacy binding. Existing
+mixed Zen configuration and learned rows remain untouched; no shared allowance
+is copied into the new Go identity without evidence of its intended scope.
+Operator-owned Go overrides must be reviewed on the separate account before
+deployment relies on them. This correction performs no storage migration or
+operational settings write.
+
 ## Configuration and defaults
 
 `provider_account_limits` in the task repository stores `account_key`, `config_json`, `learned_json`, and `updated_at`. Separate owner/learned columns prevent learning from replacing owner edits. JSON has independent `free`, `subscription`, and `paid` settings, `profile_tiers`, optional purchased-credit metadata, and a confirmed subscription plan. Precedence is owner override, learned allowance, then derived default. Nil is unknown/inherit; zero disables the local cap. Budgets carry window, unit, reset, optional anchor/time zone, and model-class scope.
@@ -45,6 +55,28 @@ Extend `usage_limit_observations` through idempotent migrations with tier/dimens
 Claude and Codex usage clients remain measurement sources. OpenRouter 1,000/day and LLM Gateway free 20 RPM are installation defaults with measured provenance, so their display, edit, and admission effects do not depend on a usage client. DevPass 120 RPM and 50 concurrent turns are the Subscription-tier defaults; because this base has no DevPass plan observation, the owner maps the DevPass profile to Subscription once in profile tier mapping, and the card shows that mapping. OpenRouter key-counter refresh and Go/DevPass response-header measurement are auxiliary observation methods and are not wired in this port. Learned, owner, and catalog-default values still work from classified observations. `dynamicLimitCalendar` preserves the operator-entered monthly reset and the existing retry ladder; a paid-model quota failure without a provider reset uses that monthly reset as its retry hint.
 
 The OpenRouter key-counter refresh after a free rate error is an auxiliary observation method and is not wired in this port. When it is wired, a free-model daily exhaustion must be model-scoped so a paid OpenRouter model on the same credential binding is not blocked until 00:00 UTC. Missing or unavailable evidence leaves the existing retry ladder unchanged.
+
+A classified quota failure on a non-free Go model is provider-scoped on the
+proven credential binding. That scope applies to the existing short backoff as
+well as a known long reset, so sibling non-free Go models are skipped while
+known free Go models and Zen on the same binding remain selectable. A known
+free Go model does not consume a subscription-pool circuit. The resolver does
+not invent a reset or a quota window.
+The account-specific scope requires the existing host binding resolver to
+confirm that profile's Go account. An override or unavailable profile retains
+the legacy scope rather than being attributed to the host account.
+Unknown subscription learning still requires positive recorded usage and keeps
+its provisional window; zero usage does not create an allowance. Explicit
+owner replacements, including zero, retain precedence.
+
+The bounded `provider.catalog.free_usage.v1` result is a model-daily cause only
+for a free OpenCode Zen candidate. Its existing covering group or model scope
+receives the counted requests. It does not train a new account-wide daily cap
+or relabel paid models or another provider. Existing owner overrides can disable
+an obsolete learned account cap with zero; this correction does not clear it.
+The failed Zen Free candidate also uses its model scope for the existing short
+backoff when its reset is unreported, preserving Go eligibility on the same
+credential. A positive learned group count still governs group admission.
 
 ## Account, model, and group scopes
 

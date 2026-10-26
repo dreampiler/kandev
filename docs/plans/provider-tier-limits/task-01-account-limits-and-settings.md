@@ -53,3 +53,25 @@ Readback on the installed card (operator-owned settings writes are outside this 
 - The same account's Subscription effective values are 120/minute and 50 turns, with default/measured provenance.
 - Credit-key profiles on the same account remain paid.
 - No artificial limit exhaustion: the admission effect is accepted only when a real in-use skip is observed.
+
+## Go identity and quota-consumer correction
+
+The local correction separates Go and Zen account keys when limits are enabled,
+preserves the legacy off path, and consumes Go quota failures at provider scope
+on the existing credential binding even when the reset is unknown. It does not
+change the backoff duration, fabricate a reset or alter route order. The explicit
+Zen Free catalog signature feeds the existing model/group scope learner.
+
+Disposable checks reproduce the original shared account identity, learned Go
+allowance leaking into Zen admission, missing provider suspension, and missing
+Free scope cause. The corrected flow checks observation storage and subsequent
+Go admission, Zen isolation, zero-usage uncertainty, owner-zero precedence, and
+actual dynamic successor selection with known and unknown reset hints.
+Further controls reproduce and protect both directions of tier isolation:
+Go subscription exhaustion keeps known free Go candidates, and Zen Free's
+model backoff keeps Go candidates on the same credential binding.
+An unproved command override cannot acquire the host Go account scope.
+No permanent test or operating write is added. Existing mixed Zen configuration
+is retained, not automatically copied; deployment must review Go-specific owner
+settings under the separate identity. Runtime integration, not a local test,
+must establish the in-use skip result.

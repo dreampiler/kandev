@@ -29,6 +29,7 @@ const (
 	accountKindAnthropic  = "anthropic"
 	accountKindOpenAI     = "openai"
 	accountKindOpenCode   = "opencode_zen"
+	accountKindOpenCodeGo = "opencode_go"
 	accountKindOpenRouter = "openrouter"
 	accountKindLLMGateway = "llmgateway"
 
@@ -80,6 +81,8 @@ func accountIdentityFor(accountKey string) accountIdentity {
 		return accountIdentity{ID: accountPrefixOpenAI, Kind: accountKindOpenAI}
 	case accountPrefixOpenCodeZen:
 		return accountIdentity{ID: accountPrefixOpenCodeZen, Kind: accountKindOpenCode}
+	case accountPrefixOpenCodeGo:
+		return accountIdentity{ID: accountPrefixOpenCodeGo, Kind: accountKindOpenCodeGo}
 	case accountPrefixOpenRouter:
 		return accountIdentity{ID: accountPrefixOpenRouter, Kind: accountKindOpenRouter}
 	case accountPrefixLLMGateway:
@@ -136,6 +139,10 @@ func (a *usageProviderAdapter) bindingFor(profile *settingsmodels.AgentProfile, 
 		provider := dynamicruntime.ProviderOf(profile.Model)
 		prefix := accountPrefixOpenCodeZen
 		switch provider {
+		case accountPrefixOpenCodeGo:
+			if a.tierLimits != nil {
+				prefix = accountPrefixOpenCodeGo
+			}
 		case accountPrefixOpenRouter:
 			prefix = accountPrefixOpenRouter
 		case accountPrefixLLMGateway:

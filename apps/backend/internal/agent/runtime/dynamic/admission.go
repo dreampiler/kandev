@@ -27,8 +27,8 @@ type LimitObserver interface {
 	ObserveLimit(context.Context, Candidate, *routingerr.Error, time.Time)
 }
 
-// LimitSuspension names the scope a limit-created long reset suspends.
-// Provider-reported reset hints keep the upstream binding-wide behavior.
+// LimitSuspension names the scope established by account evidence. A provider
+// Known quota scopes also narrow short backoffs without assigning unknown resets.
 type LimitSuspension int
 
 const (
@@ -42,7 +42,7 @@ const (
 
 // LimitFailureResolver refines a classified limit failure with account evidence
 // (for example a provider key counter that separates a minute block from the
-// daily reset) and reports the suspension scope its hint belongs to. A nil
+// daily reset) and reports the scope established by that evidence. A nil
 // result keeps the original failure.
 type LimitFailureResolver interface {
 	ResolveLimitFailure(context.Context, Candidate, *routingerr.Error) (*routingerr.Error, LimitSuspension)

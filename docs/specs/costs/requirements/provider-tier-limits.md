@@ -23,6 +23,13 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 - **AC-COSTS-TIER-LIMITS-001.5:** OpenRouter free rate errors shall refresh the same account's key endpoint: positive daily remaining means a minute block; zero means the daily reset. Unavailable evidence preserves lane 8's existing ladder.
 - **AC-COSTS-TIER-LIMITS-001.6:** UI/docs shall distinguish provider measurements and local request estimates. Credentials shall remain inside existing resolution paths and never enter responses.
 
+Go and Zen shall remain distinct provider accounts when limits are enabled,
+even if they share an auth-file location. A Go observation shall not train or
+exhaust Zen's allowance. A classified Go subscription quota shall skip sibling
+non-free Go models on its credential binding under the existing backoff,
+without blocking known free models or assigning an unreported reset. Owner
+overrides and the limits-off path remain intact.
+
 ### REQ-COSTS-TIER-LIMITS-002: Account, model, and shared-group scopes
 
 - **AC-COSTS-TIER-LIMITS-002.1:** A free tier shall support three request scopes: account-wide (the existing daily allowance), per-model, and a shared group of models with one combined allowance. A scope names provider model IDs; every applicable scope shall be checked for a model.
@@ -31,6 +38,11 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 - **AC-COSTS-TIER-LIMITS-002.4:** A classified per-model daily error shall replace the learned value of the scope that covers the model with the requests counted in that scope so far. An account-wide daily error keeps REQ-COSTS-TIER-LIMITS-001.4 learning, because the provider key counter already measures that allowance. Owner values are never replaced. Learning shall use naturally occurring errors only.
 - **AC-COSTS-TIER-LIMITS-002.5:** Classified per-model daily errors from two or more ungrouped models of one account within the same minute shall propose a provisional learned group. The settings card shall mark it provisional; an owner value of zero disables it.
 - **AC-COSTS-TIER-LIMITS-002.6:** The existing provider-limit card shall show and edit scopes in each account row with their source and provenance, on desktop and phone, with the existing save path, permissions, and locale catalogs.
+
+The explicit Free usage-limit catalog signature on a free Zen candidate shall
+feed the existing model/group daily learner. It shall not create an account-wide
+allowance, classify another provider, or infer a paid model is free.
+Its short model backoff shall not block Go on the same credential binding.
 
 ## Exclusions
 

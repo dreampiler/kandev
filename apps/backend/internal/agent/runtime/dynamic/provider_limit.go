@@ -7,6 +7,30 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 )
 
+const providerOpenCodeGo = "opencode-go"
+
+// IsGoSubscriptionQuota reports a quota failure on a non-free local Go model.
+// Published free models have separate allowances from the subscription pool.
+func IsGoSubscriptionQuota(candidate Candidate, failure *routingerr.Error) bool {
+	return failure != nil && failure.Code == routingerr.CodeQuotaLimited && !candidate.RemoteExecution &&
+		ProviderOf(candidate.ModelID) == providerOpenCodeGo && !candidate.CatalogFree && !IsFreeModel(candidate.ModelID)
+}
+
+func shortQuotaSuspension(candidate Candidate, failure *routingerr.Error, scope LimitSuspension) bool {
+	if failure == nil || failure.Code != routingerr.CodeQuotaLimited {
+		return false
+	}
+	switch scope {
+	case SuspensionProvider:
+		return IsGoSubscriptionQuota(candidate, failure)
+	case SuspensionModel:
+		return failure.ClassifierRule == "provider.catalog.free_usage.v1" &&
+			FailureCauseFor(candidate, failure) == CauseFreeDailyLimit
+	default:
+		return false
+	}
+}
+
 // ProviderLimit is the operator-entered limit setting of one provider, keyed by
 // the provider prefix of its model IDs.
 type ProviderLimit struct {
@@ -90,7 +114,7 @@ func IsFreeModel(modelID string) bool {
 // account-level allowance is a separate tier check.
 func ModelScoped(modelID string) bool {
 	switch ProviderOf(modelID) {
-	case "opencode-go", "opencode", "opencode-zen", "openrouter":
+	case providerOpenCodeGo, "opencode", "opencode-zen", "openrouter":
 		return true
 	default:
 		return false
@@ -108,9 +132,15 @@ const (
 
 // FailureCauseFor refines a classified limit failure from the provider wording.
 // An unrecognized cause stays empty and the caller falls back to observations.
-func FailureCauseFor(_ Candidate, failure *routingerr.Error) FailureCause {
+func FailureCauseFor(candidate Candidate, failure *routingerr.Error) FailureCause {
 	if failure == nil {
 		return ""
+	}
+	provider := ProviderOf(candidate.ModelID)
+	if failure.Code == routingerr.CodeQuotaLimited && failure.ClassifierRule == "provider.catalog.free_usage.v1" &&
+		(provider == "opencode" || provider == "opencode-zen") &&
+		(candidate.CatalogFree || IsFreeModel(candidate.ModelID)) {
+		return CauseFreeDailyLimit
 	}
 	text := strings.ToLower(failure.RawExcerpt)
 	switch {

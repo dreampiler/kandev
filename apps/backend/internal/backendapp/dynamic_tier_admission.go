@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,12 +51,17 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		resolved = failure
 	}
 	scope := dynamicruntime.SuspensionBinding
-	if resolved != failure {
+	switch {
+	case dynamicruntime.IsGoSubscriptionQuota(candidate, resolved) && a.goAccountBound(ctx, candidate.ID):
+		// Go subscription exhaustion covers its models on this account, while
+		// other providers on the same agent credential binding remain usable.
+		scope = dynamicruntime.SuspensionProvider
+	case resolved != failure:
 		// The OpenRouter key counter separates a minute block from the
 		// account's daily free allowance; both are account/provider scope.
 		scope = dynamicruntime.SuspensionProvider
-	} else if dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit &&
-		(dynamicruntime.IsFreeModel(candidate.ModelID) || dynamicruntime.ModelScoped(candidate.ModelID)) {
+	case dynamicruntime.FailureCauseFor(candidate, failure) == dynamicruntime.CauseFreeDailyLimit &&
+		(dynamicruntime.IsFreeModel(candidate.ModelID) || dynamicruntime.ModelScoped(candidate.ModelID)):
 		scope = dynamicruntime.SuspensionModel
 	}
 	// A classified quota limit on a paid model without the provider's own
@@ -71,6 +77,18 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		}
 	}
 	return resolved, scope
+}
+
+func (a *tierLimitAdapter) goAccountBound(ctx context.Context, profileID string) bool {
+	if a.usage.settingsStore == nil {
+		return false
+	}
+	profile, agentType, ok := a.usage.loadProfile(ctx, profileID)
+	if !ok {
+		return false
+	}
+	binding, ok := a.usage.bindingFor(profile, agentType)
+	return ok && strings.HasPrefix(binding.accountKey, accountPrefixOpenCodeGo+":")
 }
 
 // ObserveLimit records the classified limit and learns an undisclosed
