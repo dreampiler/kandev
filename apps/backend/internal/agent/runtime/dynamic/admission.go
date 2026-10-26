@@ -27,8 +27,8 @@ type LimitObserver interface {
 	ObserveLimit(context.Context, Candidate, *routingerr.Error, time.Time)
 }
 
-// LimitSuspension names the scope a limit-created long reset suspends.
-// Provider-reported reset hints keep the upstream binding-wide behavior.
+// LimitSuspension names the scope established by account evidence. A provider
+// Go quota scope also narrows short backoffs without assigning an unknown reset.
 type LimitSuspension int
 
 const (

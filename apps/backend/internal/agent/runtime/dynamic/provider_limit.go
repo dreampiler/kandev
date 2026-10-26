@@ -108,9 +108,15 @@ const (
 
 // FailureCauseFor refines a classified limit failure from the provider wording.
 // An unrecognized cause stays empty and the caller falls back to observations.
-func FailureCauseFor(_ Candidate, failure *routingerr.Error) FailureCause {
+func FailureCauseFor(candidate Candidate, failure *routingerr.Error) FailureCause {
 	if failure == nil {
 		return ""
+	}
+	provider := ProviderOf(candidate.ModelID)
+	if failure.Code == routingerr.CodeQuotaLimited && failure.ClassifierRule == "provider.catalog.free_usage.v1" &&
+		(provider == "opencode" || provider == "opencode-zen") &&
+		(candidate.CatalogFree || IsFreeModel(candidate.ModelID)) {
+		return CauseFreeDailyLimit
 	}
 	text := strings.ToLower(failure.RawExcerpt)
 	switch {

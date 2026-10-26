@@ -4,6 +4,13 @@ status: in_progress
 
 # Provider account tier limits delivery
 
+The Go quota-consumer correction reuses this delivery's existing modules.
+It separates limits-enabled Go account attribution from Zen, narrows Go quota
+suspensions to the provider on its credential binding, and connects the explicit
+Zen Free signature to existing scope learning. See Task 01 for verification and
+the separate operational readback. No source-module port, new PR or deployment
+is part of the correction.
+
 ## Scope and dependency
 
 Deliver the [requirements](../../specs/costs/requirements/provider-tier-limits.md) and [design](../../specs/costs/system-design/provider-tier-limits.md) as PR1 of two sequential changes. Restore the preserved tier-limit implementation on fork main `4830d61604`, repair its lint failures, and preserve monthly resets and paid-model blocks. Dependency fork PR #272 is already included in the base. PR2 follows PR1 merge and adds account/model/shared-group scopes, measured catalog values and scope-specific learned replacements. PR1 does not complete that owner outcome. PR1 merged as fork PR #302. PR2 delivers REQ-COSTS-TIER-LIMITS-002 on fork main `2829183ecf`.

@@ -903,6 +903,14 @@ Use the profile refresh control after installing, authenticating, or upgrading a
 
 ### Monitor Office agent quota
 
+When provider usage limits are enabled, OpenCode Go and Zen have separate
+account-limit rows. Go's learned allowances do not apply to Zen. A Go quota
+failure temporarily skips other Go models on the same credential binding while
+retaining the existing backoff and any reported reset. An unknown reset stays
+unknown. Existing mixed Zen settings remain saved; review Go-specific owner
+overrides on the separate Go account after upgrading. No shared limit is copied
+automatically.
+
 > [!EXPERIMENTAL]
 > Office mode is feature-flagged and disabled in the production profile by
 > default. Enable **Office mode** under **Settings > System > Feature Toggles**

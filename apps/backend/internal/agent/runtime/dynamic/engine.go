@@ -1529,7 +1529,9 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 			scope = scopes[0]
 		}
 		longReset := failure.ResetHint != nil && failure.ResetHint.After(open.Now.Add(circuitBackoff))
-		if e.limits != nil && longReset && candidate.ModelID != "" &&
+		shortGoQuota := scope == SuspensionProvider && ProviderOf(candidate.ModelID) == "opencode-go" &&
+			failure.Code == routingerr.CodeQuotaLimited
+		if e.limits != nil && (longReset || shortGoQuota) && candidate.ModelID != "" &&
 			e.openNarrowCircuit(candidate, scope, open) {
 			return
 		}
@@ -1538,9 +1540,9 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 	}
 }
 
-// openNarrowCircuit opens a provider- or model-scoped long suspension when the
-// limit feature created the reset hint. It returns false for the upstream
-// binding-wide scope.
+// openNarrowCircuit opens the scope established by the limit resolver. A
+// Go quota scope also applies to short backoffs without an inferred reset.
+// It returns false for the upstream binding-wide scope.
 func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, failure FailureOpen) bool {
 	switch scope {
 	case SuspensionProvider:
