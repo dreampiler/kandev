@@ -49,8 +49,9 @@ structured HTTP projection and guarded next-candidate selection passed focused
 checks. A reproduced cross-candidate count leak was corrected; additional
 orchestrator race checks passed. Conflicting cross-model observations now keep
 path/model scope. Existing flag contracts, frontend feature data (8 tests),
-typecheck and specification checks passed. Changed-Go lint has not produced a
-verdict; the normal final hook and review sequence remains pending.
+typecheck and specification checks passed. Normal changed-Go lint, all other
+applicable commit hooks and commit-message validation passed for the local
+implementation.
 
 The registered agent's existing live billing detector supplies both optional
 account context and the candidate's separate fallback account identity. Focused
@@ -66,5 +67,5 @@ projected HTTP metadata and correlate repeated failures by semantic group.
 No OpenCode Go paid-tier detector exists in the current registered agent; its
 default remains API key. Post-output mid-turn recovery remains refused by the
 existing safety contract. These original limitations remain explicit for owner
-reconciliation. No final review, implementation commit or publication acceptance
-is claimed.
+reconciliation. The local implementation is committed; independent formal review
+and publication acceptance remain pending.
