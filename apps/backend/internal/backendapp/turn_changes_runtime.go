@@ -6,6 +6,7 @@ import (
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/changes"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 type runtimeTurnChangeCaptureHandler struct {
@@ -39,15 +40,7 @@ func (h *runtimeTurnChangeCaptureHandler) FinishTurnChanges(
 	terminal agentruntime.TurnChangeTerminal,
 	client agentruntime.TurnChangeCheckpointClient,
 ) error {
-	finishErr := h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
-	if finishErr != nil {
-		// A terminal whose executor deadline expired can still be settled from
-		// the persisted claim and any accepted endpoint. Retry once so a bounded
-		// capture failure becomes a durable unavailable result before the
-		// lifecycle releases its generation fence.
-		finishErr = h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
-	}
-	return finishErr
+	return h.coordinator.CaptureTerminalEndpoints(ctx, coordinatorTurnChangeTerminal(terminal), client)
 }
 
 func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
@@ -59,9 +52,23 @@ func (h *runtimeTurnChangeCaptureHandler) ProcessTurnChanges(
 		return err
 	}
 	if h.publisher != nil {
-		return h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+		err := h.publisher.PublishTurnChangeSummary(ctx, terminal.TaskID, terminal.SessionID, changes.ChangeSetIDForTurn(terminal.TurnID))
+		// The coordinator also accepts an absent historical interval as done.
+		// It has no summary to publish, including after rejected admission.
+		for cause := err; cause != nil; cause = errors.Unwrap(cause) {
+			if cause == repoerrors.ErrTurnChangeSetNotFound {
+				return nil
+			}
+		}
+		return err
 	}
 	return nil
+}
+
+func (h *runtimeTurnChangeCaptureHandler) AbandonTurnChanges(
+	ctx context.Context, terminal agentruntime.TurnChangeTerminal, _ agentruntime.TurnChangeCheckpointClient,
+) error {
+	return h.coordinator.AbandonTerminal(ctx, coordinatorTurnChangeTerminal(terminal))
 }
 
 func coordinatorTurnChangeTerminal(terminal agentruntime.TurnChangeTerminal) changes.Terminal {

@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "Este servidor MCP está desativado no espaço de trabalho.",
   "mcpReasonDefinitionMissing": "Esta definição de servidor MCP já não está disponível.",
   "mcpReasonSecretResolution": "Não foi possível resolver as credenciais necessárias.",
-  "mcpTaskSelectionInfo": "Escolha servidores MCP adicionais para esta tarefa. Os servidores selecionados no perfil do agente ou nos repositórios são incluídos automaticamente."
+  "mcpTaskSelectionInfo": "Escolha servidores MCP adicionais para esta tarefa. Os servidores selecionados no perfil do agente ou nos repositórios são incluídos automaticamente.",
+  "questionImageCanvas": "Inspeção de imagem",
+  "questionImageInvalid": "Esta imagem está danificada ou tem um formato não suportado.",
+  "questionImageUnavailable": "Imagem indisponível. Pode continuar a responder à pergunta.",
+  "questionImageInspect": "Inspecionar imagem",
+  "questionImageTooLarge": "Esta imagem excede o limite de tamanho da pré-visualização.",
+  "questionImageRetry": "Tentar novamente",
+  "questionImageShow": "Mostrar imagens",
+  "questionImageLoading": "A carregar imagem…",
+  "questionImageUnsupported": "A pré-visualização da imagem não é suportada.",
+  "questionImageHide": "Ocultar imagens",
+  "questionImageNotFound": "Ficheiro de imagem não encontrado.",
+  "questionImageActualSize": "Tamanho real",
+  "questionImageFit": "Ajustar"
 }

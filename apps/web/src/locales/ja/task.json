@@ -2916,5 +2916,18 @@
   "mcpReasonDefinitionDisabled": "この MCP サーバーはワークスペースで無効になっています。",
   "mcpReasonDefinitionMissing": "この MCP サーバーの定義は利用できなくなりました。",
   "mcpReasonSecretResolution": "必要な認証情報を解決できませんでした。",
-  "mcpTaskSelectionInfo": "このタスクに追加する MCP サーバーを選択します。エージェントプロファイルやリポジトリで選択済みのサーバーは自動的に含まれます。"
+  "mcpTaskSelectionInfo": "このタスクに追加する MCP サーバーを選択します。エージェントプロファイルやリポジトリで選択済みのサーバーは自動的に含まれます。",
+  "questionImageCanvas": "画像の確認",
+  "questionImageInvalid": "この画像は破損しているか、形式が対応していません。",
+  "questionImageUnavailable": "画像を表示できません。質問には引き続き回答できます。",
+  "questionImageInspect": "画像を確認",
+  "questionImageTooLarge": "この画像はプレビューのサイズ制限を超えています。",
+  "questionImageRetry": "再試行",
+  "questionImageShow": "画像を表示",
+  "questionImageLoading": "画像を読み込み中…",
+  "questionImageUnsupported": "画像のプレビューには対応していません。",
+  "questionImageHide": "画像を非表示",
+  "questionImageNotFound": "画像ファイルが見つかりません。",
+  "questionImageActualSize": "実際のサイズ",
+  "questionImageFit": "画面に合わせる"
 }

@@ -1825,6 +1825,9 @@ func configureMCPServices(
 	mcpSelectionService := mcpconfig.NewSelectionService(selectionRepo, catalogRepo)
 	mcpSelectionService.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	mcpSelectionService.SetOwnerValidator(mcpSelectionOwnerValidator(p))
+	if profileReader, ok := p.agentSettingsRepo.(mcpUsageProfileReader); ok {
+		mcpSelectionService.SetUsageOwnerReader(mcpUsageOwnerReader(profileReader, p.taskSvc))
+	}
 	mcpSelectionService.SetSessionResolutionContext(mcpSessionResolutionContext(p))
 	if stateRepo, ok := p.agentSettingsRepo.(mcpconfig.SessionMCPSelectionStateRepository); ok {
 		mcpSelectionService.SetSessionMCPStateRepository(stateRepo)
@@ -1932,6 +1935,7 @@ func registerSecondaryRoutes(
 		p.taskSvc,
 		p.taskRepo,
 		p.features.NeedsYouInbox,
+		&questionImageReaderAdapter{lifecycle: p.lifecycleMgr},
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
