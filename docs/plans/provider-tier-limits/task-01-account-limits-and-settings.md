@@ -67,6 +67,10 @@ allowance leaking into Zen admission, missing provider suspension, and missing
 Free scope cause. The corrected flow checks observation storage and subsequent
 Go admission, Zen isolation, zero-usage uncertainty, owner-zero precedence, and
 actual dynamic successor selection with known and unknown reset hints.
+Further controls reproduce and protect both directions of tier isolation:
+Go subscription exhaustion keeps known free Go candidates, and Zen Free's
+model backoff keeps Go candidates on the same credential binding.
+An unproved command override cannot acquire the host Go account scope.
 No permanent test or operating write is added. Existing mixed Zen configuration
 is retained, not automatically copied; deployment must review Go-specific owner
 settings under the separate identity. Runtime integration, not a local test,

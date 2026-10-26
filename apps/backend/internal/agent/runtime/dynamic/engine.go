@@ -1529,9 +1529,7 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 			scope = scopes[0]
 		}
 		longReset := failure.ResetHint != nil && failure.ResetHint.After(open.Now.Add(circuitBackoff))
-		shortGoQuota := scope == SuspensionProvider && ProviderOf(candidate.ModelID) == "opencode-go" &&
-			failure.Code == routingerr.CodeQuotaLimited
-		if e.limits != nil && (longReset || shortGoQuota) && candidate.ModelID != "" &&
+		if e.limits != nil && (longReset || shortQuotaSuspension(candidate, failure, scope)) && candidate.ModelID != "" &&
 			e.openNarrowCircuit(candidate, scope, open) {
 			return
 		}
@@ -1541,7 +1539,7 @@ func (e *Engine) openCircuitForFailure(profile Profile, candidateID string, fail
 }
 
 // openNarrowCircuit opens the scope established by the limit resolver. A
-// Go quota scope also applies to short backoffs without an inferred reset.
+// Known quota scopes also apply to short backoffs without an inferred reset.
 // It returns false for the upstream binding-wide scope.
 func (e *Engine) openNarrowCircuit(candidate Candidate, scope LimitSuspension, failure FailureOpen) bool {
 	switch scope {
@@ -1574,14 +1572,16 @@ func otherSuspensionKeyOpen(registry *CircuitRegistry, keys []string, probed str
 	return false
 }
 
-// limitSuspensionKeys returns the narrow circuit keys a limit-created long
-// reset may have opened. They are only consulted when provider limits are on.
+// limitSuspensionKeys returns circuit keys opened by the limit resolver.
+// Known free Go models do not share the subscription suspension. These keys
+// are only consulted when provider limits are on.
 func limitSuspensionKeys(candidate Candidate) []string {
 	if candidate.ModelID == "" {
 		return nil
 	}
 	keys := make([]string, 0, 2)
-	if provider := ProviderOf(candidate.ModelID); provider != "" {
+	if provider := ProviderOf(candidate.ModelID); provider != "" &&
+		(provider != providerOpenCodeGo || (!candidate.CatalogFree && !IsFreeModel(candidate.ModelID))) {
 		keys = append(keys, ResourceKey(ScopeProvider, candidate.BindingKey+"|"+provider))
 	}
 	keys = append(keys, ResourceKey(ScopeModel, candidate.BindingKey+"|"+candidate.ModelID))

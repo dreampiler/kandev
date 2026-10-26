@@ -25,9 +25,10 @@ Free inference, flat-fee subscriptions, and pay-as-you-go inference have separat
 
 Go and Zen shall remain distinct provider accounts when limits are enabled,
 even if they share an auth-file location. A Go observation shall not train or
-exhaust Zen's allowance. A classified Go account quota shall skip sibling Go
-models on its credential binding under the existing backoff, without assigning
-an unreported reset. Owner overrides and the limits-off path remain intact.
+exhaust Zen's allowance. A classified Go subscription quota shall skip sibling
+non-free Go models on its credential binding under the existing backoff,
+without blocking known free models or assigning an unreported reset. Owner
+overrides and the limits-off path remain intact.
 
 ### REQ-COSTS-TIER-LIMITS-002: Account, model, and shared-group scopes
 
@@ -41,6 +42,7 @@ an unreported reset. Owner overrides and the limits-off path remain intact.
 The explicit Free usage-limit catalog signature on a free Zen candidate shall
 feed the existing model/group daily learner. It shall not create an account-wide
 allowance, classify another provider, or infer a paid model is free.
+Its short model backoff shall not block Go on the same credential binding.
 
 ## Exclusions
 

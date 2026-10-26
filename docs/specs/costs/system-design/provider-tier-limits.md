@@ -56,10 +56,15 @@ Claude and Codex usage clients remain measurement sources. OpenRouter 1,000/day 
 
 The OpenRouter key-counter refresh after a free rate error is an auxiliary observation method and is not wired in this port. When it is wired, a free-model daily exhaustion must be model-scoped so a paid OpenRouter model on the same credential binding is not blocked until 00:00 UTC. Missing or unavailable evidence leaves the existing retry ladder unchanged.
 
-A classified Go quota failure is provider-scoped on the proven credential
-binding. That scope applies to the existing short backoff as well as a known
-long reset, so sibling Go models are skipped while Zen on the same binding
-remains selectable. The resolver does not invent a reset or a quota window.
+A classified quota failure on a non-free Go model is provider-scoped on the
+proven credential binding. That scope applies to the existing short backoff as
+well as a known long reset, so sibling non-free Go models are skipped while
+known free Go models and Zen on the same binding remain selectable. A known
+free Go model does not consume a subscription-pool circuit. The resolver does
+not invent a reset or a quota window.
+The account-specific scope requires the existing host binding resolver to
+confirm that profile's Go account. An override or unavailable profile retains
+the legacy scope rather than being attributed to the host account.
 Unknown subscription learning still requires positive recorded usage and keeps
 its provisional window; zero usage does not create an allowance. Explicit
 owner replacements, including zero, retain precedence.
@@ -69,6 +74,9 @@ for a free OpenCode Zen candidate. Its existing covering group or model scope
 receives the counted requests. It does not train a new account-wide daily cap
 or relabel paid models or another provider. Existing owner overrides can disable
 an obsolete learned account cap with zero; this correction does not clear it.
+The failed Zen Free candidate also uses its model scope for the existing short
+backoff when its reset is unreported, preserving Go eligibility on the same
+credential. A positive learned group count still governs group admission.
 
 ## Account, model, and group scopes
 

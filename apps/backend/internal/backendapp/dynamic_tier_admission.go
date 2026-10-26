@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,8 +52,7 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	}
 	scope := dynamicruntime.SuspensionBinding
 	switch {
-	case !candidate.RemoteExecution && dynamicruntime.ProviderOf(candidate.ModelID) == accountPrefixOpenCodeGo &&
-		resolved.Code == routingerr.CodeQuotaLimited:
+	case dynamicruntime.IsGoSubscriptionQuota(candidate, resolved) && a.goAccountBound(ctx, candidate.ID):
 		// Go subscription exhaustion covers its models on this account, while
 		// other providers on the same agent credential binding remain usable.
 		scope = dynamicruntime.SuspensionProvider
@@ -77,6 +77,18 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		}
 	}
 	return resolved, scope
+}
+
+func (a *tierLimitAdapter) goAccountBound(ctx context.Context, profileID string) bool {
+	if a.usage.settingsStore == nil {
+		return false
+	}
+	profile, agentType, ok := a.usage.loadProfile(ctx, profileID)
+	if !ok {
+		return false
+	}
+	binding, ok := a.usage.bindingFor(profile, agentType)
+	return ok && strings.HasPrefix(binding.accountKey, accountPrefixOpenCodeGo+":")
 }
 
 // ObserveLimit records the classified limit and learns an undisclosed
