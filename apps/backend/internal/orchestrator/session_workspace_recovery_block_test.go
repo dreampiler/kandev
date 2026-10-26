@@ -21,6 +21,7 @@ func TestWorkspaceRecoveryBlockPreservesPromptAdmission(t *testing.T) {
 			service := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
 			session, err := repo.GetTaskSession(ctx, "session1")
 			require.NoError(t, err)
+			seedExecutorRunning(t, repo, session.ID, session.TaskID, "workspace-inspection-execution")
 			block := &models.SessionRecoveryBlock{
 				SessionID: session.ID, IncarnationID: session.QueueIncarnationID,
 				Reason: "unknown_prompt_outcome", State: models.RecoveryBlockOpen,

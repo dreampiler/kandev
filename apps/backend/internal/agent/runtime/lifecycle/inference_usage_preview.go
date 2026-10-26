@@ -5,9 +5,10 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/usage"
 	util "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
-// PreviewInferenceProfileUsage prepares the same literal profile overrides as
+// PreviewInferenceProfileUsage prepares the same resolved profile overrides as
 // ExecuteInferenceProfilePrompt, in an existing original session's namespace.
 // Unlike actual dispatch it never calls GetOrEnsureExecution or launches a CLI.
 func (m *Manager) PreviewInferenceProfileUsage(ctx context.Context, sessionID, profileID string) *usage.ExecutionUsageReport {
@@ -57,10 +58,14 @@ func (m *Manager) preparedInferenceUsagePreview(ctx context.Context, execution *
 	if cfg == nil || !cfg.Supported {
 		return nil
 	}
-	flags, prefix, env, err := util.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
+	flags, prefix, _, err := util.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
 		return nil
 	}
-	input := &util.UsagePreviewRequest{ExecutionID: execution.ID, AgentID: name, Model: profile.Model, Policy: usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: name, ExecutorType: execution.ExecutorType}, InferenceConfig: &util.InferenceConfigDTO{Protocol: cfg.Protocol, Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath, Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix, OperatorDefined: cfg.OperatorDefined}}
+	env, err := m.ResolveUtilityProfileEnvironment(ctx, name, profile.EnvVars)
+	if err != nil {
+		return nil
+	}
+	input := &util.UsagePreviewRequest{ExecutionID: execution.ID, AgentID: name, Model: profile.Model, Policy: usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: name, ExecutorType: execution.ExecutorType}, InferenceConfig: &util.InferenceConfigDTO{Protocol: cfg.Protocol, Command: cfg.Command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: execution.WorkspacePath, Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix), OperatorDefined: cfg.OperatorDefined}}
 	return input
 }

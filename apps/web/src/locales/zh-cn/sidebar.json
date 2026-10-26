@@ -433,5 +433,7 @@
   "controlSummary.attention.questionSubject_other": "{{count}} 项等待你处理",
   "integratedControl.noCoordinators": "没有可显示的协调器",
   "integratedControl.unavailable": "不可用",
-  "integratedControl.executorProfile": "执行器配置"
+  "integratedControl.executorProfile": "执行器配置",
+  "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}：各工作流阶段的任务数",
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}：各工作流阶段的任务数"
 }

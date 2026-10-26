@@ -24,8 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/acpprovider"
 	commonconfig "github.com/kandev/kandev/internal/common/config"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/githubauth"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
@@ -226,6 +228,12 @@ type McpServerConfig struct {
 	Env map[string]string `json:"env,omitempty"`
 	// Headers holds HTTP headers for SSE/HTTP transport
 	Headers map[string]string `json:"headers,omitempty"`
+	// DefinitionID and DefinitionRevision identify the selected workspace-owned
+	// definition. Origins are sanitized scope metadata used for attachment
+	// evidence and never contain secrets or transport values.
+	DefinitionID       string                          `json:"definition_id,omitempty"`
+	DefinitionRevision int64                           `json:"definition_revision,omitempty"`
+	Origins            []agentctltypes.McpServerOrigin `json:"origins,omitempty"`
 }
 
 // InstanceConfig holds configuration for a single agent instance.
@@ -253,7 +261,9 @@ type InstanceConfig struct {
 	AgentCommand string
 
 	// AgentArgs is the parsed command (derived from AgentCommand)
-	AgentArgs []string
+	AgentArgs             []string
+	LaunchWrapper         launchwrapper.Spec `json:"launch_wrapper,omitzero"`
+	LaunchWrapperRequired bool               `json:"launch_wrapper_required,omitempty"`
 
 	// WorkDir is the working directory for the agent process
 	WorkDir string

@@ -433,5 +433,7 @@
   "controlSummary.attention.questionSubject_other": "{{count}} itens à sua espera",
   "integratedControl.noCoordinators": "Sem coordenadores para apresentar",
   "integratedControl.unavailable": "Indisponível",
-  "integratedControl.executorProfile": "Perfil do executor"
+  "integratedControl.executorProfile": "Perfil do executor",
+  "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}: tarefas por fase do fluxo de trabalho",
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: tarefas por fase do fluxo de trabalho"
 }

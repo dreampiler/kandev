@@ -434,5 +434,6 @@
   "integratedControl.noCoordinators": "No coordinators to display",
   "integratedControl.unavailable": "Unavailable",
   "integratedControl.executorProfile": "Executor profile",
-  "controlSummary.compare.stageDetails": "{{stage}} {{count}}: workflow step counts"
+  "controlSummary.compare.stageDetails_one": "{{stage}} {{count}}: workflow step counts",
+  "controlSummary.compare.stageDetails_other": "{{stage}} {{count}}: workflow step counts"
 }

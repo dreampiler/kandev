@@ -54,6 +54,7 @@ func (e *Executor) validateReuseEnvironmentInventoryWithIdentity(
 	adoptCheckoutBranchCanonicalSlots(req, rows)
 	if preserveCanonicalIdentity {
 		pinCanonicalWorktreeIdentities(req, env)
+		e.pinCanonicalCloneURLBaseIdentity(req, env)
 	}
 	if len(req.Repositories) > 0 {
 		specs = req.Repositories

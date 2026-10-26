@@ -8,7 +8,7 @@ plan: "plan.md"
 requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008
 acceptance_criteria:
-  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.11
+  - AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.13
 system_design:
   - ../../specs/agents/system-design/workspace-inventory-repair.md
 ---
@@ -36,7 +36,7 @@ holds, while the canonical row stays keyed by the original slot identity.
 
 ## Acceptance
 
-- AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.11
+- AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.13
 
 ## Verification
 

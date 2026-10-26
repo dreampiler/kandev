@@ -9,7 +9,7 @@ requirements:
   - REQ-TASKS-WIP-LIMIT-PULL-SYSTEM-001
 acceptance_criteria:
   - AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.3
-  - AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10
+  - AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.13
 system_design:
   - ../../specs/tasks/system-design/wip-limit-pull-system.md
 ---

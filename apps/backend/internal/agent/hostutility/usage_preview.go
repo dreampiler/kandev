@@ -5,6 +5,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/usage"
 	util "github.com/kandev/kandev/internal/agentctl/server/utility"
+	"github.com/kandev/kandev/internal/common/launchwrapper"
 )
 
 // PreviewProfileUsage uses an existing warm native instance only. Neither a
@@ -30,7 +31,7 @@ func (m *Manager) PreviewProfileUsage(ctx context.Context, profileID string) *us
 		return nil
 	}
 	defer release()
-	flags, prefix, env, err := util.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
+	flags, prefix, _, err := util.ProfileInferenceEnvironment(profile.CLIFlags, profile.CommandPrefix, profile.EnvVars)
 	if err != nil {
 		return nil
 	}
@@ -38,7 +39,11 @@ func (m *Manager) PreviewProfileUsage(ctx context.Context, profileID string) *us
 	if cfg == nil {
 		return nil
 	}
-	input := &util.UsagePreviewRequest{ExecutionID: inst.instanceID, AgentID: profile.AgentID, Model: m.resolveModel(profile.AgentID, profile.Model, ia), Policy: usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: profile.AgentID, ExecutorType: "standalone"}, InferenceConfig: &util.InferenceConfigDTO{Protocol: cfg.Protocol, Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir, Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, CommandPrefix: prefix, OperatorDefined: cfg.OperatorDefined}}
+	env, err := m.resolveProfileEnvironment(ctx, profile.AgentID, profile.EnvVars)
+	if err != nil {
+		return nil
+	}
+	input := &util.UsagePreviewRequest{ExecutionID: inst.instanceID, AgentID: profile.AgentID, Model: m.resolveModel(profile.AgentID, profile.Model, ia), Policy: usage.ExecutionUsagePolicy{ProfileID: profileID, AgentID: profile.AgentID, ExecutorType: "standalone"}, InferenceConfig: &util.InferenceConfigDTO{Protocol: cfg.Protocol, Command: command.Args(), ModelFlag: cfg.ModelFlag.Args(), WorkDir: inst.workDir, Env: env, StripEnv: agents.StripEnvFor(ia), CLIFlags: flags, LaunchWrapper: launchwrapper.Profile(prefix), OperatorDefined: cfg.OperatorDefined}}
 	report, err := inst.client.PreviewInferenceUsage(ctx, input)
 	if err != nil {
 		return nil

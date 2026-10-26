@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-07-27
-updated: 2026-10-20
+updated: 2026-10-25
 owners:
   - kandev
 ---
@@ -42,7 +42,13 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   capacity in tasks and global session capacity in sessions. If WIP promotion
   exposes a global session limit, the displayed reason shall follow the current
   authoritative queue state. Changing one limit shall not bypass the other.
-- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10:** When a workflow transition commits a
+
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.10:** Pull-from guidance shall remain
+  readable after a tap on phone and coarse-pointer devices, with a dismissible
+  drawer and a touch target of at least 44 pixels. Desktop focus and hover shall
+  expose the same guidance without changing the selected feeder or draft.
+
+- **AC-TASKS-WIP-LIMIT-PULL-SYSTEM-001.13:** When a workflow transition commits a
   task into a full limited step and defers that step's entry behavior until
   promotion, the backend shall record one operator log entry for the deferral.
   The entry shall name the task, the session that completed the source step,
@@ -63,3 +69,5 @@ integrations, and workflow transitions without exceeding configured WIP capacity
   the step's WIP limit and why (live session, no live session, release grace
   pending with its release time, or released), and the number counted shall
   equal the number admission uses.
+
+The deferral-log criterion was numbered 001.10 in its earlier unmerged package; 001.13 preserves it alongside upstream touch guidance. Existing sessionless-release criteria 001.11 and 001.12 are unchanged.
