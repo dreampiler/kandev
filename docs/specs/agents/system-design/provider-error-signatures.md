@@ -4,6 +4,7 @@ system: agents
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
   - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
+  - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002
 ---
 
 # Provider Error Signature Classification System Design
@@ -20,6 +21,8 @@ provider-neutral rules, or how dynamic routing acts on a classified failure.
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001` | [Rule signatures](#rule-signatures), [Inputs that carry prose](#inputs-that-carry-prose) |
+
+| `REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-002` | [Opt-in unmatched diagnostic prefilter](#opt-in-unmatched-diagnostic-prefilter) |
 
 ## Components and responsibilities
 
@@ -86,3 +89,55 @@ Do not fabricate recorded protocol provenance or expose raw error Data.
 Interactive policy belongs to Platform. Office and dynamic routing consume the
 new classification through their existing policies, without a new retry policy.
 [Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
+
+## Opt-in unmatched diagnostic prefilter
+
+Requirement 002 adds `features.providerKeywordContext`, off in every profile
+and restart-required. Configuration/registry/profile/frontend feature bindings
+share that identity and `KANDEV_FEATURES_PROVIDER_KEYWORD_CONTEXT`.
+
+Existing injection, typed status, managed-runtime, provider-specific,
+provider-neutral and runtime-environment checks retain their order. Only an
+unmatched diagnostic reaches `prefilter.go`, before the phase default. Within
+the prefilter, structured status precedes keyword groups and context. Typed
+statuses already recognized by the existing classifier never get reclassified.
+The 400 request/context distinction authorizes no circuit or replay permission.
+
+`keyword_groups.go` owns the semantic vocabulary. Separator normalization and
+bounded stem matching count distinct terms, not occurrences. Single terms and
+ties retain low confidence. Error envelopes, source completeness and current
+invocation evidence remain separate from semantic confidence. A keyword match
+cannot turn a quoted success into a terminal provider failure.
+
+`KeywordContext` is optional trusted input with unknown zero values.
+`KeywordDecision` carries group, suspension scope, backoff and default action.
+The orchestrator retains the existing diagnostic-correlation rules. New
+unmarked assistant text remains output; the new terminal classifier cannot
+clear that safety fence. Its existing prompt-attempt record
+holds at most sixteen observations. Attempt identities deduplicate results;
+successful output/effects clear continuity and the existing evidence lifecycle
+owns cleanup. No service, persistent log, fingerprint algorithm or periodic task
+is introduced.
+
+The registered agent's existing billing detector supplies optional account
+context through the credential-binding resolver. Candidate `KeywordAccountID`
+uses that same identity without changing the ordinary `BindingKey` used by
+known-rule failures. Missing bindings remain isolated. Dynamic circuits reuse
+the existing registry and probe leases. Path/model keys isolate unrelated
+models; a missing model stays candidate-scoped. Proven paid-account limits
+use a separate opt-in account key. Reset hints retain their
+deadline, and timed capacity/limit backoff progresses through 5, 15 and 30
+minutes. A model-qualified structured 404 holds only that model key; changing
+the configured model selects a different key. The registry's existing owner
+`ReleaseHold` operation can close a held key; no release API is added.
+Disabled candidates ignore keyword metadata when choosing defaults and circuit
+durations, retaining the legacy circuit behavior.
+
+Saved candidate policy overrides defaults. Unknown failures and empty
+completions retain their existing per-candidate unclassified policy and
+threshold. No confidence level bypasses replay, continuation, task ownership,
+cancellation, settlement or generation fences.
+
+The minimal future catalog seam is the existing deterministic classifier:
+known rules stay before `classifyKeywordContext`; loading and export remain
+separate work. No loader or new rule DSL is implemented.

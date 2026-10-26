@@ -12,7 +12,7 @@ import (
 // provider failure. Workspace preparation, executor, runtime detection, and
 // local agentctl errors are Kandev conditions: they stay unclassified, so the
 // ordinary launch recovery owns them and no provider candidate is suspended.
-func classifyDynamicLaunchFailure(err error, executionProfileID string) error {
+func classifyDynamicLaunchFailure(err error, executionProfileID string, keywordEnabled ...bool) error {
 	var classified *routingerr.Error
 	if errors.As(err, &classified) {
 		return err
@@ -22,9 +22,10 @@ func classifyDynamicLaunchFailure(err error, executionProfileID string) error {
 		return err
 	}
 	classified = routingerr.Classify(routingerr.Input{
-		Phase:      routingerr.PhaseProcessStart,
-		ProviderID: executionProfileID,
-		Stderr:     err.Error(),
+		KeywordContext: routingerr.KeywordContext{Enabled: len(keywordEnabled) != 0 && keywordEnabled[0], Diagnostic: true, EmptyOutput: true},
+		Phase:          routingerr.PhaseProcessStart,
+		ProviderID:     executionProfileID,
+		Stderr:         err.Error(),
 	})
 	// Unknown low-confidence startup failures are runtime errors, not
 	// provider failures. Let the ordinary launch recovery own them.
