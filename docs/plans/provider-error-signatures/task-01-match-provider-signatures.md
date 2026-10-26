@@ -57,6 +57,14 @@ rule IDs.
 
 ## Context-length producer/consumer follow-up
 
+The terminal stream projection also keeps execution identity separate from the
+agent type used for classification. A real-handler disposable check supplies
+the lifecycle producer's actual field shape: execution ID in `AgentID`, type in
+`AgentType`, and an OpenCode Go provider diagnostic. The typed case must use the
+existing quota skip action immediately, while legacy type fallback and the
+output/effect/stale fences remain. No duplicate Go regex or permanent test is
+added.
+
 The completed scope and verification above are preserved. Add only the captured
 named context-length rule at prompt-send and its existing exact terminal-
 provider consumer compatibility. Preserve typed-limit priority, other phase

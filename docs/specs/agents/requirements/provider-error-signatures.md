@@ -33,6 +33,11 @@ because its agent wrote about another one.
 **Intent:** A rate-limit, quota, or subscription classification must come from
 a provider error signature, not from a topic word in agent prose.
 
+The stream consumer shall select the rule table using the emitting agent type,
+not the execution identity or the model-provider prefix. Legacy payloads without
+an explicit type keep their existing fallback. This does not authorize routing
+after output, effects, or a stale prompt.
+
 **User story:** As an operator, I want a provider account suspended only when
 that provider reports a limit, so that an agent summarizing other sessions'
 errors does not take its own healthy account out of rotation.

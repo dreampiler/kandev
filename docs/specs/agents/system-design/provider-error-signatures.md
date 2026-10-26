@@ -29,6 +29,10 @@ prompt-send producer and its existing exact consumer compatibility.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+- **Stream terminal projection** selects the provider rule table using the
+  payload's `AgentType`. Stream `AgentID` is the historical execution identity,
+  not a rule-table key. If explicit type is absent, retain the legacy field
+  fallback. Execution, prompt-generation, output and effect fences are unchanged.
 
 ## Inputs that carry prose
 
