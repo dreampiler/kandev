@@ -141,13 +141,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		}
 	case streams.EventTypeReasoning:
 		observedOutput = strings.TrimSpace(payload.Data.Text) != ""
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			observedOutput,
-			false,
-		)
+		if observedOutput {
+			s.observePromptReasoning(payload.SessionID, eventExecutionID, payload.Data.PromptGeneration)
+		}
 	case agentEventToolCall, agentEventToolUpdate:
 		observedEffect = true
 		s.observePromptAttempt(
@@ -158,7 +154,7 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 			true,
 		)
 	}
-	if observedOutput || observedEffect {
+	if (observedOutput && eventType != streams.EventTypeReasoning) || observedEffect {
 		resetEvent := watcher.AgentEventData{
 			TaskID: taskID, SessionID: sessionID, OwnerKind: string(payload.OwnerKind),
 			AgentExecutionID: eventExecutionID, PromptGeneration: payload.Data.PromptGeneration,
@@ -503,12 +499,17 @@ func (s *Service) handleAgentErrorEvent(ctx context.Context, payload *lifecycle.
 		executionID = payload.AgentID
 	}
 	if sessionID != "" {
+		// Stream AgentID is an execution identity; classification uses the transport type.
+		agentType := payload.AgentType
+		if agentType == "" {
+			agentType = payload.AgentID
+		}
 		failure := watcher.AgentEventData{
 			TaskID:             taskID,
 			SessionID:          sessionID,
 			OwnerKind:          string(payload.OwnerKind),
 			AgentExecutionID:   executionID,
-			AgentID:            payload.AgentID,
+			AgentID:            agentType,
 			AgentProfileID:     payload.AgentProfileID,
 			ExecutionProfileID: payload.ExecutionProfileID,
 			PromptGeneration:   payload.Data.PromptGeneration,

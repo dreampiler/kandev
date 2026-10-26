@@ -3,7 +3,7 @@ package routingerr
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
-var providerNeutralRules = []rule{
+var providerNeutralRules = append(providerCatalogRules, []rule{
 	// Some providers announce an exhausted quota as an ordinary assistant
 	// message and then never settle the prompt, so the notice is the only
 	// failure signal. The high-confidence rule is anchored to the whole text and
@@ -78,7 +78,7 @@ var providerNeutralRules = []rule{
 		CodeProviderUnavailable,
 		ConfMedium,
 	),
-}
+}...)
 
 func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {
