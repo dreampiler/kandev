@@ -40,6 +40,10 @@ func (m *Manager) waitTurnChangeRetry(attempt int) bool {
 	if attempt > 0 {
 		delay = min(turnChangeRetryInitialDelay<<uint(attempt-1), turnChangeRetryMaximumDelay)
 	}
+	return m.waitTurnChangeDelay(delay)
+}
+
+func (m *Manager) waitTurnChangeDelay(delay time.Duration) bool {
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
@@ -97,6 +101,42 @@ func (m *Manager) abandonTurnChange(execution *AgentExecution, terminal TurnChan
 		zap.String("execution_id", terminal.ExecutionID), zap.String("turn_id", terminal.TurnID),
 		zap.Uint64("prompt_generation", terminal.PromptGeneration), zap.Error(cause), zap.NamedError("settlement_error", err))
 	return err == nil
+}
+
+// settleTurnChangeCapture continues only the durable terminal write after
+// capture has stopped. Storage uncertainty keeps the original fence held;
+// neither backoff nor an attempt deadline authorizes a successor prompt.
+func (m *Manager) settleTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal, cause error) bool {
+	if _, ok := m.turnChangeCaptureHandler.(interface {
+		AbandonTurnChanges(context.Context, TurnChangeTerminal, TurnChangeCheckpointClient) error
+	}); !ok {
+		return m.abandonTurnChange(execution, terminal, cause)
+	}
+	delay := time.Duration(0)
+	for {
+		if !m.waitTurnChangeDelay(delay) || !turnChangeCaptureStillOwned(execution, terminal) {
+			return false
+		}
+		if m.abandonTurnChange(execution, terminal, cause) {
+			return true
+		}
+		if delay == 0 {
+			delay = turnChangeRetryInitialDelay
+		} else {
+			delay = min(delay*2, turnChangeRetryMaximumDelay)
+		}
+	}
+}
+
+func turnChangeCaptureStillOwned(execution *AgentExecution, terminal TurnChangeTerminal) bool {
+	execution.startupCallbackMu.RLock()
+	defer execution.startupCallbackMu.RUnlock()
+	if execution.ID != terminal.ExecutionID || execution.currentStartupAttemptID() != terminal.StartupAttemptID {
+		return false
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+	return execution.turnChangeCaptureGeneration == terminal.PromptGeneration
 }
 
 func finishRetriedTurnChangeCapture(execution *AgentExecution, terminal TurnChangeTerminal) {

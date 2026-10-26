@@ -26,8 +26,8 @@ system_design:
 
 Bound terminal capture/summary retries and stop proven missing-set or ownership
 loss without mutating a successor's live interval. This work order records the
-implemented source in PR #4785; `done` does not assert PR merge, deployment or
-completion of the parent feature's broader qualification work.
+implemented source in PR #4785 and its review correction. The correction has focused verification recorded below; historical evidence
+remains scoped to its original source.
 
 ## In scope
 
@@ -40,17 +40,24 @@ valid summary/checkpoints and normal completion/failure/route/queue authority.
 
 Production data repair, forced live errors or restarts, new settings/UI/schema,
 retention policy, completion gates, provider routing and new standing test files.
-The documentation follow-up changes only this work order and its manifest.
+The review correction changes only the existing lifecycle retry/summary paths
+and this work order. Coordinator and canonical publisher APIs stay unchanged.
 
 ## Acceptance
 
-1. Each phase ends within three logical attempts, counting inline work, with
+1. Capture and summary each end within three logical attempts, counting inline work, with
    250/500 ms cancellable waits. Typed permanent loss stops immediately; joined
    storage failures remain visible and bounded.
 2. Terminal processing validates the exact turn, execution, environment, startup
    attempt and generation. Abandonment uses revision/claim guards, preserves
    accepted refs/content and finalized summaries, and cannot settle or clean
    another live owner. Failed persistence does not authorize fence release.
+   Once capture stops, manager-owned continuation retries only abandonment
+   until its existing durable/no-op result, shutdown or replacement ownership.
+   It uses cancellable backoff capped at the existing five seconds; it does not
+   restart capture or expire the fence. A stored unavailable result enters the
+   normal summary phase after safe fence completion, so publisher failure does
+   not reopen the capture fence.
 3. Existing versioned completion/failure owners still settle the originating
    turn and managed input. Ordinary route and queued-prompt admission continue
    through their existing guards rather than a synthesized success path.
@@ -79,9 +86,10 @@ These are the six actual implementation paths in the published change:
 
 ## Verification
 
-The following existing focused commands were executed during implementation
-from `apps/backend`. Reuse their results for unchanged runtime code; they are
-not a request to rerun Go checks for this documentation-only reconciliation.
+The following existing focused commands were executed during the original
+implementation from `apps/backend`. Their results remain historical evidence
+for unchanged code. The review correction requires only the affected lifecycle
+controls and disposable fault cases; it has not been run at this candidate.
 
 ```text
 go test -trimpath ./internal/task/changes -run 'TestCoordinator(SettlesUnacceptedStart|AcceptsTerminalEndpointsBeforeSummaryProcessing|RejectsTerminalFromMismatchedOwnership|KeepsBaselineForValidSameTurnContinuation|SettlesCaptureDeadlineAndPersistenceFailuresBeforeSuccessorAdmission)$' -count=1
@@ -151,9 +159,32 @@ unchanged coverage module evaluated the actual eight changed paths and four
 linked document bodies, returning `covered`, `ok: true`, `errors: []`, and the
 expected work order and REQ-TASKS-TURN-CHANGES-003/004/007 design references.
 
-The new public head's actual coverage status remains pending until these
-documents are applied to the same PR. Do not replace that status with the
-earlier runtime test results or reinterpret an old failed check as passed.
+Review correction prepared on 2026-10-27: both permanent inline capture loss and
+exhausted background capture now retain manager-owned settlement continuation
+after abandonment storage failure. Successful abandonment enters the existing
+summary phase after original-owner fence/anchor cleanup. Capture and summary
+keep their separate three-attempt budgets and all-leaves permanent-error rule;
+settlement-only persistence retries do not ask for new checkpoints. Existing
+coordinator no-op results and canonical row/revision publication are preserved.
+No publisher owner parameter, new policy, schema, recurring service, TTL fence
+release, or permanent test case was added.
+
+Root verification for the correction:
+- The disposable baseline failed on both storage-recovery paths and on skipped
+  summary notification, establishing the reported defects.
+- The candidate passed all five causal scenarios, including unchanged capture
+  counts, settlement recovery, summary failure/retry after fence release,
+  shutdown, and replacement ownership.
+- The candidate and the six existing lifecycle controls passed again on the
+  actual publication checkout. The same selected cases passed with the race
+  detector, alongside the existing coordinator persistence/settlement and
+  compact summary projection tests.
+- The temporary cases use package-local fakes and virtual time. They establish
+  lifecycle phase/fence behavior; no installed provider/browser observation is
+  claimed. No permanent test case or verification framework was added.
+- Formatting completed. Normal hooks, updated-head hosted CI and readback are
+  recorded by the integrator after publication; the original CI result is not
+  reinterpreted as a new pass.
 
 ## Risks
 

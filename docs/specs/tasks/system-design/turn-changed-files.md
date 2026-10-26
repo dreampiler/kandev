@@ -178,7 +178,7 @@ That update changes only the anchor/revision, never accepted endpoints.
 
 Stop/Cancel immediately cancels provider work and start capture. Backend shutdown stops the process without prompt cancellation.
 After acknowledged stop, capture has an independent deadline before cleanup.
-Timeouts and forced/unconfirmed shutdowns retain unavailable/partial history; startup reconciles unfinished rows. Git waits are bounded.
+Timeouts and forced/unconfirmed shutdowns retain unavailable/partial history; startup reconciles unfinished rows. Settle before fence release.
 
 ## Git capture
 
