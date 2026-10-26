@@ -24,11 +24,31 @@ func shortQuotaSuspension(candidate Candidate, failure *routingerr.Error, scope 
 	case SuspensionProvider:
 		return IsGoSubscriptionQuota(candidate, failure)
 	case SuspensionModel:
-		return failure.ClassifierRule == "provider.catalog.free_usage.v1" &&
-			FailureCauseFor(candidate, failure) == CauseFreeDailyLimit
+		return isFreeUsageQuota(candidate, failure)
 	default:
 		return false
 	}
+}
+
+func isFreeUsageQuota(candidate Candidate, failure *routingerr.Error) bool {
+	provider := ProviderOf(candidate.ModelID)
+	if failure == nil || failure.Code != routingerr.CodeQuotaLimited ||
+		(provider != "opencode" && provider != "opencode-zen") ||
+		(!candidate.CatalogFree && !IsFreeModel(candidate.ModelID)) {
+		return false
+	}
+	const freeUsageRule = "provider.catalog.free_usage.v1"
+	if failure.ClassifierRule == freeUsageRule {
+		return true
+	}
+	if failure.ClassifierRule != "opencode.stderr.usage_limit.v1" || candidate.RemoteExecution {
+		return false
+	}
+	// Preserve the adapter's rule precedence while proving the bounded notice.
+	neutral := routingerr.Classify(routingerr.Input{
+		Phase: failure.Phase, Stderr: failure.RawExcerpt, ResetHintDerivationDisabled: true,
+	})
+	return neutral.Code == routingerr.CodeQuotaLimited && neutral.ClassifierRule == freeUsageRule
 }
 
 // ProviderLimit is the operator-entered limit setting of one provider, keyed by
@@ -136,10 +156,7 @@ func FailureCauseFor(candidate Candidate, failure *routingerr.Error) FailureCaus
 	if failure == nil {
 		return ""
 	}
-	provider := ProviderOf(candidate.ModelID)
-	if failure.Code == routingerr.CodeQuotaLimited && failure.ClassifierRule == "provider.catalog.free_usage.v1" &&
-		(provider == "opencode" || provider == "opencode-zen") &&
-		(candidate.CatalogFree || IsFreeModel(candidate.ModelID)) {
+	if isFreeUsageQuota(candidate, failure) {
 		return CauseFreeDailyLimit
 	}
 	text := strings.ToLower(failure.RawExcerpt)

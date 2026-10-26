@@ -29,6 +29,10 @@ prompt-send producer and its existing exact consumer compatibility.
   `rules.go` and the classification flags applied to each code.
 - **`internal/agent/runtime/dynamic`** evaluates the classified code with the
   candidate's saved recovery policy and opens resource circuits.
+- **Stream terminal projection** selects the provider rule table using the
+  payload's `AgentType`. Stream `AgentID` is the historical execution identity,
+  not a rule-table key. If explicit type is absent, retain the legacy field
+  fallback. Execution, prompt-generation, output and effect fences are unchanged.
 
 ## Inputs that carry prose
 
@@ -91,3 +95,23 @@ failure policy. No general fallback, new policy, timer or feature flag is added.
 
 The separate structured-envelope signature, quota catalogue, prefilter and
 assistant-notice work remain with their original delivery owner.
+
+## Literal provider catalog
+
+`provider_catalog_rules.go` holds diagnostic-envelope signatures shared by
+providers and is composed into the neutral rule table before the generic
+unavailable fallback. Structured HTTP input and provider-specific rules retain
+precedence. Catalog rules require an error-line prefix or a diagnostic type,
+and preserve the context-length rule's prompt-send guard. Existing Go quota,
+credit, weekly-limit and reasoning-history rules are reused.
+
+`provider.catalog.request_rejected.v1` remains globally an unclassified runtime
+failure with retry/fallback flags unchanged. The existing exact terminal
+consumer accepts it only at prompt-send with a complete diagnostic, known
+attempt identity, and no observed output or effects, just like the named
+context rejection. Only that consumer projects it to the existing unknown
+provider policy. No generic recovery or implicit replay permission is added.
+
+Usage-account learning is a separate consumer boundary, not a property of
+matching a message. This catalog does not create account IDs, change scope,
+invent reset calendars or alter the candidate's configured quota action.
