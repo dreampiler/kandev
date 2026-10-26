@@ -82,3 +82,80 @@ typed-limit controls in one selected `-race` invocation (`routingerr` 1.285s,
 `dynamic` 1.048s, `orchestrator` 3.003s). Existing manual-recovery, threshold,
 duplicate/unsafe-evidence and workflow-claim fence checks also passed in that
 invocation. No passing check was repeated; no standing test was added.
+
+## Provider catalog consolidation
+
+The literal catalog covers the following observed signatures. Existing typed
+signals and provider-specific rules retain precedence. Classification does not
+assert a new account identity, expiry, quota window or circuit scope.
+
+| Signature | Classification |
+| --- | --- |
+| upstream_endpoint_unavailable | `provider_unavailable` |
+| rate_limit_try_later | `rate_limited` |
+| usage_limit_reached_reset_in | `quota_limited` |
+| account_user_blocked | `account_blocked` |
+| ocg_go_usage_limit | `quota_limited` |
+| not_found | `model_unavailable` |
+| provider_header_timeout | `provider_unavailable` |
+| upstream_host_rate_limited | `rate_limited` |
+| dp_credit_limit | `quota_limited` |
+| or_no_endpoints | `model_unavailable` |
+| deepseek_reasoning_content_400 | `resume_corrupted` |
+| upstream_idle_timeout_504 | `provider_unavailable` |
+| invalid_tools_400 | `agent_runtime_error` |
+| ocg_requires_global_region | `provider_not_configured` |
+| rate_limit_redacted_reason | `rate_limited` |
+| codex_usage_limit | `quota_limited` |
+| internal_server_error_500 | `provider_unavailable` |
+| ocg_trains_on_data_blocked | `provider_not_configured` |
+| stealth_error | `provider_unavailable` |
+| nvidia_overloaded_503 | `provider_overloaded` |
+| upstream_model_unavailable | `model_unavailable` |
+| console_rate_limit | `rate_limited` |
+| context_length_400 | `agent_runtime_error` |
+| host_capacity_unavailable_429 | `model_capacity` |
+| socket_closed | `network_unavailable` |
+| nvidia_failed_generate | `provider_unavailable` |
+| upstream_invalid_json | `provider_unavailable` |
+| unable_to_connect | `network_unavailable` |
+| nvidia_not_ready | `provider_unavailable` |
+| nvidia_error_code | `provider_unavailable` |
+| payment_required | `subscription_required` |
+| invalid_request_400 | `agent_runtime_error` |
+| rate_limit_brief_wait | `rate_limited` |
+| upstream_server_error | `provider_unavailable` |
+| reasoning_effort_not_allowed_400 | `agent_runtime_error` |
+| backend_overloaded | `provider_overloaded` |
+| too_many_images_400 | `agent_runtime_error` |
+| provider_empty_response_502 | `provider_unavailable` |
+| sse_read_timeout | `provider_unavailable` |
+| claude_weekly_limit | `quota_limited` |
+| host_503_model_temporarily_unavailable | `provider_unavailable` |
+| other:AI_APICallError: Rate limit exceeded: free-models-per-day-high-balance | `rate_limited` |
+| other:Internal error: {"code":<n>,"message":"JSON error injected into SSE stream","metadata":{"error_type":"provider_unavailable"}} | `provider_unavailable` |
+| free_usage | `quota_limited` |
+
+Existing Go, credit, Codex, Claude, generic-rate, account-block and DeepSeek
+reasoning-history signatures are reused. The DeepSeek history diagnostic keeps
+`resume_corrupted` and its explicit fresh-session handling. New catalog rules
+require a line-opening error envelope or diagnostic type; quoted prose cannot
+activate those rules. The previously accepted temporary upstream rate-limit
+rule remains unchanged, including the hyphen and whitespace forms.
+
+Only a complete, exact, pre-result request-rejection diagnostic may enter the
+existing repeated-unclassified policy. Output, tool effects, missing evidence
+or an incomplete identity keep it outside automatic replay. No account/model
+selection order, retry count, policy default or reset calendar is changed.
+
+Verification uses disposable overlays with existing fixtures at `Classify`,
+`classifyKanbanFailure` and the dynamic-policy boundary. The overlay is excluded
+from automatic test discovery and is not a permanent test suite. The existing
+thinking-only empty-turn package is consumed with the upstream lifecycle
+diagnostic signature preserved. Its no-answer check is confined to normal
+empty completions; reasoning still prevents generic failure replay.
+
+Account-limit learning and account-key attribution are not present at this PR
+base. A classification match alone does not prove exhausted-account skipping
+or a correct daily/monthly block. Those consumers require their actual source
+and account evidence; they must not be simulated by broadening a regex.

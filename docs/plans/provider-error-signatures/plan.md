@@ -69,3 +69,13 @@ startup/later-phase preservation, typed-limit priority, diagnostic/output/effect
 fences, repeat-result stability, ordinary manual recovery and workflow-claim
 fences. Temporary overlays are removed after delivery. No standing test,
 whole-build requirement or operating mutation is added.
+
+## Catalog consolidation follow-up
+
+Status: in progress. Task 01 now carries the literal provider catalog and
+bounded request-rejection consumer follow-up. Existing completed work and
+verification remain valid for their original scope. The signature disposition
+and changed-source boundaries are recorded in Task 01. The prepared
+thinking-only empty-completion change is integrated with the upstream
+diagnostic signature preserved. Review and publisher acceptance remain pending;
+local implementation is not evidence of publication or account-limit recovery.

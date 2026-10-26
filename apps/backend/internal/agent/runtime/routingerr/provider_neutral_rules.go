@@ -3,7 +3,7 @@ package routingerr
 // providerNeutralRules contain stable evidence that can be emitted by more
 // than one adapter. Keep these rules independent from provider IDs so adding a
 // new ACP provider does not require copying the same transient fingerprints.
-var providerNeutralRules = []rule{
+var providerNeutralRules = append(providerCatalogRules, []rule{
 	// A gateway that restricted an account rejects every request with 403 and
 	// an account-restriction code or message. The envelope must open the line,
 	// optionally inside a labeled JSON message, so an agent quoting the error
@@ -43,7 +43,7 @@ var providerNeutralRules = []rule{
 		CodeProviderUnavailable,
 		ConfMedium,
 	),
-}
+}...)
 
 func matchProviderNeutralRules(text string, phase Phase) (*Error, bool) {
 	if text == "" {

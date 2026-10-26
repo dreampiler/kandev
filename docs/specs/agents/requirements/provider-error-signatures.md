@@ -79,3 +79,19 @@ errors does not take its own healthy account out of rotation.
 - Changing other provider-neutral rules or the runtime-environment rules. The
   named prompt-send context-length signature in criterion 001.7 is in scope.
 - Changing how classified failures suspend candidates or select a successor.
+
+## Literal catalog follow-up
+
+Recognize bounded upstream error envelopes for timeout, transport, capacity,
+model/endpoint availability, subscription and usage exhaustion, request
+compatibility, and malformed or empty upstream responses. Preserve existing
+provider-specific signatures and their precedence. A bare OpenCode Free usage
+notice must classify as quota exhaustion and reach the existing candidate
+quota action. Do not add another Go quota expression when its rule already
+matches. Keep the context-length rule restricted to prompt-send.
+
+The literal catalog must not infer account identity, invent a reset time or
+turn agent prose into an account failure. Request rejection may use only the
+existing exact pre-result repeated-failure policy, preserving no-output/effect
+and diagnostic-identity fences. Configuration and usage-account consumers
+remain responsible for quota-window and account-wide admission decisions.
