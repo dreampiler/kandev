@@ -41,7 +41,7 @@ valid summary/checkpoints and normal completion/failure/route/queue authority.
 Production data repair, forced live errors or restarts, new settings/UI/schema,
 retention policy, completion gates, provider routing and new standing test files.
 The review correction changes only the existing lifecycle retry/summary paths
-and this work order. Coordinator and canonical publisher APIs stay unchanged.
+and existing documentation. Coordinator and canonical publisher APIs stay unchanged.
 
 ## Acceptance
 
@@ -89,7 +89,7 @@ These are the six actual implementation paths in the published change:
 The following existing focused commands were executed during the original
 implementation from `apps/backend`. Their results remain historical evidence
 for unchanged code. The review correction requires only the affected lifecycle
-controls and disposable fault cases; it has not been run at this candidate.
+controls and disposable fault cases recorded in the correction results below.
 
 ```text
 go test -trimpath ./internal/task/changes -run 'TestCoordinator(SettlesUnacceptedStart|AcceptsTerminalEndpointsBeforeSummaryProcessing|RejectsTerminalFromMismatchedOwnership|KeepsBaselineForValidSameTurnContinuation|SettlesCaptureDeadlineAndPersistenceFailuresBeforeSuccessorAdmission)$' -count=1
