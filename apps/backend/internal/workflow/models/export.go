@@ -63,6 +63,7 @@ type StepPortable struct {
 	Name                         string                                       `json:"name" yaml:"name"`
 	Position                     int                                          `json:"position" yaml:"position"`
 	Color                        string                                       `json:"color" yaml:"color"`
+	StageType                    StageType                                    `json:"stage_type,omitempty" yaml:"stage_type,omitempty"`
 	Prompt                       string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
 	Events                       StepEvents                                   `json:"events" yaml:"events"`
 	IsStartStep                  bool                                         `json:"is_start_step" yaml:"is_start_step"`
@@ -209,6 +210,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			Name:                        s.Name,
 			Position:                    s.Position,
 			Color:                       s.Color,
+			StageType:                   s.StageType,
 			Prompt:                      s.Prompt,
 			Events:                      ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
 			IsStartStep:                 s.IsStartStep,
@@ -283,6 +285,13 @@ func (e *WorkflowExport) Validate() error {
 		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
+			if step.StageType != "" {
+				switch step.StageType {
+				case StageTypeWork, StageTypeReview, StageTypeApproval, StageTypeCustom:
+				default:
+					return fmt.Errorf("workflow %d step %d: invalid stage_type %q", i, j, step.StageType)
+				}
+			}
 			if step.Name == "" {
 				return fmt.Errorf("workflow %d step %d: name is required", i, j)
 			}

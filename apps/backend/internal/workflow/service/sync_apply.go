@@ -186,7 +186,9 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		var reviewRebindings []profileRebinding
 		if existing != nil {
 			step.CreatedAt = existing.CreatedAt
-			step.StageType = existing.StageType // not carried by the portable format
+			if sp.StageType == "" {
+				step.StageType = existing.StageType
+			}
 			if stepMatchesDefinition(existing, step) {
 				continue
 			}
@@ -354,13 +356,13 @@ func reviewProfileIDs(events models.StepEvents) []string {
 }
 
 // stepMatchesDefinition reports whether an existing step already equals its
-// desired definition (timestamps and stage type aside — stage type is copied
-// from the existing step). Events are compared via their JSON encoding to
-// normalize YAML/JSON numeric type differences in action configs.
+// desired definition. Events are compared via their JSON encoding to normalize
+// YAML/JSON numeric type differences in action configs.
 func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 	return existing.Name == desired.Name &&
 		existing.Position == desired.Position &&
 		existing.Color == desired.Color &&
+		existing.StageType == desired.StageType &&
 		existing.Prompt == desired.Prompt &&
 		existing.AllowManualMove == desired.AllowManualMove &&
 		existing.IsStartStep == desired.IsStartStep &&

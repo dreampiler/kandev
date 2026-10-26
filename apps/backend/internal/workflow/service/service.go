@@ -1012,12 +1012,17 @@ func (s *Service) stepFromPortableWithMatcherOptions(
 	existingProfileID string,
 	matchDirectProfile bool,
 ) *models.WorkflowStep {
+	stageType := sp.StageType
+	if stageType == "" {
+		stageType = models.StageTypeCustom
+	}
 	step := &models.WorkflowStep{
 		ID:                          posToID[sp.Position],
 		WorkflowID:                  workflowID,
 		Name:                        sp.Name,
 		Position:                    sp.Position,
 		Color:                       sp.Color,
+		StageType:                   stageType,
 		Prompt:                      sp.Prompt,
 		Events:                      models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), matchProfile),
 		IsStartStep:                 sp.IsStartStep,
