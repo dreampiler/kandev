@@ -53,11 +53,16 @@ that I do not have to recover a task whose agent never failed.
 - **AC-TASKS-STALE-CREATED-AUTOSTART-001.3:** When a lost CREATED race or a
   stale CREATED dispatch finds the session WAITING_FOR_INPUT while the task is
   still on the dispatching step, the system shall deliver the step prompt
-  exactly once through the waiting-session prompt path.
+  exactly once through the waiting-session prompt path. A fresh STARTING or
+  RUNNING state shall retain the complete step prompt through the existing
+  busy-queue policy, including attachments, reference order, plan mode,
+  recorded-message identity and the already claimed handoff.
 - **AC-TASKS-STALE-CREATED-AUTOSTART-001.4:** When a lost CREATED race or a
   stale CREATED dispatch finds that the task has left the dispatching step, the
   system shall not deliver the step prompt and shall return a taken hand-off
-  message to the session queue.
+  message to the session queue. The original step and session incarnation
+  shall remain current at queue insertion and provider admission, including
+  preparation waits, retries and composed fresh fallback.
 - **AC-TASKS-STALE-CREATED-AUTOSTART-001.5:** The losing launch shall not start
   an agent process.
 - **AC-TASKS-STALE-CREATED-AUTOSTART-001.6:** A start failure other than a lost
