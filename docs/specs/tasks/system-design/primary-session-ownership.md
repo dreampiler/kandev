@@ -61,10 +61,12 @@ awaits a recovery action. It ranks the rest:
    resolvable profile treats every session as matching.
 2. Any other session.
 3. A session with a valid `workflow_parking` marker.
-4. A session that awaits a recovery action, last: `sessionAwaitsRecoveryAction`
-   finds an open `session_recovery_blocks` row for its current incarnation and
-   generation through `GetOpenSessionRecoveryBlock`, or its `route_state` is
-   `action_required`. An unreadable block counts as open.
+4. A session with an open current-incarnation/generation recovery block or an
+   `action_required` dynamic route, last and only for removal promotion.
+
+`sessionAwaitsRecoveryAction` uses the existing `GetOpenSessionRecoveryBlock`.
+A read error counts as awaiting recovery; a missing optional store keeps the
+existing no-block behavior. No recovery block is resolved by selection.
 
 Inside a rank it keeps the existing order: `RUNNING`, then other active states,
 then idle (`001.2`). It returns an empty ID only when no session is eligible,
@@ -122,6 +124,10 @@ to five attempts). It then offers the new primary to
 `DrainQueuedMessageIfAutoRun`. A transfer failure logs a warning and leaves
 the queue on the terminal session. The flag is read once at startup into the
 orchestrator service config.
+
+Cancelled or finished resume attempts do not retain ownership. Selection does
+not resolve unknown-outcome blocks or retry their prompts. The separate opt-in
+queue hand-off retains the admission and recovery guards above.
 
 ## Failure and recovery
 

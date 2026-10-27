@@ -47,14 +47,14 @@ return to an earlier conversation.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.2:** When the primary session stops
   or is deleted, an automatic promotion shall prefer a nonterminal session that
   uses the current step's effective profile and shall rank a parked session
-  below the others. A session with an open recovery block for its current
-  incarnation and generation, or whose dynamic route is `action_required`,
-  shall not inherit the role after a stop; when it is the only remaining active
-  session, the stopped primary keeps the role. After a deletion, such a session
-  shall rank last and remain the fallback. Within a rank, running, then other
-  active, then idle sessions win. A FAILED written by the rollback of a resume
-  attempt that still owns the primary session shall not start an automatic
-  promotion.
+  below other healthy candidates. A session with an open recovery block for
+  its current incarnation and generation, an unreadable recovery block, or an
+  action-required dynamic route shall not inherit the role after a stop. If
+  no other active candidate exists, the stopped primary keeps the role.
+  After a deletion, a nonterminal session awaiting recovery shall remain the
+  last fallback. Within a rank, running, then other active, then idle sessions
+  win. A FAILED rollback while a live resume attempt owns the primary session
+  shall not start an automatic promotion.
 - **AC-TASKS-PRIMARY-SESSION-OWNERSHIP-001.3:** An automatic promotion shall
   never select a terminal session. After a stop, it shall still require an
   active session. After a deletion, it may select any nonterminal session. When
