@@ -86,10 +86,10 @@ Both promote through `SetPrimarySession`, which does not change an explicit
 session selection (`001.4`).
 
 `maybePromotePrimary` ignores a FAILED while `resumeAttemptInFlight` reports
-that the resume attempt registry still holds a live attempt for that session.
-The resume rollback (`terminalRollbackState`) and the attempt-fenced
-bootstrap failure both publish FAILED inside that attempt, so the session the
-user is restoring keeps the role (`001.2`).
+a live, unaccepted startup attempt. The lookup reads acceptance under the
+registry lock and releases it before promotion storage work. Provider acceptance
+transfers startup ownership before the deferred attempt finishes, so accepted,
+cancelled and finished attempts do not retain this suppression (`001.2`).
 
 `SetPrimarySession` schedules the terminal-primary queue hand-off (`001.5`)
 only when the previous primary is terminal and no resume attempt owns it. The
@@ -125,7 +125,7 @@ to five attempts). It then offers the new primary to
 the queue on the terminal session. The flag is read once at startup into the
 orchestrator service config.
 
-Cancelled or finished resume attempts do not retain ownership. Selection does
+Accepted, cancelled or finished resume attempts do not retain ownership. Selection does
 not resolve unknown-outcome blocks or retry their prompts. The separate opt-in
 queue hand-off retains the admission and recovery guards above.
 

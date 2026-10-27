@@ -20,6 +20,7 @@ import (
 
 var (
 	ErrAgentNotFound       = errors.New("utility agent not found")
+	ErrAgentDisabled       = errors.New("utility agent is disabled")
 	ErrInvalidAgent        = errors.New("invalid utility agent")
 	ErrCallNotFound        = errors.New("utility agent call not found")
 	ErrBuiltinAgent        = errors.New("cannot modify built-in agent")
@@ -370,10 +371,17 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 	return s.preparePromptRequest(ctx, utilityID, tmplCtx, defaults, sessionless, nil)
 }
 
+func isDisabledCustomAgent(agent *models.UtilityAgent) bool {
+	return !agent.Builtin && !agent.Enabled
+}
+
 func (s *Service) preparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool, callSessionID *string) (*PromptRequest, error) {
 	agent, err := s.repo.GetAgentByID(ctx, utilityID)
 	if err != nil {
 		return nil, ErrAgentNotFound
+	}
+	if isDisabledCustomAgent(agent) {
+		return nil, ErrAgentDisabled
 	}
 
 	// Resolve template
