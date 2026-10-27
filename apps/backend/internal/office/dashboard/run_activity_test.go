@@ -389,6 +389,14 @@ func TestLiveRuns_ResolvesAgentFromSessionProfile(t *testing.T) {
 	`, "lra-sess1", "lra-task1", "agent-live", startedAt, startedAt); err != nil {
 		t.Fatalf("insert session: %v", err)
 	}
+	missingAgentStartedAt := time.Now().UTC().Add(-3 * time.Minute).Format("2006-01-02T15:04:05Z")
+	insertTestTask(t, deps.db, "lra-task-missing-agent", ws, "Former Agent Task", "IN_PROGRESS", 0)
+	if _, err := deps.db.Exec(`
+		INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at)
+		VALUES (?, ?, ?, 'RUNNING', ?, ?)
+	`, "lra-sess-missing-agent", "lra-task-missing-agent", "agent-deleted", missingAgentStartedAt, missingAgentStartedAt); err != nil {
+		t.Fatalf("insert session for missing agent: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/workspaces/"+ws+"/live-runs", nil)
 	w := httptest.NewRecorder()
@@ -405,13 +413,19 @@ func TestLiveRuns_ResolvesAgentFromSessionProfile(t *testing.T) {
 	if err := json.Unmarshal(resp["runs"], &runs); err != nil {
 		t.Fatalf("decode runs: %v", err)
 	}
-	if len(runs) != 1 {
-		t.Fatalf("runs length = %d, want 1", len(runs))
+	if len(runs) != 2 {
+		t.Fatalf("runs length = %d, want 2", len(runs))
 	}
 	if runs[0]["agentId"] != "agent-live" {
 		t.Errorf("agentId = %v, want agent-live", runs[0]["agentId"])
 	}
 	if runs[0]["agentName"] != "Live Worker" {
 		t.Errorf("agentName = %v, want 'Live Worker'", runs[0]["agentName"])
+	}
+	if runs[1]["agentId"] != "agent-deleted" {
+		t.Errorf("missing agentId = %v, want agent-deleted", runs[1]["agentId"])
+	}
+	if runs[1]["agentName"] != "" {
+		t.Errorf("missing agentName = %v, want empty", runs[1]["agentName"])
 	}
 }
