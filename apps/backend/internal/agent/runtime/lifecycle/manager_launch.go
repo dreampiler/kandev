@@ -1973,6 +1973,16 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		if err != nil {
 			return nil, err
 		}
+		// The workspace-only execution may predate the dynamic conductor's
+		// candidate selection, so its AgentProfileID can still hold the logical
+		// (virtual) family. Re-bind it to the concrete execution profile this
+		// promotion resolved so the profile read-back and the persisted
+		// executors_running row carry the physical profile instead of the family.
+		promotedProfileChanged := false
+		if profileInfo != nil && profileInfo.ProfileID != "" && execution.AgentProfileID != profileInfo.ProfileID {
+			execution.AgentProfileID = profileInfo.ProfileID
+			promotedProfileChanged = true
+		}
 		releaseOpenCodeAdmission := m.acquireOpenCodeLaunchAdmission(agentTypeName)
 		defer releaseOpenCodeAdmission()
 		agentConfig, err := m.resolveLaunchableAgent(agentTypeName)
@@ -2048,9 +2058,14 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		// Workspace-only executions can be created from a session row that stores
 		// the task assignee. The launch request carries the acting Office identity,
-		// so persist it only after the final agent-launch admission succeeds.
+		// so persist it only after the final agent-launch admission succeeds. The
+		// same write carries a re-bound concrete AgentProfileID so a restart
+		// restores the physical profile rather than the logical family.
 		if req.AgentProfileID != "" {
 			execution.OfficeAgentProfileID = req.AgentProfileID
+			promotedProfileChanged = true
+		}
+		if promotedProfileChanged {
 			m.persistExecutorRunning(context.WithoutCancel(sharedCtx), execution)
 		}
 		m.logger.Info("promoted workspace-only execution to agent execution",

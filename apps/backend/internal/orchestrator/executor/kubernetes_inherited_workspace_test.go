@@ -54,7 +54,7 @@ func TestKubernetesInheritedWorkspaceLegacyLaunch(t *testing.T) {
 func TestKubernetesInheritedWorkspaceSameTaskAllowed(t *testing.T) {
 	task := &v1.Task{ID: "owner", Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "shared_group"}}}
 	env := &models.TaskEnvironment{ID: "owned-env", TaskID: task.ID, ExecutorType: "k8s"}
-	require.NoError(t, rejectInheritedEnvironmentExecutorMismatch(task, env, "k8s"))
+	require.NoError(t, rejectInheritedEnvironmentExecutorMismatch(task, env, "k8s", false))
 }
 
 func TestKubernetesInheritedWorkspaceIncompleteOwnership(t *testing.T) {
@@ -70,7 +70,7 @@ func TestKubernetesInheritedWorkspaceIncompleteOwnership(t *testing.T) {
 		{name: "executor mismatch", owner: "parent", executorType: "local_pc", want: models.ErrWorkspaceReuseUnsafe},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := rejectInheritedEnvironmentExecutorMismatch(task, &models.TaskEnvironment{TaskID: tc.owner, ExecutorType: tc.executorType}, "k8s")
+			err := rejectInheritedEnvironmentExecutorMismatch(task, &models.TaskEnvironment{TaskID: tc.owner, ExecutorType: tc.executorType}, "k8s", false)
 			require.ErrorIs(t, err, tc.want)
 		})
 	}

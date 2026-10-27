@@ -460,16 +460,27 @@ func TestResolveStartWhenUnblocked(t *testing.T) {
 	}
 }
 
-func TestDependencyStatusForTask_ArchivedIsPendingNotResolved(t *testing.T) {
-	// Archival is neither success nor failure: an archived predecessor must not
-	// release a dependent, and must not be reported as a failed chain either.
+func TestDependencyStatusForTask_ArchivedCompletedResolves(t *testing.T) {
+	// A finished predecessor resolves the edge whether or not auto-archive has
+	// since moved it off the board: archival is not a verdict, so a completed
+	// chain is not re-blocked hours later. FAILED and CANCELLED still halt the
+	// chain, and an unfinished predecessor still blocks.
 	if got := DependencyStatusForTask(&models.Task{State: v1.TaskStateCompleted}); got != DependencyResolved {
 		t.Errorf("completed = %q; want %q", got, DependencyResolved)
 	}
 	archivedAt := time.Now().UTC()
 	archived := &models.Task{State: v1.TaskStateCompleted, ArchivedAt: &archivedAt}
-	if got := DependencyStatusForTask(archived); got != DependencyPending {
-		t.Errorf("archived+completed = %q; want %q", got, DependencyPending)
+	if got := DependencyStatusForTask(archived); got != DependencyResolved {
+		t.Errorf("archived+completed = %q; want %q", got, DependencyResolved)
+	}
+	if got := DependencyStatusForTask(&models.Task{State: v1.TaskStateFailed, ArchivedAt: &archivedAt}); got != DependencyFailed {
+		t.Errorf("archived+failed = %q; want %q", got, DependencyFailed)
+	}
+	if got := DependencyStatusForTask(&models.Task{State: v1.TaskStateCancelled}); got != DependencyFailed {
+		t.Errorf("cancelled = %q; want %q", got, DependencyFailed)
+	}
+	if got := DependencyStatusForTask(&models.Task{State: v1.TaskStateInProgress}); got != DependencyPending {
+		t.Errorf("in-progress = %q; want %q", got, DependencyPending)
 	}
 	if got := DependencyStatusForTask(nil); got != DependencyPending {
 		t.Errorf("nil task = %q; want %q", got, DependencyPending)
