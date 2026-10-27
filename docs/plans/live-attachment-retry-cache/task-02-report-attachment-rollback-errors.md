@@ -46,8 +46,7 @@ active inventory row in `inventory/live shared`.
   cleanup authority, active-reference checks, or any timeout.
 - Weakening exact rollback assertions or claiming the active-row cause is
   solved. That cause remains unconfirmed and requires its own evidence.
-- New API, schema, acceptance criteria, gates, or permanent tests. Disposable
-  overlays remain outside the repository's automatic test collection.
+- New API, schema, acceptance criteria, gates or verification framework.
 
 ## Behavior to preserve
 
@@ -67,7 +66,9 @@ Disposable baseline overlay: the two focused error-propagation cases returned
 nil and failed as expected (`1.073s`). The candidate overlay passed (`0.485s`).
 The public `-race` fixture overlay passed (`1.258s`). The exact disposable overlay fixture and logs are retained outside the
 repository automatic test collection.
-No permanent test file was added.
+Three focused cases are retained in the existing host-materialization test file,
+using the real worktree manager with injected store faults. No new test file
+or runtime test seam is added.
 
 These checks establish error propagation and the existing public fixture flow.
 They do not establish the cause of, or a fix for, the active inventory row
@@ -75,3 +76,7 @@ observed in `inventory/live shared`; preserve that limitation.
 
 Implementation and focused validation are complete. Normal hooks, CI and
 publication are separate results; Task 01 remains historically done.
+
+Committed existing-file regression cases passed directly with fts5 and the
+race detector (2.278s), covering both injected failures and preserved known-ID
+exclusion/deduplication. The physical-inventory limitation above is unchanged.
