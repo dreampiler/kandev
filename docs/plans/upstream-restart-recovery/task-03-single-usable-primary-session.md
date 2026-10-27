@@ -111,5 +111,10 @@ and removal controls with the race detector (2.343s). This includes the blocked
 removal fallback, cancelled attempt, explicit choice with unknown outcome and
 queue identity, and optional-store compatibility.
 
-Formatting completed. No installed-provider operation or standing test was
-added. Normal hooks and hosted CI are separate publication results.
+Formatting completed. Eight focused scenario groups now extend the existing
+primary-session candidate test file. No installed-provider operation was performed. Normal hooks and hosted CI are separate publication results.
+
+The committed existing-file recovery cases and existing primary-promotion
+stop/removal controls passed directly with fts5 and the race detector (2.139s).
+Unknown-outcome blocks, original queue identity, explicit selection and legacy
+store compatibility are retained.
