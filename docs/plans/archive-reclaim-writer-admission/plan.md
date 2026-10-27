@@ -59,7 +59,7 @@ admission and physical worktree removal remain unchanged.
 
 - [x] [Task 01: Skip persisted reclaim admission](task-01-skip-persisted-reclaim-admission.md)
 
-## Verification and documentation follow-up
+## Verification and follow-up
 
 The work order records original focused validation and its limits. Its temporary
 copy/contention and admission cases, existing unarchive controls and persistence
@@ -77,6 +77,27 @@ trusted coverage evaluator accepted the runtime path plus these two documents:
 `covered`, `ok: true`, no errors, and the declared archive requirement/design.
 Hosted coverage remains pending until the same PR receives the documents and
 reports a fresh result.
+
+### Maintainer follow-up: permanent admission regressions
+
+The contributor PR now also has permanent repository tests in
+`apps/backend/internal/task/repository/sqlite/resource_cleanup_archive_reclaim_test.go`.
+They use separate file-backed SQLite writer and reader pools. The duplicate
+operation test holds a writer transaction and confirms that the persisted job
+returns unchanged while the writer remains held. Other tests cover current and
+stale archive generations, reader errors, cancellation, incoming managed
+envelopes, recovery claims, and managed-deletion barriers. New operation misses
+also remain blocked by recovery claims and managed-deletion barriers. Existing
+service concurrency and unarchive tests remain in place.
+
+The focused repository test command passed after these additions:
+
+```text
+go test -trimpath -tags fts5 -p 2 ./internal/task/repository/sqlite -run '^TestCreateArchiveReclaimTaskResourceCleanupJob' -count=1
+```
+
+The changed-file Go lint passed with `0 issues`. This is local focused evidence;
+it does not replace a fresh hosted CI result.
 
 ## Risks
 
