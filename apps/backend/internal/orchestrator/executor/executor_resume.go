@@ -2672,6 +2672,7 @@ func (e *Executor) applyResumeRepoConfig(
 		if detachedLocalResumeUsesTaskWorkspace(task, session, req, existingEnv, allRepos, repository) {
 			req.RepositoryID = ""
 			req.Branch = ""
+			req.WorkspacePath = existingEnv.WorkspacePath
 			return "", nil
 		}
 		// A persisted session repository may legitimately be absent from the

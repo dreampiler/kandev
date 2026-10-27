@@ -126,21 +126,22 @@ function useFocusComposerOnMount(chatInputRef: React.RefObject<ChatInputContaine
   }, [chatInputRef]);
 }
 
-function QuickChatTranscript({
-  panelState,
-  items,
-}: {
-  panelState: ReturnType<typeof useChatPanelState>;
+type QuickChatMessageSurfaceProps = {
   items: ReturnType<typeof useVisibleItems>;
-}) {
+  panelState: ReturnType<typeof useChatPanelState>;
+  taskId: string | null;
+};
+
+function QuickChatMessageSurface({ items, panelState, taskId }: QuickChatMessageSurfaceProps) {
   return (
     <div className="flex-1 min-h-0 overflow-hidden bg-popover" data-testid="quick-chat-messages">
       <MessageList
         items={items}
         messages={panelState.allMessages}
+        footerActionMessages={panelState.footerActionMessages}
         permissionsByToolCallId={panelState.permissionsByToolCallId}
         childrenByParentToolCallId={panelState.childrenByParentToolCallId}
-        taskId={panelState.taskId ?? undefined}
+        taskId={taskId ?? undefined}
         sessionId={panelState.resolvedSessionId}
         messagesLoading={panelState.messagesLoading}
         isWorking={panelState.isWorking}
@@ -196,7 +197,9 @@ export const QuickChatContent = memo(function QuickChatContent({
     (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, shortcutScopeRef),
     [],
   );
-  if (readOnly) return <QuickChatTranscript panelState={panelState} items={items} />;
+  if (readOnly) {
+    return <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />;
+  }
   return (
     <div
       ref={shortcutScopeRef}
@@ -212,7 +215,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         pendingClarification={pendingClarification}
         onCancel={handleCancelTurn}
       />
-      <QuickChatTranscript panelState={panelState} items={items} />
+      <QuickChatMessageSurface items={items} panelState={panelState} taskId={taskId} />
       <ClarificationPanelSection
         key={sessionId}
         pending={Boolean(pendingClarification)}

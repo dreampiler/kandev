@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
+  - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
 ---
 
 # Provider Error Signature Classification System Design
@@ -11,10 +12,11 @@ requirements:
 
 The Agents system owns provider-error classification. This design describes
 how the provider rule table separates provider limit signatures from agent
-prose. The original limit-signature work does not change rule order, confidence,
-classification flags, provider-neutral rules or how dynamic routing acts on a
-classified failure. The context-length follow-up below adds only a named
-prompt-send producer and its existing exact consumer compatibility.
+prose. The original limit-signature work preserves rule order, confidence,
+classification flags and existing routing actions. The context-length follow-up
+adds only the named prompt-send producer and its existing exact consumer.
+The other bounded additions below preserve higher-priority signals and the
+sanitized excerpt contract.
 
 ## Requirement mapping
 
@@ -66,9 +68,27 @@ active (paid) Claude [Pro|Max|Team|Enterprise] subscription", "subscription
 expired / is required / is inactive / not active", and "no active
 subscription".
 
-Rule order and confidence are unchanged, so a provider signature that matched
-before still yields the same code, confidence, and flags. Text that matched
-only through a topic word now falls through to the next rule, the
+Additional bounded signatures:
+
+- OpenCode's unlabelled opening `free usage limit reached` line is an
+  OpenCode-scoped quota rule. The label-wrapped form is outside this follow-up
+  and remains separate catalogue work.
+- OpenCode daily rate-limit wording (`free-models-per-day` and
+  `limit_rpd/<model>`) is matched against raw diagnostic text only because the
+  shared sanitizer masks its distinguishing token. `RawExcerpt` remains the
+  sanitized excerpt, and existing structured, payment, credit, and quota
+  precedence is preserved.
+- OpenCode Zen's opening `Rate limit exceeded. Please try again later` is a
+  generic rate limit; it carries no inferred reset period.
+- A labeled opening JSON envelope containing the exact field
+  `"error_type":"provider_unavailable"` is a shared provider-neutral
+  signature, independent of field order. The existing optional Agent encountered
+  an error status prefix is preserved. Bare JSON and quoted prose remain
+  unmatched by this rule.
+
+Previously matching higher-priority signatures retain their precedence, code,
+confidence, and flags. Text that matched only through a topic word falls
+through to the next rule, the
 provider-neutral rules, or the phase default.
 
 ## Observability
@@ -115,3 +135,19 @@ provider policy. No generic recovery or implicit replay permission is added.
 Usage-account learning is a separate consumer boundary, not a property of
 matching a message. This catalog does not create account IDs, change scope,
 invent reset calendars or alter the candidate's configured quota action.
+
+## Codex terminal throttling
+
+`REQ-AGENTS-CODEX-RATE-SIGNATURE-001` adds a bounded, line-anchored catalogue
+signature in `routingerr/rules.go`. Match the complete observed 429 wording,
+with established optional error labels. Keep quota rules ahead of the new rule.
+Do not match a bare 429 or an arbitrary occurrence of "retry limit".
+
+Use a distinct stable rule ID and sanitized fixture. Cover direct and prefixed
+messages, prose collisions, other statuses, other providers, and quota precedence.
+The screenshot establishes the displayed text, not a captured ACP envelope.
+Do not fabricate recorded protocol provenance or expose raw error Data.
+
+Interactive policy belongs to Platform. Office and dynamic routing consume the
+new classification through their existing policies, without a new retry policy.
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

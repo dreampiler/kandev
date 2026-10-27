@@ -70,6 +70,11 @@ release a queue claim, or authorize a prompt. Blocks of unarchived tasks,
 including terminal non-primary sessions that a manual resume can revive, remain
 open.
 
+The Office recovery-park consumer ignores archive-only closure. It retains the
+run's block reference and does not requeue it for admission merely because the
+block is resolved by bookkeeping. Actual explicit session recovery retains its
+existing release behavior after unarchive.
+
 Unarchive restores only blocks closed with `task_archived` in the same
 transaction that clears `archived_at`, and advances the affected session
 revision before recovery eligibility is evaluated. Retention treats such a

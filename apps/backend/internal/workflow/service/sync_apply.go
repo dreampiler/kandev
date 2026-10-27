@@ -358,9 +358,8 @@ func reviewProfileIDs(events models.StepEvents) []string {
 }
 
 // stepMatchesDefinition reports whether an existing step already equals its
-// desired definition (timestamps and stage type aside — stage type is copied
-// from the existing step). Events are compared via their JSON encoding to
-// normalize YAML/JSON numeric type differences in action configs.
+// desired definition. Events are compared via their JSON encoding to normalize
+// YAML/JSON numeric type differences in action configs.
 func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 	return existing.Name == desired.Name &&
 		existing.Position == desired.Position &&

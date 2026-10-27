@@ -5,7 +5,7 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior and classification, portable agent-profile descriptors, WIP rules, supported events, and explicit task-completion policies. It deliberately omits database IDs and workspace ownership. New exports use version 2; version 1 documents remain accepted and receive compatibility defaults at import.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
@@ -45,7 +45,7 @@ All routes are on the Kandev backend under `/api/v1`.
 | `POST` | `/workspaces/:id/workflows/import/preview` | Validate a portable YAML request and return skipped names, eligible global profiles, and direct step-profile matches. It does not write. |
 | `POST` | `/workspaces/:id/workflows/import` | Parse a portable YAML request and return `{"created": [...], "skipped": [...]}`. |
 
-The workspace export route treats an absent `ids` parameter as “all”; `ids=` is an explicit empty selection and returns an envelope with no workflows. Such an envelope cannot be imported because validation requires at least one workflow. The UI supplies IDs for its Kanban-only selection. A direct “all” HTTP export can include workflow styles the portable converter cannot completely represent, so prefer the UI for user-managed Kanban workflows.
+The workspace export route treats an absent `ids` parameter as “all”; `ids=` is an explicit empty selection and returns an envelope with no workflows. Such an envelope cannot be imported because validation requires at least one workflow. The UI supplies IDs for its Kanban-only selection. A direct “all” HTTP export can include workflow styles whose Office-specific assignments and history the portable converter cannot completely represent, so prefer the UI for user-managed Kanban workflows.
 
 Import requests are limited to 1 MiB. A larger request returns `413 Request Entity Too Large` and does not write. The preview route accepts portable YAML. The browser's final import request uses `application/json` with the YAML text and explicit direct step-profile bindings; a raw `application/x-yaml` request remains available for scripts and unattended callers.
 
@@ -127,7 +127,7 @@ Unknown YAML fields are ignored by the current decoder. Do not use that as an ex
 
 | Field | Export behavior | Import behavior |
 |-------|-----------------|-----------------|
-| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace name causes a skip. |
+| `name` | Always emitted. | Exact empty string is rejected. Existing target-workspace names and later occurrences of the same exact name in one document are skipped. |
 | `description` | Omitted when empty. | Stored as supplied. |
 | `agent_profile` | Omitted when no workflow profile resolves. | Exact value match; see [Profile matching](#profile-matching). |
 | `steps` | Always emitted, possibly empty. | Empty lists are currently accepted, although an empty workflow is not useful. |
@@ -174,6 +174,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `name` | string | Always exported; exact empty string is rejected. |
 | `position` | integer | Always exported and must be unique inside its workflow. It is an ordering key and reference anchor; built-ins use contiguous zero-based values, but validation does not require that. |
 | `color` | string | Always exported. Kandev normally stores a background utility class such as `bg-blue-500`; portable validation does not allow-list colors. |
+| `stage_type` | enum | Always exported for stored steps: `work`, `review`, `approval`, or `custom`. Older documents may omit it; a newly imported step then defaults to `custom`. During sync, an explicit source value applies and participates in drift comparison; an omitted value preserves a matched step's current type, while a new step defaults to `custom`. |
 | `prompt` | string | Omitted when empty. `{{task_prompt}}` is the editor-supported task-description placeholder. |
 | `events` | object | Always exported, even when empty. Supported portable triggers are below. |
 | `is_start_step` | boolean | Always exported. Missing input decodes as `false`. The editor enforces one start step, but portable validation does not. During import, later `true` steps demote earlier ones. |
@@ -201,7 +202,7 @@ If a source step is missing, later than its target, or invalid after a sync
 edit, import and sync report a validation error. Kandev does not silently pick
 another conversation.
 
-`stage_type`, Office participants, recorded decisions, task data, and step history are not portable. Imported steps receive new UUIDs and the default internal stage type.
+Office participants, recorded decisions, task data, and step history are not portable. Imported steps receive new UUIDs. When an older portable document omits `stage_type`, a newly imported step receives `custom`.
 
 ## Portable events
 
@@ -234,7 +235,7 @@ Portable validation is deliberately narrow. Beyond `set_session_mode` and positi
 
 The seven Office/Phase-2 triggers and the two PR triggers listed in the table above round-trip through export and import: their actions, including `move_to_step`, are carried the same way as the four Kanban-era triggers. A Phase-2 `move_to_step` uses `config.step_position` and is validated against the workflow's step positions identically to `on_turn_start`/`on_turn_complete`. `queue_run_for_each_participant`'s `config.skip_decided` (boolean) excludes any seat that already recorded a decision at the step from that fan-out: the shipped office-default template sets it on `review`/`approval`'s `on_comment` so a gate comment only wakes undecided reviewers/approvers.
 
-What still doesn't round-trip is Office step *metadata* that has no portable representation: `stage_type`, step participants (reviewers/approvers), recorded decisions, task data, and step history (see [Step fields](#step-fields)). The Workflows settings UI filters Office-style workflows from its list and Export All selection because of that metadata gap, not because their trigger events are dropped. Manage participant and decision state through the Office product surface; portable Kanban import/export only carries step behavior, not Office workflow state.
+`stage_type` round-trips as a step classification hint. Office participants (reviewers/approvers), recorded decisions, task data, and step history still have no portable representation. The Workflows settings UI continues to filter workflows whose style is `office` from its list and Export All selection; that filter is based on workflow style, not `stage_type`, and is unchanged. Manage participant and decision state through the Office product surface. A portable stage classification does not carry Office assignments, change execution authority, or make the format a full Office workflow backup.
 
 </details>
 
@@ -279,10 +280,17 @@ If there is no exact match, import still succeeds and silently leaves that workf
 Browser imports follow these rules:
 
 1. The preview decodes and validates the complete envelope, applies name deduplication, and returns direct step-profile candidates without creating anything.
-2. Existing workflows are compared by exact name. Matches are reported under `skipped`; they are not updated or merged.
+2. Names are compared exactly, including case and whitespace. Every occurrence matching an existing destination workflow, including hidden workflows, is skipped. Otherwise, the first occurrence in document order is retained and later occurrences are skipped. Skipped definitions are not updated or merged.
 3. Each new workflow and its steps receive fresh IDs. Step-position references are remapped to those IDs.
 4. Exact profile matches are preselected. Unmatched direct step descriptors require explicit eligible profile selections.
-5. The final request validates every binding, profile ID, profile revision, and portable reference before creating any workflow.
+5. The final request structurally validates every supplied binding and portable reference. It checks retained steps' profile IDs and revisions before creating any workflow.
+
+Preview, browser submission, raw YAML, and MCP imports use the same name-selection
+rule. Results report each skipped occurrence under `skipped`. Only retained
+workflows need profile selections, so a missing profile in a later duplicate
+does not block the first workflow. Preview and binding `workflow_index` values
+refer to the original document array, including skipped entries. Structural
+validation still checks the complete document before creation.
 
 Browser preview, selection validation, and profile conflicts write nothing. After
 that validation pass, a database failure during creation is still not one
@@ -371,7 +379,7 @@ After import, assign a workflow default or affected step agent profile if the de
 - **Pull reference error:** ensure the target position exists, is not the same step, and does not participate in a cycle.
 - **Workflow skipped:** rename either the destination workflow or the imported workflow; import is create-or-skip, not update.
 - **Profile missing after import:** match display name, model, and mode exactly, or select a profile in settings afterward.
-- **Event vanished:** all eleven triggers round-trip; only Office step metadata (`stage_type`, participants, decisions, task data, step history) does not.
+- **Event vanished:** all eleven triggers round-trip. Office participants, decisions, task data, and step history remain non-portable; `stage_type` is carried separately as a classification field.
 - **Large import reports strange YAML:** keep the request below 1 MiB; the route truncates at that boundary.
 - **Import failed after creating something:** creation is not an all-or-nothing transaction; remove partial results and retry a corrected file.
 

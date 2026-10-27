@@ -30,21 +30,21 @@ func (s *Service) sessionAwaitsRecoveryAction(ctx context.Context, session *mode
 	return block != nil
 }
 
-// resumeAttemptInFlight reports whether a resume or recovery attempt still
-// owns startup of the session. A FAILED written while that attempt owns the
-// session is the attempt's own rollback, not a finished session: the session
-// stays the one the user is restoring, so it neither hands its role to another
-// session nor gives up its queue.
+// resumeAttemptInFlight reports whether a live, unaccepted attempt still owns
+// startup. Provider acceptance transfers that ownership before deferred finish.
 func (s *Service) resumeAttemptInFlight(sessionID string) bool {
 	if sessionID == "" {
 		return false
 	}
-	attempt, ok := s.resumeAttemptStore().current(sessionID)
-	return ok && attempt != nil && attempt.ctx != nil && attempt.ctx.Err() == nil
+	registry := s.resumeAttemptStore()
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	attempt := registry.attempts[sessionID]
+	return attempt != nil && attempt.ctx != nil && attempt.ctx.Err() == nil && !attempt.accepted
 }
 
 // terminalQueueSourceRetired reports whether the session whose queue a
-// hand-off would move is still terminal and no resume attempt owns it.
+// hand-off would move is still terminal and no unaccepted resume attempt owns startup.
 func (s *Service) terminalQueueSourceRetired(ctx context.Context, sessionID string) bool {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {

@@ -43,7 +43,7 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 	candidate dynamicruntime.Candidate,
 	failure *routingerr.Error,
 ) (*routingerr.Error, dynamicruntime.LimitSuspension) {
-	if a == nil || a.usage == nil || a.usage.tierLimits == nil {
+	if !a.hasTierLimits() {
 		return failure, dynamicruntime.SuspensionBinding
 	}
 	resolved := a.usage.tierLimits.resolveFailure(ctx, candidate, failure)
@@ -77,6 +77,10 @@ func (a *tierLimitAdapter) ResolveLimitFailure(
 		}
 	}
 	return resolved, scope
+}
+
+func (a *tierLimitAdapter) hasTierLimits() bool {
+	return a != nil && a.usage != nil && a.usage.tierLimits != nil
 }
 
 func (a *tierLimitAdapter) goAccountBound(ctx context.Context, profileID string) bool {

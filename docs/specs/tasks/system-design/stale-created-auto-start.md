@@ -51,12 +51,30 @@ session that is no longer CREATED releases the guard and continues without
 launching. A launch that returns the marker retires its start attempt, releases
 the guard, reloads the session, and continues the same way.
 
-The continuation reads the task. When the session is WAITING_FOR_INPUT and the
-task is still on the dispatching step, it delivers the already recorded step
-prompt through `retryAutoStartStepPrompt`, the path a non-CREATED snapshot takes.
-The losing launch failed before starting the agent process or registering the
-initial prompt dispatch, so this is the only delivery. Otherwise it returns the
-taken hand-off message to the queue and returns nil.
+The continuation preserves the original workflow-entry and session-incarnation
+snapshot. It reuses an existing ceiling entry binding and derives one from the
+captured transition where the existing repository supports that path. It never
+rebinds old input to a successor workflow entry.
+
+A WAITING_FOR_INPUT session takes retryAutoStartStepPrompt. A fresh STARTING
+or RUNNING session retains the entire raw step prompt through the existing
+busy-queue policy, preserving the recorded-message flag, attachments, references,
+plan mode and handoff metadata. Successful full queueing does not separately
+restore the taken handoff. Callers that disable queueing keep their existing
+waiting-session retry behavior.
+
+Queue insertion uses the existing session/workflow-entry atomic admission when
+available. The existing compatibility path remains available to focused or
+legacy queue stores without that capability. Prompt retries carry validation
+at the normal dispatch and final provider-admission callbacks. The same scoped
+callbacks travel through composed fresh fallback and initial prompt admission;
+ordinary prompt/start callers receive no new admission requirement.
+
+Fresh fallback validates under the existing task-entry and cancellation guards
+before resetting the original session. An intentional stale-entry refusal returns
+without dispatching or entering generic launch-failure handling. The winning
+session and task state remain owned by the winning path. A taken handoff is
+restored once across the continuation's refusal callbacks.
 
 ## Verification
 

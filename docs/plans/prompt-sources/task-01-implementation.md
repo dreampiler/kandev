@@ -64,3 +64,28 @@ An explicitly unlocked instance keeps the existing editor. Desktop and phone ret
 ```
 
 This sketch records the affected structure; spacing is illustrative. It does not add a new control or approval requirement.
+
+
+## Portable stage classification correction
+
+The existing native definition conversion must retain its persisted stage type.
+The portable step now carries optional stage_type in the existing export version
+envelope. Recognized work/review/approval/custom values survive export, preview
+and import. New steps from older inputs default to custom; sync preserves a
+matched existing type when an older source omits it, and applies and reports
+explicit type changes as drift. Unknown supplied types are rejected.
+
+This correction preserves profile-selection, source permissions, stable identity
+and history. Office-style exclusion, participant assignments, decisions and
+execution authority are unchanged. It does not add hold classification or
+backfill. Existing public import/export and sync guides state that boundary.
+
+Root verification reproduced all three original defects: exported stage type
+was absent, unknown supplied types were ignored, and explicit sync types were
+not applied. The final publication checkout passed the same disposable cases
+and existing export/profile-selection/sync-no-op/stable-ID/persisted-stage
+controls with the race detector: models1.113s, service1.911s, repository1.434s.
+Missing-field compatibility and export-version selection were preserved.
+No permanent test or installed workflow activation was added. Normal commit
+hooks and updated-head hosted CI are separate publication results; historical
+verification above is not substituted for the new checks.

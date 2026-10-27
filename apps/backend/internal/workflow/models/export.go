@@ -285,6 +285,13 @@ func (e *WorkflowExport) Validate() error {
 		}
 		positions := make(map[int]bool, len(wf.Steps))
 		for j, step := range wf.Steps {
+			if step.StageType != "" {
+				switch step.StageType {
+				case StageTypeWork, StageTypeReview, StageTypeApproval, StageTypeCustom:
+				default:
+					return fmt.Errorf("workflow %d step %d: invalid stage_type %q", i, j, step.StageType)
+				}
+			}
 			if step.Name == "" {
 				return fmt.Errorf("workflow %d step %d: name is required", i, j)
 			}

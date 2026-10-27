@@ -16,6 +16,7 @@ func (e *Executor) applyResumeRepositoryContext(
 		return "", nil, err
 	}
 	if inherit {
+		req.WorkspacePath = env.WorkspacePath
 		return "", nil, nil
 	}
 	id, err := e.applyResumeRepoConfig(ctx, task, session, req, env, repositories)
