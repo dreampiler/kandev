@@ -181,6 +181,11 @@ type RoutineTaskCreator interface {
 	) (string, error)
 }
 
+// Required assignments must be written before create-time auto-start can run.
+type routineTaskCreatorWithRequirements interface {
+	CreateOfficeTaskInWorkflowWithRequirements(context.Context, string, string, string, string, string, string, string, int) (string, error)
+}
+
 // RoutineService provides routine CRUD, trigger management, and dispatch logic.
 type RoutineService struct {
 	repo            Repository
@@ -1230,14 +1235,28 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 	run *RoutineRun,
 	title, description string,
 ) error {
+	var template taskTemplate
+	if err := json.Unmarshal([]byte(routine.TaskTemplate), &template); err != nil {
+		return fmt.Errorf("invalid routine task template: %w", err)
+	}
+	required := template.RequiredSubtaskCount
+	if required < 0 {
+		return fmt.Errorf("required subtask count must not be negative")
+	}
 	workflowID, err := s.workflowEnsurer.EnsureRoutineWorkflow(ctx, routine.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("ensure routine workflow: %w", err)
 	}
-	taskID, err := s.taskCreator.CreateOfficeTaskInWorkflow(
-		ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID,
-		workflowID, title, description, routine.ID,
-	)
+	var taskID string
+	if required > 0 {
+		creator, ok := s.taskCreator.(routineTaskCreatorWithRequirements)
+		if !ok {
+			return fmt.Errorf("routine task creator does not support required subtask assignments")
+		}
+		taskID, err = creator.CreateOfficeTaskInWorkflowWithRequirements(ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID, workflowID, title, description, routine.ID, required)
+	} else {
+		taskID, err = s.taskCreator.CreateOfficeTaskInWorkflow(ctx, routine.WorkspaceID, "", routine.AssigneeAgentProfileID, workflowID, title, description, routine.ID)
+	}
 	if err != nil {
 		return fmt.Errorf("create routine task: %w", err)
 	}
@@ -1547,8 +1566,9 @@ func (s *RoutineService) closeOutRun(ctx context.Context, run *RoutineRun, termi
 // -- helpers --
 
 type taskTemplate struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title                string `json:"title"`
+	Description          string `json:"description"`
+	RequiredSubtaskCount int    `json:"required_subtask_count,omitempty"`
 }
 
 func parseTaskTemplate(raw string) taskTemplate {

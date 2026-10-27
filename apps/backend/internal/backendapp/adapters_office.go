@@ -256,6 +256,12 @@ func (a *taskCreatorAdapter) createOfficeTask(
 func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string,
 ) (string, error) {
+	return a.CreateOfficeTaskInWorkflowWithRequirements(ctx, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID, 0)
+}
+
+func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflowWithRequirements(
+	ctx context.Context, workspaceID, projectID, assigneeAgentID, workflowID, title, description, routineID string, requiredSubtasks int,
+) (string, error) {
 	metadata := map[string]interface{}{
 		// The Routine workflow's start step carries on_enter:
 		// auto_start_agent, but a materialized run lands directly on that
@@ -296,6 +302,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		AssigneeAgentProfileID: assigneeAgentID,
 		Metadata:               metadata,
 		OfficeCarrierMetadata:  carrierMetadata,
+		RequiredSubtaskCount:   requiredSubtasks,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {
