@@ -187,12 +187,19 @@ installation are prohibited on the shared host for this review.
 ## Primary recovery-selection follow-up (2026-10-27)
 
 The original four work orders above retain their recorded results. Work order
-03 has one additional correctness increment awaiting verification: exclude a
-recovery-blocked or unreadable session after a stop, retain it as a removal
-fallback, and preserve the primary during a live resume attempt's FAILED
-rollback. Existing current-main recovery and resume-attempt APIs are reused.
-Explicit promotion, queue targets, automatic recovery policy and all schema
-contracts are unchanged. No terminal queue handoff or terminal-session revival
-is included. Disposable source fixtures are prepared outside the repository;
-current-port execution and normal required checks remain with the integrating
-owner. The original validation claims do not cover this follow-up.
+03 adds one verified correctness increment: exclude a recovery-blocked or
+unreadable session after a stop, retain it as a removal fallback, and preserve
+the primary during a live resume attempt's FAILED rollback. Existing recovery
+and resume-attempt APIs are reused. Explicit promotion, queue targets, automatic
+recovery policy and schema contracts are unchanged. Terminal queue handoff and
+terminal-session revival remain outside this increment.
+
+Original-source disposable probes reproduced the selection and ownership
+defects. Eight scenario groups now extend the existing primary-session candidate
+test file. Those cases and existing stop/removal controls passed directly with
+fts5 and the race detector (2.139s), including cancelled attempts, unknown blocks,
+queue identity, explicit selection and optional-store compatibility. Normal
+commit hooks and the unchanged documentation coverage evaluator passed. The
+follow-up was submitted in #4843; hosted CI is tracked separately. These focused
+repository/service checks do not claim installed-provider or browser acceptance
+or reuse the original work orders' results as proof for this increment.
