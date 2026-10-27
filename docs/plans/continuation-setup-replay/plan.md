@@ -29,8 +29,9 @@ In scope: `agent_delivery_retention.go`, `delivery_stream_preflight.go`, and
 `apps/backend/internal/agent/runtime/lifecycle/`, plus a permanent regression
 test beside them.
 
-Excluded: orchestrator generation commit ordering, the generation-one bootstrap
-path, and any UI change.
+Excluded: orchestrator generation commit ordering, changes to the ordinary fresh
+generation-one bootstrap path, and any UI change. The legacy continuation
+follow-up reuses the existing bootstrap wait with its original deadline.
 
 ## Work orders
 
@@ -58,3 +59,17 @@ is still pending. Both tests fail on the base revision and pass with the fix.
   fully retained unacknowledged stream, and no retained prompt submissions.
 - Waiting for a commit that never happens would hang startup; the existing
   bounded successor wait and cancellation still apply.
+
+
+## Legacy continuation follow-up verification
+
+Task 01 also covers the existing authorized generation-zero producer. The
+optional two-source-boundary correction and existing-file real SQLite/journal
+cases passed focused race checks (11.460s), including first-generation commit
+ordering/cancellation and refusal conditions. Ordinary fresh bootstrap and
+N-to-N+1 successor behavior retain their controls and original deadlines.
+
+The original Task 01 results stay historical. SQLguard passed; unrelated
+Windows storage-temp absolute-path conformance failures reproduce on the exact
+published baseline, and PostgreSQL execution remains unconfigured. Details and
+actual scope are in Task 01. Updated-head CI and PR publication are separate.

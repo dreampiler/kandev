@@ -102,7 +102,27 @@ func canReplaySuccessorSetupEvents(ctx context.Context, execution *AgentExecutio
 		return false
 	}
 	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, execution.SessionID, execution.DeliveryIncarnationID)
+	if execution.ForceContextContinuation && errors.Is(err, models.ErrTaskSessionNotFound) {
+		return canReplayLegacyContinuationSetupEvents(ctx, execution, delivery)
+	}
 	return err == nil && replacementGenerationPending(execution, current)
+}
+
+type legacyContinuationBootstrapReader interface {
+	HasPreparedLegacyContinuationBootstrap(context.Context, string, string, string) (bool, error)
+}
+
+func canReplayLegacyContinuationSetupEvents(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository) bool {
+	if execution.DeliveryHarnessGeneration != 1 || !execution.deliveryBootstrap.Load() ||
+		execution.SessionID == "" || execution.DeliveryIncarnationID == "" || execution.ID == "" {
+		return false
+	}
+	prepared, supported := delivery.(legacyContinuationBootstrapReader)
+	if !supported {
+		return false
+	}
+	valid, err := prepared.HasPreparedLegacyContinuationBootstrap(ctx, execution.SessionID, execution.DeliveryIncarnationID, execution.ID)
+	return err == nil && valid
 }
 
 func canUseLegacyEmptyDelivery(ctx context.Context, execution *AgentExecution, delivery AgentDeliveryRepository, streamID string, err error) bool {
