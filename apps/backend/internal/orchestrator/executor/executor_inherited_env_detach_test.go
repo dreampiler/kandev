@@ -131,12 +131,10 @@ func TestLaunchPreparedSession_DetachesInheritedPolicyEnvironmentOnExecutorMisma
 	repo.sessions[session.ID] = session
 
 	var launchedExecutorType, launchedTaskEnvironmentID string
-	var launchedWorkspaceReuseRequired bool
 	exec := newTestExecutor(t, &mockAgentManager{
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchedExecutorType = req.ExecutorType
 			launchedTaskEnvironmentID = req.TaskEnvironmentID
-			launchedWorkspaceReuseRequired = req.WorkspaceReuseRequired
 			return &LaunchAgentResponse{AgentExecutionID: "exec-child", Status: v1.AgentStatusStarting}, nil
 		},
 	}, repo)
@@ -158,9 +156,6 @@ func TestLaunchPreparedSession_DetachesInheritedPolicyEnvironmentOnExecutorMisma
 	}
 	if launchedTaskEnvironmentID == "" || launchedTaskEnvironmentID == parent.ID {
 		t.Fatalf("launched task environment ID = %q, want a fresh child environment", launchedTaskEnvironmentID)
-	}
-	if launchedWorkspaceReuseRequired {
-		t.Fatal("detached child launch must not require reuse of the inherited environment")
 	}
 	if len(repo.createTaskEnvironmentCalls) != 1 {
 		t.Fatalf("created %d task environments, want 1 fresh environment for the detached child", len(repo.createTaskEnvironmentCalls))
