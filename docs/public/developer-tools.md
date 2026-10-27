@@ -95,6 +95,8 @@ tabs or close the view.
 
 Quick Chat keeps the prompt, files, profile, and repositories in the setup after a creation error. Correct the problem and select **Send** again. After a conversation exists, a delivery error keeps the opening prompt in that chat for an explicit retry.
 
+If Kandev recognizes a terminal rate-limit error that it can retry safely, Quick Chat retries the accepted message up to five times. A status card shows progress and lets you cancel.
+
 Configuration Chat does not use repository selections. Its existing workspace permissions and Settings entry point remain in effect.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
@@ -154,6 +156,8 @@ The built-in actions are:
 Set a global **Default utility agent profile** by choosing an enabled, global, ACP inference profile. Each built-in action can inherit that profile or select another profile, and its prompt template is editable. The profile owns the agent, model, mode, launch flags, environment, and permission policy.
 
 You can also create a custom utility. Name, prompt, and profile are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A stale, disabled, deleted, workspace-scoped, passthrough-only, or unconfigured profile fails closed. Repair the binding in Settings before running the utility again.
+
+Disabling a custom utility blocks new calls until it is re-enabled; calls already admitted continue.
 
 Utility calls run as ephemeral processes on the Kandev backend host. Kandev resolves one profile snapshot at call start, records its profile ID with the call, and applies its permissions without asking for interactive approval. If the profile does not auto-approve a permission request, the call is rejected promptly. Profile edits affect the next call; an in-flight call keeps its snapshot.
 

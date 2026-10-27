@@ -1185,10 +1185,13 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
 	// 8 plan + 1 related-tasks + 3 task-documents + 1 rich-output
-	// + 1 step_complete (ADR 0015) + 1 transfer = 15
+	// + 1 step_complete (ADR 0015) + 1 transfer + 3 native review tools = 18
 	// (no ask_user_question, no delegate, no list_task_comments)
 	assert.Contains(t, tools, "transfer_task_kandev")
-	assert.Equal(t, 15, len(tools))
+	assert.Contains(t, tools, "run_code_review_kandev")
+	assert.Contains(t, tools, "set_review_source_kandev")
+	assert.Contains(t, tools, "get_code_review_kandev")
+	assert.Equal(t, 18, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {
@@ -1241,8 +1244,8 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 	assert.NotContains(t, tools, "update_task_plan_kandev")
 	assert.NotContains(t, tools, "delete_task_plan_kandev")
 
-	// External mode does NOT include kanban update_task_kandev (config has its own update_task_state)
-	assert.NotContains(t, tools, "update_task_kandev")
+	// External mode reuses the generic task update alongside config's state-only tool.
+	assert.Contains(t, tools, "update_task_kandev")
 
 	// External mode does NOT include message_task_kandev (no live session context)
 	assert.NotContains(t, tools, "message_task_kandev")
@@ -1261,10 +1264,13 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// Baseline 42 tools plus the five compact settings tools and the audited
-	// cross-workspace transfer tool.
+	// Upstream's 51-tool external catalogue plus three native review
+	// source/readback tools; generic task update remains available.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 53, len(tools))
+	assert.Equal(t, 54, len(tools))
+	assert.Contains(t, tools, "run_code_review_kandev")
+	assert.Contains(t, tools, "set_review_source_kandev")
+	assert.Contains(t, tools, "get_code_review_kandev")
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 
