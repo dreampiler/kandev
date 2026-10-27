@@ -196,3 +196,13 @@ writes no cursor or receipt. Event processing for both successor kinds waits
 under the bounded successor wait for the committed generation and checks the
 live owner before any receipt or projection.
 Delivery: [Successor setup replay](../../../plans/continuation-setup-replay/plan.md).
+
+
+## Legacy generation-zero continuation setup
+
+The explicit legacy continuation preflight uses the optional read-only pending
+checkpoint predicate described in [harness continuity](../../agents/system-design/harness-session-continuity.md#legacy-generation-zero-continuation-setup).
+Admission permits retained setup replay from zero; the existing first-generation
+wait still prevents receipts/projection until the canonical native generation
+commits and remains caller-cancellable. Ordinary fresh/successor behavior,
+unknown delivery reconciliation, proof/claim authority and deadlines are unchanged.

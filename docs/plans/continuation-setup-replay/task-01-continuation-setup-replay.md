@@ -35,7 +35,9 @@ the owner check.
 
 ## Out of scope
 
-Orchestrator commit ordering, the generation-one bootstrap exception, UI.
+Orchestrator commit ordering, changes to ordinary fresh generation-one
+bootstrap behavior, and UI. The legacy follow-up below reuses the existing
+first-generation wait for an explicitly authorized context continuation.
 
 ## Acceptance
 
@@ -85,3 +87,42 @@ could hang startup. The guards and the existing bounded wait address both.
 ## Parallelism
 
 `sequential`
+
+
+## Legacy first-generation completion
+
+The original successor results above remain historical evidence. This bounded
+follow-up composes a typed-absence generation-zero branch into the existing
+successor preflight and adds the optional read-only
+HasPreparedLegacyContinuationBootstrap query. The existing producer already
+stores an authorized blocked unfinished attempt with expected generation zero
+and a prepared snapshot targeting one; no producer or waiter change is needed.
+
+This combined Native tree already supplies that guarded legacy admission through
+canReplayContinuationSetupEvents and canReplayLegacyContinuationSetupEvents in
+continuation_delivery_preflight.go, using the same read-only repository predicate.
+The real replay-cursor entry point composes it with fresh and successor admission.
+Keep that existing path instead of duplicating the private source helper.
+
+The original upstream source rejected native-bound and resumed candidates at the
+real initialDeliveryReplayCursor entry point (0.720s). The upstream PR #4597 candidate passed
+these cases and existing fresh/successor/commit/cancellation controls (5.681s).
+Final existing-file cases additionally cover fourteen contradictory SQL states,
+ordinary/non-bootstrap/journal/query-error refusals, and first-generation commit
+versus cancellation with no early receipt; the selected race suite passed
+(11.460s). These are historical upstream source results; this combined Native
+candidate records its own focused verification separately. No installed-provider
+or browser execution is claimed.
+
+SQLguard completed successfully. Full store conformance on this Windows host
+fails the existing storage_temp_artifacts absolute-path fixture, including its
+previous-stable upgrade use. An exact published-source overlay reproduces the
+four storage conformance failures (0.282s); the new optional query is hidden in
+that baseline. No schema or storage-validation change was made to bypass it.
+Full conformance success is not claimed. PostgreSQL was not executed because
+KANDEV_TEST_POSTGRES_DSN is not configured.
+
+Normal hooks, current-head documentation coverage and hosted CI are separate
+publication results. Existing native proof/claims, unknown delivery rows,
+original native history, predecessor replay and operator authorization remain
+authoritative. No automatic recovery or historical-ancestry closure is added.
