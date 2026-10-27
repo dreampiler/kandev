@@ -20,8 +20,8 @@ func (s *Service) dynamicRelaunchHasResumeSource(ctx context.Context, sessionID 
 	return !errors.Is(err, models.ErrExecutorRunningNotFound)
 }
 
-// queuedTranscriptMessageIDs returns the transcript message IDs already
-// recorded for entries the session's queue still owns. The snapshot includes
+// queuedTranscriptMessageIDs returns transcript row IDs for entries the
+// session's queue still owns. The snapshot includes
 // retained rows an in-flight delivery reserved, and the dispatch claims cover
 // ordinary rows the reservation moved out of the queue table. The chat
 // handler's atomic queued send writes that row when it queues the entry, and a
@@ -61,12 +61,9 @@ func (s *Service) queuedTranscriptMessageIDs(ctx context.Context, sessionID stri
 }
 
 // addQueuedTranscriptMessageID records the transcript row identities carried by
-// one queue-owned entry. Only entries whose user message was already recorded
-// can be replayed by prompt construction.
+// one queue-owned entry. Transcript selection matches existing row IDs; a
+// persisted claim's recorded marker can predate the actual transcript write.
 func addQueuedTranscriptMessageID(ids map[string]struct{}, queuedMsg *messagequeue.QueuedMessage, sourceIDs []string) {
-	if recorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool); !recorded {
-		return
-	}
 	if transcriptID, _ := queuedMsg.Metadata[messagequeue.MetadataDurableTranscriptMessageID].(string); transcriptID != "" {
 		ids[transcriptID] = struct{}{}
 	}

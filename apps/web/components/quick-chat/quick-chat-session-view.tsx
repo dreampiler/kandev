@@ -1,5 +1,6 @@
 "use client";
 
+import type { ComponentProps, ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { useTask } from "@/hooks/use-task";
@@ -19,6 +20,7 @@ import { QuickChatContent } from "./quick-chat-content";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { useTranslation } from "react-i18next";
 import { ConfigChatRestartStatus } from "@/components/config-chat/config-chat-restart-status";
+import { isQuickChatStartupPending } from "./quick-chat-startup-state";
 
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
@@ -103,8 +105,10 @@ function preventQuickChatAutoResume(
   taskId: string | null,
   taskSession: TaskSession | null,
   summary: TaskStatusSummary | null | undefined,
+  acceptedStartupPending: boolean,
 ): boolean {
   return Boolean(
+    acceptedStartupPending ||
     (taskId && !taskSession) ||
     (summary?.active_error &&
       (summary.active_error.scope === "task" || summary.active_error.session_id === sessionId)) ||
@@ -120,6 +124,23 @@ export function QuickChatSessionView(props: QuickChatSessionViewProps) {
     return <ConfigChatRestartStatus workspaceId={session.workspaceId} />;
   }
   return <ActiveQuickChatSessionView {...props} />;
+}
+
+function renderQuickChatWithLaunchError(
+  taskId: string | null,
+  value: Omit<ComponentProps<typeof TaskLaunchErrorProvider>["value"], "taskId">,
+  readOnly: boolean,
+  sessionContent: ReactNode,
+) {
+  if (!taskId) return sessionContent;
+  return (
+    <TaskLaunchErrorProvider value={{ taskId, ...value }}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {!readOnly && <TaskSharedError />}
+        {sessionContent}
+      </div>
+    </TaskLaunchErrorProvider>
+  );
 }
 
 function ActiveQuickChatSessionView({
@@ -153,6 +174,12 @@ function ActiveQuickChatSessionView({
     task,
     quickChatTaskId,
   );
+  const acceptedStartupPending =
+    session.kind === "chat" &&
+    isQuickChatStartupPending({
+      startupPending: session.startupPending,
+      sessionState: taskSession?.state,
+    });
   const resumption = useSessionResumption(taskId, session.sessionId, taskArchiveState, {
     skipAutomaticRecovery: !automaticRecovery,
     preventAutoResume: preventQuickChatAutoResume(
@@ -160,6 +187,7 @@ function ActiveQuickChatSessionView({
       taskId,
       taskSession,
       statusSummary,
+      acceptedStartupPending,
     ),
   });
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
@@ -195,6 +223,7 @@ function ActiveQuickChatSessionView({
             }
             initialPrompt={session.initialPrompt}
             onInitialPromptAttempted={onInitialPromptAttempted}
+            startupPending={acceptedStartupPending}
             initialDraft={initialDraft}
             transformOutgoing={transformOutgoing}
             hideStartupRows={hideStartupRows}
@@ -204,19 +233,14 @@ function ActiveQuickChatSessionView({
       </div>
     );
 
-  if (!taskId) return sessionContent;
-  const launchErrorValue = {
+  return renderQuickChatWithLaunchError(
     taskId,
-    workspaceId: task?.workspaceId ?? "",
-    statusSummary,
-    automaticRecovery: resumption,
-  };
-  return (
-    <TaskLaunchErrorProvider value={launchErrorValue}>
-      <div className="flex min-h-0 flex-1 flex-col">
-        {!readOnly && <TaskSharedError />}
-        {sessionContent}
-      </div>
-    </TaskLaunchErrorProvider>
+    {
+      workspaceId: task?.workspaceId ?? "",
+      statusSummary,
+      automaticRecovery: resumption,
+    },
+    readOnly,
+    sessionContent,
   );
 }
