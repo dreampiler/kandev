@@ -36,7 +36,7 @@ diagnostic text within the same ordered provider catalogue; recorded excerpts
 remain sanitized. Provider IDs and opening-line evidence remain authoritative.
 
 No new API, schema, retry policy, budget/reset scope, prefilter, assistant-notice
-channel, setting, standing test or installed-provider operation is added. Daily
+channel, setting or installed-provider operation is added. Daily
 rule IDs describe the observed reason; they do not implement account/model
 suspension until a new reset window. Retry-later wording supplies no reset.
 
@@ -76,3 +76,12 @@ repository collection.
 
 The new daily-reason criterion is 001.10. Existing criterion 001.7 in #4738
 continues to mean guarded context-length recovery; it is not redefined here.
+
+## Committed regression coverage
+
+The existing signature_rules_test.go now includes two table-driven tests with
+25 cases for the new signatures, accepted wrappers and JSON field orders,
+non-diagnostic prose, typed and text priority, sanitized joined stderr/stdout,
+and unknown retry-later reset. The integrated main-based classifier suite passed directly from the repository
+with fts5 and race detection (3.962s), including the upstream Codex retry and
+interactive-policy controls. No test framework or scheduled job is added.
