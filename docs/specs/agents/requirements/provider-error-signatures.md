@@ -90,13 +90,31 @@ errors does not take its own healthy account out of rotation.
 Recognize bounded upstream error envelopes for timeout, transport, capacity,
 model/endpoint availability, subscription and usage exhaustion, request
 compatibility, and malformed or empty upstream responses. Preserve existing
-provider-specific signatures and their precedence. A bare OpenCode Free usage
-notice must classify as quota exhaustion and reach the existing candidate
-quota action. Do not add another Go quota expression when its rule already
-matches. Keep the context-length rule restricted to prompt-send.
+provider-specific signatures and their precedence. This catalogue includes
+the error-labelled OpenCode Free usage notice. The unlabelled notice remains
+a separate desired increment in #4826, together with named daily/raw reasons
+and the general labelled error_type envelope; it is not duplicated here.
+Do not add another Go quota expression when its existing rule already matches.
+Keep the context-length rule restricted to prompt-send.
 
 The literal catalog must not infer account identity, invent a reset time or
 turn agent prose into an account failure. Request rejection may use only the
 existing exact pre-result repeated-failure policy, preserving no-output/effect
 and diagnostic-identity fences. Configuration and usage-account consumers
 remain responsible for quota-window and account-wide admission decisions.
+
+## Codex retry-exhaustion signature
+
+### REQ-AGENTS-CODEX-RATE-SIGNATURE-001: Recognize terminal Codex throttling
+
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.1:** A Codex error line beginning with
+  `exceeded retry limit, last status: 429 Too Many Requests` shall classify as
+  high-confidence `rate_limited`. Established error-label prefixes may precede it.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.2:** Mid-sentence quotations, other HTTP
+  statuses, unrelated providers, and incomplete signatures shall not match this rule.
+- **AC-AGENTS-CODEX-RATE-SIGNATURE-001.3:** Existing structured classification
+  precedence and explicit quota, authentication, and usage-limit classifications
+  shall remain unchanged. Classification alone shall not authorize prompt replay.
+
+[Design](../system-design/provider-error-signatures.md).
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).

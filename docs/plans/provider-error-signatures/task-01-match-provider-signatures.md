@@ -156,9 +156,9 @@ existing repeated-unclassified policy. Output, tool effects, missing evidence
 or an incomplete identity keep it outside automatic replay. No account/model
 selection order, retry count, policy default or reset calendar is changed.
 
-Verification uses disposable overlays with existing fixtures at `Classify`,
+Initial verification used disposable overlays with existing fixtures at `Classify`,
 `classifyKanbanFailure` and the dynamic-policy boundary. The overlay is excluded
-from automatic test discovery and is not a permanent test suite. The existing
+from automatic test discovery and was not a permanent test suite. The existing
 thinking-only empty-turn package is consumed with the upstream lifecycle
 diagnostic signature preserved. Its no-answer check is confined to normal
 empty completions; reasoning still prevents generic failure replay.
@@ -167,3 +167,26 @@ Account-limit learning and account-key attribution are not present at this PR
 base. A classification match alone does not prove exhausted-account skipping
 or a correct daily/monthly block. Those consumers require their actual source
 and account evidence; they must not be simulated by broadening a regex.
+
+## Current-main synchronization and committed coverage
+
+The current-main synchronization keeps both the prompt-context/literal
+catalogue sections and the upstream Codex throttling sections. Context matching
+remains prompt-send only. The fifteen shared catalogue entries remain separate
+from #4826's unlabelled free notice, named daily/raw reasons and general labelled
+error_type envelope. Account attribution and automatic recovery policy are
+unchanged.
+
+Existing signature_rules_test.go now retains table coverage at Classify for
+the shared catalogue and anchored prose boundaries, plus the context phase
+boundary. Existing dynamic_unclassified_fallback_test.go retains the actual
+classifyKanbanFailure entry-point cases for complete pre-result diagnostics and
+ordinary/output/effect/unknown/incomplete evidence. The existing dynamic-policy
+admission and upstream Codex/interactive-policy controls are reused.
+
+The integrated candidate passed these focused tests with fts5 and race
+detection: routingerr1.912s and orchestrator2.371s. These results cover the
+classifier/consumer entry points and existing policy admission; they do not
+claim installed-provider or browser execution. The former unrelated Windows
+npx-cache fixture limitation remains outside this selected run. Normal commit
+hooks and updated-head hosted CI are separate publication results.

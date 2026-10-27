@@ -1,6 +1,118 @@
 package routingerr
 
-import "testing"
+import (
+	"net/http"
+	"testing"
+)
+
+// @covers AC-AGENTS-CODEX-RATE-SIGNATURE-001.1 AC-AGENTS-CODEX-RATE-SIGNATURE-001.2 AC-AGENTS-CODEX-RATE-SIGNATURE-001.3
+func TestCodexRetryExhausted429Classification(t *testing.T) {
+	resetInjection()
+	const signature = "exceeded retry limit, last status: 429 Too Many Requests"
+	for _, text := range []string{
+		signature,
+		"Internal error: " + signature,
+		"API Error: " + signature,
+	} {
+		got := Classify(Input{Phase: PhasePromptSend, ProviderID: "codex-acp", Stderr: text})
+		if got.Code != CodeRateLimited || got.Confidence != ConfHigh {
+			t.Errorf("Codex message %q classified as %s/%s, want high-confidence rate limit", text, got.Code, got.Confidence)
+		}
+	}
+
+	for _, tc := range []struct {
+		name      string
+		provider  string
+		text      string
+		status    int
+		wantOther Code
+	}{
+		{name: "mid-sentence quote", provider: "codex-acp", text: "Request ended after " + signature},
+		{name: "other status", provider: "codex-acp", text: "exceeded retry limit, last status: 503 Service Unavailable"},
+		{name: "incomplete signature", provider: "codex-acp", text: "exceeded retry limit, last status: 429"},
+		{name: "unrelated provider", provider: "opencode-acp", text: signature},
+		{name: "structured authentication precedence", provider: "codex-acp", text: signature, status: http.StatusUnauthorized, wantOther: CodeAuthRequired},
+		{name: "quota signature precedence", provider: "codex-acp", text: "insufficient_quota\n" + signature, wantOther: CodeQuotaLimited},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: tc.provider, Stderr: tc.text, HTTPStatus: tc.status})
+			if tc.wantOther != "" {
+				if got.Code != tc.wantOther {
+					t.Fatalf("classification = %s (%s), want %s", got.Code, got.ClassifierRule, tc.wantOther)
+				}
+				return
+			}
+			if got.Code == CodeRateLimited {
+				t.Fatalf("message %q from %s classified as rate limit by %s", tc.text, tc.provider, got.ClassifierRule)
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.4
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.5
+func TestClassifySharedProviderCatalog(t *testing.T) {
+	resetInjection()
+	cases := []struct {
+		text, rule string
+		code       Code
+	}{
+		{"Usage limit reached You have reached your current quota for this period", "provider.catalog.quota_notice.v1", CodeQuotaLimited},
+		{"Error: free usage limit reached", "provider.catalog.free_usage.v1", CodeQuotaLimited},
+		{"temporarily rate-limited upstream, please retry shortly", "provider.rate_limit.v1", CodeRateLimited},
+		{"Error: Error from provider (Console): Rate limit exceeded", "provider.catalog.console_rate.v1", CodeRateLimited},
+		{"Error: No endpoints found for model", "provider.catalog.model_unavailable.v1", CodeModelUnavailable},
+		{"Error: Upstream request failed: This Go model requires Global regions", "provider.catalog.go_configuration.v1", CodeProviderNotConfigured},
+		{"ProviderHeaderTimeoutError: Provider response headers timed out", "provider.catalog.timeout.v1", CodeProviderUnavailable},
+		{"Error: Cannot connect to API: The socket connection was closed unexpectedly", "provider.catalog.connection.v1", CodeNetworkUnavailable},
+		{"Upstream error from Nvidia: Service temporarily overloaded", "provider.catalog.overloaded.v1", CodeProviderOverloaded},
+		{"Error: Error from provider host: 429 Too Many Requests capacity_unavailable", "provider.catalog.host_capacity.v1", CodeModelCapacity},
+		{"Error: Error from provider host: 402 Payment Required", "provider.catalog.host_payment.v1", CodeSubscriptionRequired},
+		{"Error: The tool definitions or tool call payload were rejected (invalid_tools)", "provider.catalog.request_rejected.v1", CodeAgentRuntime},
+		{"Error: Upstream response was not valid JSON", "provider.catalog.server_error.v1", CodeProviderUnavailable},
+		{"Streaming response failed: [502] Provider returned an empty response", "provider.catalog.stream_error.v1", CodeProviderUnavailable},
+		{`Error: {"code":502,"message":"JSON error injected into SSE stream"}`, "provider.catalog.sse_error.v1", CodeProviderUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.rule, func(t *testing.T) {
+			got := Classify(Input{Phase: PhasePromptSend, ProviderID: "catalogue-provider", Stderr: tc.text})
+			if got.Code != tc.code || got.ClassifierRule != tc.rule || got.Confidence != ConfHigh {
+				t.Fatalf("classification = %s/%s/%s, want %s/%s/high", got.Code, got.ClassifierRule, got.Confidence, tc.code, tc.rule)
+			}
+			if got.RawExcerpt != Sanitize(tc.text+"\n") {
+				t.Fatalf("stored excerpt does not use the existing sanitizer: %q", got.RawExcerpt)
+			}
+			// The temporary-upstream-rate signature predates this catalogue and
+			// retains its existing unanchored matching contract.
+			if tc.rule != "provider.rate_limit.v1" {
+				prose := Classify(Input{Phase: PhasePromptSend, ProviderID: "catalogue-provider", Stderr: "Assistant quoted " + tc.text})
+				if prose.ClassifierRule == tc.rule {
+					t.Fatalf("catalogue rule matched mid-sentence prose: %q", tc.text)
+				}
+			}
+		})
+	}
+}
+
+// @covers AC-AGENTS-PROVIDER-ERROR-SIGNATURES-001.7
+func TestClassifyContextLengthPhaseBoundary(t *testing.T) {
+	resetInjection()
+	for _, phase := range []Phase{PhaseProcessStart, PhaseSessionInit, PhasePromptSend, PhaseStreaming, PhaseToolExecution} {
+		t.Run(string(phase), func(t *testing.T) {
+			got := Classify(Input{Phase: phase, ProviderID: "catalogue-provider", Stderr: "Error: maximum context length is 8192 tokens"})
+			if phase == PhasePromptSend {
+				if got.Code != CodeAgentRuntime || got.ClassifierRule != "provider.context_length_exceeded.v1" || got.Confidence != ConfHigh {
+					t.Fatalf("prompt rejection = %+v", got)
+				}
+				if got.FallbackAllowed || got.AutoRetryable {
+					t.Fatalf("context wording widened prompt replay flags: %+v", got)
+				}
+			} else if got.ClassifierRule == "provider.context_length_exceeded.v1" {
+				t.Fatalf("prompt-only signature matched phase %s", phase)
+			}
+		})
+	}
+}
 
 // agentProseAboutLimits is agent output that talks about limits it read
 // elsewhere. None of it is the reporting agent's own provider failing.

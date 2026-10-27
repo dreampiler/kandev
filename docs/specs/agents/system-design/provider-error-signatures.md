@@ -3,6 +3,7 @@ status: current
 system: agents
 requirements:
   - REQ-AGENTS-PROVIDER-ERROR-SIGNATURES-001
+  - REQ-AGENTS-CODEX-RATE-SIGNATURE-001
 ---
 
 # Provider Error Signature Classification System Design
@@ -115,3 +116,19 @@ provider policy. No generic recovery or implicit replay permission is added.
 Usage-account learning is a separate consumer boundary, not a property of
 matching a message. This catalog does not create account IDs, change scope,
 invent reset calendars or alter the candidate's configured quota action.
+
+## Codex terminal throttling
+
+`REQ-AGENTS-CODEX-RATE-SIGNATURE-001` adds a bounded, line-anchored catalogue
+signature in `routingerr/rules.go`. Match the complete observed 429 wording,
+with established optional error labels. Keep quota rules ahead of the new rule.
+Do not match a bare 429 or an arbitrary occurrence of "retry limit".
+
+Use a distinct stable rule ID and sanitized fixture. Cover direct and prefixed
+messages, prose collisions, other statuses, other providers, and quota precedence.
+The screenshot establishes the displayed text, not a captured ACP envelope.
+Do not fabricate recorded protocol provenance or expose raw error Data.
+
+Interactive policy belongs to Platform. Office and dynamic routing consume the
+new classification through their existing policies, without a new retry policy.
+[Implementation package](../../../plans/quick-chat-draft-and-rate-retry/plan.md).
