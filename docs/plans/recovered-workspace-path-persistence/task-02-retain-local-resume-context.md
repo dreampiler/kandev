@@ -45,8 +45,7 @@ recovery proof/claim/unknown-outcome semantics remain unchanged.
 
 Factory extraction, provider usage, automatic recovery, continued-history
 ancestry, setup replay, operating data repair and Windows process ownership are
-outside this work order. No public API/schema/flag/worker or permanent test is
-added.
+outside this work order. No public API/schema/flag/worker is added.
 
 ## Verification selection
 
@@ -78,5 +77,12 @@ success is not claimed. No existing test or path normalization was changed.
 
 Formatting and the existing architecture check completed successfully.
 Documentation coverage, normal hooks and hosted CI are
-separate publication results. No installed provider, operating data repair or
-permanent test was added; earlier Task 01 results remain historical evidence.
+separate publication results. No installed provider operation or operating data repair was performed; earlier Task 01 results remain historical evidence.
+
+## Committed regression coverage
+
+Existing inherited-environment and workspace-info test files retain the six
+scenario groups, covering local/local_pc, detached and inherited ownership,
+physical-inventory exclusions and unchanged history. No production test seam,
+framework or scheduled job is added. The persisted cases passed directly with
+fts5 and race detection: executor3.116s and final task/service4.637s.
